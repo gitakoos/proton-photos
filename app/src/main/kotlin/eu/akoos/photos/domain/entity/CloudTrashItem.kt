@@ -42,4 +42,14 @@ data class CloudTrashItem(
      *  bytes and walk down to the photo's session key. */
     val parentLinkId: String?,
     val volumeId: String?,
+    /** Drive share the trashed link belongs to, taken from its trash group. */
+    val shareId: String? = null,
+    /** Active revision id of the trashed link, needed for full-res download. */
+    val revisionId: String? = null,
+    /** MIME type of the trashed media, or null on a legacy link without one. */
+    val mimeType: String? = null,
+    /** File size in bytes reported by Drive, or null when the link omits it. */
+    val sizeBytes: Long? = null,
+    /** Decrypted link name, shown in the viewer's details sheet; null when it can't be decrypted. */
+    val name: String? = null,
 )

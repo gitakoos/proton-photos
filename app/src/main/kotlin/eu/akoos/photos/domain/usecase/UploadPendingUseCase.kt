@@ -51,6 +51,7 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.upload.MirrorOverwriteJournal
+import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.StorageFullException
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -58,14 +59,14 @@ import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
-import eu.akoos.photos.util.MotionPhotoUtil
 import eu.akoos.photos.util.Mp4CreationTime
 import java.io.File
-import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
+import java.time.ZoneId
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
@@ -125,8 +126,13 @@ private const val UPLOAD_PARALLELISM = 3
  * `WaitingForWifi` and `PreparingBackup` are synthetic frames emitted when the auto-sync drain is
  * deferred (Wi-Fi-only on but off Wi-Fi / cloud listing not settled after a reinstall), so the
  * queued-but-idle state reads as "waiting", not "broken". They carry no per-file payload.
+ *
+ * `StorageFull` is the same kind of frame for the one deferral the user has to act on: the Drive is
+ * out of space, so the batch stopped and no later trigger can get past it either. It replaces the
+ * closing `Idle` frame rather than preceding it, because `Idle` is what observers clear the panel
+ * on, and a reason wiped in the same breath would leave the backup looking merely finished.
  */
-enum class UploadStatus { Queued, Encrypting, Uploading, Done, Failed, Idle, WaitingForWifi, PreparingBackup }
+enum class UploadStatus { Queued, Encrypting, Uploading, Done, Failed, Idle, WaitingForWifi, PreparingBackup, StorageFull }
 
 data class UploadProgress(
     val uri: String,
@@ -154,6 +160,9 @@ class UploadPendingUseCase @Inject constructor(
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
     private val uploadAlbumTargetDao: eu.akoos.photos.data.db.dao.UploadAlbumTargetDao,
+    private val pendingMetadataEditDao: eu.akoos.photos.data.db.dao.PendingMetadataEditDao,
+    private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
+    private val structuralStripper: UploadStructuralStripper,
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) {
@@ -190,6 +199,26 @@ class UploadPendingUseCase @Inject constructor(
      * running when the user tapped stop, never a later auto-backup trigger.
      */
     private val stopRequested = AtomicBoolean(false)
+
+    /**
+     * One-shot "the user asked for this run" flag, set by [requestManualRun] when Sync now is tapped.
+     * The next [invoke] consumes it and lets the folder sweep's own rows through even with auto-backup
+     * off, which is the only thing it changes: the folder selection, the Wi-Fi guard and the listing
+     * guards all still apply exactly as they do to an automatic pass.
+     *
+     * A flag rather than a queue-source rewrite because "back up now" is a fact about this RUN, not
+     * about any photo. Stamping the rows MANUAL instead would also make them bypass the folder filter
+     * from then on, so one tap would permanently pull every out-of-scope photo into the backup.
+     */
+    private val manualRunRequested = AtomicBoolean(false)
+
+    /**
+     * Mark the next batch as user-requested. Called by Sync now before it hands the run to the
+     * worker, so a one-off backup still works while auto-backup is switched off.
+     */
+    fun requestManualRun() {
+        manualRunRequested.set(true)
+    }
 
     /**
      * Request a graceful stop of the current upload batch. Prevents any not-yet-started queued item
@@ -302,16 +331,24 @@ class UploadPendingUseCase @Inject constructor(
         val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
         val compressTier = UploadCompressionTier
             .fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: -1)
+        // #108: the video path re-encodes at its own tier, seeded from the shared value on upgrade.
+        val videoCompressTier = UploadCompressionTier
+            .fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] ?: -1)
         val mirrorStripToLocal = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
         val mirrorCompressToLocal = prefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] ?: false
         val compressVideosOnUpload = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false
         val renameToCaptureDate = prefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false
         val deleteLocalAfterBackup = prefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] ?: false
+        // Authorship has no upload preference of its own, so it rides on the software one: the
+        // backup keeps removing the software, artist and copyright tags as a single choice, and the
+        // artist/copyright split stays confined to the manual picker where the user ticks it.
+        val stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false
         val stripConfig = MetadataStripConfig(
             stripGps = prefs[SettingsKeys.STRIP_GPS] ?: false,
             stripCameraInfo = prefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
             stripTimestamp = prefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
-            stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
+            stripSoftwareInfo = stripSoftwareInfo,
+            stripAuthorship = stripSoftwareInfo,
         )
 
         // Drain queued album targets for photos that already finished uploading (their row is
@@ -400,8 +437,17 @@ class UploadPendingUseCase @Inject constructor(
         // UPLOADING rows are covered by resetStaleUploadingClaims + the stranded-intent recovery, so no
         // separate manual set is needed here.
         val albumTargetUris: Set<String> = uploadAlbumTargetDao.getAll().map { it.localUri }.toSet()
+
+        // A device file queued for a cloud metadata edit is owned end to end by MetadataEditWorker (via
+        // the synced replace path): it seeds its own UPLOADING row and uploads the corrected copy itself.
+        // Exclude those URIs here so this backup selector never races the worker on the same file. The
+        // race is real on a process kill: the pending_metadata_edit row survives, but resetStaleUploadingClaims
+        // would reset the sync row to LOCAL_ONLY and this selector would upload it as a SECOND copy.
+        val metadataEditUris: Set<String> = pendingMetadataEditDao.allPendingDeviceUris().toSet()
+
         val strandedForced = allStates.filter {
             it.localUri in albumTargetUris &&
+                it.localUri !in metadataEditUris &&
                 it.cloudFileId == null &&
                 it.status != SyncStatus.LOCAL_ONLY &&
                 it.status != SyncStatus.HIDDEN
@@ -434,6 +480,40 @@ class UploadPendingUseCase @Inject constructor(
                 it.copy(status = SyncStatus.LOCAL_ONLY, backedUpAtMs = null, lastSyncSuccessMs = null)
             } else {
                 it
+            }
+        }
+
+        // Keep the metadata-edit worker's files out of the backup queue (see [metadataEditUris] above):
+        // the worker uploads the corrected copy, so a backup upload here would be a duplicate.
+        if (metadataEditUris.isNotEmpty()) {
+            pending = pending.filterNot { it.localUri in metadataEditUris }
+        }
+
+        // Consumed HERE, past every early return above, not where the other prefs are read. A Sync now
+        // tap can land on a batch that defers for Wi-Fi or for an unsettled listing, and consuming the
+        // flag on the way into one of those would spend the user's request on a run that uploaded
+        // nothing: the deferred rows would then be held by the switch on every later trigger, which is
+        // the same silent nothing this flag exists to prevent. Surviving a deferral means the next run
+        // that actually gets this far honours the tap.
+        //
+        // Absent AUTO_SYNC = ON, matching every other reader of this key.
+        val manualRun = manualRunRequested.getAndSet(false)
+        val autoSync = manualRun || prefs[SettingsKeys.AUTO_SYNC] != false
+
+        // The auto-backup switch is enforced here, on the queue, not only on the background triggers.
+        // Turning it off leaves the folder selection intact so re-enabling restores it, so the folder
+        // filter below cannot express "off" at all; without this step a foreground refresh, which
+        // kicks a run of its own, uploads the whole selection with the switch showing off. Only the
+        // rows the folder sweep queued are dropped. An explicit intent, and a photo owed to an album,
+        // still upload: each is an instruction about one photo, while the switch is a statement about
+        // the sweep. The rows keep their queued flag, so flipping the switch back resumes them.
+        if (!autoSync) {
+            val before = pending.size
+            pending = pending.filter { state ->
+                !QueueSource.isAutomatic(state.queueSource) || state.localUri in albumTargetUris
+            }
+            if (pending.size != before) {
+                Log.d(UPLOAD_TAG, "Auto-backup off: held ${before - pending.size}/$before queued item(s)")
             }
         }
 
@@ -563,11 +643,13 @@ class UploadPendingUseCase @Inject constructor(
                                 userId = userId,
                                 state = state,
                                 totalCount = totalCount,
+                                manualRun = manualRun,
                                 albumTargetUris = albumTargetUris,
                                 albumOptInFolders = albumOptInFolders,
                                 stripOnUpload = stripOnUpload,
                                 compressOnUpload = compressOnUpload,
                                 compressTier = compressTier,
+                                videoCompressTier = videoCompressTier,
                                 mirrorStripToLocal = mirrorStripToLocal,
                                 mirrorCompressToLocal = mirrorCompressToLocal,
                                 compressVideosOnUpload = compressVideosOnUpload,
@@ -612,11 +694,16 @@ class UploadPendingUseCase @Inject constructor(
         // Refresh the consent notification with the latest pending queue. Same
         // call MainActivity.onResume fires so an externally deleted file (file
         // manager, OS trash flush) gets reconciled the moment the user opens the
-        // app even without a worker run.
-        pendingDeleteNotif()
+        // app even without a worker run. Guarded like the other two call sites: its
+        // DataStore read and write can throw, and a throw here reaches SyncWorker as
+        // a failed run, turning a batch that uploaded everything into a retry.
+        runCatching { pendingDeleteNotif() }
 
-        // Final "Idle" frame so the UI clears any in-flight panel.
-        _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, totalCount, totalCount))
+        // Final frame so the UI clears any in-flight panel. A batch the Drive stopped closes on
+        // StorageFull instead: the rows stay queued and every later trigger will hit the same wall,
+        // so this is the only moment anything can say why the backup went quiet.
+        val closingStatus = if (storageFullHit.get()) UploadStatus.StorageFull else UploadStatus.Idle
+        _progress.tryEmit(UploadProgress("", "", closingStatus, totalCount, totalCount))
         Result(attempted = pending.size, successCount = finalSuccess)
     }
 
@@ -634,11 +721,14 @@ class UploadPendingUseCase @Inject constructor(
         userId: UserId,
         state: SyncState,
         totalCount: Int,
+        /** This batch was asked for by the user, so the live auto-backup re-check does not apply. */
+        manualRun: Boolean,
         albumTargetUris: Set<String>,
         albumOptInFolders: Set<String>,
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
         compressTier: UploadCompressionTier,
+        videoCompressTier: UploadCompressionTier,
         mirrorStripToLocal: Boolean,
         mirrorCompressToLocal: Boolean,
         compressVideosOnUpload: Boolean,
@@ -661,7 +751,14 @@ class UploadPendingUseCase @Inject constructor(
         try {
             val rawLocalItem = localRepo.queryByUri(state.localUri)
             if (rawLocalItem == null) {
-                Log.w(UPLOAD_TAG, "Local item not found for URI: ${state.localUri}")
+                // The queued photo was deleted from the device before it uploaded. Drop its orphaned
+                // LOCAL_ONLY row (status-guarded, so a row another pass already claimed is left alone)
+                // so it stops showing as a phantom "Queued" tile and is not re-processed, and advance
+                // the finished tally (NOT the success tally, which drives allFailed) so the batch's
+                // "N of M" count reaches completion instead of sticking on the deleted photos.
+                Log.w(UPLOAD_TAG, "Queued photo gone before upload, dropping it: ${state.localUri}")
+                syncStateRepo.deleteLocalOnlyByUris(listOf(state.localUri))
+                finishedCount.incrementAndGet()
                 return
             }
             // Skip items whose folder is no longer in the backup selection. Read the selection LIVE
@@ -673,6 +770,27 @@ class UploadPendingUseCase @Inject constructor(
             // toggle.
             if (!isExplicitAction(state.queueSource) && state.localUri !in albumTargetUris) {
                 val livePrefs = context.settingsDataStore.data.first()
+                // Wi-Fi-only, enforced PER PHOTO (see [uploadDefersForWifiOnly]): an auto-queued photo
+                // never rides mobile data, even when an explicit "back up now" or album-add opened this
+                // pass. Only the explicitly-picked photos (which skip this whole block) go over cellular,
+                // so a single manual pick uploads just that one rather than dragging the auto backlog
+                // onto mobile. Read live so a Wi-Fi drop mid-batch stops the not-yet-started items.
+                if (uploadDefersForWifiOnly(
+                        state.queueSource,
+                        wifiOnly = livePrefs[SettingsKeys.SYNC_WIFI_ONLY] != false,
+                        onWifi = networkObserver.currentlyOnWifi(),
+                    )
+                ) {
+                    Log.d(UPLOAD_TAG, "Skipping ${rawLocalItem.displayName}: Wi-Fi-only on and not on Wi-Fi")
+                    return
+                }
+                // Same live read for the auto-backup switch, so turning it off part-way through a
+                // long batch stops the items that have not started rather than only the next run.
+                // A user-requested run is exempt: the switch was already off when they asked.
+                if (!manualRun && QueueSource.isAutomatic(state.queueSource) && livePrefs[SettingsKeys.AUTO_SYNC] == false) {
+                    Log.d(UPLOAD_TAG, "Skipping ${rawLocalItem.displayName}: auto-backup was switched off")
+                    return
+                }
                 val liveBackupEverything = livePrefs[SettingsKeys.BACKUP_EVERYTHING] ?: false
                 val liveSelected = livePrefs[SettingsKeys.SYNC_FOLDER_NAMES]
                 val liveExcluded = livePrefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet()
@@ -711,10 +829,7 @@ class UploadPendingUseCase @Inject constructor(
             // runs against the bytes independently, so a stripped + renamed photo still gets erased.
             var mirrorRenameTarget: String? = null
             val renamedItem = if (renameToCaptureDate) {
-                val ext = rawLocalItem.displayName.substringAfterLast('.', "")
-                val captureMs = rawLocalItem.dateTaken.takeIf { it > 0L } ?: System.currentTimeMillis()
-                val newBase = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(captureMs))
-                val newName = if (ext.isNotEmpty()) "$newBase.$ext" else newBase
+                val newName = uploadRenamedName(rawLocalItem.displayName, rawLocalItem.dateTaken, System.currentTimeMillis())
                 Log.d(UPLOAD_TAG, "Rename-on-upload: '${rawLocalItem.displayName}' → '$newName'")
                 if (mirrorStripToLocal) mirrorRenameTarget = newName
                 rawLocalItem.copy(displayName = newName)
@@ -740,7 +855,7 @@ class UploadPendingUseCase @Inject constructor(
                 runCatching {
                     val raw = ExifHelper.readMetadata(context, state.localUri).dateTimeOriginal
                     if (raw != null) {
-                        SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).parse(raw)?.time ?: 0L
+                        ExifDateFormat.fromExifLocal(raw, ZoneId.systemDefault()) ?: 0L
                     } else {
                         0L
                     }
@@ -790,7 +905,25 @@ class UploadPendingUseCase @Inject constructor(
                 // a motion photo, strip only the primary's EXIF into a temp while re-attaching the
                 // original trailer byte-for-byte. This runs FIRST and authoritatively (MotionPhotoUtil
                 // .detect) so a motion photo can never reach the in-place mirror wipe below.
-                val motionTemp = stripImagePreservingMotion(state.localUri, stripConfig)
+                val motionTemp = structuralStripper.stripImagePreservingMotion(state.localUri, stripConfig)
+                // An Ultra HDR still appends its gain map as a second image after the primary, the same
+                // shape as a motion trailer, so every ordinary strip route below drops it. Decided HERE,
+                // ahead of the in-place mirror wipe, because that wipe overwrites the on-device original
+                // and cannot be undone. The route is taken only when the platform can prove the rebuilt
+                // file still decodes WITH its gain map; on any doubt it yields null and the ordinary strip
+                // runs, because a lost HDR rendition is recoverable and a shipped GPS tag is not.
+                val gainMapTemp = if (motionTemp == null &&
+                    eu.akoos.photos.data.upload.UploadImageCompressor.attemptsGainMapPreservingStrip(
+                        localItem.mimeType,
+                        stripOnUpload,
+                        Build.VERSION.SDK_INT,
+                        hasGainMap = { structuralStripper.hasGainMapUpload(state.localUri) },
+                    )
+                ) {
+                    structuralStripper.stripImagePreservingGainMap(state.localUri, stripConfig)
+                } else {
+                    null
+                }
                 if (motionTemp != null) {
                     strippedFile = motionTemp
                     Log.d(UPLOAD_TAG, "Motion Photo primary stripped, trailer preserved for ${localItem.displayName}")
@@ -798,19 +931,41 @@ class UploadPendingUseCase @Inject constructor(
                     // trailer), so overwrite the on-device original with the whole motion-preserving
                     // stripped file instead — the local loses its metadata too and byte-matches the
                     // cloud. Silent with all-files; a refused write leaves the original intact.
-                    if (mirrorStripToLocal && overwriteLocalInPlace(state.localUri, motionTemp)) {
+                    val motionMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, motionTemp)
+                    if (motionMirrorLanded) {
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device motion photo wiped for ${localItem.displayName}")
                     }
+                    if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, motionMirrorLanded)) {
+                        invalidateMirroredLocation(userId, state.localUri)
+                    }
                     android.net.Uri.fromFile(motionTemp).toString()
+                } else if (gainMapTemp != null) {
+                    strippedFile = gainMapTemp
+                    Log.d(UPLOAD_TAG, "Ultra HDR primary stripped, gain map preserved for ${localItem.displayName}")
+                    // Mirror: same reasoning as the motion photo. An in-place EXIF rewrite would drop the
+                    // appended gain map, so the on-device original is replaced with the whole verified
+                    // file instead. Silent with all-files; a refused write leaves the original intact.
+                    val gainMapMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, gainMapTemp)
+                    if (gainMapMirrorLanded) {
+                        Log.d(UPLOAD_TAG, "Mirror strip: on-device Ultra HDR photo wiped for ${localItem.displayName}")
+                    }
+                    if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, gainMapMirrorLanded)) {
+                        invalidateMirroredLocation(userId, state.localUri)
+                    }
+                    android.net.Uri.fromFile(gainMapTemp).toString()
                 } else if (mirrorStripToLocal &&
                     ExifHelper.stripFieldsInPlace(context, state.localUri, stripConfig)
                         is eu.akoos.photos.util.StripResult.Stripped
                 ) {
-                    // Confirmed NOT a motion photo (the helper above returned null) → safe to wipe the
-                    // on-device original in place and upload it as-is, so the local and the backed-up
-                    // copy stay byte-identical and pair by content hash. The wipe is the last step
-                    // before the upload and is idempotent, so a failed upload simply retries it.
+                    // Confirmed neither a motion photo nor a verifiably preservable Ultra HDR (both
+                    // helpers above returned null) → safe to wipe the on-device original in place and
+                    // upload it as-is, so the local and the backed-up copy stay byte-identical and pair
+                    // by content hash. The wipe is the last step before the upload and is idempotent,
+                    // so a failed upload simply retries it.
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device original wiped for ${localItem.displayName}")
+                    if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, deviceRewriteSucceeded = true)) {
+                        invalidateMirroredLocation(userId, state.localUri)
+                    }
                     state.localUri
                 } else {
                     // Mirror off, or the OS refused the in-place write (no MANAGE_MEDIA) → ordinary
@@ -825,7 +980,7 @@ class UploadPendingUseCase @Inject constructor(
                                 localItem.mimeType,
                                 stripOnUpload,
                                 compressOnUpload,
-                                isMotionPhoto = { isMotionPhotoUpload(state.localUri) },
+                                isMotionPhoto = { structuralStripper.isMotionPhotoUpload(state.localUri) },
                             )
                     ) {
                         // The container cannot be EXIF-rewritten in place (HEIC / HEIF / AVIF) and no
@@ -849,15 +1004,19 @@ class UploadPendingUseCase @Inject constructor(
                 }
             } else if (stripOnUpload && stripConfig.stripGps && localItem.mimeType.startsWith("video/")) {
                 val tmp = File.createTempFile("stripped_", ".mp4", context.cacheDir)
-                if (eu.akoos.photos.presentation.editor.VideoMetadataStripper
+                if (eu.akoos.photos.util.VideoMetadataStripper
                         .remuxWithoutLocation(context, state.localUri, tmp)) {
                     strippedFile = tmp
                     Log.d(UPLOAD_TAG, "Video location atom stripped for ${localItem.displayName}")
                     // Mirror: overwrite the on-device video with the location-stripped remux so the
                     // local loses its GPS too and matches the cloud. Silent with all-files; a refused
                     // write leaves the original intact.
-                    if (mirrorStripToLocal && overwriteLocalInPlace(state.localUri, tmp)) {
+                    val videoMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, tmp)
+                    if (videoMirrorLanded) {
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device video wiped for ${localItem.displayName}")
+                    }
+                    if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, videoMirrorLanded)) {
+                        invalidateMirroredLocation(userId, state.localUri)
                     }
                     android.net.Uri.fromFile(tmp).toString()
                 } else {
@@ -884,11 +1043,26 @@ class UploadPendingUseCase @Inject constructor(
             // motion). Detection reuses MotionPhotoUtil against the exact bytes about to be compressed.
             val compressIsMotionPhoto = compressOnUpload &&
                 localItem.mimeType.startsWith("image/") &&
-                isMotionPhotoUpload(strippedUploadUri)
+                structuralStripper.isMotionPhotoUpload(strippedUploadUri)
             if (compressIsMotionPhoto) {
                 Log.d(UPLOAD_TAG, "Skipping image compression for motion photo ${localItem.displayName}; motion preserved")
             }
-            val uploadUri: String = if (compressOnUpload && !compressIsMotionPhoto && localItem.mimeType.startsWith("image/")) {
+            // An Ultra HDR still is the same story with a gain map in place of a clip: the compressor
+            // decodes only the primary frame, so re-encoding drops the appended gain map and the photo
+            // loses its HDR rendition. Skip compression for one so the stripped/original bytes upload
+            // whole. Detection reuses UltraHdrUtil against the exact bytes about to be compressed.
+            val compressHasGainMap = !compressIsMotionPhoto &&
+                eu.akoos.photos.data.upload.UploadImageCompressor.skipsCompressionForGainMap(
+                    localItem.mimeType,
+                    compressOnUpload,
+                    hasGainMap = { structuralStripper.hasGainMapUpload(strippedUploadUri) },
+                )
+            if (compressHasGainMap) {
+                Log.d(UPLOAD_TAG, "Skipping image compression for Ultra HDR ${localItem.displayName}; gain map preserved")
+            }
+            val uploadUri: String = if (compressOnUpload && !compressIsMotionPhoto && !compressHasGainMap &&
+                localItem.mimeType.startsWith("image/")
+            ) {
                 // The compressor rebuilds the output JPEG's EXIF from the source it recompresses, so it
                 // must honour the strip directly: when the source is a format the strip step could not
                 // rewrite (HEIC), strippedUploadUri fell back to the untouched original and copying its
@@ -919,10 +1093,7 @@ class UploadPendingUseCase @Inject constructor(
                     eu.akoos.photos.data.upload.VideoUploadCompressor.compressToTemp(
                         context,
                         android.net.Uri.parse(strippedUploadUri),
-                        eu.akoos.photos.data.upload.VideoUploadCompressor.VideoCompressionParams(
-                            compressTier.videoMaxShortEdgePx,
-                            compressTier.videoBitrateBps,
-                        ),
+                        videoCompressionParamsFor(videoCompressTier),
                         localItem.dateTaken,
                     )
                 }
@@ -930,7 +1101,7 @@ class UploadPendingUseCase @Inject constructor(
                     compressedFile = compressed
                     strippedFile?.delete()
                     strippedFile = null
-                    Log.d(UPLOAD_TAG, "Compressed video ${localItem.displayName} for upload (tier=${compressTier.name})")
+                    Log.d(UPLOAD_TAG, "Compressed video ${localItem.displayName} for upload (tier=${videoCompressTier.name})")
                     android.net.Uri.fromFile(compressed).toString()
                 } else {
                     strippedUploadUri
@@ -1112,11 +1283,20 @@ class UploadPendingUseCase @Inject constructor(
                             Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed for ${localItem.displayName}")
                         }
                     }
-                } else if (!compressIsMotionPhoto) {
+                } else if (!compressIsMotionPhoto &&
+                    !eu.akoos.photos.data.upload.UploadImageCompressor.skipsCompressionForGainMap(
+                        localItem.mimeType,
+                        compressOnUpload,
+                        hasGainMap = { structuralStripper.hasGainMapUpload(state.localUri) },
+                    )
+                ) {
                     // stripOnUpload && !mirrorStripToLocal: the upload's compressed temp is stripped, but
                     // the user did not opt to strip the local. Compress a FRESH strip-free copy from the
                     // untouched original and overwrite with that, then delete the fresh temp. Skipped for
-                    // a motion photo so the on-device motion is never re-encoded away.
+                    // a motion photo so the on-device motion is never re-encoded away, and for an Ultra
+                    // HDR still so its gain map is never flattened out of the local copy. That probe reads
+                    // the untouched original, which is exactly what this branch would overwrite, and not
+                    // the stripped temp the upload-side skip looks at.
                     // A no-op strip config keeps this local copy's EXIF intact: the user opted to
                     // compress the on-device original but not to strip it, so it must retain the full
                     // metadata the untouched original carries.
@@ -1507,122 +1687,19 @@ class UploadPendingUseCase @Inject constructor(
     }
 
     /**
-     * Strip path for Motion Photos. Returns a temp upload file when [localUri] is a motion photo,
-     * or null when it is not (so the caller runs the ordinary EXIF strip instead).
-     *
-     * For a motion photo the bytes split into primary = `[0, videoOffset)` and trailer =
-     * `[videoOffset, EOF)`. The primary is written to a temp, GPS/EXIF-stripped via [ExifHelper],
-     * then the original trailer is appended byte-for-byte. The trailer length is unchanged, so a
-     * recipient's `fileSize - videoLength` math still resolves and the motion (plus the motion XMP
-     * the primary still carries) survives.
-     *
-     * Safety: if the file is a confirmed motion photo but the split or primary strip can't complete
-     * cleanly, the byte-exact materialized copy is returned so the upload preserves the motion
-     * rather than risk a corrupt primary. Returns null only when detection finds no motion photo.
+     * Best-effort drop of the on-device [uri]'s stored GPS fix once a mirror strip has rewritten that
+     * file GPS-free. The map, Search's place facet and the location screen all plot `photo_location`,
+     * and the GPS backfill skips any file that already has a row, so a row left standing keeps every one
+     * of them on a point the file no longer carries. Scoped to the account the upload runs under, by the
+     * device content URI the fix is keyed under. A delete failure costs a stale point until the next
+     * pass over the file and never fails the upload it rides on.
      */
-    private fun stripImagePreservingMotion(localUri: String, stripConfig: MetadataStripConfig): File? {
-        // Materialize the source so the tail scan and the split read real bytes, not a stream.
-        val source = try {
-            val tmp = File.createTempFile("motion_src_", ".bin", context.cacheDir)
-            context.contentResolver.openInputStream(Uri.parse(localUri))?.use { input ->
-                tmp.outputStream().use { input.copyTo(it) }
-            } ?: run { tmp.delete(); return null }
-            tmp
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.w(UPLOAD_TAG, "Motion-photo materialize failed for $localUri: ${e.message}")
-            return null
-        }
-
-        val info = MotionPhotoUtil.detect(source)
-        if (info == null) {
-            // Not a motion photo — let the caller take the ordinary strip path.
-            source.delete()
-            return null
-        }
-
-        // From here the file IS a motion photo: never return null (that would invite the
-        // destructive plain strip). On any failure fall back to the byte-exact source copy.
-        var primary: File? = null
+    private suspend fun invalidateMirroredLocation(userId: UserId, uri: String) {
         try {
-            primary = File.createTempFile("motion_primary_", ".jpg", context.cacheDir)
-            RandomAccessFile(source, "r").use { raf ->
-                primary!!.outputStream().use { out ->
-                    val buffer = ByteArray(64 * 1024)
-                    var remaining = info.videoOffset
-                    while (remaining > 0) {
-                        val toRead = minOf(buffer.size.toLong(), remaining).toInt()
-                        val read = raf.read(buffer, 0, toRead)
-                        if (read < 0) break
-                        out.write(buffer, 0, read)
-                        remaining -= read
-                    }
-                }
-            }
-
-            // Strip GPS/EXIF from the primary only. Feed it through the existing temp-file strip
-            // via a file:// URI so the same tag set + behaviour applies.
-            val strippedPrimary = ExifHelper.stripToTempFile(
-                context, Uri.fromFile(primary).toString(), stripConfig,
-            )
-            // stripToTempFile returns null on no-op or error; in either case keep the primary bytes
-            // we already split so the concatenation still yields an intact motion photo.
-            val primaryForJoin = strippedPrimary ?: primary!!
-
-            val joined = File.createTempFile("motion_out_", ".jpg", context.cacheDir)
-            joined.outputStream().use { out ->
-                primaryForJoin.inputStream().use { it.copyTo(out) }
-                RandomAccessFile(source, "r").use { raf ->
-                    raf.seek(info.videoOffset)
-                    val buffer = ByteArray(64 * 1024)
-                    while (true) {
-                        val read = raf.read(buffer)
-                        if (read < 0) break
-                        out.write(buffer, 0, read)
-                    }
-                }
-            }
-            strippedPrimary?.delete()
-            primary?.delete()
-            source.delete()
-            return joined
+            photoLocationDao.deleteByIds(userId.id, listOf(uri))
         } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.w(UPLOAD_TAG, "Motion-photo split/strip failed for $localUri; uploading byte-exact: ${e.message}")
-            primary?.delete()
-            // Byte-exact fallback: the untouched materialized copy keeps the motion intact.
-            return source
-        }
-    }
-
-    /**
-     * True when [uploadUri] points at an Android Motion Photo (a still with an appended MP4 trailer),
-     * so the caller can skip image compression that would re-encode only the primary and lose the
-     * motion. Reuses [MotionPhotoUtil.detect], which needs a [File]: a file:// URI (a strip temp that
-     * already preserved the motion) is read in place; a content:// original is materialized to a temp
-     * first, then deleted. Defensive: any failure returns false so an unreadable file just compresses
-     * as an ordinary still.
-     */
-    private fun isMotionPhotoUpload(uploadUri: String): Boolean {
-        val uri = runCatching { Uri.parse(uploadUri) }.getOrNull() ?: return false
-        if (uri.scheme == "file") {
-            val path = uri.path ?: return false
-            return runCatching { MotionPhotoUtil.detect(File(path)) != null }.getOrDefault(false)
-        }
-        var temp: File? = null
-        return try {
-            temp = File.createTempFile("motion_check_", ".bin", context.cacheDir)
-            val copied = context.contentResolver.openInputStream(uri)?.use { input ->
-                temp!!.outputStream().use { input.copyTo(it) }
-                true
-            } ?: false
-            copied && MotionPhotoUtil.detect(temp!!) != null
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.w(UPLOAD_TAG, "Motion-photo check failed for $uploadUri: ${e.message}")
-            false
-        } finally {
-            temp?.delete()
+            if (e is CancellationException) throw e
+            Log.w(UPLOAD_TAG, "mirror strip location drop for $uri failed: ${e.message}")
         }
     }
 
@@ -1670,7 +1747,11 @@ class UploadPendingUseCase @Inject constructor(
                 var rawW = 0
                 var rawH = 0
                 runCatching {
-                    android.media.MediaMetadataRetriever().use { r ->
+                    // Released explicitly: MediaMetadataRetriever implements AutoCloseable only from
+                    // API 29, so a `use` block throws at close time on every older device and leaks
+                    // the native retriever there.
+                    val r = android.media.MediaMetadataRetriever()
+                    try {
                         r.setDataSource(context, Uri.parse(sourceUri))
                         rawW = r.extractMetadata(
                             android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
@@ -1678,6 +1759,8 @@ class UploadPendingUseCase @Inject constructor(
                         rawH = r.extractMetadata(
                             android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT
                         )?.toIntOrNull() ?: 0
+                    } finally {
+                        runCatching { r.release() }
                     }
                 }
                 // Send the RAW encoded stream dimensions UNSWAPPED and NO Camera block at all — what
@@ -1730,7 +1813,10 @@ class UploadPendingUseCase @Inject constructor(
      *  xAttr branch reads for the source), so a downscaled upload reports the real stream size.
      *  Returns null on any failure or a non-positive dimension, so the caller keeps the source dims. */
     private fun probeVideoDimensions(file: File): Pair<Int, Int>? = runCatching {
-        android.media.MediaMetadataRetriever().use { r ->
+        // Released explicitly: MediaMetadataRetriever implements AutoCloseable only from API 29, so a
+        // `use` block throws at close time on every older device and turns each probe into a null.
+        val r = android.media.MediaMetadataRetriever()
+        try {
             r.setDataSource(file.absolutePath)
             val w = r.extractMetadata(
                 android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH
@@ -1739,6 +1825,8 @@ class UploadPendingUseCase @Inject constructor(
                 android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT
             )?.toIntOrNull() ?: 0
             if (w > 0 && h > 0) w to h else null
+        } finally {
+            runCatching { r.release() }
         }
     }.getOrNull()
 
@@ -1853,5 +1941,61 @@ class UploadPendingUseCase @Inject constructor(
             }
             return mediaStoreDateTakenMs
         }
+
+        /**
+         * Whether an upload's mirror step actually rewrote the on-device file GPS-free, which is what
+         * makes that file's stored `photo_location` fix stale. All three have to hold, and each fails
+         * the same way when it does not: [stripGpsOnUpload] is the effective GPS strip (strip-on-upload
+         * with GPS in its set), and with it off the file keeps its coordinates; [mirrorToLocal] gates the
+         * in-place rewrite, and with it off only a temp copy is stripped while the device original is
+         * left whole; [deviceRewriteSucceeded] is the write's own outcome, and the OS can refuse it,
+         * leaving the original intact. A plain strip-on-upload with no mirror therefore never satisfies
+         * this, so its still-located device file keeps its map point.
+         *
+         * Pure and side-effect-free, so the matrix is pinned by a plain JVM test.
+         */
+        fun mirrorRemovedDeviceGps(
+            stripGpsOnUpload: Boolean,
+            mirrorToLocal: Boolean,
+            deviceRewriteSucceeded: Boolean,
+        ): Boolean = stripGpsOnUpload && mirrorToLocal && deviceRewriteSucceeded
+
+        /**
+         * The cloud displayName a rename-on-upload derives from a source's capture timestamp,
+         * formatted `yyyy-MM-dd_HH-mm-ss` and keeping the original extension. A non-positive
+         * [dateTakenMs] (absent MediaStore DATE_TAKEN) falls back to [nowMs]. Pure and
+         * side-effect-free so the naming is pinned by a plain JVM test.
+         */
+        fun uploadRenamedName(displayName: String, dateTakenMs: Long, nowMs: Long): String {
+            val ext = displayName.substringAfterLast('.', "")
+            val captureMs = dateTakenMs.takeIf { it > 0L } ?: nowMs
+            val base = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US).format(Date(captureMs))
+            return if (ext.isNotEmpty()) "$base.$ext" else base
+        }
     }
 }
+
+/**
+ * #102: whether an auto-queued photo must wait for Wi-Fi under the Wi-Fi-only setting. An explicitly
+ * picked upload (a MANUAL "back up now" of a photo, or an ALBUM_ADD) rides mobile data because the
+ * user asked for that one; a folder auto-backup or an edit re-upload waits for Wi-Fi. Enforced per
+ * photo, so a single manual pick does not drag the whole auto backlog onto cellular just because it
+ * opened the pass.
+ */
+internal fun uploadDefersForWifiOnly(queueSource: String?, wifiOnly: Boolean, onWifi: Boolean): Boolean =
+    wifiOnly && !onWifi &&
+        queueSource != QueueSource.MANUAL &&
+        queueSource != QueueSource.ALBUM_ADD
+
+/**
+ * #108: the video-transcode knobs the upload path derives from a compression [tier]: the short-edge
+ * cap and target bitrate the VIDEO path re-encodes at. The photo path hands the tier straight to the
+ * image compressor, so it has no equivalent.
+ */
+internal fun videoCompressionParamsFor(
+    tier: UploadCompressionTier,
+): eu.akoos.photos.data.upload.VideoUploadCompressor.VideoCompressionParams =
+    eu.akoos.photos.data.upload.VideoUploadCompressor.VideoCompressionParams(
+        tier.videoMaxShortEdgePx,
+        tier.videoBitrateBps,
+    )

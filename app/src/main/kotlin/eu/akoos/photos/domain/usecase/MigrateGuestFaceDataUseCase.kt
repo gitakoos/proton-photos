@@ -1,0 +1,127 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package eu.akoos.photos.domain.usecase
+
+import androidx.room.withTransaction
+import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.db.dao.ClusterSummaryDao
+import eu.akoos.photos.data.db.dao.FaceDao
+import eu.akoos.photos.data.db.dao.FaceScanDao
+import eu.akoos.photos.data.db.dao.NotPersonDao
+import eu.akoos.photos.data.db.dao.PersonCoverDao
+import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import javax.inject.Inject
+
+/** What to do with the guest-scoped face data when a real account becomes active. */
+enum class GuestFaceMigration { NONE, ADOPT, DISCARD }
+
+/**
+ * The outcome of a sign-in migration: the [action] taken and how many people and face rows it carried
+ * across (ADOPT) or dropped (DISCARD), so the copyable diagnostics can show what the sign-in did. Both
+ * counts are 0 for NONE.
+ */
+data class GuestFaceMigrationResult(
+    val action: GuestFaceMigration,
+    val people: Int,
+    val faces: Int,
+)
+
+/**
+ * Decides the fate of guest ("local") face data on sign-in. A guest scans device photos and builds
+ * People + names under the `LOCAL_USER` owner; every face table keys its rows by that owner. Without
+ * this step, signing in re-scans the same device files under the account and the re-scan overwrites
+ * each guest face row on its shared primary key with a nameless one, silently destroying the names.
+ *
+ * - No guest data -> NONE.
+ * - Guest data AND the account has none yet -> ADOPT: re-key every table `local` -> account, so the
+ *   people, names, memberships, scan markers and curation carry over and the account does not re-scan.
+ * - Guest data BUT the account already has its own faces -> DISCARD: the account owns the People it
+ *   already built, and the `face` table is single-row-per-photo so the two cannot be merged; drop the
+ *   guest rows so stale biometric vectors do not linger under the signed-in session.
+ */
+fun guestFaceMigrationAction(hasGuestData: Boolean, accountHasData: Boolean): GuestFaceMigration =
+    when {
+        !hasGuestData -> GuestFaceMigration.NONE
+        accountHasData -> GuestFaceMigration.DISCARD
+        else -> GuestFaceMigration.ADOPT
+    }
+
+class MigrateGuestFaceDataUseCase @Inject constructor(
+    private val faceDao: FaceDao,
+    private val faceScanDao: FaceScanDao,
+    private val personDao: PersonDao,
+    private val notPersonDao: NotPersonDao,
+    private val personCoverDao: PersonCoverDao,
+    private val personManualPhotoDao: PersonManualPhotoDao,
+    private val clusterSummaryDao: ClusterSummaryDao,
+    private val appDatabase: AppDatabase,
+) {
+    private val guest = PhotoLocationEntity.LOCAL_USER
+
+    /**
+     * Runs once per sign-in, and MUST run before the face scan enumerates for [accountId], or the
+     * re-scan overwrites the guest faces first. Idempotent: after an ADOPT or DISCARD there are no
+     * `local` rows left, so a later call resolves to NONE. Never throws to the caller.
+     */
+    suspend fun invoke(accountId: String): GuestFaceMigrationResult {
+        if (accountId == guest) return GuestFaceMigrationResult(GuestFaceMigration.NONE, 0, 0)
+        return runCatching {
+            appDatabase.withTransaction {
+                val action = guestFaceMigrationAction(
+                    hasGuestData = faceScanDao.hasAnyForUser(guest),
+                    accountHasData = faceScanDao.hasAnyForUser(accountId),
+                )
+                // Count the guest rows about to move or drop, before the mutation empties them, so the
+                // diagnostics can report exactly what the sign-in carried across or discarded.
+                val people = if (action == GuestFaceMigration.NONE) 0 else personDao.countForUser(guest)
+                val faces = if (action == GuestFaceMigration.NONE) 0 else faceDao.countForUser(guest)
+                when (action) {
+                    GuestFaceMigration.NONE -> Unit
+                    GuestFaceMigration.ADOPT -> {
+                        // Order is irrelevant: these tables are not foreign-key linked, and person /
+                        // cluster ids are global autogenerated longs, so references stay valid.
+                        faceDao.updateUserId(guest, accountId)
+                        faceScanDao.updateUserId(guest, accountId)
+                        personDao.updateUserId(guest, accountId)
+                        notPersonDao.updateUserId(guest, accountId)
+                        personCoverDao.updateUserId(guest, accountId)
+                        personManualPhotoDao.updateUserId(guest, accountId)
+                        clusterSummaryDao.updateUserId(guest, accountId)
+                    }
+                    GuestFaceMigration.DISCARD -> {
+                        faceDao.clearForUser(guest)
+                        faceScanDao.clearForUser(guest)
+                        personDao.clearForUser(guest)
+                        notPersonDao.clearForUser(guest)
+                        personCoverDao.clearForUser(guest)
+                        personManualPhotoDao.clearForUser(guest)
+                        clusterSummaryDao.clearForUser(guest)
+                    }
+                }
+                GuestFaceMigrationResult(action, people, faces)
+            }
+        }.getOrDefault(GuestFaceMigrationResult(GuestFaceMigration.NONE, 0, 0))
+    }
+}

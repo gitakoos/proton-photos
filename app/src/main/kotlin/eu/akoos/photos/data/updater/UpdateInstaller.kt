@@ -22,14 +22,18 @@
 
 package eu.akoos.photos.data.updater
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.content.pm.Signature
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.content.FileProvider
+import androidx.core.content.pm.PackageInfoCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.security.MessageDigest
@@ -37,10 +41,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * OS-side install plumbing for the self-updater. Owns the FileProvider URI conversion
- * + the "Install unknown apps" permission gate — both of which Android tightened in 8.0
- * (Oreo) and again in 10 (Q's scoped storage). The caller is always an Activity, since
- * both intents require a running UI surface.
+ * OS-side install plumbing for the self-updater. Owns the PackageInstaller session that applies
+ * an update without a confirmation dialog, the FileProvider URI conversion behind the legacy
+ * intent fallback, and the "Install unknown apps" permission gate — the latter two being what
+ * Android tightened in 8.0 (Oreo) and again in 10 (Q's scoped storage).
  */
 @Singleton
 class UpdateInstaller @Inject constructor(
@@ -76,11 +80,110 @@ class UpdateInstaller @Inject constructor(
     }
 
     /**
-     * Hands the APK to the system installer. We route the file through our FileProvider
-     * (declared in AndroidManifest.xml) so the system installer process gets a
-     * content:// URI it can read across the StrictMode file-URI boundary that Android 7+
-     * enforces. The FLAG_GRANT_READ_URI_PERMISSION temporarily extends the read grant to
-     * whichever process the system picks to handle the install.
+     * Applies [apkFile] through a PackageInstaller session, which is the only route that can
+     * update this app without the system's confirmation screen.
+     *
+     * The OS waives that screen for a session whose owner asks for
+     * [PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED], declares
+     * `UPDATE_PACKAGES_WITHOUT_USER_ACTION`, holds a granted `REQUEST_INSTALL_PACKAGES`, is
+     * installing itself, and ships an APK whose targetSdk clears the floor that Android raises
+     * with each release. Any of those slipping turns the commit into
+     * [PackageInstaller.STATUS_PENDING_USER_ACTION] rather than a failure, so the confirmation
+     * path stays wired up permanently, not as an edge case.
+     *
+     * Returns synchronously once the session is committed; the terminal result lands on
+     * [InstallSessionEvents] via [InstallStatusReceiver].
+     */
+    fun installViaSession(apkFile: File): InstallOutcome {
+        // Signer identity first: nothing is staged for an APK that is not ours.
+        if (!verifyApkSignature(apkFile)) return InstallOutcome.SignatureMismatch
+        if (!isCandidateNewerThanInstalled(apkFile)) return InstallOutcome.NotNewer
+
+        val packageInstaller = context.packageManager.packageInstaller
+        var sessionId = INVALID_SESSION_ID
+        var session: PackageInstaller.Session? = null
+        var committed = false
+        return try {
+            val params = PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL,
+            ).apply {
+                setAppPackageName(context.packageName)
+                setSize(apkFile.length())
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    // Update ownership keeps later silent updates routed through this installer.
+                    setRequestUpdateOwnership(true)
+                }
+            }
+            sessionId = packageInstaller.createSession(params)
+            val open = packageInstaller.openSession(sessionId)
+            session = open
+            open.openWrite(SESSION_APK_NAME, 0L, apkFile.length()).use { output ->
+                apkFile.inputStream().use { input -> input.copyTo(output) }
+                open.fsync(output)
+            }
+            open.commit(statusIntentSender(sessionId))
+            committed = true
+            InstallOutcome.Committed
+        } catch (t: Throwable) {
+            InstallOutcome.Failed(t.message)
+        } finally {
+            runCatching { session?.close() }
+            // An uncommitted session keeps its staged bytes in the installer until abandoned.
+            if (!committed && sessionId != INVALID_SESSION_ID) {
+                runCatching { packageInstaller.abandonSession(sessionId) }
+            }
+        }
+    }
+
+    /**
+     * Compares the archive's versionCode against the installed one. Android refuses a downgrade
+     * with an opaque installer error, so the refusal is made here where the caller can name it.
+     * Fail-closed: an unreadable archive counts as not newer.
+     */
+    private fun isCandidateNewerThanInstalled(apkFile: File): Boolean {
+        return try {
+            val pm = context.packageManager
+            val installed = pm.getPackageInfo(context.packageName, 0)
+            val candidate = pm.getPackageArchiveInfo(apkFile.absolutePath, 0) ?: return false
+            isCandidateNewer(
+                installedVersionCode = PackageInfoCompat.getLongVersionCode(installed),
+                candidateVersionCode = PackageInfoCompat.getLongVersionCode(candidate),
+            )
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Callback channel for the committed session. The OS writes its status extras into this
+     * Intent, which is why the PendingIntent has to be mutable on Android 12+. The request code
+     * carries the session id so two sessions can never collapse onto one PendingIntent.
+     */
+    private fun statusIntentSender(sessionId: Int): IntentSender {
+        val intent = Intent(context, InstallStatusReceiver::class.java)
+            .setAction(InstallStatusReceiver.ACTION_INSTALL_STATUS)
+        var flags = PendingIntent.FLAG_UPDATE_CURRENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            flags = flags or PendingIntent.FLAG_MUTABLE
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            STATUS_REQUEST_CODE_BASE + sessionId,
+            intent,
+            flags,
+        ).intentSender
+    }
+
+    /**
+     * Hands the APK to the system installer. Last-resort fallback for when a session cannot be
+     * created, written or committed. We route the file through our FileProvider (declared in
+     * AndroidManifest.xml) so the system installer process gets a content:// URI it can read
+     * across the StrictMode file-URI boundary that Android 7+ enforces. The
+     * FLAG_GRANT_READ_URI_PERMISSION temporarily extends the read grant to whichever process
+     * the system picks to handle the install.
      */
     fun buildInstallIntent(apkFile: File): Intent {
         val authority = "${context.packageName}.updater.fileprovider"
@@ -135,4 +238,58 @@ class UpdateInstaller @Inject constructor(
             MessageDigest.getInstance("SHA-256").digest(sig.toByteArray())
                 .joinToString("") { "%02x".format(it) }
         }.toSet()
+
+    private companion object {
+        const val INVALID_SESSION_ID = -1
+        /** Name of the single entry written into the session; a label, not a filesystem path. */
+        const val SESSION_APK_NAME = "update.apk"
+        /** Offset by the session id so concurrent sessions get distinct PendingIntents. */
+        const val STATUS_REQUEST_CODE_BASE = 9310
+    }
 }
+
+/**
+ * Outcome of an update install. A type rather than a Boolean so the caller can separate a
+ * deliberately blocked install (wrong signer, not actually newer) from a plumbing failure that
+ * still deserves the legacy intent fallback.
+ */
+sealed class InstallOutcome {
+    /** Session committed. The terminal result arrives on [InstallSessionEvents]. */
+    data object Committed : InstallOutcome()
+
+    /** The OS applied the update. */
+    data object Success : InstallOutcome()
+
+    /** The OS wants its confirmation screen; [intent] has to be launched to continue. */
+    data class PendingUserAction(val intent: Intent) : InstallOutcome()
+
+    /** The archive is not signed by this app's certificate. */
+    data object SignatureMismatch : InstallOutcome()
+
+    /** The archive's versionCode does not rank above the installed one. */
+    data object NotNewer : InstallOutcome()
+
+    /** Anything else. The caller may retry through [UpdateInstaller.buildInstallIntent]. */
+    data class Failed(val message: String?) : InstallOutcome()
+}
+
+/** Coarse reading of `PackageInstaller.EXTRA_STATUS`, kept free of Android types so it is pure. */
+enum class InstallStatusVerdict {
+    PENDING_USER_ACTION,
+    SUCCESS,
+    FAILURE,
+}
+
+/**
+ * Maps a session status int onto a verdict. Every value other than the two known-good ones is a
+ * failure, including a missing extra, so an unrecognised future status never reads as success.
+ */
+internal fun verdictForStatus(status: Int): InstallStatusVerdict = when (status) {
+    PackageInstaller.STATUS_PENDING_USER_ACTION -> InstallStatusVerdict.PENDING_USER_ACTION
+    PackageInstaller.STATUS_SUCCESS -> InstallStatusVerdict.SUCCESS
+    else -> InstallStatusVerdict.FAILURE
+}
+
+/** An update may only move the versionCode forward; equal or lower is refused. */
+internal fun isCandidateNewer(installedVersionCode: Long, candidateVersionCode: Long): Boolean =
+    candidateVersionCode > installedVersionCode

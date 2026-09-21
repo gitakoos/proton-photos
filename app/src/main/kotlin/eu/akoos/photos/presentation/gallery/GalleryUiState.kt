@@ -47,8 +47,11 @@ data class GalleryUiState(
     val isRefreshing: Boolean = false,
     val permissionState: PermissionState = PermissionState.NotRequested,
     val error: String? = null,
-    val storageFullEvent: Boolean = false,
     val userInitial: String = "",
+    /** True while a Proton account is active. False in a local-only session (null userId), which
+     *  hides the cloud-account surfaces (avatar ring, Shared tab). Defaults true so a signed-in
+     *  session renders every surface unchanged. */
+    val isSignedIn: Boolean = true,
     val contentFilter: ContentFilter = ContentFilter(),
     val cloudUsedBytes: Long = 0L,
     val cloudMaxBytes: Long = 0L,
@@ -67,6 +70,9 @@ data class GalleryUiState(
     val multiShareState: MultiShareState = MultiShareState.Idle,
     val addToAlbumState: AddToAlbumState = AddToAlbumState.Idle,
     val multiStripState: MultiStripState = MultiStripState.Idle,
+    /** Progress of a batch favourite from the selection dock. */
+    val favoriteState: eu.akoos.photos.presentation.common.FavoriteActionState =
+        eu.akoos.photos.presentation.common.FavoriteActionState.Idle,
     /** Android 10+ write-permission dialog for stripping foreign files; the granted retry strips
      *  the deferred URIs. */
     val pendingStripIntent: android.app.PendingIntent? = null,
@@ -97,6 +103,14 @@ data class GalleryUiState(
     /** Cloud album linkIds the user hid client-side. The add-to-album picker marks these rows with
      *  a lock so a hidden album reads as hidden while staying fully selectable. */
     val hiddenAlbumIds: Set<String> = emptySet(),
+    /** Indexed people (face clusters) for the People rail, most-photographed first. Empty when the
+     *  AI features are off or nothing has been indexed yet, which keeps the People chip hidden. */
+    val people: List<PersonUi> = emptyList(),
+    /** The person the timeline is filtered to, or null for no person filter. */
+    val selectedPersonId: Long? = null,
+    /** Photo keys ([GalleryItem.stableId]) the selected person appears in. [applyFilter] keeps only
+     *  feed items in this set while [selectedPersonId] is non-null, composing like the Offline set. */
+    val personPhotoKeys: Set<String> = emptySet(),
 ) {
     val storageFraction: Float
         get() = if (cloudMaxBytes > 0L)
@@ -121,10 +135,12 @@ sealed class MultiDownloadState {
 }
 
 /** [Working] tracks how many cloud-only items have finished decrypting (determinate progress);
- *  the terminal chooser launch is a one-shot intent, not a state. */
+ *  the terminal chooser launch is a one-shot intent, not a state. [Done] carries how the batch
+ *  ended so a photo that never made it into the chooser is reported instead of dropped. */
 sealed class MultiShareState {
     data object Idle : MultiShareState()
     data class  Working(val done: Int, val total: Int) : MultiShareState()
+    data class  Done(val shared: Int, val failed: Int) : MultiShareState()
 }
 
 sealed class AddToAlbumState {
@@ -179,9 +195,55 @@ data class ContentFilter(
     val year: Int? = null,
     val month: Int? = null,
     val day: Int? = null,
+    // Inclusive end of a day range within (year, month); when set, [day] is the range start. A single
+    // day leaves this null. Only meaningful alongside a month, since a range is swept in one month grid.
+    val dayEnd: Int? = null,
 )
 
 enum class MediaType { All, PhotosOnly, VideosOnly }
-enum class SyncStatusFilter { All, LocalOnly, BackedUp }
+enum class SyncStatusFilter { All, LocalOnly, BackedUp, CloudOnly }
 
 enum class TimelineGrouping { None, Day, Month, Year }
+
+/**
+ * One person on the People rail. Small on purpose (a cover reference, never an embedding) so the
+ * gallery state stays cheap. [coverPhotoKey] is the cover face's photo ([GalleryItem.stableId]),
+ * resolved to a thumbnail the same way a timeline cell is. [faceBox] is the cover face region as
+ * fractions (0..1) of the cover image so a tile can crop to the face at any thumbnail resolution;
+ * it is null when the cover photo's dimensions are unknown (a cloud-only photo not on the device),
+ * in which case the tile shows the whole cover thumbnail.
+ */
+data class PersonUi(
+    val personId: Long,
+    val displayName: String?,
+    val coverPhotoKey: String,
+    val faceBox: FaceBox? = null,
+    /** Cached number of faces assigned to the person; the album-style People card shows it as a count. */
+    val faceCount: Int = 0,
+    /** True for the single "Unsorted" bucket, so a card can label it apart from a real person. */
+    val isOther: Boolean = false,
+)
+
+/** A face region as fractions (0..1) of its image, left/top/right/bottom. */
+data class FaceBox(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+)
+
+/**
+ * Adapt a domain [eu.akoos.photos.domain.model.PersonSummary] to the UI [PersonUi], dropping a person
+ * with no resolvable cover (so a tile never renders blank). Shared by every surface that lists people.
+ */
+fun eu.akoos.photos.domain.model.PersonSummary.toPersonUi(): PersonUi? {
+    val cover = coverPhotoKey ?: return null
+    return PersonUi(
+        personId = personId,
+        displayName = displayName,
+        coverPhotoKey = cover,
+        faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
+        faceCount = faceCount,
+        isOther = isOther,
+    )
+}

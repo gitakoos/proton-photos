@@ -27,23 +27,29 @@ import android.graphics.drawable.BitmapDrawable
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -53,7 +59,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -70,11 +75,12 @@ import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import eu.akoos.photos.R
-import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
-import eu.akoos.photos.presentation.location.LocationDetailSheet
-import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.places.PlaceSearchSheet
 import eu.akoos.photos.presentation.theme.AppColors
+import kotlinx.coroutines.delay
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
@@ -94,9 +100,10 @@ private const val MARKER_CAP = 150
 private const val PIN_THUMB_PX = 120
 
 /**
- * Map page. Plots every geotagged photo for the account on an OpenStreetMap canvas. The
- * top bar mirrors the Calendar / Search back-pill recipe; the map itself is an osmdroid
- * [MapView] driven through an [AndroidView] with its lifecycle bridged via [DisposableEffect].
+ * Map page. Plots every geotagged photo for the account on an OpenStreetMap canvas. A plain
+ * floating header sits over the map and a bottom bar opens the shared place search; the map itself
+ * is an osmdroid [MapView] driven through an [AndroidView] with its lifecycle bridged via
+ * [DisposableEffect].
  *
  * On entry the screen requests [Manifest.permission.ACCESS_MEDIA_LOCATION] (Android 10+) when
  * it isn't already held, and — once granted or already present — kicks the one-shot GPS
@@ -104,32 +111,37 @@ private const val PIN_THUMB_PX = 120
  *
  * Each fix is plotted as a rounded-rectangle thumbnail pin (Google-Photos style). A placeholder
  * pin drops immediately; the thumbnail is loaded off-thread through Coil and swapped in once
- * decoded. Tapping a pin raises a [LocationDetailSheet] as a [ModalBottomSheet] OVER the map (the
- * map stays behind), which resolves the pin's coordinates to a place and lists every photo taken
- * there. A photo tap inside the drawer closes it and opens the viewer via [onPhotoClick].
- * Clustering arrives in a later piece.
+ * decoded. Tapping a pin opens the full-screen place page ([onOpenPlace]) for the pin's
+ * coordinates, the same located-photos view the world map and the Places browser open, so a place
+ * opens one way everywhere. Clustering arrives in a later piece.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreen(
     onBack: () -> Unit,
-    onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit = { _, _ -> },
-    onOpenCalendar: () -> Unit = {},
-    onOpenSearch: () -> Unit = {},
+    onOpenPlace: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
+    onSwitchStyle: () -> Unit = {},
     vm: MapViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
     val isDark = !colors.isLight
     val context = LocalContext.current
     val pins by vm.pins.collectAsStateWithLifecycle()
+    val placesLoaded by vm.placesLoaded.collectAsStateWithLifecycle()
     val density = LocalDensity.current.density
 
-    // Coordinates of the tapped pin. Non-null raises the location-detail drawer over the map;
-    // dismiss (drag-down / scrim tap / a photo tap) clears it back to the map.
-    var sheetCoords by remember { mutableStateOf<Pair<Double, Double>?>(null) }
-    // City-search overlay: a tap on the search pill opens it; it lists the geocoded city set.
+    // Bottom place search: a tap on the search bar raises the shared places drawer over the map.
     var showSearch by remember { mutableStateOf(false) }
     val cities by vm.cities.collectAsStateWithLifecycle()
+
+    // Held false until the camera has been positioned on real data; the opaque cover over the map reads
+    // from it, so the one-time re-centre happens behind the spinner instead of as a visible jump.
+    var centered by remember { mutableStateOf(false) }
+
+    // Staggered entrance, mirroring the globe: the map settles first, then a beat later the header and
+    // bottom search fade and slide in, so the map reads before the chrome lands.
+    var chromeVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { delay(200); chromeVisible = true }
 
     // Permission gate: ACCESS_MEDIA_LOCATION only exists on Android 10+. On older OS versions
     // EXIF GPS is readable without it, so we treat the grant as implicitly present and go
@@ -212,12 +224,22 @@ fun MapScreen(
     // means a new `locations` emission cancels the previous run's in-flight loaders rather than
     // leaving them to repaint markers that were already cleared. Center on the average of the points
     // so the first frame frames the user's photos; fall back to a world view when nothing is located.
-    LaunchedEffect(mapView, pins) {
+    LaunchedEffect(mapView, pins, placesLoaded) {
         mapView.overlays.clear()
         if (pins.isEmpty()) {
+            // Nothing located yet and the query has not produced its first result: keep the cover's
+            // spinner up and leave the camera alone, so the world view is never shown only to jump to
+            // the fixes a moment later.
+            if (!placesLoaded) {
+                mapView.invalidate()
+                return@LaunchedEffect
+            }
+            // The query has settled and the account genuinely has no located photos: rest on the world
+            // view and reveal it as a world map.
             mapView.controller.setZoom(WORLD_ZOOM)
             mapView.controller.setCenter(GeoPoint(0.0, 0.0))
             mapView.invalidate()
+            centered = true
             return@LaunchedEffect
         }
 
@@ -240,7 +262,7 @@ fun MapScreen(
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 icon = placeholder
                 setOnMarkerClickListener { _, _ ->
-                    sheetCoords = pin.latitude to pin.longitude
+                    onOpenPlace(pin.latitude, pin.longitude)
                     true
                 }
             }.also { mapView.overlays.add(it) }
@@ -251,6 +273,9 @@ fun MapScreen(
         mapView.controller.setZoom(LOCATED_ZOOM)
         mapView.controller.setCenter(GeoPoint(avgLat, avgLon))
         mapView.invalidate()
+        // Camera now frames the located photos; drop the cover so the map is revealed already centred,
+        // ahead of the thumbnails that swap in below.
+        centered = true
 
         // Now fill in thumbnails. Each pin's resolved library item supplies the same image source the
         // gallery cell uses — a local content uri or a cloud thumbnail, both decoded through Coil — so
@@ -281,41 +306,15 @@ fun MapScreen(
             .fillMaxSize()
             .background(colors.bg0),
     ) {
-        // The map lives in its own rounded, bordered container (inset from the edges) rather than
-        // bleeding to the screen edges — this keeps a clear gap below the top bar so the map's own
-        // touch handling can't fight the back button, and reads as a contained surface.
+        // The map bleeds to the screen edges, full-bleed like the globe; the floating header and the
+        // bottom search bar draw over it with their own insets.
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(top = 56.dp, start = 12.dp, end = 12.dp, bottom = 8.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .border(0.5.dp, colors.pillBorder, RoundedCornerShape(16.dp)),
+            modifier = Modifier.fillMaxSize(),
         ) {
             AndroidView(
                 factory = { mapView },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(
-                        if (showSearch && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                            Modifier.blur(16.dp)
-                        } else {
-                            Modifier
-                        },
-                    ),
+                modifier = Modifier.fillMaxSize(),
             )
-            // City-search overlay — dims (and blurs where supported) the map and lists the places.
-            if (showSearch) {
-                MapCitySearchOverlay(
-                    cities = cities,
-                    onPick = { city ->
-                        mapView.controller.animateTo(GeoPoint(city.latitude, city.longitude), 9.0, 900L)
-                        showSearch = false
-                        sheetCoords = city.latitude to city.longitude
-                    },
-                    onClose = { showSearch = false },
-                )
-            }
 
             // OpenStreetMap tile attribution — required by OSM's tile usage policy for the standard
             // MAPNIK tiles. A fixed dark scrim + light text keeps it legible over both the light
@@ -323,6 +322,7 @@ fun MapScreen(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
                     .padding(4.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(Color.Black.copy(alpha = 0.45f))
@@ -334,53 +334,88 @@ fun MapScreen(
                     fontSize = 11.sp,
                 )
             }
-        }
 
-        // Floating header — drawn as a later sibling over the map. The title pill grows downward
-        // into its view-switch menu over the map (back button + search pill stay pinned at the top)
-        // instead of pushing the row down. It carries its own statusBarsPadding.
-        FloatingMemoriesHeader(
-            title = stringResource(R.string.map_title),
-            onBack = onBack,
-            menuItems = listOf(stringResource(R.string.calendar_title) to onOpenCalendar),
-            trailing = {
-                // Search pill — opens (and re-taps to close) the city-search overlay.
+            // Opaque cover over the map, held until the camera is centred on real data so the one-time
+            // re-centre lands off-screen; it fades out on [centered], revealing the already framed map
+            // rather than a visible jump from the world view.
+            AnimatedVisibility(
+                visible = !centered,
+                modifier = Modifier.fillMaxSize(),
+                exit = fadeOut(tween(240)),
+            ) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(colors.pillBg, CircleShape)
-                        .border(0.5.dp, colors.pillBorder, CircleShape)
-                        .clickable { showSearch = !showSearch },
+                        .fillMaxSize()
+                        .background(colors.bg0),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        if (showSearch) Icons.Default.Close else Icons.Default.Search,
-                        contentDescription = stringResource(R.string.map_search_places),
-                        tint = colors.fgPrimary,
-                        modifier = Modifier.size(18.dp),
-                    )
+                    CircularProgressIndicator(color = colors.accent)
                 }
-            },
-        )
-    }
+            }
+        }
 
-    // Location detail drawer — rises over the map when a pin is tapped. Opens tall-but-not-full
-    // (skipPartiallyExpanded); the cover runs to the top edge with a slim handle floated over it
-    // inside the sheet, so there's no separate surface band. A photo tap closes it, then the viewer.
-    sheetCoords?.let { (lat, lon) ->
-        ModalBottomSheet(
-            onDismissRequest = { sheetCoords = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = AppColors.current.bg0,
-            dragHandle = null,
+        // An opaque search bar along the bottom raises the same drawer the Places screen uses; it hides
+        // while the drawer is open, so the pressed bar reads as having risen into the drawer.
+        AnimatedVisibility(
+            visible = chromeVisible && cities.isNotEmpty() && !showSearch,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(240)) + slideInVertically(tween(280)) { it / 2 },
+            exit = fadeOut(tween(160)),
         ) {
-            LocationDetailSheet(
-                latitude = lat,
-                longitude = lon,
-                onPhotoClick = { items, index ->
-                    sheetCoords = null
-                    onPhotoClick(items, index)
+            val pill = RoundedCornerShape(14.dp)
+            Row(
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(bottom = 20.dp, start = 20.dp, end = 20.dp)
+                    .fillMaxWidth()
+                    .clip(pill)
+                    .background(colors.bg2, pill)
+                    .border(0.5.dp, colors.line2, pill)
+                    .clickable { showSearch = true }
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null, tint = colors.fgDim, modifier = Modifier.size(18.dp))
+                Text(stringResource(R.string.map_search_places), color = colors.fgMute, fontSize = 14.sp)
+            }
+        }
+        if (showSearch) {
+            PlaceSearchSheet(
+                cities = cities,
+                onPick = { city ->
+                    showSearch = false
+                    onOpenPlace(city.latitude, city.longitude)
+                },
+                onDismiss = { showSearch = false },
+            )
+        }
+
+        // Floating header, a later sibling drawn over the map, carrying its own status-bar padding. It
+        // waits for the stagger, then fades and slides in over the map. No scrim: the header's dark
+        // veil is invisible over the globe but strong over the bright OSM tiles.
+        AnimatedVisibility(
+            visible = chromeVisible,
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth(),
+            enter = fadeIn(tween(240)) + slideInVertically(tween(280)) { -it / 2 },
+            exit = fadeOut(tween(160)),
+        ) {
+            FloatingHeader(
+                title = stringResource(R.string.map_title),
+                onBack = onBack,
+                showScrim = false,
+                trailing = {
+                    // Open the appearance setting that toggles the map style.
+                    IconBubble(
+                        icon = Icons.Filled.Layers,
+                        contentDescription = stringResource(R.string.settings_map_style),
+                        onClick = onSwitchStyle,
+                        diameter = 40.dp,
+                        iconSize = 18.dp,
+                        background = colors.pillBg,
+                        borderColor = colors.pillBorder,
+                        tint = colors.fgPrimary,
+                    )
                 },
             )
         }

@@ -20,6 +20,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+
 package eu.akoos.photos.presentation.viewer
 
 import android.content.Context
@@ -40,39 +42,59 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.common.UndoAction
 import eu.akoos.photos.presentation.common.UndoController
 import eu.akoos.photos.presentation.common.buildHideUndoAction
-import eu.akoos.photos.presentation.common.transplantHiddenSyncState
+import eu.akoos.photos.presentation.gallery.isItemFavorite
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
+import eu.akoos.photos.data.db.dao.LocalTagDao
+import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
+import eu.akoos.photos.data.hidden.HiddenVaultJournal
+import eu.akoos.photos.data.hidden.HiddenVaultRecords
+import eu.akoos.photos.data.hidden.HiddenVaultRestorer
+import eu.akoos.photos.presentation.util.formatBytes
+import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
+import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.PhotoMetadata
+import eu.akoos.photos.util.UserPhotoTags
+import eu.akoos.photos.util.stripForShareOrOriginal
 import eu.akoos.photos.util.friendlyNetworkError
+import eu.akoos.photos.util.originalUriForExif
 import eu.akoos.photos.util.retryOnDbTear
 import java.io.File
 import javax.inject.Inject
@@ -81,10 +103,65 @@ import javax.inject.Inject
  *  details sheet (a cloud-only video carries no on-device media row and no EXIF). */
 data class CloudVideoMeta(val width: Int, val height: Int, val durationMs: Long)
 
+/** The fix the details sheet states, in degrees. Resolved by [PhotoGpsResolver] exactly as the place
+ *  name is, so a photo whose only fix is the backfilled cloud one still names its coordinates. */
+data class DetailsGps(val latitude: Double, val longitude: Double)
+
 /** Album context for the details sheet: the device MediaStore bucket the photo lives in (null when
  *  there is no on-device copy) and the names of every cloud album that owns it (a photo can belong
  *  to many). */
 data class DetailsAlbums(val localFolder: String? = null, val cloudAlbums: List<String> = emptyList())
+
+/** A completed album removal: the album the photo was taken out of, plus the photo's Drive linkId.
+ *  Both ids travel together so a viewer can tell a removal from the album it was opened from apart
+ *  from one aimed at any other album the photo also belongs to. */
+data class AlbumRemoval(val albumLinkId: String, val photoLinkId: String)
+
+/**
+ * The device-side favourite set as it stands after toggling [item] to [nowFavorite].
+ *
+ * The set speaks for a photo that lives only on the device and for nothing else, so only such a
+ * photo's uri goes into it or comes out of it. A backed-up photo keeps its heart on Drive as tag 0,
+ * which is what every reader asks (see [isItemFavorite]), so it never gains an entry here, and any
+ * entry it still carries under either key it can be stored under comes out: the local uri from while
+ * it was device-only, the linkId from while it was cloud-only. Neither is read for it, and once the
+ * photo is keyed the other way round no toggle reaches it either. That is the whole cleanup, spread
+ * over the photos the user touches rather than run as a pass of its own.
+ */
+internal fun favoriteIdsAfterToggle(
+    item: GalleryItem,
+    favoriteIds: Set<String>,
+    nowFavorite: Boolean,
+): Set<String> = when (item) {
+    is GalleryItem.LocalOnly ->
+        if (nowFavorite) favoriteIds + item.local.uri else favoriteIds - item.local.uri
+    is GalleryItem.Synced    -> favoriteIds - item.local.uri - item.cloud.linkId
+    is GalleryItem.CloudOnly -> favoriteIds - item.cloud.linkId
+}
+
+/**
+ * Where the heart settles after a backed-up photo's cloud write is answered: on [attempted] when the
+ * write landed, back on [previous] when it did not.
+ *
+ * A heart that flipped on the tap but whose write was rejected (offline, signed out, a server that
+ * refused) would otherwise show a favourite Drive never recorded, and the next listing would take it
+ * away with no explanation. Being unable to name the user counts as a rejected write, since no tag
+ * can be written without one.
+ */
+internal fun favoriteAfterCloudWrite(previous: Boolean, attempted: Boolean, ok: Boolean): Boolean =
+    if (ok) attempted else previous
+
+/**
+ * Whether the metadata state describes a photo other than the settled one, so it has to go before the
+ * incoming read lands.
+ *
+ * [describes] is the photo the state was read for and [settled] the one now on screen. Not every
+ * settle produces a read (a video carries no EXIF), so without this the rows would keep stating the
+ * photo the user swiped away from. A re-read of the same photo answers false and its rows stay put,
+ * which keeps an editor save from blinking them away and back.
+ */
+internal fun metadataOutlivesPhoto(describes: String?, settled: String): Boolean =
+    describes != null && describes != settled
 
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
@@ -95,6 +172,9 @@ class PhotoViewerViewModel @Inject constructor(
     private val downloadPhotos: DownloadPhotosUseCase,
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
     private val hiddenStorage: HiddenStorageManager,
+    private val hiddenVaultJournal: HiddenVaultJournal,
+    private val hiddenVaultRestorer: HiddenVaultRestorer,
+    private val hiddenVaultEditor: eu.akoos.photos.data.hidden.HiddenVaultEditor,
     private val offlineStore: OfflineStorageManager,
     private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
@@ -102,9 +182,17 @@ class PhotoViewerViewModel @Inject constructor(
     private val forceUploadLocalUris: eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val photoLocationDao: PhotoLocationDao,
+    private val localTagDao: LocalTagDao,
+    private val photoListingDao: PhotoListingDao,
+    private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
+    private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
+    private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
     private val getGalleryItems: GetGalleryItemsUseCase,
+    private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
     private val undoController: UndoController,
     private val thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore,
+    private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
+    private val moveController: MoveToFolderController,
 ) : ViewModel() {
 
     private companion object {
@@ -197,6 +285,10 @@ class PhotoViewerViewModel @Inject constructor(
     private val _shareIntent = MutableSharedFlow<android.content.Intent>(replay = 0, extraBufferCapacity = 1)
     val shareIntent: SharedFlow<android.content.Intent> = _shareIntent.asSharedFlow()
 
+    /** Fires when an undo puts a deleted photo back. The viewer drops photos it deleted from its own
+     *  pager, and only this tells it that one of them is worth showing again. */
+    val undoRestored: SharedFlow<UndoAction> = undoController.restored
+
     /** Single-photo public-link state shown in the manage-link sheet, owned by [publicLink].
      *  Reset to [PublicLinkState.None] on every page load so a link from the previously viewed
      *  photo never lingers. */
@@ -213,6 +305,17 @@ class PhotoViewerViewModel @Inject constructor(
      *  and fills in like the Size row instead of only appearing once a location is found. */
     private val _detailsPlace = MutableStateFlow<String?>(null)
     val detailsPlace: StateFlow<String?> = _detailsPlace.asStateFlow()
+
+    /** The fix [detailsPlace] is the coarse reading of, so the sheet's coordinate rows state the very
+     *  location its place row names. Filled by [loadDetailsPlace] alongside the place name; null while
+     *  it resolves / when the photo carries no fix. */
+    private val _detailsGps = MutableStateFlow<DetailsGps?>(null)
+    val detailsGps: StateFlow<DetailsGps?> = _detailsGps.asStateFlow()
+
+    /** Identity of the photo the metadata state describes: a device photo's uri, a cloud photo's
+     *  linkId. [retargetMetadata] compares the settled photo against it, so the rows never outlive
+     *  the photo they were read for. */
+    private var metadataItemKey: String? = null
 
     /** Resolved on-disk size of the loaded cloud full-res, used as the Size-row fallback when
      *  [CloudPhoto.sizeBytes] is 0 (server returns null size for some videos). Reset per page. */
@@ -355,6 +458,12 @@ class PhotoViewerViewModel @Inject constructor(
     private val _setCoverDone = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
     val setCoverDone: SharedFlow<Unit> = _setCoverDone.asSharedFlow()
 
+    /** One-shot on a successful remove-from-album, so a viewer showing that album's membership can
+     *  drop the photo from its pager. Same replay=0 + single-buffer shape as [addToAlbumDone];
+     *  failures flow through [transientError] and emit nothing, leaving the photo on screen. */
+    private val _removeFromAlbumDone = MutableSharedFlow<AlbumRemoval>(replay = 0, extraBufferCapacity = 1)
+    val removeFromAlbumDone: SharedFlow<AlbumRemoval> = _removeFromAlbumDone.asSharedFlow()
+
     /** Errors that the UI should toast/snackbar. Set by previously-silent failure paths
      *  (add-to-album, download-to-device, load albums) so the user gets feedback instead of a
      *  silently spinning indicator. Caller clears via [clearTransientError]. */
@@ -372,30 +481,36 @@ class PhotoViewerViewModel @Inject constructor(
         val sourceAlbumLinkId: String?,
     )
 
+    /** Whether a Proton account is signed in. The null-userId local-only session leaves the per-photo
+     *  cloud actions without a destination, so the screen hides them. Defaults to signed-in so nothing
+     *  flickers before the first emit. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
     /** Live gallery list backing the viewer's reconciliation. The screen re-resolves each item in
      *  its passed-in static `items` snapshot against this by identity so a photo finishing upload
      *  (LocalOnly → Synced) or any metadata refresh reflects in the open viewer instead of staying
      *  frozen at click time. Empty until the merge first emits. */
-    val liveItems: StateFlow<List<GalleryItem>> = flow {
-        val userId = accountManager.getPrimaryUserId().first()
-        if (userId == null) { emit(emptyList()); return@flow }
-        emitAll(getGalleryItems.invoke(userId))
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val liveItems: StateFlow<List<GalleryItem>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) getGalleryItems.invokeLocalOnly()
+            else getGalleryItems.invoke(userId)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Cloud linkId → local URI for photos also on device. Lets the screen upgrade a CloudOnly
      *  badge to "Synced" after a download, since the static `items` snapshot can't reflect it. */
-    val localUriByLinkId: StateFlow<Map<String, String>> = flow {
-        val userId = accountManager.getPrimaryUserId().first()
-        if (userId == null) { emit(emptyMap()); return@flow }
-        emitAll(
-            syncStateRepo.observeAll(userId).map { states ->
+    val localUriByLinkId: StateFlow<Map<String, String>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) flowOf(emptyMap())
+            else syncStateRepo.observeAll(userId).map { states ->
                 states.asSequence()
                     .filter { it.status == eu.akoos.photos.domain.entity.SyncStatus.SYNCED }
                     .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
                     .associate { it.cloudFileId!! to it.localUri }
             }
-        )
-    }
+        }
         .retryOnDbTear("ViewerLocalUris")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
@@ -406,11 +521,10 @@ class PhotoViewerViewModel @Inject constructor(
     fun deleteItem(item: GalleryItem, freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         viewModelScope.launch {
             _deleteState.value = DeleteState.Working
+            // A local (device) delete needs no account; the use case only requires a signed-in user
+            // for a cloud trash, which local-only mode never produces. Pass the nullable userId
+            // through instead of blocking a guest delete here.
             val userId = accountManager.getPrimaryUserId().first()
-            if (userId == null) {
-                _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_not_signed_in))
-                return@launch
-            }
             val result = deletePhotoUseCase(
                 userId          = userId,
                 items           = listOf(item),
@@ -440,6 +554,205 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
+    /** Whether [uri] names a file in the app-private vault. Exposed so the screen can ask it about the
+     *  photo it is drawing, rather than being told by whichever surface opened the viewer. */
+    fun isVaultUri(uri: String): Boolean = hiddenStorage.isHiddenUri(uri)
+
+    /**
+     * The vaulted photos that still have a Drive copy, so the viewer's status badge answers for one
+     * the same way the vault's grid does.
+     *
+     * A vaulted photo reaches every screen as a device-only item — vaulting removes the MediaStore row
+     * that made it a [GalleryItem.Synced] — so nothing about the item itself can say a Drive copy is
+     * there, and the vault's own cloud-id records are the only thing that still can. Keyed by vault
+     * uri, so membership already means the photo is one the vault holds and nothing further has to be
+     * asked. A rename re-keys the record in the same edit that moves the file, so the badge follows the
+     * photo instead of being left on a path nothing is at.
+     */
+    val pairedVaultUris: StateFlow<Set<String>> = context.settingsDataStore.data
+        .map { HiddenVaultRecords.pairedUris(it[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()) }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** Master AI-features gate (Settings, AI and machine learning). Off suppresses the Copy-text long
+     *  press so no text-detection model is ever fetched from the viewer. Observed, so a change made in
+     *  Settings is reflected the next time the viewer is opened. */
+    val aiFeaturesEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // Resolves the Copy-text opt-in fallback for a device that never touched the switch: whether the
+    // reader's models are already on disk. Non-suspend and cheap enough to answer inline.
+    private val ocrModelManager by lazy { OcrModelManager(context) }
+
+    /** Copy-text gate (Settings, AI and machine learning): the master switch AND the per-feature Copy
+     *  text opt-in, whose absent state falls back to the reader's models already being on disk so a user
+     *  who used Copy text before keeps it. Off keeps the long press to read inert, so no OCR model is
+     *  fetched from the viewer. Observed, so a Settings change is reflected the next time it is opened. */
+    val copyTextEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map {
+            it[SettingsKeys.AI_FEATURES_ENABLED] == true &&
+                (it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick())
+        }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
+     *  the viewer offers the people-in-this-photo action, so turning faces off suppresses it while the
+     *  master AI switch stays on. Observed, so a Settings change is reflected the next time the viewer
+     *  is opened. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.FACE_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** One person the face index found on the photo now on screen, for the "people in this photo" bar.
+     *  [faceBox] is the 0..1 crop of this photo, so the chip shows the person's face from this frame. */
+    data class ViewerPerson(
+        val personId: Long,
+        val name: String?,
+        val faceBox: eu.akoos.photos.presentation.gallery.FaceBox,
+        /** The specific face this chip stands for, so a single leftover face can be named on its own. */
+        val faceId: String,
+        /** True when the face sits in the Unsorted leftover bucket, which cannot be named as a whole; the
+         *  viewer names this one face into a new or existing person instead of opening the bucket. */
+        val isOther: Boolean,
+    )
+
+    private val _peopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
+    /** The people found on the settled photo, named first; empty when AI is off or none are grouped. */
+    val peopleInPhoto: StateFlow<List<ViewerPerson>> = _peopleInPhoto.asStateFlow()
+
+    /**
+     * Resolve the grouped faces on [photoKey] to the people they belong to, so the viewer can offer a
+     * jump to each. One chip per person (the clearest face), named people before unnamed clusters.
+     * Clears when AI is off, so nothing is read or shown for a user who never opted in.
+     */
+    fun loadPeopleInPhoto(item: GalleryItem) {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first()
+            val prefs = context.settingsDataStore.data.first()
+            val aiOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+            _peopleInPhoto.value =
+                if (!aiOn) emptyList() else resolvePeople(item, userId, detectIfEmpty = false)
+        }
+    }
+
+    /**
+     * Detect the faces on [item] now if it has none grouped yet, and return the people found, updating
+     * the bar. Called from a long-press on a spot with no already-known face, so tagging works on a
+     * photo the background walk has not reached (the way the text read runs on demand). Empty when AI is
+     * off. The detection itself runs off the main thread.
+     */
+    suspend fun detectFacesNow(item: GalleryItem): List<ViewerPerson> {
+        val userId = accountManager.getPrimaryUserId().first()
+        val prefs = context.settingsDataStore.data.first()
+        val aiOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+        if (!aiOn) return emptyList()
+        val list = resolvePeople(item, userId, detectIfEmpty = true)
+        _peopleInPhoto.value = list
+        return list
+    }
+
+    /** The grouped faces on [item] as people; when [detectIfEmpty] and none are grouped yet, scan the
+     *  photo on demand first (a no-op on one already scanned) so a face can still be found. */
+    private suspend fun resolvePeople(
+        item: GalleryItem,
+        userId: me.proton.core.domain.entity.UserId?,
+        detectIfEmpty: Boolean,
+    ): List<ViewerPerson> {
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        val photoKey = item.stableId
+        var faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
+        if (faces.isEmpty() && detectIfEmpty) {
+            val scanned = runCatching {
+                withContext(Dispatchers.Default) { faceIndexingScheduler.indexPhotoOnDemand(item, userId, force = true) }
+            }.getOrDefault(false)
+            if (scanned) faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
+        }
+        val otherId = personDao.otherPersonId(account)
+        val result = ArrayList<ViewerPerson>()
+        val seenPerson = HashSet<Long>()
+        for (f in faces) {
+            val pid = f.personId ?: continue
+            val isOther = pid == otherId
+            // One chip per named or unnamed-cluster person, but one chip PER FACE for the Unsorted bucket,
+            // so every leftover face on the photo can be named on its own instead of all collapsing into the
+            // single grab-bag bucket (which is what left them unnameable from here).
+            if (!isOther && !seenPerson.add(pid)) continue
+            val name = if (isOther) null else personDao.personById(pid)?.displayName?.takeIf { it.isNotBlank() }
+            result.add(
+                ViewerPerson(
+                    pid, name,
+                    eu.akoos.photos.presentation.gallery.FaceBox(f.left, f.top, f.right, f.bottom),
+                    f.id, isOther,
+                ),
+            )
+        }
+        return result.sortedByDescending { it.name != null }
+    }
+
+    /**
+     * Name one face on the photo now on screen: assign it to an existing person called [rawName], or a
+     * fresh one, and label it so the name survives a rebuild. For a face stuck in the Unsorted leftover
+     * bucket (which cannot be named as a whole), this is how a single face is lifted out into a real
+     * person. A recluster is requested so the new name pulls in that person's other faces. Guest-safe via
+     * the local sentinel; the chips on this photo are refreshed so the named face shows its name at once.
+     */
+    fun nameFace(item: GalleryItem, faceId: String, rawName: String) {
+        val name = rawName.trim()
+        if (faceId.isEmpty() || name.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val userId = accountManager.getPrimaryUserId().first()
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val target = personDao.namedPeopleForUser(account)
+                .firstOrNull { it.displayName == name }?.id
+                ?: personDao.insert(eu.akoos.photos.data.db.entity.PersonEntity(userId = account, displayName = name))
+            faceDao.reassignFacesToPerson(listOf(faceId), target)
+            faceDao.labelFacesByIds(listOf(faceId), name)
+            faceIndexingScheduler.requestRecluster(userId)
+            loadPeopleInPhoto(item)
+        }
+    }
+
+    /**
+     * Where each vaulted photo moved since the pager took its snapshot, so the page keeps showing the
+     * same photo after a rename or a date edit moved its file.
+     *
+     * The pager works from a list captured when the grid was tapped, and [liveItems] leaves vaulted
+     * photos out on purpose, so nothing else would ever tell it the file is somewhere new — the page
+     * would go on pointing at a path nothing is at, and every action taken from it with it. Published by
+     * the vault itself, so an edit made on the metadata screen in front of the viewer arrives the same
+     * way one made in the viewer does.
+     */
+    val vaultMoves: StateFlow<Map<String, eu.akoos.photos.data.hidden.VaultMove>>
+        get() = hiddenVaultEditor.moves
+
+    /**
+     * Delete a vaulted photo outright.
+     *
+     * Its bytes are an app-private file with no MediaStore row, so the system trash the ordinary
+     * delete goes through cannot take it and there is no cloud copy to answer for: the whole delete
+     * is the vault's own file and the records that point at it. Reports through the same
+     * [DeleteState] the ordinary delete does, so the screen drops the photo from the pager the one
+     * way it already knows.
+     */
+    fun deleteVaultedItem(item: GalleryItem) {
+        val uri = PhotoViewerVaultGate.vaultUriOf(item, ::isVaultUri) ?: return
+        viewModelScope.launch {
+            _deleteState.value = DeleteState.Working
+            _deleteState.value = try {
+                if (hiddenVaultRestorer.deletePhoto(uri)) DeleteState.Done
+                else DeleteState.Failed(context.getString(R.string.viewer_delete_vault_failed))
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w("PhotoViewerVM", "vault delete failed: ${e.message}")
+                DeleteState.Failed(context.getString(R.string.viewer_delete_vault_failed))
+            }
+        }
+    }
+
     /** Called after the system trash dialog returns RESULT_OK. */
     fun onDeletePermissionGranted() {
         val pending = pendingPermissionResult
@@ -448,18 +761,16 @@ class PhotoViewerViewModel @Inject constructor(
             // First commit the deferred cloud delete, if any. Doing this in a coroutine so a
             // network hiccup surfaces as Failed rather than crashing the UI.
             val cloudResult = if (pending != null) {
+                // No account is needed to finish a local delete; the use case guards its own cloud
+                // branch, returning CloudDeleteFailed only when there are cloud links and no session.
                 val userId = accountManager.getPrimaryUserId().first()
-                if (userId == null) {
-                    DeletePhotoUseCase.Result.CloudDeleteFailed
-                } else {
-                    deletePhotoUseCase.completeAfterPermissionGranted(
-                        userId          = userId,
-                        cloudLinkIds    = pending.cloudLinkIds,
-                        items           = pending.itemsBeingDeleted,
-                        freeUpSpace     = pending.freeUpSpace,
-                        hide            = pending.hide,
-                    )
-                }
+                deletePhotoUseCase.completeAfterPermissionGranted(
+                    userId          = userId,
+                    cloudLinkIds    = pending.cloudLinkIds,
+                    items           = pending.itemsBeingDeleted,
+                    freeUpSpace     = pending.freeUpSpace,
+                    hide            = pending.hide,
+                )
             } else DeletePhotoUseCase.Result.Success
 
             if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
@@ -509,6 +820,7 @@ class PhotoViewerViewModel @Inject constructor(
         resetMotionState()
         resetPanoramaState()
         resetPublicLinkState()
+        retargetMetadata(uri)
         val parsedUri = Uri.parse(uri)
         _state.value = if (mimeType.startsWith("video/"))
             ViewerState.ShowVideo(parsedUri, itemKey = uri)
@@ -519,69 +831,52 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
+    /** Reads through [originalUriForExif] so a device photo's GPS survives the Android 10+ redaction
+     *  and the details sheet can show the coordinates the file actually carries. */
     fun loadMetadata(uri: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            _metadata.value = ExifHelper.readMetadata(context, uri)
+            _metadata.value = ExifHelper.readMetadata(context, originalUriForExif(context, uri))
         }
     }
 
-    fun clearMetadata() {
+    private fun clearMetadata() {
         _metadata.value = null
         _detailsPlace.value = null
+        _detailsGps.value = null
+    }
+
+    /** Points the metadata state at [itemKey], dropping what it holds when that names another photo.
+     *  Called from [loadLocal] / [loadCloud], which is where a page settle arrives. */
+    private fun retargetMetadata(itemKey: String) {
+        if (metadataOutlivesPhoto(metadataItemKey, itemKey)) clearMetadata()
+        metadataItemKey = itemKey
     }
 
     /**
-     * Resolve the current item's place name for the details overview's Location row — from local EXIF
-     * GPS, or for a cloud photo from the stored fix the map backfill records ([PhotoLocationEntity]).
-     * Reset to null first so the row shows its placeholder immediately, then filled once resolved. A
-     * photo with no GPS simply leaves it null (the row keeps the dash).
+     * Resolve the current item's place name and coordinates for the details overview's Location rows,
+     * from local EXIF GPS or, for a cloud photo, from the stored fix the map backfill records
+     * ([PhotoLocationEntity]). Reset to null first so the rows show their placeholder immediately, then
+     * filled once resolved. A photo with no GPS simply leaves both null (the rows keep the dash).
      */
     fun loadDetailsPlace(item: GalleryItem) {
         _detailsPlace.value = null
+        _detailsGps.value = null
         viewModelScope.launch(Dispatchers.IO) {
+            val userId = accountManager.getPrimaryUserId().first()?.id
             val latLng = when (item) {
-                is GalleryItem.LocalOnly -> localGps(item.local.uri)
-                is GalleryItem.Synced -> localGps(item.local.uri) ?: cloudGps(item.cloud.linkId)
-                is GalleryItem.CloudOnly -> cloudGps(item.cloud.linkId)
+                is GalleryItem.LocalOnly ->
+                    PhotoGpsResolver.localGps(context, item.local.uri, item.local.mimeType)
+                is GalleryItem.Synced ->
+                    PhotoGpsResolver.localGps(context, item.local.uri, item.local.mimeType)
+                        ?: userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
+                is GalleryItem.CloudOnly ->
+                    userId?.let { PhotoGpsResolver.cloudGps(photoLocationDao, it, item.cloud.linkId) }
             } ?: metadataGps()
+            _detailsGps.value = latLng?.let { DetailsGps(it.first, it.second) }
             if (latLng != null) {
                 _detailsPlace.value = OfflineGeocoder.reverseGeocode(context, latLng.first, latLng.second)
             }
         }
-    }
-
-    private fun localGps(uri: String): Pair<Double, Double>? {
-        // Images keep GPS in EXIF.
-        val meta = runCatching { ExifHelper.readMetadata(context, uri) }.getOrNull()
-        val lat = meta?.gpsLatitude
-        val lng = meta?.gpsLongitude
-        if (lat != null && lng != null) return lat to lng
-        // Videos keep it in the container (ISO 6709), which ExifInterface doesn't read.
-        return videoGps(uri)
-    }
-
-    private fun videoGps(uri: String): Pair<Double, Double>? {
-        val retriever = android.media.MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context, Uri.parse(uri))
-            val loc = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_LOCATION) ?: return null
-            // ISO 6709, e.g. "+37.7749-122.4194/" — take the first two signed numbers (lat, lng).
-            val m = Regex("""([+-]\d+(?:\.\d+)?)([+-]\d+(?:\.\d+)?)""").find(loc) ?: return null
-            val lat = m.groupValues[1].toDoubleOrNull() ?: return null
-            val lng = m.groupValues[2].toDoubleOrNull() ?: return null
-            lat to lng
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            null
-        } finally {
-            runCatching { retriever.release() }
-        }
-    }
-
-    private suspend fun cloudGps(linkId: String): Pair<Double, Double>? {
-        val userId = accountManager.getPrimaryUserId().first() ?: return null
-        val row = runCatching { photoLocationDao.getById(userId.id, linkId) }.getOrNull() ?: return null
-        return row.latitude to row.longitude
     }
 
     /** Fallback coordinates for the place name: the GPS already read from the viewed photo's own
@@ -769,59 +1064,54 @@ class PhotoViewerViewModel @Inject constructor(
     }
 
     /** Holds the private-storage URI of a file currently being hidden, awaiting the user's
-     *  confirmation in the system trash dialog. Only committed to [SettingsKeys.HIDDEN_PHOTO_URIS]
-     *  after the delete succeeds; cleared (and the file removed) if the user cancels. */
+     *  confirmation in the system trash dialog. Its intent is journalled; only a confirmed delete
+     *  publishes it into [SettingsKeys.HIDDEN_PHOTO_URIS], and a cancel drops both copy and record. */
     private var pendingHidePrivateUri: String? = null
 
-    /** Source folder of [pendingHidePrivateUri], captured at hide time so the eventual unhide
-     *  can return the file to its original location. Persisted alongside the private URI in
-     *  [SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] once the hide commits. */
-    private var pendingHideSourceFolder: String? = null
-
-    /** Original display name of [pendingHidePrivateUri], captured at hide time and persisted in
-     *  [SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] once the hide commits so unhide can restore
-     *  the original filename. */
-    private var pendingHideOriginalName: String? = null
-
     /**
-     * Hide a single photo. A device-only photo moves to the Hidden vault: copy bytes to app-private
-     * storage, stage the URI as pending (not yet in HIDDEN_PHOTO_URIS), then delete the MediaStore
-     * original (Android 11+ system trash dialog); only a successful delete commits the hidden URI,
-     * and cancel drops the orphaned copy so the photo can't end up in both places. A synced (green)
-     * or cloud-only photo hides client-side by its cloud linkId instead, leaving its device file in
-     * place.
+     * Hide a single photo. A photo with a device file, backed up or not, moves to the Hidden vault:
+     * copy bytes to app-private storage, record the intent, then delete the MediaStore original
+     * (Android 11+ system trash dialog); only a successful delete publishes the hidden URI, and
+     * cancel drops the orphaned copy so the photo can't end up in both places. Recording BEFORE the
+     * delete is what makes an interruption between the two repairable — see [HiddenVaultJournal]. A
+     * cloud-only photo has no device file to move and hides by its cloud linkId instead. The Drive
+     * copy is untouched either way.
      */
     fun hideItem(item: GalleryItem) {
         viewModelScope.launch {
-            // Pull dateTaken alongside so the hidden file can preserve its capture-time
-            // through the round-trip — see HiddenStorageManager.store(captureTimeMs).
+            // Pull the effective capture time alongside so the hidden file can preserve it through
+            // the round-trip — see HiddenStorageManager.store(captureTimeMs).
             val sourceUri: String; val displayName: String; val mime: String; val dateTakenMs: Long
-            val cloudLinkId: String?; val bucketName: String?
+            val cloudLinkId: String?; val bucketName: String?; val sizeBytes: Long
             when (item) {
                 is GalleryItem.LocalOnly -> {
                     sourceUri = item.local.uri; displayName = item.local.displayName
-                    mime = item.local.mimeType; dateTakenMs = item.local.dateTaken; cloudLinkId = null
-                    bucketName = item.local.bucketName
+                    mime = item.local.mimeType; dateTakenMs = item.captureTimeMs; cloudLinkId = null
+                    bucketName = item.local.bucketName; sizeBytes = item.local.sizeBytes
                 }
                 is GalleryItem.Synced -> {
-                    // A synced (green) photo keeps its device file in place and hides client-side by
-                    // its cloud linkId, exactly like a cloud-only photo. The merge filter drops it from
-                    // every surface and unhide re-includes it with no re-pairing of the device copy.
-                    context.settingsDataStore.edit { prefs ->
-                        val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
-                        prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing + item.cloud.linkId
-                    }
-                    _isHidden.value = true
-                    _deleteState.value = DeleteState.Done
-                    return@launch
+                    // The device file moves into the vault exactly as a device-only photo's does, and
+                    // the cloud linkId travels with it: that is what the reveal re-pairs by, so the
+                    // photo comes back as the backed-up photo it already is instead of uploading a
+                    // second copy of itself. The Drive copy stays where it is throughout.
+                    sourceUri = item.local.uri; displayName = item.local.displayName
+                    mime = item.local.mimeType; dateTakenMs = item.captureTimeMs
+                    cloudLinkId = item.cloud.linkId
+                    bucketName = item.local.bucketName
+                    sizeBytes = item.local.sizeBytes.takeIf { it > 0L } ?: item.cloud.sizeBytes
                 }
                 is GalleryItem.CloudOnly -> {
+                    HiddenVaultDiagnostics.hideStarted(
+                        vaultedCount = 0, pairedCount = 0, filteredCount = 1, totalBytes = 0L,
+                    )
                     // No device file to vault: hide the cloud photo client-side by linkId. It drops
                     // from every listing via the HIDDEN_CLOUD_PHOTO_IDS filter, nothing on Drive changes.
                     context.settingsDataStore.edit { prefs ->
                         val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
                         prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing + item.cloud.linkId
                     }
+                    buildHideUndoAction(emptyList(), listOf(item.cloud.linkId))
+                        ?.let { undoController.offer(it) }
                     _isHidden.value = true
                     _deleteState.value = DeleteState.Done
                     return@launch
@@ -832,33 +1122,60 @@ class PhotoViewerViewModel @Inject constructor(
                 Log.w("PhotoViewerVM", "hideItem called on already-hidden URI; use unhideHiddenItem instead")
                 return@launch
             }
+            HiddenVaultDiagnostics.hideStarted(
+                vaultedCount = 1,
+                pairedCount = if (cloudLinkId != null) 1 else 0,
+                filteredCount = 0,
+                totalBytes = sizeBytes,
+            )
+            // Refuse up front when the copy cannot fit. The original stays until the copy is written,
+            // so the volume has to hold both at once.
+            val shortfall = hiddenVaultJournal.spaceShortfallBytes(sizeBytes)
+            if (shortfall > 0L) {
+                _deleteState.value = DeleteState.Failed(
+                    context.getString(R.string.gallery_hide_needs_free_space, formatBytes(shortfall)),
+                )
+                return@launch
+            }
             val sourceFolder = withContext(Dispatchers.IO) {
                 hiddenStorage.sourceFolderFor(sourceUri, bucketName)
             }
             val privateUri = withContext(Dispatchers.IO) {
                 hiddenStorage.store(sourceUri, displayName, mime, captureTimeMs = dateTakenMs)
             }
+            HiddenVaultDiagnostics.copied(
+                copiedCount = if (privateUri != null) 1 else 0,
+                failedCount = if (privateUri == null) 1 else 0,
+            )
             if (privateUri == null) {
                 _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_hide_failed))
                 return@launch
             }
-            // Persist the (privateUri → cloudLinkId) pair so unhide can transplant the
-            // existing SyncState row onto the restored MediaStore URI — keeps reconcile
-            // from re-uploading the Synced photo as a duplicate Drive entry.
-            if (cloudLinkId != null) {
-                context.settingsDataStore.edit { prefs ->
-                    val existing = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = existing + "$privateUri|$cloudLinkId"
-                }
-            }
-            pendingHidePrivateUri = privateUri
-            pendingHideSourceFolder = sourceFolder
-            pendingHideOriginalName = displayName.takeIf { it.isNotBlank() }
-
-            val userId = accountManager.getPrimaryUserId().first() ?: run {
-                cancelPendingHide()
+            // Record the intent BEFORE the delete, together with everything the eventual unhide needs
+            // — the original folder and name, and the cloud linkId that lets unhide transplant the
+            // existing SyncState row instead of re-uploading the photo as a duplicate Drive entry.
+            val journalled = hiddenVaultJournal.journal(
+                listOf(
+                    HiddenVaultJournal.Entry(
+                        privateUri = privateUri,
+                        sourceUri = sourceUri,
+                        sourceFolder = sourceFolder,
+                        originalName = displayName,
+                        cloudLinkId = cloudLinkId,
+                    ),
+                ),
+            )
+            if (!journalled) {
+                hiddenVaultJournal.discard(listOf(privateUri))
+                _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_hide_failed))
                 return@launch
             }
+            pendingHidePrivateUri = privateUri
+
+            // Hiding a device photo needs no account; the vault is app-private and the use case only
+            // requires a signed-in user for a cloud trash, which a hide never performs (deleteFromCloud
+            // = false). Pass the nullable userId through instead of aborting a guest hide here.
+            val userId = accountManager.getPrimaryUserId().first()
             val result = deletePhotoUseCase(
                 userId          = userId,
                 items           = listOf(item),
@@ -868,10 +1185,12 @@ class PhotoViewerViewModel @Inject constructor(
             )
             when (result) {
                 is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    HiddenVaultDiagnostics.originalsAwaitingConsent(1)
                     pendingPermissionResult = result
                     _deleteState.value = DeleteState.NeedsPermission(result.pendingIntent)
                 }
                 is DeletePhotoUseCase.Result.Success -> {
+                    HiddenVaultDiagnostics.originalsRemoved(1, neededConsent = false)
                     // Pre-Q: delete succeeded synchronously. Commit the hidden URI now.
                     // Snapshot the vault URI first: commitPendingHide() clears it.
                     val hiddenUri = pendingHidePrivateUri
@@ -887,97 +1206,42 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
+    /** Publish the journalled hide now that the delete has confirmed. */
     private fun commitPendingHide() {
         val privateUri = pendingHidePrivateUri ?: return
-        val sourceFolder = pendingHideSourceFolder
-        val originalName = pendingHideOriginalName
         pendingHidePrivateUri = null
-        pendingHideSourceFolder = null
-        pendingHideOriginalName = null
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current + privateUri
-                if (!sourceFolder.isNullOrBlank()) {
-                    val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = folders + "$privateUri|$sourceFolder"
-                }
-                if (!originalName.isNullOrBlank()) {
-                    val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names + "$privateUri|$originalName"
-                }
-            }
+            hiddenVaultJournal.confirm(listOf(privateUri))
             _isHidden.value = true
         }
     }
 
+    /** Drop the copy and its record — the user did not confirm the system delete, so the original
+     *  is still where they can see it. */
     private fun cancelPendingHide() {
         val privateUri = pendingHidePrivateUri ?: return
         pendingHidePrivateUri = null
-        pendingHideSourceFolder = null
-        pendingHideOriginalName = null
-        // Drop the orphaned private copy — the user did not confirm the system delete.
-        viewModelScope.launch(Dispatchers.IO) {
-            hiddenStorage.delete(privateUri)
-        }
+        viewModelScope.launch { hiddenVaultJournal.discard(listOf(privateUri)) }
     }
 
     /**
-     * Restores a hidden item back to MediaStore and removes the private copy. HIDDEN_PHOTO_URIS
-     * and HIDDEN_URI_CLOUD_ID_MAP are mutated in one edit{} block so a concurrent hide can't
-     * desync them.
+     * Return the vaulted photo on screen to the device.
+     *
+     * [HiddenVaultRestorer] owns the whole round trip — the name and folder recorded at hide time, the
+     * cloud pairing, the journal entry, and the folder name a reveal empties — so a photo revealed
+     * here comes back exactly as it does from the vault screen, and the last photo out of a hidden
+     * folder takes that folder's own record with it.
+     *
+     * [originalDisplayName] serves as the fallback for a vault entry old enough to have recorded no
+     * name; the private code the file is stored under would otherwise land on the device.
      */
     fun unhideHiddenItem(hiddenUri: String, originalDisplayName: String? = null) {
-        viewModelScope.launch(Dispatchers.IO) {
-            // Restore to the folder the file was hidden from (recorded at hide time); falls
-            // back to the Pictures/Movies root when no source folder was captured.
-            val prefsSnapshot = context.settingsDataStore.data.first()
-            val sourceFolder = prefsSnapshot[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP]
-                ?.firstOrNull { it.startsWith("$hiddenUri|") }
-                ?.substringAfter('|')
-            // Prefer the name persisted at hide time over any passed-in name, which may be
-            // derived from the private UUID file and would restore as a code.
-            val resolvedName = prefsSnapshot[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP]
-                ?.firstOrNull { it.startsWith("$hiddenUri|") }
-                ?.substringAfter('|')
-                ?: originalDisplayName
-            // Cloud linkId stashed at hide time, used below to transplant the SyncState row onto the
-            // restored URI so a synced photo re-pairs by id instead of re-uploading as a duplicate.
-            val cloudLinkId = prefsSnapshot[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP]
-                ?.firstOrNull { it.startsWith("$hiddenUri|") }
-                ?.substringAfter('|')
-            val restoredUri = hiddenStorage.restore(hiddenUri, resolvedName, albumFolderName = sourceFolder)
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current - hiddenUri
-                val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] =
-                    mapping.filterNot { it.startsWith("$hiddenUri|") }.toSet()
-                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] =
-                    folders.filterNot { it.startsWith("$hiddenUri|") }.toSet()
-                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] =
-                    names.filterNot { it.startsWith("$hiddenUri|") }.toSet()
-            }
-            // Re-pair a restored synced photo with its Drive twin so reconcile does not re-upload it.
-            transplantHiddenSyncState(syncStateRepo, accountManager, cloudLinkId, restoredUri)
-            _isHidden.value = false
-        }
-    }
-
-    /**
-     * Legacy in-app-only hide (DataStore filter without moving the file). Kept for callers that
-     * cannot perform the full hide flow — exposed mainly so existing tests keep compiling.
-     * Prefer [hideItem] for new code.
-     */
-    fun toggleHide(uri: String) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = if (uri in current) current - uri else current + uri
+            if (hiddenVaultRestorer.restorePhoto(hiddenUri, fallbackDisplayName = originalDisplayName)) {
+                _isHidden.value = false
+            } else {
+                _deleteState.value = DeleteState.Failed(context.getString(R.string.hidden_restore_failed))
             }
-            _isHidden.value = !_isHidden.value
         }
     }
 
@@ -996,59 +1260,94 @@ class PhotoViewerViewModel @Inject constructor(
 
     fun checkIfFavorite(item: GalleryItem) {
         viewModelScope.launch {
-            val id = when (item) {
-                is GalleryItem.LocalOnly -> item.local.uri
-                is GalleryItem.Synced    -> item.local.uri
-                is GalleryItem.CloudOnly -> item.cloud.linkId
-            }
             val favIds = context.settingsDataStore.data
                 .map { it[SettingsKeys.FAVORITE_IDS] ?: emptySet() }
                 .first()
-            val cloudFlag = when (item) {
-                is GalleryItem.Synced    -> item.cloud.isFavoriteOnCloud
-                is GalleryItem.CloudOnly -> item.cloud.isFavoriteOnCloud
-                is GalleryItem.LocalOnly -> false
-            }
-            _isFavorite.value = id in favIds || cloudFlag
+            _isFavorite.value = isItemFavorite(item, favIds, liveCloudTags(item))
             // Offline pin reflects only a cloud-only item — a Synced/LocalOnly photo already
             // has its bytes on the device, so it has no separate offline blob. The check is a
             // directory walk, so keep it off the main thread (this runs on every page-settle).
             _isOffline.value = (item as? GalleryItem.CloudOnly)?.let {
                 withContext(Dispatchers.IO) { offlineStore.isOffline(it.cloud.linkId) }
             } ?: false
-            // Seed the category tags for the details-sheet chips (cloud-backed photos only).
+            // Seed the category tags for the details-sheet chips. A cloud-backed photo reports the
+            // server's set, which the chips write to directly. A device-only one has no such set,
+            // so it reports the categories it effectively shows, and a chip therefore always
+            // matches the badge on the same photo's grid cell.
             _currentPhotoTags.value = when (item) {
                 is GalleryItem.Synced    -> item.cloud.tags
                 is GalleryItem.CloudOnly -> item.cloud.tags
-                is GalleryItem.LocalOnly -> emptySet()
+                is GalleryItem.LocalOnly -> effectiveLocalTags(item, readUserTags(item.local.uri))
             }
         }
     }
 
+    /**
+     * The Drive tag set the library currently holds for a cloud-backed photo, read from its own
+     * listing row rather than taken off the pager's item.
+     *
+     * The pager works from a snapshot taken when the grid was tapped, so the tags riding on the item
+     * are as old as that tap: a tag written since then, in this viewer or on another client, is not
+     * on them. The listing row is mirrored by every tag write and costs no network, so it answers
+     * for the photo as it stands, offline included.
+     *
+     * Null for a device-only photo (it has no Drive link), and null when the library holds no row
+     * for the link yet, which hands the answer back to the snapshot as the best one available.
+     */
+    private suspend fun liveCloudTags(item: GalleryItem): Set<Int>? {
+        val linkId = when (item) {
+            is GalleryItem.Synced    -> item.cloud.linkId
+            is GalleryItem.CloudOnly -> item.cloud.linkId
+            is GalleryItem.LocalOnly -> return null
+        }
+        val csv = runCatching { photoListingDao.getTagsCsv(linkId) }.getOrNull() ?: return null
+        return if (csv.isEmpty()) emptySet()
+               else csv.split(',').mapNotNull { it.toIntOrNull() }.toSet()
+    }
+
+    /**
+     * Flips the heart on [item], on whichever side records it: a photo that lives only on the device
+     * writes the device-side set, a backed-up one writes Drive tag 0 and nothing local, since that
+     * tag is the only answer read back for it (see [isItemFavorite]).
+     *
+     * The heart flips before the network so the button responds to the tap, and goes back where it
+     * was if the write is rejected ([favoriteAfterCloudWrite]), the same as [setPhotoTag] does for a
+     * category chip. A write that lands also settles the device-side set through
+     * [favoriteIdsAfterToggle].
+     */
     fun toggleFavorite(item: GalleryItem) {
+        val cloudPhoto = when (item) {
+            is GalleryItem.Synced    -> item.cloud
+            is GalleryItem.CloudOnly -> item.cloud
+            is GalleryItem.LocalOnly -> null
+        }
         viewModelScope.launch {
-            val id = when (item) {
-                is GalleryItem.LocalOnly -> item.local.uri
-                is GalleryItem.Synced    -> item.local.uri
-                is GalleryItem.CloudOnly -> item.cloud.linkId
-            }
-            val nowFavorite = !_isFavorite.value
-            // Optimistic local toggle (so all favorite UI flips immediately).
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.FAVORITE_IDS] ?: emptySet()
-                prefs[SettingsKeys.FAVORITE_IDS] = if (nowFavorite) current + id else current - id
+            val previous = _isFavorite.value
+            val nowFavorite = !previous
+            // No Drive link to tag, so the device-side set is where the heart lives, and reaching it
+            // takes no network: flip it and settle.
+            if (cloudPhoto == null) {
+                writeFavoriteIds(item, nowFavorite)
+                _isFavorite.value = nowFavorite
+                return@launch
             }
             _isFavorite.value = nowFavorite
-            // Push cloud favorite tag for backed-up items.
-            val cloudPhoto = when (item) {
-                is GalleryItem.Synced    -> item.cloud
-                is GalleryItem.CloudOnly -> item.cloud
-                is GalleryItem.LocalOnly -> null
-            }
-            if (cloudPhoto != null) {
-                val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            val userId = accountManager.getPrimaryUserId().first()
+            val ok = userId != null &&
                 cloudRepo.setCloudFavorite(userId, cloudPhoto, favorite = nowFavorite)
-            }
+            _isFavorite.value = favoriteAfterCloudWrite(previous, nowFavorite, ok)
+            if (ok) writeFavoriteIds(item, nowFavorite)
+        }
+    }
+
+    /** Stores whatever [favoriteIdsAfterToggle] makes of the device-side set for [item]. The read
+     *  and the write are one transaction, so two quick taps compose instead of the second one
+     *  storing a set the first has already replaced. */
+    private suspend fun writeFavoriteIds(item: GalleryItem, nowFavorite: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            val current = prefs[SettingsKeys.FAVORITE_IDS] ?: emptySet()
+            val next = favoriteIdsAfterToggle(item, current, nowFavorite)
+            if (next != current) prefs[SettingsKeys.FAVORITE_IDS] = next
         }
     }
 
@@ -1112,16 +1411,18 @@ class PhotoViewerViewModel @Inject constructor(
     }
 
     /**
-     * Adds or removes a single category [tagId] on the current photo. Cloud-backed photos only —
-     * a local-only item has no Drive link to tag. Optimistically flips the chip, then writes the
-     * tag through the metadata-only [DrivePhotoRepository.setCloudTag] (no content/revision touch);
-     * reverts the chip if the write is rejected.
+     * Adds or removes a single category [tagId] on the current photo, on whichever side holds its
+     * categories. A cloud-backed photo writes the tag through the metadata-only
+     * [DrivePhotoRepository.setCloudTag] (no content/revision touch); a device-only one records the
+     * choice on the device, see [setLocalPhotoTag]. Both flip the chip optimistically and put it
+     * back if the write is rejected.
      */
     fun setPhotoTag(item: GalleryItem, tagId: Int, add: Boolean) {
         val cloudPhoto = when (item) {
             is GalleryItem.Synced    -> item.cloud
             is GalleryItem.CloudOnly -> item.cloud
-            is GalleryItem.LocalOnly -> return
+            // No Drive link to tag, so the choice is kept in the file's own local-tag row.
+            is GalleryItem.LocalOnly -> { setLocalPhotoTag(item, tagId, add); return }
         }
         viewModelScope.launch {
             val previous = _currentPhotoTags.value
@@ -1135,10 +1436,58 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
+    /** Serialises the local-tag writes below. Each one re-reads the row it is about to replace, so
+     *  two quick chip taps have to queue or the second would compose its toggle onto the set the
+     *  first has not stored yet and drop it. */
+    private val userTagWriteLock = Mutex()
+
+    /**
+     * Records a category choice for a photo that lives only on the device.
+     *
+     * A stored choice is complete: once the row holds anything, that is the photo's whole category
+     * set. So what is written is always the set the photo effectively shows with this one toggle
+     * applied, which on the first toggle seeds the choice from the automatic categories the photo
+     * already carries. Storing the single toggled id alone would drop all of those instead. Turning
+     * the last one back off stores nothing, which hands the photo back to automatic categorisation.
+     *
+     * The chip flips before any I/O (the same optimism as [toggleFavorite]) and then settles on
+     * what the photo shows once the row holds [next]; a failed write puts it back where it was.
+     */
+    private fun setLocalPhotoTag(item: GalleryItem.LocalOnly, tagId: Int, add: Boolean) {
+        val uri = item.local.uri
+        val previous = _currentPhotoTags.value
+        _currentPhotoTags.value = if (add) previous + tagId else previous - tagId
+        viewModelScope.launch {
+            userTagWriteLock.withLock {
+                val base = effectiveLocalTags(item, readUserTags(uri))
+                val next = if (add) base + tagId else base - tagId
+                val ok = runCatching { localTagDao.setUserTagsCsv(uri, UserPhotoTags.encode(next)) }
+                    .onFailure { Log.w("PhotoViewerVM", "user category write failed: ${it.message}") }
+                    .isSuccess
+                // Through [effectiveLocalTags] rather than [next] itself, so clearing the last
+                // category shows the automatic ones it hands the photo back to instead of leaving
+                // the chips empty against a grid badge that already says otherwise.
+                _currentPhotoTags.value = if (ok) effectiveLocalTags(item, next) else previous
+            }
+        }
+    }
+
+    /** The categories the user picked for one device file, read from its local-tag row rather than
+     *  taken off the pager's item, whose copy a write made in this viewer session already outdates
+     *  (the list refreshes on the next media scan). Empty when none were picked. */
+    private suspend fun readUserTags(uri: String): Set<Int> =
+        UserPhotoTags.decode(runCatching { localTagDao.getUserTagsCsv(uri) }.getOrNull())
+
+    /** The categories a device-only photo effectively shows given [stored] as its choice: that
+     *  choice when it holds anything, and the automatic sources otherwise. Answered by
+     *  [CategorizeItem] so the chips and the grid badges never disagree. */
+    private fun effectiveLocalTags(item: GalleryItem.LocalOnly, stored: Set<Int>): Set<Int> =
+        CategorizeItem.classify(GalleryItem.LocalOnly(item.local.copy(userTags = stored)))
+
     /**
      * Renames [item] to [newName].
-     * - [replaceOriginal] true ("Rename original"): local renamed in-place; cloud re-uploaded with
-     *   the new name and the old linkId trashed.
+     * - [replaceOriginal] true ("Rename original"): the file is renamed where it already is, on the
+     *   device or on Drive, keeping its identity.
      * - [replaceOriginal] false ("Save as copy"): a new MediaStore entry / new cloud linkId; the
      *   original stays.
      */
@@ -1173,7 +1522,7 @@ class PhotoViewerViewModel @Inject constructor(
                             MediaStore.createWriteRequest(context.contentResolver, listOf(Uri.parse(uri))),
                         )
                     } else {
-                        RenameState.Failed(e.message ?: context.getString(R.string.viewer_rename_failed))
+                        RenameState.Failed(e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_rename_failed))
                     }
                 },
             )
@@ -1194,32 +1543,28 @@ class PhotoViewerViewModel @Inject constructor(
 
     private suspend fun renameLocal(uri: String, newName: String, replaceOriginal: Boolean) {
         val parsed = android.net.Uri.parse(uri)
-        // Hidden-vault file:// URIs aren't MediaStore content URIs (ContentResolver.update throws
-        // "Unknown URI"); route to the dedicated rename that preserves the __<captureMs>__ tag.
+        // A vaulted photo is an app-private file with no MediaStore row, so both halves of the rename —
+        // moving the file and re-keying what the vault records for it — belong to the vault itself.
+        // "Rename original" moves the file; "Save as copy" adds a second hidden photo, which is where a
+        // copy of a hidden photo has to go.
         if (hiddenStorage.isHiddenUri(uri)) {
-            val newUri = hiddenStorage.rename(uri, newName)
-                ?: error("Hidden rename failed (file may already exist with that name)")
-            // Swap the URI in both DataStore sets, or the renamed file leaks back into the listing.
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = (current - uri) + newUri
-                val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-                val updatedMapping = mapping.map { entry ->
-                    if (entry.startsWith("$uri|")) "$newUri|${entry.substringAfter('|')}"
-                    else entry
-                }.toSet()
-                prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = updatedMapping
-                val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] = folders.map { entry ->
-                    if (entry.startsWith("$uri|")) "$newUri|${entry.substringAfter('|')}"
-                    else entry
-                }.toSet()
-                val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] = names.map { entry ->
-                    if (entry.startsWith("$uri|")) "$newUri|${entry.substringAfter('|')}"
-                    else entry
-                }.toSet()
+            val renamed =
+                if (replaceOriginal) hiddenVaultEditor.rename(uri, newName)
+                else hiddenVaultEditor.copy(uri, newName)
+            if (renamed == null) {
+                // A rename that cannot move the file has one cause the user can act on, and the name
+                // being taken is it. A copy that could not be written has none to name, so it says only
+                // that it did not happen.
+                error(
+                    context.getString(
+                        if (replaceOriginal) R.string.viewer_rename_name_taken
+                        else R.string.viewer_rename_failed,
+                    ),
+                )
             }
+            // The path the photo now lives at is what the pager loads it from, and a path a rename has
+            // freed can still hold that photo's pixels in the cache.
+            dropCachedBytes(renamed)
             return
         }
         if (replaceOriginal) {
@@ -1290,7 +1635,15 @@ class PhotoViewerViewModel @Inject constructor(
     private suspend fun renameCloud(photo: CloudPhoto, newName: String, replaceOriginal: Boolean, sourceAlbumLinkId: String?) {
         val userId = accountManager.getPrimaryUserId().first()
             ?: error(context.getString(R.string.viewer_not_signed_in))
-        val newLinkId = cloudRepo.renameOrCopyCloudPhoto(userId, photo, newName, trashOriginal = replaceOriginal)
+        if (replaceOriginal) {
+            // In-place rename: the linkId, the album membership and the bytes all stay put, so
+            // there is no new link to file anywhere. A failure propagates to renameItem, which turns
+            // it into RenameState.Failed and shows it in the rename sheet. Falling back to the copy
+            // path on failure would hand the user the duplicate this call exists to avoid.
+            cloudTrashService.renameCloudPhoto(userId, photo, newName)
+            return
+        }
+        val newLinkId = cloudRepo.copyCloudPhotoAs(userId, photo, newName)
         // Keep the new linkId in the same album the source was in (best-effort).
         sourceAlbumLinkId?.let { albumId ->
             runCatching { cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId)) }
@@ -1314,19 +1667,30 @@ class PhotoViewerViewModel @Inject constructor(
                 listOfNotNull(thumbUrl, file?.let { Uri.fromFile(it).toString() })
             }
         }
-        val loader = context.imageLoader
-        val mc = loader.memoryCache
         keys.forEach { key ->
-            if (mc != null) runCatching {
-                mc.keys.filter { it.key == key }.forEach { mc.remove(it) }
-            }
-            runCatching { loader.diskCache?.remove(key) }
+            dropCachedBytes(key)
             // Nudge MediaStore observers (the gallery grid) for renamed device files so the
             // new display name surfaces without a manual pull-to-refresh.
             if (item !is GalleryItem.CloudOnly) {
                 runCatching { context.contentResolver.notifyChange(Uri.parse(key), null) }
             }
         }
+    }
+
+    /**
+     * Drops whatever the image cache holds under [key], in memory and on disk.
+     *
+     * A path is the key, so a path that has just been given to a different photo answers with the
+     * previous one's pixels until this runs — which is exactly what a vault rename onto a name another
+     * photo has left behind produces.
+     */
+    @OptIn(coil.annotation.ExperimentalCoilApi::class)
+    private fun dropCachedBytes(key: String) {
+        val loader = context.imageLoader
+        loader.memoryCache?.let { mc ->
+            runCatching { mc.keys.filter { it.key == key }.forEach { mc.remove(it) } }
+        }
+        runCatching { loader.diskCache?.remove(key) }
     }
 
     fun loadAlbums() {
@@ -1336,11 +1700,15 @@ class PhotoViewerViewModel @Inject constructor(
             // picker show (including albums created this session). A fresh network fetch alone can
             // surface fewer entries while it's slow or a detail chunk fails, which left the viewer's
             // picker missing albums. Then refresh from the network.
+            // Shared albums this user may contribute to belong in the picker too, and the network
+            // refresh below returns only owned albums, so they are appended to both results rather
+            // than fetched once and overwritten.
+            val sharedAddable = runCatching { cloudRepo.loadSharedAddableAlbumsCached() }.getOrNull().orEmpty()
             runCatching { cloudRepo.loadAlbumsCached() }.getOrNull()
                 ?.takeIf { it.isNotEmpty() }
-                ?.let { _albums.value = it }
+                ?.let { _albums.value = it + sharedAddable }
             runCatching { cloudRepo.loadAlbums(userId) }
-                .onSuccess { _albums.value = it }
+                .onSuccess { _albums.value = it + sharedAddable }
                 .onFailure { e ->
                     // Passive prefetch on viewer open: a no-network failure is expected (e.g.
                     // opening a pinned photo offline) and must not pop a "no connection" snackbar.
@@ -1421,12 +1789,22 @@ class PhotoViewerViewModel @Inject constructor(
             runCatching { cloudRepo.removePhotosFromAlbum(userId, albumLinkId, listOf(cloudLinkId)) }
                 .onSuccess {
                     _currentPhotoAlbumIds.value = _currentPhotoAlbumIds.value - albumLinkId
-                    undoController.offer(UndoAction.AlbumRemove(albumLinkId, listOf(cloudLinkId)))
+                    // Undo re-adds by copying from this device's own volume, which cannot reach a
+                    // photo that lives on the sharer's volume, so a shared album gets no Undo
+                    // rather than one that silently does nothing. Same rule the album grid follows.
+                    // An album missing from the loaded list is not confirmed as this user's own, so
+                    // it takes the same quiet path.
+                    val isOwnAlbum =
+                        _albums.value.firstOrNull { it.linkId == albumLinkId }?.isSharedWithMe == false
+                    if (isOwnAlbum) {
+                        undoController.offer(UndoAction.AlbumRemove(albumLinkId, listOf(cloudLinkId)))
+                    }
+                    _removeFromAlbumDone.tryEmit(AlbumRemoval(albumLinkId, cloudLinkId))
                 }
                 .onFailure { e ->
                     _transientError.value = context.getString(
                         R.string.viewer_remove_from_album_failed,
-                        e.message ?: context.getString(R.string.viewer_unknown_error),
+                        e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                     )
                 }
             _isAddingToAlbum.value = false
@@ -1449,7 +1827,7 @@ class PhotoViewerViewModel @Inject constructor(
                 .onFailure { e ->
                     _transientError.value = context.getString(
                         R.string.viewer_set_cover_failed,
-                        e.message ?: context.getString(R.string.viewer_unknown_error),
+                        e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                     )
                 }
         }
@@ -1477,8 +1855,15 @@ class PhotoViewerViewModel @Inject constructor(
                 is GalleryItem.LocalOnly -> {
                     _isAddingToAlbum.value = true
                     runCatching { forceUploadLocalUris.queueForAlbum(userId, albumLinkId, listOf(item.local.uri)) }
+                        .onSuccess { if (targetName.isNotEmpty()) _addToAlbumDone.tryEmit(targetName) }
+                        .onFailure { e ->
+                            if (e is kotlinx.coroutines.CancellationException) throw e
+                            _transientError.value = context.getString(
+                                R.string.viewer_add_to_album_failed,
+                                e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
+                            )
+                        }
                     _isAddingToAlbum.value = false
-                    if (targetName.isNotEmpty()) _addToAlbumDone.tryEmit(targetName)
                     return@launch
                 }
             }
@@ -1497,7 +1882,7 @@ class PhotoViewerViewModel @Inject constructor(
                 .onFailure { e ->
                     _transientError.value = context.getString(
                         R.string.viewer_add_to_album_failed,
-                        e.message ?: context.getString(R.string.viewer_unknown_error),
+                        e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                     )
                 }
             _isAddingToAlbum.value = false
@@ -1529,7 +1914,7 @@ class PhotoViewerViewModel @Inject constructor(
             }.onFailure { e ->
                 _transientError.value = context.getString(
                     R.string.viewer_create_album_failed,
-                    e.message ?: context.getString(R.string.viewer_unknown_error),
+                    e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                 )
             }
             _isAddingToAlbum.value = false
@@ -1565,8 +1950,12 @@ class PhotoViewerViewModel @Inject constructor(
                 // "Strip" button on that section disappears automatically once its source
                 // fields are null.
                 _metadata.value = withContext(Dispatchers.IO) {
-                    ExifHelper.readMetadata(context, uri)
+                    ExifHelper.readMetadata(context, originalUriForExif(context, uri))
                 }
+                // The file is live in MediaStore, so a GPS strip also has to drop the fix stored for
+                // it; otherwise the map and the place groupings keep plotting the coordinates the
+                // photo no longer carries.
+                invalidateStrippedLocations(config, listOf(uri))
             }
             is StripResult.NeedsPermission -> {
                 // Android 11+ scoped storage: the file is not app-owned (e.g. a camera-roll photo).
@@ -1589,12 +1978,12 @@ class PhotoViewerViewModel @Inject constructor(
     }
 
     /** Saves the item to the device gallery. A cloud photo in an album lands in
-     *  `Pictures/<AlbumName>/`, otherwise `Pictures/` root. */
+     *  `DCIM/<AlbumName>/`, otherwise `DCIM/Camera`. */
     fun downloadToDevice(item: GalleryItem) {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _isSavingToDevice.value = true
-            // Album membership → Pictures/<AlbumName>/ routing. Usually a cache hit (5-min TTL).
+            // Album membership → DCIM/<AlbumName>/ routing. Usually a cache hit (20-min TTL).
             val cloudLinkId = when (item) {
                 is GalleryItem.CloudOnly -> item.cloud.linkId
                 is GalleryItem.Synced -> item.cloud.linkId
@@ -1610,12 +1999,18 @@ class PhotoViewerViewModel @Inject constructor(
                 eu.akoos.photos.data.transfer.TransferCenter.Kind.DOWNLOAD, 1,
             )
             try {
-                runCatching {
+                // A per-photo failure is COUNTED, not thrown: the use case catches it and returns a
+                // normal snapshot, so a catch alone never fired and a save that wrote nothing finished
+                // in silence. The count is the only thing that says whether the photo reached the
+                // device, which is why it is read here rather than only the exception.
+                val outcome = runCatching {
                     downloadPhotos.downloadGalleryItems(userId, listOf(item), folderName = folder)
-                }.onFailure { e ->
+                }
+                val reason = outcome.exceptionOrNull()?.message?.takeIf { it.isNotBlank() }
+                if (outcome.isFailure || (outcome.getOrNull()?.failed ?: 0) > 0) {
                     _transientError.value = context.getString(
                         R.string.viewer_save_to_device_failed,
-                        e.message ?: context.getString(R.string.viewer_unknown_error),
+                        reason?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                     )
                 }
             } finally {
@@ -1631,10 +2026,12 @@ class PhotoViewerViewModel @Inject constructor(
     fun shareItem(item: GalleryItem) {
         viewModelScope.launch {
             _isSharing.value = true
+            // Null when strip-on-share is off, so the resolved URI passes through untouched below.
+            val stripConfig = currentShareStripConfig(context)
             runCatching {
                 val uri: Uri = when (item) {
-                    is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
-                    is GalleryItem.Synced    -> Uri.parse(item.local.uri)
+                    is GalleryItem.LocalOnly -> localShareUri(item.local)
+                    is GalleryItem.Synced    -> localShareUri(item.local)
                     is GalleryItem.CloudOnly -> {
                         // Offline pin short-circuit: a pinned blob already holds the full-res
                         // bytes in app-private storage, so share it with no network download. The
@@ -1665,17 +2062,41 @@ class PhotoViewerViewModel @Inject constructor(
                         }
                     }
                 }
+                val (itemMime, itemName) = eu.akoos.photos.util.ShareIntentBuilder.shareMimeAndName(item)
+                val shareUri = stripForShareOrOriginal(context, uri, itemMime, itemName, stripConfig)
                 val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(listOf(item))
-                eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, listOf(uri), mime)
+                eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, listOf(shareUri), mime)
             }.onSuccess { intent ->
                 _shareIntent.tryEmit(intent)
             }.onFailure { e ->
                 _transientError.value = context.getString(
                     R.string.viewer_share_failed,
-                    e.message ?: context.getString(R.string.viewer_unknown_error),
+                    e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                 )
             }
             _isSharing.value = false
+        }
+    }
+
+    /**
+     * The uri another app may read a device-backed photo through.
+     *
+     * A MediaStore photo already has one. A vaulted photo does not — it is an app-private `file://`
+     * that the platform refuses to put in an intent at all — so it goes out through the share
+     * provider instead, which grants the receiver that one file, serves the bytes in place, and puts
+     * no part of the vault's location in the uri it hands over.
+     */
+    private fun localShareUri(local: eu.akoos.photos.domain.entity.LocalMediaItem): Uri {
+        val parsed = Uri.parse(local.uri)
+        if (!hiddenStorage.isHiddenUri(local.uri)) return parsed
+        val file = parsed.path?.let { File(it) }?.takeIf { it.exists() }
+            ?: error(context.getString(R.string.viewer_unknown_error))
+        return androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.share.fileprovider", file,
+        ).also {
+            // The vault names its files by a private code, so report the name the photo was hidden
+            // under instead — the same substitution the cloud branch above makes.
+            eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, local.displayName)
         }
     }
 
@@ -1709,6 +2130,32 @@ class PhotoViewerViewModel @Inject constructor(
     /** Clear any per-photo public-link state so a stale link can't show on the next photo. */
     private fun resetPublicLinkState() = publicLink.reset()
 
+    // ── Move the viewed photo to a device folder (logged-out, single on-device photo) ────────────
+    // Delegated to the shared [MoveToFolderController], the same relocation the timeline and the
+    // device-folder detail offer, so the viewer can send the one photo it is showing into another
+    // DCIM folder. Only the photo's own device uri moves; nothing cloud is touched.
+
+    /** Existing device folders offered as move targets, kept warm for the picker. */
+    val moveTargetFolders = moveController.targetFolders(viewModelScope)
+
+    /** One-shot system write-consent request a foreign-file move needs; the host's launcher drives it. */
+    val pendingMoveIntent = moveController.pendingMoveIntent
+
+    /** Destination folder of a completed move, for the host's snackbar. */
+    val moveConfirmation = moveController.moveConfirmation
+
+    /** Move the single viewed device photo into [folderName] under DCIM/. */
+    fun moveToFolder(uri: String, folderName: String) =
+        moveController.move(viewModelScope, listOf(uri), folderName)
+
+    /** Move the single viewed device photo into a freshly named device folder, born with it. */
+    fun createFolderWith(uri: String, name: String) =
+        moveController.createFolder(viewModelScope, name, listOf(uri))
+
+    fun onMovePermissionGranted() = moveController.onPermissionGranted(viewModelScope)
+
+    fun clearPendingMove() = moveController.clearPending()
+
     fun loadCloud(photo: CloudPhoto) {
         resetMotionState()
         resetPanoramaState()
@@ -1725,9 +2172,9 @@ class PhotoViewerViewModel @Inject constructor(
         _cloudFullResSize.value = null
         _cloudVideoMeta.value = null
         _fullResBlockedByMetered.value = false
-        // Clear the previous photo's EXIF; the cloud photo's own metadata is read from its
-        // decrypted full-res once the download lands (see onSuccess below).
-        _metadata.value = null
+        // Drop another photo's EXIF; this one's is read from its decrypted full-res once the download
+        // lands (see onSuccess below), and a video never produces a read at all.
+        retargetMetadata(itemKey)
 
         if (thumbUrl != null) {
             // Thumbnail placeholder while downloading full-res (videos too).
@@ -1805,7 +2252,7 @@ class PhotoViewerViewModel @Inject constructor(
                 },
                 onFailure = { e ->
                     if (thumbUrl == null && _state.value.itemKey == itemKey) {
-                        _state.value = ViewerState.Error(e.message)
+                        _state.value = ViewerState.Error(eu.akoos.photos.util.sanitizeErrorMessage(e.message))
                     }
                     // else keep showing thumbnail silently
                 },

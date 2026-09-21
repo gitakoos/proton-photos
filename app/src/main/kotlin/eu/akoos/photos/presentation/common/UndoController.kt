@@ -28,7 +28,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.hidden.HiddenStorageManager
+import eu.akoos.photos.data.hidden.HiddenVaultRestorer
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncState
@@ -47,7 +47,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -66,7 +65,7 @@ import javax.inject.Singleton
 @Singleton
 class UndoController @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val hiddenStorage: HiddenStorageManager,
+    private val hiddenVaultRestorer: HiddenVaultRestorer,
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
     private val accountManager: AccountManager,
@@ -78,8 +77,16 @@ class UndoController @Inject constructor(
     val pending: StateFlow<UndoAction?> = _pending.asStateFlow()
 
     private val _restored = MutableSharedFlow<UndoAction>(extraBufferCapacity = 8)
-    /** Emitted after an undo finishes so the visible screen can refresh (a hide-restore needs it). */
+    /** Emitted after an undo brought something back, so the visible screen can refresh (a
+     *  hide-restore needs it). An undo that reversed nothing at all stays silent here: repainting a
+     *  grid that is unchanged tells the user the photo is back when it is not. */
     val restored: SharedFlow<UndoAction> = _restored.asSharedFlow()
+
+    private val _undoFailed = MutableSharedFlow<Int>(extraBufferCapacity = 8)
+    /** How many photos an undo could not bring back, emitted whenever that is more than none. The
+     *  bar's own message says the undo happened, so this is the only place the shortfall can be
+     *  told; without it a photo stays hidden while the screen reads as restored. */
+    val undoFailed: SharedFlow<Int> = _undoFailed.asSharedFlow()
 
     /** Offer a fresh undoable action. Replaces any earlier pending one (only the latest is undoable). */
     fun offer(action: UndoAction) {
@@ -97,8 +104,8 @@ class UndoController @Inject constructor(
         _pending.value = null
         scope.launch {
             try {
-                when (action) {
-                    is UndoAction.Hide -> restoreHidden(action.hiddenUris)
+                val reversedSomething = when (action) {
+                    is UndoAction.Hide -> reverseHide(action)
                     is UndoAction.Delete -> {
                         val userId = accountManager.getPrimaryUserId().first()
                         // Track which cloud copies actually came back out of trash — only those are
@@ -120,54 +127,54 @@ class UndoController @Inject constructor(
                         // whereas a false SYNCED would silently drop the photo from backup.
                         val safeRelinks = action.syncedRelinks.filter { it.cloudLinkId in restoredCloud }
                         if (safeRelinks.isNotEmpty() && userId != null) relinkSynced(safeRelinks, userId)
+                        true
                     }
                     is UndoAction.AlbumRemove -> {
                         val userId = accountManager.getPrimaryUserId().first() ?: return@launch
                         cloudRepo.addPhotosToAlbum(userId, action.albumLinkId, action.photoLinkIds)
+                        true
                     }
                 }
-                _restored.tryEmit(action)
+                if (reversedSomething) _restored.tryEmit(action)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "undo failed: ${e.message}")
+                // A hide undo that threw brought nothing back, and the bar has already claimed it
+                // did, so the shortfall is reported here rather than left to the log.
+                if (action is UndoAction.Hide) _undoFailed.tryEmit(action.count)
             }
         }
     }
 
-    /** Move each vault URI back to MediaStore, prune the hidden-photo bookkeeping, and re-pair any
-     *  restored synced photo with its Drive twin so reconcile does not re-upload it as a duplicate. */
-    private suspend fun restoreHidden(hiddenUris: List<String>) = withContext(Dispatchers.IO) {
-        val prefsSnapshot = context.settingsDataStore.data.first()
-        val folderMap = prefsSnapshot[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
-        val nameMap = prefsSnapshot[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
-        val cloudIdMap = prefsSnapshot[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-        // (cloudLinkId, restoredUri) pairs for the synced photos, transplanted after the prune below.
-        val transplants = mutableListOf<Pair<String, String>>()
-        for (hiddenUri in hiddenUris) {
-            val sourceFolder = folderMap.firstOrNull { it.startsWith("$hiddenUri|") }?.substringAfter('|')
-            val originalName = nameMap.firstOrNull { it.startsWith("$hiddenUri|") }?.substringAfter('|')
-            val cloudLinkId = cloudIdMap.firstOrNull { it.startsWith("$hiddenUri|") }?.substringAfter('|')
-            val restoredUri = hiddenStorage.restore(hiddenUri, originalDisplayName = originalName, albumFolderName = sourceFolder)
-            if (cloudLinkId != null && restoredUri != null) transplants += cloudLinkId to restoredUri
+    /**
+     * Reverse both halves of a hide and answer whether anything actually came back.
+     *
+     * The client-side half goes first and costs one preference write: dropping the linkIds from the
+     * hidden set puts the backed-up and cloud-only photos back in every listing, with nothing on
+     * Drive and nothing on the device to touch. The restorer then owns the vault half's whole round
+     * trip — the bytes, the index, the per-uri records, the journal and a folder hide's own folder
+     * name — so an undone hide leaves the vault exactly as a reveal from the vault screen does.
+     *
+     * Every photo the two halves could not reach is counted and reported, because the bar has
+     * already told the user the hide was undone.
+     */
+    private suspend fun reverseHide(action: UndoAction.Hide): Boolean {
+        var failed = 0
+        if (action.cloudLinkIds.isNotEmpty()) {
+            try {
+                context.settingsDataStore.edit { prefs ->
+                    val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
+                    prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing - action.cloudLinkIds.toSet()
+                }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "undo: hidden set not cleared: ${e.message}")
+                failed += action.cloudLinkIds.size
+            }
         }
-        context.settingsDataStore.edit { prefs ->
-            val current = prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()
-            prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = current - hiddenUris.toSet()
-            val mapping = prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
-            prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] =
-                mapping.filterNot { entry -> hiddenUris.any { entry.startsWith("$it|") } }.toSet()
-            val folders = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] ?: emptySet()
-            prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP] =
-                folders.filterNot { entry -> hiddenUris.any { entry.startsWith("$it|") } }.toSet()
-            val names = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] ?: emptySet()
-            prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP] =
-                names.filterNot { entry -> hiddenUris.any { entry.startsWith("$it|") } }.toSet()
-        }
-        // Transplant each restored synced photo's SyncState row onto its new URI so reconcile pairs by
-        // id, not hash. A content-drifted file (for example a re-encoded video) would otherwise re-upload.
-        for ((cloudLinkId, restoredUri) in transplants) {
-            transplantHiddenSyncState(syncStateRepo, accountManager, cloudLinkId, restoredUri)
-        }
+        failed += hiddenVaultRestorer.restoreAll(action.hiddenUris)
+        if (failed > 0) _undoFailed.tryEmit(failed)
+        return failed < action.count
     }
 
     /** Move each local MediaStore file back out of the device trash by clearing IS_TRASHED. Silent
@@ -215,42 +222,13 @@ class UndoController @Inject constructor(
     }
 }
 
-/**
- * Re-pair a just-unhidden synced photo with its Drive twin by transplanting the existing SyncState row
- * onto the restored MediaStore URI. Without this the restored file carries no SyncState, so reconcile
- * can't match it by id and, on any content drift across the hide cycle (a video whose mvhd changed, say),
- * starts a fresh upload that duplicates the cloud entry. A no-op when the photo had no cloud twin
- * ([cloudLinkId] null) or the restore failed ([restoredUri] null).
- */
-suspend fun transplantHiddenSyncState(
-    syncStateRepo: SyncStateRepository,
-    accountManager: AccountManager,
-    cloudLinkId: String?,
-    restoredUri: String?,
-) {
-    if (cloudLinkId == null || restoredUri == null) return
-    runCatching {
-        val userId = accountManager.getPrimaryUserId().first()
-        val oldRow = syncStateRepo.getByCloudId(cloudLinkId)
-        if (oldRow != null && userId != null) {
-            // Write a fresh SYNCED row keyed on the new MediaStore URI, carrying the hash and backed-up
-            // timestamp so the row history doesn't reset, then flip the stale HIDDEN row (its localUri no
-            // longer exists on disk) to CLOUD_ONLY for the next reconcile pass to clean up.
-            syncStateRepo.upsert(
-                oldRow.copy(localUri = restoredUri, status = SyncStatus.SYNCED),
-                userId,
-            )
-            syncStateRepo.updateStatusAndDeleteLocal(oldRow.localUri, SyncStatus.CLOUD_ONLY)
-        }
-    }
-}
-
 /** Thin ViewModel so the nav-graph snackbar host can observe [UndoController] and drive it. */
 @HiltViewModel
 class UndoBarViewModel @Inject constructor(
     private val undoController: UndoController,
 ) : ViewModel() {
     val pending: StateFlow<UndoAction?> = undoController.pending
+    val undoFailed: SharedFlow<Int> = undoController.undoFailed
     fun undo() = undoController.undo()
     fun dismiss() = undoController.dismiss()
 }

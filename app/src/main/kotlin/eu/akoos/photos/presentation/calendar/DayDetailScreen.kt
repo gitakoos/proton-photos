@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -70,6 +71,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.fullBleedHorizontal
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
@@ -81,9 +83,9 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.isoDateFormat
 import java.text.SimpleDateFormat
 import java.util.Locale
-import java.util.TimeZone
 
 /**
  * Day Detail screen — hero photo at the top, editable description below, then a grid of
@@ -138,8 +140,22 @@ fun DayDetailScreen(
         } else {
             val cols = rememberDefaultGridColumns()
             val seamless = rememberSeamlessGrid()
+            val gridState = rememberLazyGridState()
+            // Land back on the photo the viewer closed on. One flat run of the day's photos, behind
+            // the hero and the description row, which are the two full-width slots ahead of them.
+            // The cells key on a type-prefixed local key the viewer knows nothing about, so match on
+            // the gallery identity instead: this grid hands the viewer its items untouched.
+            val returnGroups = remember(state.items) { listOf(state.items) }
+            ReturnToViewerPhoto(
+                gridState = gridState,
+                groups = returnGroups,
+                headerPerGroup = false,
+                leadingSlots = 2,
+                keyOf = { it.stableId },
+            )
             LazyVerticalGrid(
                 columns = GridCells.Fixed(cols),
+                state = gridState,
                 modifier = Modifier.fillMaxSize(),
                 // Match the main timeline grid (GalleryGrid): same default columns, 20.dp side inset
                 // and 6.dp gap, so the day's photos render at the same size as the Photos page.
@@ -236,11 +252,12 @@ fun DayDetailScreen(
     // Description edit sheet. Save commits to Room via the existing VM setter; cancel just
     // dismisses without persisting.
     if (editingDescription) {
-        eu.akoos.photos.presentation.calendar.components.EditFieldSheet(
+        eu.akoos.photos.presentation.common.EditFieldSheet(
             title = stringResource(R.string.day_detail_edit_description_title),
             initialValue = descriptionInput,
             hint = stringResource(R.string.day_detail_description_hint),
             singleLine = false,
+            confirmLabel = stringResource(R.string.day_detail_save),
             onDismiss = { editingDescription = false },
             onSave = { v ->
                 descriptionInput = v
@@ -370,9 +387,7 @@ private fun itemKey(item: GalleryItem): String = when (item) {
 }
 
 private fun formatDateLabel(date: String): String {
-    val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-        timeZone = TimeZone.getDefault()
-    }
+    val parser = isoDateFormat()
     val parsed = runCatching { parser.parse(date) }.getOrNull() ?: return date
     val display = SimpleDateFormat("EEEE, d MMMM yyyy", Locale.getDefault())
     return display.format(parsed)

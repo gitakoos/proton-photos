@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.Flow
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumChild
+import eu.akoos.photos.domain.entity.AlbumShareLink
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.PendingInvitation
 import eu.akoos.photos.domain.entity.ShareInvitation
@@ -55,6 +56,16 @@ interface DrivePhotoRepository {
      */
     suspend fun loadAlbumsCached(): List<Album>
 
+    /** Cached shared-with-me albums this user has edit rights on, for the add-to-album picker. */
+    suspend fun loadSharedAddableAlbumsCached(): List<Album>
+
+    /**
+     * DB-only read of every album shared with this user, viewer-only ones included. Used by the
+     * Shared tab for instant paint on open (airplane mode included) before the shared-with-me walk
+     * lands. Empty until that walk has succeeded once on this device, and right after sign-out.
+     */
+    suspend fun loadSharedWithMeAlbumsCached(): List<Album>
+
     /**
      * Background pass that walks each album's children pagination on Drive and persists the
      * `albumLinkId → photoLinkId` rows so a subsequent `loadAlbumPhotos(...)` call hits the
@@ -67,11 +78,22 @@ interface DrivePhotoRepository {
     suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>)
 
     /**
+     * The same edge rows for the albums someone else shared with this user, whose children live on
+     * the OWNER's volume rather than this one's.
+     *
+     * Kept apart from [prefetchAlbumsMembership] because the requests are charged to that owner:
+     * bounded per pass, one album at a time, each album once per process, and skipped on a low
+     * battery. Fire-and-forget from the Shared tab once its own refresh has landed; nothing periodic
+     * calls it. Edge rows only — no photo bytes, no thumbnails, no crypto.
+     */
+    suspend fun prefetchSharedAlbumsMembership(userId: UserId, albums: List<Album>)
+
+    /**
      * Returns a `photoLinkId → primary album name` map across every album the user owns.
      * Photos belonging to multiple albums get the alphabetically-first album's name.
      * Photos that aren't in any album are absent from the map. Used by the download flow
      * to route album-bound photos into per-album folders without the caller having to
-     * know the album membership upfront. 5-min cache; safe to call on every download.
+     * know the album membership upfront. 20-min cache; safe to call on every download.
      */
     suspend fun getAlbumMemberships(userId: UserId): Map<String, String>
 
@@ -82,6 +104,15 @@ interface DrivePhotoRepository {
      * to REMOVE the photo instead of adding it again.
      */
     suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>>
+
+    /**
+     * Like [getAlbumIdsByPhoto] but guaranteed complete or throwing: returns the full
+     * `photoLinkId → Set<albumLinkId>` map only when every album's children enumerated, and throws
+     * when the walk could not be verified complete. The metadata-replace use cases enumerate through
+     * this before trashing an original so a transient album-list failure can never silently drop the
+     * photo from an album.
+     */
+    suspend fun getVerifiedAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>>
     suspend fun createDriveAlbum(userId: UserId, name: String): Album
     suspend fun loadAlbumChildren(userId: UserId, albumLinkId: String): List<AlbumChild>
     /**
@@ -177,18 +208,16 @@ interface DrivePhotoRepository {
     ): eu.akoos.photos.data.repository.drive.CloudTrashOutcome
 
     /**
-     * Renames a cloud photo. Since the Drive Photos API does not expose a server-side rename
-     * endpoint, this is implemented as download-then-reupload-as-[newName]. When [trashOriginal]
-     * is true (rename-in-place semantics), the source [photo].linkId is moved to Recently Deleted
-     * after the new upload succeeds; otherwise the original stays as well (save-as-copy).
+     * Builds a second cloud photo from [photo]'s bytes under [newName], by downloading the full-res
+     * original and re-uploading it. The source link stays where it is, so this serves the
+     * "Save as copy" action rather than a rename.
      *
      * Returns the new linkId.
      */
-    suspend fun renameOrCopyCloudPhoto(
+    suspend fun copyCloudPhotoAs(
         userId: UserId,
         photo: CloudPhoto,
         newName: String,
-        trashOriginal: Boolean,
     ): String
 
     /**
@@ -209,7 +238,9 @@ interface DrivePhotoRepository {
      * Tag 0 (Favorites) routes through the favorite path. Returns true on success.
      */
     suspend fun setCloudTag(userId: UserId, photo: CloudPhoto, tagId: Int, add: Boolean): Boolean
-    suspend fun deleteAlbum(userId: UserId, albumLinkId: String)
+    /** @throws eu.akoos.photos.domain.entity.AlbumDeleteWouldLosePhotos when the server refuses
+     *  because the album holds the only copy of some photos and [deletePhotosToo] is false. */
+    suspend fun deleteAlbum(userId: UserId, albumLinkId: String, deletePhotosToo: Boolean = false)
 
     /**
      * Removes the album reference for each [photoLinkIds] without touching the underlying
@@ -260,8 +291,8 @@ interface DrivePhotoRepository {
         userId: UserId,
         linkIds: List<String>,
     ): eu.akoos.photos.data.repository.drive.CloudDeleteOutcome
-    /** Creates a public share link for an album; returns the public URL. */
-    suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): String
+    /** Creates a public share link for an album; returns the public URL and its share id. */
+    suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): AlbumShareLink
 
     /**
      * Creates (or reuses) a public share link for a single photo; returns the public URL.
@@ -288,8 +319,9 @@ interface DrivePhotoRepository {
      */
     suspend fun setPhotoLinkPassword(userId: UserId, photoLinkId: String, password: String?): String
 
-    /** Invites a Proton user (by email) to an album with read permissions. */
-    suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String)
+    /** Invites a Proton user (by email) to an album with the given permission bitmap
+     *  (4 = viewer, 6 = editor); returns the share id the invitation lands on. */
+    suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String, permissions: Int): String
 
     /**
      * Server-side photo-copy roll-up: takes every photo in [sourceAlbumLinkId]
@@ -387,6 +419,15 @@ interface DrivePhotoRepository {
     suspend fun changeInvitationPermission(userId: UserId, shareId: String, invitationId: String, permissions: Int)
     /** Returns albums that other users have shared with the current user. */
     suspend fun loadSharedWithMeAlbums(userId: UserId): List<Album>
+
+    /**
+     * Fetches a cover thumbnail into the local cache for each album in [albums] that someone shared
+     * with this user and that has none yet, through the share granting access to it. Bounded and
+     * banded as background work, because the requests are charged to the album's owner rather than to
+     * this user. Fire-and-forget from the Shared tab once its refresh has landed; covers only, never
+     * an album's photos.
+     */
+    suspend fun prefetchSharedAlbumCovers(userId: UserId, albums: List<Album>)
     /** Returns individual library photos the current user has shared via a public link. */
     suspend fun loadSharedByMePhotos(userId: UserId): List<SharedPhoto>
 
@@ -501,4 +542,29 @@ interface DrivePhotoRepository {
      * duration. Reads only the photo's own encrypted metadata, so it needs no runtime permission.
      */
     suspend fun backfillVideoDurations(userId: UserId)
+
+    /**
+     * Walk the on-device photos whose EXIF has not been read yet and recover what only the file
+     * itself knows: the GPS fix for the map, and the capture date for any photo whose MediaStore
+     * DATE_TAKEN is missing or disagrees with its own EXIF. One read per file serves both, and each
+     * leg skips what it has already recorded, so a re-run only touches new files. The GPS leg needs
+     * ACCESS_MEDIA_LOCATION and stands down without it; the date leg runs either way.
+     */
+    suspend fun backfillLocalExif(userId: UserId)
+
+    /**
+     * Walk the library's photos that have not been face-indexed yet, detect and embed each face, and
+     * store it for the People grouping. A no-op unless the AI features are on and the user has not
+     * paused indexing, and unless the on-device face models are present. Resumable and idempotent: a
+     * re-run only touches photos it has never produced a face for.
+     */
+    suspend fun backfillFaces(userId: UserId?)
+
+    /**
+     * Walk the library's photos that have not been semantically indexed yet, compute one CLIP image
+     * embedding per photo, and store it for typed-phrase search. A no-op unless the AI features and
+     * semantic search are both on, and unless the on-device image model is present. Resumable and
+     * idempotent: a re-run only touches photos it has never embedded.
+     */
+    suspend fun backfillSemantic(userId: UserId?)
 }

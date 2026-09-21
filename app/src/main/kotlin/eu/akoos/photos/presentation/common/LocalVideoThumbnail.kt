@@ -51,13 +51,15 @@ internal sealed interface LocalVideoThumb {
 /**
  * Grid-sized OS video thumbnails, keyed on "uri@px". `ContentResolver.loadThumbnail` is
  * system-cached and near-instant, but a fling still re-enters the cell many times, so a small
- * bounded cache keeps a warm bitmap for a re-scroll without re-hitting the resolver. Bitmaps are
- * tile-sized (a few hundred px), so even a full cache is a couple of MB. Bounded by entry count
- * because every value is roughly the same small size.
+ * bounded cache keeps a warm bitmap for a re-scroll without re-hitting the resolver. Bounded by
+ * total bytes rather than entry count: a 320px tile is ~410 KB as ARGB_8888, so a 150-entry count
+ * cap would reach ~60 MB, whereas a byte budget stays small regardless of tile size.
  */
 private object LocalVideoThumbnailCache {
-    private const val MAX_ENTRIES = 150
-    private val cache = object : LruCache<String, Bitmap>(MAX_ENTRIES) {}
+    private const val MAX_BYTES = 12 * 1024 * 1024
+    private val cache = object : LruCache<String, Bitmap>(MAX_BYTES) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+    }
 
     fun get(key: String): Bitmap? = cache.get(key)
 

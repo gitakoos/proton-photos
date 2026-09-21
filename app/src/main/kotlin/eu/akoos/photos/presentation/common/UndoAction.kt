@@ -30,9 +30,20 @@ package eu.akoos.photos.presentation.common
 sealed class UndoAction {
     abstract val count: Int
 
-    /** Undo a Hide: restore each private-vault URI back to MediaStore. */
-    data class Hide(val hiddenUris: List<String>) : UndoAction() {
-        override val count: Int get() = hiddenUris.size
+    /**
+     * Undo a Hide, both halves of it: restore each private-vault URI back to MediaStore, and drop
+     * each cloud linkId from the hidden set so the backed-up and cloud-only photos are listed again.
+     *
+     * A hide acts on whichever halves the selection held, so an undo that carried only the vault
+     * side would reverse a mixed hide by half and leave the rest hidden with the bar reporting
+     * success. Either list may be empty, which is how one undo path covers an all-device, an
+     * all-backed-up and a mixed hide alike.
+     */
+    data class Hide(
+        val hiddenUris: List<String>,
+        val cloudLinkIds: List<String> = emptyList(),
+    ) : UndoAction() {
+        override val count: Int get() = hiddenUris.size + cloudLinkIds.size
     }
 
     /**

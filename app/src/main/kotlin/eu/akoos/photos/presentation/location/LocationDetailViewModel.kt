@@ -29,13 +29,13 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -47,19 +47,16 @@ import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.presentation.common.GalleryItemSelectionController
+import eu.akoos.photos.presentation.common.MoveToFolderController
+import eu.akoos.photos.presentation.common.addToAlbumOutcome
+import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.sanitizeErrorMessage
 import javax.inject.Inject
-
-/** Determinate progress of a multi-item download / share over the location's photos. */
-sealed class LocationOpState {
-    data object Idle : LocationOpState()
-    data class Working(val done: Int, val total: Int) : LocationOpState()
-}
 
 /** One-shot outcome of "Save as album", surfaced to the screen's snackbar. */
 data class SaveAsAlbumResult(
@@ -69,31 +66,30 @@ data class SaveAsAlbumResult(
 )
 
 data class LocationDetailUiState(
-    /** "City, Country" resolved from the tapped pin — the screen title. */
+    /** "City, Country" resolved from the tapped pin - the screen title. */
     val placeName: String = "",
     val isLoading: Boolean = true,
     val items: List<GalleryItem> = emptyList(),
-    /** Selection key set — local uri for local-backed items, cloud linkId for cloud-only. */
-    val selectedKeys: Set<String> = emptySet(),
-    val downloadState: LocationOpState = LocationOpState.Idle,
-    val shareState: LocationOpState = LocationOpState.Idle,
     /** True while the "Save as album" round-trip is in flight. */
     val isSavingAsAlbum: Boolean = false,
     val saveAsAlbumResult: SaveAsAlbumResult? = null,
     val error: String? = null,
-) {
-    val isSelectionMode: Boolean get() = selectedKeys.isNotEmpty()
-    val selectedCount: Int get() = selectedKeys.size
-}
+)
 
 /**
- * Backs [LocationDetailSheet]: an album-style drawer of every geotagged photo taken in one place
- * (city). The tapped pin's coordinates resolve to a "City, Country" label via [OfflineGeocoder];
- * the screen then shows every located photo whose own coordinates geocode to the SAME label,
- * resolved to its [GalleryItem] from the shared library merge so each cell opens the viewer with
- * the correct synced / cloud state. "Save as album" creates a real Drive album named after the
- * city and adds those photos (uploading any local-only ones first), reusing the same album-create +
- * add-to-album path as the gallery and device-folder surfaces.
+ * Backs the place page ([LocationPhotosContent] in [PlaceCityScreen]): an album-style view of every
+ * geotagged photo taken in one place (city). The coordinates resolve to a "City, Country" label via
+ * [OfflineGeocoder]; the screen then shows every located photo whose own coordinates geocode to the
+ * SAME label, resolved to its [GalleryItem] from the shared library merge so each cell opens the
+ * viewer with the correct synced / cloud state. "Save as album" creates a real Drive album named
+ * after the city and adds those photos (uploading any local-only ones first), reusing the same
+ * album-create + add-to-album path as the gallery and device-folder surfaces.
+ *
+ * The multi-select (share / add-to-album / back-up / download / offline / favourite / hide / delete /
+ * strip) runs through the shared [GalleryItemSelectionController], the same one the timeline and search
+ * use, so this surface offers the full action set from one place. "Save as album" and move-to-folder
+ * stay local: the first names itself after the place and takes every photo in it, the second sends the
+ * device selection into a DCIM folder through the shared [MoveToFolderController].
  */
 @HiltViewModel
 class LocationDetailViewModel @Inject constructor(
@@ -103,17 +99,20 @@ class LocationDetailViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val driveRepo: DrivePhotoRepository,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
-    private val downloadPhotos: DownloadPhotosUseCase,
-    private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val moveController: MoveToFolderController,
+    private val selectionFactory: GalleryItemSelectionController.Factory,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LocationDetailUiState())
     val uiState: StateFlow<LocationDetailUiState> = _uiState.asStateFlow()
 
-    /** One-shot system-share intents emitted to the screen, which launches the chooser. */
-    private val _shareIntent = MutableSharedFlow<android.content.Intent>(extraBufferCapacity = 1)
-    val shareIntent: SharedFlow<android.content.Intent> = _shareIntent.asSharedFlow()
+    /** Whether a Proton account is signed in. A null-userId local-only session leaves the cloud
+     *  actions (add-to-album) without a destination, so the screen hides them. Defaults to signed-in
+     *  so nothing flickers before the first emit. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     private var loadJob: Job? = null
 
@@ -127,10 +126,7 @@ class LocationDetailViewModel @Inject constructor(
         _uiState.update { it.copy(isLoading = true, error = null) }
         loadJob = viewModelScope.launch {
             try {
-                val userId = accountManager.getPrimaryUserId().first() ?: run {
-                    _uiState.update { it.copy(isLoading = false) }
-                    return@launch
-                }
+                val userId = accountManager.getPrimaryUserId().first()
                 // The tapped pin's place is the title. A null geocode (dataset missing) leaves the
                 // screen empty rather than guessing.
                 val target = OfflineGeocoder.reverseGeocode(context, latitude, longitude) ?: run {
@@ -141,7 +137,8 @@ class LocationDetailViewModel @Inject constructor(
 
                 // The merged library is the single source the gallery / search / calendar open the
                 // viewer with, so a resolved item carries the right synced / cloud state.
-                val libraryItems = getGalleryItems.invoke(userId).first()
+                val libraryItems = (if (userId == null) getGalleryItems.invokeLocalOnly()
+                    else getGalleryItems.invoke(userId)).first()
                 val itemByKey = HashMap<String, GalleryItem>(libraryItems.size * 2)
                 for (item in libraryItems) {
                     when (item) {
@@ -157,7 +154,9 @@ class LocationDetailViewModel @Inject constructor(
                 // Geocode every located row off the main thread; OfflineGeocoder caches its dataset so
                 // this is a sub-millisecond scan per row. Keep those matching the tapped place and map
                 // each to its library item by the entity id (local content uri or cloud linkId).
-                val located: List<PhotoLocationEntity> = photoLocationDao.observeForUser(userId.id).first()
+                // Read the local partition when signed out, so a guest's place resolves its photos too.
+                val located: List<PhotoLocationEntity> =
+                    photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER).first()
                 val matched = withContext(Dispatchers.Default) {
                     val seen = LinkedHashSet<String>()
                     val out = ArrayList<GalleryItem>()
@@ -182,134 +181,97 @@ class LocationDetailViewModel @Inject constructor(
         }
     }
 
-    // ── Selection ────────────────────────────────────────────────────────────
-    //
-    // Cells are keyed by local uri where a device copy exists, else the cloud linkId — the same
-    // keying the device-folder grid uses, so the drag-select sweep maps swept keys back to items.
-
-    private fun keyOf(item: GalleryItem): String = when (item) {
-        is GalleryItem.LocalOnly -> item.local.uri
-        is GalleryItem.Synced -> item.local.uri
-        is GalleryItem.CloudOnly -> item.cloud.linkId
-    }
-
-    fun toggleSelection(key: String) {
-        _uiState.update {
-            val next = if (key in it.selectedKeys) it.selectedKeys - key else it.selectedKeys + key
-            it.copy(selectedKeys = next)
-        }
-    }
-
-    /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
-    fun setSelectedKeys(keys: Set<String>) = _uiState.update { it.copy(selectedKeys = keys) }
-
-    fun clearSelection() = _uiState.update { it.copy(selectedKeys = emptySet()) }
-
-    private fun selectedGalleryItems(): List<GalleryItem> {
-        val sel = _uiState.value.selectedKeys
-        return _uiState.value.items.filter { keyOf(it) in sel }
-    }
-
     fun clearError() = _uiState.update { it.copy(error = null) }
 
-    // ── Download selected ──────────────────────────────────────────────────────
+    // ── Multi-select ──────────────────────────────────────────────────────────────────────────────
+    //
+    // Delegates to the shared [GalleryItemSelectionController] (the timeline and search use the same
+    // one), so every selection action, the delete + strip permission handshakes and the Undo offer
+    // live in one place. Only Select-all needs local context - the current place list.
+    val sel = selectionFactory.create(viewModelScope)
 
-    /** Download the selected photos to the device, mirroring the gallery's multi-download. */
-    fun downloadSelected() {
-        val items = selectedGalleryItems()
-        if (items.isEmpty()) return
-        viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(downloadState = LocationOpState.Working(0, items.size)) }
-            val memberships: Map<String, String> = runCatching { driveRepo.getAlbumMemberships(userId) }
-                .getOrDefault(emptyMap())
-                .mapValues { (_, name) -> eu.akoos.photos.util.ProtonPhotosStorage.sanitize(name) }
-            val transferId = transferCenter.start(
-                eu.akoos.photos.data.transfer.TransferCenter.Kind.DOWNLOAD, items.size,
-            )
-            try {
-                runCatching {
-                    downloadPhotos.downloadGalleryItems(
-                        userId, items,
-                        folderName = "",
-                        folderByLinkId = memberships,
-                    ) { progress ->
-                        transferCenter.progress(transferId, progress.done)
-                        _uiState.update {
-                            it.copy(downloadState = LocationOpState.Working(progress.done, progress.total))
-                        }
-                    }
-                }
-            } finally {
-                transferCenter.finish(transferId)
-            }
-            _uiState.update { it.copy(downloadState = LocationOpState.Idle, selectedKeys = emptySet()) }
+    val selectedItems: StateFlow<Set<GalleryItem>> get() = sel.selectedItems
+    val albums: StateFlow<List<Album>> get() = sel.albums
+    val shareIntent get() = sel.shareIntent
+    val offlineBatchResult get() = sel.offlineBatchResult
+    val actionFailure get() = sel.actionFailure
+    val downloadStarted get() = sel.downloadStarted
+    val isDeleting: StateFlow<Boolean> get() = sel.isDeleting
+    val pendingDeleteIntent get() = sel.pendingDeleteIntent
+    val pendingStripIntent get() = sel.pendingStripIntent
+    val multiStripState get() = sel.multiStripState
+    val favoriteIds get() = sel.favoriteIds
+    val offlinePinIds get() = sel.offlinePinIds
+    val favoriteState get() = sel.favoriteState
+
+    fun toggleSelection(item: GalleryItem) = sel.toggleSelection(item)
+    fun setSelection(items: Set<GalleryItem>) = sel.setSelection(items)
+    fun clearSelection() = sel.clearSelection()
+    fun selectAll() = sel.selectAll(_uiState.value.items)
+    fun shareSelected() = sel.shareSelected()
+    fun addSelectedToAlbum(albumLinkId: String, onResult: (joined: Int, queued: Int) -> Unit) =
+        sel.addSelectedToAlbum(albumLinkId, onResult)
+    fun createAlbumThenAddSelected(
+        name: String,
+        onResult: (joined: Int, queued: Int, error: String?) -> Unit,
+    ) = sel.createAlbumThenAddSelected(name, onResult)
+    fun backUpSelected(onResult: (queued: Int) -> Unit) = sel.backUpSelected(onResult)
+    fun downloadSelected(onResult: (succeeded: Int, failed: Int) -> Unit) = sel.downloadSelected(onResult)
+    fun toggleSelectedOffline() = sel.toggleSelectedOffline()
+    fun toggleSelectedFavorite() = sel.toggleSelectedFavorite()
+    fun hideSelected() = sel.hideSelected()
+    /** The two halves the selection's hide would act on, for the confirmation that fronts it. */
+    fun hideSplitForSelection() = sel.hideSplitForSelection()
+    fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) =
+        sel.deleteSelected(freeUpSpace, deleteFromCloud)
+    fun onDeletePermissionGranted() = sel.onDeletePermissionGranted()
+    fun clearPendingDeleteIntent() = sel.clearPendingDeleteIntent()
+    fun stripMetadataSelected(config: MetadataStripConfig) = sel.stripMetadataSelected(config)
+    fun onStripPermissionGranted() = sel.onStripPermissionGranted()
+    fun clearPendingStripIntent() = sel.clearPendingStripIntent()
+    fun resetMultiStripState() = sel.resetMultiStripState()
+
+    // ── Move to a device folder (logged-out, device data only) ──────────────────────────────────
+    // Delegated to the shared [MoveToFolderController], the same relocation the timeline offers, so a
+    // located selection can send its device photos into a DCIM folder.
+
+    /** Existing device folders offered as move targets, kept warm for the picker. */
+    val moveTargetFolders = moveController.targetFolders(viewModelScope)
+
+    /** One-shot system write-consent request a foreign-file move needs; the screen's host drives it. */
+    val pendingMoveIntent = moveController.pendingMoveIntent
+
+    /** Destination folder of a completed move, for the host's snackbar. */
+    val moveConfirmation = moveController.moveConfirmation
+
+    /** The selected photos that carry a device file, mapped to their uris; a cloud-only one has none. */
+    private fun selectedDeviceUris(): List<String> = selectedItems.value.mapNotNull { item ->
+        when (item) {
+            is GalleryItem.LocalOnly -> item.local.uri
+            is GalleryItem.Synced -> item.local.uri
+            is GalleryItem.CloudOnly -> null
         }
     }
 
-    // ── Share selected ──────────────────────────────────────────────────────────
-
-    /**
-     * Share the selection to other apps: local items reuse their content uri directly; cloud-only
-     * items decrypt to cacheDir first and go through the share FileProvider. Mirrors the gallery.
-     */
-    fun shareSelected() {
-        val items = selectedGalleryItems()
-        if (items.isEmpty()) return
-        viewModelScope.launch {
-            _uiState.update { it.copy(shareState = LocationOpState.Working(0, items.size)) }
-            val userId = accountManager.getPrimaryUserId().first()
-            val uris = ArrayList<android.net.Uri>(items.size)
-            var done = 0
-            for (item in items) {
-                runCatching {
-                    when (item) {
-                        is GalleryItem.LocalOnly -> android.net.Uri.parse(item.local.uri)
-                        is GalleryItem.Synced -> android.net.Uri.parse(item.local.uri)
-                        is GalleryItem.CloudOnly -> {
-                            val uid = userId ?: error("Not signed in")
-                            val file = driveRepo.downloadFullResPhoto(uid, item.cloud)
-                            androidx.core.content.FileProvider.getUriForFile(
-                                context, "${context.packageName}.share.fileprovider", file,
-                            ).also {
-                                eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, item.cloud.displayName)
-                            }
-                        }
-                    }
-                }.onSuccess { uris.add(it) }
-                    .onFailure { android.util.Log.w("LocationDetailVM", "share resolve failed: ${it.message}") }
-                done++
-                _uiState.update { it.copy(shareState = LocationOpState.Working(done, items.size)) }
-            }
-            if (uris.isNotEmpty()) {
-                val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(items)
-                _shareIntent.tryEmit(
-                    eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, uris, mime),
-                )
-            }
-            _uiState.update { it.copy(shareState = LocationOpState.Idle, selectedKeys = emptySet()) }
-        }
+    /** Move every selected device photo into [folderName] under DCIM/, then drop the selection. */
+    fun moveSelectedToFolder(folderName: String) {
+        val uris = selectedDeviceUris()
+        moveController.move(viewModelScope, uris, folderName)
+        clearSelection()
     }
 
-    // ── Add selected to an existing cloud album ────────────────────────────────
-
-    /**
-     * Add the selection to album [albumLinkId]: cloud-backed items join now; local-only ones are
-     * queued to upload and join after. Reuses the same path as the gallery / device-folder add.
-     * Reports (joined now, queued for after) for the snackbar.
-     */
-    fun addSelectedToAlbum(albumLinkId: String, onResult: (joined: Int, queued: Int) -> Unit) {
-        val items = selectedGalleryItems()
-        if (items.isEmpty()) return
-        viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val (joined, queued) = addItemsToAlbum(userId, albumLinkId, items)
-            _uiState.update { it.copy(selectedKeys = emptySet()) }
-            onResult(joined, queued)
-        }
+    /** Move the selection into a freshly named device folder, born with the photos the move lands there. */
+    fun createFolderWithPhotos(name: String) {
+        val uris = selectedDeviceUris()
+        moveController.createFolder(viewModelScope, name, uris)
+        clearSelection()
     }
 
-    // ── Save as album ──────────────────────────────────────────────────────────
+    fun onMovePermissionGranted() = moveController.onPermissionGranted(viewModelScope)
+
+    fun clearPendingMove() = moveController.clearPending()
+
+    // ── Save as album ──────────────────────────────────────────────────────────────
 
     /**
      * Create a Drive album named after the city and add every photo in this place to it. Local-only
@@ -377,22 +339,28 @@ class LocationDetailViewModel @Inject constructor(
         }
         val localUris = items.mapNotNull { (it as? GalleryItem.LocalOnly)?.local?.uri }
         val joined = if (cloudLinkIds.isNotEmpty()) {
-            runCatching { driveRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds) }
-                .getOrNull()?.succeededLinkIds?.size ?: 0
+            val outcome = try {
+                val result = driveRepo.addPhotosToAlbum(userId, albumLinkId, cloudLinkIds)
+                addToAlbumOutcome(cloudLinkIds.size, result.succeededLinkIds.size, result.failedLinkIds.size, threw = false)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                addToAlbumOutcome(cloudLinkIds.size, 0, 0, threw = true)
+            }
+            if (outcome.isPartialOrFullFailure) {
+                _uiState.update {
+                    it.copy(
+                        error = context.resources.getQuantityString(
+                            R.plurals.viewer_add_photos_failed, outcome.failed, outcome.failed,
+                        ),
+                    )
+                }
+            }
+            outcome.added
         } else 0
         val queued = if (localUris.isNotEmpty()) {
             forceUploadLocalUris.queueForAlbum(userId, albumLinkId, localUris)
         } else 0
         return joined to queued
-    }
-
-    /** Seed the album picker for "Add to album" from the local album cache (no network round-trip). */
-    private val _albums = MutableStateFlow<List<Album>>(emptyList())
-    val albums: StateFlow<List<Album>> = _albums.asStateFlow()
-
-    init {
-        viewModelScope.launch {
-            runCatching { driveRepo.loadAlbumsCached() }.onSuccess { _albums.value = it }
-        }
     }
 }

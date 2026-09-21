@@ -77,11 +77,17 @@ class PhotoWidgetUpdateWorker(
          */
         fun enqueueOrReplace(context: Context, appWidgetId: Int, intervalMinutes: Int = 60) {
             val clampedInterval = intervalMinutes.coerceAtLeast(15).toLong()
+            // A photo rotation is the definition of deferrable, so stand the periodic update down on
+            // a low battery. The immediate update after configuration stays unconstrained so the
+            // widget still fills in at once. The OS also defers this under Doze regardless.
+            val constraints = Constraints.Builder()
+                .setRequiresBatteryNotLow(true)
+                .build()
             val request = PeriodicWorkRequestBuilder<PhotoWidgetUpdateWorker>(
                 clampedInterval, TimeUnit.MINUTES,
             )
                 .setInputData(workDataOf(KEY_WIDGET_ID to appWidgetId))
-                .setConstraints(Constraints.NONE)
+                .setConstraints(constraints)
                 .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 periodicTag(appWidgetId),

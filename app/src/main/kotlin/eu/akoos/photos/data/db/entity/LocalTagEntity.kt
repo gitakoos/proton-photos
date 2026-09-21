@@ -24,11 +24,15 @@ package eu.akoos.photos.data.db.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import eu.akoos.photos.util.UserPhotoTags
 
 /**
  * Per-URI category-tag cache so a re-scan only re-detects changed files (tag detection reads XMP,
  * too costly per file per scan). A row is fresh only while both [dateModified] and [sizeBytes]
  * still match MediaStore — otherwise the file was replaced and tags recompute. Rebuildable.
+ *
+ * [userTagsCsv] is the one part that is NOT rebuildable, so the scanner never writes it: see the
+ * column's own note below.
  */
 @Entity(tableName = "local_tag")
 data class LocalTagEntity(
@@ -42,9 +46,20 @@ data class LocalTagEntity(
     val tagsCsv: String,
     /** Epoch-ms the detection ran, for diagnostics / future cache-age policy. */
     val scannedAt: Long,
+    /**
+     * Comma-separated PhotoTag ids the USER chose for this file, kept apart from [tagsCsv] because
+     * the two have opposite lifetimes. Everything above is a detection the scanner may discard and
+     * recompute at will; this is an answer only a person can give, so the scanner writes it never
+     * and re-detection leaves it standing (see LocalTagDao.upsertDetection).
+     */
+    val userTagsCsv: String = "",
 ) {
     /** Decode [tagsCsv] into the tag-id set the gallery and search consume. */
     fun tags(): Set<Int> =
         if (tagsCsv.isEmpty()) emptySet()
         else tagsCsv.split(',').mapNotNull { it.toIntOrNull() }.toSet()
+
+    /** Decode [userTagsCsv] into the tag-id set the user picked for this file. Out-of-range ids are
+     *  dropped, since the Drive PhotoTag enum only runs 0 to 9. */
+    fun userTags(): Set<Int> = UserPhotoTags.decode(userTagsCsv)
 }

@@ -24,8 +24,10 @@ package eu.akoos.photos.data.repository.drive
 
 import android.content.Context
 import android.util.Log
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -45,11 +47,19 @@ import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.api.dto.PhotoLinkDto
 import eu.akoos.photos.data.api.dto.PhotoLinksResponse
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
+import eu.akoos.photos.data.db.dao.CloudAlbumDao
+import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
+import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.DriveNotFoundException
+import eu.akoos.photos.util.combineSqlChunks
+import eu.akoos.photos.util.flatMapSqlChunks
+import eu.akoos.photos.util.forEachSqlChunk
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -118,6 +128,33 @@ private const val STREAM_RESUME_MAX_MS: Long = 180_000L
 // keeps it fast while easing the burst that trips Proton's rate-limit on large libraries.
 private const val LISTING_PAGE_DELAY_MS: Long = 400L
 
+private const val SERIALIZATION_PATH_MARKER = "at path: "
+private const val SERIALIZATION_INPUT_MARKER = "JSON input:"
+private const val SERIALIZATION_PATH_MAX = 80
+
+/**
+ * The two parts of a serialization failure that name code rather than data: the exception type and
+ * the `at path: $.Field` trailer kotlinx.serialization appends, which is built from DTO field names
+ * and array indices and so pinpoints which photo field tripped the parse.
+ *
+ * Nothing else survives, because the rest of the message is not safe for a dump a tester pastes into
+ * a public issue: a decoding failure appends a raw `JSON input:` excerpt of the body that failed,
+ * and a Drive listing page carries link ids, share ids and encrypted names. The excerpt is cut off
+ * before the trailer is looked for, so a body that happens to contain the trailer's own text cannot
+ * supply the path either.
+ */
+internal fun serializationFailureDetail(cause: Throwable): String {
+    val type = cause.javaClass.simpleName
+    val head = cause.message.orEmpty().substringBefore(SERIALIZATION_INPUT_MARKER)
+    val markerAt = head.indexOf(SERIALIZATION_PATH_MARKER)
+    if (markerAt < 0) return type
+    val path = head.substring(markerAt + SERIALIZATION_PATH_MARKER.length)
+        .takeWhile { !it.isWhitespace() }
+        .take(SERIALIZATION_PATH_MAX)
+    // Only kotlinx's own path expression is kept; anything else after the marker is free text.
+    return if (path.startsWith('$')) "$type at $path" else type
+}
+
 /** Privacy-safe one-line description of a listing error for the diagnostics buffer: exception type,
  *  the ProtonCore error variant, the HTTP status, and the Retry-After (seconds) when present. Never
  *  the message body, ids, or any account data. */
@@ -128,11 +165,11 @@ private fun listingErrorDetail(e: Throwable): String {
         append(e.javaClass.simpleName)
         if (apiError != null) append('/').append(apiError.javaClass.simpleName)
         if (http != null) append("/http=").append(http.httpCode)
-        // A Parse error's cause (a SerializationException) names the DTO field that didn't match —
-        // log a truncated form (field name, no values) so a tester log pinpoints which photo field
-        // tripped the listing parse.
-        (apiError as? me.proton.core.network.domain.ApiResult.Error.Parse)?.cause?.message?.let {
-            append("/cause=").append(it.replace('\n', ' ').take(160))
+        // A Parse error's cause (a SerializationException) names the DTO field that didn't match, so
+        // a tester log pinpoints which photo field tripped the listing parse. Only the exception type
+        // and that field path go in; the rest of the message carries an excerpt of the page body.
+        (apiError as? me.proton.core.network.domain.ApiResult.Error.Parse)?.cause?.let {
+            append("/cause=").append(serializationFailureDetail(it))
         }
         val ra = http?.retryAfter?.inWholeSeconds
         if (ra != null && ra > 0) append("/retryAfter=").append(ra).append('s')
@@ -148,6 +185,68 @@ private fun isPermanentListingError(e: Throwable): Boolean {
     return http.httpCode == 401 || http.httpCode == 403
 }
 
+// The two Proton body codes the events endpoint uses to refuse an anchor outright rather than fail
+// to answer: the request cannot be satisfied at all (2000), or the anchor names something the
+// server no longer holds (2501). The official Drive client stops its event loop and refreshes the
+// volume on exactly these two, since no number of retries turns either into a working feed.
+private const val EVENT_ANCHOR_INVALID_REQUIREMENTS = 2000
+private const val EVENT_ANCHOR_NOT_EXISTS = 2501
+
+/**
+ * Whether [e] carries one of the body codes that names an unusable anchor, so a log can separate a
+ * refusal the server spelled out from one taken on the safe default below.
+ *
+ * Read from Proton's own code rather than the HTTP status, which is an ordinary 4xx that a dozen
+ * unrelated validation failures also produce.
+ */
+internal fun isKnownFatalEventAnchorCode(e: Throwable): Boolean {
+    val http = (e as? me.proton.core.network.domain.ApiException)?.error
+        as? me.proton.core.network.domain.ApiResult.Error.Http ?: return false
+    return http.proton?.code == EVENT_ANCHOR_INVALID_REQUIREMENTS ||
+        http.proton?.code == EVENT_ANCHOR_NOT_EXISTS
+}
+
+/**
+ * Whether an event-feed failure means the stored anchor has to go, so the next pass re-arms from a
+ * full refresh instead of replaying a call that can only fail the same way.
+ *
+ * The default follows the asymmetry rather than the list of known codes. Clearing an anchor that
+ * was in fact fine costs one extra full walk, once. Keeping one the server has stopped accepting
+ * costs the incremental feed permanently: every pass re-sends it, fails, re-walks the whole
+ * library, and the cheap path never runs again. So any API failure that is not recognisably
+ * temporary resets, whether or not its code is one of the two named above.
+ *
+ * Two failures keep the anchor. A transient one (no connectivity, a 429, a 5xx) is the server
+ * saying "not now", not "not this anchor", and turning a blip into a full re-walk is the outcome
+ * least worth risking. A throwable that is not an API failure at all (a local write, a decode)
+ * never reached the endpoint, so it carries no evidence about the anchor and must not be read as
+ * though it did.
+ */
+internal fun shouldResetEventAnchor(e: Throwable): Boolean {
+    if (eu.akoos.photos.util.isTransientApiError(e)) return false
+    // Being offline is evidence about the connection, not the anchor. It reads as non-transient so a
+    // retry loop stops, but here it must still keep the anchor rather than force a full re-walk once
+    // the network returns.
+    if (eu.akoos.photos.util.isOfflineError(e)) return false
+    return e is me.proton.core.network.domain.ApiException
+}
+
+/**
+ * The Link.State the Proton API reports for a photo in the trash, as opposed to STATE_ACTIVE = 1.
+ * Values match the official Drive client (LinkDto.STATE_ACTIVE / STATE_TRASHED).
+ */
+internal const val LINK_STATE_TRASHED = 2
+
+/**
+ * Whether a volume event means the photo has left this user's active stream. A hard delete arrives
+ * as [eventType] 0; a "delete" on any Proton client only trashes first (emptying the trash later is
+ * the hard delete), and a trash arrives as an ordinary update carrying [LINK_STATE_TRASHED]. Both
+ * take the photo out of the listing the full walk reconciles against, so the feed removes it rather
+ * than re-adding it from the update that announced the trash.
+ */
+internal fun isStreamRemovalEvent(eventType: Int, linkState: Int?): Boolean =
+    eventType == 0 || linkState == LINK_STATE_TRASHED
+
 /** How long to wait before re-trying a failed listing page: the server's Retry-After when it sent
  *  one (so we back off exactly as asked), otherwise an escalating, capped backoff. */
 private fun listingRetryWaitMs(e: Throwable, attempt: Int): Long {
@@ -157,6 +256,92 @@ private fun listingRetryWaitMs(e: Throwable, attempt: Int): Long {
     val backoff = minOf(STREAM_RESUME_BASE_MS shl (attempt - 1), STREAM_RESUME_MAX_MS)
     return (serverWait ?: backoff).coerceAtMost(STREAM_RESUME_MAX_MS)
 }
+
+/**
+ * Which of [candidateIds] the refresh sweep may delete: those no protection set claims.
+ *
+ * Shared by both sweep sites so they can never drift apart on what counts as protected. A row
+ * survives if ANY of [protectedIdSets] holds it, which is what lets each site name its own
+ * reasons (the server listing, in-flight uploads, un-detailed stubs) without restating the rule.
+ *
+ * [candidateIds] must already be scoped to the user's own volume: a row on another volume can
+ * never appear in a keep-set built from the own-volume stream walk, so offering it here would
+ * mark it removable every single pass.
+ */
+internal fun removableListingIds(
+    candidateIds: Collection<String>,
+    vararg protectedIdSets: Set<String>,
+): List<String> = candidateIds.filterNot { id -> protectedIdSets.any { id in it } }
+
+/**
+ * Where one listing page leaves the walk.
+ *
+ * Only [Exhausted] means the server has nothing after this point, and only [Exhausted] may credit
+ * the pass as having listed the whole library. The distinction is the difference between pruning
+ * photos the server really dropped and pruning every photo past the point a walk happened to stop.
+ */
+internal sealed interface ListingPageVerdict {
+    /** Links came back ending on a cursor the walk has not queried yet, so it continues. */
+    data class Advance(val nextCursor: String) : ListingPageVerdict
+
+    /** An empty page: the one answer that proves there is nothing further to list. */
+    data object Exhausted : ListingPageVerdict
+
+    /**
+     * The page ends on the very cursor it was queried with, which would walk the same page forever.
+     * The walk stops, but it stopped SHORT of the library's end with every older photo still
+     * unlisted, so this is a failure that happens to be survivable, never a completed listing.
+     */
+    data object CursorStalled : ListingPageVerdict
+}
+
+/**
+ * Classify a page by its link ids and the cursor that fetched it.
+ *
+ * A short page is deliberately [Advance], not [Exhausted]: the photos timeline endpoint carries no
+ * More/AnchorID and can answer with fewer links than asked while more still follow, so treating a
+ * short page as the end is what truncated large libraries mid-listing.
+ */
+internal fun listingPageVerdict(
+    pageLinkIds: List<String>,
+    queriedCursor: String?,
+): ListingPageVerdict {
+    val nextCursor = pageLinkIds.lastOrNull() ?: return ListingPageVerdict.Exhausted
+    return if (nextCursor == queriedCursor) ListingPageVerdict.CursorStalled
+    else ListingPageVerdict.Advance(nextCursor)
+}
+
+/**
+ * The two answers one refresh pass gives about its own completeness. They are kept apart because
+ * they fail for different reasons and are trusted for different things.
+ */
+internal data class RefreshPassOutcome(
+    /**
+     * The listing walk reached its end during this pass — whether it started from the newest photo
+     * or resumed a saved cursor.
+     *
+     * Gates clearing the resume cursor (nothing is left to resume), running the sweep, and arming
+     * the event anchor. All three turn on which links the LISTING named. The sweep needs no more
+     * than this because the candidate set it consumes was materialised before the walk began and
+     * only ever shrinks by what the SERVER returned, so pagination ending is precisely the moment
+     * its remainder means "absent from the library", and nothing done to a row afterwards can
+     * change which links the listing named.
+     */
+    val paginationComplete: Boolean,
+    /**
+     * Additionally, every detail batch processed.
+     *
+     * Gates the stored complete flag, which promises the DB holds the whole library in full. A
+     * failed batch breaks that promise even though the listing itself was whole, since it left a
+     * region of rows as bare stubs.
+     */
+    val detailComplete: Boolean,
+)
+
+internal fun refreshPassOutcome(paginationComplete: Boolean, failedBatches: Int) = RefreshPassOutcome(
+    paginationComplete = paginationComplete,
+    detailComplete = paginationComplete && failedBatches == 0,
+)
 
 /**
  * Cloud photo stream: paginated full refresh + event-based incremental refresh +
@@ -170,6 +355,9 @@ class PhotoStreamService @Inject constructor(
     private val apiProvider: ApiProvider,
     private val cryptoHelper: DriveCryptoHelper,
     private val photoListingDao: PhotoListingDao,
+    private val listingSweepSnapshotDao: ListingSweepSnapshotDao,
+    private val cloudAlbumDao: CloudAlbumDao,
+    private val albumPhotoMembershipDao: AlbumPhotoMembershipDao,
     private val shareService: PhotosShareService,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val photoEntityBuilder: PhotoEntityBuilder,
@@ -177,11 +365,14 @@ class PhotoStreamService @Inject constructor(
     private val recentUploadsTracker: RecentUploadsTracker,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     @ApplicationContext private val context: Context,
+    @eu.akoos.photos.di.AppScope appScope: CoroutineScope,
 ) {
     private val semaphore get() = shareService.networkSemaphore
 
     /**
-     * Single-flight guard: cold-start fires up to three concurrent refreshes (SyncWorker
+     * Single-flight guard AND owner of the walk's lifetime.
+     *
+     * Single-flight, because cold-start fires up to three concurrent refreshes (SyncWorker
      * boot kick, MainActivity.onResume silent refresh, GalleryViewModel.doSync) and each
      * one previously ran the full crypto loop in parallel. With 315 photos × 3 callers ×
      * sequential per-photo decrypt, the system would queue ~945 Go OpenPGP calls within a
@@ -190,8 +381,18 @@ class PhotoStreamService @Inject constructor(
      * one in-flight refresh both eliminates the duplicate work AND keeps Go-runtime
      * concurrency well-bounded — the second / third caller just waits for the first to
      * finish and returns immediately (they get the same DB state anyway).
+     *
+     * Detached, because a walk of a large library outlasts every UI scope that starts one.
+     * Left in the caller's job it was cancelled by leaving Settings, leaving the Photos tab or
+     * backgrounding the Activity, so the listing never reached its end — and the stale-entry
+     * sweep, which only runs on a pass that reaches the end, therefore never ran at all.
+     * That is why deletions made elsewhere took so long to show up here.
+     *
+     * A consequence worth stating: a CancellationException seen anywhere inside the walk now
+     * means the walk itself was stopped (sign-out, or process teardown), never that a caller
+     * lost interest. The rethrows that carry it are load-bearing on that reading.
      */
-    private val refreshFullMutex = Mutex()
+    private val fullWalk = DetachedWalk(appScope)
     private val refreshIncrementalMutex = Mutex()
 
     /**
@@ -218,14 +419,20 @@ class PhotoStreamService @Inject constructor(
     }
 
     /**
-     * Set by [doRefreshCloudPhotos] to report whether the most recent full refresh saw the
-     * WHOLE listing through to a clean finish (listing paginated completely AND every
-     * processing batch upserted without error). The incremental fallback in
-     * [doRefreshCloudPhotosIncremental] consults it before persisting the initial event
-     * anchor: the events feed only delivers FUTURE changes, never a backfill, so storing the
-     * "caught up to now" anchor on top of a partially-populated DB would permanently strand
-     * the photos that a crashed/aborted batch never wrote. Leaving the anchor unsaved makes
-     * the next launch fall through to another full refresh, which retries the missing rows.
+     * Set by [doRefreshCloudPhotos] to report whether the most recent full refresh walked the
+     * listing all the way to the server's empty page.
+     *
+     * [doRefreshCloudPhotosIncremental] consults it before persisting the initial event anchor.
+     * What that anchor claims is that the local SET of photos matches the server's as of a point in
+     * time, and set membership is decided by the listing pages alone — so pagination reaching the
+     * end is the whole precondition. A failed detail batch is deliberately NOT part of it: it
+     * leaves the row present under the right linkId with only its detail columns unfilled, and the
+     * events feed treats such a stub exactly as it treats a photo with no row at all (a delete
+     * event removes it by id; an update event refetches detail from the server and replaces it).
+     * Requiring clean batches instead meant one failure among the hundreds a large library needs
+     * kept the anchor unarmed for good, so the incremental path never ran for the accounts it helps
+     * most. The stubs are healed by [backfillIncompleteRows] on the next full refresh, which every
+     * launch and every pull-to-refresh still performs regardless of the anchor.
      */
     @Volatile
     private var lastFullRefreshComplete: Boolean = false
@@ -258,7 +465,7 @@ class PhotoStreamService @Inject constructor(
     private val fallbackFullRefreshCooldownMs: Long = 5L * 60_000L
     private val completedListingPollCooldownMs: Long = 2L * 60L * 60_000L
     // Coalesce window for full refreshes: launch, resume, tab-switch and the incremental fallback can
-    // pile several onto refreshFullMutex, which then drains them one whole library walk at a time —
+    // pile several onto the walk, which then drains them one whole library walk at a time —
     // minutes of needless re-listing + re-decrypt. A non-forced refresh that finds one already
     // completed this recently just returns; explicit user actions (pull-to-refresh, Sync now) pass
     // force = true so they always fetch.
@@ -276,6 +483,9 @@ class PhotoStreamService @Inject constructor(
     /** Mark [linkIds] as just-trashed so the next refresh keeps them out (see [isRecentlyTrashed]). */
     fun markRecentlyTrashed(linkIds: Collection<String>) {
         val now = System.currentTimeMillis()
+        // Sweep entries past the protection window while marking, so a large trash with no later
+        // isRecentlyTrashed lookups does not keep them in the map until the next reset().
+        recentlyTrashed.entries.removeAll { now - it.value > TRASH_PROTECTION_WINDOW_MS }
         linkIds.forEach { recentlyTrashed[it] = now }
     }
 
@@ -297,9 +507,26 @@ class PhotoStreamService @Inject constructor(
         return true
     }
 
+    /**
+     * LinkIds of every album this device has cached, which is how a row is recognised as living
+     * only inside an album rather than in the user's photo stream. Read once per pass, since a
+     * photo's parent is either the photos root (a stream photo) or an album.
+     *
+     * An empty answer degrades in one direction only: a contributed photo stays a timeline row
+     * until the album list is cached, which is cosmetic. Guessing the other way would hide the
+     * user's own photos.
+     */
+    private suspend fun cachedAlbumLinkIds(): Set<String> =
+        runCatching { cloudAlbumDao.getAllLinkIds().toSet() }
+            .getOrElse {
+                Log.w(TAG, "cached album ids unavailable this pass: ${it.message}")
+                emptySet()
+            }
+
     fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>> =
-        // observeOwnStreamLite, not observeAll: rows loaded from shared-with-me albums sit in the
-        // same table and must not surface in the user's own timeline.
+        // observeOwnStreamLite, not observeAll: rows that live only inside an album sit in the same
+        // table, whether the album was shared with this user or a guest contributed into one of
+        // theirs, and neither kind belongs in the user's own timeline.
         // The LITE projection selects only the display columns — NOT the per-row crypto material
         // (encNodeKey / contentKeyPacket / encNodePassphrase / encXAttr, kilobytes each). A
         // thumbnail-decrypt burst re-emits the whole listing on every DB write; selecting the crypto
@@ -319,19 +546,49 @@ class PhotoStreamService @Inject constructor(
             }
             .flowOn(Dispatchers.Default)
 
+    /** Chunked at the one layer every caller (album detail, album download, hidden album) shares, so
+     *  an album larger than SQLite's host-variable cap resolves instead of failing the statement. The
+     *  comparator restates observeByLinkIds' own ORDER BY: a merged read is otherwise chunk-major. */
     fun observePhotosByLinkIds(linkIds: List<String>): Flow<List<CloudPhoto>> =
-        photoListingDao.observeByLinkIds(linkIds).map { list -> list.map { it.toDomain() } }
+        linkIds.combineSqlChunks(compareByDescending<PhotoListingEntity> { it.captureTime }) { chunk ->
+            photoListingDao.observeByLinkIds(chunk)
+        }.map { list -> list.map { it.toDomain() } }
 
-    suspend fun refreshCloudPhotos(userId: UserId, force: Boolean = false): Unit = withContext(Dispatchers.IO) {
-        refreshFullMutex.withLock {
-            val sinceLast = System.currentTimeMillis() - lastFullRefreshCompletedMs.get()
-            if (!force && lastFullRefreshCompletedMs.get() > 0L && sinceLast < minFullRefreshIntervalMs) {
-                Log.d(TAG, "refreshCloudPhotos: coalesced — a full refresh completed ${sinceLast}ms ago")
-                return@withLock
-            }
-            doRefreshCloudPhotos(userId, force)
-            lastFullRefreshCompletedMs.set(System.currentTimeMillis())
+    suspend fun refreshCloudPhotos(userId: UserId, force: Boolean = false) {
+        val sinceLast = System.currentTimeMillis() - lastFullRefreshCompletedMs.get()
+        if (!force && lastFullRefreshCompletedMs.get() > 0L && sinceLast < minFullRefreshIntervalMs) {
+            Log.d(TAG, "refreshCloudPhotos: coalesced — a full refresh completed ${sinceLast}ms ago")
+            return
         }
+        // The walk runs on the app scope; only this await belongs to the caller. Whatever the walk
+        // throws surfaces here, which is what lets the free-up sweep refuse to run on a refresh it
+        // could not complete.
+        fullWalk.run(userId, force) { passForced ->
+            withContext(Dispatchers.IO) {
+                doRefreshCloudPhotos(userId, passForced)
+                lastFullRefreshCompletedMs.set(System.currentTimeMillis())
+            }
+        }
+    }
+
+    /**
+     * Stops the detached full walk for [userId] and waits for it to unwind.
+     *
+     * Called from the converged sign-out teardown before that account's rows and key material are
+     * wiped: a walk that outlives the UI must not outlive the account it belongs to, or it would
+     * re-populate the very table the wipe just emptied, using keys that are no longer there.
+     */
+    suspend fun cancelRefreshFor(userId: UserId) {
+        fullWalk.cancelFor(userId)
+        // Singleton state that would otherwise be inherited by whoever signs in next: a stale
+        // completion stamp would coalesce away their first refresh, a stale "fully listed" would
+        // put their backfill on the two-hour poll floor instead of the five-minute one, and gentle
+        // pacing would persist with no first screen to pace for.
+        lastFullRefreshCompletedMs.set(0L)
+        lastFallbackFullRefreshMs.set(0L)
+        lastFullRefreshComplete = false
+        gentleSyncActive = false
+        recentlyTrashed.clear()
     }
 
     /**
@@ -421,15 +678,40 @@ class PhotoStreamService @Inject constructor(
             // up front so a crash/abort midway correctly leaves the listing marked incomplete.
             context.settingsDataStore.edit { it[completeKey] = false }
 
+            // The sweep's candidate set is materialised HERE — before the first page is asked for,
+            // and ONLY on a pass that starts fresh. That timing is the whole safety argument: every
+            // later step removes from this set and none adds to it, so what survives to the end of
+            // pagination is a subset of what the library held before the walk began, and a photo
+            // another client uploads while the walk runs can never be in it. A resumed pass must
+            // therefore never refill it, or it would re-offer the very rows the earlier pages of the
+            // same walk already accounted for, and those pages are not fetched again.
+            //
+            // A failure leaves nothing behind rather than the previous pass's generation: an empty
+            // set can only under-delete, while a stale one could name a row that has since stopped
+            // being a candidate at all (it moved into an album, say) and delete it.
+            if (startedFresh) {
+                runCatching {
+                    val candidates = photoListingDao.getSweepCandidateLinkIds(userId.id, activeVolumeId)
+                    listingSweepSnapshotDao.replaceGeneration(userId.id, activeVolumeId, candidates)
+                }.onFailure { e ->
+                    Log.w(TAG, "refreshCloudPhotos: sweep snapshot failed, this pass prunes nothing: ${e.message}")
+                    runCatching { listingSweepSnapshotDao.clearGeneration(userId.id, activeVolumeId) }
+                }
+            }
+
             // 2. Paginated photo stream — matches the official Drive SDK: the photos timeline
             // endpoint takes no Limit/PageSize param. Pass the last LinkID as PreviousPageLastLinkID
             // and walk until the server returns an empty page.
             val streamLinks = mutableListOf<PhotoLinkDto>()
-            // Track whether the stream API responded without throwing (even if it returned 0 photos).
-            // Used below to decide if it's safe to delete DB entries not found in this refresh.
-            var streamCallSucceeded = false
+            // Whether the walk reached the end of the listing during this pass. Set only after the
+            // loop below runs out of pages, so a walk that paused on a rate limit leaves it false.
+            var paginationComplete = false
             try {
                 var lastLinkId: String? = resumeCursor
+                // Raised only where the server answered with an empty page. A null lastLinkId is how
+                // the loop exits, but it is also how the stall exit bails out, so the two would be
+                // indistinguishable to anything reading the loop condition alone.
+                var reachedListingEnd = false
                 if (resumeCursor != null) {
                     Log.d(TAG, "refreshCloudPhotos: resuming stream listing from saved cursor")
                 }
@@ -469,34 +751,53 @@ class PhotoStreamService @Inject constructor(
                     consecutiveFailures = 0
                     val page = checkNotNull(fetched)
                     streamLinks.addAll(page.links)
+                    // Account for this page against the sweep set from the LISTING, the one step that
+                    // knows what the server still holds. Per-row processing further down only adds
+                    // detail to a row, it never learns that a photo is gone, so a detail batch that
+                    // fails must not be able to turn a present photo into a missing one.
+                    //
+                    // Deliberately unguarded: a write that fails here would leave a still-present
+                    // photo in the set and let the sweep delete it, so the throw must reach the
+                    // catch below, which leaves this pass incomplete and the cursor pointing at the
+                    // page before this one. The retry re-applies the same removals, which is a no-op
+                    // for any this page already made.
+                    val pageLinkIds = page.links.map { it.linkId }
+                    pageLinkIds.forEachSqlChunk {
+                        listingSweepSnapshotDao.deleteListed(userId.id, activeVolumeId, it)
+                    }
                     eu.akoos.photos.util.SyncDiagnostics.log("listing page: +${page.links.size} (total ${streamLinks.size})")
-                    // Stop ONLY on an empty page, never on a merely-short one. The Proton photos
-                    // timeline endpoint can return a page with fewer than the requested limit while
-                    // more photos still follow — it carries no More/AnchorID, so pagination is purely
-                    // "give me what's after this LinkID". Treating any short page as the end truncated
-                    // large libraries mid-listing and dropped every older photo after the short page
-                    // (the root cause of the "timeline only goes back a few years" reports). The
-                    // official Drive SDK paginates the same way: keep walking while a page returns any
-                    // photos, stop when one comes back empty.
-                    val nextCursor = if (page.links.isNotEmpty()) page.links.last().linkId else null
-                    if (nextCursor != null && nextCursor == lastLinkId) {
-                        // Defensive: a backend that returns a page ending on the same cursor we just
-                        // queried would otherwise loop forever. Stop rather than hammer the API.
-                        Log.w(TAG, "refreshCloudPhotos: cursor did not advance ($nextCursor), stopping the walk")
-                        lastLinkId = null
-                    } else if (nextCursor != null) {
-                        // Persist the cursor before fetching the next page so a crash, process
-                        // kill, or thrown page resumes from here rather than the newest photo.
-                        context.settingsDataStore.edit { it[cursorKey] = nextCursor }
-                        lastLinkId = nextCursor
-                        delay(LISTING_PAGE_DELAY_MS)
-                    } else {
-                        lastLinkId = null
+                    when (val verdict = listingPageVerdict(pageLinkIds, lastLinkId)) {
+                        is ListingPageVerdict.Advance -> {
+                            // Persist the cursor before fetching the next page so a crash, process
+                            // kill, or thrown page resumes from here rather than the newest photo.
+                            context.settingsDataStore.edit { it[cursorKey] = verdict.nextCursor }
+                            lastLinkId = verdict.nextCursor
+                            delay(LISTING_PAGE_DELAY_MS)
+                        }
+                        ListingPageVerdict.Exhausted -> {
+                            reachedListingEnd = true
+                            lastLinkId = null
+                        }
+                        ListingPageVerdict.CursorStalled -> {
+                            // Stop rather than hammer the API, but leave the walk uncredited: the
+                            // photos after this page were never listed, and the saved cursor still
+                            // points here so a later pass retries the same page.
+                            Log.w(TAG, "refreshCloudPhotos: cursor did not advance ($lastLinkId), stopping the walk short of the end")
+                            lastLinkId = null
+                        }
                     }
                 } while (lastLinkId != null)
-                streamCallSucceeded = true
-                eu.akoos.photos.util.SyncDiagnostics.log("listing done: ${streamLinks.size} links")
-                Log.d(TAG, "refreshCloudPhotos: stream walk reached the end, ${streamLinks.size} photos this pass")
+                // Credited by the natural end alone. Every other way out of this loop — the stall
+                // above, or any throw into the catch below — stopped somewhere the server never
+                // said was the end, and the sweep would read that silence as "these are deleted".
+                paginationComplete = reachedListingEnd
+                if (reachedListingEnd) {
+                    eu.akoos.photos.util.SyncDiagnostics.log("listing done: ${streamLinks.size} links")
+                    Log.d(TAG, "refreshCloudPhotos: stream walk reached the end, ${streamLinks.size} photos this pass")
+                } else {
+                    eu.akoos.photos.util.SyncDiagnostics.log("listing STALLED at ${streamLinks.size} links")
+                    Log.w(TAG, "refreshCloudPhotos: stream stopped without reaching the end, ${streamLinks.size} photos this pass")
+                }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 // The cursor saved per page above stays pointing at the last good page, so the
@@ -505,26 +806,67 @@ class PhotoStreamService @Inject constructor(
                 Log.w(TAG, "refreshCloudPhotos: stream paused at saved cursor (${e.javaClass.simpleName}: ${e.message})")
             }
 
-            // Prune photos deleted elsewhere RIGHT AFTER the listing completes, not after the (much
-            // slower, ~30s) per-batch detail/crypto processing below. On a fresh top-to-bottom walk the
-            // listing (streamLinks) is already the complete server set, so it's a safe found-set — the
-            // per-row processing only ADDS/updates rows, it never decides what's gone. This makes a
-            // deletion made on Drive disappear within ~1s of a pull-to-refresh instead of ~30s later.
-            // The slower foundIds-based cleanup at the end stays as a no-op safety net.
-            if (startedFresh && streamCallSucceeded) {
-                val listedIds = streamLinks.mapTo(HashSet()) { it.linkId }
+            // The one sweep site. It runs the moment pagination ends, rather than after the much
+            // slower (~30s) per-batch detail/crypto processing below, so a photo deleted on Drive
+            // disappears within about a second of a pull-to-refresh.
+            //
+            // Pagination ending is the only condition, because the set being consumed answers the
+            // question on its own: it was read before this walk's first page, it has since lost
+            // every link any page of the walk returned, and nothing has been added to it. What is
+            // left is exactly the candidates the server stopped listing. Whether this pass started
+            // fresh or resumed does not enter into it — a walk spread over several passes accounts
+            // for its pages across all of them and the remainder is the same set either way, which
+            // is what lets a library too large to list in one pass ever prune at all.
+            if (paginationComplete) {
                 val recentUploads = recentUploadsTracker.snapshotWithinMs(UPLOAD_PROTECTION_WINDOW_MS)
-                val existingIds = photoListingDao.getAllLinkIds(userId.id).toSet()
-                val toDelete = (existingIds - listedIds - recentUploads).toList()
-                    .let { ids ->
-                        if (eu.akoos.photos.BuildConfig.DEBUG)
-                            ids.filterNot { it.startsWith(LargeLibrarySim.LINK_ID_PREFIX) } else ids
+                // What a completed walk left unaccounted for: rows the server stopped listing. Those
+                // photos are gone from Drive, so their local rows are stale and are removed here. The
+                // one row that must survive is one still mid-upload from this device, whose cloud copy
+                // exists but a page may not list it yet, which is what the recent-uploads window
+                // protects. A stub (detail not fetched) is NOT protected: a photo the server no longer
+                // lists is not on Drive, so the dedup reason to hold its contentHash does not apply to
+                // it, and a photo deleted elsewhere must leave whether or not its detail ever loaded
+                // here.
+                // Guarded: if the set read fails (e.g. a CursorWindow hiccup from a concurrent delete),
+                // skip the sweep this pass rather than sweep against a half-read set.
+                val unaccountedFor = runCatching { listingSweepSnapshotDao.getGeneration(userId.id, activeVolumeId) }
+                    .getOrElse {
+                        Log.w(TAG, "refreshCloudPhotos: sweep set read failed, skipping stale-entry cleanup this pass: ${it.message}")
+                        // Redacted for the diagnostics buffer: a SQLite failure message commonly
+                        // quotes the statement and its bound arguments, which here are the user id
+                        // and the volume id.
+                        eu.akoos.photos.util.SyncDiagnostics.log(
+                            "sweep skipped: candidate set read failed " +
+                                "(${it.javaClass.simpleName}: ${eu.akoos.photos.util.sanitizeErrorMessage(it.message)})"
+                        )
+                        null
                     }
-                if (toDelete.isNotEmpty()) {
-                    // Chunk to stay under SQLite's bound-variable limit on a big server-side deletion.
-                    toDelete.chunked(500).forEach { photoListingDao.deleteByLinkIds(it) }
-                    recentUploadsTracker.forget(toDelete)
-                    Log.d(TAG, "refreshCloudPhotos: removed ${toDelete.size} stale entries (early, post-listing)")
+                if (unaccountedFor != null) {
+                    val toDelete = removableListingIds(unaccountedFor, recentUploads)
+                        // The debug large-library simulator's synthetic rows aren't in the server
+                        // listing, so a refresh must not prune them out from under an active test.
+                        .let { ids ->
+                            if (eu.akoos.photos.BuildConfig.DEBUG)
+                                ids.filterNot { it.startsWith(LargeLibrarySim.LINK_ID_PREFIX) } else ids
+                        }
+                    if (toDelete.isNotEmpty()) {
+                        // Chunk to stay under SQLite's bound-variable limit on a big server-side deletion.
+                        toDelete.forEachSqlChunk { photoListingDao.deleteByLinkIds(userId.id, it) }
+                        // Forget them in the tracker too: they're confirmed gone from server, so
+                        // they should never be "protected" again on a subsequent refresh.
+                        recentUploadsTracker.forget(toDelete)
+                        Log.d(TAG, "refreshCloudPhotos: removed ${toDelete.size} stale entries " +
+                            "(protected ${recentUploads.size} recent uploads within ${UPLOAD_PROTECTION_WINDOW_MS}ms window)")
+                    }
+                    // Surfaced in the shared diagnostics (not just logcat) so a tester's dump shows
+                    // whether the sweep ran and what it accounted for.
+                    eu.akoos.photos.util.SyncDiagnostics.log(
+                        "sweep: ${unaccountedFor.size} server-absent, removed ${toDelete.size}, " +
+                            "kept ${recentUploads.size} recent upload(s)"
+                    )
+                    // The generation has answered the one question it existed for; the next fresh
+                    // pass reads its own.
+                    runCatching { listingSweepSnapshotDao.clearGeneration(userId.id, activeVolumeId) }
                 }
             }
 
@@ -554,7 +896,7 @@ class PhotoStreamService @Inject constructor(
             // below later fails. INSERT OR IGNORE never clobbers a fully-built row from a prior run;
             // the per-chunk upsert in the detail loop then REPLACES each stub with the full row.
             // Chunked so the gallery Flow isn't churned by one huge insert.
-            if (streamCallSucceeded && allPhotoLinks.isNotEmpty()) {
+            if (paginationComplete && allPhotoLinks.isNotEmpty()) {
                 val stubRows = allPhotoLinks.map { link ->
                     eu.akoos.photos.data.db.entity.PhotoListingEntity(
                         linkId = link.linkId,
@@ -577,19 +919,16 @@ class PhotoStreamService @Inject constructor(
 
             val rootLinkId = shareService.photosRootLinkId()
             val ownPublicKeys = cryptoHelper.getOwnPublicKeysArmored(userId)
+            val albumLinkIds = cachedAlbumLinkIds()
 
             // Parent keys decrypted across ALL batches, used once after the loop to seed the
             // lazy thumbnail scheduler. Keyed material only (linkId → key bytes) — small and
             // de-duplicated, so accumulating it for the whole library is not a heap concern.
             val accumulatedParentKeys = mutableMapOf<String, ByteArray>()
-            // LinkIds successfully observed in the stream listing — collected as plain strings
-            // (cheap) so the post-loop stale-entry cleanup can compute what to delete without
-            // holding any heavy per-link state.
-            val foundIds = mutableSetOf<String>()
-            // Batches that threw partway: one bad batch is logged and skipped so the rest of
-            // the refresh still lands, but its presence suppresses the stale-entry cleanup and
-            // the incremental-anchor save (an incomplete picture must not prune valid rows or
-            // declare the library caught-up).
+            // Batches that threw partway: one bad batch is logged and skipped so the rest of the
+            // refresh still lands. It leaves a region of rows as bare stubs, so it suppresses the
+            // stored complete flag — but neither the sweep nor the event anchor, both of which turn
+            // on membership, which the listing alone already settled.
             var failedBatches = 0
             // Running tally of detail rows whose batch completed, for the diagnostics buffer only.
             var processed = 0
@@ -761,13 +1100,44 @@ class PhotoStreamService @Inject constructor(
                                 // and the cloud tile stays blank until a row rebuild.
                                 val staleThumb = cached.thumbnailUrl != null &&
                                     !thumbnailHelpers.isCachedValid(cached.thumbnailUrl)
-                                if (stubTagsCsv != cachedTagsCsv || staleThumb) {
+                                // Same class of miss as the tags above: a rename made on another
+                                // client reaches this batch's link details and the fast path drops
+                                // it, so the old caption sticks for good. The encrypted name is
+                                // already in hand and so is the key that opens it, but decrypting
+                                // every cached row here is exactly the JNI pressure this path
+                                // exists to avoid, so compare digests of the ciphertext and only
+                                // spend a decrypt on a row whose name actually moved.
+                                val cachedDetail = linkDetailMap[stub.linkId]
+                                val freshEncName = cachedDetail?.link?.name
+                                val nameRefresh = resolveNameRefresh(
+                                    storedFingerprint = cached.nameFingerprint,
+                                    freshFingerprint = nameFingerprint(freshEncName),
+                                ) {
+                                    // Reaching here is a real Go-crypto call on a chunk that would
+                                    // otherwise report none, so it has to count towards the pacing
+                                    // below. The pass that follows adding the digest column has
+                                    // every row unanswered at once, and an unpaced burst of those
+                                    // is the shape that panics libgojni.
+                                    chunkDidCryptoWork = true
+                                    val nameKey = parentKeyCache[cachedDetail?.link?.parentLinkId]
+                                        ?: rootLinkKeyBytes
+                                    if (freshEncName == null || nameKey == null) null else try {
+                                        cryptoHelper.decryptAndVerifyData(freshEncName, nameKey, ownPublicKeys)
+                                            ?.let { String(it.data, Charsets.UTF_8) }
+                                    } catch (e: Exception) {
+                                        if (e is kotlinx.coroutines.CancellationException) throw e
+                                        Log.w(TAG, "refreshCloudPhotos: name decrypt failed for ${stub.linkId}: ${e.message}")
+                                        null
+                                    }
+                                }
+                                if (stubTagsCsv != cachedTagsCsv || staleThumb || nameRefresh != null) {
                                     batchToSave += cached.copy(
                                         tagsCsv = if (stubTagsCsv != cachedTagsCsv) stubTagsCsv else cached.tagsCsv,
                                         thumbnailUrl = if (staleThumb) null else cached.thumbnailUrl,
+                                        displayName = nameRefresh?.displayName ?: cached.displayName,
+                                        nameFingerprint = nameRefresh?.fingerprint ?: cached.nameFingerprint,
                                     )
                                 }
-                                foundIds += stub.linkId
                                 continue
                             }
                             // Cache miss: the build() below runs the Go-crypto path.
@@ -785,6 +1155,8 @@ class PhotoStreamService @Inject constructor(
                                 stub, detail, userId, effectiveShareId, activeVolumeId, parentKeyBytes,
                                 thumbnailCacheDir, thumbnailInfo, ckpMap[stub.linkId], ownPublicKeys,
                                 decryptThumbnail = false,
+                                albumLinkIds = albumLinkIds,
+                                photosRootLinkId = shareService.photosRootLinkId(),
                             )
                             // Preserve a previously-cached thumbnail URL when the new build came
                             // back without one (e.g. v2/volumes uploads have no server-side
@@ -806,11 +1178,9 @@ class PhotoStreamService @Inject constructor(
                             // returning a trashed photo for up to ~a minute (eventual consistency);
                             // without this guard the refresh re-adds the row we already removed on
                             // delete, flashing the green-cloud badge back on until a later refresh
-                            // finally sees it gone. Treating it as "not found" also lets the
-                            // stale-entry cleanup drop any lingering row immediately.
+                            // finally sees it gone.
                             if (!isRecentlyTrashed(stub.linkId)) {
                                 batchToSave += merged
-                                foundIds += stub.linkId
                             }
                         }
                         // Pace only when this chunk actually did Go-crypto work; a pure cache-hit
@@ -870,7 +1240,7 @@ class PhotoStreamService @Inject constructor(
             try {
                 backfillIncompleteRows(
                     userId, activeVolumeId, effectiveShareId, rootLinkId, rootLinkKeyBytes,
-                    ownPublicKeys, thumbnailCacheDir, accumulatedParentKeys, foundIds,
+                    ownPublicKeys, thumbnailCacheDir, accumulatedParentKeys, albumLinkIds,
                 )
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -884,95 +1254,30 @@ class PhotoStreamService @Inject constructor(
             // few cryptoLock-serialized JNI calls.
             thumbnailDecryptScheduler.populateParentKeys(accumulatedParentKeys)
 
-            // Stale-entry cleanup: remove DB rows the fresh listing no longer contains.
-            //
-            // Deletion policy:
-            //   • Only delete entries that (a) aren't in the current found set AND
-            //     (b) aren't a VERY recent upload (within UPLOAD_PROTECTION_WINDOW_MS).
-            //   • Skip deletion entirely when the photo stream was unavailable (404 / network
-            //     error) OR any processing batch failed: in those cases we only have a PARTIAL
-            //     picture of what's on the server, so deleting would incorrectly remove valid
-            //     rows — including stream-only photos uploaded in previous sessions.
-            //
-            // Why the protection window is TIGHT (≈90s, not the full 1h TTL): the only legitimate
-            // "don't delete despite missing from stream" case is the narrow race where an upload
-            // committed but the server-side photo stream index hasn't caught up yet (usually
-            // seconds, never minutes). Using the full TTL meant photos deleted on Drive web kept
-            // showing as SYNCED with green cloud icons because their linkIds were still in the
-            // 1h-wide protection set. The persistent TTL is for crash/restart resilience (so a
-            // process kill between upload and refresh can't drop a fresh upload); the in-refresh
-            // protection only needs to span the upload→stream visibility race, which is orders of
-            // magnitude shorter.
-            // Completion is gated strictly: the listing is COMPLETE only when THIS pass started
-            // fresh from the newest photo, paginated all the way to the final short page, AND had
-            // zero failed detail batches. A resumed-tail pass (it only saw the older tail) or any
-            // pass with a 429-truncated page or detail batch leaves the listing INCOMPLETE, so the
-            // next run walks fresh and re-fetches the missing region once the limit clears.
-            val listingComplete = startedFresh && streamCallSucceeded && failedBatches == 0
+            val outcome = refreshPassOutcome(paginationComplete, failedBatches)
             // Pagination reaching the end is enough to clear the resume cursor (nothing left to
             // resume) and to open the sticky upload-dedup gate — every streamed link already has a
             // stub row in the dedup index, so a pass with a failed detail batch still can't cause a
             // re-upload (the backfill fills the row, the next fresh walk completes it).
-            if (streamCallSucceeded) {
+            if (outcome.paginationComplete) {
                 context.settingsDataStore.edit {
-                    // Strict: only a clean fresh full walk marks the listing complete, so the
-                    // fresh-vs-resume decision and the prune downstream never act on a truncated set.
-                    it[completeKey] = listingComplete
+                    // The stored flag promises the DB holds the whole library, which a failed detail
+                    // batch breaks, so this one keeps the batch condition. Left false, the next pass
+                    // finds no cursor either and walks fresh, re-fetching the gap.
+                    it[completeKey] = outcome.detailComplete
                     // Sticky "listed at least once" marker — keyed on pagination success (not
                     // failedBatches) so a transient 429 on a detail batch can't strand the upload on
                     // "Preparing backup"; never cleared at a later walk start (only on sign-out).
                     it[everCompleteKey] = true
                     it.remove(cursorKey)
                 }
-            }
-
-            // Stale-entry cleanup needs a COMPLETE picture of the server's photos, so it only runs
-            // after a FRESH top-to-bottom walk that finished with no failed batches — the exact same
-            // condition that marks the listing complete above. A resumed walk only saw the older tail
-            // this pass, so its found-set would wrongly treat the newer rows (listed in an earlier
-            // run) as gone and delete them.
-            val safeToPrune = listingComplete
-            if (safeToPrune) {
-                // Whole picture in hand → safe to clean up stale entries. Use the tight
-                // protection window (see comment above) rather than the full TTL.
-                val recentUploads = recentUploadsTracker.snapshotWithinMs(UPLOAD_PROTECTION_WINDOW_MS)
-                val existingIds = photoListingDao.getAllLinkIds(userId.id).toSet()
-                // Stub rows (detail not fetched yet) carry a valid contentHash but are absent from
-                // foundIds when their detail batch failed transiently. Exclude them so a rate-limit
-                // can't make the prune delete the very dedup rows the stub upsert just added.
-                // Guarded: if this read ever fails (e.g. a CursorWindow hiccup from a concurrent
-                // delete), skip the prune this pass rather than pruning with an empty stub set.
-                val stubIds = runCatching { photoListingDao.getIncompleteRowLinkIds(userId.id).toSet() }
-                    .getOrElse {
-                        Log.w(TAG, "refreshCloudPhotos: incomplete-rows read failed, skipping stale-entry cleanup this pass: ${it.message}")
-                        null
-                    }
-                if (stubIds != null) {
-                    val toDelete = (existingIds - foundIds - recentUploads - stubIds).toList()
-                        // The debug large-library simulator's synthetic rows aren't in the server
-                        // listing, so a refresh must not prune them out from under an active test.
-                        .let { ids ->
-                            if (eu.akoos.photos.BuildConfig.DEBUG)
-                                ids.filterNot { it.startsWith(LargeLibrarySim.LINK_ID_PREFIX) } else ids
-                        }
-                    if (toDelete.isNotEmpty()) {
-                        // Chunk to stay under SQLite's bound-variable limit on a big server-side deletion.
-                        toDelete.chunked(500).forEach { photoListingDao.deleteByLinkIds(it) }
-                        // Forget them in the tracker too: they're confirmed gone from server, so
-                        // they should never be "protected" again on a subsequent refresh.
-                        recentUploadsTracker.forget(toDelete)
-                        Log.d(TAG, "refreshCloudPhotos: removed ${toDelete.size} stale entries " +
-                            "(protected ${recentUploads.size} recent uploads within ${UPLOAD_PROTECTION_WINDOW_MS}ms window)")
-                    }
-                    Log.d(TAG, "refreshCloudPhotos: saved ${foundIds.size} photos")
-                }
             } else {
-                Log.d(TAG, "refreshCloudPhotos: partial/resumed pass (fresh=$startedFresh, streamOk=$streamCallSucceeded, failedBatches=$failedBatches) — upserted ${foundIds.size} photos, skipping stale-entry cleanup to avoid data loss")
+                Log.d(TAG, "refreshCloudPhotos: pass ended mid-listing (fresh=$startedFresh, failedBatches=$failedBatches) — cursor kept, sweep deferred to whichever pass reaches the end")
             }
-            // Report completeness so the incremental fallback knows whether the event anchor
-            // may be persisted (see [lastFullRefreshComplete]). Only true after a clean fresh full
-            // walk: the pass started fresh, listed to the end, AND every batch processed cleanly.
-            lastFullRefreshComplete = listingComplete
+            // Report completeness so the incremental fallback knows whether the event anchor may be
+            // persisted (see [lastFullRefreshComplete]). Membership is what the anchor speaks for and
+            // the listing is what settles membership, so this tracks pagination, not the batches.
+            lastFullRefreshComplete = outcome.paginationComplete
         } catch (e: DriveNotFoundException) {
             Log.w(TAG, "refreshCloudPhotos: DriveNotFoundException: ${e.message}")
         } catch (e: Exception) {
@@ -994,8 +1299,7 @@ class PhotoStreamService @Inject constructor(
      * as bare stubs because their detail batch failed. ONE bounded pass over [getIncompleteRowsLite]
      * only — never a re-walk of the whole listing — and it just upserts the completed rows, so a
      * photo that stays undecryptable is left as a stub (still dedup-safe via its content hash) and
-     * not retried in a loop. Mirrors the per-photo build in [doRefreshCloudPhotos]; every completed
-     * linkId is added to [foundIds] so the caller's stale-entry prune doesn't treat it as gone.
+     * not retried in a loop. Mirrors the per-photo build in [doRefreshCloudPhotos].
      */
     private suspend fun backfillIncompleteRows(
         userId: UserId,
@@ -1006,7 +1310,7 @@ class PhotoStreamService @Inject constructor(
         ownPublicKeys: List<String>,
         thumbnailCacheDir: File,
         accumulatedParentKeys: MutableMap<String, ByteArray>,
-        foundIds: MutableSet<String>,
+        albumLinkIds: Set<String>,
     ) {
         val incomplete = runCatching { photoListingDao.getIncompleteRowsLite(userId.id) }
             .getOrElse {
@@ -1088,8 +1392,9 @@ class PhotoStreamService @Inject constructor(
                         stub, detail, userId, effectiveShareId, activeVolumeId, parentKeyBytes,
                         thumbnailCacheDir, thumbnailInfo, ckpMap[row.linkId], ownPublicKeys,
                         decryptThumbnail = false,
+                        albumLinkIds = albumLinkIds,
+                        photosRootLinkId = shareService.photosRootLinkId(),
                     )
-                    foundIds += row.linkId
                 }
             }
             if (toSave.isNotEmpty()) {
@@ -1180,6 +1485,7 @@ class PhotoStreamService @Inject constructor(
 
             val ckpMap = linkDetailHelpers.batchFetchContentKeyPackets(userId, effectiveShareId, newLinkIds)
 
+            val albumLinkIds = cachedAlbumLinkIds()
             val toSave = mutableListOf<eu.akoos.photos.data.db.entity.PhotoListingEntity>()
             for (stub in newStubs) {
                 val detail = linkDetailMap[stub.linkId]
@@ -1190,6 +1496,8 @@ class PhotoStreamService @Inject constructor(
                     stub, detail, userId, effectiveShareId, activeVolumeId, parentKeyBytes,
                     thumbnailCacheDir, thumbnailInfo, ckpMap[stub.linkId], ownPublicKeys,
                     decryptThumbnail = false,
+                    albumLinkIds = albumLinkIds,
+                    photosRootLinkId = shareService.photosRootLinkId(),
                 )
             }
             if (toSave.isEmpty()) return
@@ -1215,10 +1523,28 @@ class PhotoStreamService @Inject constructor(
         refreshIncrementalMutex.withLock { doRefreshCloudPhotosIncremental(userId) }
     }
 
+    /**
+     * Drops a stored event anchor. A failure to write is logged rather than raised, so clearing
+     * never takes down the error path that asked for it, but cancellation propagates: a cancelled
+     * scope must not swallow the signal and carry on into a full refresh.
+     */
+    private suspend fun clearEventAnchor(key: Preferences.Key<String>) {
+        try {
+            context.settingsDataStore.edit { it.remove(key) }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.w(TAG, "incremental: event anchor clear failed: ${e.message}")
+        }
+    }
+
     private suspend fun doRefreshCloudPhotosIncremental(userId: UserId) {
+        // Held outside the try so the catch can still reach the anchor it needs to clear: the key is
+        // derived from a volume lookup that is itself inside the try and can throw.
+        var resettableAnchorKey: Preferences.Key<String>? = null
         try {
             val volumeId = shareService.getVolumeId(userId)
             val anchorKey = SettingsKeys.eventAnchorKey(userId.id, volumeId)
+            resettableAnchorKey = anchorKey
             val prefs = context.settingsDataStore.data.first()
             val storedAnchor: String? = prefs[anchorKey]
 
@@ -1281,7 +1607,20 @@ class PhotoStreamService @Inject constructor(
                     Log.d(TAG, "incremental: initial anchor saved ${latestAnchor.eventId}")
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
-                    Log.w(TAG, "incremental: could not get event anchor (${e.message}), will retry after cooldown")
+                    if (shouldResetEventAnchor(e)) {
+                        // The endpoint refused the anchor rather than failed to answer, so there is
+                        // nothing here worth keeping. Clearing covers the case where a concurrent
+                        // pass armed one between this branch's read and now: that value came from
+                        // the same call this one just proved unusable, and inheriting it would put
+                        // the next pass straight onto the doomed events walk. The full refresh
+                        // above already brought the library current, so nothing is lost by leaving
+                        // the feed unarmed until a later pass retries.
+                        val known = if (isKnownFatalEventAnchorCode(e)) "refused" else "unrecognised"
+                        clearEventAnchor(anchorKey)
+                        Log.w(TAG, "incremental: event anchor $known (${listingErrorDetail(e)}), cleared, staying on full refresh")
+                    } else {
+                        Log.w(TAG, "incremental: could not get event anchor (${e.message}), will retry after cooldown")
+                    }
                 }
                 return
             }
@@ -1302,7 +1641,7 @@ class PhotoStreamService @Inject constructor(
                 }
                 for (event in eventsResp.events) {
                     val linkId = event.link?.linkId ?: event.linkId ?: continue
-                    if (event.eventType == 0) {
+                    if (isStreamRemovalEvent(event.eventType, event.link?.state)) {
                         deleteLinkIds += linkId
                     } else {
                         upsertLinkIds += linkId
@@ -1313,13 +1652,43 @@ class PhotoStreamService @Inject constructor(
             }
 
             if (deleteLinkIds.isNotEmpty()) {
-                photoListingDao.deleteByLinkIds(deleteLinkIds)
+                // One event batch is however many deletes happened since the last pass, so the id
+                // list is unbounded and gets sliced under the per-statement host-variable cap.
+                deleteLinkIds.forEachSqlChunk { photoListingDao.deleteByLinkIds(userId.id, it) }
+                // The edges are a separate table and outlive the rows they name, so an album screen
+                // (which enumerates through them) would keep painting a photo that no longer
+                // exists. Logged rather than thrown: the photo rows are already gone, and losing
+                // the whole incremental pass over a stale edge is the worse trade.
+                try {
+                    deleteLinkIds.forEachSqlChunk { albumPhotoMembershipDao.deleteForPhotos(it) }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "incremental: album membership cleanup failed: ${e.message}")
+                }
                 Log.d(TAG, "incremental: deleted ${deleteLinkIds.size} links")
             }
 
             upsertLinkIds = upsertLinkIds.filter { it !in deleteLinkIds }.toMutableList()
             if (upsertLinkIds.isNotEmpty()) {
                 val linkDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, upsertLinkIds)
+
+                // A trash can reach the feed as an update whose event payload does not carry the new
+                // state, but the link endpoint always does. Any candidate the fetch reports trashed is
+                // removed like a delete rather than upserted, or the full listing (which already
+                // dropped it) and this feed would take turns removing and re-adding it.
+                val trashedNow = upsertLinkIds.filter { linkDetailMap[it]?.link?.state == LINK_STATE_TRASHED }
+                if (trashedNow.isNotEmpty()) {
+                    trashedNow.forEachSqlChunk { photoListingDao.deleteByLinkIds(userId.id, it) }
+                    try {
+                        trashedNow.forEachSqlChunk { albumPhotoMembershipDao.deleteForPhotos(it) }
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.w(TAG, "incremental: album membership cleanup failed for trashed: ${e.message}")
+                    }
+                    upsertLinkIds = upsertLinkIds.filterNot { it in trashedNow }.toMutableList()
+                    eu.akoos.photos.util.SyncDiagnostics.log("incremental: ${trashedNow.size} trashed elsewhere, removed locally")
+                    Log.d(TAG, "incremental: removed ${trashedNow.size} trashed links")
+                }
 
                 val rootLinkId = shareService.photosRootLinkId()
                 val parentKeyCache = mutableMapOf<String?, ByteArray?>()
@@ -1366,6 +1735,7 @@ class PhotoStreamService @Inject constructor(
 
                 val ckpMap = linkDetailHelpers.batchFetchContentKeyPackets(userId, shareId, upsertLinkIds)
                 val ownPublicKeys = cryptoHelper.getOwnPublicKeysArmored(userId)
+                val albumLinkIds = cachedAlbumLinkIds()
 
                 val entities = upsertLinkIds.mapNotNull { linkId ->
                     val detail = linkDetailMap[linkId] ?: return@mapNotNull null
@@ -1383,6 +1753,8 @@ class PhotoStreamService @Inject constructor(
                         stub, detail, userId, shareId, volumeId, parentKeyBytes,
                         thumbnailCacheDir, thumbnailInfo, ckpMap[linkId], ownPublicKeys,
                         decryptThumbnail = false,
+                        albumLinkIds = albumLinkIds,
+                        photosRootLinkId = shareService.photosRootLinkId(),
                     )
                 }
                 // Validate cached file:// URLs against the on-disk file too, not just the
@@ -1390,17 +1762,47 @@ class PhotoStreamService @Inject constructor(
                 // files don't, and preserving the stale URL would suppress the lazy-decrypt
                 // request in PhotoCell (it only fires for thumbnailUrl == null). See the
                 // longer comment in [doRefreshCloudPhotos] for the full story.
-                val existingThumbByLinkId = photoListingDao.getByLinkIds(entities.map { it.linkId })
-                    .associateBy({ it.linkId }, { it.thumbnailUrl })
+                // Chunked: one event batch is unbounded, and an oversized IN list fails the whole
+                // read, which would drop every carried thumbnail rather than just the excess.
+                val existingByLinkId = entities.map { it.linkId }
+                    .flatMapSqlChunks { photoListingDao.getByLinkIds(it) }
+                    .associateBy { it.linkId }
                 val entitiesToSave = entities.map { entity ->
-                    if (entity.thumbnailUrl == null) {
-                        val carry = existingThumbByLinkId[entity.linkId]
+                    val existing = existingByLinkId[entity.linkId]
+                    val carried = if (entity.thumbnailUrl == null) {
+                        val carry = existing?.thumbnailUrl
                             ?.takeIf { thumbnailHelpers.isCachedValid(it) }
                         entity.copy(thumbnailUrl = carry)
                     } else entity
+                    // A guard against an unproven path, not a fix for anything observed. A photo
+                    // inside an album another user shared has its parent and album flag pinned when
+                    // the album loads, because the server reports no parent for such a row and the
+                    // recipient holds no key for the owner's photos root. Those albums sit on a
+                    // foreign volume and this feed subscribes only to the user's own photos volume,
+                    // so an event for one most likely cannot arrive at all. If one ever did, the
+                    // server's raw values would clear the pin and land someone else's photo on this
+                    // user's timeline, so an existing pin outranks whatever the event carries.
+                    if (existing != null && existing.isChildOfAlbum && !carried.isChildOfAlbum) {
+                        carried.copy(isChildOfAlbum = true, parentLinkId = existing.parentLinkId)
+                    } else carried
                 }
                 photoListingDao.upsertAll(entitiesToSave)
                 Log.d(TAG, "incremental: upserted ${entities.size} photos")
+
+                // A photo that reaches this feed as an album child is one somebody contributed to a
+                // shared album, and the photo row alone leaves it invisible: the album screen's
+                // instant paint enumerates an album through the membership edges, so without an edge
+                // the contribution only appears after a full album load. IGNORE on conflict, so this
+                // adds the missing edge and never disturbs one the album load already wrote.
+                val newEdges = entitiesToSave.mapNotNull { entity ->
+                    entity.parentLinkId
+                        ?.takeIf { entity.isChildOfAlbum }
+                        ?.let { AlbumPhotoMembershipEntity(it, entity.linkId) }
+                }
+                if (newEdges.isNotEmpty()) {
+                    runCatching { albumPhotoMembershipDao.upsertAll(newEdges) }
+                        .onFailure { Log.w(TAG, "incremental: album membership upsert failed: ${it.message}") }
+                }
 
                 // Seed lazy-thumbnail scheduler with parent keys (root + albums) we already
                 // decrypted in this incremental pass — same rationale as the full refresh.
@@ -1423,6 +1825,14 @@ class PhotoStreamService @Inject constructor(
                 // retries the same events instead of re-listing everything.
                 Log.w(TAG, "refreshCloudPhotosIncremental: transient error, retrying incrementally next pass: ${e.message}")
             } else {
+                // Without this the stored anchor survives its own rejection: every later pass
+                // re-sends the same value, fails the same way, and pays a full re-walk for it, so
+                // the incremental path never runs again. Dropping it costs one full refresh (the
+                // one below) and lets the next pass arm a fresh anchor.
+                if (shouldResetEventAnchor(e)) {
+                    resettableAnchorKey?.let { key -> clearEventAnchor(key) }
+                    Log.w(TAG, "refreshCloudPhotosIncremental: anchor cleared (${listingErrorDetail(e)}), next pass re-arms")
+                }
                 Log.e(TAG, "refreshCloudPhotosIncremental failed, falling back to full refresh", e)
                 refreshCloudPhotos(userId)
             }

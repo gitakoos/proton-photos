@@ -127,6 +127,9 @@ class PhotoWidget : GlanceAppWidget() {
         }
     }
 
+    // Glance exposes no LocalConfiguration, and the host rebuilds the widget on a configuration
+    // change, so reading uiMode from the widget context is the idiom here.
+    @Suppress("LocalContextConfigurationRead")
     @Composable
     private fun isSystemLight(): Boolean {
         val ctx = LocalContext.current

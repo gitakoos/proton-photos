@@ -80,7 +80,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.calendar.components.MonthGrid
-import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBorder
 import java.text.SimpleDateFormat
@@ -97,7 +97,6 @@ import java.util.Locale
 fun CalendarScreen(
     onBack: () -> Unit,
     onDayClick: (date: String) -> Unit,
-    onOpenMap: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     viewModel: CalendarViewModel = hiltViewModel(),
 ) {
@@ -211,10 +210,9 @@ fun CalendarScreen(
         }
 
         // ───────────── Floating header ─────────────
-        // The title pill floats over the calendar (drawn on top via zIndex) so its
-        // view-switch menu grows downward over the content instead of pushing it down.
-        // It carries its own statusBarsPadding, so it isn't wrapped in another inset.
-        FloatingMemoriesHeader(
+        // The title pill floats over the calendar (drawn on top via zIndex) so the content
+        // scrolls under it. It carries its own statusBarsPadding, so it isn't wrapped in another inset.
+        FloatingHeader(
             title = stringResource(R.string.calendar_title),
             onBack = onBack,
             trailing = {
@@ -227,7 +225,6 @@ fun CalendarScreen(
                     tint = colors.fgPrimary,
                 )
             },
-            menuItems = listOf(stringResource(R.string.map_title) to onOpenMap),
         )
 
     }

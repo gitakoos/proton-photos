@@ -27,6 +27,8 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncStatus
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -173,6 +175,20 @@ class DeletePhotoUseCaseTest {
     }
 
     @Test
+    fun `a local-only row lands on LOCAL_ONLY whichever way it got there`() {
+        // Its whole corner of the table, since a photo with no cloud copy has no other state to be in:
+        // no pairing to keep, and nothing on Drive a hide could leave behind.
+        for (freeUpSpace in listOf(true, false)) {
+            for (hide in listOf(true, false)) {
+                assertEquals(
+                    SyncStatus.LOCAL_ONLY,
+                    DeletePhotoUseCase.postDeleteSyncStatus(localOnly("uri://local-only"), freeUpSpace, hide),
+                )
+            }
+        }
+    }
+
+    @Test
     fun `a synced row becomes HIDDEN on a hide flow even while freeing space`() {
         assertEquals(
             SyncStatus.HIDDEN,
@@ -182,6 +198,21 @@ class DeletePhotoUseCaseTest {
             SyncStatus.HIDDEN,
             DeletePhotoUseCase.postDeleteSyncStatus(synced("link", "uri://synced"), freeUpSpace = false, hide = true),
         )
+    }
+
+    @Test
+    fun `a vaulted synced row lands on HIDDEN and on nothing else`() {
+        // The whole point of the state: a SYNCED row whose local path is absent from the device
+        // gallery is destroyed by the reconcile pass, and a CLOUD_ONLY one presents a vaulted photo as
+        // if it were only on Drive. HIDDEN is what both passes skip.
+        for (freeUpSpace in listOf(true, false)) {
+            val status = DeletePhotoUseCase.postDeleteSyncStatus(
+                synced("link", "uri://synced"), freeUpSpace, hide = true,
+            )
+            assertEquals(SyncStatus.HIDDEN, status)
+            assertNotEquals(SyncStatus.SYNCED, status)
+            assertNotEquals(SyncStatus.CLOUD_ONLY, status)
+        }
     }
 
     @Test
@@ -204,6 +235,89 @@ class DeletePhotoUseCaseTest {
         for (freeUpSpace in listOf(true, false)) {
             for (hide in listOf(true, false)) {
                 assertNull(DeletePhotoUseCase.postDeleteSyncStatus(cloudOnly("link"), freeUpSpace, hide))
+            }
+        }
+    }
+
+    // ── removesFromGallery: one case per button the delete sheet offers ────────────────────
+
+    @Test
+    fun `trashing a device-only photo removes it`() {
+        assertTrue(
+            DeletePhotoUseCase.removesFromGallery(
+                localOnly("uri://local"), freeUpSpace = true, deleteFromCloud = false,
+            )
+        )
+    }
+
+    @Test
+    fun `freeing a synced photo's device space keeps it, as a cloud photo`() {
+        assertFalse(
+            DeletePhotoUseCase.removesFromGallery(
+                synced("link", "uri://synced"), freeUpSpace = true, deleteFromCloud = false,
+            )
+        )
+    }
+
+    @Test
+    fun `trashing a synced photo's cloud copy keeps it, as a device photo`() {
+        assertFalse(
+            DeletePhotoUseCase.removesFromGallery(
+                synced("link", "uri://synced"), freeUpSpace = false, deleteFromCloud = true,
+            )
+        )
+    }
+
+    @Test
+    fun `deleting a synced photo everywhere removes it`() {
+        assertTrue(
+            DeletePhotoUseCase.removesFromGallery(
+                synced("link", "uri://synced"), freeUpSpace = true, deleteFromCloud = true,
+            )
+        )
+    }
+
+    @Test
+    fun `trashing a cloud-only photo removes it`() {
+        assertTrue(
+            DeletePhotoUseCase.removesFromGallery(
+                cloudOnly("link"), freeUpSpace = false, deleteFromCloud = true,
+            )
+        )
+    }
+
+    @Test
+    fun `a delete that targets neither side removes nothing`() {
+        val items = listOf(localOnly("uri://local"), cloudOnly("link"), synced("link2", "uri://synced"))
+        for (item in items) {
+            assertFalse(
+                DeletePhotoUseCase.removesFromGallery(item, freeUpSpace = false, deleteFromCloud = false)
+            )
+        }
+    }
+
+    @Test
+    fun `removal agrees with the targets the same delete would act on`() {
+        val items = listOf(localOnly("uri://local"), cloudOnly("link"), synced("link2", "uri://synced"))
+        for (item in items) {
+            for (freeUpSpace in listOf(true, false)) {
+                for (deleteFromCloud in listOf(true, false)) {
+                    val targets = DeletePhotoUseCase.computeDeleteTargets(
+                        listOf(item), freeUpSpace, deleteFromCloud,
+                    )
+                    // A photo is gone only when every copy it has was targeted, so the count of
+                    // targets has to match the number of copies the item holds.
+                    val copies = when (item) {
+                        is GalleryItem.Synced -> 2
+                        else -> 1
+                    }
+                    val targeted = targets.cloudLinkIds.size + targets.localUriStrings.size
+                    assertEquals(
+                        "item=$item freeUpSpace=$freeUpSpace deleteFromCloud=$deleteFromCloud",
+                        targeted == copies,
+                        DeletePhotoUseCase.removesFromGallery(item, freeUpSpace, deleteFromCloud),
+                    )
+                }
             }
         }
     }

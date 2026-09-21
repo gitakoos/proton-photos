@@ -50,16 +50,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.imageLoader
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
+import eu.akoos.photos.presentation.theme.LocalGifAutoplayCovers
+import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
 
 /** The optional sharing state shown via the top-start pill. */
 enum class AlbumShareBadge {
@@ -81,12 +85,20 @@ enum class AlbumCloudBadge {
 @Composable
 fun UnifiedAlbumCard(
     coverModel: Any?,
+    /** True when [coverModel] is a local GIF whose uri hides its extension (a MediaStore content://
+     *  id). Lets the card pick the still-frame loader when cover autoplay is off. A cloud GIF cover
+     *  needs no flag: it arrives resolved as a file path ending in .gif. */
+    coverIsGif: Boolean = false,
     title: String,
     metaText: String,
     shareBadge: AlbumShareBadge = AlbumShareBadge.None,
     cloudBadge: AlbumCloudBadge = AlbumCloudBadge.None,
-    /** Shows a "Folder" pill for bucket-derived local albums (rename/delete refused for these). */
+    /** Shows a folder glyph in the corner badge for bucket-derived local albums (rename/delete
+     *  refused for these). */
     isDeviceFolder: Boolean = false,
+    /** False while a grid-wide mode owns the card's gestures. The clickable is dropped outright
+     *  rather than pointed at no-op lambdas, so the card cannot ripple at a tap it will ignore. */
+    interactionsEnabled: Boolean = true,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -94,7 +106,13 @@ fun UnifiedAlbumCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .then(
+                if (interactionsEnabled) {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                } else {
+                    Modifier
+                }
+            ),
     ) {
         Box(
             modifier = Modifier
@@ -104,32 +122,31 @@ fun UnifiedAlbumCard(
                 .background(Bg2),
         ) {
             if (coverModel != null) {
+                // A GIF cover animates only when the user opted into cover autoplay; otherwise the
+                // decoder-free loader renders its still first frame. A local cover's content:// uri
+                // hides the extension, so [coverIsGif] carries the answer there; a resolved cloud GIF
+                // arrives as a file path ending in .gif. Every other cover keeps the default loader
+                // and is a still image regardless.
+                val autoplay = LocalGifAutoplayCovers.current
+                val staticLoader = LocalStaticImageLoader.current
+                val context = LocalContext.current
+                val modelIsGif = coverIsGif || coverModel.toString().endsWith(".gif", ignoreCase = true)
+                val coverLoader =
+                    if (modelIsGif && !autoplay) staticLoader ?: context.imageLoader
+                    else context.imageLoader
                 AsyncImage(
                     model              = coverModel,
+                    imageLoader        = coverLoader,
                     contentDescription = null,
                     contentScale       = ContentScale.Crop,
                     modifier           = Modifier.fillMaxSize(),
                 )
             }
 
-            if (isDeviceFolder) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp)
-                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 5.dp, vertical = 3.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    Icon(Icons.Default.Folder, null, tint = Color.White, modifier = Modifier.size(11.dp))
-                    Text(stringResource(R.string.album_card_folder_badge), color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                }
-            }
-
             CloudCornerBadge(
                 cloud = cloudBadge,
                 share = shareBadge,
+                folder = isDeviceFolder,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp),
             )
         }
@@ -153,14 +170,17 @@ fun UnifiedAlbumCard(
     }
 }
 
-/** Bottom-end badge combining a sharing icon and the cloud/backup indicator in one pill. */
+/** Bottom-end badge combining a sharing icon, a device-folder marker, and the cloud/backup indicator
+ *  in one pill. A device folder shows the folder glyph here, in the same corner cloud albums use, so
+ *  the two read the same way instead of a text pill in the opposite corner. */
 @Composable
 private fun CloudCornerBadge(
     cloud: AlbumCloudBadge,
     share: AlbumShareBadge = AlbumShareBadge.None,
+    folder: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    if (cloud == AlbumCloudBadge.None && share == AlbumShareBadge.None) return
+    if (cloud == AlbumCloudBadge.None && share == AlbumShareBadge.None && !folder) return
     Row(
         modifier = modifier
             .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
@@ -170,6 +190,14 @@ private fun CloudCornerBadge(
     ) {
         if (share != AlbumShareBadge.None) {
             Icon(Icons.Default.People, null, tint = Color.White, modifier = Modifier.size(13.dp))
+        }
+        if (folder) {
+            Icon(
+                Icons.Default.Folder,
+                stringResource(R.string.album_card_folder_badge),
+                tint = Color.White,
+                modifier = Modifier.size(13.dp),
+            )
         }
         when (cloud) {
             AlbumCloudBadge.Cloud ->

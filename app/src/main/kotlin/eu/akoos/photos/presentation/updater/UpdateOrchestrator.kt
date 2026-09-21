@@ -23,6 +23,8 @@
 package eu.akoos.photos.presentation.updater
 
 import eu.akoos.photos.data.updater.DownloadProgress
+import eu.akoos.photos.data.updater.InstallOutcome
+import eu.akoos.photos.data.updater.StagedUpdateStore
 import eu.akoos.photos.data.updater.UpdateDownloader
 import eu.akoos.photos.data.updater.UpdateInstaller
 import eu.akoos.photos.domain.repository.UpdateCheckerRepository
@@ -56,6 +58,7 @@ class UpdateOrchestrator @Inject constructor(
     private val repository: UpdateCheckerRepository,
     private val downloader: UpdateDownloader,
     private val installer: UpdateInstaller,
+    private val stagedUpdates: StagedUpdateStore,
 ) {
 
     private val _state = MutableStateFlow<UpdatePromptState?>(null)
@@ -83,7 +86,7 @@ class UpdateOrchestrator @Inject constructor(
     private var downloadJob: Job? = null
 
     /**
-     * Fires from onResume on every foreground entry. Two responsibilities:
+     * Fires from onResume on every foreground entry. Three responsibilities:
      *
      *  1. Re-light the persistent update dot from the repository's saved marker so a
      *     previously-found update survives a relaunch, WITHOUT opening the dialog during the check.
@@ -91,6 +94,8 @@ class UpdateOrchestrator @Inject constructor(
      *     a fresh Available result re-nags via the dialog, a fresh UpToDate clears the dot. A
      *     throttled call returns UpToDate but leaves the saved marker alone, so the dot (re-hydrated
      *     from the marker below) stays lit.
+     *  3. Adopt an APK the background check already downloaded, so the prompt opens on its
+     *     install-ready step instead of asking for a download that has already happened.
      *
      * Errors stay silent, a one-off network flake at foreground shouldn't yell at the user.
      */
@@ -110,11 +115,38 @@ class UpdateOrchestrator @Inject constructor(
         // The cached check updates the persisted marker only on a fresh network fetch (Available
         // sets it, UpToDate clears it); a throttled call leaves it. Re-reading it here reconciles
         // the dot in all three cases without the dialog being touched by the throttled branch.
-        _updateAvailable.value = repository.knownAvailableVersion() != null
+        val known = repository.knownAvailableVersion()
+        _updateAvailable.value = known != null
+        // Covers the throttled branch too, which never reaches showAvailable: the marker names the
+        // version, and a background download may already have the APK for it.
+        adoptStagedUpdate(known)
     }
 
     /**
-     * Force-checks regardless of the 24h cache. Used by the manual "Check for updates"
+     * Moves straight to [UpdatePromptState.InstallReady] when the background check has already
+     * fetched the APK for [versionName], skipping a download the user would otherwise pay for
+     * twice. The archive is re-verified here rather than trusted from the record: it was written
+     * by an earlier process and has sat in a cache directory since.
+     *
+     * Passing null (the app is up to date) clears the record and the bytes behind it, which is what
+     * removes the archive after a successful install.
+     */
+    private suspend fun adoptStagedUpdate(versionName: String?) {
+        if (_state.value is UpdatePromptState.Downloading ||
+            _state.value is UpdatePromptState.InstallReady
+        ) return
+        val file = stagedUpdates.claimFor(versionName)
+        if (file == null || versionName == null) return
+        if (!installer.verifyApkSignature(file)) {
+            stagedUpdates.discard()
+            return
+        }
+        pendingFile = file
+        _state.value = UpdatePromptState.InstallReady(versionName)
+    }
+
+    /**
+     * Force-checks regardless of the 4h cache. Used by the manual "Check for updates"
      * Settings row. Returns a discriminated outcome so the caller can show a snackbar
      * for the up-to-date / error branches (the available branch surfaces via [state]).
      */
@@ -198,11 +230,16 @@ class UpdateOrchestrator @Inject constructor(
      * check that still finds this update re-shows the dialog, so the reminder comes back on the
      * normal check cadence rather than being suppressed forever.
      */
-    fun dismiss(@Suppress("UNUSED_PARAMETER") scope: CoroutineScope) {
+    fun dismiss(scope: CoroutineScope) {
         downloadJob?.cancel()
         downloadJob = null
         pendingFile = null
         _state.value = null
+        // The staged record outlives this screen, and every foreground entry re-adopts it, so
+        // clearing memory alone put the prompt back within seconds and Not now could not be
+        // answered at all. Dropping the record is what leaves the next scheduled check to raise
+        // it again, which is the cadence this is meant to have.
+        scope.launch { runCatching { stagedUpdates.discard() } }
     }
 
     /**
@@ -213,11 +250,47 @@ class UpdateOrchestrator @Inject constructor(
     fun pendingInstallFile(): File? = pendingFile
 
     /**
+     * Applies the staged APK through the silent PackageInstaller session. The two refusals the
+     * installer can name (wrong signer, not actually newer) are terminal and surface as dialog
+     * errors with the staged file dropped; everything else is handed back so the host can either
+     * launch the OS confirmation screen or fall through to the legacy intent.
+     */
+    fun installPending(): InstallOutcome {
+        val file = pendingFile ?: return InstallOutcome.Failed("No staged update")
+        val outcome = installer.installViaSession(file)
+        when (outcome) {
+            is InstallOutcome.SignatureMismatch -> {
+                discardStagedFile(file)
+                _state.value = UpdatePromptState.Error(
+                    versionName = pendingAvailable?.versionName,
+                    errorKind = UpdatePromptState.ErrorKind.VERIFICATION,
+                )
+            }
+            is InstallOutcome.NotNewer -> {
+                discardStagedFile(file)
+                // The staged build does not rank above what is running, so the dot is stale too.
+                _updateAvailable.value = false
+                _state.value = UpdatePromptState.Error(
+                    versionName = pendingAvailable?.versionName,
+                    errorKind = UpdatePromptState.ErrorKind.ALREADY_CURRENT,
+                )
+            }
+            else -> Unit
+        }
+        return outcome
+    }
+
+    private fun discardStagedFile(file: File) {
+        runCatching { file.delete() }
+        pendingFile = null
+    }
+
+    /**
      * Surfaces the dialog in its Available state. Bytes-to-MB rounds UP so a 23.4 MB
      * payload reads as "24 MB" instead of "23" (users compare against their cellular
      * data plan — overshooting is friendlier than undershooting).
      */
-    private fun showAvailable(status: UpdateStatus.Available) {
+    private suspend fun showAvailable(status: UpdateStatus.Available) {
         pendingAvailable = status
         _updateAvailable.value = true
         val sizeMb = ((status.apkSizeBytes + 1024L * 1024L - 1L) / (1024L * 1024L))
@@ -227,6 +300,8 @@ class UpdateOrchestrator @Inject constructor(
             versionName = status.versionName,
             sizeMb = sizeMb,
         )
+        // Upgrade straight past the download when the background check already fetched this one.
+        adoptStagedUpdate(status.versionName)
     }
 
     sealed class ManualCheckOutcome {

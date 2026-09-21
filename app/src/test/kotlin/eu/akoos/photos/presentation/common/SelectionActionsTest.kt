@@ -146,21 +146,34 @@ class SelectionActionsTest {
         }
     }
 
+    // ── Offline direction (the row's label has to match the press) ───────────────────────────────
+
     @Test
-    fun `hideTargetFor sends device-backed photos to the vault and cloud-only client-side`() {
-        // Device-only and synced both have a device file to move into the Hidden vault.
-        assertEquals(HideTarget.VAULT, hideTargetFor(localOnly("uri://a")))
-        assertEquals(HideTarget.VAULT, hideTargetFor(synced("link-s", "uri://s")))
-        // A cloud-only photo has no device file, so it is hidden client-side by linkId.
-        assertEquals(HideTarget.CLIENT_SIDE, hideTargetFor(cloudOnly("link-c")))
+    fun `only the cloud-only photos count as pinnable`() {
+        // A photo whose bytes are already on the device has nothing to pin, so it takes no part in
+        // the direction: a selection of those alone leaves the offline row nothing to act on.
+        val sel = listOf(localOnly("uri://a"), synced("link-s", "uri://s"), cloudOnly("link-c"))
+        assertEquals(listOf("link-c"), offlinePinnableLinkIds(sel))
+        assertEquals(emptyList<String>(), offlinePinnableLinkIds(listOf(localOnly("uri://a"))))
     }
 
     @Test
-    fun `anyHideable is false only on an empty selection`() {
-        assertFalse(anyHideable(emptyList()))
-        assertTrue(anyHideable(listOf(localOnly("uri://a"))))
-        assertTrue(anyHideable(listOf(cloudOnly("link-c"))))
-        assertTrue(anyHideable(listOf(synced("link-s", "uri://s"))))
+    fun `one photo that is not pinned makes the whole press a pin`() {
+        val links = listOf("link-a", "link-b")
+        assertTrue(offlineTurnsOn(links, offlinePinIds = emptySet()))
+        // The ordinary case: a selection that happens to hold one already-pinned photo finishes the
+        // job rather than un-pinning that single one.
+        assertTrue(offlineTurnsOn(links, offlinePinIds = setOf("link-a")))
+    }
+
+    @Test
+    fun `a wholly pinned selection presses the other way`() {
+        assertFalse(offlineTurnsOn(listOf("link-a", "link-b"), setOf("link-a", "link-b")))
+    }
+
+    @Test
+    fun `nothing pinnable has no pin to offer`() {
+        assertFalse(offlineTurnsOn(emptyList(), offlinePinIds = setOf("link-a")))
     }
 
     // ── Album membership (add-to-album picker indicator) ─────────────────────────────────────────

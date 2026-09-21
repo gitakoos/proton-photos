@@ -23,6 +23,7 @@
 package eu.akoos.photos.worker
 
 import android.content.Context
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -33,6 +34,9 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import eu.akoos.photos.data.db.dao.ImportStagedDao
+import eu.akoos.photos.util.DeviceHealthPolicy
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -41,22 +45,28 @@ import java.util.concurrent.TimeUnit
  * the process, comes back later" gap that the foreground prune in [App.onCreate] and
  * [PhotoViewerViewModel.onCleared] cannot reach.
  *
- * Constraints — [NetworkType.CONNECTED] + [Constraints.Builder.setRequiresBatteryNotLow]:
+ * Constraints are [NetworkType.CONNECTED] + [Constraints.Builder.setRequiresBatteryNotLow]:
  *  - Connectivity gate matches the offline-grace semantics of the prune routine itself,
  *    so we never wipe locally-cached blobs when the user could not re-download them.
  *  - Battery-not-low avoids waking the device for cache hygiene when the user is in a
  *    "must squeeze every drop" state; OS also defers under Doze regardless.
  *
- * Interval is fixed at 30 minutes — same horizon as [PhotoDownloadService.FULLRES_TTL_MS],
+ * Interval is fixed at 30 minutes, the same horizon as [PhotoDownloadService.FULLRES_TTL_MS],
  * so a missed wake-up still keeps the worst-case stale-blob window at ~1 h.
  */
 @HiltWorker
 class CachePruneWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted params: WorkerParameters,
+    private val deviceHealth: DeviceHealthPolicy,
+    private val importStagedDao: ImportStagedDao,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // Skip a cache sweep while the OS is throttling to cool the device; the 30-minute cadence
+        // brings it back once the phone is cool, and a missed sweep only widens the stale-blob
+        // window by one interval.
+        if (deviceHealth.thermallyThrottled()) return Result.success()
         // pruneStaleFullResCache already short-circuits when networkAvailable=false.
         // The CONNECTED constraint below means we should normally have a network here
         // when this runs, but pass true explicitly because WorkManager only guarantees
@@ -64,6 +74,9 @@ class CachePruneWorker @AssistedInject constructor(
         eu.akoos.photos.data.repository.drive.PhotoDownloadService.pruneStaleFullResCache(
             context,
             networkAvailable = true,
+            // Off-main periodic pass, so also reclaim download-resume scratch (dec_*/.tmp)
+            // abandoned past RESUME_TTL_MS; the startup + viewer-close callers keep the light sweep.
+            deepClean = true,
         )
         // Sweep abandoned upload-resume tempDirs whose last-touch is older than the
         // STALE_TTL. The resume manifest itself preserves blocks indefinitely after a
@@ -73,12 +86,63 @@ class CachePruneWorker @AssistedInject constructor(
         eu.akoos.photos.data.repository.drive.UploadResumeManifest.pruneStaleTempDirs(
             context.cacheDir,
         )
+        // Sweep abandoned import stages. Picking a zip stages import_staged rows plus cached
+        // thumbnails; a finished run clears its own rows and a re-stage clears the prior ones, but a
+        // stage the user walked away from without confirming or discarding is freed only here. The
+        // STALE_MS horizon is far longer than any real staging session, so an in-progress or a
+        // just-finished import stays recent and untouched. Guarded so a prune failure never fails
+        // the worker; each thumbnail delete is best-effort.
+        runCatching {
+            val cutoff = System.currentTimeMillis() - STALE_MS
+            val stale = importStagedDao.thumbPathsOlderThan(cutoff)
+            stale.forEach { path -> path?.let { runCatching { File(it).delete() } } }
+            importStagedDao.deleteOlderThan(cutoff)
+            if (stale.isNotEmpty()) Log.d(TAG, "pruned ${stale.size} abandoned import stage(s)")
+        }
+        // Sweep abandoned scratch a process kill can leave with no owner to reclaim it: video-editor
+        // exports (hundreds of MB), motion-photo probes, and a staged-but-never-installed update APK.
+        // Each cutoff is far longer than the real activity, so an in-progress one (a fresh file) is
+        // never touched.
+        sweepStaleFiles("video_editor", VIDEO_EDITOR_STALE_MS, "video-editor")
+        sweepStaleFiles("motion", MOTION_STALE_MS, "motion-photo")
+        sweepStaleFiles("updates", UPDATES_STALE_MS, "staged-update")
         return Result.success()
+    }
+
+    /** Deletes top-level files under `cacheDir/[dirName]` last touched before [ttlMs] ago. Best-effort
+     *  and directory-scoped, so it never touches a fresh (in-progress) file. */
+    private fun sweepStaleFiles(dirName: String, ttlMs: Long, label: String) {
+        runCatching {
+            val dir = File(context.cacheDir, dirName)
+            if (!dir.isDirectory) return
+            val cutoff = System.currentTimeMillis() - ttlMs
+            var swept = 0
+            dir.listFiles()?.forEach { f ->
+                if (f.isFile && f.lastModified() in 1..cutoff && f.delete()) swept++
+            }
+            if (swept > 0) Log.d(TAG, "swept $swept abandoned $label temp(s)")
+        }
     }
 
     companion object {
         const val UNIQUE_NAME = "cache_prune_periodic"
+        private const val TAG = "cache_prune_worker"
         private const val INTERVAL_MINUTES = 30L
+
+        /** Age past which a picked-but-never-confirmed import stage is swept: its import_staged
+         *  rows and cached thumbnails. Far longer than any real staging session, so only a
+         *  genuinely abandoned stage is ever caught. */
+        private val STALE_MS: Long = TimeUnit.DAYS.toMillis(7)
+
+        /** Age past which a leftover `video_editor/vmux_*` export temp is swept. Far longer than any
+         *  real export, so a background export still being written is never touched. */
+        private val VIDEO_EDITOR_STALE_MS: Long = TimeUnit.HOURS.toMillis(6)
+
+        /** Motion-photo probe temps are momentary, so a leftover is old within hours. */
+        private val MOTION_STALE_MS: Long = TimeUnit.HOURS.toMillis(6)
+
+        /** A staged update APK the user has not installed is kept a week before it is reclaimed. */
+        private val UPDATES_STALE_MS: Long = TimeUnit.DAYS.toMillis(7)
 
         fun schedule(workManager: WorkManager) {
             val constraints = Constraints.Builder()

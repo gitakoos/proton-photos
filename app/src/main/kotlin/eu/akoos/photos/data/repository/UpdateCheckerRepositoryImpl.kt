@@ -157,21 +157,28 @@ class UpdateCheckerRepositoryImpl @Inject constructor(
         return if (dash >= 0) noV.substring(0, dash) else noV
     }
 
-    /** True if the tag carries any pre-release suffix we want to skip. */
-    private fun hasPrereleaseSuffix(tag: String): Boolean {
-        val lower = tag.lowercase()
-        return lower.contains("-beta") ||
-            lower.contains("-alpha") ||
-            lower.contains("-rc") ||
-            lower.contains("-pre") ||
-            lower.contains("-snapshot")
-    }
-
     private companion object {
         private const val CACHE_TTL_MS = 4L * 60L * 60L * 1000L
         /** Matches the `base { archivesName }` setting in app/build.gradle.kts. */
         private const val APK_BASE_NAME = "photosforproton"
     }
+}
+
+/**
+ * True if the tag carries a pre-release suffix the auto-check skips. The updater only ever offers
+ * stable releases, so a preview tag has to be ruled out by its own name as well as by GitHub's
+ * pre-release flag: a tag can be published as a full release and still be a preview.
+ *
+ * Matched on the suffix, never the bare word, so a release whose name happens to contain one of
+ * these ("2.4.0-rc" is skipped, "2.4.0" is not) stays on the stable path.
+ */
+internal fun hasPrereleaseSuffix(tag: String): Boolean {
+    val lower = tag.lowercase()
+    return lower.contains("-beta") ||
+        lower.contains("-alpha") ||
+        lower.contains("-rc") ||
+        lower.contains("-pre") ||
+        lower.contains("-snapshot")
 }
 
 /**

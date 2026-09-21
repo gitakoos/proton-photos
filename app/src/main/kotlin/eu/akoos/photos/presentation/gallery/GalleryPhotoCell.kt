@@ -74,14 +74,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import coil.imageLoader
 import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.common.LocalVideoThumb
+import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
+import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.LocalGifAutoplayGrid
+import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
+import eu.akoos.photos.presentation.theme.CloudBadgeSurface
+import eu.akoos.photos.presentation.theme.cloudBadgeTint
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.util.formatVideoTime
 
@@ -111,6 +118,9 @@ internal data class PhotoCellInputs(
     // renders the OS thumbnail instead of decoding a fresh video frame per bind. Cloud-only videos
     // stay false (their poster is an already-decrypted image).
     val isLocalVideo: Boolean,
+    // True for an on-device GIF (LocalOnly or a Synced local twin, mime image/gif): the cell can then
+    // render its still first frame when grid GIF autoplay is off. A cloud thumbnail is static already.
+    val isLocalGif: Boolean,
     // Video length in ms for the always-on bottom-start duration pill. Null for images and when
     // unknown; resolved local-first (the on-device file's duration) then cloud (durationMs).
     val durationMs: Long?,
@@ -123,10 +133,39 @@ internal data class PhotoCellInputs(
     val typeBadgeCdRes: Int?,
 )
 
+/**
+ * Whether [item] carries the favourite heart.
+ *
+ * A photo that lives only on the device answers from [favoriteIds], the device-side set keyed by its
+ * MediaStore uri, because nothing else records the answer for it. A backed-up photo answers from
+ * Drive PhotoTag 0 alone: the heart writes straight to Drive and another client can change it there
+ * too, so a device-side copy of the answer would keep showing a favourite the server has already
+ * dropped. That is the ordering [CategorizeItem] uses for the categories, and the favourite is one
+ * of those tags in the same place.
+ *
+ * [liveCloudTags] is the tag set the local library holds for the photo right now, for a caller that
+ * can read it. Null means "use the set the item carries", which is what a caller whose items come
+ * straight from the library flow already has.
+ */
+internal fun isItemFavorite(
+    item: GalleryItem,
+    favoriteIds: Set<String>,
+    liveCloudTags: Set<Int>? = null,
+): Boolean = when (item) {
+    is GalleryItem.LocalOnly -> item.local.uri in favoriteIds
+    is GalleryItem.Synced    -> 0 in (liveCloudTags ?: item.cloud.tags)
+    is GalleryItem.CloudOnly -> 0 in (liveCloudTags ?: item.cloud.tags)
+}
+
 /** Resolve a [GalleryItem] to [PhotoCellInputs]. The category look-ups run once here rather than
  *  repeatedly inside the cell. [downloadedCloudLinkIds] upgrades a downloaded CloudOnly tile to the
- *  green synced badge; [favoriteIds] adds the heart; [offlinePinIds] adds the offline badge to a
- *  CloudOnly tile pinned for offline. All default empty for surfaces that don't track them.
+ *  green synced badge; [favoriteIds] adds the heart on a device-only tile (a backed-up one reads its
+ *  Drive tag, see [isItemFavorite]); [offlinePinIds] adds the offline badge to a CloudOnly tile
+ *  pinned for offline. All default empty for surfaces that don't track them.
+ *
+ *  [pairedVaultUris] raises the same green badge on a vaulted tile whose photo kept a Drive copy; the
+ *  vault's own records are the only thing that can still say so, since vaulting removes the MediaStore
+ *  row that made the photo a Synced item.
  *
  *  [cloudThumbnailUrl] is the freshly-decrypted `file://` URL for this cell's cloud row, resolved from
  *  ThumbnailUrlStore in the caller's item scope. The timeline projection no longer carries the URL on
@@ -138,6 +177,7 @@ internal fun photoCellInputsFor(
     downloadedCloudLinkIds: Set<String> = emptySet(),
     offlinePinIds: Set<String> = emptySet(),
     cloudThumbnailUrl: String? = null,
+    pairedVaultUris: Set<String> = emptySet(),
 ): PhotoCellInputs {
     val cloudId = when (item) {
         is GalleryItem.CloudOnly -> item.cloud.linkId
@@ -152,6 +192,10 @@ internal fun photoCellInputsFor(
         is GalleryItem.CloudOnly -> cloudThumbnailUrl ?: item.cloud.thumbnailUrl
     }
     val isDownloaded = cloudId != null && cloudId in downloadedCloudLinkIds
+    // A vaulted photo has no MediaStore row, so it reaches a grid as LocalOnly whether or not it was
+    // backed up, and its own type cannot say which. The vault's cloud-id records can, and a Drive copy
+    // the hide left untouched is exactly what the green cloud means everywhere else.
+    val isPairedVaultPhoto = item is GalleryItem.LocalOnly && item.local.uri in pairedVaultUris
     val mime = when (item) {
         is GalleryItem.LocalOnly -> item.local.mimeType
         is GalleryItem.Synced    -> item.local.mimeType
@@ -175,16 +219,19 @@ internal fun photoCellInputsFor(
     // An on-device video (LocalOnly, or a Synced twin) can show the OS poster instead of a decoded
     // frame. CloudOnly videos have no local file here, so they keep the decrypted-image path.
     val hasLocalUri = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
+    val isLocalGif = hasLocalUri && mime == "image/gif"
     return PhotoCellInputs(
         imageData      = imageData,
         stableKey      = cloudId ?: favoriteKey,
         isVideo        = isVideo,
         isLocalVideo   = isVideo && hasLocalUri,
+        isLocalGif     = isLocalGif,
         durationMs     = durationMs,
         isPlaceholder  = imageData == null && item is GalleryItem.CloudOnly,
         showCloudBadge  = item is GalleryItem.CloudOnly && !isDownloaded,
-        showSyncedBadge = item is GalleryItem.Synced || (item is GalleryItem.CloudOnly && isDownloaded),
-        isFavorite     = favoriteKey in favoriteIds || 0 in cats,
+        showSyncedBadge = item is GalleryItem.Synced ||
+            (item is GalleryItem.CloudOnly && isDownloaded) || isPairedVaultPhoto,
+        isFavorite     = isItemFavorite(item, favoriteIds),
         isOffline      = item is GalleryItem.CloudOnly && cloudId != null && cloudId in offlinePinIds,
         typeBadgeRes   = when {
             // Videos are already marked by the center play icon, so no separate video badge here.
@@ -229,6 +276,8 @@ internal fun PhotoCell(
     // On-device video: render the system thumbnail instead of decoding a video frame through Coil,
     // so the poster is instant on open rather than popping in. Defaults false (unchanged path).
     isLocalVideo: Boolean = false,
+    // On-device GIF: render its still first frame instead of animating when grid autoplay is off.
+    isLocalGif: Boolean = false,
     // Video length in ms; drives the always-on bottom-start duration pill (null = no pill).
     durationMs: Long? = null,
     isPlaceholder: Boolean = false,
@@ -265,13 +314,19 @@ internal fun PhotoCell(
     // placeholder decision and the image request below.
     val resolvedImageData = imageData ?: LocalThumbnailUrls.current.value[stableKey]
 
+    // A local GIF animates only when the user opted into grid autoplay; otherwise the decoder-free
+    // loader renders its still first frame. Every other cell keeps the default (animating) loader.
+    val gridAutoplay = LocalGifAutoplayGrid.current
+    val staticLoader = LocalStaticImageLoader.current
+
     // Badge-density tiers by the grid's live column count. As tiles shrink the corner badges crowd,
     // so denser grids drop the lower-priority ones. The cloud/status badge is always kept (it is the
     // most important state and its own `when` already only draws for Synced/CloudOnly). The center
     // play icon is not a badge and stays for every video regardless of tier.
     //   <= 3 columns (big tiles):  show every badge, as before.
     //   == 4 columns (compact):    cloud badge + exactly ONE highest-priority secondary.
-    //   >= 5 columns (minimal):    cloud badge only.
+    //   == 5 columns (minimal):    cloud badge only.
+    //   >= 6 columns (dense):      no corner badge at all, so the tiny tiles stay clean.
     // Secondary priority (high to low): video duration > offline pin > type badge > favorite.
     val isDurationSecondary = isVideo && durationMs != null && durationMs > 0
     val compactSecondary: CompactSecondary = when {
@@ -297,11 +352,15 @@ internal fun PhotoCell(
             compactSecondary == CompactSecondary.Favorite
         else         -> false
     }
+    // On the very dense grids the tiles are too small for even the cloud/status badge to read, so it is
+    // dropped there too, leaving the thumbnails clean.
+    val allowStatusBadge = columns < 6
 
     Box(
         modifier = Modifier
             // Slightly taller than a square so the corner badges cover less of the photo.
             .aspectRatio(aspectRatioOverride ?: 0.85f)
+            .selectPressScale(selected)
             .clip(RoundedCornerShape(cornerRadius))
             .background(Bg2)
             // The timeline owns long-press at the grid level (drag-to-select), so it passes no
@@ -404,8 +463,12 @@ internal fun PhotoCell(
                         .crossfade(false)
                         .build()
                 }
+                val cellLoader =
+                    if (isLocalGif && !gridAutoplay) staticLoader ?: context.imageLoader
+                    else context.imageLoader
                 AsyncImage(
                     model              = request,
+                    imageLoader        = cellLoader,
                     contentDescription = null,
                     contentScale       = ContentScale.Crop,
                     onState            = onImageState,
@@ -431,10 +494,13 @@ internal fun PhotoCell(
         //   CloudOnly  = white cloud (only in Drive — not on device)
         // A CloudOnly cell upgrades to the green badge once its linkId has a SYNCED local copy:
         // the user downloaded it but the static item snapshot still reads CloudOnly. Mirrors the
-        // same upgrade the photo viewer applies.
-        when {
-            showSyncedBadge -> SyncedCloudBadge()
-            showCloudBadge  -> CloudBadge()
+        // same upgrade the photo viewer applies. A vaulted LocalOnly tile upgrades the same way when
+        // the vault records a Drive copy for it.
+        if (allowStatusBadge) {
+            when {
+                showSyncedBadge -> SyncedCloudBadge()
+                showCloudBadge  -> CloudBadge()
+            }
         }
 
         // Bottom-start overlays: the offline-pin badge and the video duration pill share one Row
@@ -544,7 +610,14 @@ internal fun PhotoCell(
                     .size(22.dp)
                     .align(Alignment.TopStart),
             ) {
-                if (selected) {
+                // Empty ring underneath; the filled check scales in over it on select.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                )
+                SelectionCheckPop(selected) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -554,13 +627,6 @@ internal fun PhotoCell(
                         Icon(Icons.Default.Check, stringResource(R.string.cd_status_selected),
                             tint = Color.White, modifier = Modifier.size(14.dp))
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                            .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
-                    )
                 }
             }
         }
@@ -587,9 +653,12 @@ private fun BoxScope.CloudBadge() {
     }
 }
 
-/** Green cloud — backed up to Drive AND still on this device. Safe to remove from device. */
+/** Green cloud — backed up to Drive AND still on this device. Safe to remove from device.
+ *  Internal rather than private so the Free up space screen marks its photos with the very same
+ *  badge: that screen asks the user to confirm each photo has a Drive copy before its device copy is
+ *  deleted, and a second badge that merely looked alike could drift from this one. */
 @Composable
-private fun BoxScope.SyncedCloudBadge() {
+internal fun BoxScope.SyncedCloudBadge() {
     Box(
         modifier = Modifier
             .align(Alignment.BottomEnd)
@@ -601,7 +670,7 @@ private fun BoxScope.SyncedCloudBadge() {
         Icon(
             Icons.Default.Cloud,
             contentDescription = stringResource(R.string.cd_status_backed_up_device),
-            tint = Color(0xFF30D158),
+            tint = cloudBadgeTint(CloudBadgeSurface.DarkChip),
             modifier = Modifier.size(12.dp),
         )
     }

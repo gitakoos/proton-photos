@@ -56,7 +56,7 @@ import eu.akoos.photos.presentation.theme.AppColors
 @Composable
 internal fun AppLockStep(
     enabled: Boolean,
-    timeoutMinutes: Int,
+    timeoutSeconds: Int,
     onEnabledChange: (Boolean) -> Unit,
     onTimeoutChange: (Int) -> Unit,
 ) {
@@ -78,23 +78,23 @@ internal fun AppLockStep(
             Spacer(Modifier.height(14.dp))
             SmallLabel(stringResource(R.string.onboarding_lock_timeout_label))
             Spacer(Modifier.height(8.dp))
-            val options = listOf(0, 1, 5, 10, 15, 60)
+            val options = listOf(0, 5, 10, 30, 60, 300, 600, 900, 3600)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(colors.cardBg, RoundedCornerShape(12.dp))
                     .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp)),
             ) {
-                options.forEachIndexed { idx, mins ->
-                    val selected = mins == timeoutMinutes
+                options.forEachIndexed { idx, secs ->
+                    val selected = secs == timeoutSeconds
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onTimeoutChange(mins) }
+                            .clickable { onTimeoutChange(secs) }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(text = timeoutLabel(mins), color = colors.fgPrimary, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+                        Text(text = timeoutLabel(secs), color = colors.fgPrimary, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
                         if (selected) {
                             Box(modifier = Modifier.size(20.dp).background(colors.accent, CircleShape), contentAlignment = Alignment.Center) {
                                 Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
@@ -111,12 +111,15 @@ internal fun AppLockStep(
 }
 
 @Composable
-private fun timeoutLabel(minutes: Int): String = when (minutes) {
+private fun timeoutLabel(seconds: Int): String = when (seconds) {
     0 -> stringResource(R.string.settings_app_lock_timeout_immediate)
-    1 -> stringResource(R.string.settings_app_lock_timeout_1min)
-    5 -> stringResource(R.string.settings_app_lock_timeout_5min)
-    10 -> stringResource(R.string.settings_app_lock_timeout_10min)
-    15 -> stringResource(R.string.settings_app_lock_timeout_15min)
-    60 -> stringResource(R.string.settings_app_lock_timeout_1h)
-    else -> "$minutes min"
+    5 -> stringResource(R.string.settings_app_lock_timeout_5sec)
+    10 -> stringResource(R.string.settings_app_lock_timeout_10sec)
+    30 -> stringResource(R.string.settings_app_lock_timeout_30sec)
+    60 -> stringResource(R.string.settings_app_lock_timeout_1min)
+    300 -> stringResource(R.string.settings_app_lock_timeout_5min)
+    600 -> stringResource(R.string.settings_app_lock_timeout_10min)
+    900 -> stringResource(R.string.settings_app_lock_timeout_15min)
+    3600 -> stringResource(R.string.settings_app_lock_timeout_1h)
+    else -> stringResource(R.string.settings_app_lock_timeout_immediate)
 }

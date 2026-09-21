@@ -92,6 +92,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalAlbum
+import eu.akoos.photos.presentation.common.SelectionCheckPop
+import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.AppColors
@@ -152,6 +154,7 @@ class PhotoWidgetConfigActivity : ComponentActivity() {
             ProtonPhotosTheme(darkTheme = useDark, palette = palette) {
                 val viewModel: PhotoWidgetConfigViewModel = hiltViewModel()
                 val state by viewModel.state.collectAsStateWithLifecycle()
+                val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
 
                 // Pre-fill the form from the widget's existing Glance state. Lets the
                 // user re-edit a placed widget instead of remove + re-add.
@@ -169,6 +172,7 @@ class PhotoWidgetConfigActivity : ComponentActivity() {
 
                 WidgetConfigScreen(
                     state    = state,
+                    isSignedIn = isSignedIn,
                     onMode   = viewModel::setMode,
                     onInterval = viewModel::setInterval,
                     onUris   = viewModel::setSelectedUris,
@@ -190,13 +194,14 @@ class PhotoWidgetConfigActivity : ComponentActivity() {
 @Composable
 private fun WidgetConfigScreen(
     state: WidgetConfigUiState,
+    isSignedIn: Boolean,
     onMode: (WidgetMode) -> Unit,
     onInterval: (WidgetInterval) -> Unit,
     onUris: (List<String>) -> Unit,
     onAlbum: (String) -> Unit,
     onCloudSelection: (List<String>) -> Unit,
     onCloudAlbum: (String) -> Unit,
-    onRequestCloudThumb: (eu.akoos.photos.data.db.entity.PhotoListingEntity) -> Unit,
+    onRequestCloudThumb: (String) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -260,12 +265,15 @@ private fun WidgetConfigScreen(
                             selected    = state.mode == WidgetMode.SELECTED,
                             onClick     = { onMode(WidgetMode.SELECTED) },
                         )
-                        ModeOption(
-                            title       = stringResource(R.string.widget_mode_cloud),
-                            description = stringResource(R.string.widget_mode_cloud_desc),
-                            selected    = state.mode == WidgetMode.CLOUD_SELECTED,
-                            onClick     = { onMode(WidgetMode.CLOUD_SELECTED) },
-                        )
+                        // Cloud photo selection needs an account; the source is empty logged out.
+                        if (isSignedIn) {
+                            ModeOption(
+                                title       = stringResource(R.string.widget_mode_cloud),
+                                description = stringResource(R.string.widget_mode_cloud_desc),
+                                selected    = state.mode == WidgetMode.CLOUD_SELECTED,
+                                onClick     = { onMode(WidgetMode.CLOUD_SELECTED) },
+                            )
+                        }
                         ModeOption(
                             title       = stringResource(R.string.widget_mode_album),
                             description = stringResource(R.string.widget_mode_album_desc),
@@ -396,9 +404,14 @@ private fun WidgetConfigScreen(
                                 CircularProgressIndicator(color = colors.accent, strokeWidth = 2.dp)
                             }
                         } else if (state.cloudPhotos.isEmpty()) {
-                            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Box(
+                                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                // A stream that gave up says so; an unreadable library must not read
+                                // as an empty one.
                                 Text(
-                                    stringResource(R.string.widget_no_cloud_photos),
+                                    state.cloudError ?: stringResource(R.string.widget_no_cloud_photos),
                                     color = colors.fgMute, fontSize = 14.sp,
                                 )
                             }
@@ -429,6 +442,7 @@ private fun WidgetConfigScreen(
                                     Box(
                                         modifier = Modifier
                                             .aspectRatio(1f)
+                                            .selectPressScale(isSelected)
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(colors.bg2)
                                             .border(
@@ -453,7 +467,7 @@ private fun WidgetConfigScreen(
                                                 modifier = Modifier.fillMaxSize(),
                                             )
                                         } else {
-                                            LaunchedEffect(photo.linkId) { onRequestCloudThumb(photo) }
+                                            LaunchedEffect(photo.linkId) { onRequestCloudThumb(photo.linkId) }
                                         }
                                         if (isSelected) {
                                             Box(
@@ -461,15 +475,21 @@ private fun WidgetConfigScreen(
                                                     .fillMaxSize()
                                                     .background(colors.accent.copy(alpha = 0.25f)),
                                             )
-                                            Icon(
-                                                Icons.Default.CheckCircle,
-                                                contentDescription = null,
-                                                tint = colors.accent,
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(4.dp)
-                                                    .size(18.dp),
-                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(4.dp)
+                                                .size(18.dp),
+                                        ) {
+                                            SelectionCheckPop(visible = isSelected) {
+                                                Icon(
+                                                    Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = colors.accent,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -507,6 +527,7 @@ private fun WidgetConfigScreen(
                                     Box(
                                         modifier = Modifier
                                             .aspectRatio(1f)
+                                            .selectPressScale(isSelected)
                                             .clip(RoundedCornerShape(8.dp))
                                             .background(colors.bg2)
                                             .border(
@@ -535,15 +556,21 @@ private fun WidgetConfigScreen(
                                                     .fillMaxSize()
                                                     .background(colors.accent.copy(alpha = 0.25f)),
                                             )
-                                            Icon(
-                                                Icons.Default.CheckCircle,
-                                                contentDescription = null,
-                                                tint = colors.accent,
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(4.dp)
-                                                    .size(18.dp),
-                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(4.dp)
+                                                .size(18.dp),
+                                        ) {
+                                            SelectionCheckPop(visible = isSelected) {
+                                                Icon(
+                                                    Icons.Default.CheckCircle,
+                                                    contentDescription = null,
+                                                    tint = colors.accent,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -565,11 +592,15 @@ private fun WidgetConfigScreen(
                                     selected = state.mode == WidgetMode.ALBUM,
                                     onClick  = { onMode(WidgetMode.ALBUM) },
                                 )
-                                IntervalChip(
-                                    label    = stringResource(R.string.widget_album_source_cloud),
-                                    selected = state.mode == WidgetMode.CLOUD_ALBUM,
-                                    onClick  = { onMode(WidgetMode.CLOUD_ALBUM) },
-                                )
+                                // Following a cloud album needs an account; hidden logged out so only
+                                // device folders remain selectable.
+                                if (isSignedIn) {
+                                    IntervalChip(
+                                        label    = stringResource(R.string.widget_album_source_cloud),
+                                        selected = state.mode == WidgetMode.CLOUD_ALBUM,
+                                        onClick  = { onMode(WidgetMode.CLOUD_ALBUM) },
+                                    )
+                                }
                             }
                             if (state.mode == WidgetMode.CLOUD_ALBUM) {
                                 if (state.cloudAlbums.isEmpty()) {

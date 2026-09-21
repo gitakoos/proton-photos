@@ -46,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -76,7 +77,13 @@ fun AppLockScreen(onUnlocked: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Bg0),
+            .background(Bg0)
+            // Consume every gesture so the lock, drawn as an overlay over the nav graph, cannot leak a
+            // tap or scroll to the content behind it. The unlock button (a child) still gets its own
+            // clicks first, so this only swallows presses on the empty backdrop.
+            .pointerInput(Unit) {
+                awaitPointerEventScope { while (true) { awaitPointerEvent().changes.forEach { it.consume() } } }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Column(

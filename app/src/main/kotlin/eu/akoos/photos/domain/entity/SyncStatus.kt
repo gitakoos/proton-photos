@@ -69,4 +69,19 @@ object QueueSource {
     const val AUTO_FOLDER = "AUTO_FOLDER"
     const val ALBUM_ADD = "ALBUM_ADD"
     const val EDITOR = "EDITOR"
+
+    /**
+     * True when the row is up for upload because the automatic folder backup put it there, rather
+     * than because the user asked for this photo. [AUTO_FOLDER] is that case by definition, and a
+     * null source is a legacy row from before the column existed, which only reconcile ever created.
+     *
+     * This is what the auto-backup switch turns off. Turning it off leaves the folder selection
+     * intact so re-enabling restores it, which means the selection alone cannot say whether a photo
+     * should upload; the queue source can. A row the user queued by hand ([MANUAL]), by adding a
+     * device photo to a cloud album ([ALBUM_ADD]) or by saving an edit ([EDITOR]) is not automatic
+     * and still uploads with the switch off, because each of those is an instruction about one
+     * photo and the switch is a statement about the folder sweep.
+     */
+    fun isAutomatic(queueSource: String?): Boolean =
+        queueSource == null || queueSource == AUTO_FOLDER
 }

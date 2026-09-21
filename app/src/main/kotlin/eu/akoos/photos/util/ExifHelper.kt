@@ -34,9 +34,7 @@ import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.io.FileDescriptor
 import java.io.FileOutputStream
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.time.ZoneId
 
 private const val TAG = "ExifHelper"
 
@@ -152,6 +150,7 @@ data class PhotoMetadata(
     val lensModel: String? = null,
     val dateTime: String? = null,
     val dateTimeOriginal: String? = null,
+    val offsetTimeOriginal: String? = null,
     val gpsLatitude: Double? = null,
     val gpsLongitude: Double? = null,
     val gpsAltitude: Double? = null,
@@ -163,6 +162,7 @@ data class PhotoMetadata(
     val exposureTime: String? = null,
     val isoSpeed: String? = null,
     val flash: Int? = null,
+    val description: String? = null,
     val software: String? = null,
     val artist: String? = null,
     val copyright: String? = null,
@@ -175,22 +175,28 @@ data class PhotoMetadata(
  * file's EXIF from the original consults these to decide which tags it may carry, so a recompressed
  * copy never re-injects metadata the strip was meant to erase. Tags outside every group (colour
  * space, EXIF version, image description) are not part of the strip model and are always copied.
+ *
+ * AUTHORSHIP (artist, copyright) stands apart from SOFTWARE because it carries a name the user chose
+ * to put on the photo, so removing it is a decision of its own rather than a side effect of dropping
+ * the editing tool.
  */
-enum class ExifMetadataGroup { GPS, CAMERA, TIMESTAMP, SOFTWARE }
+enum class ExifMetadataGroup { GPS, CAMERA, TIMESTAMP, SOFTWARE, AUTHORSHIP }
 
 data class MetadataStripConfig(
     val stripGps: Boolean = false,
     val stripCameraInfo: Boolean = false,
     val stripTimestamp: Boolean = false,
     val stripSoftwareInfo: Boolean = false,
+    val stripAuthorship: Boolean = false,
 ) {
     /** Caller asked to remove nothing — short-circuit the strip pipeline. */
     val isNoOp: Boolean
-        get() = !stripGps && !stripCameraInfo && !stripTimestamp && !stripSoftwareInfo
+        get() = !stripGps && !stripCameraInfo && !stripTimestamp && !stripSoftwareInfo &&
+            !stripAuthorship
 
     /**
      * The [ExifMetadataGroup]s that may be copied onto a re-encoded (recompressed) upload: a group is
-     * allowed only when its strip flag is off. Pure and side-effect-free (it just inverts the four
+     * allowed only when its strip flag is off. Pure and side-effect-free (it just inverts the five
      * flags), so a plain JVM test can pin it without Android, a Context, or an ExifInterface. A
      * stripped group is absent from the result; tags that belong to no modelled group are never
      * listed here and are always carried by the copy step.
@@ -200,6 +206,7 @@ data class MetadataStripConfig(
         if (!stripCameraInfo) add(ExifMetadataGroup.CAMERA)
         if (!stripTimestamp) add(ExifMetadataGroup.TIMESTAMP)
         if (!stripSoftwareInfo) add(ExifMetadataGroup.SOFTWARE)
+        if (!stripAuthorship) add(ExifMetadataGroup.AUTHORSHIP)
     }
 }
 
@@ -228,6 +235,11 @@ object ExifHelper {
                 lensModel = exif.getAttribute(ExifInterface.TAG_LENS_MODEL),
                 dateTime = exif.getAttribute(ExifInterface.TAG_DATETIME),
                 dateTimeOriginal = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL),
+                // The offset that pins the bare datetime to an absolute instant. TAG_OFFSET_TIME is the
+                // fallback because it belongs to TAG_DATETIME, which is the same clock on all but a
+                // re-saved file.
+                offsetTimeOriginal = exif.getAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL)
+                    ?: exif.getAttribute(ExifInterface.TAG_OFFSET_TIME),
                 gpsLatitude = latLon?.get(0),
                 gpsLongitude = latLon?.get(1),
                 gpsAltitude = exif.getAttribute(ExifInterface.TAG_GPS_ALTITUDE)
@@ -242,6 +254,7 @@ object ExifHelper {
                 isoSpeed = exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
                     ?: exif.getAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS),
                 flash = exif.getAttributeInt(ExifInterface.TAG_FLASH, -1).takeIf { it >= 0 },
+                description = exif.getAttribute(ExifInterface.TAG_IMAGE_DESCRIPTION),
                 software = exif.getAttribute(ExifInterface.TAG_SOFTWARE),
                 artist = exif.getAttribute(ExifInterface.TAG_ARTIST),
                 copyright = exif.getAttribute(ExifInterface.TAG_COPYRIGHT),
@@ -321,16 +334,25 @@ object ExifHelper {
      * Copies the file from [uri] to a temp file, strips the configured metadata fields,
      * and returns the temp file path. Caller must delete the temp file after use.
      * Returns null if nothing needs stripping or the operation fails.
+     *
+     * [targetDir] overrides where the temp is created; null keeps the default cacheDir root, so the
+     * upload path is unchanged. The share path passes `cacheDir/fullres` — the one cache root the
+     * share FileProvider exposes — so the stripped copy can be handed to another app directly.
      */
     @Suppress("DEPRECATION") // TAG_ISO_SPEED_RATINGS kept to wipe the legacy tag too.
-    fun stripToTempFile(context: Context, uri: String, config: MetadataStripConfig): File? {
+    fun stripToTempFile(
+        context: Context,
+        uri: String,
+        config: MetadataStripConfig,
+        targetDir: File? = null,
+    ): File? {
         if (config.isNoOp) return null
         val parsed = Uri.parse(uri)
         val inputStream = context.contentResolver.openInputStream(parsed) ?: return null
         // The temp must keep the source container's extension. A hardcoded ".jpg" mislabels
         // HEIC / RAW / motion-photo bytes, which then upload (and decode) under the wrong type.
         val suffix = tempSuffixFor(context, parsed)
-        val tmpFile = File.createTempFile("stripped_", suffix, context.cacheDir)
+        val tmpFile = File.createTempFile("stripped_", suffix, targetDir ?: context.cacheDir)
         // Once the temp exists, any later failure (copy / EXIF write) must delete it so a thrown
         // strip never orphans a cache file. The success path returns it for the caller to use+delete.
         return try {
@@ -383,9 +405,11 @@ object ExifHelper {
             }
             if (config.stripSoftwareInfo) {
                 exif.setAttribute(ExifInterface.TAG_SOFTWARE, null)
+                exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
+            }
+            if (config.stripAuthorship) {
                 exif.setAttribute(ExifInterface.TAG_ARTIST, null)
                 exif.setAttribute(ExifInterface.TAG_COPYRIGHT, null)
-                exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
             }
             exif.saveAttributes()
             tmpFile
@@ -471,9 +495,14 @@ object ExifHelper {
                 }
                 if (config.stripSoftwareInfo) {
                     exif.setAttribute(ExifInterface.TAG_SOFTWARE, null)
+                    exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
+                }
+                // Artist / copyright are their own flag: a caller that drops the editing tool can
+                // still keep the credit the user put on the photo. Keep the tag set identical to
+                // [stripToTempFile] so a manual wipe and an upload strip remove the same fields.
+                if (config.stripAuthorship) {
                     exif.setAttribute(ExifInterface.TAG_ARTIST, null)
                     exif.setAttribute(ExifInterface.TAG_COPYRIGHT, null)
-                    exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
                 }
                 exif.saveAttributes()
             }
@@ -560,12 +589,16 @@ object ExifHelper {
         ExifInterface.TAG_CAMERA_OWNER_NAME,
     )
 
-    /** EXIF tags that record the editing software, author, or free-text provenance. */
+    /** EXIF tags that record the editing software or its free-text provenance note. */
     private val SOFTWARE_GROUP_TAGS: Set<String> = setOf(
         ExifInterface.TAG_SOFTWARE,
+        ExifInterface.TAG_USER_COMMENT,
+    )
+
+    /** EXIF tags that name the person behind the photo and the rights over it. */
+    private val AUTHORSHIP_GROUP_TAGS: Set<String> = setOf(
         ExifInterface.TAG_ARTIST,
         ExifInterface.TAG_COPYRIGHT,
-        ExifInterface.TAG_USER_COMMENT,
     )
 
     /** EXIF tags that reveal the capture location. */
@@ -604,6 +637,7 @@ object ExifHelper {
         in TIMESTAMP_GROUP_TAGS -> ExifMetadataGroup.TIMESTAMP
         in CAMERA_GROUP_TAGS -> ExifMetadataGroup.CAMERA
         in SOFTWARE_GROUP_TAGS -> ExifMetadataGroup.SOFTWARE
+        in AUTHORSHIP_GROUP_TAGS -> ExifMetadataGroup.AUTHORSHIP
         else -> null
     }
 
@@ -720,10 +754,14 @@ object ExifHelper {
         runCatching {
             val exif = ExifInterface(file.absolutePath)
             if (exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL).isNullOrBlank()) {
-                val stamp = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).format(Date(captureEpochMs))
+                val stamp = ExifDateFormat.toExifLocal(captureEpochMs, ZoneId.systemDefault())
+                // The offset pairs with the datetime, so the stamp names one absolute instant.
+                val offset = ExifDateFormat.toExifOffset(captureEpochMs, ZoneId.systemDefault())
                 exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, stamp)
+                exif.setAttribute(ExifInterface.TAG_OFFSET_TIME_ORIGINAL, offset)
                 if (exif.getAttribute(ExifInterface.TAG_DATETIME).isNullOrBlank()) {
                     exif.setAttribute(ExifInterface.TAG_DATETIME, stamp)
+                    exif.setAttribute(ExifInterface.TAG_OFFSET_TIME, offset)
                 }
                 exif.saveAttributes()
             }

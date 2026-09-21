@@ -27,15 +27,19 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.view.MotionEvent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,11 +76,15 @@ import me.proton.core.accountmanager.presentation.onUserKeyCheckFailed
 import me.proton.core.auth.presentation.AuthOrchestrator
 import eu.akoos.photos.data.api.FORCE_UPDATE_REQUIRED
 import eu.akoos.photos.data.preferences.LanguagePrefsBoot
+import eu.akoos.photos.data.updater.InstallOutcome
+import eu.akoos.photos.data.updater.InstallSessionEvents
 import eu.akoos.photos.data.updater.UpdateInstaller
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.settings.FreeUpInterval
@@ -90,14 +98,23 @@ import eu.akoos.photos.presentation.lock.AppLockManager
 import eu.akoos.photos.presentation.lock.AppLockScreen
 import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
+import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
 import eu.akoos.photos.presentation.theme.ProtonPhotosTheme
 import eu.akoos.photos.presentation.util.LocaleOverride
 import eu.akoos.photos.data.repository.drive.PhotoStreamService
+import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.isBatteryLow
 import eu.akoos.photos.worker.FreeUpSpaceWorker
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
+
+/**
+ * A cross-app edit or view intent is honoured only for a content:// URI. A file:// URI could aim
+ * the app at its own private storage, so every scheme other than content is refused. Kept as a pure
+ * predicate so it is verifiable in a plain JVM unit test.
+ */
+internal fun isAcceptableExternalEditScheme(scheme: String?): Boolean = scheme == "content"
 
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
@@ -109,10 +126,13 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var driveRepo: DrivePhotoRepository
     @Inject lateinit var photoStreamService: PhotoStreamService
     @Inject lateinit var networkObserver: NetworkObserver
+    @Inject lateinit var deviceHealth: DeviceHealthPolicy
     @Inject lateinit var reconcile: ReconcileSyncStateUseCase
     @Inject lateinit var pendingDeleteNotif: PendingDeleteNotificationUseCase
     @Inject lateinit var updateOrchestrator: UpdateOrchestrator
     @Inject lateinit var updateInstaller: UpdateInstaller
+    @Inject lateinit var installSessionEvents: InstallSessionEvents
+    @Inject lateinit var newsRepository: NewsRepository
 
     private var isLocked by mutableStateOf(false)
     private var lockEnabled = false
@@ -133,6 +153,11 @@ class MainActivity : AppCompatActivity() {
     private val resumeRefreshThresholdMs = 60L * 1000L
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Follow the real OS light/dark setting for THIS activity, so Compose's isSystemInDarkTheme()
+        // reports it truthfully under the "System" theme. The app-wide default stays NIGHT_YES
+        // (App.applyStoredThemeMode) to keep the XML ProtonCore login screens dark; this local
+        // override only affects MainActivity, whose every surface is themed by Compose.
+        delegate.setLocalNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         super.onCreate(savedInstanceState)
         authOrchestrator.register(this)
         enableEdgeToEdge()
@@ -160,12 +185,28 @@ class MainActivity : AppCompatActivity() {
             .onSessionForceLogout {
                 lifecycleScope.launch { accountManager.disableAccount(it.userId) }
             }
-            .onAccountDisabled {
+            // initialState = false is load-bearing. The default replays the state on every
+            // subscription, and the app only ever disables an account rather than removing it, so the
+            // disabled row lives on and this block ran again on each Activity creation: a cold start,
+            // a process death, or the system flipping to dark mode. Almost nothing below is scoped to
+            // the account named here, so those repeats landed on whoever was signed in by then, down
+            // to emptying the hidden area, whose copy is the only one a device-only photo has.
+            .onAccountDisabled(initialState = false) {
                 // Every sign-out path converges here (explicit sign-out, force-logout, 2FA /
                 // key-check failures). Wipe this account's cached rows, plaintext key material and
                 // decrypted thumbnails so a revoked or re-authed session leaves nothing resident.
                 // NavGraph already routes to login once isLoggedIn = false.
-                lifecycleScope.launch { runCatching { driveRepo.clearCacheForSignOut(it.userId) } }
+                // The stored state goes with them. The comment above is right that every path
+                // converges here, but only the cached rows and key material were being cleared: the
+                // folder selection, album mapping, hidden folder names and queued Drive cleanups are
+                // preferences, and they stayed for whoever signed in next.
+                lifecycleScope.launch {
+                    runCatching { driveRepo.clearCacheForSignOut(it.userId) }
+                    runCatching {
+                        eu.akoos.photos.data.preferences.AccountScopedPreferences
+                            .clear(this@MainActivity, it.userId)
+                    }
+                }
             }
             .onUserKeyCheckFailed { /* corrupt user key — best to just disable and re-login */ }
             .onUserAddressKeyCheckFailed { /* same */ }
@@ -206,8 +247,9 @@ class MainActivity : AppCompatActivity() {
 
         // Early cloud-photo refresh once a primary user resolves, so thumbnails are landing by the
         // time the gallery appears. setGentleSync(true) paces the decrypt burst slowly under the
-        // heavy first screen; GalleryViewModel flips it off when visible. refreshFullMutex single-
-        // flights it, so the later syncOnLaunch refresh just awaits this one. Gated on the same
+        // heavy first screen; GalleryViewModel flips it off when visible. The walk is single-
+        // flighted and runs on the app scope, so the later syncOnLaunch refresh just awaits this
+        // one, and backgrounding the Activity no longer abandons it midway. Gated on the same
         // constraints as the sync workers: auto-sync on, not low battery, not metered when Wi-Fi-only.
         lifecycleScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
@@ -260,7 +302,7 @@ class MainActivity : AppCompatActivity() {
         // DataStore flow's first emission and turned "Lock after 5 min" into "Lock immediately".
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                val timeoutMs = appLockManager.lockTimeoutMinutes.first().toLong() * 60_000L
+                val timeoutMs = appLockManager.lockTimeoutSeconds.first().toLong() * 1000L
                 val now = System.currentTimeMillis()
                 val sinceUnlock = now - lastUnlockMs
                 val sinceBackground = if (lastBackgroundMs == 0L) 0L else now - lastBackgroundMs
@@ -289,7 +331,7 @@ class MainActivity : AppCompatActivity() {
                         }
                 }
             }
-            val themeKey by themeKeyFlow.collectAsState(initial = "dark")
+            val themeKey by themeKeyFlow.collectAsState(initial = ThemePrefsBoot.read(this@MainActivity))
             val themeMode = ThemeMode.fromKey(themeKey)
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {
@@ -310,6 +352,25 @@ class MainActivity : AppCompatActivity() {
                 settingsDataStore.data.map { it[SettingsKeys.AMOLED_BLACK] == true }
             }
             val amoledBlack by amoledFlow.collectAsState(initial = false)
+
+            // Tint the green "backed up" cloud badges with the palette accent — DataStore-backed, live.
+            val tintCloudFlow = remember {
+                settingsDataStore.data.map { it[SettingsKeys.TINT_CLOUD_WITH_ACCENT] == true }
+            }
+            val tintCloudWithAccent by tintCloudFlow.collectAsState(initial = false)
+
+            // GIF autoplay in grids / on album covers, DataStore-backed, re-collected so they apply live.
+            val gifAutoplayGridFlow = remember {
+                settingsDataStore.data.map { it[SettingsKeys.GIF_AUTOPLAY_GRID] == true }
+            }
+            val gifAutoplayGrid by gifAutoplayGridFlow.collectAsState(initial = false)
+            val gifAutoplayCoversFlow = remember {
+                settingsDataStore.data.map { it[SettingsKeys.GIF_AUTOPLAY_COVERS] == true }
+            }
+            val gifAutoplayCovers by gifAutoplayCoversFlow.collectAsState(initial = false)
+
+            // The animated-decoder-free Coil loader, exposed to grids/covers that render a GIF as a still.
+            val staticImageLoader = remember { (application as App).staticImageLoader }
 
             // Active locale — DataStore-driven so a change reflows string resolution without an
             // Activity recreate. Initial value from the boot-mirror to avoid a first-composition flash.
@@ -334,7 +395,15 @@ class MainActivity : AppCompatActivity() {
             }
 
             LocaleOverride(language) {
-                ProtonPhotosTheme(darkTheme = useDark, palette = palette, amoledBlack = amoledBlack) {
+                ProtonPhotosTheme(
+                    darkTheme = useDark,
+                    palette = palette,
+                    amoledBlack = amoledBlack,
+                    tintCloudWithAccent = tintCloudWithAccent,
+                    gifAutoplayGrid = gifAutoplayGrid,
+                    gifAutoplayCovers = gifAutoplayCovers,
+                ) {
+                  CompositionLocalProvider(LocalStaticImageLoader provides staticImageLoader) {
                     val forceUpdateFlow = remember {
                         settingsDataStore.data.map { it[FORCE_UPDATE_REQUIRED] == true }
                     }
@@ -342,22 +411,31 @@ class MainActivity : AppCompatActivity() {
 
                     when {
                         forceUpdate -> ForceUpdateDialog()
-                        isLocked -> AppLockScreen(onUnlocked = {
-                            lastUnlockMs = System.currentTimeMillis()
-                            isLocked = false
-                        })
                         else -> {
-                            NavGraph(
-                                onStartLogin = { authOrchestrator.startLoginWorkflow(null) },
-                                onCheckForUpdates = { runManualUpdateCheck() },
-                                widgetPhotoUri = widgetPhotoUri,
-                                onWidgetPhotoConsumed = { widgetPhotoUri = null },
-                                externalEditRequest = externalEditRequest,
-                                onExternalEditConsumed = { externalEditRequest = null },
-                            )
-                            UpdaterHost()
+                            // App lock is drawn as an OVERLAY over the nav graph, not as a branch that
+                            // replaces it. Gating NavGraph out of composition disposed its NavController
+                            // and back stack, so unlocking re-entered at the start destination and the
+                            // startup router popped to the gallery instead of returning where the user
+                            // was. AppLockScreen is opaque, FLAG_SECURE, and consumes all input, so it
+                            // fully covers the content (and the recents preview) with the route intact.
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                NavGraph(
+                                    onStartLogin = { authOrchestrator.startLoginWorkflow(null) },
+                                    onCheckForUpdates = { runManualUpdateCheck() },
+                                    widgetPhotoUri = widgetPhotoUri,
+                                    onWidgetPhotoConsumed = { widgetPhotoUri = null },
+                                    externalEditRequest = externalEditRequest,
+                                    onExternalEditConsumed = { externalEditRequest = null },
+                                )
+                                UpdaterHost()
+                                if (isLocked) AppLockScreen(onUnlocked = {
+                                    lastUnlockMs = System.currentTimeMillis()
+                                    isLocked = false
+                                })
+                            }
                         }
                     }
+                  }
                 }
             }
         }
@@ -377,9 +455,20 @@ class MainActivity : AppCompatActivity() {
         val installLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) {
-            val file = updateOrchestrator.pendingInstallFile()
-            if (file != null && updateInstaller.canInstall()) {
-                runCatching { startActivity(updateInstaller.buildInstallIntent(file)) }
+            if (updateOrchestrator.pendingInstallFile() != null && updateInstaller.canInstall()) {
+                startPendingInstall()
+            }
+        }
+        // Terminal result of a committed install session. A confirmation screen is launched from
+        // here (an Activity already has a task); a failed session drops to the legacy intent.
+        LaunchedEffect(Unit) {
+            installSessionEvents.outcomes.collect { outcome ->
+                when (outcome) {
+                    is InstallOutcome.PendingUserAction ->
+                        runCatching { startActivity(outcome.intent) }
+                    is InstallOutcome.Failed -> launchLegacyInstall()
+                    else -> Unit
+                }
             }
         }
         current?.let { state ->
@@ -389,14 +478,13 @@ class MainActivity : AppCompatActivity() {
                     when (state) {
                         is UpdatePromptState.Available -> updateOrchestrator.confirmUpdate(scope)
                         is UpdatePromptState.InstallReady -> {
-                            val file = updateOrchestrator.pendingInstallFile()
-                            if (file != null) {
+                            if (updateOrchestrator.pendingInstallFile() != null) {
                                 if (!updateInstaller.canInstall()) {
                                     runCatching {
                                         installLauncher.launch(updateInstaller.buildPermissionRequestIntent())
                                     }
                                 } else {
-                                    runCatching { startActivity(updateInstaller.buildInstallIntent(file)) }
+                                    startPendingInstall()
                                 }
                             }
                         }
@@ -406,6 +494,24 @@ class MainActivity : AppCompatActivity() {
                 onDismiss = { updateOrchestrator.dismiss(scope) },
             )
         }
+    }
+
+    /**
+     * Runs the staged update through the silent install session. A refused install (wrong signer,
+     * not newer) already shows its own dialog error, so only a plumbing failure falls back.
+     */
+    private fun startPendingInstall() {
+        when (val outcome = updateOrchestrator.installPending()) {
+            is InstallOutcome.Failed -> launchLegacyInstall()
+            is InstallOutcome.PendingUserAction -> runCatching { startActivity(outcome.intent) }
+            else -> Unit
+        }
+    }
+
+    /** Last resort: hand the APK to the system installer through the FileProvider intent. */
+    private fun launchLegacyInstall() {
+        val file = updateOrchestrator.pendingInstallFile() ?: return
+        runCatching { startActivity(updateInstaller.buildInstallIntent(file)) }
     }
 
     /**
@@ -473,6 +579,7 @@ class MainActivity : AppCompatActivity() {
         val action = intent.action ?: return null
         if (action != Intent.ACTION_EDIT && action != Intent.ACTION_VIEW) return null
         val uri = intent.data ?: return null
+        if (!isAcceptableExternalEditScheme(uri.scheme)) return null
         // Prefer the intent's type; fall back to the ContentResolver (some apps omit it).
         val mimeType = intent.type
             ?: runCatching { contentResolver.getType(uri) }.getOrNull()
@@ -506,6 +613,13 @@ class MainActivity : AppCompatActivity() {
         if (!segment.isNullOrBlank() && segment.contains('.')) return segment
         val ts = System.currentTimeMillis()
         return if (isVideo) "video_$ts.mp4" else "image_$ts.jpg"
+    }
+
+    // Feed the device-health policy every touch so heavy on-device work stands aside while the user
+    // is actively using the app, then resumes shortly after they stop.
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        deviceHealth.markInteraction()
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onStop() {
@@ -544,11 +658,18 @@ class MainActivity : AppCompatActivity() {
                 // Silent — onResume must never crash; the next refresh or SyncWorker tick retries.
             }
         }
-        // Silent in-app update check. The repository caches the result for 24h, so this is a no-op
+        // Silent in-app update check. The repository caches the result for 4h, so this is a no-op
         // on most resumes; when a newer GitHub release exists it surfaces the update dialog (and,
-        // after "Not now", the dismissable gallery banner) through UpdateOrchestrator.
+        // after "Not now", the dismissable gallery banner) through UpdateOrchestrator. This is the
+        // foreground half only: UpdateCheckWorker runs the same check on its own schedule so a
+        // release still gets noticed while the app is closed.
         lifecycleScope.launch {
             runCatching { updateOrchestrator.runSilentCheck() }
+        }
+        // Refresh the news feed on the same resume, so the unread dot is current the moment the user
+        // is looking. A no-op when news is switched off, and a dropped network keeps the last feed.
+        lifecycleScope.launch {
+            runCatching { newsRepository.refresh() }
         }
     }
 

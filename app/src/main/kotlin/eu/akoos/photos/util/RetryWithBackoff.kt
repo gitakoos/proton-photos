@@ -28,6 +28,7 @@ import me.proton.core.network.domain.ApiException
 import me.proton.core.network.domain.ApiResult
 import okhttp3.Response
 import java.io.IOException
+import java.net.UnknownHostException
 import kotlin.random.Random
 
 private const val TAG = "RetryBackoff"
@@ -115,21 +116,56 @@ private fun Throwable.retryAfterMsOrNull(): Long? {
  * still behaves as it did before.
  */
 fun isTransientApiError(e: Throwable): Boolean {
+    // A host-resolution failure (UnknownHostException) or an explicit no-internet result means there
+    // is no network route right now, not a transient server blip. Retrying in a tight backoff loop
+    // cannot fix it and just spins the radio and CPU across every concurrent caller (a background
+    // battery drain flagged on aggressive OEMs), so it is non-transient: fail fast and let the
+    // network-constrained worker or the content-observer re-arm resume once connectivity returns.
+    // Genuinely transient server errors (429 / 5xx / timeout / connection reset) still retry.
+    if (e is UnknownHostException) return false
     if (e is IOException) return true
     val apiError = (e as? ApiException)?.error
     if (apiError != null) {
         when (apiError) {
             is ApiResult.Error.Http ->
                 if (apiError.httpCode == 429 || apiError.httpCode in 500..599) return true
-            is ApiResult.Error.Connection,
-            is ApiResult.Error.Timeout,
-            is ApiResult.Error.NoInternet -> return true
+            // NoInternet is a SUBTYPE of Connection, so it must be matched first: an explicit
+            // "no internet" is offline and fails fast, while a generic Connection blip can recover.
+            is ApiResult.Error.NoInternet -> return false
+            // ProtonCore wraps a host-resolution failure as Connection(cause = UnknownHostException):
+            // that is "no network route right now", not a transient blip, so fail fast. A plain
+            // connection reset (any other cause) can still recover, so retry that.
+            is ApiResult.Error.Connection -> return apiError.cause !is UnknownHostException
+            is ApiResult.Error.Timeout -> return true
             else -> Unit
         }
-        if (apiError.cause is IOException) return true
+        val cause = apiError.cause
+        if (cause is IOException && cause !is UnknownHostException) return true
     }
     val msg = e.message ?: ""
     return msg.contains("429") || msg.contains("503") || msg.contains("502") || msg.contains("504")
+}
+
+/**
+ * Whether [e] is a "there is no network route right now" failure rather than a server refusal: a
+ * host-resolution failure, or ProtonCore's explicit no-internet / offline connection result. These
+ * are the cases [isTransientApiError] deliberately reports as non-transient, so a retry loop stops
+ * instead of spinning the radio while offline.
+ *
+ * A caller that has to tell "the server refused this" from "the phone is offline" needs them back
+ * apart: being offline is evidence about the connection, not about whatever the request was doing,
+ * so it must not be read as a refusal (dropping an event anchor over a lost signal forces a full
+ * library re-walk once connectivity returns).
+ */
+fun isOfflineError(e: Throwable): Boolean {
+    if (e is UnknownHostException) return true
+    val apiError = (e as? ApiException)?.error ?: return false
+    return when (apiError) {
+        // NoInternet is a subtype of Connection, so match it first.
+        is ApiResult.Error.NoInternet -> true
+        is ApiResult.Error.Connection -> apiError.cause is UnknownHostException
+        else -> false
+    }
 }
 
 /**

@@ -37,4 +37,14 @@ data class PhotoLocationEntity(
     val userId: String,
     val latitude: Double,
     val longitude: Double,
-)
+) {
+    companion object {
+        /**
+         * The [userId] partition used when there is no signed-in account, so on-device GPS fixes are
+         * stored and read without one. A real Proton user id never equals this, so the two never
+         * collide; because [id] is the sole primary key, a photo's row is owned by whichever partition
+         * last backfilled it, and a guest/account switch simply re-reads it once.
+         */
+        const val LOCAL_USER = "local"
+    }
+}

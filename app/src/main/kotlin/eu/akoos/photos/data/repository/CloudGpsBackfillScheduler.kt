@@ -28,15 +28,21 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.crypto.DecryptPriority
+import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.repository.drive.AlbumService
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
+import eu.akoos.photos.data.repository.drive.PhotosShareService
+import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.HEALTH_PAUSE_POLL_MS
 import eu.akoos.photos.util.isTransientApiError
 import eu.akoos.photos.util.retryWithBackoff
 import java.util.concurrent.ConcurrentHashMap
@@ -81,6 +87,8 @@ class CloudGpsBackfillScheduler @Inject constructor(
     private val linkDetailHelpers: LinkDetailHelpers,
     private val photoLocationResolver: PhotoLocationResolver,
     private val albumService: AlbumService,
+    private val shareService: PhotosShareService,
+    private val deviceHealth: DeviceHealthPolicy,
 ) {
     /** Concurrency bound on in-flight XAttr decrypts — a handful keeps JNI / GC pressure low. */
     private val semaphore = Semaphore(WORKER_COUNT)
@@ -106,11 +114,24 @@ class CloudGpsBackfillScheduler @Inject constructor(
     suspend fun backfillAll(userId: UserId) {
         if (!backfilling.compareAndSet(false, true)) return
         try {
+            // Every fetch below addresses this user's own volume, so the walk is scoped to it: a row
+            // from an album another user shared could never resolve a revision here, and would be
+            // re-offered on every pass. Unavailable (offline, or a share not bootstrapped yet) simply
+            // defers the pass, the same treatment a failed page gets.
+            val ownVolumeId = runCatching { shareService.getVolumeId(userId) }.getOrNull()
+            if (ownVolumeId.isNullOrBlank()) {
+                Log.d(TAG, "own volume id unavailable, deferring this pass")
+                return
+            }
             // Photos in a client-side hidden album are kept out of the proactive geocode; snapshot the
             // member set once so the walk stays consistent across its pages.
             val hiddenLinkIds = albumService.observeHiddenAlbumMemberLinkIds().first()
             while (true) {
-                val batch = runCatching { photoListingDao.getUngeocoded(userId.id, PAGE) }
+                // Defer this background walk while the phone is hot, low on battery, or in the power saver; it
+                // resumes on its own once conditions clear. Not gated on interaction: it runs quietly in the
+                // background and does not compete with the UI.
+                while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
+                val batch = runCatching { photoListingDao.getUngeocoded(userId.id, ownVolumeId, PAGE) }
                     .getOrElse { e ->
                         if (e is CancellationException) throw e
                         Log.w(TAG, "query failed: ${e.message}"); break
@@ -142,8 +163,11 @@ class CloudGpsBackfillScheduler @Inject constructor(
                         launch {
                             try {
                                 semaphore.withPermit {
-                                    photoLocationResolver.locate(userId, row, resolved.byLinkId[row.linkId])
-                                        ?.let { located.add(it) }
+                                    // Background GPS backfill yields the process-global crypto gate to
+                                    // interactive decrypts; the on-demand export path stays foreground.
+                                    withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
+                                        photoLocationResolver.locate(userId, row, resolved.byLinkId[row.linkId])
+                                    }?.let { located.add(it) }
                                 }
                             } catch (e: CancellationException) {
                                 throw e

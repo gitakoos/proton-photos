@@ -68,17 +68,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.imageLoader
+import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.presentation.common.LocalVideoThumb
+import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
+import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
-import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.presentation.theme.LocalGifAutoplayGrid
+import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
+import eu.akoos.photos.presentation.theme.CloudBadgeSurface
+import eu.akoos.photos.presentation.theme.cloudBadgeTint
 import eu.akoos.photos.presentation.util.formatVideoTime
 
 /** Pixel budget for the OS video poster in album tiles. Matches the gallery grid so a synced
@@ -132,6 +139,12 @@ internal fun PhotoCell(
     onRequestThumbnail: (linkId: String) -> Unit = {},
     onCancelThumbnail: (linkId: String) -> Unit = {},
 ) {
+    // A local GIF animates only when the user opted into grid autoplay; otherwise the decoder-free
+    // loader renders its still first frame. A cloud thumbnail is static already, so it is unaffected.
+    val gridAutoplay = LocalGifAutoplayGrid.current
+    val staticLoader = LocalStaticImageLoader.current
+    val isLocalGif = localUri != null && photo.mimeType == "image/gif"
+
     val imageModel: Any? = when {
         localUri != null -> android.net.Uri.parse(localUri)
         photo.thumbnailUrl != null -> photo.thumbnailUrl
@@ -158,6 +171,7 @@ internal fun PhotoCell(
         modifier = Modifier
             // Slightly taller than square so corner badges cover less of the photo.
             .aspectRatio(0.85f)
+            .selectPressScale(isSelected)
             .clip(RoundedCornerShape(if (seamless) 0.dp else if (isSelected) 8.dp else 6.dp))
             .background(Bg2)
             // Tap-only by default: with no long-press handler the cell is a plain clickable, and the
@@ -189,12 +203,29 @@ internal fun PhotoCell(
                 modifier = Modifier.fillMaxSize(),
             )
             osThumb is LocalVideoThumb.Loading -> Unit // Bg2 tile shows through until the poster lands.
-            imageModel != null -> AsyncImage(
-                model = imageModel,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
+            imageModel != null -> {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                // Same key GalleryPhotoCell pins, so Coil returns the already-warm 320 px bitmap
+                // instead of decoding a second copy at this identical size.
+                val request = remember(imageModel, photo.linkId) {
+                    ImageRequest.Builder(context)
+                        .data(imageModel)
+                        .size(ALBUM_THUMB_PX)
+                        .memoryCacheKey(photo.linkId)
+                        .crossfade(false)
+                        .build()
+                }
+                val cellLoader =
+                    if (isLocalGif && !gridAutoplay) staticLoader ?: context.imageLoader
+                    else context.imageLoader
+                AsyncImage(
+                    model = request,
+                    imageLoader = cellLoader,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             else -> {
                 // Loading placeholder while the on-demand decrypt runs (parent already fills the Bg2 tile).
                 Icon(
@@ -265,7 +296,7 @@ internal fun PhotoCell(
             Icon(
                 Icons.Default.Cloud,
                 contentDescription = null,
-                tint = if (localUri != null) StatusSynced else Color.White,
+                tint = if (localUri != null) cloudBadgeTint(CloudBadgeSurface.DarkChip) else Color.White,
                 modifier = Modifier.size(11.dp),
             )
         }
@@ -370,20 +401,20 @@ internal fun PhotoCell(
 
         if (isSelectionMode) {
             Box(modifier = Modifier.padding(4.dp).size(20.dp).align(Alignment.TopStart)) {
-                if (isSelected) {
+                // Empty ring underneath; the filled check scales in over it on select.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(0.3f), CircleShape)
+                        .border(1.5.dp, Color.White.copy(0.8f), CircleShape),
+                )
+                SelectionCheckPop(isSelected) {
                     Box(
                         modifier = Modifier.fillMaxSize().background(Accent, CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(13.dp))
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(0.3f), CircleShape)
-                            .border(1.5.dp, Color.White.copy(0.8f), CircleShape),
-                    )
                 }
             }
         }

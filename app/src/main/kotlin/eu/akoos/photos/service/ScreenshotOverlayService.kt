@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.service
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.BroadcastReceiver
@@ -71,9 +70,12 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.RequiresApi
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
+import eu.akoos.photos.data.notification.NotificationIds
+import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -82,6 +84,7 @@ import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.paletteAccent
+import eu.akoos.photos.util.copySensitiveText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -259,6 +262,19 @@ class ScreenshotOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+
+    /**
+     * The platform calls this when a foreground service runs past the budget it allows that service
+     * type, and expects the service to be gone seconds later or it kills the process with an ANR.
+     * A `specialUse` service has no time limit on the current platform, so this is a floor rather
+     * than a live path: if a release ever starts metering this type, the overlay steps aside
+     * instead of taking down the app, and the user can turn it back on from Settings.
+     */
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "foreground budget exhausted; stopping overlay")
+        stopSelf()
+    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -1884,8 +1900,7 @@ class ScreenshotOverlayService : Service() {
 
     private fun copyLinkToClipboard(url: String) {
         runCatching {
-            val clipboard = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-            clipboard.setPrimaryClip(ClipData.newPlainText("Photo link", url))
+            copySensitiveText(this, "Photo link", url)
         }
     }
 
@@ -1949,7 +1964,7 @@ class ScreenshotOverlayService : Service() {
     companion object {
         const val TAG = "screenshot_overlay"
         const val CHANNEL_ID = "screenshot_overlay"
-        const val NOTIFICATION_ID = 4245
+        const val NOTIFICATION_ID = NotificationIds.SCREENSHOT_OVERLAY
 
         // A screenshot write fires several onChange events; ignore repeats inside this window.
         private const val DEBOUNCE_MS = 3_000L
@@ -1964,7 +1979,9 @@ class ScreenshotOverlayService : Service() {
         private const val AUTO_DISMISS_MS = 6_000L
 
         // Most recent draw actions kept for Undo; older snapshots are evicted so memory stays bounded.
-        private const val UNDO_CAP = 8
+        // Each undo entry is a full-screen ARGB_8888 layer copy (~10 MB on a high-res panel), so the
+        // depth is kept shallow to bound the resident memory of a foreground drawing service.
+        private const val UNDO_CAP = 5
 
         fun start(context: Context) {
             if (!Settings.canDrawOverlays(context)) {
@@ -1987,18 +2004,14 @@ class ScreenshotOverlayService : Service() {
         }
 
         fun ensureChannel(context: Context) {
-            val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            if (nm.getNotificationChannel(CHANNEL_ID) != null) return
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                context.getString(eu.akoos.photos.R.string.settings_screenshot_overlay),
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                setShowBadge(false)
-                setSound(null, null)
-                enableVibration(false)
-            }
-            nm.createNotificationChannel(channel)
+            ensureNotificationChannel(
+                context,
+                id = CHANNEL_ID,
+                name = context.getString(eu.akoos.photos.R.string.settings_screenshot_overlay),
+                description = context.getString(eu.akoos.photos.R.string.screenshot_overlay_channel_desc),
+                importance = NotificationManager.IMPORTANCE_LOW,
+                silent = true,
+            )
         }
     }
 }

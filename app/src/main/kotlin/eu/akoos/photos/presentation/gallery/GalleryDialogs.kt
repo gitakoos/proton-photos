@@ -24,6 +24,8 @@ package eu.akoos.photos.presentation.gallery
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -69,36 +71,11 @@ import eu.akoos.photos.presentation.common.selectionCloudLinkIds
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBg
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun GalleryContentFilterDialog(
-    currentFilter: ContentFilter,
-    currentCategory: GalleryFilter,
-    sheetState: SheetState,
-    onApply: (ContentFilter) -> Unit,
-    onCategorySelected: (GalleryFilter) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Bg2,
-        scrimColor = Color.Black.copy(alpha = 0.5f),
-    ) {
-        ContentFilterSheet(
-            currentFilter = currentFilter,
-            currentCategory = currentCategory,
-            onApply = onApply,
-            onCategorySelected = onCategorySelected,
-            onDismiss = onDismiss,
-        )
-    }
-}
 
 /** Shared-tab "Filter by person" picker. `onEmailSelected(null)` resets to "All". */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,7 +89,8 @@ internal fun GallerySharedEmailFilterDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Bg2,
+        containerColor = SheetBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
             modifier = Modifier
@@ -193,7 +171,8 @@ internal fun GalleryMultiDeleteDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Bg2,
+        containerColor = SheetBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         MultiDeleteSheet(
             selectedItems = selectedItems,
@@ -217,7 +196,7 @@ internal fun GalleryAddToAlbumDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         // Only cloud-backed items carry a linkId, so the picker offers cloud albums + New album.
@@ -246,6 +225,68 @@ internal fun GalleryAddToAlbumDialog(
     }
 }
 
+/**
+ * Bottom sheet for "add to person": a horizontally scrolling row of the named people, each shown as
+ * the same circular face tile the timeline rail uses, so tapping one attaches the current selection to
+ * that person. Only named people appear, since a manual add is stored against the name; when there are
+ * none, the sheet explains that a person must be named first.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun GalleryAddToPersonSheet(
+    people: List<PersonUi>,
+    sheetState: SheetState,
+    onPersonSelected: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val colors = AppColors.current
+    val named = people.filter { !it.displayName.isNullOrBlank() }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SheetBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(top = 8.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                stringResource(R.string.person_add_photos_title),
+                color = colors.fgPrimary,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (named.isEmpty()) {
+                Text(
+                    stringResource(R.string.person_add_needs_name),
+                    color = colors.fgMute,
+                    fontSize = 14.sp,
+                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    named.forEach { person ->
+                        PersonTile(
+                            person = person,
+                            selected = false,
+                            onClick = { onPersonSelected(person.personId) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun GalleryNewAlbumDialog(
@@ -257,14 +298,14 @@ internal fun GalleryNewAlbumDialog(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = appColors.cardBg,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 20.dp)
                 .padding(bottom = 36.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -278,6 +319,7 @@ internal fun GalleryNewAlbumDialog(
                 placeholder = { Text(stringResource(R.string.albums_create_album_hint), color = FgMute) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor   = Accent,
                     unfocusedBorderColor = Line2,

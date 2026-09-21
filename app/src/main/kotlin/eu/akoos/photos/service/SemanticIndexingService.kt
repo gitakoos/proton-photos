@@ -1,0 +1,315 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package eu.akoos.photos.service
+
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.IBinder
+import android.os.SystemClock
+import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
+import dagger.hilt.android.AndroidEntryPoint
+import eu.akoos.photos.R
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.notification.NotificationIds
+import eu.akoos.photos.data.notification.ensureNotificationChannel
+import eu.akoos.photos.data.semantic.SemanticIndexingProgress
+import eu.akoos.photos.data.semantic.SemanticIndexingScheduler
+import eu.akoos.photos.data.semantic.SemanticIndexingState
+import eu.akoos.photos.util.SemanticDiagnostics
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import me.proton.core.domain.entity.UserId
+import javax.inject.Inject
+
+/**
+ * Foreground host for the one-time initial semantic-search indexing walk. The walk itself lives in
+ * [SemanticIndexingScheduler]; this service only keeps the app process alive so a large first pass runs
+ * to completion after the user swipes the app from Recents, and shows its progress in a LOW notification.
+ *
+ * It never owns the work. On start it triggers the walk through the scheduler's own entry and then
+ * observes [SemanticIndexingScheduler.progress]; the scheduler's single-flight guard collapses that
+ * trigger into a walk already running (e.g. one the gallery started), so the service can only ever host
+ * and report, never spawn a second walk. Health gating (battery, heat, power saver) and the shared model
+ * gate stay in the scheduler; this service does not touch them and holds no wakelock, the foreground
+ * service being the sanctioned host that keeps the CPU available.
+ *
+ * The walk legitimately parks while the device is a poor state for heavy work, or while the face walk
+ * holds the shared model gate, which shows here as the progress count standing still. The notification
+ * then reads a waiting line rather than a frozen count, and if no progress lands within [GRACE_STOP_MS]
+ * the service stops itself and lets a later launch or trigger resume, so a park never holds an idle
+ * foreground service forever.
+ */
+@AndroidEntryPoint
+class SemanticIndexingService : Service() {
+
+    @Inject lateinit var scheduler: SemanticIndexingScheduler
+
+    /** Service-scoped scope for the trigger and the progress watcher; cancelled in [onDestroy]. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Guards the one-time trigger + observe, so repeat starts (pass re-kicks, sticky restarts) do not
+     *  stack watchers or extra triggers on the same instance. */
+    private var started = false
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        ensureChannel(this)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Stop action: pause the walk so it stays off until the user resumes it, then drop the service.
+        if (intent?.action == ACTION_STOP) {
+            scope.launch { runCatching { scheduler.setPaused(true) } }
+            stopIndexingService()
+            return START_NOT_STICKY
+        }
+
+        intent?.getStringExtra(EXTRA_USER_ID)?.let { lastUserId = it }
+
+        // Promote immediately: Android kills the service within seconds otherwise, and on Android 12+ a
+        // background start cannot foreground at all, so fall back to stopping rather than crash-looping.
+        val foregrounded = try {
+            startForegroundWith(scheduler.progress.value)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "startForeground denied (background start): ${e.message}")
+            false
+        }
+        if (!foregrounded) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // Note the foreground start once per session (a re-kick does not reset it), so the copied
+        // diagnostics can show how long this dataSync service has run against the platform's daily budget.
+        SemanticDiagnostics.recordFgsStart()
+
+        if (!started) {
+            started = true
+            // Trigger through the scheduler's own entry; the single-flight guard makes a redundant kick a
+            // no-op, so this only starts a walk when none is running (e.g. a sticky restart) and otherwise
+            // just hosts the one already going.
+            // A guest walk carries the local sentinel, never a fabricated UserId (that would poison the
+            // per-UserId flow + crypto caches), so map it back to a null userId for indexAll.
+            lastUserId?.let { uid ->
+                scope.launch {
+                    runCatching {
+                        scheduler.indexAll(if (uid == PhotoLocationEntity.LOCAL_USER) null else UserId(uid))
+                    }
+                }
+            }
+            observeProgress()
+        }
+        return START_STICKY
+    }
+
+    /**
+     * Android 15 caps how long a `dataSync` foreground service runs within a rolling day and calls this
+     * once the budget is spent, giving the service seconds to stop before the platform kills it. Stop
+     * cleanly; the walk is resumable and a later launch or trigger picks it up.
+     */
+    @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        // Record the platform hitting the dataSync daily budget, so the copied diagnostics can confirm or
+        // rule out the daily cap as the reason a large index stopped short.
+        SemanticDiagnostics.recordFgsTimeout()
+        Log.w(TAG, "dataSync foreground budget exhausted; stopping")
+        stopIndexingService()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        scope.cancel()
+        // The foreground session ended, so the diagnostics runtime reads "off" until the next start.
+        SemanticDiagnostics.recordFgsStop()
+    }
+
+    /**
+     * Poll the scheduler's progress and keep the notification honest: a moving count reads "N of M", a
+     * count that has stood still past [STALE_AFTER_MS] (a health park, a pause, or a wait on the shared
+     * model gate) reads the waiting line, and a walk that finished or was never running stops the service.
+     * Polling rather than collecting the flow, because a park emits nothing, yet the service still has to
+     * notice the stall to switch text and to stop itself after the grace window.
+     */
+    private fun observeProgress() {
+        scope.launch {
+            var lastIndexed = -1
+            var lastAdvanceAt = SystemClock.elapsedRealtime()
+            var lastText: String? = null
+            while (isActive) {
+                val p = scheduler.progress.value
+                if (p.state == SemanticIndexingState.Done || p.state == SemanticIndexingState.Idle) {
+                    stopIndexingService()
+                    return@launch
+                }
+                val now = SystemClock.elapsedRealtime()
+                if (p.indexed > lastIndexed) {
+                    lastIndexed = p.indexed
+                    lastAdvanceAt = now
+                }
+                val staleFor = now - lastAdvanceAt
+                if (staleFor >= GRACE_STOP_MS) {
+                    stopIndexingService()
+                    return@launch
+                }
+                val advancing = p.state == SemanticIndexingState.Running && p.total > 0 && staleFor < STALE_AFTER_MS
+                val text = if (advancing) {
+                    getString(R.string.semantic_index_service_progress, p.indexed, p.total)
+                } else {
+                    getString(R.string.semantic_index_service_waiting)
+                }
+                if (text != lastText) {
+                    lastText = text
+                    postNotification(buildNotification(advancing, p.indexed, p.total, text))
+                }
+                delay(POLL_MS)
+            }
+        }
+    }
+
+    private fun startForegroundWith(p: SemanticIndexingProgress) {
+        val advancing = p.state == SemanticIndexingState.Running && p.total > 0
+        val text = if (advancing) {
+            getString(R.string.semantic_index_service_progress, p.indexed, p.total)
+        } else {
+            getString(R.string.semantic_index_service_waiting)
+        }
+        val notification = buildNotification(advancing, p.indexed, p.total, text)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun buildNotification(advancing: Boolean, indexed: Int, total: Int, text: String): Notification {
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(getString(R.string.semantic_index_service_title))
+            .setContentText(text)
+            .setOngoing(true)
+            .setShowWhen(false)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                getString(R.string.semantic_index_service_stop),
+                stopPendingIntent(),
+            )
+        // Determinate bar while the count moves; indeterminate while parked, so the bar never reads as a
+        // frozen position.
+        if (advancing) builder.setProgress(total, indexed.coerceIn(0, total), false)
+        else builder.setProgress(0, 0, true)
+        return builder.build()
+    }
+
+    private fun postNotification(notification: Notification) {
+        // Wrapped: a denied POST_NOTIFICATIONS grant must not crash the update, the notification being
+        // informational and the service best-effort.
+        @android.annotation.SuppressLint("MissingPermission")
+        runCatching { NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification) }
+    }
+
+    private fun stopPendingIntent(): PendingIntent {
+        val intent = Intent(this, SemanticIndexingService::class.java).setAction(ACTION_STOP)
+        return PendingIntent.getService(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
+
+    private fun stopIndexingService() {
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        stopSelf()
+    }
+
+    companion object {
+        const val TAG = "semantic_index_service"
+        const val CHANNEL_ID = "semantic_indexing"
+        const val NOTIFICATION_ID = NotificationIds.SEMANTIC_INDEXING
+        const val ACTION_STOP = "eu.akoos.photos.action.STOP_SEMANTIC_INDEX"
+        const val EXTRA_USER_ID = "user_id"
+
+        /** How often the watcher samples progress. */
+        private const val POLL_MS = 2_000L
+
+        /** No forward progress for this long flips the notification to the waiting line. Covers a health
+         *  park or a wait on the shared model gate, both of which read as Running with a still count. */
+        private const val STALE_AFTER_MS = 15_000L
+
+        /** No forward progress for this long stops the service, so a long park never holds an idle
+         *  foreground service; a later launch or trigger resumes the walk. */
+        private const val GRACE_STOP_MS = 120_000L
+
+        /** The last account a start carried, so a sticky restart with a null intent still has a userId to
+         *  resume with while the process lives. */
+        @Volatile private var lastUserId: String? = null
+
+        /** Idempotently start the host for [userId]. Repeated calls route through onStartCommand and stay
+         *  running; a background-start refusal on Android 12+ is swallowed since the caller cannot know it
+         *  is foreground. */
+        fun start(context: Context, userId: UserId?) {
+            lastUserId = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            val intent = Intent(context, SemanticIndexingService::class.java)
+                .putExtra(EXTRA_USER_ID, userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+            runCatching {
+                ContextCompat.startForegroundService(context, intent)
+            }.onFailure {
+                Log.w(TAG, "start failed: ${it.message}")
+            }
+        }
+
+        /** Lazily creates the semantic-indexing notification channel. Idempotent, and distinct from the
+         *  face and backup channels so a user can mute one without the others. */
+        fun ensureChannel(context: Context) {
+            ensureNotificationChannel(
+                context,
+                id = CHANNEL_ID,
+                name = context.getString(R.string.semantic_index_service_channel_name),
+                description = context.getString(R.string.semantic_index_service_channel_desc),
+                importance = NotificationManager.IMPORTANCE_LOW,
+                silent = true,
+            )
+        }
+    }
+}

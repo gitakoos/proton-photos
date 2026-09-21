@@ -229,6 +229,7 @@ internal fun AlbumMirrorStep(
                     value = input,
                     onValueChange = { input = it },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
                     placeholder = {
                         Text(stringResource(R.string.album_mirror_custom_dialog_hint))
                     },

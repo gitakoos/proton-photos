@@ -52,8 +52,8 @@ interface AlbumPhotoMembershipDao {
     fun observeAssociatedPhotoLinkIdsForAlbums(albumIds: Set<String>): Flow<List<String>>
 
     /** Reverse lookup: which albums hold the given photos — backs the add-to-album picker's
-     *  "already in this album" indicator. Rides the photoLinkId index; [photoLinkIds] is a
-     *  user selection, never the whole library, so the IN list stays bounded. */
+     *  "already in this album" indicator. Rides the photoLinkId index. [photoLinkIds] is a user
+     *  selection that select-all can grow to the whole library, so callers chunk it. */
     @Query("SELECT albumLinkId, photoLinkId FROM album_photo_membership WHERE photoLinkId IN (:photoLinkIds)")
     fun observeAlbumIdsForPhotos(photoLinkIds: Set<String>): Flow<List<AlbumPhotoMembershipLite>>
 
@@ -64,9 +64,17 @@ interface AlbumPhotoMembershipDao {
     suspend fun deleteAllForAlbum(albumLinkId: String)
 
     /** Targeted delete for remove-from-album, so the gallery filter re-fires without
-     *  dropping every other photo's membership row. */
+     *  dropping every other photo's membership row. Callers chunk [photoLinkIds]. */
     @Query("DELETE FROM album_photo_membership WHERE albumLinkId = :albumLinkId AND photoLinkId IN (:photoLinkIds)")
     suspend fun deleteForAlbumPhotos(albumLinkId: String, photoLinkIds: List<String>)
+
+    /** Drops every edge pointing at the given photos, across all albums, for a path that deletes the
+     *  photo rows themselves. An album screen enumerates its photos through these edges, so an edge
+     *  left behind outlives the row it names and keeps painting a photo that is gone. Album-scoped
+     *  deletes use [deleteForAlbumPhotos] instead; this one is for when the photo, not the
+     *  membership, is what ended. Callers chunk [photoLinkIds]. */
+    @Query("DELETE FROM album_photo_membership WHERE photoLinkId IN (:photoLinkIds)")
+    suspend fun deleteForPhotos(photoLinkIds: List<String>)
 
     /** Atomically replaces an album's membership rows so the offline list matches network truth. */
     @Transaction

@@ -36,23 +36,24 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.entity.DayMetaEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.presentation.util.isoDateFormat
+import eu.akoos.photos.presentation.util.monthYearFormat
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-import java.util.TimeZone
 import javax.inject.Inject
 
 /**
@@ -102,27 +103,28 @@ class CalendarViewModel @Inject constructor(
             try {
                 accountManager.getPrimaryUserId()
                     .flatMapLatest { userId ->
-                        primaryUserId = userId?.id
-                        if (userId == null) {
-                            flowOf(emptyList<MonthBucket>())
-                        } else {
-                            // Build the month grid from the data sources only, so a thumbnail-decrypt
-                            // (store change) does not re-run the heavier buildMonths walk.
-                            combine(
-                                getGalleryItems.invoke(userId),
-                                dayMetaDao.observeAll(userId.id),
-                                hiddenUrisFlow,
-                            ) { items, metas, hiddenUris ->
-                                val visible = items.filter { item ->
-                                    val uri = when (item) {
-                                        is GalleryItem.LocalOnly -> item.local.uri
-                                        is GalleryItem.Synced -> item.local.uri
-                                        is GalleryItem.CloudOnly -> null
-                                    }
-                                    uri == null || uri !in hiddenUris
+                        primaryUserId = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+                        // Build the month grid from the data sources only, so a thumbnail-decrypt
+                        // (store change) does not re-run the heavier buildMonths walk. Signed out the
+                        // grid is built from the device's own media and the day-meta overlay reads the
+                        // local partition, so a guest's day annotations show on the calendar too.
+                        val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
+                            else getGalleryItems.invoke(userId)
+                        val metasFlow = dayMetaDao.observeAll(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+                        combine(
+                            libraryFlow,
+                            metasFlow,
+                            hiddenUrisFlow,
+                        ) { items, metas, hiddenUris ->
+                            val visible = items.filter { item ->
+                                val uri = when (item) {
+                                    is GalleryItem.LocalOnly -> item.local.uri
+                                    is GalleryItem.Synced -> item.local.uri
+                                    is GalleryItem.CloudOnly -> null
                                 }
-                                buildMonths(visible, metas)
+                                uri == null || uri !in hiddenUris
                             }
+                            buildMonths(visible, metas)
                         }
                     }
                     // The day tile draws its cover imperatively (a bitmap built outside any Compose
@@ -230,7 +232,7 @@ class CalendarViewModel @Inject constructor(
         if (terms.isEmpty()) return emptyList()
 
         // Pull EVERY DayMeta row so each annotated day's description is in the haystack below.
-        // Biasing the fetch on one term used to drop matches whose term lived only in the
+        // Biasing the fetch on one term would drop matches whose term lives only in the
         // description of a row the bias filtered out; the table is small (one row per annotated
         // day), so loading all of it is cheap and correct.
         val uid = primaryUserId
@@ -240,7 +242,7 @@ class CalendarViewModel @Inject constructor(
             emptyMap()
         }
 
-        val monthLabelFmt = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+        val monthLabelFmt = monthYearFormat()
         val dayLabelFmt = SimpleDateFormat("MMMM d", Locale.getDefault())
         val cal = Calendar.getInstance()
         val results = mutableListOf<DayBucket>()
@@ -289,19 +291,19 @@ class CalendarViewModel @Inject constructor(
         val metaByDate = metas.associateBy { it.date }
         val cal = Calendar.getInstance()
 
-        // Group items by yyyy-MM-dd while ALSO tracking each (year, month) pair, so we can
-        // render every month in the user's library — including months that fall between
-        // two with photos but contain none themselves.
-        val itemsByDate = mutableMapOf<String, MutableList<GalleryItem>>()
+        // Group items by yyyy-MM-dd, then find the oldest capture so the month walk below knows how
+        // far back to render, covering months between two with photos that contain none themselves.
+        val itemsByDate = groupItemsByDay(
+            items,
+            captureTimeMs = { it.captureTimeMs },
+            isoDate = { ISO_DATE.get().format(Date(it)) },
+        )
+
         var minMillis = Long.MAX_VALUE
-        var maxMillis = Long.MIN_VALUE
         for (item in items) {
             val ms = item.captureTimeMs
             if (ms <= 0L) continue
             if (ms < minMillis) minMillis = ms
-            if (ms > maxMillis) maxMillis = ms
-            val date = ISO_DATE.get().format(Date(ms))
-            itemsByDate.getOrPut(date) { mutableListOf() }.add(item)
         }
 
         if (minMillis == Long.MAX_VALUE) {
@@ -389,15 +391,36 @@ class CalendarViewModel @Inject constructor(
         // coroutine — stash it in a ThreadLocal to dodge the per-call allocation while
         // still being conservative about reuse if buildMonths ever gets parallelised.
         private val ISO_DATE = object : ThreadLocal<SimpleDateFormat>() {
-            override fun initialValue(): SimpleDateFormat =
-                SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-                    timeZone = TimeZone.getDefault()
-                }
+            override fun initialValue(): SimpleDateFormat = isoDateFormat()
         }
 
+        /** The key the day buckets are built with, which is why the locale is pinned rather than
+         *  left to the device. `%d` renders through the format locale's own digits, so on a phone set
+         *  to Persian, Arabic, Bengali or Burmese this returned a key spelled in those digits while
+         *  every bucket was keyed in Latin ones, and every day in the calendar looked empty. */
         fun formatDate(year: Int, month: Int, day: Int): String =
-            "%04d-%02d-%02d".format(year, month, day)
+            String.format(Locale.US, "%04d-%02d-%02d", year, month, day)
     }
+}
+
+/**
+ * Buckets [items] into ISO day keys (yyyy-MM-dd) with the supplied [isoDate] formatter, skipping any
+ * item whose [captureTimeMs] is non-positive. Insertion order is kept: day keys follow first
+ * appearance and each day's list follows the order its items arrived in. Pure, so the Calendar's day
+ * grouping is verifiable without the view model's flows.
+ */
+internal fun <T> groupItemsByDay(
+    items: List<T>,
+    captureTimeMs: (T) -> Long,
+    isoDate: (Long) -> String,
+): Map<String, List<T>> {
+    val itemsByDate = mutableMapOf<String, MutableList<T>>()
+    for (item in items) {
+        val ms = captureTimeMs(item)
+        if (ms <= 0L) continue
+        itemsByDate.getOrPut(isoDate(ms)) { mutableListOf() }.add(item)
+    }
+    return itemsByDate
 }
 
 data class CalendarUiState(

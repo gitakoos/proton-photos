@@ -26,12 +26,16 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import eu.akoos.photos.util.MetadataStripConfig
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -45,11 +49,6 @@ object SettingsKeys {
     /** When true, a floating month/year label fades in over the Photos timeline while it is
      *  actively scrolling, giving a time reference for the topmost visible photo. Off by default. */
     val SHOW_SCROLL_DATE = booleanPreferencesKey("show_scroll_date")
-
-    /** When true, the selection-mode action buttons (share, delete, download, set as cover, remove)
-     *  show a short text label beneath the icon. On by default; users who prefer icon-only can
-     *  turn it off so the action bars stay compact. */
-    val SHOW_SELECTION_LABELS = booleanPreferencesKey("show_selection_labels")
 
     /** When true, the Photos timeline is flipped so the oldest photos sit at the top and the
      *  newest at the bottom (scroll up for older). Off by default — the timeline stays newest-first.
@@ -77,18 +76,50 @@ object SettingsKeys {
      *  Restored on entry when [ALBUMS_REMEMBER_LAST_FILTER] is on. */
     val ALBUMS_LAST_FILTER = intPreferencesKey("albums_last_filter")
 
+    /** Albums-grid sort mode, an AlbumSortMode ordinal (0 = Custom, 1 = NameAsc, 2 = LastActivity,
+     *  3 = PhotoCount). Absent = LastActivity, which is the order the album cache is read in, so an
+     *  install that never picks a mode keeps the grid it already had. */
+    val ALBUMS_SORT_MODE = intPreferencesKey("albums_sort_mode")
+
+    /** Direction the photos inside an album are listed in, an AlbumPhotoSortMode ordinal
+     *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order albums have always
+     *  opened on. One global choice every album shares: a per-album key would grow with the
+     *  library and rewrite the whole preferences file on each change. */
+    val ALBUM_PHOTO_SORT_MODE = intPreferencesKey("album_photo_sort_mode")
+
+    /** Direction the photos inside a device folder are listed in, an AlbumPhotoSortMode ordinal
+     *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order a folder opens on. Its
+     *  own key rather than [ALBUM_PHOTO_SORT_MODE]: a folder and an album are browsed for different
+     *  reasons, so a direction chosen in one has no claim on the other. One global choice every
+     *  folder shares, since a per-folder key would grow with the device's bucket list and rewrite
+     *  the whole preferences file on each change. */
+    val DEVICE_FOLDER_PHOTO_SORT_MODE = intPreferencesKey("device_folder_photo_sort_mode")
+
+    /** The user's own Albums-grid arrangement, a '|'-separated list of album linkIds, read only
+     *  when [ALBUMS_SORT_MODE] is Custom. Absent or empty = no arrangement yet, which Custom
+     *  resolves as LastActivity. '|' matches [PENDING_ORPHAN_DELETES] and the widget's id lists,
+     *  since a Drive linkId is base64 and can end in '=' padding. Holds ids the grid is not
+     *  currently showing, so a hidden album keeps its slot for its return; never pruned against
+     *  what is on screen. */
+    val ALBUMS_CUSTOM_ORDER = stringPreferencesKey("albums_custom_order")
+
     /** When true (default), the viewer + editor will NOT auto-download cloud full-res
      *  blobs on metered networks. Wifi-only is the data-conscious default; users on
      *  unlimited mobile plans can flip it off in Settings → Sync. Does not affect the
      *  thumbnail layer (those are tiny and load freely). */
     val FULLRES_WIFI_ONLY = booleanPreferencesKey("fullres_wifi_only")
     /**
-     * App-lock timeout in minutes — how long the app can be in the background before re-locking
-     * on resume. 0 = lock immediately (the default before this option existed). Larger values mean the
-     * user can quickly switch to another app and back without re-authenticating.
-     * Common picks: 0 (immediate), 1, 5, 10, 15, 60.
+     * Legacy app-lock timeout in minutes. Superseded by [APP_LOCK_TIMEOUT_SECONDS]; kept only so old
+     * installs migrate cleanly (read-side: seconds = minutes * 60 when the seconds key is absent).
      */
     val APP_LOCK_TIMEOUT_MINUTES = intPreferencesKey("app_lock_timeout_minutes")
+    /**
+     * App-lock timeout in seconds: how long the app can be in the background before re-locking on
+     * resume. 0 = lock immediately (the default before this option existed). Larger values mean the
+     * user can quickly switch to another app and back without re-authenticating.
+     * Common picks: 0 (immediate), 5, 10, 30, 60, 300, 600, 900, 3600.
+     */
+    val APP_LOCK_TIMEOUT_SECONDS = intPreferencesKey("app_lock_timeout_seconds")
     val AUTO_FREE_UP = booleanPreferencesKey("auto_free_up")
     val FREE_UP_INTERVAL = stringPreferencesKey("free_up_interval")
     /**
@@ -112,6 +143,26 @@ object SettingsKeys {
      * base surfaces. Default false so existing installs keep the near-black dark theme.
      */
     val AMOLED_BLACK = booleanPreferencesKey("amoled_black")
+
+    /** When true, the green "backed up" cloud badges are tinted with the palette accent colour instead of
+     *  the fixed green. Off by default, so the badges stay green unless the user turns it on. */
+    val TINT_CLOUD_WITH_ACCENT = booleanPreferencesKey("tint_cloud_with_accent")
+
+    /** When true, GIFs animate in the timeline, album, and device-folder grids; off shows a still first
+     *  frame instead. Off by default so grids stay calm unless the user opts in. */
+    val GIF_AUTOPLAY_GRID = booleanPreferencesKey("gif_autoplay_grid")
+
+    /** When true, an album cover that is a GIF animates; off shows a still first frame. Off by default. */
+    val GIF_AUTOPLAY_COVERS = booleanPreferencesKey("gif_autoplay_covers")
+
+    /** true = the classic OpenStreetMap tile map; false (default) = the modern world map. */
+    val MAP_STYLE_OSM = booleanPreferencesKey("map_style_osm")
+
+    /** True once the one-time map-style chooser has been answered or dismissed, the first time a map
+     *  entry point is opened. Absent/false = the chooser still surfaces on the next map open, so the
+     *  choice between the modern world map and the classic tile map is offered at the moment it
+     *  matters instead of only living in Settings. */
+    val MAP_STYLE_PROMPTED = booleanPreferencesKey("map_style_prompted")
     val LAST_SYNC_MS = longPreferencesKey("last_sync_ms")
 
     /** Wall-clock millis of the last successful GitHub release check. Used to throttle
@@ -125,9 +176,31 @@ object SettingsKeys {
      *  key slot; there is no permanent per-version dismissal anymore. */
     val UPDATE_AVAILABLE_VERSION = stringPreferencesKey("update_dismissed_version")
 
+    /** When false, the periodic background release check is cancelled and no update notification
+     *  is posted. Absent = on: an app that is rarely opened is exactly the one that needs to be
+     *  told about a new version. The manual Settings check is unaffected either way. */
+    val UPDATE_BACKGROUND_CHECK = booleanPreferencesKey("update_background_check")
+
+    /** versionName the update notification has already been posted for. The background check keeps
+     *  finding the same release every period, so this is what keeps one announcement from becoming
+     *  a recurring one. Cleared once a check confirms the app is up to date. */
+    val UPDATE_NOTIFIED_VERSION = stringPreferencesKey("update_notified_version")
+
+    /** versionName of an APK the background check has already downloaded, alongside
+     *  [UPDATE_STAGED_FILE] holding where it sits. Persisted because the download happens with the
+     *  app closed, so the in-memory handle the update prompt normally holds is long gone by the
+     *  time the user opens the app. Both are cleared once the archive is installed, superseded or
+     *  found missing. */
+    val UPDATE_STAGED_VERSION = stringPreferencesKey("update_staged_version")
+    val UPDATE_STAGED_FILE = stringPreferencesKey("update_staged_file")
+
     /** User's custom order for the timeline category rail, a CSV of GalleryFilter enum names.
      *  Absent = the default Drive-web order. Reordered by long-pressing a chip and dragging. */
     val CATEGORY_RAIL_ORDER = stringPreferencesKey("category_rail_order")
+
+    /** GalleryFilter enum names the user has hidden from the timeline category rail, toggled with
+     *  the eye button on the Timeline filter screen. Absent / empty = every category shows. */
+    val CATEGORY_RAIL_HIDDEN = stringSetPreferencesKey("category_rail_hidden")
 
     val LANGUAGE = stringPreferencesKey("language")
 
@@ -143,6 +216,14 @@ object SettingsKeys {
     val GRID_REMEMBER_LAST = booleanPreferencesKey("grid_remember_last")
     /** Last pinched timeline zoom level index; restored on launch when [GRID_REMEMBER_LAST] is on. */
     val GRID_LAST_LEVEL = intPreferencesKey("grid_last_level")
+    /** Albums tab: how many album/folder COVERS sit per row (default 2). Distinct from
+     *  [GRID_DEFAULT_COLUMNS], which is the PHOTO density inside an album / folder / hidden. */
+    val ALBUM_GRID_COLUMNS = intPreferencesKey("album_grid_columns")
+
+    /** When on, tapping a different bottom tab keeps that page where it was last scrolled; only
+     *  re-tapping the already-active tab returns it to the top. Off by default, so any tab tap
+     *  resets that tab to the top as before. */
+    val KEEP_SCROLL_ON_TAB_SWITCH = booleanPreferencesKey("keep_scroll_on_tab_switch")
 
     /** Folders selected for backup. null (key absent) = back up nothing (first-run default). */
     val SYNC_FOLDER_NAMES = stringSetPreferencesKey("sync_folder_names")
@@ -204,17 +285,54 @@ object SettingsKeys {
     val HIDDEN_URI_ORIGINAL_NAME_MAP = stringSetPreferencesKey("hidden_uri_original_name_map")
 
     /**
-     * mediaUri → capture-date-ms mapping for downloaded files whose MediaStore DATE_TAKEN could
-     * not be persisted, stored as a set of "mediaUri|captureMs" strings (DataStore lacks a Map).
+     * hiddenUri → everything else the hidden photo owned that is keyed by its device uri, as a set of
+     * "hiddenUri|sourceUri|favourite|userTags|coverFolder|albums" strings (same flatten as the maps
+     * above, one entry per hidden photo that has anything to carry).
+     *
+     * A hide changes the photo's uri twice — content:// to file:// and on to a fresh content:// — so
+     * every store keyed by that uri loses the photo unless the hide copies the answer forward. The
+     * favourite heart, the categories the user chose, the folder cover they pinned and the albums the
+     * photo is queued to join are all such answers, and none of them can be worked out again from the
+     * bytes. Written before the original is deleted and read back onto the restored uri, so a round
+     * trip through the vault leaves the photo exactly as it went in. Encoded and decoded through
+     * [eu.akoos.photos.data.hidden.HiddenVaultCarry].
+     */
+    val HIDDEN_URI_CARRIED_MAP = stringSetPreferencesKey("hidden_uri_carried_map")
+
+    /**
+     * Hides that have copied their bytes into the vault but not yet had their MediaStore original
+     * removed, as a set of "hiddenUri|sourceUri" strings (same flatten as the maps above).
+     *
+     * Written BEFORE the delete and cleared right after it, so the window a process death can land in
+     * always leaves a record of what was being moved. Kept apart from [HIDDEN_PHOTO_URIS] so an entry
+     * that has not confirmed yet cannot read as an ordinary hidden photo. The source uri is the whole
+     * payload: it is what tells a later reconciliation whether the delete ever happened.
+     */
+    val HIDDEN_PENDING_HIDES = stringSetPreferencesKey("hidden_pending_hides")
+
+    /**
+     * mediaUri → capture-date-ms mapping for files whose MediaStore DATE_TAKEN is missing or
+     * wrong, stored as a set of "mediaUri|captureMs" strings (DataStore lacks a Map).
      * MediaStore only derives DATE_TAKEN from the embedded date for JPEG/HEIF images (and video
      * mvhd); for a PNG/WebP/GIF download it refuses the column, leaving DATE_TAKEN = 0, so the
      * file would read as its download date once its cloud twin is gone. The download writes the
      * real capture date here when the read-back shows the column did not stick, and the local
-     * media scan applies it as the date whenever DATE_TAKEN is 0 — so a downloaded PNG keeps its
-     * true date even after its cloud copy is deleted. Entries for files no longer present are
-     * pruned during the scan, so the map stays bounded.
+     * media scan reports an entry ahead of the column, so a downloaded PNG keeps its true date
+     * even after its cloud copy is deleted. Entries for files no longer present are pruned
+     * during the scan, so the map stays bounded.
      */
+    // The download wording is kept for continuity with the entries already stored on devices.
     val DOWNLOAD_DATE_OVERRIDES = stringSetPreferencesKey("download_date_overrides")
+
+    /**
+     * folderName → cover-uri mapping for device folders whose cover the user pinned, stored as a set
+     * of "folderName|coverUri" strings (same flatten as [HIDDEN_URI_SOURCE_FOLDER_MAP]). The key is
+     * the MediaStore bucket display name, matching every other per-folder preference here. A folder
+     * with no entry, or one whose pinned photo is not among its current items, falls back to its
+     * newest photo. Entries are read and written through [eu.akoos.photos.util.FolderCoverMap], and
+     * pruned during the local media scan once it proves the pinned file is gone.
+     */
+    val FOLDER_COVER_URI_MAP = stringSetPreferencesKey("folder_cover_uri_map")
 
     /**
      * User-declared local folder names that aren't backed by an existing MediaStore bucket yet.
@@ -297,10 +415,12 @@ object SettingsKeys {
     fun photoListingCursorKey(userId: String, volumeId: String) =
         stringPreferencesKey("photo_listing_cursor_${userId}_$volumeId")
 
-    /** True once the photo-stream listing has been walked end to end (every page fetched without
-     *  a failure). Gates the incremental event anchor — future deltas are only safe to track once
-     *  the whole library is in the DB. Reset to false at the start of a walk and left false on any
-     *  page failure so the next run keeps walking older photos. */
+    /** True once the photo-stream listing has been walked end to end AND every detail batch landed,
+     *  i.e. the DB holds the whole library in full. Decides whether the next walk starts fresh or
+     *  resumes the saved cursor, and whether the missing-anchor account polls its newest page. Reset
+     *  to false at the start of a walk and left false on any page or batch failure so the next run
+     *  keeps walking older photos. The event anchor is gated separately and more loosely, on the
+     *  listing alone — see `PhotoStreamService.lastFullRefreshComplete`. */
     fun photoListingCompleteKey(userId: String, volumeId: String) =
         booleanPreferencesKey("photo_listing_complete_${userId}_$volumeId")
 
@@ -322,6 +442,23 @@ object SettingsKeys {
     fun pairingSettledKey(userId: String) =
         booleanPreferencesKey("pairing_settled_$userId")
 
+    /** When a reconcile pass last completed against a fully-listed cloud library, as epoch millis.
+     *  Written at the end of the pass under the same condition as [pairingSettledKey], so a run that
+     *  threw, or one that only ever saw a half-walked listing, leaves it alone.
+     *
+     *  It answers one question for the automatic free-up sweep: how old is the picture of the cloud
+     *  that `sync_state` was last checked against. The sweep deletes the device copy of a SYNCED
+     *  photo, and the only thing standing between that and deleting a last copy is reconcile having
+     *  recently demoted photos whose cloud twin is gone. Backup off cancels the background sync
+     *  entirely, so an unopened app can leave that check unrun indefinitely while the hourly sweep
+     *  keeps running; this timestamp is what lets the sweep notice and stand down.
+     *
+     *  What it does NOT prove is that the cloud listing itself was re-fetched in the same pass, only
+     *  that it had been fully walked. That is acceptable here because every caller that reconciles
+     *  refreshes first, and the case being defended against is nothing running at all. */
+    fun cloudVerifiedAtKey(userId: String) =
+        longPreferencesKey("cloud_verified_at_$userId")
+
     /** Notification preferences. Producers read these before posting; the Notifications settings
      *  screen toggles them. NOTIFY_ALBUM_DOWNLOAD and NOTIFY_DELETE_REMINDER are opt-OUTS: absent =
      *  true (shown). NOTIFY_BACKUP_STATUS is the opposite, an opt-IN: absent = false (hidden), since
@@ -337,6 +474,16 @@ object SettingsKeys {
     val STRIP_TIMESTAMP = booleanPreferencesKey("strip_timestamp")
     val STRIP_SOFTWARE_INFO = booleanPreferencesKey("strip_software_info")
     val STRIP_ON_UPLOAD = booleanPreferencesKey("strip_on_upload")
+
+    // Metadata stripping — which fields to strip from the shared copy when sharing. A separate,
+    // independent config from the upload keys above so the two never influence each other; the
+    // per-field defaults mirror the upload equivalents (authorship follows software there).
+    val STRIP_ON_SHARE = booleanPreferencesKey("strip_on_share")
+    val STRIP_SHARE_GPS = booleanPreferencesKey("strip_share_gps")
+    val STRIP_SHARE_CAMERA_INFO = booleanPreferencesKey("strip_share_camera_info")
+    val STRIP_SHARE_TIMESTAMP = booleanPreferencesKey("strip_share_timestamp")
+    val STRIP_SHARE_SOFTWARE_INFO = booleanPreferencesKey("strip_share_software_info")
+    val STRIP_SHARE_AUTHORSHIP = booleanPreferencesKey("strip_share_authorship")
     /** When true, the upload pipeline re-encodes each photo to a lighter JPEG before sending it to
      *  Drive, trading some image quality for a smaller cloud footprint. The on-device original is
      *  never touched. Off by default. The [COMPRESS_UPLOAD_TIER] ordinal picks how aggressive the
@@ -344,20 +491,28 @@ object SettingsKeys {
     val COMPRESS_ON_UPLOAD = booleanPreferencesKey("compress_on_upload")
     /** When true, the upload pipeline transcodes each video to a smaller copy before sending it to
      *  Drive, trading some quality for a smaller cloud footprint. Separate opt-in from
-     *  [COMPRESS_ON_UPLOAD]; both share [COMPRESS_UPLOAD_TIER]. The on-device original is never
-     *  touched. Off by default. */
+     *  [COMPRESS_ON_UPLOAD]; its quality tier is [COMPRESS_UPLOAD_TIER_VIDEO]. The on-device original
+     *  is never touched. Off by default. */
     val COMPRESS_VIDEO_ON_UPLOAD = booleanPreferencesKey("compress_video_on_upload")
-    /** Ordinal of the selected compression tier, mapping to an [eu.akoos.photos.domain.entity.UploadCompressionTier]
-     *  value. Absent = the Balanced default. Consulted by both the photo ([COMPRESS_ON_UPLOAD]) and
-     *  the video ([COMPRESS_VIDEO_ON_UPLOAD]) path. */
+    /** Ordinal of the PHOTO compression tier, mapping to an [eu.akoos.photos.domain.entity.UploadCompressionTier]
+     *  value. Absent = the Balanced default. Consulted by the photo ([COMPRESS_ON_UPLOAD]) path; the
+     *  video path reads its own [COMPRESS_UPLOAD_TIER_VIDEO]. */
     val COMPRESS_UPLOAD_TIER = intPreferencesKey("compress_upload_tier")
+    /** Ordinal of the VIDEO compression tier, the video-only counterpart of [COMPRESS_UPLOAD_TIER]
+     *  (#108). Absent = the Balanced default. Consulted only by the video ([COMPRESS_VIDEO_ON_UPLOAD])
+     *  path. */
+    val COMPRESS_UPLOAD_TIER_VIDEO = intPreferencesKey("compress_upload_tier_video")
+    /** One-shot migration flag for the photo/video tier split (#108). While unset, the migration in
+     *  `App.kt` seeds [COMPRESS_UPLOAD_TIER_VIDEO] from the old shared [COMPRESS_UPLOAD_TIER] so an
+     *  upgrading install keeps its level on both paths, then flips this true so the seed never
+     *  re-runs. */
+    val COMPRESS_TIER_SPLIT_MIGRATED = booleanPreferencesKey("compress_tier_split_migrated")
     /** When true, "strip on upload" also wipes the on-device original (with MANAGE_MEDIA), so the
      *  backed-up copy and the local file stay byte-identical and pair by content hash. */
     val MIRROR_STRIP_TO_LOCAL = booleanPreferencesKey("mirror_strip_to_local")
     /** When true, "compress on upload" also replaces the on-device original with the lighter
      *  re-encode (with all-files access), so the backed-up copy and the local file stay identical.
-     *  The full-quality original is overwritten. Persisted only for now; the upload pipeline wires
-     *  it in a later change. */
+     *  The full-quality original is overwritten. */
     val MIRROR_COMPRESS_TO_LOCAL = booleanPreferencesKey("mirror_compress_to_local")
     /** When true, the upload pipeline derives a new filename from the source's capture
      *  timestamp before sending bytes to Drive — e.g. `IMG_2841.jpg` → `2026-05-29_14-32-08.jpg`.
@@ -405,9 +560,6 @@ object SettingsKeys {
     // Hidden album — stores URIs of photos hidden from main gallery
     val HIDDEN_PHOTO_URIS = stringSetPreferencesKey("hidden_photo_uris")
 
-    // Timeline grouping preference
-    val TIMELINE_GROUPING = stringPreferencesKey("timeline_grouping")
-
     /** True once the user dismissed the "densest layout may slow scrolling" heads-up with
      *  "Don't show again". Absent/false = the one-time notice still appears the first time the
      *  timeline is zoomed out to the densest grid in a session. */
@@ -417,6 +569,11 @@ object SettingsKeys {
     val APP_LOCK_ENABLED = booleanPreferencesKey("app_lock_enabled")
 
     val MANAGE_MEDIA_PROMPTED = booleanPreferencesKey("manage_media_prompted")
+
+    /** Set once the post-notifications permission has been auto-requested, so the gallery asks at
+     *  most once per install instead of re-firing (and re-showing the "notifications off" snackbar)
+     *  on every return to the grid. */
+    val NOTIFICATION_PERMISSION_ASKED = booleanPreferencesKey("notification_permission_asked")
 
     /**
      * Set to true the moment the user finishes the post login onboarding wizard
@@ -428,6 +585,12 @@ object SettingsKeys {
      */
     val ONBOARDING_COMPLETE = booleanPreferencesKey("onboarding_complete")
 
+    /** True once the user chose to use the app without signing in to a Proton account (local-only
+     *  mode): the gallery shows the device's own photos and the sign-in step is skipped. Absent
+     *  reads as false, so a fresh install still starts on the normal sign-in flow. Persists per
+     *  install; signing in later clears it. */
+    val CONTINUE_WITHOUT_ACCOUNT = booleanPreferencesKey("continue_without_account")
+
     /**
      * Highest BuildConfig.VERSION_CODE for which the one-time "What's new" screen has
      * already been shown. Default 0 (absent), so a fresh install or any upgrade whose
@@ -437,6 +600,24 @@ object SettingsKeys {
      * the next versioned release raises the code again.
      */
     val WHATS_NEW_SEEN_VERSION = intPreferencesKey("whats_new_seen_version")
+
+    /** True once the one-time 2.5.0 thank-you popup has been shown and dismissed. Absent reads as
+     *  false, so the popup surfaces once on the first launch of the 2.5.0 stable build. Device-wide
+     *  (not account-scoped): it is never cleared on sign-out. */
+    val THANKS_2_5_0_SEEN = booleanPreferencesKey("thanks_2_5_0_seen")
+
+    /** Off switch for the news feed. Absent reads as on. When off, the feed is not fetched and the
+     *  unread dot never shows, so a user who does not want it pays nothing for it. */
+    val NEWS_ENABLED = booleanPreferencesKey("news_enabled")
+
+    /** The [id]s of the news entries the user has already seen. Opening the news screen sets this to
+     *  exactly the entries in the current feed, so it stays bounded and only a genuinely new id
+     *  counts as unread. Kept by id, not by count, so editing an entry never re-alerts. */
+    val NEWS_READ_IDS = stringSetPreferencesKey("news_read_ids")
+
+    /** The last feed fetched, stored raw so the news screen and the unread dot both read from the
+     *  same cache the moment the app opens, with no network wait, and still work offline. */
+    val NEWS_CACHE_JSON = stringPreferencesKey("news_cache_json")
 
     /** Privacy opt-in: when true, wipe the full-res blob cache every time the app
      *  process is backgrounded. Off by default — most users prefer the 30-min TTL
@@ -456,8 +637,6 @@ object SettingsKeys {
      *  the timeline. Off by default so existing users see no change. The Albums
      *  and Shared tabs are untouched — only the Photos tab honours this filter. */
     val HIDE_PHOTOS_IN_ALBUMS = booleanPreferencesKey("hide_photos_in_albums")
-    val HIDE_DEVICE_FOLDERS_IN_ALBUMS = booleanPreferencesKey("hide_device_folders_in_albums")
-    val HIDE_CLOUD_ALBUMS_IN_ALBUMS = booleanPreferencesKey("hide_cloud_albums_in_albums")
 
     /**
      * Bucket display names the user has chosen to keep OUT of the main Photos timeline.
@@ -470,6 +649,25 @@ object SettingsKeys {
      * same cross-path collision caveat as [EXCLUDED_FOLDER_NAMES].
      */
     val TIMELINE_EXCLUDED_FOLDER_NAMES = stringSetPreferencesKey("timeline_excluded_folder_names")
+
+    /**
+     * Bucket display names whose folder the user has hidden, the device-folder counterpart of
+     * [HIDDEN_ALBUM_IDS]. The card leaves the Albums grid and the folder is reached from the
+     * biometric-gated Hidden Photos area, which is where it is unhidden again.
+     *
+     * The folder's photos do NOT all survive on the device. A photo that exists only here moves
+     * into the app-private vault, and that move deletes its MediaStore original for good: the vault
+     * copy is the last one left, and signing out empties the vault. A backed-up photo keeps both
+     * its device file and its Drive copy and is only filtered out of the listings this app draws.
+     *
+     * Deliberately NOT [TIMELINE_EXCLUDED_FOLDER_NAMES], which is the opposite trade: that one
+     * drops the folder's photos from the timeline while leaving its card on the grid and touching
+     * no file at all. A folder can be in either set, both, or neither.
+     *
+     * Matches MediaStore bucket display names, the same identity every other per-folder preference
+     * here uses, with the same cross-path collision caveat as [EXCLUDED_FOLDER_NAMES].
+     */
+    val HIDDEN_FOLDER_NAMES = stringSetPreferencesKey("hidden_folder_names")
     /** Cloud album linkIds individually hidden from the timeline (per-album toggle), separate from
      *  the [HIDE_PHOTOS_IN_ALBUMS] master switch which hides photos in ALL albums at once. */
     val TIMELINE_EXCLUDED_ALBUM_IDS = stringSetPreferencesKey("timeline_excluded_album_ids")
@@ -507,6 +705,113 @@ object SettingsKeys {
     const val RECENT_UPLOAD_TTL_MS = 60L * 60L * 1000L
 
     /**
+     * Master opt-in for the app's on-device machine-learning features: Copy text, Hide faces, and the
+     * People grouping those build toward. Absent reads as OFF, so a fresh install fetches no model and
+     * keeps the AI entry points hidden until the user turns this on in Settings. The per-model consent
+     * flags below ([OCR_MODEL_DOWNLOAD_ALLOWED], [FACE_MODEL_DOWNLOAD_ALLOWED]) stay as the second gate
+     * on the actual download; this one decides whether those features are reachable at all.
+     */
+    val AI_FEATURES_ENABLED = booleanPreferencesKey("ai_features_enabled")
+
+    /**
+     * Per-feature opt-in for the Copy text reader, nested under [AI_FEATURES_ENABLED]. Absent falls
+     * back to whether the detection and recognition models already sit on disk, so a device that has
+     * fetched them reads as ON and one that has not reads as OFF. Off keeps the master AI switch on
+     * while hiding only the read-the-text gesture.
+     */
+    val OCR_ENABLED = booleanPreferencesKey("ocr_enabled")
+
+    /**
+     * Per-feature opt-in for the face features (Hide faces and the People grouping), nested under
+     * [AI_FEATURES_ENABLED]. Absent reads as OFF, so the face pipeline stays idle until the user turns
+     * it on. Off keeps the master AI switch on while standing the face work down.
+     */
+    val FACE_ENABLED = booleanPreferencesKey("face_enabled")
+
+    /**
+     * True once the user has agreed to fetch the on-device text-detection model, which the viewer's
+     * read-the-text gesture needs and which is several megabytes. Absent means the agreement has not
+     * been given yet, and the gesture asks.
+     *
+     * Only an acceptance is stored. A refusal is not, because the prompt never appears on its own:
+     * it only ever follows the user asking to read the text on a photo, so asking again on the next
+     * such request is the answer to that request rather than a second attempt at the same one.
+     */
+    val OCR_MODEL_DOWNLOAD_ALLOWED = booleanPreferencesKey("ocr_model_download_allowed")
+
+    /**
+     * True once the user has agreed to fetch the on-device face-detection model, the SCRFD detector
+     * that finds where the faces are so the editor can blur them. Several megabytes, so it is fetched
+     * only on agreement. Absent means the agreement has not been given yet.
+     *
+     * Mirrors [OCR_MODEL_DOWNLOAD_ALLOWED]: only an acceptance is stored, never a refusal, because the
+     * prompt never appears on its own. It only ever follows the user reaching for the feature, so
+     * asking again on the next such request is the answer to that request rather than a repeat of the
+     * same one.
+     */
+    val FACE_MODEL_DOWNLOAD_ALLOWED = booleanPreferencesKey("face_model_download_allowed")
+
+    /**
+     * True once the user has agreed to fetch the on-device semantic search models, the CLIP image
+     * and text encoders that let a typed phrase find matching photos. Several hundred megabytes together,
+     * so they are fetched only on agreement. Absent means the agreement has not been given yet.
+     *
+     * Mirrors [FACE_MODEL_DOWNLOAD_ALLOWED]: only an acceptance is stored, never a refusal, because the
+     * prompt never appears on its own. It only ever follows the user reaching for the feature, so asking
+     * again on the next such request is the answer to that request rather than a repeat of the same one.
+     */
+    val SEMANTIC_MODEL_DOWNLOAD_ALLOWED = booleanPreferencesKey("semantic_model_download_allowed")
+
+    /**
+     * Per-feature opt-in for semantic search (find photos by a typed phrase), nested under
+     * [AI_FEATURES_ENABLED]. Absent reads as OFF, so the semantic index stays idle until the user turns
+     * it on. Off keeps the master AI switch on while standing the semantic indexing walk down. The
+     * background indexer reads [AI_FEATURES_ENABLED] && [SEMANTIC_ENABLED]; if either is off it no-ops.
+     */
+    val SEMANTIC_ENABLED = booleanPreferencesKey("semantic_enabled")
+
+    /**
+     * User pause switch for the background face-indexing walk. Absent (the default) reads as NOT
+     * paused, so indexing runs whenever the AI features are on. When true the walk stops itself
+     * between photos and never auto-restarts, so a user who would rather the phone not spend cycles
+     * on it can turn it off from Settings and have it stay off until they turn it back on.
+     */
+    val FACE_INDEXING_PAUSED = booleanPreferencesKey("face_indexing_paused")
+
+    /**
+     * When true, the face scan automatically merges each named person's closest look-alike cluster (the
+     * same matches the manual "this may be the same person" card would offer), instead of surfacing them
+     * for confirmation. Off by default, since a merge cannot be cleanly undone.
+     */
+    val FACE_AUTO_MERGE = booleanPreferencesKey("face_auto_merge")
+
+    /**
+     * When true (the default), a substantial initial face-indexing backlog runs under a foreground
+     * service with a progress notification, so the walk keeps going after the app is swiped from
+     * Recents. When false the walk stays on the in-process coroutine with no notification. A handful
+     * of incremental photos never promotes either way; only the large first pass does.
+     */
+    val FACE_INDEX_BACKGROUND = booleanPreferencesKey("face_index_background")
+
+    /**
+     * Recognition-model generation the stored face embeddings were produced by, compared against
+     * [eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION] as an indexing walk starts. When it differs
+     * or is absent, the indexer clears the face tables once and rebuilds every embedding with the
+     * current model, so two incompatible embedding widths are never compared. Written only after the
+     * wipe lands, so an interrupted wipe retries on the next walk.
+     */
+    val FACE_MODEL_VERSION_KEY = intPreferencesKey("face_model_version")
+
+    /**
+     * Clustering-parameter generation the stored people were grouped under, compared against
+     * [eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION] once the library is fully scanned.
+     * When it differs the people were grouped by older thresholds, so the indexer regroups the existing
+     * embeddings once (no re-detect, no re-embed) and records the new generation. Distinct from
+     * [FACE_MODEL_VERSION_KEY], which forces a full re-embed.
+     */
+    val FACE_CLUSTER_PARAMS_VERSION_KEY = intPreferencesKey("face_cluster_params_version")
+
+    /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +
      * [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator]; the production
@@ -517,10 +822,14 @@ object SettingsKeys {
 
 /**
  * Single source of truth for "is auto-backup actually going to upload anything". Auto-sync can be
- * ON yet effectively idle when no folder is selected and back-up-everything is off — in that state
- * the upload pipeline already early-returns (UploadPendingUseCase / LocalMediaRepositoryImpl), so
- * the background triggers should not be armed either. Mirrors that exact predicate so the
- * trigger-arming gate and the upload gate can never disagree. AUTO_SYNC absent = ON.
+ * ON yet effectively idle when no folder is selected and back-up-everything is off, and in that
+ * state waking the device to find nothing is pure drain, so the background triggers are not armed.
+ *
+ * This decides ARMING only. It is not the gate that stops an upload: an explicit "back up now", an
+ * album-add and an editor save all reach the pipeline without passing here, and a foreground refresh
+ * kicks a run of its own. The queue itself is where the switch is enforced, on each row's
+ * [eu.akoos.photos.domain.entity.QueueSource], which is what tells a folder-sweep row apart from a
+ * photo the user asked for. AUTO_SYNC absent = ON.
  */
 suspend fun syncEffectivelyEnabled(context: Context): Boolean {
     val prefs = context.settingsDataStore.data.first()
@@ -528,4 +837,43 @@ suspend fun syncEffectivelyEnabled(context: Context): Boolean {
     val backupEverything = prefs[SettingsKeys.BACKUP_EVERYTHING] ?: false
     val folders = prefs[SettingsKeys.SYNC_FOLDER_NAMES]
     return autoSync && (backupEverything || !folders.isNullOrEmpty())
+}
+
+/**
+ * The metadata-strip config a share should apply to each shared copy, or null when the
+ * [SettingsKeys.STRIP_ON_SHARE] master is off — in which case the share goes out as the original,
+ * byte-for-byte. Independent of the upload-strip keys; the per-field defaults match the share
+ * settings screen (location on, the rest off). One reader for every share call-site so the
+ * pref-reading lives in a single place.
+ */
+suspend fun currentShareStripConfig(context: Context): MetadataStripConfig? {
+    val prefs = context.settingsDataStore.data.first()
+    if (prefs[SettingsKeys.STRIP_ON_SHARE] != true) return null
+    return MetadataStripConfig(
+        stripGps = prefs[SettingsKeys.STRIP_SHARE_GPS] ?: true,
+        stripCameraInfo = prefs[SettingsKeys.STRIP_SHARE_CAMERA_INFO] ?: false,
+        stripTimestamp = prefs[SettingsKeys.STRIP_SHARE_TIMESTAMP] ?: false,
+        stripSoftwareInfo = prefs[SettingsKeys.STRIP_SHARE_SOFTWARE_INFO] ?: false,
+        stripAuthorship = prefs[SettingsKeys.STRIP_SHARE_AUTHORSHIP] ?: false,
+    )
+}
+
+/** True when the user chose to use the app without a Proton account (local-only mode). Absent reads
+ *  as false, so a fresh install still starts on the normal sign-in flow. */
+val Context.continueWithoutAccount: Flow<Boolean>
+    get() = settingsDataStore.data.map { it[SettingsKeys.CONTINUE_WITHOUT_ACCOUNT] ?: false }
+
+/** Persists the local-only choice read by [continueWithoutAccount]. */
+suspend fun Context.setContinueWithoutAccount(value: Boolean) {
+    settingsDataStore.edit { it[SettingsKeys.CONTINUE_WITHOUT_ACCOUNT] = value }
+}
+
+/** True once the one-time 2.5.0 thank-you popup has been shown. Absent reads as false so it can
+ *  surface once. Device-wide, so it survives a sign-out. */
+val Context.thanks250Seen: Flow<Boolean>
+    get() = settingsDataStore.data.map { it[SettingsKeys.THANKS_2_5_0_SEEN] ?: false }
+
+/** Persists that the 2.5.0 thank-you popup read by [thanks250Seen] has been dismissed. */
+suspend fun Context.setThanks250Seen(value: Boolean) {
+    settingsDataStore.edit { it[SettingsKeys.THANKS_2_5_0_SEEN] = value }
 }

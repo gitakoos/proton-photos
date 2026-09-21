@@ -29,6 +29,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -127,14 +128,14 @@ fun ThemeSettingsScreen(
 
         // ── Palette dots ────────────────────────────────────────────────────
         CollapsibleSection(label = stringResource(R.string.settings_palette_section)) {
-            Row(
+            FlowRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(colors.cardBg, RoundedCornerShape(999.dp))
-                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(999.dp))
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                    .background(colors.cardBg, RoundedCornerShape(24.dp))
+                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(24.dp))
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 ThemePalette.entries.forEach { p ->
                     val swatch = paletteAccent(p, isLight = colors.isLight)
@@ -154,6 +155,18 @@ fun ThemeSettingsScreen(
             }
         }
 
+        // Tint the green "backed up" cloud badges with the chosen palette accent instead of the fixed
+        // green. Independent of light/dark, so it is always shown.
+        Spacer(Modifier.height(20.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_tint_cloud),
+                description = stringResource(R.string.settings_tint_cloud_summary),
+                checked = state.tintCloudWithAccent,
+                onCheckedChange = { viewModel.setTintCloudWithAccent(it) },
+            )
+        }
+
         // ── AMOLED pure-black toggle — only takes effect in dark mode, so it shows only when the
         // effective theme is dark: an explicit Dark choice, or System while the system is dark. ──
         val darkEffective = state.themeMode == ThemeMode.Dark ||
@@ -169,6 +182,7 @@ fun ThemeSettingsScreen(
                 )
             }
         }
+
     }
 }
 

@@ -209,10 +209,22 @@ fun AccountScreen(
                 }
             }
         }
-        if (showSignOutDialog) {
+        // The dialog waits on the vault count so the Hidden Photos item is listed only when photos
+        // would really be deleted, not on the zero that stands in until the count settles.
+        if (showSignOutDialog && state.vaultedCountSettled) {
+            val faceItem = stringResource(R.string.sign_out_dialog_item_faces)
+            val dayNotesItem = stringResource(R.string.sign_out_dialog_item_day_notes)
+            val vaultItem = stringResource(R.string.sign_out_dialog_item_vault)
+            val items = buildList {
+                if (state.faceEnabled) add(faceItem)
+                add(dayNotesItem)
+                if (state.vaultedPhotoCount > 0) add(vaultItem)
+            }
+            val signOutMessage = stringResource(R.string.sign_out_dialog_message) +
+                items.joinToString(separator = "\n", prefix = "\n") { "· " + it }
             ConfirmDialog(
                 title = stringResource(R.string.sign_out_dialog_title),
-                message = stringResource(R.string.sign_out_dialog_message),
+                message = signOutMessage,
                 confirmLabel = stringResource(R.string.sign_out_dialog_confirm),
                 dismissLabel = stringResource(R.string.sign_out_dialog_cancel),
                 onConfirm = {

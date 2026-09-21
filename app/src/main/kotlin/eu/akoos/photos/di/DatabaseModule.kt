@@ -51,9 +51,23 @@ import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.Migrations
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
+import eu.akoos.photos.data.db.dao.ClusterSummaryDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.db.dao.FaceDao
+import eu.akoos.photos.data.db.dao.FaceScanDao
+import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
+import eu.akoos.photos.data.db.dao.ImportAlbumMemberDao
+import eu.akoos.photos.data.db.dao.ImportHistoryDao
+import eu.akoos.photos.data.db.dao.ImportStagedDao
+import eu.akoos.photos.data.db.dao.ImportUploadedDao
+import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PerceptualHashDao
+import eu.akoos.photos.data.db.dao.NotPersonDao
+import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.PersonCoverDao
+import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
+import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
@@ -161,5 +175,67 @@ abstract class DatabaseModule {
         @Singleton
         fun provideUploadAlbumTargetDao(db: AppDatabase): UploadAlbumTargetDao =
             db.uploadAlbumTargetDao()
+
+        @Provides
+        @Singleton
+        fun providePendingMetadataEditDao(db: AppDatabase): PendingMetadataEditDao =
+            db.pendingMetadataEditDao()
+
+        @Provides
+        @Singleton
+        fun provideImportStagedDao(db: AppDatabase): ImportStagedDao =
+            db.importStagedDao()
+
+        @Provides
+        @Singleton
+        fun provideImportHistoryDao(db: AppDatabase): ImportHistoryDao =
+            db.importHistoryDao()
+
+        @Provides
+        @Singleton
+        fun provideImportUploadedDao(db: AppDatabase): ImportUploadedDao =
+            db.importUploadedDao()
+
+        @Provides
+        @Singleton
+        fun provideImportAlbumMemberDao(db: AppDatabase): ImportAlbumMemberDao =
+            db.importAlbumMemberDao()
+
+        @Provides
+        @Singleton
+        fun provideListingSweepSnapshotDao(db: AppDatabase): ListingSweepSnapshotDao =
+            db.listingSweepSnapshotDao()
+
+        @Provides
+        @Singleton
+        fun provideFaceDao(db: AppDatabase): FaceDao = db.faceDao()
+
+        @Provides
+        @Singleton
+        fun providePersonDao(db: AppDatabase): PersonDao = db.personDao()
+
+        @Provides
+        @Singleton
+        fun provideFaceScanDao(db: AppDatabase): FaceScanDao = db.faceScanDao()
+
+        @Provides
+        @Singleton
+        fun providePersonManualPhotoDao(db: AppDatabase): PersonManualPhotoDao = db.personManualPhotoDao()
+
+        @Provides
+        @Singleton
+        fun provideNotPersonDao(db: AppDatabase): NotPersonDao = db.notPersonDao()
+
+        @Provides
+        @Singleton
+        fun providePersonCoverDao(db: AppDatabase): PersonCoverDao = db.personCoverDao()
+
+        @Provides
+        @Singleton
+        fun provideClusterSummaryDao(db: AppDatabase): ClusterSummaryDao = db.clusterSummaryDao()
+
+        @Provides
+        @Singleton
+        fun provideImageEmbeddingDao(db: AppDatabase): ImageEmbeddingDao = db.imageEmbeddingDao()
     }
 }

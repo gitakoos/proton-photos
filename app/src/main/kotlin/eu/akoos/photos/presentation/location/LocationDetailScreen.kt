@@ -22,16 +22,20 @@
 
 package eu.akoos.photos.presentation.location
 
+import android.app.Activity
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -49,12 +53,19 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LibraryAdd
+import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
@@ -75,7 +86,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -85,70 +96,120 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.MultiStripState
+import eu.akoos.photos.presentation.common.SelectionAction
+import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.common.allLocalOnly
+import eu.akoos.photos.presentation.common.anyCloudOnly
+import eu.akoos.photos.presentation.common.anyLocalOnly
+import eu.akoos.photos.presentation.common.anyMetadataEditable
+import eu.akoos.photos.presentation.common.favoriteSelectionAction
+import eu.akoos.photos.presentation.common.favoriteTurnsOn
+import eu.akoos.photos.presentation.common.hasDownloadable
+import eu.akoos.photos.presentation.common.offlinePinnableLinkIds
+import eu.akoos.photos.presentation.common.offlineTurnsOn
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
-import eu.akoos.photos.presentation.viewer.PhotoShareSheet
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
+import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
-import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 
 /**
- * Drawer content for the location detail, raised as a bottom sheet over the photo map when a pin is
- * tapped. Mirrors the device-folder / album detail layout: a hero header with the resolved
- * "City, Country" title + a photo count, a grid keyed by local uri (cloud-only by linkId) with
- * long-press drag multi-select, a selection bar carrying share / add-to-album / download, and a tap
- * opening the viewer on the same merged-library items the gallery uses. "Save as album" creates a
- * real Drive album named after the place and adds every photo here to it.
- *
- * Sits inside the host's `ModalBottomSheet` column rather than a full-screen Box: the content takes
- * a tall fixed height so the map peeks above, and the selection bar + action dock are re-parented
- * within the sheet bounds. A photo tap (non-selection mode) calls [onPhotoClick]; the host closes
- * the sheet first so the viewer rises over the map.
+ * The located-photos body behind the full-screen place page ([PlaceCityScreen]): the hero header,
+ * the photo grid with drag multi-select, the shared selection drawer with the full action set (share,
+ * add-to-album, move-to-folder, favourite, back up, download, offline, edit metadata, strip, hide,
+ * delete) and the save-as-album flow. [modifier] shapes the host, [contentTopPadding] clears a
+ * floating header, [headerOverlay] draws one on top, and [showDragHandle] adds a pull-down grip.
+ * [onEditMetadata] opens the date + place editor for the current selection, matching the timeline.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun LocationDetailSheet(
-    latitude: Double,
-    longitude: Double,
+fun LocationPhotosContent(
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
+    modifier: Modifier = Modifier,
+    backgroundColor: Color = Bg0,
+    contentTopPadding: Dp = 0.dp,
+    showDragHandle: Boolean = false,
+    onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
+    headerOverlay: (@Composable BoxScope.() -> Unit)? = null,
     viewModel: LocationDetailViewModel = hiltViewModel(),
 ) {
-    // Clear any prior selection on load so a fresh pin opens unselected; keyed on the coords so
-    // re-entering a different pin reloads cleanly.
-    LaunchedEffect(latitude, longitude) {
-        viewModel.clearSelection()
-        viewModel.load(latitude, longitude)
-    }
-
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val selectedItems by viewModel.selectedItems.collectAsStateWithLifecycle()
     val albums by viewModel.albums.collectAsStateWithLifecycle()
+    val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
+    val pendingDeleteIntent by viewModel.pendingDeleteIntent.collectAsStateWithLifecycle()
+    val isDeleting by viewModel.isDeleting.collectAsStateWithLifecycle()
+    val pendingStripIntent by viewModel.pendingStripIntent.collectAsStateWithLifecycle()
+    val multiStripState by viewModel.multiStripState.collectAsStateWithLifecycle()
+    val favoriteIds by viewModel.favoriteIds.collectAsStateWithLifecycle()
+    val offlinePinIds by viewModel.offlinePinIds.collectAsStateWithLifecycle()
+    val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
+
+    val isSelectionMode = selectedItems.isNotEmpty()
+
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val gridState = rememberLazyGridState()
     val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
 
-    // In selection mode the back button cancels the selection instead of dismissing the sheet —
+    // In selection mode the back button cancels the selection instead of dismissing the sheet -
     // mirrors the gallery, album-detail and device-folder behaviour.
-    BackHandler(enabled = state.isSelectionMode) { viewModel.clearSelection() }
+    BackHandler(enabled = isSelectionMode) { viewModel.clearSelection() }
 
     var showSaveAsAlbumConfirm by remember { mutableStateOf(false) }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var showPhotoShareSheet by remember { mutableStateOf(false) }
-    val photoShareSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // The picker's own "New album" row, which names an album and then adds the selection to it.
+    var showCreateAlbumInline by remember { mutableStateOf(false) }
+    // Move the device selection into another folder, logged-out, device-data only. The shared host
+    // owns the picker + its own write-consent launcher; the selection is snapshotted in the VM.
+    var showMoveSheet by remember { mutableStateOf(false) }
+    val moveTargetFolders by viewModel.moveTargetFolders.collectAsStateWithLifecycle()
+    val pendingMoveIntent by viewModel.pendingMoveIntent.collectAsStateWithLifecycle()
+    var showDeleteSheet by remember { mutableStateOf(false) }
+    var showStripPicker by remember { mutableStateOf(false) }
+    // The selection's hide split while its confirmation is up, null when none is. Holding the split
+    // rather than a flag is what lets the sheet describe the photos the tap was made on.
+    var hideConfirmSplit by remember {
+        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+    }
 
-    // The VM builds the system-share intent off the UI thread; the sheet launches the chooser.
-    val shareCtx = LocalContext.current
+    // The VM builds the system-share intent off the UI thread; the screen launches the chooser.
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
-            runCatching { shareCtx.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle)) }
+            runCatching { context.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle)) }
         }
+    }
+    // Offline-batch result - the pins apply optimistically, this only reports the outcome.
+    val offlineRemovedMsg = stringResource(R.string.offline_removed)
+    LaunchedEffect(Unit) {
+        viewModel.offlineBatchResult.collect { count ->
+            when {
+                count > 0 -> snackbarHostState.showSnackbar(
+                    context.resources.getQuantityString(R.plurals.offline_batch_result, count, count),
+                )
+                count < 0 -> snackbarHostState.showSnackbar(offlineRemovedMsg)
+            }
+        }
+    }
+    // An action that did not do all it said says so; the message already reads for the user.
+    LaunchedEffect(Unit) {
+        viewModel.actionFailure.collect { snackbarHostState.showSnackbar(it) }
+    }
+    // A download says it began the moment it does; its progress lives on the Activity screen and the
+    // selection clears straight away. Same wording the timeline and search use for the same moment.
+    val downloadStartedMsg = stringResource(R.string.download_started_background)
+    LaunchedEffect(Unit) {
+        viewModel.downloadStarted.collect { snackbarHostState.showSnackbar(downloadStartedMsg) }
     }
 
     LaunchedEffect(state.error) {
@@ -163,6 +224,52 @@ fun LocationDetailSheet(
         val r = state.saveAsAlbumResult ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(savedAsAlbumFmt.format(r.albumName))
         viewModel.clearSaveAsAlbumResult()
+    }
+
+    // System trash-dialog launcher for a delete/hide that needs MANAGE_MEDIA on Android 11+.
+    val deletePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onDeletePermissionGranted()
+        else viewModel.clearPendingDeleteIntent()
+    }
+    LaunchedEffect(pendingDeleteIntent) {
+        val pi = pendingDeleteIntent ?: return@LaunchedEffect
+        // The launch itself can throw if the sender was already consumed; drop the pending work so a
+        // stale intent can't force-close the screen.
+        runCatching {
+            deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        }.onFailure { viewModel.clearPendingDeleteIntent() }
+    }
+    // System write-permission launcher for the batch metadata strip (foreign files on Android 11+).
+    val stripPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onStripPermissionGranted()
+        else viewModel.clearPendingStripIntent()
+    }
+    LaunchedEffect(pendingStripIntent) {
+        val pi = pendingStripIntent ?: return@LaunchedEffect
+        runCatching {
+            stripPermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+        }.onFailure { viewModel.clearPendingStripIntent() }
+    }
+    // Strip result: one snackbar when a batch finishes, then reset so it fires once.
+    LaunchedEffect(multiStripState) {
+        when (val s = multiStripState) {
+            is MultiStripState.Done -> {
+                val msg = if (s.skipped > 0)
+                    context.getString(R.string.gallery_stripped_with_skipped, s.stripped, s.skipped)
+                else context.getString(R.string.gallery_stripped_metadata, s.stripped)
+                snackbarHostState.showSnackbar(msg)
+                viewModel.resetMultiStripState()
+            }
+            is MultiStripState.Failed -> {
+                snackbarHostState.showSnackbar(s.message)
+                viewModel.resetMultiStripState()
+            }
+            else -> Unit
+        }
     }
 
     val videoCount = remember(state.items) {
@@ -200,38 +307,29 @@ fun LocationDetailSheet(
         }
     }
 
-    // Tall-but-not-full drawer surface: the map peeks above the sheet. The grid fills + scrolls
-    // inside; the selection bar and action dock sit within these bounds.
+    // The host modifier shapes the surface (a tall sheet band or a full-screen page); the grid fills
+    // and scrolls inside, with the selection bar and action dock within these bounds.
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .fillMaxHeight(0.9f)
-            .background(Bg0),
+        modifier = modifier.background(backgroundColor),
     ) {
         val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
         val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
         // Drag-to-select: long-press a photo then drag to sweep a range (shares the timeline gesture).
-        // Cells are keyed by local uri (cloud-only by linkId); the swept keys map to selected keys.
-        val selectableKeys = remember(state.items) {
-            state.items.map { item ->
-                when (item) {
-                    is GalleryItem.LocalOnly -> item.local.uri
-                    is GalleryItem.Synced -> item.local.uri
-                    is GalleryItem.CloudOnly -> item.cloud.linkId
-                }
-            }
-        }
+        // Cells key on the shared keyOf() (LocalOnly/Synced by uri, CloudOnly by linkId); the swept
+        // keys map back to the whole GalleryItem the selection holds.
+        val selectableKeys = remember(state.items) { state.items.map { keyOf(it) } }
         val keyToIndex = remember(selectableKeys) { selectableKeys.mapIndexed { i, k -> k to i }.toMap() }
         // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
         // cell back off (otherwise a stationary long-press would select then immediately deselect).
         val tapGuard = remember { mutableStateOf(false) }
         val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
             gridState = gridState,
-            items = selectableKeys,
+            items = state.items,
             indexByKey = keyToIndex,
-            selected = state.selectedKeys,
-            onSelectionChange = viewModel::setSelectedKeys,
+            selected = selectedItems,
+            onSelectionChange = viewModel::setSelection,
             tapGuard = tapGuard,
+            enabled = !isDeleting,
         )
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
@@ -242,13 +340,14 @@ fun LocationDetailSheet(
             contentPadding = PaddingValues(
                 start = if (seamless) 0.dp else 20.dp,
                 end = if (seamless) 0.dp else 20.dp,
+                top = contentTopPadding,
                 bottom = 24.dp,
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             modifier = Modifier.fillMaxSize().then(dragSelectModifier),
         ) {
-            // Hero header — cover, place name and count, plus the "Save as album" action.
+            // Hero header - cover, place name and count, plus the "Save as album" action.
             item(span = { GridItemSpan(maxLineSpan) }) {
                 // Photo tiles bleed to the edge in seamless mode; this header keeps the 20.dp inset.
                 Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
@@ -256,10 +355,13 @@ fun LocationDetailSheet(
                     coverModel = coverModel,
                     title = state.placeName,
                     photoCountText = countLabel,
-                    canRename = false,
+                    coverParallax = {
+                        if (gridState.firstVisibleItemIndex == 0)
+                            gridState.firstVisibleItemScrollOffset.toFloat() else 0f
+                    },
                     titleActions = if (state.items.isNotEmpty()) {
                         {
-                            // Create a Drive album from this place — a progress ring while the
+                            // Create a Drive album from this place - a progress ring while the
                             // round-trip runs, otherwise the library-add glyph.
                             Box(
                                 modifier = Modifier
@@ -289,7 +391,10 @@ fun LocationDetailSheet(
                 }
             }
 
-            if (state.isLoading) {
+            // Skeleton only an empty grid: swapping photos that are already there for placeholders
+            // collapses it and throws the reader back to the first row, and a refresh that finds
+            // nothing new would do that for no visible gain.
+            if (state.isLoading && state.items.isEmpty()) {
                 items(9, span = { GridItemSpan(1) }) {
                     eu.akoos.photos.presentation.common.ShimmerSquare(
                         modifier = Modifier.fillMaxWidth(),
@@ -308,21 +413,12 @@ fun LocationDetailSheet(
             } else {
                 itemsIndexed(
                     items = state.items,
-                    key = { _, item ->
-                        when (item) {
-                            is GalleryItem.LocalOnly -> item.local.uri
-                            is GalleryItem.Synced -> item.local.uri
-                            is GalleryItem.CloudOnly -> item.cloud.linkId
-                        }
-                    },
+                    key = { _, item -> keyOf(item) },
                 ) { index, item ->
-                    val itemKey = when (item) {
-                        is GalleryItem.LocalOnly -> item.local.uri
-                        is GalleryItem.Synced -> item.local.uri
-                        is GalleryItem.CloudOnly -> item.cloud.linkId
+                    val isSelected = item in selectedItems
+                    val inputs = remember(item, favoriteIds) {
+                        photoCellInputsFor(item, favoriteIds = favoriteIds)
                     }
-                    val isSelected = itemKey in state.selectedKeys
-                    val inputs = remember(item) { photoCellInputsFor(item) }
                     PhotoCell(
                         imageData = inputs.imageData,
                         stableKey = inputs.stableKey,
@@ -331,7 +427,7 @@ fun LocationDetailSheet(
                         durationMs = inputs.durationMs,
                         isPlaceholder = inputs.isPlaceholder,
                         selected = isSelected,
-                        isSelectionMode = state.isSelectionMode,
+                        isSelectionMode = isSelectionMode,
                         showCloudBadge = inputs.showCloudBadge,
                         showSyncedBadge = inputs.showSyncedBadge,
                         isFavorite = inputs.isFavorite,
@@ -343,7 +439,7 @@ fun LocationDetailSheet(
                             // Skip the release-tap that follows a long-press select; it would
                             // otherwise toggle the just-anchored cell back off.
                             if (tapGuard.value) tapGuard.value = false
-                            else if (state.isSelectionMode) viewModel.toggleSelection(itemKey)
+                            else if (isSelectionMode) viewModel.toggleSelection(item)
                             else onPhotoClick(state.items, index)
                         },
                         // Long-press + drag is handled by the grid-level drag-select; a plain
@@ -354,10 +450,10 @@ fun LocationDetailSheet(
             }
         }
 
-        // The sheet's default drag handle sat on a separate surface band that clashed with the cover
-        // (worst in dark mode). Instead the cover runs to the very top; a slim handle floats over a
-        // faint top scrim so it reads as pull-down-to-dismiss without a colour break.
-        if (!state.isSelectionMode) {
+        // The sheet's pull-down grip: the cover runs to the very top and a slim handle floats over a
+        // faint top scrim so it reads as pull-down-to-dismiss without a colour break. Only the sheet
+        // host shows it; the full-screen page relies on its header's back button instead.
+        if (showDragHandle && !isSelectionMode) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -380,146 +476,180 @@ fun LocationDetailSheet(
             )
         }
 
-        // Selection-mode action bar — a single floating pill within the sheet, matching the gallery,
-        // album-detail and device-folder selection toolbars: cancel, a photo/video count, then share.
-        if (state.isSelectionMode) {
-            val selectedItems = state.items.filter { item ->
-                val k = when (item) {
-                    is GalleryItem.LocalOnly -> item.local.uri
-                    is GalleryItem.Synced -> item.local.uri
-                    is GalleryItem.CloudOnly -> item.cloud.linkId
-                }
-                k in state.selectedKeys
-            }
-            val selectedVideos = selectedItems.count { item ->
-                val mime = when (item) {
-                    is GalleryItem.LocalOnly -> item.local.mimeType
-                    is GalleryItem.Synced -> item.local.mimeType
-                    is GalleryItem.CloudOnly -> item.cloud.mimeType
-                }
-                mime.startsWith("video/")
-            }
-            val selectedPhotos = selectedItems.size - selectedVideos
-            val selPhotosText = pluralStringResource(R.plurals.count_photos_plural, selectedPhotos, selectedPhotos)
-            val selVideosText = pluralStringResource(R.plurals.count_videos_plural, selectedVideos, selectedVideos)
-            val selectionLabel = when {
-                selectedPhotos > 0 && selectedVideos > 0 -> "$selPhotosText, $selVideosText"
-                selectedVideos > 0 -> selVideosText
-                else -> selPhotosText
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .padding(top = 8.dp)
-                    .clip(RoundedCornerShape(28.dp))
-                    .background(Bg0.copy(alpha = 0.95f))
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(28.dp))
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconBubble(
-                    icon = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.gallery_cancel_selection),
-                    onClick = { viewModel.clearSelection() },
-                    diameter = 40.dp,
-                    iconSize = 18.dp,
-                    background = PillBg,
-                    borderColor = PillBorder,
-                    tint = FgPrimary,
-                )
-                Text(
-                    selectionLabel,
-                    color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(start = 12.dp).weight(1f),
-                )
-                // Share selected to other apps. A cloud-only one downloads first, one already on
-                // the device shares directly. The ring tracks how many have been resolved.
-                val isSharing = state.shareState is LocationOpState.Working
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(PillBg, CircleShape)
-                        .border(0.5.dp, PillBorder, CircleShape)
-                        .clickable(enabled = !isSharing) { showPhotoShareSheet = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (isSharing) {
-                        val p = state.shareState as LocationOpState.Working
-                        CircularProgressIndicator(
-                            progress = { if (p.total > 0) p.done.toFloat() / p.total else 0f },
-                            color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp),
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Share,
-                            contentDescription = stringResource(R.string.share_action),
-                            tint = Accent,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-            }
+        // A multi-select delete blocks the screen behind a progress drawer so a second tap can't
+        // fire into a half-finished delete.
+        val opDeletingLabel = stringResource(R.string.op_deleting)
+        eu.akoos.photos.presentation.common.BlockingOperationSheet(
+            if (isDeleting) eu.akoos.photos.presentation.common.OperationProgress(0, 0, opDeletingLabel, indeterminate = true) else null,
+        )
 
-            // Bottom action dock — secondary actions (add to album, download), the same floating
-            // PillBgOpaque pill as the gallery and album selection docks, pinned at the sheet bottom.
-            val isDownloading = state.downloadState is LocationOpState.Working
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 24.dp)
-                    .background(PillBgOpaque, RoundedCornerShape(999.dp))
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Add selected to a cloud album — opens the gallery's picker sheet.
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable { showAddToAlbumSheet = true }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.PhotoAlbum,
-                        contentDescription = stringResource(R.string.gallery_add_to_album),
-                        tint = Accent,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                // Download selected to the device, mirroring the gallery's multi-download.
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable(enabled = !isDownloading) { viewModel.downloadSelected() }
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (isDownloading) {
-                        val dl = state.downloadState as LocationOpState.Working
-                        CircularProgressIndicator(
-                            progress = { if (dl.total > 0) dl.done.toFloat() / dl.total else 0f },
-                            color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp),
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.FileDownload,
-                            contentDescription = stringResource(R.string.gallery_download_selected),
-                            tint = Accent,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-            }
+        // Selection drawer: the shared surface every multi-select uses, so the located-photos bulk
+        // actions all sit in one list, in the order every other surface lists them.
+        val allSelected = state.items.isNotEmpty() && selectedItems.size == state.items.size
+        // Which way the offline row goes, so it names the press rather than the state: a pin while
+        // anything pinnable in the selection is still un-pinned, a removal once none is.
+        val offlinePinsSelection = remember(selectedItems, offlinePinIds) {
+            offlineTurnsOn(offlinePinnableLinkIds(selectedItems), offlinePinIds)
         }
+        val locationSelectionActions = buildList {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.SelectAll,
+                    label = stringResource(
+                        if (allSelected) R.string.gallery_deselect_all else R.string.select_all,
+                    ),
+                    onClick = { if (allSelected) viewModel.clearSelection() else viewModel.selectAll() },
+                )
+            )
+            add(
+                SelectionAction(
+                    icon = Icons.Default.Share,
+                    label = stringResource(R.string.sel_label_share),
+                    onClick = { viewModel.shareSelected() },
+                )
+            )
+            // Add-to-album needs a Drive destination, so it stays behind a signed-in session.
+            if (isSignedIn) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.PhotoAlbum,
+                        label = stringResource(R.string.gallery_add_to_album),
+                        onClick = { showAddToAlbumSheet = true },
+                    )
+                )
+            }
+            // Move the device selection into another folder, the logged-out counterpart to
+            // Add-to-album, offered only without an account and on the Android 10+ MediaStore floor.
+            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(
+                    SelectionAction(
+                        icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                        label = stringResource(R.string.move_to_folder),
+                        onClick = { showMoveSheet = true },
+                    )
+                )
+            }
+            // Favourite the whole selection in one press.
+            add(
+                favoriteSelectionAction(
+                    turnsOn = remember(selectedItems, favoriteIds) {
+                        favoriteTurnsOn(selectedItems, favoriteIds)
+                    },
+                    state = favoriteState,
+                    onClick = { viewModel.toggleSelectedFavorite() },
+                )
+            )
+            // Back up the not-yet-uploaded (LocalOnly) photos in the selection. Needs a Drive
+            // destination, so it stays behind a signed-in session.
+            if (isSignedIn && anyLocalOnly(selectedItems)) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.CloudUpload,
+                        label = stringResource(R.string.sel_label_back_up),
+                        onClick = {
+                            viewModel.backUpSelected { queued ->
+                                if (queued > 0) scope.launch {
+                                    snackbarHostState.showSnackbar(context.getString(R.string.backup_started))
+                                }
+                            }
+                        },
+                    )
+                )
+            }
+            // Download / offline apply to cloud-only photos (no local file yet).
+            if (hasDownloadable(selectedItems)) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.FileDownload,
+                        label = stringResource(R.string.sel_label_download),
+                        onClick = {
+                            viewModel.downloadSelected { succeeded, failed ->
+                                val msg = when {
+                                    failed > 0 -> context.getString(R.string.gallery_download_partial, succeeded, failed)
+                                    succeeded == 1 -> context.getString(R.string.gallery_download_done_singular)
+                                    else -> context.getString(R.string.gallery_download_done, succeeded)
+                                }
+                                scope.launch { snackbarHostState.showSnackbar(msg) }
+                            }
+                        },
+                    )
+                )
+            }
+            if (anyCloudOnly(selectedItems)) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.OfflinePin,
+                        label = stringResource(
+                            if (offlinePinsSelection) R.string.offline_make_available
+                            else R.string.offline_remove,
+                        ),
+                        onClick = { viewModel.toggleSelectedOffline() },
+                    )
+                )
+            }
+            // The date + place editor opens for any editable photo (a device photo, or a cloud or
+            // backed-up image the corrected-copy replace can rewrite), so a mixed selection keeps the
+            // entry (the editor writes exactly those photos and names the count).
+            if (anyMetadataEditable(selectedItems)) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.EditNote,
+                        label = stringResource(R.string.metadata_editor_edit_metadata),
+                        onClick = { onEditMetadata(selectedItems.toList()) },
+                    )
+                )
+            }
+            // The strip stays behind an all-device-only selection: a Synced photo keeps its Drive
+            // copy's EXIF, so stripping just the local file is a misleading half-strip.
+            if (allLocalOnly(selectedItems)) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.PrivacyTip,
+                        label = stringResource(R.string.gallery_strip_metadata),
+                        onClick = { showStripPicker = true },
+                    )
+                )
+            }
+            // Hide any non-empty selection: a photo that lives only on this device moves into the
+            // vault, one with a cloud copy is filtered by linkId.
+            if (selectedItems.isNotEmpty()) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.VisibilityOff,
+                        label = stringResource(R.string.sel_label_hide),
+                        enabled = !isDeleting,
+                        // A hide ends in a permanent removal of the device originals it vaults, so it
+                        // is confirmed exactly as the delete beside it is. The split is read at the
+                        // tap, so the sheet names what THIS selection will have done to it.
+                        onClick = { hideConfirmSplit = viewModel.hideSplitForSelection().takeIf { !it.isEmpty } },
+                    )
+                )
+            }
+            add(
+                SelectionAction(
+                    icon = Icons.Default.DeleteOutline,
+                    label = stringResource(R.string.sel_label_delete),
+                    tint = ErrorColor,
+                    enabled = !isDeleting,
+                    onClick = { showDeleteSheet = true },
+                )
+            )
+        }
+        SelectionDrawer(
+            visible = isSelectionMode,
+            items = remember(selectedItems) { selectedItems.toList() },
+            actions = locationSelectionActions,
+            onDismiss = { viewModel.clearSelection() },
+            // Scrolling the grid collapses the drawer, so reaching past it to carry on through the
+            // photos needs no deliberate pull or tap first.
+            contentScrolling = gridState.isScrollInProgress,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
 
-        // Jump-to-top pill — appears once scrolled down, hidden during selection so it never
+        // Jump-to-top pill - appears once scrolled down, hidden during selection so it never
         // collides with the bottom action dock. Mirrors the album / device-folder detail pages.
         AnimatedVisibility(
-            visible = showScrollTop && !state.isSelectionMode,
+            visible = showScrollTop && !isSelectionMode,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
@@ -533,83 +663,105 @@ fun LocationDetailSheet(
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
                 diameter = 44.dp,
                 iconSize = 24.dp,
-                background = PillBgOpaque,
+                background = PillBg,
                 borderColor = PillBorder,
                 tint = FgPrimary,
             )
         }
 
-        // Unified progress pill — one surface for the multi-download and multi-share, matching the
-        // album and device-folder bulk actions. Offset below the selection bar while selecting.
-        val downloadingTpl = stringResource(R.string.op_downloading_fmt)
-        val sharingTpl = stringResource(R.string.op_sharing_fmt)
-        val dlState = state.downloadState
-        val shState = state.shareState
-        val opProgress = when {
-            dlState is LocationOpState.Working ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    dlState.done, dlState.total, downloadingTpl.format(dlState.done, dlState.total),
-                )
-            shState is LocationOpState.Working ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    shState.done, shState.total, sharingTpl.format(shState.done, shState.total),
-                )
-            else -> null
-        }
-        eu.akoos.photos.presentation.common.OperationProgressPill(
-            progress = opProgress,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = if (state.isSelectionMode) 64.dp else 8.dp),
-        )
-
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+
+        // A full-screen host draws its floating pill header last so it sits above the grid; the sheet
+        // passes none and shows the pull-down grip instead.
+        headerOverlay?.invoke(this)
     }
 
-    // Unified share drawer for the selection — Send to app only, since a located set has no album
-    // context and the public-link / share-with-people rows don't apply here.
-    if (showPhotoShareSheet && state.selectedCount > 0) {
-        PhotoShareSheet(
-            sheetState = photoShareSheetState,
-            canCreateLink = false,
-            showPublicLink = false,
-            showShareWithPeople = false,
-            onDismiss = { showPhotoShareSheet = false },
-            onSendToApp = { showPhotoShareSheet = false; viewModel.shareSelected() },
-            onShareWithPeople = { showPhotoShareSheet = false },
-            onManagePublicLink = { showPhotoShareSheet = false },
+    if (showStripPicker) {
+        eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog(
+            onConfirm = {
+                showStripPicker = false
+                viewModel.stripMetadataSelected(it)
+            },
+            onDismiss = { showStripPicker = false },
         )
     }
 
-    // Add-to-album sheet — reuses the gallery's picker. Cloud-backed selections join the album now;
-    // local-only selections back up first and join afterwards. Inline create is off here.
-    if (showAddToAlbumSheet && state.selectedCount > 0) {
-        val addCtx = LocalContext.current
-        val addItems = state.items.filter { item ->
-            val k = when (item) {
-                is GalleryItem.LocalOnly -> item.local.uri
-                is GalleryItem.Synced -> item.local.uri
-                is GalleryItem.CloudOnly -> item.cloud.linkId
-            }
-            k in state.selectedKeys
-        }.toSet()
+    // Hide confirmation - the shared sheet every hide surface raises, worded from this selection's
+    // own split.
+    hideConfirmSplit?.let { split ->
+        eu.akoos.photos.presentation.common.HideConfirmSheet(
+            split = split,
+            title = stringResource(R.string.hide_confirm_title),
+            onConfirm = {
+                hideConfirmSplit = null
+                viewModel.hideSelected()
+            },
+            onDismiss = { hideConfirmSplit = null },
+        )
+    }
+
+    // Bulk-delete sheet - reuses the gallery's dialog so options + copy stay identical.
+    if (showDeleteSheet && selectedItems.isNotEmpty()) {
+        eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog(
+            selectedItems = selectedItems,
+            onDismiss = { showDeleteSheet = false },
+            onDelete = { freeUpSpace, deleteFromCloud ->
+                showDeleteSheet = false
+                viewModel.deleteSelected(freeUpSpace, deleteFromCloud)
+            },
+        )
+    }
+
+    // Add-to-album sheet - reuses the gallery's picker. Cloud-backed selections join the album now;
+    // local-only selections back up first and join afterwards.
+    if (showAddToAlbumSheet && selectedItems.isNotEmpty()) {
         eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog(
-            selectedItems = addItems,
+            selectedItems = selectedItems,
             cloudAlbums = albums,
             sheetState = addToAlbumSheetState,
-            onCreateNew = { showAddToAlbumSheet = false },
+            onCreateNew = {
+                showAddToAlbumSheet = false
+                showCreateAlbumInline = true
+            },
             onCloudAlbumSelected = { album ->
                 showAddToAlbumSheet = false
-                viewModel.addSelectedToAlbum(album.linkId) { _, _ ->
+                viewModel.addSelectedToAlbum(album.linkId) { joined, queued ->
                     scope.launch {
-                        snackbarHostState.showSnackbar(addCtx.getString(R.string.device_folder_added_to_album))
+                        val msg = when {
+                            joined > 0 -> context.getString(R.string.gallery_added_to_album, joined, album.name)
+                            queued > 0 -> context.getString(R.string.device_folder_added_to_album)
+                            else -> context.getString(R.string.album_picker_empty)
+                        }
+                        snackbarHostState.showSnackbar(msg)
                     }
                 }
             },
             onDismiss = { showAddToAlbumSheet = false },
+        )
+    }
+
+    // Name a brand-new album for the selection, then create it and add the photos to it - the same
+    // two steps the timeline's picker runs, so the row means the same thing on both.
+    if (showCreateAlbumInline) {
+        eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
+            onDismiss = { showCreateAlbumInline = false },
+            onCreate = { name ->
+                showCreateAlbumInline = false
+                viewModel.createAlbumThenAddSelected(name) { joined, queued, error ->
+                    scope.launch {
+                        val msg = when {
+                            error != null -> error
+                            joined > 0 -> context.getString(R.string.gallery_added_to_album, joined, name)
+                            queued > 0 -> context.getString(R.string.device_folder_added_to_album)
+                            else -> context.getString(R.string.album_picker_empty)
+                        }
+                        snackbarHostState.showSnackbar(msg)
+                    }
+                }
+            },
         )
     }
 
@@ -627,4 +779,28 @@ fun LocationDetailSheet(
             onDismiss = { showSaveAsAlbumConfirm = false },
         )
     }
+
+    // Move-to-folder host: the picker, the new-folder name dialog, its own write-consent launcher and
+    // the completion snackbar, all logged-out and device-only. The selection is snapshotted in the
+    // ViewModel, so the host carries only the picked name.
+    MoveToFolderHost(
+        targetFolders = moveTargetFolders,
+        show = showMoveSheet,
+        pendingMoveIntent = pendingMoveIntent,
+        moveConfirmation = viewModel.moveConfirmation,
+        onPick = { viewModel.moveSelectedToFolder(it) },
+        onCreate = { viewModel.createFolderWithPhotos(it) },
+        onGranted = { viewModel.onMovePermissionGranted() },
+        onClear = { viewModel.clearPendingMove() },
+        onDismiss = { showMoveSheet = false },
+        snackbarHostState = snackbarHostState,
+    )
+}
+
+/** Cell / drag-select key: local uri where a device copy exists, else the cloud linkId, prefixed so
+ *  the two id spaces never collide. Shared by the grid cells, the drag sweep and the index map. */
+private fun keyOf(item: GalleryItem): String = when (item) {
+    is GalleryItem.LocalOnly -> "L:" + item.local.uri
+    is GalleryItem.Synced    -> "S:" + item.local.uri
+    is GalleryItem.CloudOnly -> "C:" + item.cloud.linkId
 }

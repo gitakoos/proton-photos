@@ -35,9 +35,24 @@ import kotlinx.coroutines.flow.retryWhen
  * emission, instead of a `catch` that would terminate the flow and freeze the screen. [onRetry] runs
  * on each failure (to clear a loading state or surface a soft error). Cancellation is not retried:
  * flow operators are cancellation-transparent, so a scope cancel still propagates.
+ *
+ * [maxAttempts] caps the re-subscribes, for a stream whose failure could be deterministic rather
+ * than transient. Retrying such a source forever hides it: the collector simply never receives
+ * anything and the screen sits on its skeleton with nothing to explain it. Past the cap the cause is
+ * rethrown so the collector can show what happened. The default retries without limit, which is
+ * right where the only plausible failure really is a torn read.
  */
-fun <T> Flow<T>.retryOnDbTear(tag: String, onRetry: (Throwable) -> Unit = {}): Flow<T> =
+fun <T> Flow<T>.retryOnDbTear(
+    tag: String,
+    maxAttempts: Long = Long.MAX_VALUE,
+    onRetry: (Throwable) -> Unit = {},
+): Flow<T> =
     retryWhen { cause, attempt ->
+        if (attempt >= maxAttempts) {
+            Log.w(tag, "stream failed $attempt times, giving up: ${cause.message}")
+            onRetry(cause)
+            return@retryWhen false
+        }
         Log.w(tag, "stream failed (attempt $attempt), re-subscribing: ${cause.message}")
         onRetry(cause)
         delay(retryBackoffMs(attempt))

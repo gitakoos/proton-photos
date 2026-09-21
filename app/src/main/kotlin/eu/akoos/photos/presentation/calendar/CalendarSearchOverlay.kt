@@ -137,9 +137,9 @@ private fun SearchPill(query: String, onQueryChange: (String) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(100))
-            .background(colors.pillBg, RoundedCornerShape(100))
-            .border(0.5.dp, colors.pillBorder, RoundedCornerShape(100))
+            .clip(RoundedCornerShape(14.dp))
+            .background(colors.pillBg, RoundedCornerShape(14.dp))
+            .border(0.5.dp, colors.pillBorder, RoundedCornerShape(14.dp))
             .padding(horizontal = 14.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

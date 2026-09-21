@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import eu.akoos.photos.data.image.UltraHdrDecoder
 import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
@@ -59,6 +60,7 @@ import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import eu.akoos.photos.worker.CachePruneWorker
 import eu.akoos.photos.worker.SyncWorker
+import eu.akoos.photos.worker.UpdateCheckWorker
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -105,6 +107,12 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // (WorkManager schedules, lifecycle observer, receivers, Coil) to avoid duplicate workers.
         if (!isMainProcess()) return
         delegatingFactory.addFactory(workerFactory)
+        // Drop crash records left over from a version this build replaced, so a diagnostics bundle copied
+        // after an update carries only this build's crashes rather than a prior version's history. Keeps
+        // this version's own blocks, so a real crash from an earlier session on this build survives.
+        appScope.launch {
+            runCatching { eu.akoos.photos.util.CrashLogStore.pruneToVersion(filesDir, BuildConfig.VERSION_CODE) }
+        }
         if (BuildConfig.DEBUG) {
             android.os.StrictMode.setVmPolicy(
                 android.os.StrictMode.VmPolicy.Builder()
@@ -137,7 +145,14 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // Periodic sweeper for the "process killed for days, cache still on disk" gap the cold-start
         // prune above can't reach.
         CachePruneWorker.schedule(WorkManager.getInstance(this))
+        // Daily maintenance that reaps face rows whose photo has left the library for good, so the
+        // biometric tables cannot grow without bound; trust-gated and trash-aware so restorable
+        // photos keep their faces.
+        eu.akoos.photos.worker.FaceReapWorker.schedule(WorkManager.getInstance(this))
+        scheduleUpdateCheck()
         seedAlbumOptInFromBucketMap()
+        migrateOcrConsentToAiFeatures()
+        migrateCompressTierSplit()
         importPendingAlbumAdds()
         recoverMirrorOverwrites()
         registerCacheCleanupOnBackground()
@@ -155,6 +170,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         val shedFrom = android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
         if (level >= shedFrom) {
             imageLoader.memoryCache?.clear()
+            staticImageLoader.memoryCache?.clear()
         }
     }
 
@@ -181,11 +197,10 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
      *  into a shared log (mirrors the SyncDiagnostics rule). No device/app header here; the Settings
      *  copy adds the model and version. */
     private fun writeCrashLog(throwable: Throwable) {
-        val dir = java.io.File(filesDir, "diagnostics").apply { mkdirs() }
-        val file = java.io.File(dir, "last_crash.txt")
+        val file = eu.akoos.photos.util.CrashLogStore.file(filesDir).apply { parentFile?.mkdirs() }
         if (file.length() > 128L * 1024) file.writeText("")
         val text = buildString {
-            append("---- crash v").append(BuildConfig.VERSION_CODE).append(" ----\n")
+            append(eu.akoos.photos.util.CrashLogStore.blockHeader(BuildConfig.VERSION_CODE))
             var t: Throwable? = throwable
             var depth = 0
             while (t != null && depth < 8) {
@@ -227,6 +242,17 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     }
 
     /**
+     * Arms (or cancels) the periodic release check against its setting. Reads DataStore, so it runs
+     * off the startup path; the schedule is unique work, so re-running it every launch keeps one
+     * registration rather than stacking them.
+     */
+    private fun scheduleUpdateCheck() {
+        appScope.launch {
+            runCatching { UpdateCheckWorker.reconcile(this@App) }
+        }
+    }
+
+    /**
      * One-shot seed for [SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES]: copies existing
      * [SettingsKeys.ALBUM_BUCKET_MAP] bucket names into the opt-in set so installs already
      * mirroring folders keep doing so once the toggle becomes user-visible. Gated on
@@ -246,6 +272,47 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                     p[SettingsKeys.ALBUM_OPT_IN_MIGRATED] = true
                 }
                 Log.d("AlbumOptInMigration", "Seeded album opt-in list with ${existingBucketNames.size} folders from ALBUM_BUCKET_MAP")
+            }
+        }
+    }
+
+    /**
+     * One-shot migration onto the new master AI-features gate ([SettingsKeys.AI_FEATURES_ENABLED]): a
+     * user who already accepted the text-detection model keeps Copy text working, so their consent
+     * pre-enables the gate. Only runs while the gate has never been set, which is its own idempotency:
+     * once it (or the user) writes the key the check is skipped, and a later turn-off is never undone.
+     * New installs have no OCR consent, so the gate stays absent (OFF).
+     */
+    private fun migrateOcrConsentToAiFeatures() {
+        appScope.launch {
+            runCatching {
+                val prefs = settingsDataStore.data.first()
+                if (prefs[SettingsKeys.AI_FEATURES_ENABLED] != null) return@runCatching
+                if (prefs[SettingsKeys.OCR_MODEL_DOWNLOAD_ALLOWED] == true) {
+                    settingsDataStore.edit { it[SettingsKeys.AI_FEATURES_ENABLED] = true }
+                }
+            }
+        }
+    }
+
+    /**
+     * One-shot seed for the photo/video compression tier split (#108): copies the old shared
+     * [SettingsKeys.COMPRESS_UPLOAD_TIER] into the new video-only [SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO]
+     * so an upgrading install keeps the exact level it had on both paths. Gated on
+     * [SettingsKeys.COMPRESS_TIER_SPLIT_MIGRATED], which flips true once so the seed never re-runs. An
+     * absent shared value is left absent (both paths already default to Balanced). Never touches the
+     * on/off toggles.
+     */
+    private fun migrateCompressTierSplit() {
+        appScope.launch {
+            runCatching {
+                val prefs = settingsDataStore.data.first()
+                if (prefs[SettingsKeys.COMPRESS_TIER_SPLIT_MIGRATED] == true) return@runCatching
+                val sharedTier = prefs[SettingsKeys.COMPRESS_UPLOAD_TIER]
+                settingsDataStore.edit { p ->
+                    if (sharedTier != null) p[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] = sharedTier
+                    p[SettingsKeys.COMPRESS_TIER_SPLIT_MIGRATED] = true
+                }
             }
         }
     }
@@ -347,7 +414,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         // AppCompatDelegate night mode governs ProtonCore's login screens (they read uiMode via
         // isSystemInDarkTheme). Force NIGHT_YES except an explicit "light" pick — the palette is
         // dark-built and a "system" default made login appear light on light-system OEM phones.
-        // The in-app Compose ProtonPhotosTheme still honours the full system/dark/light choice.
+        // MainActivity overrides its own local night mode to FOLLOW_SYSTEM (see its onCreate), so the
+        // in-app Compose ProtonPhotosTheme honours the full system/dark/light choice; this default is
+        // only the fallback for the XML-based ProtonCore login activities.
         AppCompatDelegate.setDefaultNightMode(
             when (cached) {
                 "light" -> AppCompatDelegate.MODE_NIGHT_NO
@@ -409,7 +478,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
      * Privacy opt-in ([SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE]): wipe disk caches when the whole
      * process backgrounds. Process-level ON_STOP is the right hook — it fires only when all
      * Activities leave the started state, not on rotation / picker round-trips. Wipes fullres,
-     * thumbnails, and coil_cache; deliberately leaves in-flight upload block dirs and DataStore alone.
+     * thumbnails, coil_cache, and import_thumbs; deliberately leaves in-flight upload block dirs and
+     * DataStore alone.
      */
     private fun registerCacheCleanupOnBackground() {
         androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(
@@ -422,7 +492,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                         if (!enabled) return@launch
                         runCatching {
                             listOf(
-                                "fullres", "thumbnails", "coil_cache",
+                                "fullres", "thumbnails", "coil_cache", "import_thumbs",
                             ).forEach { sub ->
                                 java.io.File(cacheDir, sub).deleteRecursively()
                             }
@@ -464,6 +534,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                             val ratio = eu.akoos.photos.util.PerfDiagnostics.heapUsedRatio()
                             if (ratio >= HEAP_RELIEF_HIGH_RATIO && !relievedWhileHigh) {
                                 imageLoader.memoryCache?.clear()
+                                staticImageLoader.memoryCache?.clear()
                                 eu.akoos.photos.util.PerfDiagnostics.recordHeapRelief()
                                 relievedWhileHigh = true
                             } else if (ratio < HEAP_RELIEF_LOW_RATIO) {
@@ -485,13 +556,29 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     // Coil ImageLoader. VideoFrameDecoder for video posters; the animated decoder plays GIFs and
     // widens HEIF/AVIF coverage (ImageDecoderDecoder on API 28+, GifDecoder below). Memory cache is
     // capped well under the largeHeap 25% default, which balloons past 400 MB and made scrolling laggy.
-    override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
+    override fun newImageLoader(): ImageLoader = buildImageLoader(animated = true)
+
+    // Sibling loader with the animated decoders left out, so a GIF resolves to its still first frame
+    // with no playback. Reached from Compose via LocalStaticImageLoader by grids and covers that opt
+    // out of GIF autoplay; identical to the main loader in every other respect, and its own memory
+    // cache keeps still frames from colliding with the animated loader's entries under the same key.
+    val staticImageLoader: ImageLoader by lazy { buildImageLoader(animated = false) }
+
+    private fun buildImageLoader(animated: Boolean): ImageLoader = ImageLoader.Builder(this)
         .components {
+            // First in line from the API that can attach a gain map at all, and even there it claims
+            // a load only when that load opted in and the bytes actually carry one. Every other load
+            // falls straight through to the decoders below and decodes identically.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                add(UltraHdrDecoder.Factory())
+            }
             add(VideoFrameDecoder.Factory())
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                add(coil.decode.ImageDecoderDecoder.Factory())
-            } else {
-                add(coil.decode.GifDecoder.Factory())
+            if (animated) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    add(coil.decode.ImageDecoderDecoder.Factory())
+                } else {
+                    add(coil.decode.GifDecoder.Factory())
+                }
             }
         }
         .crossfade(true)

@@ -42,14 +42,14 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.DayMetaDao
 import eu.akoos.photos.data.db.entity.DayMetaEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
+import eu.akoos.photos.presentation.util.isoDateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import javax.inject.Inject
 
 /**
@@ -88,15 +88,19 @@ class DayDetailViewModel @Inject constructor(
                         flowOf(DayLoadData(emptyList(), null, null, emptySet()))
                     } else {
                         userIdFlow.flatMapLatest { userId ->
-                            if (userId == null) {
-                                flowOf(DayLoadData(emptyList(), null, date, emptySet()))
-                            } else {
-                                combine(
-                                    getGalleryItems.invoke(userId),
-                                    dayMetaDao.observeByDate(userId.id, date),
-                                    hiddenUrisFlow,
-                                ) { items, meta, hidden -> DayLoadData(items, meta, date, hidden) }
-                            }
+                            // Signed out the day is filled from the device's own media and its
+                            // metadata row (description, cover) lives under the local partition, so a
+                            // guest can annotate a day the same as a signed-in user.
+                            val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
+                                else getGalleryItems.invoke(userId)
+                            val metaFlow = dayMetaDao.observeByDate(
+                                userId?.id ?: PhotoLocationEntity.LOCAL_USER, date,
+                            )
+                            combine(
+                                libraryFlow,
+                                metaFlow,
+                                hiddenUrisFlow,
+                            ) { items, meta, hidden -> DayLoadData(items, meta, date, hidden) }
                         }
                     }
                 }
@@ -161,9 +165,11 @@ class DayDetailViewModel @Inject constructor(
     private fun upsertWith(block: (DayMetaEntity?) -> DayMetaEntity) {
         val date = _selectedDate.value ?: return
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val current = dayMetaDao.getByDate(userId.id, date)
-            val next = block(current).copy(date = date, userId = userId.id)
+            // A guest writes under the local partition, a signed-in user under their own id, so the
+            // edit persists either way (was dropped for a guest before).
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+            val current = dayMetaDao.getByDate(account, date)
+            val next = block(current).copy(date = date, userId = account)
             dayMetaDao.upsert(next)
         }
     }
@@ -180,10 +186,7 @@ class DayDetailViewModel @Inject constructor(
 
     companion object {
         private val ISO_DATE = object : ThreadLocal<SimpleDateFormat>() {
-            override fun initialValue(): SimpleDateFormat =
-                SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
-                    timeZone = TimeZone.getDefault()
-                }
+            override fun initialValue(): SimpleDateFormat = isoDateFormat()
         }
     }
 }

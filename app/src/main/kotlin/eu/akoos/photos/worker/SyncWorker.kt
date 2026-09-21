@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.worker
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
@@ -53,6 +52,8 @@ import kotlinx.coroutines.launch
 import me.proton.core.domain.entity.UserId
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
+import eu.akoos.photos.data.notification.NotificationIds
+import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
@@ -60,6 +61,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
 import eu.akoos.photos.domain.usecase.UploadStatus
+import eu.akoos.photos.util.NetworkObserver
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -71,6 +73,7 @@ class SyncWorker @AssistedInject constructor(
     private val upload: UploadPendingUseCase,
     private val accountManager: AccountManager,
     private val cloudRepo: DrivePhotoRepository,
+    private val networkObserver: NetworkObserver,
 ) : CoroutineWorker(context, params) {
 
     /**
@@ -132,7 +135,12 @@ class SyncWorker @AssistedInject constructor(
             val pass = runSyncPass(userId, firstPass = true)
             val uploadFailed = pass.failed
 
-            context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = System.currentTimeMillis() }
+            // Only stamp a successful sync time. A fully-failed batch that still wrote LAST_SYNC_MS made
+            // Settings show "synced just now" over a broken backup (and reset the resume-refresh gate),
+            // contradicting the allFailed contract in UploadPendingUseCase.
+            if (!uploadFailed) {
+                context.settingsDataStore.edit { it[SettingsKeys.LAST_SYNC_MS] = System.currentTimeMillis() }
+            }
             return@coroutineScope if (uploadFailed && runAttemptCount < 3) Result.retry()
             else if (uploadFailed) Result.failure()
             else Result.success()
@@ -181,8 +189,17 @@ class SyncWorker @AssistedInject constructor(
 
     private suspend fun runSyncPass(userId: UserId, firstPass: Boolean): PassResult {
         try {
-            // Refresh cloud state first so deleted-cloud photos are removed from DB before reconcile.
-            cloudRepo.refreshCloudPhotosIncremental(userId)
+            // Wi-Fi-only covers the background cloud refresh, not just the upload below. The listing
+            // walk (and its short-cooldown full-refresh fallback when the listing is incomplete) is the
+            // largest background data cost, so on mobile with Wi-Fi-only on it is skipped, mirroring the
+            // upload guard in UploadPendingUseCase. Reconcile still runs (it works off the local DB) and
+            // the upload self-skips. The foreground refresh (pull-to-refresh / opening the app) is a
+            // separate call and stays unaffected, so a manual open still updates on mobile.
+            val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
+            if (!wifiOnly || networkObserver.currentlyOnWifi()) {
+                // Refresh cloud state first so deleted-cloud photos are removed from DB before reconcile.
+                cloudRepo.refreshCloudPhotosIncremental(userId)
+            }
             reconcile(userId).collect {}
             // Upload errors must NOT silently disappear — swallowing them gives a "success"
             // verdict even when nothing was uploaded, leaving a stale "last sync time" with no
@@ -198,8 +215,6 @@ class SyncWorker @AssistedInject constructor(
                     Log.w(TAG, "upload tried ${uploadResult.attempted} items, 0 succeeded — retrying")
                     uploadFailed = true
                 }
-            } catch (_: NotImplementedError) {
-                // Legacy code path: harmless, the use case can be a no-op in some builds.
             } catch (e: IOException) {
                 Log.w(TAG, "upload IO error — will retry", e)
                 uploadFailed = true
@@ -297,9 +312,7 @@ class SyncWorker @AssistedInject constructor(
         const val NAME_ONESHOT = "sync_worker_oneshot"
         const val TAG_ONESHOT = "sync_oneshot"
         const val CHANNEL_ID = "sync_worker"
-        // Deliberately distinct from AlbumDownloadWorker.NOTIFICATION_ID (4242) so the two
-        // foreground notifications can coexist when both workers are running.
-        const val NOTIFICATION_ID = 4243
+        const val NOTIFICATION_ID = NotificationIds.SYNC_WORKER
 
         /** WorkManager's hard floor — periodic work cannot fire faster than this. */
         const val MIN_INTERVAL_MINUTES = 15L
@@ -310,24 +323,19 @@ class SyncWorker @AssistedInject constructor(
          * channel so the user can mute one without affecting the other.
          */
         fun ensureChannel(context: Context) {
-            val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            if (nm.getNotificationChannel(CHANNEL_ID) != null) return
             // IMPORTANCE_LOW keeps the upload notification visible in the status bar but
             // suppresses the heads-up popup banner, so background sync stays present-but-quiet
-            // instead of interrupting on every automatic upload. Existing installs migrate when
-            // the channel is recreated post-uninstall; a user who wants the louder behaviour can
-            // flip it in system Settings → App notifications, the canonical Android pattern.
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                context.getString(R.string.sync_worker_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = context.getString(R.string.sync_worker_channel_desc)
-                setShowBadge(false)
-                setSound(null, null)
-                enableVibration(false)
-            }
-            nm.createNotificationChannel(channel)
+            // instead of interrupting on every automatic upload. A user who wants the louder
+            // behaviour can flip it in system Settings → App notifications, the canonical
+            // Android pattern.
+            ensureNotificationChannel(
+                context,
+                id = CHANNEL_ID,
+                name = context.getString(R.string.sync_worker_channel_name),
+                description = context.getString(R.string.sync_worker_channel_desc),
+                importance = NotificationManager.IMPORTANCE_LOW,
+                silent = true,
+            )
         }
 
         fun schedule(workManager: WorkManager, wifiOnly: Boolean = true, intervalMinutes: Long = MIN_INTERVAL_MINUTES) {
@@ -361,32 +369,6 @@ class SyncWorker @AssistedInject constructor(
         }
 
         fun cancel(workManager: WorkManager) = workManager.cancelUniqueWork(TAG)
-
-        /**
-         * Stop an in-flight upload the user can see (the "sync now" burst, a content-observer
-         * auto-backup pass, or a periodic tick that is currently uploading) without disabling
-         * scheduled backups.
-         *
-         * This is a COOPERATIVE stop: it flips [UploadPendingUseCase]'s stop flag so the batch loop
-         * stops STARTING new queued items, while the item currently in transit finishes and is
-         * backed up. It deliberately does NOT WorkManager-cancel the running worker; cancelling the
-         * worker cancels the upload coroutine mid-encrypt, tearing down an in-flight native PGP call
-         * (libgojni) and crashing the process with a native SIGSEGV. The worker drains gracefully and
-         * returns normally, which dismisses its own foreground notification; the still-pending items
-         * stay LOCAL_ONLY and resume on the next natural trigger (new photo / periodic / app-open).
-         *
-         * The three in-app cancel buttons call [UploadPendingUseCase.requestStop] directly; this
-         * static helper (reached from the notification path and any non-injected caller) routes to the
-         * same use case via a Hilt EntryPoint. Download cancel is unaffected.
-         */
-        fun cancelActiveUpload(context: Context) {
-            runCatching {
-                dagger.hilt.android.EntryPointAccessors.fromApplication(
-                    context.applicationContext,
-                    StopUploadReceiver.StopUploadEntryPoint::class.java,
-                ).uploadPendingUseCase().requestStop()
-            }.onFailure { Log.w(TAG, "cancelActiveUpload: cooperative stop failed: ${it.message}") }
-        }
 
         /**
          * OS-level MediaStore content-URI trigger via WorkManager. The system itself watches

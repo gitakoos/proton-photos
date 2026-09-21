@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -73,9 +74,14 @@ private object FilmstripCache {
             oldValue: List<Bitmap>,
             newValue: List<Bitmap>?,
         ) {
-            // Only recycle frames actually being dropped. A re-put of the same key (newValue set)
-            // hands the live bitmaps back to the map, so those must survive.
-            if (newValue != null) return
+            // Recycle ONLY on an explicit remove() (evicted=false, newValue=null): a consumer that
+            // got these frames on a cache hit still holds the same Bitmap instances, and an LRU
+            // size-eviction (evicted=true) would recycle them under a strip still being drawn -> a
+            // "recycled bitmap" crash in the shared viewer scrubber. A re-put (newValue set) hands the
+            // live bitmaps back to the map. In the skipped cases the dropped frames are simply left to
+            // GC once nothing references them. The editor's release() path is an explicit remove, so
+            // its eager free is preserved.
+            if (newValue != null || evicted) return
             for (bmp in oldValue) {
                 if (!bmp.isRecycled) bmp.recycle()
             }
@@ -134,30 +140,91 @@ internal fun rememberVideoFilmstripFrames(
     val key = if (uri != null) cacheKey(uri, frameCount, targetPx) else ""
 
     // Fixed-size slot list so out-of-order parallel arrivals still land in time order and the strip
-    // never reflows (a consumer draws each slot, null = not-yet-decoded placeholder).
-    val frames = remember(uri, frameCount, targetPx) {
+    // never reflows (a consumer draws each slot, null = not-yet-decoded placeholder). Its identity is
+    // keyed on the SOURCE (uri + target size), NOT the frame count: a zoom that raises the count keeps
+    // the same list, so the frames already on screen stay visible while the denser set decodes. Only a
+    // real source change (or a target-size change) rebuilds it as all-null, i.e. a reset to placeholders.
+    val frames = remember(uri, targetPx) {
         mutableStateListOf<Bitmap?>().apply { repeat(frameCount) { add(null) } }
     }
+    // The count the rendered list currently reflects. Fresh per (uri, targetPx), so the first pass for a
+    // source fills the list in place (progressive), while a later, different count is a zoom that fills a
+    // separate buffer and swaps it in whole, so the strip never blanks on a count increase.
+    val renderedCount = remember(uri, targetPx) { intArrayOf(frameCount) }
 
     LaunchedEffect(uri, frameCount, targetPx) {
         if (uri == null) return@LaunchedEffect
 
+        // A finished strip for this exact count is cached: publish it into the rendered list in one
+        // swap, whether this is a fresh source or a zoom to a new count.
         FilmstripCache.get(key)?.let { cached ->
-            for (i in 0 until frameCount) frames[i] = cached.getOrNull(i)
+            publishStrip(frames, cached, frameCount)
+            renderedCount[0] = frameCount
             return@LaunchedEffect
         }
 
-        extractInto(context, uri, fallbackDurationMs, frameCount, targetPx, frames)
+        if (frameCount == renderedCount[0]) {
+            // First pass for this source: nothing worth preserving on screen, so decode straight into
+            // the rendered list and let each frame pop into its slot as it lands (progressive fill).
+            extractInto(context, uri, fallbackDurationMs, frameCount, targetPx, frames)
 
-        // Commit the completed (dense-prefix) strip so a tab swap / pager re-settle is instant.
-        val done = frames.filterNotNull()
-        if (done.isNotEmpty()) FilmstripCache.put(key, done)
+            // Cache only a COMPLETE strip (no null gaps). filterNotNull would collapse a mid-strip decode
+            // failure, and the reader (getOrNull(i)) is index-keyed, so on a cache hit every later frame
+            // would shift one slot; skipping the cache for an incomplete strip just re-extracts it later.
+            if (frames.isNotEmpty() && frames.none { it == null }) {
+                FilmstripCache.put(key, frames.filterNotNull())
+            }
+        } else {
+            // A zoom to a different (usually denser) count for the SAME source: decode into a separate
+            // buffer so the current frames stay on screen, then publish the whole strip once the buffer
+            // has no gaps (the same completeness gate). A cancelled or incomplete pass leaves the strip as
+            // it is (no blank) and a later pass re-extracts. The dropped buffer's bitmaps were never cached
+            // and never shown, so they are left to GC: recycling a cached or on-screen bitmap would crash.
+            val buffer = mutableStateListOf<Bitmap?>().apply { repeat(frameCount) { add(null) } }
+            extractInto(context, uri, fallbackDurationMs, frameCount, targetPx, buffer)
+            if (buffer.isNotEmpty() && buffer.none { it == null }) {
+                FilmstripCache.put(key, buffer.filterNotNull())
+                publishStrip(frames, buffer, frameCount)
+                renderedCount[0] = frameCount
+            }
+        }
     }
 
     return remember(uri, frameCount, targetPx) {
         VideoFilmstripFrames(frames, key)
     }
 }
+
+/**
+ * Replace the whole rendered strip in one shot: resize [target] to [count] and copy [source]'s frames
+ * into it, so the strip goes from the frames currently shown straight to the new set with no all-null
+ * frame in between. The bitmaps stay owned by [FilmstripCache]; [target] only points at the same
+ * instances, so nothing is recycled here.
+ */
+private fun publishStrip(
+    target: SnapshotStateList<Bitmap?>,
+    source: List<Bitmap?>,
+    count: Int,
+) {
+    val next = List(count) { source.getOrNull(it) }
+    target.clear()
+    target.addAll(next)
+}
+
+/**
+ * Extract a filmstrip into a caller-owned [target] list (already sized to [frameCount] with null slots),
+ * progressively and off the main thread, WITHOUT touching the shared [FilmstripCache]. The editor's extra
+ * timeline sources use this: several strips are on screen at once, so a size-limited LRU would recycle a
+ * strip still being drawn. The caller owns the bitmaps' lifecycle and recycles [target] when done.
+ */
+internal suspend fun extractFilmstripInto(
+    context: Context,
+    uri: Uri,
+    frameCount: Int,
+    targetPx: Int,
+    fallbackDurationMs: Long,
+    target: SnapshotStateList<Bitmap?>,
+) = extractInto(context, uri, fallbackDurationMs, frameCount, targetPx, target)
 
 /**
  * Runs the bounded-parallel decode: [EXTRACT_CONCURRENCY] workers, each holding its own retriever,
@@ -200,6 +267,10 @@ private suspend fun extractInto(
                         ?: fallbackDurationMs
                     if (durationMs <= 0L) return@launch
                     while (true) {
+                        // Stop pulling indices the moment the pass is cancelled (fast scroll / editor
+                        // exit), instead of decoding every remaining frame through the uninterruptible
+                        // native retriever and only noticing at the next publish.
+                        ensureActive()
                         val i = nextIndex.getAndIncrement()
                         if (i >= frameCount) break
                         val ratio = (i.toFloat() + 0.5f) / frameCount
@@ -234,6 +305,10 @@ private fun decodeFrame(
         targetPx, targetPx,
     )
 } else {
-    retriever.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-        ?.let { Bitmap.createScaledBitmap(it, targetPx, targetPx, true) }
+    val full = retriever.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
+    val scaled = Bitmap.createScaledBitmap(full, targetPx, targetPx, true)
+    // createScaledBitmap allocates a new bitmap (a frame is never already targetPx square), so recycle
+    // the full-resolution original; otherwise 12 full frames leak per strip on API 26 (pre-O_MR1).
+    if (scaled !== full) full.recycle()
+    scaled
 }

@@ -77,6 +77,21 @@ class PhotoEntityBuilder @Inject constructor(
          *  whichever PKESK matches the photo's substituted target. Owner-side album
          *  opens leave this null and behave exactly as before. */
         fallbackParentKeyBytes: ByteArray? = null,
+        /** LinkIds of every album this device has cached, read once per pass by the caller.
+         *  A photo whose parent is one of them exists only inside that album, which is the single
+         *  fact [PhotoListingEntity.isChildOfAlbum] records. Keeping the test here rather than at
+         *  each call site means every path that builds a row answers it the same way. Adding a
+         *  photo to an album leaves it parented to the photos root, so an own-album photo is
+         *  correctly absent from this set's reach and stays a stream photo. */
+        albumLinkIds: Set<String> = emptySet(),
+        /** Wire-authoritative override for [PhotoListingEntity.isChildOfAlbum], for the album
+         *  listing that states the answer outright. Left false, the parent decides. */
+        knownChildOfAlbum: Boolean = false,
+        /** The user's own photos root, when the caller knows it. It vetoes
+         *  [PhotoListingEntity.isChildOfAlbum]: see [isDirectAlbumChild] for why that veto is worth
+         *  a parameter. Null leaves the veto off, which is what the paths that never see an album
+         *  listing get, and they have nothing to veto. */
+        photosRootLinkId: String? = null,
     ): PhotoListingEntity {
         val link = detail?.link
         var displayName = ""
@@ -204,6 +219,9 @@ class PhotoEntityBuilder @Inject constructor(
         val resolvedEncXAttr = link?.fileProperties?.activeRevision?.xAttr
             ?: link?.activeRevision?.xAttr
 
+        val parentLinkId = link?.parentLinkId
+        val childOfAlbum = isDirectAlbumChild(parentLinkId, albumLinkIds, photosRootLinkId, knownChildOfAlbum)
+
         return PhotoListingEntity(
             linkId = stub.linkId,
             shareId = shareId,
@@ -222,10 +240,92 @@ class PhotoEntityBuilder @Inject constructor(
             contentKeyPacket = resolvedCkp,
             encNodeKey = link?.nodeKey,
             encNodePassphrase = link?.nodePassphrase,
-            parentLinkId = link?.parentLinkId,
+            parentLinkId = parentLinkId,
             encXAttr = resolvedEncXAttr,
+            isChildOfAlbum = childOfAlbum,
+            // Recorded from the same ciphertext displayName was just decrypted from, so the refresh
+            // has something to compare a later fetch against without decrypting again.
+            nameFingerprint = nameFingerprint(link?.name),
         )
     }
+}
+
+/**
+ * Change-detection digest of an armored encrypted name, hex FNV-1a. Not a security primitive and
+ * not standing in for one: the only question it answers is whether the ciphertext the server
+ * returned differs from the one a stored name was decrypted from, which is how a rename made on
+ * another client gets noticed without running PGP over every photo on every sync walk.
+ *
+ * A server that re-armors an unchanged name moves the digest and costs one needless decrypt, which
+ * still resolves to the same name. That is the direction worth failing in, since the opposite one
+ * is a rename that never arrives.
+ */
+internal fun nameFingerprint(encryptedName: String?): String? {
+    if (encryptedName == null) return null
+    var hash = -0x340d631b7bdddcdbL
+    for (ch in encryptedName) {
+        hash = (hash xor ch.code.toLong()) * 0x100000001B3L
+    }
+    return java.lang.Long.toHexString(hash)
+}
+
+/** What a rename check found: the name to store and the digest that name now answers for. */
+internal data class NameRefresh(val displayName: String, val fingerprint: String)
+
+/**
+ * Whether a cached row's name needs replacing, and with what. Returns null when the row should be
+ * left alone, which is the common answer and the one that keeps the sync walk free of crypto.
+ *
+ * [decryptName] is only ever invoked when the digests disagree, so an unchanged photo costs a
+ * string comparison. A null [storedFingerprint] counts as disagreeing rather than as agreement: a
+ * row that never recorded one cannot vouch for its own name, and forcing that single decrypt is
+ * what recovers a name that drifted while nothing was watching.
+ *
+ * A decrypt that comes back null or blank is dropped rather than stored. Name decryption yields an
+ * empty string on failure, so writing the result unconditionally would let one transient crypto
+ * failure erase a good caption. The digest is withheld in that case too, leaving the row marked for
+ * a recheck so the next pass retries instead of accepting the failure as the answer.
+ */
+internal fun resolveNameRefresh(
+    storedFingerprint: String?,
+    freshFingerprint: String?,
+    decryptName: () -> String?,
+): NameRefresh? {
+    // No name on the wire means nothing to compare against, so the stored one stands.
+    if (freshFingerprint == null) return null
+    if (freshFingerprint == storedFingerprint) return null
+    val decrypted = decryptName()
+    if (decrypted.isNullOrBlank()) return null
+    // A decrypt that lands on the stored name still records the digest, so a re-armored blob is
+    // paid for once rather than on every walk.
+    return NameRefresh(decrypted, freshFingerprint)
+}
+
+/**
+ * Whether a row exists only as a direct child of an album, which is the single fact that separates a
+ * photo someone contributed to a shared album from one the user backed up themselves. Both land in
+ * the same table under the same userId, and a contributed copy lands on the album owner's volume,
+ * which is this user's own volume whenever the album is theirs.
+ *
+ * [wireSaysChild] is the album listing's own answer and settles it outright. Failing that the parent
+ * decides, and the rule that must hold is the negative one: adding a photo to an album rewraps its
+ * passphrase but does not move it, so a photo the user added to an album of their own is still
+ * parented to the photos root, is not an album child, and keeps its place on the timeline.
+ *
+ * A parent equal to [photosRootLinkId] vetoes both answers. That veto is the difference between
+ * trusting a server field and not needing to: the cost of a wrong true here is that the user's own
+ * photos leave their timeline, so nothing sitting in their own root is allowed to earn one however
+ * the listing answers. Null means the caller cannot say, and then there is nothing to veto.
+ */
+internal fun isDirectAlbumChild(
+    parentLinkId: String?,
+    albumLinkIds: Set<String>,
+    photosRootLinkId: String?,
+    wireSaysChild: Boolean,
+): Boolean {
+    if (parentLinkId == null) return false
+    if (parentLinkId == photosRootLinkId) return false
+    return wireSaysChild || parentLinkId in albumLinkIds
 }
 
 internal fun guessMimeType(name: String): String = when (name.substringAfterLast('.').lowercase()) {

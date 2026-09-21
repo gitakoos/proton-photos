@@ -22,6 +22,13 @@
 
 package eu.akoos.photos.presentation.util
 
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
+import kotlin.math.ceil
+
+/** The one byte formatter for every surface. Binary units (1024) to match how Proton
+ *  reports storage, so a quota shown here equals the same quota on Proton's own pages. */
 fun formatBytes(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"
     val kb = bytes / 1024.0
@@ -47,4 +54,33 @@ fun formatVideoTime(ms: Long, withTenths: Boolean = false): String {
     } else {
         "%d:%02d".format(m, s)
     }
+}
+
+/** "MMMM yyyy" bucket label for the timeline and album/folder month headers. Locale-aware so the
+ *  month name reads in the reader's language. Construction only; each call site keeps its own
+ *  instance because SimpleDateFormat is not thread-safe. */
+fun monthYearFormat(): SimpleDateFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+
+/** "d MMMM yyyy" day-bucket label for the day-grouped timeline and scrubber. Locale-aware like
+ *  monthYearFormat; construction only, never a shared instance. */
+fun dayMonthYearFormat(): SimpleDateFormat = SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
+
+/** "yyyy-MM-dd" day-key parser and formatter. Locale is pinned to US so the digits stay Latin on
+ *  any device, and the zone is the device default to match how the keys are built. Construction
+ *  only; callers keep their own per-thread instance. */
+fun isoDateFormat(): SimpleDateFormat =
+    SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getDefault() }
+
+/**
+ * Whole days from [nowMs] until a trashed item is permanently purged at [purgeAtMs], rounded UP:
+ * any fraction of a day still counts as a day, so a badge never claims fewer days than the reader
+ * actually has. Zero once the purge time is reached or past, which a caller renders as an
+ * imminent-deletion label rather than "0 days". Both arguments are epoch milliseconds — the device
+ * side passes DATE_EXPIRES times 1000, the cloud side a link's trashed time plus the retention
+ * window.
+ */
+fun daysUntilPurge(purgeAtMs: Long, nowMs: Long): Int {
+    val remaining = purgeAtMs - nowMs
+    if (remaining <= 0L) return 0
+    return ceil(remaining / 86_400_000.0).toInt()
 }

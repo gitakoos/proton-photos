@@ -46,6 +46,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Collections
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
@@ -220,6 +221,17 @@ fun PermissionsScreen(onBack: () -> Unit) {
                         granted = installGranted,
                     ) { openInstallSettings(context) }
                 }
+                // Default gallery is a default-app association, not a grantable permission, so it
+                // shows an "Open" hand-off to the system Open-by-default page, no grant state.
+                add {
+                    PermissionRow(
+                        icon = Icons.Default.Collections,
+                        title = stringResource(R.string.permissions_default_gallery_title),
+                        why = stringResource(R.string.permissions_default_gallery_why),
+                        granted = false,
+                        actionLabel = stringResource(R.string.permissions_action_open),
+                    ) { openDefaultGallerySettings(context) }
+                }
             }
             rows.forEachIndexed { i, row ->
                 row()
@@ -256,6 +268,7 @@ private fun PermissionRow(
     title: String,
     why: String,
     granted: Boolean,
+    actionLabel: String? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -272,8 +285,11 @@ private fun PermissionRow(
             Spacer(Modifier.height(2.dp))
             Text(why, color = FgMute, fontSize = 12.sp, lineHeight = 16.sp)
         }
-        // State + action affordance: a green "Granted" (tap to manage/revoke) or an accent "Allow".
-        if (granted) {
+        // State + action affordance: an accent action label (a system-page hand-off with no grant
+        // state), else a green "Granted" (tap to manage/revoke), else an accent "Allow".
+        if (actionLabel != null) {
+            Text(actionLabel, color = Accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        } else if (granted) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Icon(Icons.Default.CheckCircle, null, tint = StatusSynced, modifier = Modifier.size(16.dp))
                 Text(stringResource(R.string.permissions_state_granted), color = StatusSynced, fontSize = 12.sp,
@@ -380,6 +396,22 @@ private fun openOverlaySettings(context: android.content.Context) {
     runCatching {
         context.startActivity(
             Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.fromParts("package", context.packageName, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }.onFailure { openAppDetails(context) }
+}
+
+// No AOSP "gallery" role exists, so this hands off to the system Open-by-default page (app details
+// below API 31) where the user can make the app the default for photos and videos.
+private fun openDefaultGallerySettings(context: android.content.Context) {
+    val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS
+    } else {
+        Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+    }
+    runCatching {
+        context.startActivity(
+            Intent(action, Uri.fromParts("package", context.packageName, null))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         )
     }.onFailure { openAppDetails(context) }

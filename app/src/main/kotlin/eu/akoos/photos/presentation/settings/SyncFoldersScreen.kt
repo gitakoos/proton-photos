@@ -73,7 +73,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
-import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgDim
@@ -266,6 +266,7 @@ fun SyncFoldersScreen(
                                             nameError = false
                                         },
                                         singleLine = true,
+                                        shape = RoundedCornerShape(14.dp),
                                         placeholder = { Text(stringResource(R.string.sync_folders_add_dialog_name_hint)) },
                                         isError = nameError,
                                     )
@@ -300,7 +301,7 @@ fun SyncFoldersScreen(
             }
         }
 
-        SettingsPillHeader(title = stringResource(R.string.sync_folders_title), onBack = onBack)
+        FloatingHeader(title = stringResource(R.string.sync_folders_title), onBack = onBack)
     }
 }
 

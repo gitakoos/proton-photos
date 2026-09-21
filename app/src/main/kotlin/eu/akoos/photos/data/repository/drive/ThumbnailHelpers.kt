@@ -75,6 +75,9 @@ class ThumbnailHelpers @Inject constructor(
      *  whole-library warm-up so its CDN GETs wait out the shared 429 cooldown; false (default)
      *  for foreground / visible thumbnail fetches so they are never blocked by the warm-up's
      *  backoff.
+     * @param fileName Output cache file name, defaulting to `thumb_<linkId>.jpg`. The face indexer
+     *  passes `thumb_hd_<linkId>.jpg` so its HD (Type 2) decrypt never overwrites the gallery's
+     *  Type 1 cache for the same linkId.
      * @return A `file://` URI to the decrypted JPEG cached on disk, or null on failure.
      */
     suspend fun downloadAndDecryptBinary(
@@ -84,9 +87,10 @@ class ThumbnailHelpers @Inject constructor(
         linkId: String,
         cacheDir: File,
         background: Boolean = false,
+        fileName: String? = null,
     ): String? {
         return try {
-            val decFile = File(cacheDir, "thumb_$linkId.jpg")
+            val decFile = File(cacheDir, fileName ?: "thumb_$linkId.jpg")
             if (decFile.exists() && decFile.length() > 0) return "file://${decFile.absolutePath}"
 
             // DEBUG-only large-library simulator: a `simlocal://<seedIndex>` source resolves to a
@@ -102,6 +106,10 @@ class ThumbnailHelpers @Inject constructor(
             val encryptedBytes: ByteArray = simBytes ?: try {
                 cdnBlockFetcher.fetchBlock(url = info.bareUrl, token = info.token, maxAttempts = 3, background = background)
             } catch (e: Exception) {
+                // A scrolled-away thumbnail cancels its own fetch. Rethrow so the coroutine
+                // unwinds instead of the cancellation being logged as a download failure and
+                // the rest of this function running for a result nobody awaits.
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 // Thumbnails are best-effort — a non-2xx after retries means no thumbnail,
                 // not a failed photo. Log and fall through to the empty-bytes short-circuit
                 // below so the upper layer surfaces null (and the gallery falls back to a
@@ -145,6 +153,7 @@ class ThumbnailHelpers @Inject constructor(
             decFile.writeBytes(decrypted)
             "file://${decFile.absolutePath}"
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "downloadAndDecryptBinary failed linkId=$linkId: ${e.message}")
             null
         }

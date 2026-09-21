@@ -98,6 +98,7 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.memories.OnThisDayCarousel
 import eu.akoos.photos.presentation.memories.OnThisDayCard
 import eu.akoos.photos.presentation.theme.Accent
@@ -344,6 +345,22 @@ internal fun PhotoGrid(
         }
     }
 
+    // Per-group photo/video split depends only on [grouped], so compute it once here instead of
+    // re-running the O(all items) count in the grid builder on every thumbnail-decrypt recomposition.
+    val monthCounts: List<Pair<Int, Int>> = remember(grouped) {
+        grouped.map { (_, items) ->
+            val videos = items.count { item ->
+                val mt = when (item) {
+                    is GalleryItem.LocalOnly -> item.local.mimeType
+                    is GalleryItem.Synced    -> item.local.mimeType
+                    is GalleryItem.CloudOnly -> item.cloud.mimeType
+                }
+                mt.startsWith("video/")
+            }
+            (items.size - videos) to videos   // (photos, videos)
+        }
+    }
+
     val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
 
     // Two-finger pinch detector that does NOT eat single-finger drags. It only activates
@@ -393,9 +410,10 @@ internal fun PhotoGrid(
                 // Pinch-OUT (fingers spread, ratio > 1) zooms IN — bigger tiles, finer
                 // day-level navigation. Pinch-IN (ratio < 1) zooms OUT — smaller tiles,
                 // broader year-level overview. levelIndex grows as columns SHRINK in
-                // the zoomLevels list (L0=6 cols flat, L5=1 col day-grouped), so
-                // pinch-out increments toward L5. After each snap refDist is reset so
-                // the same gesture can roll through multiple levels.
+                // the zoomLevels list (L0 is the densest, most columns; the last level is
+                // 1 column, day-grouped), so pinch-out increments toward the last level.
+                // After each snap refDist is reset so the same gesture can roll through
+                // multiple levels.
                 when {
                     ratio >= 1.30f && levelIndex < zoomLevels.lastIndex -> {
                         levelIndex += 1
@@ -446,10 +464,39 @@ internal fun PhotoGrid(
         enabled = dragSelectEnabled,
     )
 
+    // Land back on the photo the viewer closed on. Both layouts emit the same shape around their
+    // photos, the optional banner and On-this-day row first and then one header per group, so one
+    // description of it serves both. In None grouping the single bucket gets no header, which is
+    // exactly the flat case an empty group list means.
+    val returnLeadingSlots =
+        (if (permissionState == PermissionState.Denied ||
+                permissionState == PermissionState.PermanentlyDenied) 1 else 0) +
+        (if (showOnThisDay && onThisDayByYear.isNotEmpty()) 1 else 0)
+    val returnGroups = remember(grouped) { grouped.map { (_, groupItems) -> groupItems } }
+    val returnHasHeaders = effectiveGrouping != TimelineGrouping.None
+    if (mosaicGrid) {
+        ReturnToViewerPhoto(
+            gridState = staggeredState,
+            groups = returnGroups,
+            headerPerGroup = returnHasHeaders,
+            leadingSlots = returnLeadingSlots,
+            keyOf = { it.stableId },
+        )
+    } else {
+        ReturnToViewerPhoto(
+            gridState = gridState,
+            groups = returnGroups,
+            headerPerGroup = returnHasHeaders,
+            leadingSlots = returnLeadingSlots,
+            keyOf = { it.stableId },
+        )
+    }
+
     if (mosaicGrid) {
         MosaicPhotoGrid(
             staggeredState = staggeredState,
             grouped = grouped,
+            monthCounts = monthCounts,
             orderedItems = orderedItems,
             onThisDayByYear = onThisDayByYear,
             showOnThisDay = showOnThisDay,
@@ -538,18 +585,9 @@ internal fun PhotoGrid(
             }
         }
 
-        for ((month, monthItems) in grouped) {
-            // Split month-group count by media type so the header reads
-            // "11 photos, 1 video" instead of an undifferentiated "12 photos".
-            val monthVideos = monthItems.count { item ->
-                val mt = when (item) {
-                    is GalleryItem.LocalOnly -> item.local.mimeType
-                    is GalleryItem.Synced    -> item.local.mimeType
-                    is GalleryItem.CloudOnly -> item.cloud.mimeType
-                }
-                mt.startsWith("video/")
-            }
-            val monthPhotos = monthItems.size - monthVideos
+        for ((index, group) in grouped.withIndex()) {
+            val (month, monthItems) = group
+            val (monthPhotos, monthVideos) = monthCounts[index]
             // None-grouping levels (L0..L2) skip the header entirely so the user gets a
             // truly flat thumbnail wall. The single placeholder "bucket" produced above
             // is still iterated to render its items.
@@ -600,6 +638,7 @@ internal fun PhotoGrid(
                     isOffline         = inputs.isOffline,
                     typeBadgeRes      = inputs.typeBadgeRes,
                     typeBadgeCdRes    = inputs.typeBadgeCdRes,
+                    isLocalGif        = inputs.isLocalGif,
                     columns           = columnCount,
                     cornerRadius      = if (seamless) 0.dp else 10.dp,
                     onClick           = {
@@ -628,6 +667,8 @@ internal fun PhotoGrid(
             gridState = gridState,
             items = orderedItems,
             grouping = effectiveGrouping,
+            columns = columnCount,
+            keyOf = keyOf,
             topPadding = topContentPadding + 8.dp,
             bottomPadding = 120.dp,
             onDraggingChange = { scrubberDragging = it },
@@ -641,6 +682,8 @@ internal fun PhotoGrid(
                 gridState = gridState,
                 items = orderedItems,
                 grouping = effectiveGrouping,
+                columns = columnCount,
+                keyOf = keyOf,
                 topPadding = topContentPadding + 12.dp,
                 suppressed = scrubberDragging,
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -679,10 +722,13 @@ private suspend fun visibleRangeDecrypt(
     }
 }
 
-/** Clamp band for a mosaic tile's aspect ratio so a panorama or a sliver-thin source can't produce
- *  an absurdly short or tall cell that breaks the staggered flow. */
-private const val MOSAIC_ASPECT_MIN = 0.5f
-private const val MOSAIC_ASPECT_MAX = 2.0f
+/** Clamp band for a mosaic tile's aspect ratio, kept to a moderate portrait-to-landscape range (2:3 to
+ *  3:2). The staggered grid packs into whichever lane is shortest and a date header re-levels the lanes,
+ *  so an extreme panorama or sliver tile leaves the neighbouring lanes far behind and opens a large gap
+ *  above the next header; holding the band near-square keeps the masonry look while cutting that ragged
+ *  whitespace. */
+private const val MOSAIC_ASPECT_MIN = 0.6667f
+private const val MOSAIC_ASPECT_MAX = 1.5f
 
 /**
  * Width / height aspect ratio for a mosaic tile from STORED dimensions, or null when none are
@@ -711,6 +757,7 @@ private fun storedMosaicAspect(item: GalleryItem): Float? {
 private fun MosaicPhotoGrid(
     staggeredState: LazyStaggeredGridState,
     grouped: List<Pair<String, List<GalleryItem>>>,
+    monthCounts: List<Pair<Int, Int>>,
     orderedItems: List<GalleryItem>,
     onThisDayByYear: List<Pair<Int, List<GalleryItem>>>,
     showOnThisDay: Boolean,
@@ -792,16 +839,14 @@ private fun MosaicPhotoGrid(
                 }
             }
 
-            for ((month, monthItems) in grouped) {
-                val monthVideos = monthItems.count { item ->
-                    val mt = when (item) {
-                        is GalleryItem.LocalOnly -> item.local.mimeType
-                        is GalleryItem.Synced    -> item.local.mimeType
-                        is GalleryItem.CloudOnly -> item.cloud.mimeType
-                    }
-                    mt.startsWith("video/")
-                }
-                val monthPhotos = monthItems.size - monthVideos
+            for ((index, group) in grouped.withIndex()) {
+                val (month, monthItems) = group
+                val (monthPhotos, monthVideos) = monthCounts[index]
+                // A section with fewer photos than a full row cannot fill the lanes, so a masonry mix of
+                // tall and short tiles there just leaves a ragged gap under the empty lanes before the next
+                // header. Lay such a sparse section out as uniform squares so it reads as a tidy short
+                // block rather than whitespace.
+                val sparseSection = monthItems.size < columnCount
                 if (effectiveGrouping != TimelineGrouping.None) {
                     val selectedInGroup = monthItems.count { it in selectedItems }
                     item(span = StaggeredGridItemSpan.FullLine, contentType = "header") {
@@ -848,10 +893,11 @@ private fun MosaicPhotoGrid(
                         isOffline         = inputs.isOffline,
                         typeBadgeRes      = inputs.typeBadgeRes,
                         typeBadgeCdRes    = inputs.typeBadgeCdRes,
+                        isLocalGif        = inputs.isLocalGif,
                         columns           = columnCount,
                         cornerRadius      = if (seamless) 0.dp else 10.dp,
-                        aspectRatioOverride = storedAspect ?: thumbAspect,
-                        onIntrinsicAspect = if (storedAspect == null) {
+                        aspectRatioOverride = if (sparseSection) 1f else (storedAspect ?: thumbAspect),
+                        onIntrinsicAspect = if (!sparseSection && storedAspect == null) {
                             { aspect -> thumbAspect = aspect.coerceIn(MOSAIC_ASPECT_MIN, MOSAIC_ASPECT_MAX) }
                         } else null,
                         onClick           = {
@@ -873,6 +919,8 @@ private fun MosaicPhotoGrid(
             gridState = staggeredState,
             items = orderedItems,
             grouping = effectiveGrouping,
+            columns = columnCount,
+            keyOf = keyOf,
             topPadding = topContentPadding + 8.dp,
             bottomPadding = 120.dp,
             onDraggingChange = { scrubberDragging = it },
@@ -883,6 +931,8 @@ private fun MosaicPhotoGrid(
                 gridState = staggeredState,
                 items = orderedItems,
                 grouping = effectiveGrouping,
+                columns = columnCount,
+                keyOf = keyOf,
                 topPadding = topContentPadding + 12.dp,
                 suppressed = scrubberDragging,
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -909,24 +959,50 @@ private fun BoxScope.ScrollDateLabelStaggered(
     grouping: TimelineGrouping,
     topPadding: Dp,
     suppressed: Boolean,
+    columns: Int? = null,
+    keyOf: ((GalleryItem) -> String)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val dateFormat = rememberTimelineDateFormat(grouping)
+    val dateFormat = rememberTimelineDateFormat(grouping, columns)
+    // Timeline callers pass keyOf so the label reads the EXACT first visible photo (no drift); a null
+    // keyOf keeps the lightweight scroll-fraction estimate.
+    val keyToItem = remember(items, keyOf) { keyOf?.let { k -> items.associateBy(k) } }
 
     var label by remember { mutableStateOf("") }
     var scrolling by remember { mutableStateOf(false) }
 
-    LaunchedEffect(gridState, items, dateFormat) {
-        snapshotFlow { gridState.firstVisibleItemIndex }
-            .distinctUntilChanged()
-            .collect { firstIndex ->
-                label = timelineDateLabel(
-                    firstIndex,
-                    gridState.layoutInfo.totalItemsCount,
-                    items,
-                    dateFormat,
-                )
+    LaunchedEffect(gridState, items, dateFormat, keyToItem) {
+        val map = keyToItem
+        if (map == null) {
+            // Albums / folders: the lightweight scroll-fraction estimate, on first-visible-index change.
+            snapshotFlow { gridState.firstVisibleItemIndex }
+                .distinctUntilChanged()
+                .collect { firstIndex ->
+                    label = timelineDateLabel(
+                        firstIndex, gridState.layoutInfo.totalItemsCount, items, dateFormat,
+                    )
+                }
+        } else {
+            // Timeline: snapshot the capture time of the photo that FILLS the top of the screen, not the
+            // one leaving it. Resolving inside snapshotFlow keeps the label in step with the frame on
+            // screen (no index-vs-layout skew), and requiring the cell to be at least half in view from
+            // the top makes it track the section now dominating rather than lagging a section behind on
+            // the sliver still exiting up top. Header / memories-row cells carry non-photo keys, skipped.
+            snapshotFlow {
+                val layout = gridState.layoutInfo
+                val viewportTop = layout.viewportStartOffset
+                layout.visibleItemsInfo.firstNotNullOfOrNull { info ->
+                    val key = info.key as? String
+                    if (key != null && info.offset.y + info.size.height / 2 >= viewportTop) {
+                        map[key]?.captureTimeMs
+                    } else {
+                        null
+                    }
+                }
             }
+                .distinctUntilChanged()
+                .collect { ts -> if (ts != null) label = dateFormat.format(Date(ts)) }
+        }
     }
     LaunchedEffect(gridState) {
         snapshotFlow { gridState.isScrollInProgress }
@@ -979,26 +1055,52 @@ internal fun BoxScope.ScrollDateLabel(
     grouping: TimelineGrouping,
     topPadding: Dp,
     suppressed: Boolean,
+    columns: Int? = null,
+    keyOf: ((GalleryItem) -> String)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val dateFormat = rememberTimelineDateFormat(grouping)
+    val dateFormat = rememberTimelineDateFormat(grouping, columns)
+    // Timeline callers pass keyOf so the label reads the EXACT first visible photo (no drift); a null
+    // keyOf keeps the lightweight scroll-fraction estimate.
+    val keyToItem = remember(items, keyOf) { keyOf?.let { k -> items.associateBy(k) } }
 
     var label by remember { mutableStateOf("") }
     var scrolling by remember { mutableStateOf(false) }
 
     // Recompute the label off-composition whenever the first visible grid index changes, mapping that
     // grid index (headers + memories row included) to the photo's capture date via the shared helper.
-    LaunchedEffect(gridState, items, dateFormat) {
-        snapshotFlow { gridState.firstVisibleItemIndex }
-            .distinctUntilChanged()
-            .collect { firstIndex ->
-                label = timelineDateLabel(
-                    firstIndex,
-                    gridState.layoutInfo.totalItemsCount,
-                    items,
-                    dateFormat,
-                )
+    LaunchedEffect(gridState, items, dateFormat, keyToItem) {
+        val map = keyToItem
+        if (map == null) {
+            // Albums / folders: the lightweight scroll-fraction estimate, on first-visible-index change.
+            snapshotFlow { gridState.firstVisibleItemIndex }
+                .distinctUntilChanged()
+                .collect { firstIndex ->
+                    label = timelineDateLabel(
+                        firstIndex, gridState.layoutInfo.totalItemsCount, items, dateFormat,
+                    )
+                }
+        } else {
+            // Timeline: snapshot the capture time of the photo that FILLS the top of the screen, not the
+            // one leaving it. Resolving inside snapshotFlow keeps the label in step with the frame on
+            // screen (no index-vs-layout skew), and requiring the cell to be at least half in view from
+            // the top makes it track the section now dominating rather than lagging a section behind on
+            // the sliver still exiting up top. Header / memories-row cells carry non-photo keys, skipped.
+            snapshotFlow {
+                val layout = gridState.layoutInfo
+                val viewportTop = layout.viewportStartOffset
+                layout.visibleItemsInfo.firstNotNullOfOrNull { info ->
+                    val key = info.key as? String
+                    if (key != null && info.offset.y + info.size.height / 2 >= viewportTop) {
+                        map[key]?.captureTimeMs
+                    } else {
+                        null
+                    }
+                }
             }
+                .distinctUntilChanged()
+                .collect { ts -> if (ts != null) label = dateFormat.format(Date(ts)) }
+        }
     }
     // Visibility tracks the grid's scroll activity, with a short tail so the label lingers briefly
     // after a fling settles instead of blinking out the instant motion stops.

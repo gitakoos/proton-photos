@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +56,7 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 @Composable
 fun SignInScreen(
     onSignInClick: () -> Unit = {},
+    onContinueWithoutAccount: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -104,6 +106,19 @@ fun SignInScreen(
             onClick = onSignInClick,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        Spacer(Modifier.height(4.dp))
+
+        TextButton(
+            onClick = onContinueWithoutAccount,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = stringResource(R.string.sign_in_continue_without_account),
+                color = FgMute,
+                fontSize = 13.sp,
+            )
+        }
 
         Spacer(Modifier.height(16.dp))
 

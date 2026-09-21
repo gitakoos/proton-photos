@@ -46,7 +46,6 @@ data class SettingsUiState(
     val syncError: String? = null,
     val autoFreeUp: Boolean = false,
     val freeUpInterval: FreeUpInterval = FreeUpInterval.OneMonth,
-    val isFreeingUp: Boolean = false,
     val deviceStorageBytes: Long = 0L,
     // ── Local storage scopes (visibility-only, no quota write-backs) ──────────
     /** Total bytes on the device data partition (StatFs.totalBytes). */
@@ -69,6 +68,78 @@ data class SettingsUiState(
     /** When true, dark mode forces base surfaces to true black for OLED panels. Off by default;
      *  has no effect in light mode. */
     val amoledBlack: Boolean = false,
+    /** Tint the green "backed up" cloud badges with the palette accent instead of green. Off by default. */
+    val tintCloudWithAccent: Boolean = false,
+    /** Animate GIFs in the timeline, album, and device-folder grids. Off shows a still first frame. */
+    val gifAutoplayGrid: Boolean = false,
+    /** Animate a GIF album cover, including cloud albums. Off shows a still first frame. */
+    val gifAutoplayCovers: Boolean = false,
+    /** Master opt-in for on-device AI/ML features (Copy text, Hide faces, and the People grouping to
+     *  come). Off by default: when off no model is downloaded and the AI entry points stay hidden. */
+    val aiFeaturesEnabled: Boolean = false,
+    /** Per-feature opt-in for the Copy text reader, nested under [aiFeaturesEnabled]. When the stored
+     *  value is absent this defaults to whether the reader's models already sit on disk, so a device
+     *  that has them reads as ON. */
+    val ocrEnabled: Boolean = false,
+    /** Which Copy text model drawer the AI panel is showing: [OcrModelPrompt.Download] when the feature
+     *  was switched on with no model on disk, [OcrModelPrompt.Remove] when it was switched off, or
+     *  [OcrModelPrompt.None] for neither. */
+    val ocrModelPrompt: OcrModelPrompt = OcrModelPrompt.None,
+    /** True while an accepted Copy text model download runs, so the toggle row reads as busy and holds
+     *  its switch until both model halves land. */
+    val ocrModelDownloading: Boolean = false,
+    /** True when the last Copy text model download did not produce usable models, so the row can say so
+     *  and the feature stays off. */
+    val ocrModelDownloadFailed: Boolean = false,
+    /** Per-feature opt-in for the face features (Hide faces and People), nested under
+     *  [aiFeaturesEnabled]. Off by default. */
+    val faceEnabled: Boolean = false,
+    /** Opt-in "automatically merge likely-same people" switch on the face sub-page. Off by default. */
+    val faceAutoMerge: Boolean = false,
+    /** Which face model drawer the AI panel is showing: [FaceModelPrompt.Download] when the feature was
+     *  switched on with no model on disk, [FaceModelPrompt.Remove] when it was switched off, offering to
+     *  delete the model and data it leaves behind, or [FaceModelPrompt.None] for no drawer. */
+    val faceModelPrompt: FaceModelPrompt = FaceModelPrompt.None,
+    /** True while an accepted face model download runs, so the toggle row reads as busy and holds its
+     *  switch until both the detector and the embedder land. */
+    val faceModelDownloading: Boolean = false,
+    /** True when the last face model download did not produce usable models, so the row can say so and
+     *  the feature stays off. */
+    val faceModelDownloadFailed: Boolean = false,
+    /** Running byte count of the face model download in flight, measured against
+     *  [eu.akoos.photos.data.face.FaceModelAssets.TOTAL_DOWNLOAD_BYTES], so the row shows a real bar
+     *  rather than an open-ended spinner. Reset to 0 whenever a download starts or ends. */
+    val faceModelDownloadedBytes: Long = 0L,
+    /** Whether Wi-Fi was connected when the face model download drawer was raised. Off means the
+     *  drawer states the download will use mobile data, so a large fetch is never pulled silently over
+     *  a metered link. */
+    val faceModelOnWifi: Boolean = true,
+    /** Whether both face models (the detector and the embedder) are already on disk. It no longer gates
+     *  the toggle, which stays usable so a missing model can be fetched or the feature switched off;
+     *  it only lets the row read as available. Resolved at load and after a download, network-free. */
+    val faceRecognitionAvailable: Boolean = false,
+    /** Per-feature opt-in for semantic search (find photos by a typed phrase), nested under
+     *  [aiFeaturesEnabled]. Off by default. */
+    val semanticEnabled: Boolean = false,
+    /** Which semantic-search model drawer the AI panel is showing: [SemanticModelPrompt.Download] when the
+     *  feature was switched on with no models on disk, [SemanticModelPrompt.Remove] when it was switched
+     *  off, offering to delete the models and the embeddings they produced, or [SemanticModelPrompt.None]
+     *  for no drawer. */
+    val semanticModelPrompt: SemanticModelPrompt = SemanticModelPrompt.None,
+    /** True while an accepted semantic-search model download runs, so the toggle row reads as busy and
+     *  holds its switch until both the image and text encoders land. */
+    val semanticModelDownloading: Boolean = false,
+    /** True when the last semantic-search model download did not produce usable models, so the row can
+     *  say so and the feature stays off. */
+    val semanticModelDownloadFailed: Boolean = false,
+    /** Running byte count of the semantic-search model download in flight, measured against
+     *  [eu.akoos.photos.data.semantic.SemanticModelAssets.TOTAL_DOWNLOAD_BYTES], so the row shows a real
+     *  bar rather than an open-ended spinner. Reset to 0 whenever a download starts or ends. */
+    val semanticModelDownloadProgress: Long = 0L,
+    /** Whether Wi-Fi was connected when the semantic-search model download drawer was raised. Off means
+     *  the drawer states the download will use mobile data, so a large fetch is never pulled silently over
+     *  a metered link. */
+    val semanticModelOnWifi: Boolean = true,
     /** Which top-level tab the gallery opens on at app start. Default Photos. */
     val landingTab: LandingTab = LandingTab.Photos,
     /** Grid-layout settings (Appearance → Grid layout). [gridRememberLast] on = the timeline
@@ -76,6 +147,9 @@ data class SettingsUiState(
      *  the album / device-folder / hidden grids. 3 = the default columns-per-row baseline. */
     val gridRememberLast: Boolean = false,
     val gridDefaultColumns: Int = 3,
+    /** When on, switching bottom tabs keeps each tab's scroll position; only re-tapping the
+     *  active tab returns it to the top. Off by default. */
+    val keepScrollOnTabSwitch: Boolean = false,
     val userDisplayName: String = "",
     val userEmail: String = "",
     val cloudUsedBytes: Long = 0L,
@@ -83,9 +157,30 @@ data class SettingsUiState(
     /** True until the account user Flow first emits — gates a shimmer over the avatar /
      *  name / email so a cold start shows a skeleton instead of a bare "?" placeholder. */
     val accountLoading: Boolean = true,
+    /** Whether a Proton account is signed in. False in the no-account local-only session, where the
+     *  Settings root offers a sign-in row and hides the account and backup surfaces. Defaults true so
+     *  a signed-in session renders unchanged. */
+    val isSignedIn: Boolean = true,
     /** True until the backed-up / pending counts first compute — gates a shimmer over the
      *  count values so a cold start shows a skeleton instead of "None" / 0. */
     val countsLoading: Boolean = true,
+    /** Photos the hidden vault holds files for. Sign-out empties the vault, so the confirmation has
+     *  to name the number. */
+    val vaultedPhotoCount: Int = 0,
+    /** How many of [vaultedPhotoCount] still have a Proton Drive copy, which is the difference
+     *  between a photo that can be downloaded again after signing back in and one whose only bytes
+     *  the sign-out destroys. The confirmation names both, so the user knows which is which before
+     *  agreeing to it. */
+    val vaultedCloudBackedCount: Int = 0,
+    /** False until [vaultedPhotoCount] has been measured against the vault directory. The sign-out
+     *  confirmation waits on it, so the number it names is the settled one rather than a zero that
+     *  changes a moment after the user has read it. */
+    val vaultedCountSettled: Boolean = false,
+    /** Numbers-only picture of the vault for the shared diagnostics: index, blobs on disk, the two
+     *  directions those can disagree in, pairings, pending hides, folders and size. Refreshed when the
+     *  diagnostics chooser opens, since the vault classes are injected singletons the screen itself
+     *  cannot reach. Blank until then, which leaves the section out of the bundle. */
+    val vaultDiagnostics: String = "",
     val language: String = "system",
     // Metadata stripping. Defaults match the engine readers (which use `?: false`) so the toggles
     // never render ON for a frame while the upload pipeline actually treats them as OFF.
@@ -93,13 +188,15 @@ data class SettingsUiState(
     /** When true, photos are re-encoded to a lighter JPEG per [compressTier] before reaching Drive.
      *  The on-device original is never modified. Off by default. */
     val compressOnUpload: Boolean = false,
-    /** When true, videos are transcoded to a smaller copy per [compressTier] before reaching Drive.
-     *  Separate opt-in from [compressOnUpload]; both share [compressTier]. The on-device original is
-     *  never modified. Off by default. */
+    /** When true, videos are transcoded to a smaller copy per [compressTierVideo] before reaching
+     *  Drive. Separate opt-in from [compressOnUpload]. The on-device original is never modified. Off
+     *  by default. */
     val compressVideosOnUpload: Boolean = false,
-    /** Which quality tier the upload compression uses when [compressOnUpload] or
-     *  [compressVideosOnUpload] is on. Governs both the photo and the video path. */
+    /** Which quality tier the PHOTO upload compression uses when [compressOnUpload] is on. */
     val compressTier: UploadCompressionTier = UploadCompressionTier.BALANCED,
+    /** Which quality tier the VIDEO upload compression uses when [compressVideosOnUpload] is on, the
+     *  video-only counterpart of [compressTier]. Reuses the same [labelRes] / [descRes] mapping. */
+    val compressTierVideo: UploadCompressionTier = UploadCompressionTier.BALANCED,
     val mirrorStripToLocal: Boolean = false,
     /** When true, the lighter re-encode also overwrites the on-device original (all-files access
      *  required), so the local file matches the compressed upload. Persisted only for now. */
@@ -112,10 +209,18 @@ data class SettingsUiState(
     val stripCameraInfo: Boolean = false,
     val stripTimestamp: Boolean = false,
     val stripSoftwareInfo: Boolean = false,
+    // Metadata stripping on share. Independent from the upload-strip fields above; the shared copy is
+    // processed while the on-device original is left untouched. Defaults mirror the upload equivalents.
+    val stripOnShare: Boolean = false,
+    val stripShareGps: Boolean = true,
+    val stripShareCameraInfo: Boolean = false,
+    val stripShareTimestamp: Boolean = false,
+    val stripShareSoftwareInfo: Boolean = false,
+    val stripShareAuthorship: Boolean = false,
     // App lock
     val appLockEnabled: Boolean = false,
-    /** Lock-on-return timeout in minutes. 0 = immediate; common picks: 5 / 10 / 15 / 60. */
-    val appLockTimeoutMinutes: Int = 0,
+    /** Lock-on-return timeout in seconds. 0 = immediate; common picks: 5 / 10 / 30 / 60 / 300. */
+    val appLockTimeoutSeconds: Int = 0,
     /** Privacy opt-in: wipe `cacheDir/fullres/` on every process backgrounding. Off by
      *  default — the 30-min TTL + offline-grace sweeper is the regular behaviour. */
     val clearCacheOnAppClose: Boolean = false,
@@ -127,14 +232,9 @@ data class SettingsUiState(
     /** Opt-in: when true, a foreground watcher shows a quick-action bar over a freshly
      *  taken screenshot. Off by default; requires the draw-over-other-apps permission. */
     val screenshotOverlayEnabled: Boolean = false,
-    /** When true, the main Photos timeline hides every photo already filed into an
-     *  album. Off by default. The Albums + Shared tabs are unaffected. */
-    val hidePhotosInAlbums: Boolean = false,
     /** When true, the Photos timeline shows a floating month/year label while scrolling.
      *  Off by default. */
     val showScrollDate: Boolean = false,
-    /** When true, selection-mode action buttons show a text label beneath the icon. On by default. */
-    val showSelectionLabels: Boolean = true,
     /** When true, the Photos timeline runs oldest-first (newest at the bottom). Off by default. */
     val reverseTimelineOrder: Boolean = false,
     /** When true, the Photos timeline uses a staggered (masonry) grid that keeps each photo's
@@ -143,10 +243,6 @@ data class SettingsUiState(
     /** When true, the Photos timeline is edge-to-edge: no side padding, square corners, a hair-thin
      *  gap. Off by default: the padded, rounded tiles stay the baseline. */
     val seamlessGrid: Boolean = false,
-    /** Albums-tab filter default as an AlbumDisplayFilter ordinal (0 = All, 1 = Cloud, 2 = Local). */
-    val albumsDefaultFilter: Int = 0,
-    /** When true, the Albums tab opens on the last-used filter instead of [albumsDefaultFilter]. */
-    val albumsRememberLastFilter: Boolean = false,
     // Trash
     val trashedCount: Int = 0,
     /** Drive (cloud) trash count. `null` = unknown — UI then falls back to the
@@ -159,7 +255,6 @@ data class SettingsUiState(
      *  fetched (or just signed out)". */
     val lastCloudTrashFetchMs: Long = 0L,
     // Free-up space: non-null when system delete dialog should be launched
-    val freeUpPendingIntent: android.app.PendingIntent? = null,
     // ── Per-file upload progress (Sync card progress bar + expandable list) ────
     /** 1-based count of completed (or attempted) uploads in the current batch. */
     val uploadDoneCount: Int = 0,
@@ -197,6 +292,28 @@ data class UploadEvent(
 
 enum class UploadEventStatus { Uploading, Queued, Encrypting, Done, Failed }
 
+/**
+ * Which Copy text model drawer the AI settings panel is showing, if any. [Download] asks to fetch the
+ * model when the feature is switched on without it on disk; [Remove] asks whether to delete it when the
+ * feature is switched off.
+ */
+enum class OcrModelPrompt { None, Download, Remove }
+
+/**
+ * Which face model drawer the AI settings panel is showing, if any. The removal takes two stages so an
+ * accidental tap cannot delete: [Remove] asks whether to delete the face model and every detected face
+ * and name when the feature is switched off, and [ConfirmRemove] is the final are-you-sure before
+ * anything is wiped; [None] shows no drawer.
+ */
+enum class FaceModelPrompt { None, Download, Remove, ConfirmRemove }
+
+/**
+ * Which semantic-search model drawer the AI settings panel is showing, if any. [Download] asks to fetch
+ * the image and text encoders when the feature is switched on without them on disk; [Remove] asks whether
+ * to delete them, and the embeddings they produced, when the feature is switched off.
+ */
+enum class SemanticModelPrompt { None, Download, Remove }
+
 enum class ThemeMode(val storageKey: String, val labelRes: Int) {
     System("system", eu.akoos.photos.R.string.theme_mode_system),
     Light ("light",  eu.akoos.photos.R.string.theme_mode_light),
@@ -219,7 +336,12 @@ enum class ThemePalette(val storageKey: String, val labelRes: Int) {
     Sunset ("sunset",  eu.akoos.photos.R.string.palette_sunset),
     Sea    ("sea",     eu.akoos.photos.R.string.palette_sea),
     Sepia  ("sepia",   eu.akoos.photos.R.string.palette_sepia),
-    Mono   ("mono",    eu.akoos.photos.R.string.palette_mono);
+    Mono   ("mono",    eu.akoos.photos.R.string.palette_mono),
+    Lavender("lavender", eu.akoos.photos.R.string.palette_lavender),
+    Rose   ("rose",    eu.akoos.photos.R.string.palette_rose),
+    Mint   ("mint",    eu.akoos.photos.R.string.palette_mint),
+    Gold   ("gold",    eu.akoos.photos.R.string.palette_gold),
+    Ruby   ("ruby",    eu.akoos.photos.R.string.palette_ruby);
 
     companion object {
         fun fromKey(key: String?): ThemePalette = entries.firstOrNull { it.storageKey == key } ?: Default

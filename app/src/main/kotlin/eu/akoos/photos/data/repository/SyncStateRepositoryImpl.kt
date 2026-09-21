@@ -30,6 +30,7 @@ import eu.akoos.photos.data.db.entity.toEntity
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.util.flatMapSqlChunks
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -52,6 +53,25 @@ class SyncStateRepositoryImpl @Inject constructor(
         dao.upsertAll(states.map { it.toEntity(userId.id) })
     }
 
+    override suspend fun updateDomainColumnsIfNotSyncedWithCloud(state: SyncState, userId: UserId): Int {
+        val entity = state.toEntity(userId.id)
+        return dao.updateDomainColumnsIfNotSyncedWithCloud(
+            localUri = entity.localUri,
+            userId = entity.userId,
+            cloudFileId = entity.cloudFileId,
+            localHash = entity.localHash,
+            cloudHash = entity.cloudHash,
+            status = entity.status,
+            lastSyncAttemptMs = entity.lastSyncAttemptMs,
+            lastSyncSuccessMs = entity.lastSyncSuccessMs,
+            backedUpAtMs = entity.backedUpAtMs,
+            sizeBytes = entity.sizeBytes,
+        )
+    }
+
+    override suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int =
+        dao.demoteToLocalIfCloudIdMatches(localUri, expectedCloudId)
+
     // Named for the caller's flow: the caller deletes the local MediaStore copy first, then this
     // flips the row's status (to CLOUD_ONLY). It does not itself delete anything.
     override suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus) {
@@ -63,6 +83,10 @@ class SyncStateRepositoryImpl @Inject constructor(
 
     override suspend fun getByCloudId(cloudFileId: String): SyncState? =
         dao.getByCloudId(cloudFileId)?.toDomain()
+
+    override suspend fun cloudPairedLinkIds(userId: UserId, localUris: List<String>): Map<String, String> =
+        localUris.flatMapSqlChunks { chunk -> dao.cloudPairs(userId.id, chunk) }
+            .associate { it.localUri to it.cloudFileId }
 
     // status is persisted as the enum's .name (see the generated __SyncStatus_enumToString), so the
     // claim/reset queries take those exact string forms.
@@ -82,10 +106,21 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun getSyncedBefore(userId: UserId, timestampMs: Long): List<SyncState> =
         dao.getSyncedBefore(userId.id, timestampMs).map { it.toDomain() }
 
+    override suspend fun getVaulted(userId: UserId): List<SyncState> =
+        dao.getVaulted(userId.id).map { it.toDomain() }
+
+    override suspend fun cloudIdsWithLivePairing(userId: UserId): Set<String> =
+        dao.cloudIdsWithLivePairing(userId.id).toHashSet()
+
+    override suspend fun clearHiddenForCloudId(cloudFileId: String) =
+        dao.deleteHiddenForCloudId(cloudFileId)
+
     override suspend fun deleteLocalOnlyByUris(localUris: List<String>) {
         if (localUris.isEmpty()) return
         localUris.chunked(500).forEach { chunk -> dao.deleteLocalOnlyByUris(chunk) }
     }
+
+    override suspend fun delete(localUri: String) = dao.delete(localUri)
 
     override suspend fun markQueued(localUri: String, source: String, at: Long) =
         dao.markQueued(localUri, source, at)

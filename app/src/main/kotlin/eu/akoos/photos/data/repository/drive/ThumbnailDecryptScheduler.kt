@@ -32,17 +32,22 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.crypto.CryptoServiceClient
+import eu.akoos.photos.crypto.DecryptPriority
+import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.HEALTH_PAUSE_POLL_MS
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -109,6 +114,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
     private val albumCryptoChain: AlbumCryptoChain,
     private val thumbnailUrlStore: ThumbnailUrlStore,
     @ApplicationContext private val context: Context,
+    private val deviceHealth: DeviceHealthPolicy,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -337,6 +343,10 @@ class ThumbnailDecryptScheduler @Inject constructor(
                 var beforeTime = Long.MAX_VALUE
                 var enqueuedCount = 0
                 page@ while (cacheBytes < budget && enqueuedCount < MAX_BACKFILL_THUMBNAILS) {
+                    // Defer this background walk while the phone is hot, low on battery, or in the power saver; it
+                    // resumes on its own once conditions clear. Not gated on interaction: it runs quietly in the
+                    // background and does not compete with the UI.
+                    while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
                     val batch = runCatching {
                         photoListingDao.getUndecryptedThumbnailsBefore(userId.id, beforeTime, BACKFILL_PAGE_SIZE)
                     }.getOrElse { e -> Log.w(TAG, "backfillAll: query failed: ${e.message}"); break@page }
@@ -489,16 +499,25 @@ class ThumbnailDecryptScheduler @Inject constructor(
                     // once the queue drains — the woken worker just re-parks.
                     available.trySend(Unit)
                     val linkId = task.photo.linkId
+                    val background = task.band == Band.BACKGROUND
                     // Trickle the warm-up: BACKGROUND tasks wait out the shared pace gate BEFORE taking a
                     // permit, so the aggregate warm-up fetch rate stays gentle without ever occupying a
                     // worker permit a newly VISIBLE thumbnail needs. VISIBLE / PREFETCH skip the gate.
-                    if (task.band == Band.BACKGROUND) paceBackground()
+                    if (background) paceBackground()
                     try {
                         semaphore.withPermit {
                             // The whole-library warm-up (BACKGROUND band) rides the shared CDN cooldown so a
                             // 429 burst self-limits; VISIBLE / PREFETCH fetches stay responsive.
-                            runCatching { decryptOne(task.userId, task.photo, task.band == Band.BACKGROUND) }
-                                .onFailure { e -> Log.w(TAG, "decrypt $linkId failed: ${e.message}") }
+                            runCatching {
+                                if (background) {
+                                    // Warm-up yields the process-global crypto gate to interactive decrypts.
+                                    withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
+                                        decryptOne(task.userId, task.photo, true)
+                                    }
+                                } else {
+                                    decryptOne(task.userId, task.photo, false)
+                                }
+                            }.onFailure { e -> Log.w(TAG, "decrypt $linkId failed: ${e.message}") }
                         }
                     } finally {
                         enqueued.remove(linkId)
@@ -786,15 +805,27 @@ class ThumbnailDecryptScheduler @Inject constructor(
     /** Re-fetch a fresh CDN url + token for [linkId]'s thumbnail when the stored one has expired
      *  (HTTP 404). Signed thumbnail urls are short-lived, but the lazy path keeps the url first seen
      *  at listing time, so the decrypt refreshes it on demand instead of forcing a full row rebuild.
-     *  Public so the debug large-library simulator can refresh a seed's expired url the same way. */
-    suspend fun fetchFreshThumbnailInfo(userId: UserId, linkId: String, volumeId: String): ThumbnailUrlInfo? {
+     *  Public so the debug large-library simulator can refresh a seed's expired url the same way.
+     *  [preferType] picks the thumbnail size: 1 (default) keeps the gallery's Type 1 fallback chain
+     *  (1, then 2, then any); 2 requests the HD Type 2 thumbnail strictly, returning null when the
+     *  revision carries none so the caller can fall back to Type 1. */
+    suspend fun fetchFreshThumbnailInfo(
+        userId: UserId,
+        linkId: String,
+        volumeId: String,
+        preferType: Int = 1,
+    ): ThumbnailUrlInfo? {
         val detail = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, listOf(linkId))[linkId] ?: return null
         val thumbs = detail.link.fileProperties?.activeRevision?.thumbnails
             ?: detail.photo?.activeRevision?.thumbnails
-        val tid = thumbs?.firstOrNull { it.type == 1 }?.thumbnailId
-            ?: thumbs?.firstOrNull { it.type == 2 }?.thumbnailId
-            ?: thumbs?.firstOrNull()?.thumbnailId
-            ?: return null
+        val tid = if (preferType == 2) {
+            thumbs?.firstOrNull { it.type == 2 }?.thumbnailId ?: return null
+        } else {
+            thumbs?.firstOrNull { it.type == 1 }?.thumbnailId
+                ?: thumbs?.firstOrNull { it.type == 2 }?.thumbnailId
+                ?: thumbs?.firstOrNull()?.thumbnailId
+                ?: return null
+        }
         return linkDetailHelpers.batchFetchThumbnailUrls(userId, volumeId, listOf(tid))[tid]
     }
 
@@ -822,6 +853,51 @@ class ThumbnailDecryptScheduler @Inject constructor(
             encNodeKey = encNodeKey,
             encNodePass = encNodePass,
             parentLinkId = parentLinkId,
+        )
+    }
+
+    /**
+     * HD (Type 2, ~1920px) counterpart of [decryptThumbnailToFileBounded] for the face indexer,
+     * which needs more detail than the gallery's Type 1 (~512px) thumbnail so face crops stay sharp.
+     * The Type 2 CDN url + token are not stored on the row, so they are fetched fresh here; the
+     * per-revision cipher material (content key packet, node key, node passphrase, parent) is the
+     * SAME as Type 1, so the decrypt reuses the exact node-key + session-key path. The result is
+     * written to a distinct `thumb_hd_<linkId>.jpg`, so it never collides with the gallery's
+     * `thumb_<linkId>.jpg` cache. Rides the same [semaphore] permit as the bounded Type 1 variant.
+     *
+     * Returns the decrypted file path, or null when the revision carries no Type 2 thumbnail (an
+     * older upload) or the fetch/decrypt fails, so the caller can fall back to the Type 1 path.
+     */
+    suspend fun decryptHdThumbnailToFileBounded(
+        userId: UserId,
+        linkId: String,
+        volumeId: String,
+        contentKeyPacketBase64: String,
+        encNodeKey: String,
+        encNodePass: String,
+        parentLinkId: String,
+    ): String? = semaphore.withPermit {
+        val cacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
+        val hdInfo = runCatching { fetchFreshThumbnailInfo(userId, linkId, volumeId, preferType = 2) }
+            .getOrNull() ?: return@withPermit null
+        val parentKey = getParentKeyBytes(userId, parentLinkId, volumeId) ?: run {
+            Log.w(TAG, "decryptHdThumbnailToFile $linkId: parent key for $parentLinkId unavailable")
+            return@withPermit null
+        }
+        val nodeKeyBytes = runCatching {
+            cryptoServiceClient.decryptNodeKey(encNodeKey, encNodePass, parentKey)
+        }.getOrElse { e ->
+            Log.w(TAG, "decryptHdThumbnailToFile $linkId: decryptNodeKey failed: ${e.message}")
+            return@withPermit null
+        }
+        val sessionKey = cryptoServiceClient.decryptSessionKey(contentKeyPacketBase64, nodeKeyBytes)
+        thumbnailHelpers.downloadAndDecryptBinary(
+            info = hdInfo,
+            nodeKeyBytes = nodeKeyBytes,
+            sessionKey = sessionKey,
+            linkId = linkId,
+            cacheDir = cacheDir,
+            fileName = "thumb_hd_$linkId.jpg",
         )
     }
 

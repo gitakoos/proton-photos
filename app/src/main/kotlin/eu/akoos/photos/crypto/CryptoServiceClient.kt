@@ -34,8 +34,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import me.proton.core.crypto.common.pgp.SessionKey
 import java.io.File
@@ -75,15 +73,17 @@ class CryptoServiceClient @Inject constructor(
     /** Caps the total decrypts in flight across every caller (thumbnails, XAttr, download blocks,
      *  key unwraps). They all funnel through [withService], so one permit here bounds the whole
      *  fan-in onto libgojni, whose native runtime races when too many decrypts hit it at once. That
-     *  race is the source of the fresh-install "not responding" on big libraries. */
-    private val decryptGate = Semaphore(GLOBAL_DECRYPT_PARALLELISM)
+     *  race is the source of the fresh-install "not responding" on big libraries. Priority-aware so
+     *  an interactive (foreground) decrypt is admitted ahead of background indexing/backfill when a
+     *  permit frees; the cap and the wrapped call are unchanged, only the admission order shifts. */
+    private val decryptGate = PriorityGate(GLOBAL_DECRYPT_PARALLELISM)
 
     /** Extra 1-wide gate that serializes decrypts only during a cold-open warm-up window, on top of
      *  [decryptGate]. The libgojni race is worst when a whole screenful decrypts at once against a
      *  cold parent-key cache (fresh launch, or an OS cache-clear that nulls every URL so the visible
      *  set re-decrypts in a burst). Forcing effective parallelism to 1 for the first
      *  [COLD_OPEN_DECRYPTS] leaves lowers the crash probability; steady-state scroll stays 3-wide. */
-    private val coldOpenGate = Semaphore(1)
+    private val coldOpenGate = PriorityGate(1)
 
     /** Decrypts still to serialize through [coldOpenGate]. Counts down once per decrypt (success OR
      *  failure, so a burst of failures still warms out and can never wedge the gate). At 0 the warm-up
@@ -168,12 +168,15 @@ class CryptoServiceClient @Inject constructor(
         remote: (ICryptoService) -> T,
         local: suspend () -> T,
     ): T {
+        // Foreground by default (absent context element): interactive decrypts stay first in line and
+        // only a caller that opts into BACKGROUND yields its place when a permit frees.
+        val priority = currentDecryptPriority()
         val svc = awaitBinding()
         // One global permit per decrypt, so the sum across all callers cannot storm libgojni. Taken
         // AFTER the bind wait (so a slow bind never holds a permit); the in-process fallback is gated
         // too, since it hits the same native library.
         val gated: suspend () -> T = {
-            decryptGate.withPermit {
+            decryptGate.withPermit(priority) {
                 if (svc == null) {
                     local()
                 } else {
@@ -201,7 +204,7 @@ class CryptoServiceClient @Inject constructor(
         // waiting on it while it is held. The counter decrements once per decrypt in a finally, so a
         // failed decrypt still warms out and can never wedge the gate. Once drained, decrypts skip it.
         return if (coldOpenRemaining.get() > 0) {
-            coldOpenGate.withPermit {
+            coldOpenGate.withPermit(priority) {
                 try {
                     gated()
                 } finally {

@@ -36,6 +36,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.IOException
 import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -101,15 +102,43 @@ class RetryWithBackoffTest {
     }
 
     @Test
-    fun `connectivity ApiResult errors are transient`() {
-        assertTrue(isTransientApiError(ApiException(ApiResult.Error.NoInternet())))
+    fun `Connection and Timeout ApiResult errors are transient`() {
         assertTrue(isTransientApiError(ApiException(ApiResult.Error.Connection(false))))
         assertTrue(isTransientApiError(ApiException(ApiResult.Error.Timeout(false))))
     }
 
     @Test
+    fun `no-network errors are NOT transient so an offline device fails fast instead of spinning`() {
+        // #100: a DNS-resolution failure (raw UnknownHostException) or an explicit NoInternet means
+        // there is no route right now, not a transient server blip. Retrying in a tight backoff loop
+        // across every concurrent caller only spins the radio and drains the battery (flagged on
+        // aggressive OEMs); the network-constrained worker / content-observer re-arm resumes the work
+        // once connectivity actually returns.
+        assertFalse(isTransientApiError(UnknownHostException("Unable to resolve host: No address associated")))
+        assertFalse(isTransientApiError(ApiException(ApiResult.Error.NoInternet())))
+    }
+
+    @Test
+    fun `an http error wrapping UnknownHostException as its cause is NOT transient`() {
+        // The wrapped-cause branch still retries a generic network IOException, but a wrapped
+        // host-resolution failure is "no network", not a transient blip, so it fails fast.
+        val wrapped = ApiException(ApiResult.Error.Http(404, "wrapped", cause = UnknownHostException("no address")))
+        assertFalse(isTransientApiError(wrapped))
+    }
+
+    @Test
+    fun `a Connection error caused by host resolution failure is NOT transient`() {
+        // ProtonCore maps a raw UnknownHostException to Connection(cause = UHE), so this is the shape
+        // an offline Proton API call actually throws. It must fail fast like a raw UnknownHostException,
+        // not spin the backoff loop, while a plain Connection blip (no UHE cause) still retries.
+        val offline = ApiException(ApiResult.Error.Connection(false, cause = UnknownHostException("no address")))
+        assertFalse(isTransientApiError(offline))
+        assertTrue(isTransientApiError(ApiException(ApiResult.Error.Connection(false))))
+    }
+
+    @Test
     fun `http error whose cause is an IOException is transient`() {
-        // A 4xx that wraps a network IOException as its cause still retries — the cause check
+        // A 4xx that wraps a network IOException as its cause still retries: the cause check
         // catches the wrapped-network case the httpCode branch alone would reject.
         val wrapped = ApiException(ApiResult.Error.Http(404, "wrapped", cause = IOException("reset")))
         assertTrue(isTransientApiError(wrapped))
@@ -207,8 +236,10 @@ class RetryWithBackoffTest {
 
     @Test
     fun `backoff is capped at maxBackoffMs`() = runTest {
-        // With base=1000 and a tiny cap of 1500, every exponential term saturates at 1500. Jitter
-        // is still added on top (0..base), so 5 waits land in [5*1500, 5*1500 + 5*1000).
+        // With base=1000 and a cap of 1500 the exponential saturates from the SECOND wait on: the
+        // first term is `base shl 0` = 1000, still under the cap. The floor is therefore the sum of
+        // the capped terms themselves, not cap * waits, which would assume a saturation the first
+        // wait never reaches and would then rest on the random jitter to make up the difference.
         val base = 1000L
         val cap = 1500L
         val attempts = 6 // → 5 waits
@@ -221,8 +252,10 @@ class RetryWithBackoffTest {
         }
         val elapsed = testScheduler.currentTime - start
         val waits = attempts - 1
-        val flooredSum = cap * waits
+        val flooredSum = (0 until waits).sumOf { minOf(base shl it, cap) }
         assertTrue("elapsed=$elapsed should be >= $flooredSum", elapsed >= flooredSum)
+        // Jitter adds 0..base on top of every wait, so the whole run stays under the floor plus
+        // one base per wait however the draws land.
         assertTrue("elapsed=$elapsed should be < ${flooredSum + base * waits}", elapsed < flooredSum + base * waits)
     }
 

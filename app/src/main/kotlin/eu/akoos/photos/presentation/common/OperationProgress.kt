@@ -22,12 +22,19 @@
 
 package eu.akoos.photos.presentation.common
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -38,7 +45,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -49,11 +55,17 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.presentation.theme.AppColors
@@ -87,14 +99,26 @@ fun OperationProgressPill(
     modifier: Modifier = Modifier,
     onCancel: (() -> Unit)? = null,
 ) {
-    if (progress == null) return
-    val colors = AppColors.current
-    Row(
-        modifier = modifier
+    // Hold the last progress so the pill animates OUT when the work ends instead of vanishing.
+    var last by remember { mutableStateOf(progress) }
+    if (progress != null) last = progress
+    AnimatedVisibility(
+        visible = progress != null,
+        enter = fadeIn() + slideInVertically { -it },
+        exit = fadeOut() + slideOutVertically { -it },
+        modifier = modifier,
+    ) {
+        val progress = last ?: return@AnimatedVisibility
+        val colors = AppColors.current
+        Row(
+            modifier = Modifier
             .clip(RoundedCornerShape(20.dp))
             .background(colors.bg0.copy(alpha = 0.95f))
             .border(0.5.dp, colors.pillBorder, RoundedCornerShape(20.dp))
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            // The cancel carries a 48.dp touch target and sets the height on its own; the minimum
+            // holds the same shape for a pill that has none.
+            .defaultMinSize(minHeight = 36.dp)
+            .padding(start = 14.dp, end = if (onCancel != null) 0.dp else 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -112,25 +136,37 @@ fun OperationProgressPill(
                 modifier = Modifier.size(16.dp),
             )
         }
+        // The label yields to the cancel rather than pushing it off screen: the longest translations
+        // are on branches that offer one, and a cancel the user cannot reach stops nothing.
         Text(
             progress.label,
             color = colors.fgPrimary,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
         )
         // Optional cancel affordance — the background back-up passes this so the user can stop it
-        // from the pill instead of digging into the notification.
+        // from the pill instead of digging into the notification. The glyph stays small; the tap
+        // area around it is a full 48.dp.
         if (onCancel != null) {
-            Icon(
-                Icons.Default.Close,
-                contentDescription = stringResource(R.string.cancel),
-                tint = colors.fgMute,
+            Box(
                 modifier = Modifier
-                    .size(18.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
-                    .clickable(onClick = onCancel),
-            )
+                    .clickable(role = Role.Button, onClick = onCancel),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = stringResource(R.string.cancel),
+                    tint = colors.fgMute,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
+    }
     }
 }
 
@@ -154,15 +190,14 @@ fun BlockingOperationSheet(progress: OperationProgress?) {
     ModalBottomSheet(
         onDismissRequest = {},
         sheetState = sheetState,
-        containerColor = colors.bg2,
+        containerColor = colors.sheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
-        dragHandle = { BottomSheetDefaults.DragHandle() },
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 20.dp)
                 .padding(top = 8.dp, bottom = 36.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {

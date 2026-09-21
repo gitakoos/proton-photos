@@ -254,4 +254,174 @@ class SyncStateDaoTest {
         assertNull(dao.getByUri("uri://1"))
         assertTrue(dao.observeAll("user1").first().isEmpty())
     }
+
+    // ── claimForUpload: the one gate between a row and a second copy on Drive ─────────────────────
+
+    /** The exact string forms the repository binds, since status is persisted as the enum's name. */
+    private suspend fun claim(uri: String): Int =
+        dao.claimForUpload(uri, SyncStatus.UPLOADING.name, SyncStatus.LOCAL_ONLY.name)
+
+    @Test
+    fun `a queued local-only row is claimed once and reads as UPLOADING`() = runTest {
+        dao.upsert(entity("uri://pending", status = SyncStatus.LOCAL_ONLY))
+        dao.markQueued("uri://pending", source = "AUTO_FOLDER", at = 10L)
+
+        assertEquals(1, claim("uri://pending"))
+        assertEquals(SyncStatus.UPLOADING, dao.getByUri("uri://pending")?.status)
+    }
+
+    @Test
+    fun `a vaulted photo's row can never be claimed for upload`() = runTest {
+        // A backed-up photo moved into the hidden vault: its bytes live in app-private storage, its
+        // Drive copy is untouched, and claiming the row would upload that same photo a second time.
+        dao.upsert(entity("uri://vaulted", status = SyncStatus.HIDDEN, cloudFileId = "cloud-1"))
+        dao.markQueued("uri://vaulted", source = "MANUAL", at = 10L)
+
+        assertEquals(0, claim("uri://vaulted"))
+        assertEquals(SyncStatus.HIDDEN, dao.getByUri("uri://vaulted")?.status)
+    }
+
+    @Test
+    fun `a row already claimed by another pass is not claimed again`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.LOCAL_ONLY))
+
+        assertEquals(1, claim("uri://1"))
+        assertEquals(0, claim("uri://1"))
+        assertEquals(SyncStatus.UPLOADING, dao.getByUri("uri://1")?.status)
+    }
+
+    @Test
+    fun `a backed-up row is not claimed, whatever its queue flag says`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "cloud-1"))
+        dao.markQueued("uri://1", source = "MANUAL", at = 10L)
+
+        assertEquals(0, claim("uri://1"))
+        assertEquals(SyncStatus.SYNCED, dao.getByUri("uri://1")?.status)
+    }
+
+    @Test
+    fun `a claim names one row and leaves every other alone`() = runTest {
+        dao.upsertAll(listOf(
+            entity("uri://1", status = SyncStatus.LOCAL_ONLY),
+            entity("uri://2", status = SyncStatus.LOCAL_ONLY),
+        ))
+
+        assertEquals(1, claim("uri://1"))
+
+        assertEquals(SyncStatus.LOCAL_ONLY, dao.getByUri("uri://2")?.status)
+    }
+
+    // ── clearQueuedForSynced: what a reveal drops off the row it re-pointed ───────────────────────
+
+    @Test
+    fun `re-pointing a pairing clears the whole upload intent on the restored file`() = runTest {
+        // A reveal upserts the row onto the restored uri as SYNCED; an upsert-created row arrives
+        // queued for the upload the pairing has just made unnecessary.
+        dao.upsert(entity("content://media/91", status = SyncStatus.SYNCED, cloudFileId = "cloud-1"))
+        dao.markQueued("content://media/91", source = "AUTO_FOLDER", at = 10L)
+
+        dao.clearQueuedForSynced("content://media/91")
+
+        val row = dao.getByUri("content://media/91")
+        assertNotNull(row)
+        assertEquals(false, row!!.queued)
+        assertNull(row.queueSource)
+        assertNull(row.queuedAt)
+    }
+
+    @Test
+    fun `the LOCAL_ONLY-guarded clear cannot do a reveal's job`() = runTest {
+        // Why the reveal reaches for the unguarded clear: the guarded one refuses a SYNCED row, so it
+        // would leave the restored file queued and a second upload of it would follow.
+        dao.upsert(entity("content://media/91", status = SyncStatus.SYNCED, cloudFileId = "cloud-1"))
+        dao.markQueued("content://media/91", source = "AUTO_FOLDER", at = 10L)
+
+        dao.clearQueued("content://media/91")
+
+        assertTrue(dao.getByUri("content://media/91")!!.queued)
+    }
+
+    @Test
+    fun `a demoted row carries no stale intent that would re-queue it`() = runTest {
+        // Clearing the source as well is what keeps a row whose cloud copy is later removed from
+        // looking like a stranded manual upload.
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "cloud-1"))
+        dao.markQueued("uri://1", source = "MANUAL", at = 10L)
+        dao.clearQueuedForSynced("uri://1")
+
+        dao.updateStatus("uri://1", SyncStatus.LOCAL_ONLY)
+
+        assertNull(dao.getQueueSource("uri://1"))
+    }
+
+    // ── updateDomainColumnsIfNotSyncedWithCloud: reconcile cannot clobber a just-promoted upload ──
+
+    /** The guarded domain write reconcile uses for a demotion: same columns as updateDomainColumns,
+     *  but it skips a row an upload just promoted to SYNCED + cloudFileId. */
+    private suspend fun guardedUpdate(
+        uri: String,
+        status: SyncStatus,
+        cloudFileId: String?,
+        localHash: String = "",
+    ): Int = dao.updateDomainColumnsIfNotSyncedWithCloud(
+        localUri = uri,
+        userId = "user1",
+        cloudFileId = cloudFileId,
+        localHash = localHash,
+        cloudHash = null,
+        status = status,
+        lastSyncAttemptMs = 0L,
+        lastSyncSuccessMs = null,
+        backedUpAtMs = null,
+        sizeBytes = 1024L,
+    )
+
+    @Test
+    fun `the guarded write leaves a row an upload just promoted to SYNCED with a cloud id alone`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "cloud-1"))
+
+        // Reconcile derived LOCAL_ONLY from a stale snapshot; the guard must refuse the clobber.
+        val changed = guardedUpdate("uri://1", status = SyncStatus.LOCAL_ONLY, cloudFileId = null)
+
+        assertEquals(0, changed)
+        val row = dao.getByUri("uri://1")
+        assertEquals(SyncStatus.SYNCED, row?.status)
+        assertEquals("cloud-1", row?.cloudFileId)
+    }
+
+    @Test
+    fun `the guarded write still rewrites a genuinely local-only row`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.LOCAL_ONLY))
+
+        val changed = guardedUpdate("uri://1", status = SyncStatus.LOCAL_ONLY, cloudFileId = null, localHash = "fresh")
+
+        assertEquals(1, changed)
+        assertEquals("fresh", dao.getByUri("uri://1")?.localHash)
+    }
+
+    // ── demoteToLocalIfCloudIdMatches: demote the vanished twin, skip an upload's re-promotion ────
+
+    @Test
+    fun `an expected-id demote drops the pairing when the cloud id still matches the snapshot`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "A"))
+
+        val changed = dao.demoteToLocalIfCloudIdMatches("uri://1", "A")
+
+        assertEquals(1, changed)
+        val row = dao.getByUri("uri://1")
+        assertEquals(SyncStatus.LOCAL_ONLY, row?.status)
+        assertNull(row?.cloudFileId)
+    }
+
+    @Test
+    fun `an expected-id demote skips a row an upload re-promoted under a different cloud id`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "B"))
+
+        val changed = dao.demoteToLocalIfCloudIdMatches("uri://1", "A")
+
+        assertEquals(0, changed)
+        val row = dao.getByUri("uri://1")
+        assertEquals(SyncStatus.SYNCED, row?.status)
+        assertEquals("B", row?.cloudFileId)
+    }
 }

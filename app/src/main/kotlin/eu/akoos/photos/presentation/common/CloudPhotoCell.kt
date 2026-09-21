@@ -62,6 +62,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.CloudBadgeSurface
+import eu.akoos.photos.presentation.theme.cloudBadgeTint
 import eu.akoos.photos.presentation.theme.FgDim
 import kotlinx.coroutines.delay
 
@@ -153,6 +155,7 @@ fun CloudPhotoCell(
     Box(
         modifier = modifier
             .aspectRatio(1f)
+            .selectPressScale(isSelected)
             .clip(RoundedCornerShape(cornerRadiusDp))
             .background(Bg2)
             .then(
@@ -184,10 +187,12 @@ fun CloudPhotoCell(
             // the first scroll. `Size.ORIGINAL` would inherit that bug; explicit pixel
             // budget keeps the decoded bitmap small.
             val context = androidx.compose.ui.platform.LocalContext.current
-            val request = remember(imageModel) {
+            val request = remember(imageModel, cloudLinkId) {
                 ImageRequest.Builder(context)
                     .data(imageModel)
                     .size(512)
+                    .memoryCacheKey("cloud:" + (cloudLinkId ?: localUri))
+                    .crossfade(false)
                     .build()
             }
             AsyncImage(
@@ -251,7 +256,13 @@ fun CloudPhotoCell(
                     .size(22.dp)
                     .align(Alignment.TopStart),
             ) {
-                if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+                        .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
+                )
+                SelectionCheckPop(isSelected) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -263,13 +274,6 @@ fun CloudPhotoCell(
                             tint = Color.White, modifier = Modifier.size(14.dp),
                         )
                     }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                            .border(1.5.dp, Color.White.copy(alpha = 0.8f), CircleShape),
-                    )
                 }
             }
         }
@@ -310,7 +314,7 @@ private fun BoxScope.SyncedCloudBadge() {
         Icon(
             Icons.Default.Cloud,
             contentDescription = stringResource(R.string.cd_status_backed_up_device),
-            tint = Color(0xFF30D158),
+            tint = cloudBadgeTint(CloudBadgeSurface.DarkChip),
             modifier = Modifier.size(12.dp),
         )
     }

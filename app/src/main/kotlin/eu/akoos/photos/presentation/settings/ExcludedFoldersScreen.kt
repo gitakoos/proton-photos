@@ -65,7 +65,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
-import eu.akoos.photos.presentation.settings.components.SettingsPillHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgDim
@@ -232,7 +232,7 @@ fun ExcludedFoldersScreen(
             }
         }
 
-        SettingsPillHeader(
+        FloatingHeader(
             title = stringResource(R.string.settings_excluded_folders_title),
             onBack = onBack,
         )

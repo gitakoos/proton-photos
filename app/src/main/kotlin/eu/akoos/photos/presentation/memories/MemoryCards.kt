@@ -104,6 +104,9 @@ internal fun OnThisDayCard(
     coverItem: GalleryItem,
     yearsAgo: Int,
     count: Int,
+    // Default keeps the fixed home-rail / carousel card size; the category grid passes a
+    // fill-width + aspect modifier so wide-screen cells have no leftover whitespace.
+    modifier: Modifier = Modifier.size(width = 132.dp, height = 168.dp),
     onClick: () -> Unit,
 ) {
     val imageModel: Any? = when (coverItem) {
@@ -131,8 +134,7 @@ internal fun OnThisDayCard(
         ImageRequest.Builder(context).data(imageModel).size(512).build()
     }
     Box(
-        modifier = Modifier
-            .size(width = 132.dp, height = 168.dp)
+        modifier = modifier
             .clip(RoundedCornerShape(16.dp))
             .background(Bg2)
             .clickable(onClick = onClick),
@@ -199,6 +201,9 @@ internal fun SeasonCard(
     coverItem: GalleryItem,
     title: String,
     count: Int,
+    // Default keeps the fixed home-rail card size; the category grid passes a fill-width + aspect
+    // modifier so wide-screen cells have no leftover whitespace.
+    modifier: Modifier = Modifier.size(width = 132.dp, height = 168.dp),
     onClick: () -> Unit,
 ) {
     val imageModel: Any? = when (coverItem) {
@@ -223,8 +228,7 @@ internal fun SeasonCard(
         ImageRequest.Builder(context).data(imageModel).size(512).build()
     }
     Box(
-        modifier = Modifier
-            .size(width = 132.dp, height = 168.dp)
+        modifier = modifier
             .clip(RoundedCornerShape(16.dp))
             .background(Bg2)
             .clickable(onClick = onClick),

@@ -22,54 +22,51 @@
 
 package eu.akoos.photos.presentation.memories
 
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.common.FloatingHeaderScrim
+import eu.akoos.photos.domain.usecase.MIN_FACES_TO_SHOW_PERSON
+import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.ShimmerBox
+import eu.akoos.photos.presentation.common.ShimmerTextLine
+import eu.akoos.photos.presentation.gallery.PersonCard
+import eu.akoos.photos.presentation.places.PlaceCard
 import eu.akoos.photos.presentation.theme.AppColors
-import eu.akoos.photos.presentation.theme.PillBg
-import eu.akoos.photos.presentation.theme.PillBorder
 import java.util.Calendar
 
 /** The two memory groupings, each with its own preview section and "see all" sub-page. */
@@ -87,6 +84,10 @@ fun MemoriesScreen(
     onBack: () -> Unit,
     onPhotoClick: (items: List<GalleryItem>, index: Int) -> Unit,
     onSeeAll: (MemoryCategory) -> Unit = {},
+    onPersonClick: (Long) -> Unit = {},
+    onSeeAllPeople: () -> Unit = {},
+    onPlaceClick: (Double, Double) -> Unit = { _, _ -> },
+    onSeeAllPlaces: () -> Unit = {},
     viewModel: MemoriesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -103,9 +104,27 @@ fun MemoriesScreen(
         val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val contentTopPad = statusBarTop + 72.dp
 
-        val isEmpty = state.onThisDay.isEmpty() && state.seasons.isEmpty()
-        if (isEmpty) {
-            Box(
+        // Only people in at least two photos reach the preview, so a stray detection cannot open its own
+        // section; the empty state keys off the same set. The preview shows the people you have NAMED,
+        // falling back to the clusters worth naming before any are named so the first is still reachable.
+        val peopleNamed = state.people.filter { !it.displayName.isNullOrBlank() }
+        val peopleToName = state.people.filter {
+            it.displayName.isNullOrBlank() && it.faceCount >= MIN_FACES_TO_SHOW_PERSON
+        }
+        val peopleShown = if (peopleNamed.isNotEmpty()) peopleNamed else peopleToName
+        val isEmpty = state.onThisDay.isEmpty() && state.seasons.isEmpty() &&
+            peopleShown.isEmpty() && state.places.isEmpty()
+        // Loading / empty / content phase, cross-faded so the neutral empty state never flashes before
+        // the first grouped library emission arrives.
+        val phase = when {
+            state.isLoading -> 0
+            isEmpty -> 1
+            else -> 2
+        }
+        Crossfade(targetState = phase, label = "memoriesContent", modifier = Modifier.fillMaxSize()) { p ->
+        when (p) {
+        0 -> MemoriesSkeleton(contentTopPad = contentTopPad)
+        1 -> Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(top = contentTopPad),
@@ -117,7 +136,7 @@ fun MemoriesScreen(
                     fontSize = 14.sp,
                 )
             }
-        } else {
+        else -> {
             val now = remember { Calendar.getInstance().get(Calendar.YEAR) }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -126,29 +145,96 @@ fun MemoriesScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (peopleShown.isNotEmpty()) {
+                    item(key = "people_section") {
+                        // Same shape as Seasons: a tappable header with a chevron opening the full
+                        // People sub-page, over a preview of the first few most-photographed people.
+                        SectionHeaderRow(
+                            title = stringResource(R.string.gallery_category_people),
+                            onClick = onSeeAllPeople,
+                        )
+                        // A single horizontally scrolling row of person cards sized to match the
+                        // Seasons cards (132x168), so People read as the same album-style tile rather
+                        // than a taller, wider grid. The header chevron opens the full People page.
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            peopleShown.take(12).forEach { person ->
+                                Box(Modifier.width(132.dp)) {
+                                    PersonCard(
+                                        person = person,
+                                        onClick = { onPersonClick(person.personId) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (state.places.isNotEmpty()) {
+                    item(key = "places_section") {
+                        // Same shape as People: a tappable header with a chevron opening the full
+                        // Places browser, over a horizontally scrolling row of the busiest cities.
+                        SectionHeaderRow(
+                            title = stringResource(R.string.places_title),
+                            onClick = onSeeAllPlaces,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            state.places.forEach { city ->
+                                Box(Modifier.width(132.dp)) {
+                                    PlaceCard(
+                                        coverItem = city.cover,
+                                        title = city.city,
+                                        count = city.count,
+                                        onClick = { onPlaceClick(city.latitude, city.longitude) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 if (state.onThisDay.isNotEmpty()) {
                     item(key = "otd_section") {
                         SectionHeaderRow(
                             title = stringResource(R.string.gallery_on_this_day),
                             onClick = { onSeeAll(MemoryCategory.ON_THIS_DAY) },
                         )
-                        // Four random entries in a fixed 2×2 grid (the sub-page lists every entry),
+                        // A horizontally scrolling row of entries (the sub-page lists every one),
                         // keyed on the set of years (not the list instance) so the shuffle stays stable
                         // across decrypt-driven re-emits, then resolved against the latest state each
                         // recomposition so covers still refresh without the preview jumping.
                         val pickedYears = remember(state.onThisDay.map { it.first }) {
-                            state.onThisDay.map { it.first }.shuffled().take(4)
+                            state.onThisDay.map { it.first }.shuffled().take(12)
                         }
                         val previewOnThisDay = pickedYears.mapNotNull { yr ->
                             state.onThisDay.firstOrNull { it.first == yr }
                         }
-                        PreviewGrid(previewOnThisDay) { (year, items) ->
-                            OnThisDayCard(
-                                coverItem = items.first(),
-                                yearsAgo = (now - year).coerceAtLeast(1),
-                                count = items.size,
-                                onClick = { onPhotoClick(items, 0) },
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            previewOnThisDay.forEach { (year, items) ->
+                                Box(Modifier.width(132.dp)) {
+                                    OnThisDayCard(
+                                        coverItem = items.first(),
+                                        yearsAgo = (now - year).coerceAtLeast(1),
+                                        count = items.size,
+                                        onClick = { onPhotoClick(items, 0) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -159,26 +245,38 @@ fun MemoriesScreen(
                             onClick = { onSeeAll(MemoryCategory.SEASONS) },
                         )
                         val pickedSeasons = remember(state.seasons.map { it.title }) {
-                            state.seasons.map { it.title }.shuffled().take(4)
+                            state.seasons.map { it.title }.shuffled().take(12)
                         }
                         val previewSeasons = pickedSeasons.mapNotNull { title ->
                             state.seasons.firstOrNull { it.title == title }
                         }
-                        PreviewGrid(previewSeasons) { bucket ->
-                            SeasonCard(
-                                coverItem = bucket.cover,
-                                title = bucket.title,
-                                count = bucket.items.size,
-                                onClick = { onPhotoClick(bucket.items, 0) },
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            previewSeasons.forEach { bucket ->
+                                Box(Modifier.width(132.dp)) {
+                                    SeasonCard(
+                                        coverItem = bucket.cover,
+                                        title = bucket.title,
+                                        count = bucket.items.size,
+                                        onClick = { onPhotoClick(bucket.items, 0) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+        }
+        }
 
         // Floating pills — back button + title, layered above the scroll area.
-        FloatingMemoriesHeader(
+        FloatingHeader(
             title = stringResource(R.string.memories_title),
             onBack = onBack,
         )
@@ -186,127 +284,40 @@ fun MemoriesScreen(
 }
 
 /**
- * Non-scrolling 2×2 preview: a [Column] of two [Row]s, each holding two weighted cells so the
- * columns share the row width. With an odd count the trailing cell is an empty spacer.
+ * Loading stand-in for the Collection preview: a couple of section headers, each over a 2×2 grid of
+ * card placeholders sized to the 132×168 memory cards, so the swap to real content does not jump.
  */
 @Composable
-private fun <T> PreviewGrid(items: List<T>, card: @Composable (T) -> Unit) {
+private fun MemoriesSkeleton(contentTopPad: Dp) {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .fillMaxSize()
+            .padding(start = 14.dp, end = 14.dp, top = contentTopPad),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items.chunked(2).forEach { rowItems ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                rowItems.forEach { item ->
-                    Box(
-                        modifier = Modifier.weight(1f),
-                        contentAlignment = Alignment.Center,
+        repeat(2) {
+            ShimmerTextLine(
+                widthFraction = 0.5f,
+                height = 22.dp,
+                modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                repeat(2) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        card(item)
+                        repeat(2) {
+                            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                ShimmerBox(
+                                    modifier = Modifier.size(width = 132.dp, height = 168.dp),
+                                    cornerRadius = 16.dp,
+                                )
+                            }
+                        }
                     }
                 }
-                if (rowItems.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
-                }
             }
-        }
-    }
-}
-
-/**
- * Floating back-bar shared by the memories screens: a circular pill back button and a pill-shaped
- * title chip at the top-start, floating over the scrolling content rather than a full-width bar.
- */
-@Composable
-internal fun FloatingMemoriesHeader(
-    title: String,
-    onBack: () -> Unit,
-    trailing: (@Composable () -> Unit)? = null,
-    menuItems: List<Pair<String, () -> Unit>>? = null,
-) {
-    val colors = AppColors.current
-    var menuExpanded by remember { mutableStateOf(false) }
-    Box(modifier = Modifier.fillMaxWidth()) {
-        FloatingHeaderScrim()
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(start = 12.dp, top = 8.dp, end = 12.dp),
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .background(PillBg, CircleShape)
-                .border(0.5.dp, PillBorder, CircleShape)
-                .clickable(onClick = onBack),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.onboarding_back),
-                tint = colors.fgPrimary,
-                modifier = Modifier.size(18.dp),
-            )
-        }
-        val hasMenu = !menuItems.isNullOrEmpty()
-        // The title pill itself stretches open into the category list (animated height) instead of
-        // popping a separate menu, so switching reads as the same pill growing downward.
-        val menuShape = RoundedCornerShape(20.dp)
-        Column(
-            modifier = Modifier
-                .clip(menuShape)
-                .background(PillBg, menuShape)
-                .border(0.5.dp, PillBorder, menuShape)
-                .animateContentSize(),
-        ) {
-            Row(
-                modifier = Modifier
-                    .then(if (hasMenu) Modifier.clickable { menuExpanded = !menuExpanded } else Modifier)
-                    .padding(start = 14.dp, end = if (hasMenu) 8.dp else 14.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    text = title,
-                    color = colors.fgPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (hasMenu) {
-                    Icon(
-                        if (menuExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
-                        contentDescription = null,
-                        tint = colors.fgPrimary,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-            }
-            if (hasMenu && menuExpanded) {
-                menuItems?.forEach { (label, action) ->
-                    Text(
-                        text = label,
-                        color = colors.fgPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier
-                            .clickable { menuExpanded = false; action() }
-                            .padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 10.dp),
-                    )
-                }
-            }
-        }
-        if (trailing != null) {
-            Spacer(modifier = Modifier.weight(1f))
-            trailing()
-        }
         }
     }
 }

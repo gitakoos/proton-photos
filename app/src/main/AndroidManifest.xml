@@ -44,10 +44,17 @@
     -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!--
+        Android 12+ counterpart to REQUEST_INSTALL_PACKAGES: lets the app's own
+        PackageInstaller session ask for USER_ACTION_NOT_REQUIRED, so an in-app update
+        applies without the system confirmation screen. Only ever used for a self-update.
+    -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
     <application
         android:name=".App"
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:networkSecurityConfig="@xml/network_security_config"
         android:icon="@mipmap/ic_launcher"
@@ -92,30 +99,29 @@
             </intent-filter>
             <!--
                 ACTION_VIEW for local image/video URIs so the app appears in another app's
-                "Open with" chooser. The content:// and file:// schemes are stated explicitly:
-                they are already the implicit default for a MIME-type-only filter (Android only
-                matches content/file URIs when no scheme is given), but ACTION_VIEW with a data
-                type and no scheme trips the AppLinkUrlError lint, which treats a bare VIEW filter
-                as an incomplete web link. No BROWSABLE / http(s) here: this is not a web link or
-                App Link, only local media handed over by another app, so naming the two real
-                schemes both keeps the behaviour identical and satisfies the check.
+                "Open with" chooser. Only the content:// scheme is accepted: a cross-app file://
+                URI is refused so a caller cannot aim the app at its own private storage, and the
+                parser enforces the same rule. The scheme is stated explicitly because ACTION_VIEW
+                with a data type and no scheme trips the AppLinkUrlError lint, which treats a bare
+                VIEW filter as an incomplete web link. No BROWSABLE / http(s) here: this is not a
+                web link or App Link, only local media handed over by another app.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" />
-                <data android:scheme="file" />
-                <data android:mimeType="image/jpeg" />
-                <data android:mimeType="image/png" />
-                <data android:mimeType="image/webp" />
-                <data android:mimeType="image/heic" />
-                <data android:mimeType="image/heif" />
-                <data android:mimeType="image/gif" />
-                <data android:mimeType="video/mp4" />
-                <data android:mimeType="video/quicktime" />
-                <data android:mimeType="video/x-matroska" />
-                <data android:mimeType="video/webm" />
-                <data android:mimeType="video/3gpp" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <!--
+                Registers the app as a gallery so a camera or system "open gallery"
+                action (ACTION_MAIN + CATEGORY_APP_GALLERY) can target it. The launch
+                behaves like a normal app start, so no extra handling is needed.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.APP_GALLERY" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
@@ -174,6 +180,16 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            Status callback of the in-app update's PackageInstaller session. Not exported and
+            carries no intent-filter: the system reaches it only through the explicit
+            PendingIntent the session was committed with.
+        -->
+        <receiver
+            android:name=".data.updater.InstallStatusReceiver"
+            android:exported="false"
+            android:enabled="true" />
+
         <!-- ── Photo Widget ──────────────────────────────────────────────── -->
         <receiver
             android:name=".widget.PhotoWidgetReceiver"
@@ -218,10 +234,12 @@
         </provider>
 
         <!--
-            Dedicated FileProvider for the share sheet. A cloud-only photo has no MediaStore
-            URI, so sharing it decrypts the full-res bytes to cacheDir/fullres/ and exposes
-            that single subfolder here. Kept separate from the updater provider above so each
-            authority advertises the minimal set of paths it actually needs.
+            Dedicated FileProvider for the share sheet. Neither photo it serves has a MediaStore
+            URI: a cloud-only one is decrypted to cacheDir/fullres/, and a vaulted one is the
+            app-private file itself, so those two subfolders are exposed here. The provider is not
+            exported, so each is only ever reachable through the single read grant a share attaches
+            to the one URI it sends. Kept separate from the updater provider above so each authority
+            advertises the minimal set of paths it actually needs.
         -->
         <provider
             android:name=".util.ShareFileProvider"
@@ -251,6 +269,38 @@
              channel importance so the notification stays out of the way. -->
         <service
             android:name=".service.BackgroundSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Initial face-indexing foreground host. Keeps the process alive so the one-time People
+             face-grouping walk runs to completion after the user swipes the app from Recents. LOW
+             channel importance; the walk still parks on the shared device-health policy. -->
+        <service
+            android:name=".service.FaceIndexingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Initial semantic-search indexing foreground host. Keeps the process alive so the one-time
+             CLIP embedding walk runs to completion after the user swipes the app from Recents. LOW
+             channel importance; the walk still parks on the shared device-health policy and model gate. -->
+        <service
+            android:name=".service.SemanticIndexingService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Common on-device model-download host. Keeps the opt-in model downloads (face grouping, text
+             recognition, photo search) running after the user leaves settings, with a progress
+             notification; one download at a time. LOW channel importance. -->
+        <service
+            android:name=".service.ModelDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- GIF export foreground host. Runs the maker's encode and optional cloud upload to completion after
+             the screen pops and the app is backgrounded or swiped from Recents; dataSync covers the encode and
+             the upload. LOW channel importance, torn down when the export finishes. -->
+        <service
+            android:name=".service.GifExportService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 

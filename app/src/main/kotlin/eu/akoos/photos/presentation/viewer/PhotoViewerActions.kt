@@ -22,7 +22,6 @@
 
 package eu.akoos.photos.presentation.viewer
 
-import eu.akoos.photos.presentation.common.DestructiveButton
 
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -80,10 +79,14 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.deleteConfirmRows
+import eu.akoos.photos.presentation.common.deleteRowDescription
+import eu.akoos.photos.presentation.common.deleteRowTitleRes
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.CardBg
 import eu.akoos.photos.presentation.theme.CardBorder
 import eu.akoos.photos.presentation.theme.DeleteTint
@@ -211,6 +214,8 @@ internal fun ViewerBubble(onClick: () -> Unit, content: @Composable () -> Unit) 
 internal fun RenameDialog(
     currentName: String,
     isCloud: Boolean,
+    /** Whether the photo lives in the vault, where a copy stays hidden instead of landing in the camera folder. */
+    isVaulted: Boolean,
     isWorking: Boolean,
     errorMessage: String?,
     onDismiss: () -> Unit,
@@ -250,6 +255,7 @@ internal fun RenameDialog(
                 enabled = !isWorking,
                 label = { Text(stringResource(R.string.rename_sheet_name_label)) },
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
                 colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
                     focusedTextColor = FgPrimary,
                     unfocusedTextColor = FgPrimary,
@@ -276,8 +282,11 @@ internal fun RenameDialog(
             )
             RenameOptionButton(
                 title = stringResource(R.string.rename_sheet_option_copy_title),
-                subtitle = if (isCloud) stringResource(R.string.rename_sheet_option_copy_subtitle_cloud)
-                    else stringResource(R.string.rename_sheet_option_copy_subtitle_local),
+                subtitle = when {
+                    isCloud -> stringResource(R.string.rename_sheet_option_copy_subtitle_cloud)
+                    isVaulted -> stringResource(R.string.rename_sheet_option_copy_subtitle_vault)
+                    else -> stringResource(R.string.rename_sheet_option_copy_subtitle_local)
+                },
                 accent = false,
                 enabled = canSubmit,
                 onClick = { onConfirm(trimmed, /* replaceOriginal = */ false) },
@@ -337,10 +346,15 @@ internal fun DeleteConfirmSheet(
     item: GalleryItem,
     onDismiss: () -> Unit,
     onDelete: (freeUpSpace: Boolean, deleteFromCloud: Boolean) -> Unit,
+    /** True when the photo's only copy is the vault file. There is no device trash behind it and no
+     *  cloud copy to fall back on, so the one choice offered says exactly that. Only a device-only
+     *  photo can be vaulted, so it changes nothing for the other two. */
+    isVaulted: Boolean = false,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .padding(horizontal = 20.dp)
             .padding(bottom = 40.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -354,50 +368,34 @@ internal fun DeleteConfirmSheet(
             color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
         )
 
-        when (item) {
-            is GalleryItem.LocalOnly -> {
-                Text(
-                    stringResource(R.string.viewer_delete_local_body),
-                    color = FgDim, fontSize = 14.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                DeleteButton(stringResource(R.string.viewer_delete_move_to_trash)) { onDelete(true, false) }
-            }
-
-            is GalleryItem.Synced -> {
-                Text(
-                    stringResource(R.string.viewer_delete_subtitle_synced),
-                    color = FgDim, fontSize = 14.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                DangerRow(
-                    title = stringResource(R.string.viewer_delete_remove_from_device),
-                    subtitle = stringResource(R.string.viewer_delete_remove_from_device_desc),
-                    onClick = { onDelete(true, false) },
-                )
-                DangerRow(
-                    title = stringResource(R.string.viewer_delete_remove_from_cloud),
-                    subtitle = stringResource(R.string.viewer_delete_remove_from_cloud_desc),
-                    onClick = { onDelete(false, true) },
-                )
-                DangerRow(
-                    title = stringResource(R.string.viewer_delete_everywhere),
-                    subtitle = stringResource(R.string.viewer_delete_everywhere_desc),
-                    isDestructive = true,
-                    onClick = { onDelete(true, true) },
-                )
-            }
-
-            is GalleryItem.CloudOnly -> {
-                Text(
-                    stringResource(R.string.viewer_delete_subtitle_cloud_only),
-                    color = FgDim, fontSize = 14.sp,
-                )
-                Spacer(Modifier.height(4.dp))
-                DeleteButton(stringResource(R.string.viewer_delete_move_to_drive_trash)) { onDelete(false, true) }
-            }
+        val hasLocal = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
+        val hasCloud = item is GalleryItem.Synced || item is GalleryItem.CloudOnly
+        val rows = deleteConfirmRows(
+            hasLocal, hasCloud,
+            reclaimableBytes = when (item) {
+                is GalleryItem.LocalOnly -> item.local.sizeBytes
+                is GalleryItem.Synced -> item.local.sizeBytes
+                is GalleryItem.CloudOnly -> 0L
+            },
+        )
+        if (rows.size > 1) {
+            Text(
+                stringResource(R.string.delete_multi_mixed_msg),
+                color = FgDim, fontSize = 14.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+        }
+        rows.forEach { row ->
+            DangerRow(
+                title = stringResource(deleteRowTitleRes(row.kind, isVaulted)),
+                subtitle = deleteRowDescription(row, isVaulted),
+                isDestructive = row.destructive,
+                onClick = { onDelete(row.freeUpSpace, row.deleteFromCloud) },
+            )
         }
 
+        // Matches the gallery multi-delete sheet's cancel exactly (no border), so the two delete
+        // drawers read as the same control.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -405,16 +403,11 @@ internal fun DeleteConfirmSheet(
                     CardBg,
                     androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
                 )
-                .border(
-                    0.5.dp,
-                    CardBorder,
-                    androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                )
                 .clickable(onClick = onDismiss)
                 .padding(vertical = 14.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(stringResource(R.string.cancel), color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.cancel), color = FgDim, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
@@ -444,11 +437,6 @@ private fun DangerRow(
     }
 }
 
-@Composable
-internal fun DeleteButton(label: String, onClick: () -> Unit) {
-    DestructiveButton(label = label, onClick = onClick, modifier = Modifier.fillMaxWidth())
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AddToAlbumSheet(
@@ -462,7 +450,7 @@ internal fun AddToAlbumSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Bg2,
+        containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
         Column(
@@ -553,10 +541,18 @@ internal fun AddToAlbumSheet(
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(album.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                                val subtitle = if (isMember)
-                                    stringResource(R.string.viewer_tap_to_remove_from_album)
-                                else
-                                    pluralStringResource(R.plurals.count_photos_plural, album.photoCount, album.photoCount)
+                                val photoCountText = pluralStringResource(
+                                    R.plurals.count_photos_plural, album.photoCount, album.photoCount,
+                                )
+                                // Same subtitle vocabulary as the gallery drawer. Both sheets answer
+                                // the same question about the same albums, so they read alike.
+                                val subtitle = when {
+                                    isMember -> stringResource(R.string.viewer_tap_to_remove_from_album)
+                                    album.isSharedWithMe ->
+                                        stringResource(R.string.gallery_album_picker_count_shared, photoCountText)
+                                    else ->
+                                        stringResource(R.string.gallery_album_picker_count_drive, photoCountText)
+                                }
                                 Text(
                                     subtitle,
                                     color = if (isMember) Accent else FgMute,

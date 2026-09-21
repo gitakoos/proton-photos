@@ -45,7 +45,7 @@ import eu.akoos.photos.data.db.entity.PerceptualHashEntity
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.util.PerceptualHash
+import eu.akoos.photos.util.PdqHash
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -111,8 +111,12 @@ class PerceptualHashScheduler @Inject constructor(
      * Compute the dHash for any of [items] whose stored row is missing or stale. Already-fresh
      * items are skipped via a single cache read. Returns immediately — hashing runs on the worker
      * pool and lands in the cache; the finder's Flow picks the hashes up as they arrive.
+     *
+     * [userId] is only needed to warm a cold cloud thumbnail (the decrypt below); a null userId is a
+     * guest, whose candidates are all local files that hash straight off disk, so the same scheduler
+     * runs for a guest with no account.
      */
-    fun request(items: List<GalleryItem>, userId: UserId) {
+    fun request(items: List<GalleryItem>, userId: UserId?) {
         scope.launch {
             val cache = runCatching { perceptualHashDao.getAll().associateBy { it.key } }
                 .getOrDefault(emptyMap())
@@ -128,7 +132,7 @@ class PerceptualHashScheduler @Inject constructor(
                 val (key, freshness, _) = keyFor(item) ?: return@forEach
                 if (!needsHash(cache[key], freshness)) return@forEach
                 if (item is GalleryItem.CloudOnly && !cloudThumbExists(item.cloud.linkId)) {
-                    if (decryptBudget > 0) {
+                    if (userId != null && decryptBudget > 0) {
                         decryptBudget--
                         runCatching { cloudRepo.requestThumbnailDecrypt(userId, item.cloud.linkId) }
                     }
@@ -166,7 +170,7 @@ class PerceptualHashScheduler @Inject constructor(
     private fun needsHash(cached: PerceptualHashEntity?, freshness: String): Boolean =
         cached == null ||
             cached.freshness != freshness ||
-            cached.algoVersion != PerceptualHash.DHASH_ALGO_VERSION
+            cached.algoVersion != PdqHash.ALGO_VERSION
 
     /** Enqueue a hash for an item whose source bitmap is ready: a local thumbnail, or a cloud
      *  thumbnail already decrypted to disk. Cold cloud thumbnails are warmed (rate-limited) by
@@ -211,49 +215,56 @@ class PerceptualHashScheduler @Inject constructor(
     private suspend fun hashAndStore(task: Task) {
         val item = task.item
         val (key, _, isCloud) = keyFor(item) ?: return
-        val hash = when (item) {
+        val fp = when (item) {
             is GalleryItem.LocalOnly -> hashLocal(item.local)
             is GalleryItem.CloudOnly -> hashCloud(item.cloud.linkId)
             is GalleryItem.Synced -> hashLocal(item.local)
         } ?: return
         val row = PerceptualHashEntity(
             key = key,
-            hash = hash,
+            h0 = fp.bits[0],
+            h1 = fp.bits[1],
+            h2 = fp.bits[2],
+            h3 = fp.bits[3],
+            quality = fp.quality,
+            color = fp.color,
             isCloud = isCloud,
             freshness = task.freshness,
-            algoVersion = PerceptualHash.DHASH_ALGO_VERSION,
+            algoVersion = PdqHash.ALGO_VERSION,
             computedAt = System.currentTimeMillis(),
         )
         runCatching { perceptualHashDao.upsertAll(listOf(row)) }
             .onFailure { Log.w(TAG, "upsert $key failed: ${it.message}") }
     }
 
-    /** Decode a tiny local bitmap (MediaStore thumbnail on API 29+, sampled stream below), hash it,
-     *  and recycle the bitmap at once so memory stays flat. */
-    private fun hashLocal(local: LocalMediaItem): Long? = runCatching {
+    /** Decode a modest local bitmap (a 256px MediaStore thumbnail on API 29+, a sampled stream below) and
+     *  fingerprint it, recycling the bitmap at once so memory stays flat. The DCT fingerprint needs real
+     *  resolution to read structure, so this is decoded far larger than the old difference hash's tiny
+     *  grid; [PdqHash] area-averages it down to 64x64 itself. */
+    private fun hashLocal(local: LocalMediaItem): PdqHash.Fingerprint? = runCatching {
         val uri = Uri.parse(local.uri)
         val bmp: Bitmap? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            context.contentResolver.loadThumbnail(uri, Size(32, 32), null)
+            context.contentResolver.loadThumbnail(uri, Size(256, 256), null)
         } else {
             context.contentResolver.openInputStream(uri)?.use { stream ->
-                BitmapFactory.decodeStream(stream, null, BitmapFactory.Options().apply { inSampleSize = 8 })
+                BitmapFactory.decodeStream(stream, null, BitmapFactory.Options().apply { inSampleSize = 4 })
             }
         }
         bmp?.let {
-            val hash = PerceptualHash.dHash(it)
+            val fp = PdqHash.fingerprint(it)
             it.recycle()
-            hash
+            fp
         }
     }.getOrNull()
 
-    /** Decode the decrypted cloud thumbnail off disk, hash it, and recycle at once. The caller has
+    /** Decode the decrypted cloud thumbnail off disk, fingerprint it, and recycle at once. The caller has
      *  already confirmed the file exists (see [enqueue]). */
-    private fun hashCloud(linkId: String): Long? = runCatching {
+    private fun hashCloud(linkId: String): PdqHash.Fingerprint? = runCatching {
         val file = cloudThumbFile(linkId)
         BitmapFactory.decodeFile(file.absolutePath)?.let { bmp ->
-            val hash = PerceptualHash.dHash(bmp)
+            val fp = PdqHash.fingerprint(bmp)
             bmp.recycle()
-            hash
+            fp
         }
     }.getOrNull()
 

@@ -22,13 +22,13 @@
 
 package eu.akoos.photos.worker
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
@@ -43,6 +43,8 @@ import kotlinx.coroutines.flow.first
 import java.io.File
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.R
+import eu.akoos.photos.data.notification.NotificationIds
+import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -60,7 +62,7 @@ import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
  * (idempotent — `createNotificationChannel` is a no-op for an already-existing channel id).
  *
  * Inputs (set via `workDataOf` in the enqueuer):
- *  - `albumName: String` — local folder name (`Pictures/<albumName>/`) and notification title
+ *  - `albumName: String` — local folder name (`DCIM/<albumName>/`) and notification title
  *  - `photoLinkIdsFile: String` — path to a cache file with the cloud photo IDs, one per line.
  *    Spilled to a file because the list can exceed WorkManager's 10 KB input-data limit; the
  *    worker reads it on start and deletes it.
@@ -77,9 +79,9 @@ class AlbumDownloadWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     // Per-run notification id so two concurrent album downloads each keep their own entry in the
-    // shade instead of overwriting each other. Derived from this worker's UUID and kept well clear
-    // of the other fixed ids (4242-4245).
-    private val notificationId: Int = 5000 + (kotlin.math.abs(id.hashCode()) % 50_000)
+    // shade instead of overwriting each other. Derived from this worker's UUID and confined to the
+    // range NotificationIds reserves for album downloads, which no fixed id may enter.
+    private val notificationId: Int = NotificationIds.albumDownload(id.hashCode())
 
     override suspend fun doWork(): Result {
         val albumName = inputData.getString(KEY_ALBUM_NAME).orEmpty()
@@ -165,7 +167,15 @@ class AlbumDownloadWorker @AssistedInject constructor(
                 albumName,
                 uris = savedUris.toList(),
             )
-            Result.success()
+            // Counts travel out with the result so the album screen can report the outcome. The
+            // in-app progress ring disappears on any terminal state, which on its own reads the
+            // same whether every photo saved or none did.
+            Result.success(
+                workDataOf(
+                    KEY_RESULT_SAVED to (result.total - result.failed),
+                    KEY_RESULT_FAILED to result.failed,
+                ),
+            )
         } catch (e: kotlinx.coroutines.CancellationException) {
             // Cooperative cancellation (the user tapped "Cancel" on the notification).
             // WorkManager treats this as cancellation, not failure — the unique-work entry
@@ -178,6 +188,13 @@ class AlbumDownloadWorker @AssistedInject constructor(
         } finally {
             // Clear the active-transfer entry so the avatar stops showing this download.
             transferId?.let { transferCenter.finish(it) }
+            // WorkManager auto-dismisses the foreground notification when the worker exits, but on
+            // some OEMs the ongoing notification lingers. Nothing else can replace it either: the id
+            // belongs to this run's UUID, so a later download posts elsewhere and a stale
+            // "X of Y downloaded" would sit in the shade for good.
+            runCatching {
+                NotificationManagerCompat.from(context).cancel(notificationId)
+            }
             // Drop the spilled id-list file once the run ends. If the process is killed mid-run
             // the finally is skipped and the file survives, so WorkManager's re-run can resume.
             listFile?.delete()
@@ -238,9 +255,6 @@ class AlbumDownloadWorker @AssistedInject constructor(
     companion object {
         const val TAG = "album_download_worker"
         const val CHANNEL_ID = "album_download"
-        // Legacy fixed id, retained for reference. Each run now posts under a per-instance
-        // [notificationId] instead, so concurrent downloads coexist in the shade.
-        const val NOTIFICATION_ID = 4242
         // Shared group key so multiple concurrent album-download notifications cluster together.
         const val GROUP_KEY = "album_downloads"
 
@@ -252,28 +266,20 @@ class AlbumDownloadWorker @AssistedInject constructor(
         const val KEY_PROGRESS_DONE = "progressDone"
         const val KEY_PROGRESS_TOTAL = "progressTotal"
         const val KEY_COVER_URI = "coverUri"
+        // Output data keys, carried on a successful result so the outcome can be reported in-app.
+        const val KEY_RESULT_SAVED = "resultSaved"
+        const val KEY_RESULT_FAILED = "resultFailed"
 
-        /**
-         * Lazily creates the album-download notification channel. Idempotent — calling on
-         * an already-registered channel is a no-op. Pre-Oreo devices have no channel concept
-         * so this returns immediately.
-         */
+        /** Lazily creates the album-download notification channel. Idempotent. */
         fun ensureChannel(context: Context) {
-            val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            // getNotificationChannel returns null if absent — only create on first call.
-            // Re-creating with the same id every time would silently reset user-changed
-            // settings (e.g. importance), but createNotificationChannel honours existing
-            // user prefs anyway. Still, gate on null to keep things explicit.
-            if (nm.getNotificationChannel(CHANNEL_ID) != null) return
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                context.getString(R.string.album_download_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
-            ).apply {
-                description = context.getString(R.string.album_download_channel_desc)
-                setShowBadge(false)
-            }
-            nm.createNotificationChannel(channel)
+            ensureNotificationChannel(
+                context,
+                id = CHANNEL_ID,
+                name = context.getString(R.string.album_download_channel_name),
+                description = context.getString(R.string.album_download_channel_desc),
+                importance = NotificationManager.IMPORTANCE_LOW,
+                silent = false,
+            )
         }
 
         /**

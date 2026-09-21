@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -115,7 +114,9 @@ fun DestructiveButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    icon: ImageVector? = Icons.Default.DeleteOutline,
+    // No icon by default: destructive confirms across the app read as one family (red text, no glyph).
+    // A caller can still pass one where it genuinely helps.
+    icon: ImageVector? = null,
     enabled: Boolean = true,
 ) {
     val colors = AppColors.current

@@ -34,10 +34,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.PerceptualHashDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.repository.drive.AlbumService
@@ -60,6 +62,7 @@ import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.util.combineSqlChunks
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -84,10 +87,22 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val cloudTrashService: CloudTrashService,
     private val albumSharingService: AlbumSharingService,
     private val thumbnailScheduler: ThumbnailDecryptScheduler,
+    private val sharedAlbumKeyStore: eu.akoos.photos.data.repository.drive.SharedAlbumKeyStore,
     private val thumbnailUrlStore: ThumbnailUrlStore,
     private val cloudGpsBackfillScheduler: CloudGpsBackfillScheduler,
     private val videoDurationBackfillScheduler: VideoDurationBackfillScheduler,
+    private val localExifBackfillScheduler: LocalExifBackfillScheduler,
+    private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
+    private val semanticIndexingScheduler: eu.akoos.photos.data.semantic.SemanticIndexingScheduler,
+    private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
+    private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
+    private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
+    private val notPersonDao: eu.akoos.photos.data.db.dao.NotPersonDao,
+    private val personCoverDao: eu.akoos.photos.data.db.dao.PersonCoverDao,
+    private val personManualPhotoDao: eu.akoos.photos.data.db.dao.PersonManualPhotoDao,
+    private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
     private val photoListingDao: PhotoListingDao,
+    private val listingSweepSnapshotDao: ListingSweepSnapshotDao,
     private val syncStateDao: SyncStateDao,
     private val dayMetaDao: DayMetaDao,
     private val perceptualHashDao: PerceptualHashDao,
@@ -142,8 +157,17 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadAlbumsCached(): List<Album> =
         albumService.loadAlbumsCached()
 
+    override suspend fun loadSharedAddableAlbumsCached(): List<Album> =
+        albumService.loadSharedAddableAlbumsCached()
+
+    override suspend fun loadSharedWithMeAlbumsCached(): List<Album> =
+        albumService.loadSharedWithMeAlbumsCached()
+
     override suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>) =
         albumService.prefetchAlbumsMembership(userId, albums)
+
+    override suspend fun prefetchSharedAlbumsMembership(userId: UserId, albums: List<Album>) =
+        albumService.prefetchSharedAlbumsMembership(userId, albums)
 
     override suspend fun createDriveAlbum(userId: UserId, name: String): Album =
         albumService.createDriveAlbum(userId, name)
@@ -163,15 +187,31 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadAlbumPhotosCached(albumLinkId: String): List<CloudPhoto> =
         albumService.loadAlbumPhotosCached(albumLinkId)
 
+    /**
+     * Routes by where the album lives. An album on this user's own volume takes the add-to-album
+     * call; one shared with them lives on the sharer's volume, where a membership cannot reference
+     * a photo of ours, so it goes through a cross-volume copy instead.
+     *
+     * The lookup is cache-only and falls through to the owned path when it finds nothing, which is
+     * the common case: only shared-with-me albums carry a sharer, so an unknown album is treated as
+     * ours exactly as before.
+     */
     override suspend fun addPhotosToAlbum(
         userId: UserId,
         albumLinkId: String,
         photoLinkIds: List<String>,
-    ): DrivePhotoRepository.AddPhotosToAlbumResult =
-        albumService.addPhotosToAlbum(userId, albumLinkId, photoLinkIds)
+    ): DrivePhotoRepository.AddPhotosToAlbumResult {
+        val sharedAlbum = runCatching { albumService.loadSharedAddableAlbumsCached() }
+            .getOrNull().orEmpty().firstOrNull { it.linkId == albumLinkId }
+        return if (sharedAlbum != null) {
+            albumSharingService.addPhotosToSharedAlbum(userId, sharedAlbum, photoLinkIds)
+        } else {
+            albumService.addPhotosToAlbum(userId, albumLinkId, photoLinkIds)
+        }
+    }
 
-    override suspend fun deleteAlbum(userId: UserId, albumLinkId: String): Unit =
-        albumService.deleteAlbum(userId, albumLinkId)
+    override suspend fun deleteAlbum(userId: UserId, albumLinkId: String, deletePhotosToo: Boolean): Unit =
+        albumService.deleteAlbum(userId, albumLinkId, deletePhotosToo)
 
     override suspend fun getAlbumMemberships(userId: UserId): Map<String, String> =
         albumService.getAlbumMemberships(userId)
@@ -179,11 +219,25 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> =
         albumService.getAlbumIdsByPhoto(userId)
 
+    override suspend fun getVerifiedAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> =
+        albumService.getVerifiedAlbumIdsByPhoto(userId)
+
+    /**
+     * Routed the same way as the add: an album shared with this user sits on the sharer's volume,
+     * so the request has to be addressed there. Unlike the add it needs nothing else, since
+     * dropping a membership never leaves the album's own volume.
+     */
     override suspend fun removePhotosFromAlbum(
         userId: UserId,
         albumLinkId: String,
         photoLinkIds: List<String>,
-    ): List<String> = albumService.removePhotosFromAlbum(userId, albumLinkId, photoLinkIds)
+    ): List<String> {
+        val sharedAlbum = runCatching { albumService.loadSharedAddableAlbumsCached() }
+            .getOrNull().orEmpty().firstOrNull { it.linkId == albumLinkId }
+        return albumService.removePhotosFromAlbum(
+            userId, albumLinkId, photoLinkIds, albumVolumeId = sharedAlbum?.volumeId,
+        )
+    }
 
     override suspend fun renameAlbum(userId: UserId, albumLinkId: String, newName: String): Unit =
         albumService.renameAlbum(userId, albumLinkId, newName)
@@ -216,12 +270,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun retryPendingOrphanDeletes(userId: UserId) =
         uploadService.retryPendingOrphanDeletes(userId)
 
-    override suspend fun renameOrCopyCloudPhoto(
+    override suspend fun copyCloudPhotoAs(
         userId: UserId,
         photo: CloudPhoto,
         newName: String,
-        trashOriginal: Boolean,
-    ): String = cloudTrashService.renameOrCopyCloudPhoto(userId, photo, newName, trashOriginal)
+    ): String = cloudTrashService.copyCloudPhotoAs(userId, photo, newName)
 
     override suspend fun setCloudFavorite(userId: UserId, photo: CloudPhoto, favorite: Boolean): Boolean =
         cloudTrashService.setCloudFavorite(userId, photo, favorite)
@@ -241,7 +294,10 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun deleteFromCloudForever(userId: UserId, linkIds: List<String>) =
         cloudTrashService.deleteFromCloudForever(userId, linkIds)
 
-    override suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): String =
+    override suspend fun createAlbumShareLink(
+        userId: UserId,
+        albumLinkId: String,
+    ): eu.akoos.photos.domain.entity.AlbumShareLink =
         albumSharingService.createAlbumShareLink(userId, albumLinkId)
 
     override suspend fun createPhotoShareLink(userId: UserId, photoLinkId: String): String =
@@ -256,8 +312,12 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun setPhotoLinkPassword(userId: UserId, photoLinkId: String, password: String?): String =
         albumSharingService.setPhotoLinkPassword(userId, photoLinkId, password)
 
-    override suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String) =
-        albumSharingService.inviteToAlbum(userId, albumLinkId, email)
+    override suspend fun inviteToAlbum(
+        userId: UserId,
+        albumLinkId: String,
+        email: String,
+        permissions: Int,
+    ): String = albumSharingService.inviteToAlbum(userId, albumLinkId, email, permissions)
 
     override suspend fun saveSharedAlbumToOwnLibrary(
         userId: UserId,
@@ -366,11 +426,18 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadSharedWithMeAlbums(userId: UserId): List<Album> =
         albumSharingService.loadSharedWithMeAlbums(userId)
 
+    override suspend fun prefetchSharedAlbumCovers(userId: UserId, albums: List<Album>) =
+        albumSharingService.prefetchSharedAlbumCovers(userId, albums)
+
     override suspend fun loadSharedByMePhotos(userId: UserId): List<SharedPhoto> =
         albumSharingService.loadSharedByMePhotos(userId)
 
     override fun observeSharedByMePhotos(linkIds: List<String>): Flow<List<SharedPhoto>> =
-        photoListingDao.observeByLinkIds(linkIds).map { rows ->
+        // Chunked: the shared-by-me feed grows with how much the user has shared. The comparator
+        // restates observeByLinkIds' ORDER BY, though the feed order below is what actually ships.
+        linkIds.combineSqlChunks(compareByDescending<PhotoListingEntity> { it.captureTime }) { chunk ->
+            photoListingDao.observeByLinkIds(chunk)
+        }.map { rows ->
             val byId = rows.associateBy { it.linkId }
             // Preserve the caller's order (the feed order) and drop rows the DB doesn't have yet.
             linkIds.mapNotNull { id ->
@@ -407,12 +474,40 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         albumSharingService.acceptInvitation(userId, invitationId)
 
     override suspend fun clearCacheForSignOut(userId: UserId) {
+        // FIRST, and awaited: the full cloud walk runs on the app scope so it survives the screen
+        // that started it, which also means it survives sign-out unless stopped here. Every wipe
+        // below is undone by a walk still paginating past it — rows land back in photo_listing for
+        // an account that is gone, decrypted with material wipeKeyCache is about to zero. Every
+        // sign-out route reaches this method (explicit sign-out, force-logout, 2FA and key-check
+        // failures all converge on onAccountDisabled), so this is the one place that covers them.
+        runCatching { streamService.cancelRefreshFor(userId) }
+        // Stop the background face-indexing walk and drop its in-session state BEFORE the rows below
+        // are wiped, so it is already standing down when the wipe lands and writes no face for the
+        // account that is leaving. Face embeddings are biometric data, so the rows go with the session.
+        runCatching { faceIndexingScheduler.reset() }
+        // Same treatment for the semantic index: stop the walk and drop this account's image embeddings,
+        // which are private derived data that leave with the session rather than lingering for the next.
+        runCatching { semanticIndexingScheduler.reset(userId) }
+        runCatching { faceDao.clearForUser(userId.id) }
+        runCatching { personDao.clearForUser(userId.id) }
+        runCatching { faceScanDao.clearForUser(userId.id) }
+        // The person NAME lives in these three plus the cluster centroids in the fourth, all keyed by
+        // account; clearing only the first three above left names, boxes and covers on disk for a
+        // departed account. Biometric data leaves with the session, so wipe all six face tables.
+        runCatching { notPersonDao.clearForUser(userId.id) }
+        runCatching { personCoverDao.clearForUser(userId.id) }
+        runCatching { personManualPhotoDao.clearForUser(userId.id) }
+        runCatching { clusterSummaryDao.clearForUser(userId.id) }
         // Wipe all plaintext key material before the user's tokens disappear, so even if the
         // process keeps running afterwards a heap inspection can't pull keys from this Singleton.
         shareService.wipeKeyCache()
         cryptoHelper.clearAllCaches()
         recentUploadsTracker.clearInMemory()
         thumbnailScheduler.clear()
+        // Decrypted share and album keys for albums other users shared with this one. Held in a
+        // Singleton that nothing else empties, so without this they outlive the session that could
+        // read them, in a process that can keep running long after the account is gone.
+        sharedAlbumKeyStore.clear()
         // Cancel any in-flight Save-to-my-library copy and reset its state to Idle so a
         // re-login by a different user doesn't pick up a stale Running banner against the
         // old account's album linkId. The Job is rooted in a Singleton-scoped SupervisorJob
@@ -424,6 +519,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // decrypt material was gone), and stale pairing/day-meta rows lingered too. Per-user
         // (userId-scoped) so any other account still signed in is left intact.
         runCatching { photoListingDao.deleteAll(userId.id) }
+        // The refresh sweep's candidate set names the same rows, so it goes with them.
+        runCatching { listingSweepSnapshotDao.clearForUser(userId.id) }
         runCatching { syncStateDao.deleteAll(userId.id) }
         runCatching { dayMetaDao.deleteAll(userId.id) }
         // Drop the cached cloud album list so the next signed-in user doesn't see the previous
@@ -446,6 +543,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // Wipe the background-transfer history. It holds album names, timestamps and device-URI
         // thumbnails of the previous session's uploads and downloads, kept in its own store that the
         // settings-key wipe does not reach, so the next signed-in user must not inherit it.
+        // Decrypted full-resolution copies and the upload resume dirs both hold this account's
+        // plaintext: `fullres` the photos themselves, each `upload_*` a manifest carrying the file's
+        // session key. Neither is user-partitioned and neither ages out on this path, so signing out
+        // left the previous account's readable bytes on disk for the next person to hold the phone.
+        runCatching { downloadService.clearDecryptedCaches() }
         runCatching { transferCenter.clearHistory() }
     }
 
@@ -495,5 +597,17 @@ class DrivePhotoRepositoryImpl @Inject constructor(
 
     override suspend fun backfillVideoDurations(userId: UserId) {
         videoDurationBackfillScheduler.backfillAll(userId)
+    }
+
+    override suspend fun backfillLocalExif(userId: UserId) {
+        localExifBackfillScheduler.backfillAll(userId)
+    }
+
+    override suspend fun backfillFaces(userId: UserId?) {
+        faceIndexingScheduler.indexAll(userId)
+    }
+
+    override suspend fun backfillSemantic(userId: UserId?) {
+        semanticIndexingScheduler.indexAll(userId)
     }
 }

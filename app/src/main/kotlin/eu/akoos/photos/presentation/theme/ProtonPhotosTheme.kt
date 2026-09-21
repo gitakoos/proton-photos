@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.theme
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.settings.ThemePalette
 
@@ -71,6 +73,11 @@ private val AccentDarkSunset  = Color(0xFFFF8A65); private val Accent2DarkSunset
 private val AccentDarkSea     = Color(0xFF4FC3F7); private val Accent2DarkSea     = Color(0xFF0288D1)
 private val AccentDarkSepia   = Color(0xFFD4A574); private val Accent2DarkSepia   = Color(0xFF8B6F47)
 private val AccentDarkMono    = Color(0xFFE0E0E0); private val Accent2DarkMono    = Color(0xFF9E9E9E)
+private val AccentDarkLavender = Color(0xFFC9A7EB); private val Accent2DarkLavender = Color(0xFF9B7FD4)
+private val AccentDarkRose     = Color(0xFFF48FB1); private val Accent2DarkRose     = Color(0xFFE06699)
+private val AccentDarkMint     = Color(0xFF6FE0C4); private val Accent2DarkMint     = Color(0xFF2FB89C)
+private val AccentDarkGold     = Color(0xFFFFD166); private val Accent2DarkGold     = Color(0xFFE9AE3C)
+private val AccentDarkRuby     = Color(0xFFFF7A88); private val Accent2DarkRuby     = Color(0xFFE84C5E)
 private val LineDark = Color(0x14FFFFFF)
 private val Line2Dark = Color(0x1EFFFFFF)
 private val PillBgDark = Color(0xBE1C1C1E)
@@ -93,6 +100,11 @@ private val AccentLightSunset = Color(0xFFE64A19); private val Accent2LightSunse
 private val AccentLightSea    = Color(0xFF0288D1); private val Accent2LightSea    = Color(0xFF01579B)
 private val AccentLightSepia  = Color(0xFF8B6F47); private val Accent2LightSepia  = Color(0xFF5D4037)
 private val AccentLightMono   = Color(0xFF424242); private val Accent2LightMono   = Color(0xFF212121)
+private val AccentLightLavender = Color(0xFF9575CD); private val Accent2LightLavender = Color(0xFF6A4CAF)
+private val AccentLightRose     = Color(0xFFD6336C); private val Accent2LightRose     = Color(0xFFA61E4D)
+private val AccentLightMint     = Color(0xFF12A98C); private val Accent2LightMint     = Color(0xFF0B7A66)
+private val AccentLightGold     = Color(0xFFCC8A00); private val Accent2LightGold     = Color(0xFF995F00)
+private val AccentLightRuby     = Color(0xFFC62838); private val Accent2LightRuby     = Color(0xFF8E1B27)
 private val LineLight = Color(0x14000000)
 private val Line2Light = Color(0x1F000000)
 // Light-theme pills sit over photos (info pill, motion / panorama controls in the viewer), where
@@ -109,12 +121,18 @@ val StatusSynced  = Color(0xFF30D158)  // green — uploaded, backed up
 val StatusPending = Color(0xFFFF9F0A)  // amber — waiting
 val StatusError   = Color(0xFFFF453A)  // red — failure
 
+// Full-capsule pill shape shared by every floating pill, chip and button (theme-invariant).
+val pillShape = RoundedCornerShape(999.dp)
+
 // ── Semantic color tokens — switch based on theme mode ───────────────────────────
 data class AppColorsTokens(
     val isLight: Boolean,
     val bg0: Color,
     val bg1: Color,
     val bg2: Color,
+    // Bottom-sheet / drawer surface. Matches bg2 in every theme except AMOLED, where it drops to
+    // true black so full-width drawers sit flush on the black page instead of a near-black step.
+    val sheetBg: Color,
     val pageBg: Color,
     val cardBg: Color,
     val cardBorder: Color,
@@ -124,6 +142,9 @@ data class AppColorsTokens(
     val fgMute: Color,
     val accent: Color,
     val accent2: Color,
+    // Bright (dark-mode) accent for the active palette. Badges pinned to a fixed near-black chip tint
+    // with this so an accent glyph reads on that chip in light mode too, where `accent` darkens.
+    val accentBright: Color,
     val line: Color,
     val line2: Color,
     val pillBg: Color,
@@ -155,6 +176,11 @@ private fun darkAccentFor(palette: ThemePalette): Pair<Color, Color> = when (pal
     ThemePalette.Sea     -> AccentDarkSea      to Accent2DarkSea
     ThemePalette.Sepia   -> AccentDarkSepia   to Accent2DarkSepia
     ThemePalette.Mono    -> AccentDarkMono     to Accent2DarkMono
+    ThemePalette.Lavender -> AccentDarkLavender to Accent2DarkLavender
+    ThemePalette.Rose     -> AccentDarkRose     to Accent2DarkRose
+    ThemePalette.Mint     -> AccentDarkMint     to Accent2DarkMint
+    ThemePalette.Gold     -> AccentDarkGold     to Accent2DarkGold
+    ThemePalette.Ruby     -> AccentDarkRuby     to Accent2DarkRuby
 }
 
 private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> = when (palette) {
@@ -164,6 +190,11 @@ private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> = when (pa
     ThemePalette.Sea     -> AccentLightSea     to Accent2LightSea
     ThemePalette.Sepia   -> AccentLightSepia   to Accent2LightSepia
     ThemePalette.Mono    -> AccentLightMono    to Accent2LightMono
+    ThemePalette.Lavender -> AccentLightLavender to Accent2LightLavender
+    ThemePalette.Rose     -> AccentLightRose     to Accent2LightRose
+    ThemePalette.Mint     -> AccentLightMint     to Accent2LightMint
+    ThemePalette.Gold     -> AccentLightGold     to Accent2LightGold
+    ThemePalette.Ruby     -> AccentLightRuby     to Accent2LightRuby
 }
 
 // AMOLED override — base surfaces drop to true black while cards/panels stay one step up so
@@ -171,6 +202,7 @@ private fun lightAccentFor(palette: ThemePalette): Pair<Color, Color> = when (pa
 private val Bg0Amoled = Color(0xFF000000)
 private val Bg1Amoled = Color(0xFF000000)
 private val Bg2Amoled = Color(0xFF101010)
+private val SheetBgAmoled = Color(0xFF000000)
 private val PageBgAmoled = Color(0xFF000000)
 private val CardBgAmoled = Color(0xFF0C0C0D)
 
@@ -181,6 +213,7 @@ private fun darkAppColors(palette: ThemePalette, amoled: Boolean = false): AppCo
         bg0            = if (amoled) Bg0Amoled else Bg0Dark,
         bg1            = if (amoled) Bg1Amoled else Bg1Dark,
         bg2            = if (amoled) Bg2Amoled else Bg2Dark,
+        sheetBg        = if (amoled) SheetBgAmoled else Bg2Dark,
         pageBg         = if (amoled) PageBgAmoled else Color(0xFF0E0E0F),
         cardBg         = if (amoled) CardBgAmoled else Color(0xFF1C1C1E),
         cardBorder     = Color(0xFF2C2C2E),
@@ -190,6 +223,7 @@ private fun darkAppColors(palette: ThemePalette, amoled: Boolean = false): AppCo
         fgMute         = FgMuteDark,
         accent         = accent,
         accent2        = accent2,
+        accentBright   = accent,
         line           = LineDark,
         line2          = Line2Dark,
         pillBg         = PillBgDark,
@@ -216,6 +250,7 @@ private fun lightAppColors(palette: ThemePalette): AppColorsTokens {
         bg0            = Bg0Light,
         bg1            = Bg1Light,
         bg2            = Bg2Light,
+        sheetBg        = Bg2Light,
         pageBg         = Color(0xFFF2F2F5),
         cardBg         = Color(0xFFFFFFFF),
         cardBorder     = Color(0xFFD8D8DC),
@@ -225,6 +260,7 @@ private fun lightAppColors(palette: ThemePalette): AppColorsTokens {
         fgMute         = FgMuteLight,
         accent         = accent,
         accent2        = accent2,
+        accentBright   = darkAccentFor(palette).first,
         line           = LineLight,
         line2          = Line2Light,
         pillBg         = PillBgLight,
@@ -297,6 +333,21 @@ fun paletteAccent(palette: ThemePalette, isLight: Boolean): Color =
 /** Composition-local with the active app color tokens. */
 val LocalAppColors = staticCompositionLocalOf { darkAppColors(ThemePalette.Default) }
 
+/** When true, the green "synced" cloud badges are tinted with the palette accent instead of the fixed
+ *  green, per the user's appearance setting. Defaults off so the badges stay green unless opted in. */
+val LocalTintCloudWithAccent = staticCompositionLocalOf { false }
+
+/** When true, GIFs animate in the timeline, album, and device-folder grids; off renders a still first
+ *  frame. Defaults off so grids stay calm unless the user opts in. */
+val LocalGifAutoplayGrid = staticCompositionLocalOf { false }
+
+/** When true, a GIF album cover animates; off renders a still first frame. Defaults off. */
+val LocalGifAutoplayCovers = staticCompositionLocalOf { false }
+
+/** The animated-decoder-free Coil loader, used to render a GIF as its still first frame with no
+ *  playback. Null until MainActivity provides the application's instance. */
+val LocalStaticImageLoader = staticCompositionLocalOf<coil.ImageLoader?> { null }
+
 /** Accessor — call AppColors.current to read tokens in a Composable. */
 object AppColors {
     val current: AppColorsTokens
@@ -326,6 +377,10 @@ val Bg2: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.bg2
 
+val SheetBg: Color
+    @Composable @ReadOnlyComposable
+    get() = LocalAppColors.current.sheetBg
+
 val FgPrimary: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.fgPrimary
@@ -345,6 +400,10 @@ val Accent: Color
 val Accent2: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.accent2
+
+val AccentBright: Color
+    @Composable @ReadOnlyComposable
+    get() = LocalAppColors.current.accentBright
 
 val Line: Color
     @Composable @ReadOnlyComposable
@@ -414,6 +473,30 @@ val ArcTrack: Color
     @Composable @ReadOnlyComposable
     get() = LocalAppColors.current.arcTrack
 
+/** Surface a synced-cloud badge is painted on, so its tint stays legible there. DarkChip is the
+ *  fixed near-black rounded chip behind the grid badges (identical in both themes); Pill is the
+ *  viewer's info pill, which turns near-white in light mode. */
+enum class CloudBadgeSurface { DarkChip, Pill }
+
+/** Tint for the green "synced" (backed up and still on device) cloud glyph, kept readable per surface.
+ *  On the fixed-dark chip the accent option uses the bright accent so it reads in light mode too, where
+ *  the plain accent darkens; on the near-white pill the default is the theme foreground so the glyph
+ *  never washes out, matching the adjacent cloud-only badge. Honors [LocalTintCloudWithAccent]. */
+@Composable
+@ReadOnlyComposable
+fun cloudBadgeTint(surface: CloudBadgeSurface): Color =
+    if (LocalTintCloudWithAccent.current) {
+        when (surface) {
+            CloudBadgeSurface.DarkChip -> AccentBright
+            CloudBadgeSurface.Pill     -> Accent
+        }
+    } else {
+        when (surface) {
+            CloudBadgeSurface.DarkChip -> StatusSynced
+            CloudBadgeSurface.Pill     -> FgPrimary
+        }
+    }
+
 // ── App font — Inter (variable .ttf; the wght axis resolves weights on API 26+). ──────
 // Applied app-wide via the Material typography + LocalTextStyle so every Text() renders in
 // Inter while keeping its own size and weight. Single family, no user choice.
@@ -450,6 +533,9 @@ fun ProtonPhotosTheme(
     darkTheme: Boolean = true,
     palette: ThemePalette = ThemePalette.Default,
     amoledBlack: Boolean = false,
+    tintCloudWithAccent: Boolean = false,
+    gifAutoplayGrid: Boolean = false,
+    gifAutoplayCovers: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val amoled  = darkTheme && amoledBlack
@@ -459,6 +545,9 @@ fun ProtonPhotosTheme(
         CompositionLocalProvider(
             LocalIndication provides NoIndication,
             LocalAppColors  provides colors,
+            LocalTintCloudWithAccent provides tintCloudWithAccent,
+            LocalGifAutoplayGrid provides gifAutoplayGrid,
+            LocalGifAutoplayCovers provides gifAutoplayCovers,
             LocalTextStyle  provides LocalTextStyle.current.merge(TextStyle(fontFamily = InterFamily)),
         ) {
             content()

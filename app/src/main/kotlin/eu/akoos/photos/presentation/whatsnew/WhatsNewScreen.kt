@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -42,24 +41,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Compress
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -83,7 +79,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
-import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBg
 import kotlinx.coroutines.launch
@@ -92,8 +88,8 @@ import javax.inject.Inject
 /**
  * Persists the one-time "What's new" dismissal. [markSeen] writes the current versionCode to
  * [SettingsKeys.WHATS_NEW_SEEN_VERSION] so the screen can never reappear for this version. The
- * screen calls it on every exit (Got-it, a feature Open button, or back), so whichever path the
- * user takes out of the screen settles the gate.
+ * screen calls it on every exit (Got-it or back), so whichever path the user takes out of the
+ * screen settles the gate.
  */
 @HiltViewModel
 class WhatsNewViewModel @Inject constructor(
@@ -108,14 +104,6 @@ class WhatsNewViewModel @Inject constructor(
     }
 }
 
-/** One feature highlight fed into the pager: its icon chip and strings, plus an optional jump. */
-private class WhatsNewFeature(
-    val icon: ImageVector,
-    val titleRes: Int,
-    val bodyRes: Int,
-    val onOpen: (() -> Unit)? = null,
-)
-
 /**
  * Rough on-screen height of one [WhatsNewCard] (a 40dp chip against a title + two-ish body lines,
  * inside 14dp padding). Only used to decide how many whole cards a page can hold; the estimate is a
@@ -125,26 +113,67 @@ private class WhatsNewFeature(
 private val WhatsNewCardEstimate: Dp = 112.dp
 
 /**
- * Greedily packs [count] feature cards onto pages, fitting as many whole cards as [pageHeight]
- * allows: a taller screen takes more per page, a shorter one fewer. Each card is treated as
- * [cardHeight] tall with [spacing] between cards, and a page closes once the next card would
- * overflow. Cards pack in order, so each page is a contiguous index range.
+ * Splits [count] feature cards into contiguous pages that are evenly balanced. It first finds how
+ * many whole cards a page of [pageHeight] can hold (each [cardHeight] tall with [spacing] between,
+ * always at least one), then uses the fewest pages that fit and spreads the cards evenly across them.
+ * So six cards on a tall screen read as two pages of three, not one crammed page of five and a lonely
+ * page of one. Cards keep their order, so each page is a contiguous index range.
  */
-private fun packFeaturePages(count: Int, pageHeight: Dp, cardHeight: Dp, spacing: Dp): List<IntRange> {
+internal fun packFeaturePages(count: Int, pageHeight: Dp, cardHeight: Dp, spacing: Dp): List<IntRange> {
+    if (count <= 0) return emptyList()
+    // The most whole cards that fit in one page: one card is cardHeight, each further card adds
+    // spacing + cardHeight. At least one, so a very short screen still shows a card (the page's own
+    // scroll is the final guard against clipping).
+    var perPage = 1
+    while (cardHeight + (spacing + cardHeight) * perPage <= pageHeight) perPage++
+    val pageCount = (count + perPage - 1) / perPage
+    val base = count / pageCount
+    val remainder = count % pageCount
     val pages = mutableListOf<IntRange>()
     var start = 0
-    var used = 0.dp
-    for (i in 0 until count) {
-        val add = if (i == start) cardHeight else spacing + cardHeight
-        if (i != start && used + add > pageHeight) {
-            pages.add(start until i)
-            start = i
-            used = cardHeight
-        } else {
-            used += add
+    for (page in 0 until pageCount) {
+        // The first `remainder` pages take one extra card, so the split is as even as it can be.
+        val size = base + if (page < remainder) 1 else 0
+        pages.add(start until start + size)
+        start += size
+    }
+    return pages
+}
+
+/** Rough on-screen height of a section label plus the gap to the first card under it, subtracted from
+ *  a page before its cards are packed so a labeled page holds one fewer card than a bare one. */
+private val WhatsNewSectionHeaderHeight: Dp = 40.dp
+
+/** One packed page of feature cards: the section label to draw above them (null when the release is
+ *  not split into sections), and the cards on that page. */
+internal class WhatsNewFeaturePage(val headerRes: Int?, val features: List<WhatsNewFeature>)
+
+/**
+ * Lays a release's feature cards out into pages. A release whose cards span more than one category is
+ * split into labeled sections (New first, then Improved), each packed on its own so a section starts a
+ * fresh page and never shares one with the next; the label's [headerHeight] is taken off the page
+ * first. A single-category release packs as one unlabeled run, exactly as older entries did.
+ */
+internal fun categoryFeaturePages(
+    release: WhatsNewRelease,
+    pageHeight: Dp,
+    cardHeight: Dp,
+    spacing: Dp,
+    headerHeight: Dp,
+): List<WhatsNewFeaturePage> {
+    val categories = release.features.map { it.category }.distinct()
+    if (categories.size <= 1) {
+        return packFeaturePages(release.features.size, pageHeight, cardHeight, spacing)
+            .map { range -> WhatsNewFeaturePage(null, release.features.slice(range)) }
+    }
+    val pages = mutableListOf<WhatsNewFeaturePage>()
+    for (category in categories) {
+        val items = release.features.filter { it.category == category }
+        val available = (pageHeight - headerHeight).coerceAtLeast(cardHeight)
+        for (range in packFeaturePages(items.size, available, cardHeight, spacing)) {
+            pages.add(WhatsNewFeaturePage(category.titleRes, items.slice(range)))
         }
     }
-    if (start < count) pages.add(start until count)
     return pages
 }
 
@@ -152,41 +181,35 @@ private fun packFeaturePages(count: Int, pageHeight: Dp, cardHeight: Dp, spacing
  * One-time post-update highlights screen. Shown once after an upgrade (see the gate in NavGraph) on
  * top of the Gallery: a floating-pill header over a size-aware horizontal pager. Feature cards are
  * packed so each page shows as many whole cards as the screen's height fits, with the page dots and
- * the primary dismiss button pinned at the bottom on every page (no scrolling to reach it). The tall
- * Hide card takes the first page alone. Any exit marks the version seen via
- * [WhatsNewViewModel.markSeen] so it does not return until the next release.
+ * the primary dismiss button pinned at the bottom on every page (no scrolling to reach it). A
+ * release's headline card, where it has one, takes the first page alone.
+ *
+ * Shows ONE release: [release] defaults to the newest, which is what the post-update gate wants;
+ * Settings passes an older one to re-read it. Any exit marks the current version seen via
+ * [WhatsNewViewModel.markSeen] so the post-update screen does not return until the next release,
+ * which is correct for a browse too (the user has now read it).
  */
 @Composable
 fun WhatsNewScreen(
     onDone: () -> Unit,
-    onOpenDuplicates: () -> Unit,
-    onOpenOffline: () -> Unit,
+    version: String? = null,
     viewModel: WhatsNewViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
+    val release = remember(version) { whatsNewReleaseFor(version) }
 
-    // Feature cards after Hide, in order. The two with a jump mark the version seen before leaving.
-    val features = listOf(
-        WhatsNewFeature(Icons.Default.CleaningServices, R.string.whats_new_freeup_title, R.string.whats_new_freeup_body),
-        WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_compress_title, R.string.whats_new_compress_body),
-        WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_seamless_title, R.string.whats_new_seamless_body),
-        WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_scrubber_title, R.string.whats_new_scrubber_body),
-        WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_album_title, R.string.whats_new_album_body),
-        WhatsNewFeature(
-            Icons.Default.ContentCopy, R.string.whats_new_dup_title, R.string.whats_new_dup_body,
-            onOpen = {
-                viewModel.markSeen()
-                onOpenDuplicates()
-            },
-        ),
-        WhatsNewFeature(
-            Icons.Default.CloudDownload, R.string.whats_new_offline_title, R.string.whats_new_offline_body,
-            onOpen = {
-                viewModel.markSeen()
-                onOpenOffline()
-            },
-        ),
-    )
+    // On a preview (test) build, lead with a card asking testers to send the diagnostics when
+    // something looks wrong, so a file problem can be told apart from something else. A public
+    // release name has no "-test" suffix, so the card never shows there.
+    val showDiagnosticsIntro = remember { BuildConfig.VERSION_NAME.contains("-test") }
+
+    // A system back gesture pops this screen through the host's own handler, which never reaches the
+    // header's onBack, so the version stayed unseen and the screen returned on every launch. Marking
+    // it here first makes the gesture settle the gate exactly as the button and the arrow do.
+    BackHandler {
+        viewModel.markSeen()
+        onDone()
+    }
 
     Box(
         modifier = Modifier
@@ -203,11 +226,15 @@ fun WhatsNewScreen(
             // pager it packs against is never taller than the space the cards actually get.
             val bottomBandHeight = 108.dp + navBottom
             val pageHeight = (maxHeight - contentTopPad - bottomBandHeight).coerceAtLeast(160.dp)
-            val featurePages = remember(pageHeight) {
-                packFeaturePages(features.size, pageHeight, WhatsNewCardEstimate, 12.dp)
+            val featurePages = remember(pageHeight, release) {
+                categoryFeaturePages(release, pageHeight, WhatsNewCardEstimate, 12.dp, WhatsNewSectionHeaderHeight)
             }
-            // Page 0 is the tall Hide card on its own; the feature pages follow.
-            val pageCount = 1 + featurePages.size
+            // A headline card, where the release has one, takes page 0 on its own; the feature
+            // pages follow. A release without one starts straight at its features. On a preview
+            // build the diagnostics card takes the very first page, ahead of everything else.
+            val introPages = if (showDiagnosticsIntro) 1 else 0
+            val heroPages = if (release.hero != null) 1 else 0
+            val pageCount = introPages + heroPages + featurePages.size
             val pagerState = rememberPagerState(pageCount = { pageCount })
 
             Column(modifier = Modifier.fillMaxSize()) {
@@ -219,32 +246,57 @@ fun WhatsNewScreen(
                         .fillMaxWidth(),
                     verticalAlignment = Alignment.Top,
                 ) { page ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        if (page == 0) {
-                            WhatsNewHideCard()
-                        } else {
-                            for (idx in featurePages[page - 1]) {
-                                val feature = features[idx]
-                                WhatsNewCard(
-                                    icon = feature.icon,
-                                    title = stringResource(feature.titleRes),
-                                    body = stringResource(feature.bodyRes),
-                                    onOpen = feature.onOpen,
+                    val pageScroll = rememberScrollState()
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(pageScroll)
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            if (introPages == 1 && page == 0) {
+                                WhatsNewDiagnosticsCard()
+                            } else {
+                                val innerPage = page - introPages
+                                if (heroPages == 1 && innerPage == 0) {
+                                    when (release.hero) {
+                                        WhatsNewHero.Hide -> WhatsNewHideCard()
+                                        WhatsNewHero.AlbumOrder -> WhatsNewAlbumOrderCard()
+                                        null -> Unit
+                                    }
+                                } else {
+                                    val featurePage = featurePages[innerPage - heroPages]
+                                    featurePage.headerRes?.let { headerRes ->
+                                        WhatsNewSectionHeader(stringResource(headerRes))
+                                    }
+                                    for (feature in featurePage.features) {
+                                        WhatsNewCard(
+                                            icon = feature.icon,
+                                            title = stringResource(feature.titleRes),
+                                            body = stringResource(feature.bodyRes),
+                                        )
+                                    }
+                                }
+                            }
+                            // The closing line comes from the release being read, not from the app, so
+                            // an older release cannot advertise changes that shipped after it.
+                            val moreRes = release.moreRes
+                            if (moreRes != null && page == pageCount - 1) {
+                                Text(
+                                    stringResource(moreRes),
+                                    color = colors.fgMute, fontSize = 13.sp,
+                                    modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp),
                                 )
                             }
+                            // A little breathing room so the last card clears the scroll hint.
+                            Spacer(Modifier.height(20.dp))
                         }
-                        if (page == pageCount - 1) {
-                            Text(
-                                stringResource(R.string.whats_new_more),
-                                color = colors.fgMute, fontSize = 13.sp,
-                                modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp),
-                            )
+                        // A downward chevron while this page can still scroll down, so a page taller
+                        // than the screen (a long card, or a large font scale) reads as scrollable
+                        // instead of looking cut off. It disappears once the bottom is reached.
+                        if (pageScroll.canScrollForward) {
+                            WhatsNewScrollHint(Modifier.align(Alignment.BottomCenter))
                         }
                     }
                 }
@@ -279,7 +331,7 @@ fun WhatsNewScreen(
 
         // Floating pill header (matches the other secondary screens): title pill + a back button
         // that dismisses exactly like Got-it. Back marks the version seen too.
-        FloatingMemoriesHeader(
+        FloatingHeader(
             title = stringResource(R.string.whats_new_title),
             onBack = {
                 viewModel.markSeen()
@@ -312,16 +364,48 @@ private fun WhatsNewPagerDots(current: Int, count: Int) {
     }
 }
 
-/**
- * One feature highlight: a leading icon chip, a bold title, a short description, and an optional
- * "Open" text button that jumps straight to the feature.
- */
+/** The "there is more below" affordance: a downward chevron in a soft accent chip, shown at the
+ *  bottom of a page only while it can still scroll down. */
+@Composable
+private fun WhatsNewScrollHint(modifier: Modifier = Modifier) {
+    val colors = AppColors.current
+    Box(
+        modifier = modifier
+            .padding(bottom = 6.dp)
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(colors.accent.copy(alpha = 0.16f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.KeyboardArrowDown,
+            contentDescription = null,
+            tint = colors.accent,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/** A section label above a group of cards ("New" / "Improved"), in the accent colour so it reads as a
+ *  divider between the release's brand-new features and its improvements, not as another card. */
+@Composable
+private fun WhatsNewSectionHeader(text: String) {
+    val colors = AppColors.current
+    Text(
+        text,
+        color = colors.accent,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+    )
+}
+
+/** One feature highlight: a leading icon chip, a bold title, and a short description. */
 @Composable
 private fun WhatsNewCard(
     icon: ImageVector,
     title: String,
     body: String,
-    onOpen: (() -> Unit)? = null,
 ) {
     val colors = AppColors.current
     Row(
@@ -347,18 +431,45 @@ private fun WhatsNewCard(
         ) {
             Text(title, color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text(body, color = colors.fgDim, fontSize = 13.sp)
-            if (onOpen != null) {
-                TextButton(
-                    onClick = onOpen,
-                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 6.dp),
-                ) {
-                    Text(
-                        stringResource(R.string.whats_new_open),
-                        color = colors.accent, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                    )
-                }
-            }
         }
+    }
+}
+
+/**
+ * The lead card on a preview build: it asks the tester to send the diagnostics when something looks
+ * wrong, so a file problem can be told apart from something else. Gated to test builds in
+ * [WhatsNewScreen], so a public release never shows it.
+ */
+@Composable
+private fun WhatsNewDiagnosticsCard() {
+    val colors = AppColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(PillBg)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(colors.accent.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.BugReport, null, tint = colors.accent, modifier = Modifier.size(22.dp))
+            }
+            Text(
+                stringResource(R.string.whats_new_diag_title),
+                color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Text(stringResource(R.string.whats_new_diag_body), color = colors.fgDim, fontSize = 13.sp)
     }
 }
 
@@ -402,6 +513,68 @@ private fun WhatsNewHideCard() {
         HideBadgeRow(Icons.Default.Cloud, Color(0xFF30D158), stringResource(R.string.whats_new_hide_backed))
         HideBadgeRow(Icons.Default.Cloud, Color.White, stringResource(R.string.whats_new_hide_cloud))
         Text(stringResource(R.string.whats_new_hide_albums), color = colors.fgDim, fontSize = 13.sp)
+    }
+}
+
+/**
+ * The album ordering highlight. The four option names are pulled from the Albums tab's OWN menu
+ * strings, so this card can never name an option differently from the menu it is describing.
+ */
+@Composable
+private fun WhatsNewAlbumOrderCard() {
+    val colors = AppColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(PillBg)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(colors.accent.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Sort, null, tint = colors.accent, modifier = Modifier.size(22.dp))
+            }
+            Text(
+                stringResource(R.string.whats_new_albums_title),
+                color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Text(stringResource(R.string.whats_new_albums_intro), color = colors.fgDim, fontSize = 13.sp)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            AlbumSortOptionRow(stringResource(R.string.albums_sort_name))
+            AlbumSortOptionRow(stringResource(R.string.albums_sort_activity))
+            AlbumSortOptionRow(stringResource(R.string.albums_sort_count))
+            AlbumSortOptionRow(stringResource(R.string.albums_sort_custom))
+        }
+        Text(stringResource(R.string.whats_new_albums_drag), color = colors.fgDim, fontSize = 13.sp)
+    }
+}
+
+/** One sort option, named exactly as the Albums tab's own menu names it. */
+@Composable
+private fun AlbumSortOptionRow(label: String) {
+    val colors = AppColors.current
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(colors.accent),
+        )
+        Text(label, color = colors.fgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
 

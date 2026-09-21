@@ -24,19 +24,28 @@ package eu.akoos.photos.data.repository
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.crypto.CryptoServiceClient
+import eu.akoos.photos.crypto.DecryptPriority
+import eu.akoos.photos.crypto.DecryptPriorityContext
 import eu.akoos.photos.data.crypto.parsePhotoDuration
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.repository.drive.AlbumCryptoChain
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.data.repository.drive.PhotosShareService
+import eu.akoos.photos.data.repository.drive.SharedAlbumKeyStore
+import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.HEALTH_PAUSE_POLL_MS
 import eu.akoos.photos.util.isTransientApiError
 import eu.akoos.photos.util.retryWithBackoff
 import java.util.concurrent.ConcurrentHashMap
@@ -63,8 +72,15 @@ private const val TAG = "VideoDurationBackfill"
  * [PhotoListingDao.getVideosMissingDuration] on the next page (`durationMs IS NULL` no longer holds), so
  * the query itself is the bound. A row whose fetch fails or whose xAttr carries no duration simply stays
  * NULL for a later run, and the zero-progress guard turns a sustained outage into a clean pause rather
- * than a spin. A row whose parent key can't be resolved here (e.g. a shared-with-me album) is skipped,
- * like any other per-row failure.
+ * than a spin.
+ *
+ * A video inside an album another user shared is filled in by a SEPARATE per-album pass, seeded when the
+ * album opens ([populateSharedAlbumContext]). Such a row keeps the OWNER's volumeId, so the volume-scoped
+ * walk above cannot see it, and its node key only unwraps under the album key the album open decrypts.
+ * The two passes stay apart because [backfillAll] ends a pass on the first page that writes nothing: were
+ * rows the owner walk can never resolve allowed into it, one page of them would starve the user's own
+ * remaining videos. Each album's pass carries its own guard, so an album open and the owner walk never
+ * cancel one another out.
  */
 @Singleton
 class VideoDurationBackfillScheduler @Inject constructor(
@@ -73,6 +89,8 @@ class VideoDurationBackfillScheduler @Inject constructor(
     private val shareService: PhotosShareService,
     private val linkDetailHelpers: LinkDetailHelpers,
     private val albumCryptoChain: AlbumCryptoChain,
+    private val sharedAlbumKeyStore: SharedAlbumKeyStore,
+    private val deviceHealth: DeviceHealthPolicy,
 ) {
     /** Concurrency bound on in-flight XAttr decrypts, a handful keeps JNI / GC pressure low. */
     private val semaphore = Semaphore(WORKER_COUNT)
@@ -82,6 +100,14 @@ class VideoDurationBackfillScheduler @Inject constructor(
 
     /** One walk at a time, a second trigger while one is running is a no-op, not a double pass. */
     private val backfilling = AtomicBoolean(false)
+
+    /** Own scope, so an album open can kick that album's pass fire-and-forget and return at once. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Albums whose pass is currently running, so a repeat open of one is a no-op rather than a second
+     *  pass over the same rows. Kept per album rather than on [backfilling]: sharing that flag would let
+     *  an album open cancel out the owner walk, which is the coupling a separate pass exists to avoid. */
+    private val albumPasses = ConcurrentHashMap.newKeySet<String>()
 
     /** parentLinkId → decrypted parent key bytes, so videos sharing a parent skip the re-decrypt. */
     private val parentKeyCache = ConcurrentHashMap<String, ByteArray>()
@@ -97,8 +123,22 @@ class VideoDurationBackfillScheduler @Inject constructor(
     suspend fun backfillAll(userId: UserId) {
         if (!backfilling.compareAndSet(false, true)) return
         try {
+            // Scoped to this user's own volume, mirroring the GPS backfill: a video in an album
+            // another user shared resolves no revision here, so it would never leave the
+            // missing-duration set and would be re-walked on every pass. Those rows belong to
+            // [backfillSharedAlbum] instead. An unavailable volume id (offline, or a share not
+            // bootstrapped yet) defers the pass rather than failing it.
+            val ownVolumeId = runCatching { shareService.getVolumeId(userId) }.getOrNull()
+            if (ownVolumeId.isNullOrBlank()) {
+                Log.d(TAG, "own volume id unavailable, deferring this pass")
+                return
+            }
             while (true) {
-                val batch = runCatching { photoListingDao.getVideosMissingDuration(userId.id, PAGE) }
+                // Defer this background walk while the phone is hot, low on battery, or in the power saver; it
+                // resumes on its own once conditions clear. Not gated on interaction: it runs quietly in the
+                // background and does not compete with the UI.
+                while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
+                val batch = runCatching { photoListingDao.getVideosMissingDuration(userId.id, ownVolumeId, PAGE) }
                     .getOrElse { e ->
                         if (e is CancellationException) throw e
                         Log.w(TAG, "query failed: ${e.message}"); break
@@ -116,38 +156,7 @@ class VideoDurationBackfillScheduler @Inject constructor(
                     break
                 }
 
-                val durations = ConcurrentHashMap<String, Long>()
-                coroutineScope {
-                    batch.forEach { row ->
-                        if (row.linkId !in resolved.ids) return@forEach
-                        launch {
-                            try {
-                                semaphore.withPermit {
-                                    durationFor(userId, row, resolved.byLinkId[row.linkId])?.let {
-                                        durations[row.linkId] = it
-                                    }
-                                }
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Throwable) {
-                                Log.w(TAG, "duration decrypt ${row.linkId} failed: ${e.message}")
-                            }
-                        }
-                    }
-                }
-
-                Log.d(TAG, "page: walked=${batch.size} xattrResolved=${resolved.ids.size} durations=${durations.size}")
-                // Persist each recovered duration per-linkId. A row that got a value drops out of the
-                // next page's query; a row that resolved but carried no duration (unusual for a video)
-                // stays NULL, and the terminating LIMIT-below-PAGE / all-cached guards keep the walk from
-                // looping on such a stuck tail.
-                durations.forEach { (linkId, ms) ->
-                    runCatching { photoListingDao.updateDurationMs(linkId, ms) }
-                        .onFailure {
-                            if (it is CancellationException) throw it
-                            Log.w(TAG, "updateDurationMs $linkId failed: ${it.message}")
-                        }
-                }
+                val written = writeDurationsForPage(userId, batch, resolved, "own volume")
 
                 // A short page ends the walk; a full page with zero writes would re-query the same rows,
                 // so bail there too and let a later run retry once the transient clears. A full page whose
@@ -155,7 +164,7 @@ class VideoDurationBackfillScheduler @Inject constructor(
                 // stay durationMs=NULL and getVideosMissingDuration would keep returning them, so ending the
                 // pass and deferring the rest to a future trigger is the bound that stops an endless re-walk,
                 // not a lost row.
-                if (batch.size < PAGE || durations.isEmpty()) break
+                if (batch.size < PAGE || written == 0) break
 
                 // Trickle a large library: a short gap between pages keeps the backfill gentle on the
                 // Drive API and off the foreground's back instead of bursting page after page.
@@ -163,6 +172,77 @@ class VideoDurationBackfillScheduler @Inject constructor(
             }
         } finally {
             backfilling.set(false)
+        }
+    }
+
+    /**
+     * Register a shared-with-me album and fill in the length of every video inside it.
+     *
+     * An album open is the trigger because that is the moment the caller holds [ctx], and the album key
+     * inside it is the only key those photos' node keys unwrap under. The caller fires this once the
+     * album's rows are durable, so the pass's first query already sees them. It runs fire-and-forget on
+     * [scope], so the album load never waits on it, and a repeat open while the same album's pass is
+     * still running is a no-op through [albumPasses].
+     */
+    fun populateSharedAlbumContext(userId: UserId, ctx: AlbumCryptoChain.SharingContext) {
+        sharedAlbumKeyStore.put(userId, ctx)
+        if (!albumPasses.add(ctx.albumLinkId)) return
+        scope.launch {
+            try {
+                backfillSharedAlbum(userId, ctx)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.w(TAG, "shared album pass ${ctx.albumLinkId} failed: ${e.message}")
+            } finally {
+                albumPasses.remove(ctx.albumLinkId)
+            }
+        }
+    }
+
+    /**
+     * One shared album's duration pass: page through [PhotoListingDao.getAlbumVideosMissingDuration] for
+     * this album, resolve each row's XAttr from the revision endpoint, decrypt it with the album key in
+     * [ctx], and write the recovered length back per linkId.
+     *
+     * Every fetch names [AlbumCryptoChain.SharingContext.sharingShareId] rather than the row's own
+     * shareId: the value stored on the row is this user's primary share, which does not cover a link on
+     * the owner's volume, so the share fallback inside [LinkDetailHelpers.fetchRevisionXAttrOrThrow]
+     * only resolves under the sharing share.
+     *
+     * Four bounds keep the pass terminating: [MAX_ALBUM_PAGES] caps the walk outright, an empty page
+     * ends it, a page that resolves no revision ends it since nothing can then be written, and a page
+     * that writes no duration ends it too, because the same rows would otherwise be re-queried for good.
+     * Anything still NULL when a bound is reached keeps its blank pill until the album is opened again,
+     * the same treatment every other unresolved row in this class gets.
+     */
+    private suspend fun backfillSharedAlbum(userId: UserId, ctx: AlbumCryptoChain.SharingContext) {
+        var pagesWalked = 0
+        while (pagesWalked < MAX_ALBUM_PAGES) {
+            // Defer this background walk while the phone is hot, low on battery, or in the power saver; it
+            // resumes on its own once conditions clear. Not gated on interaction: it runs quietly in the
+            // background and does not compete with the UI.
+            while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
+            val batch = runCatching {
+                photoListingDao.getAlbumVideosMissingDuration(userId.id, ctx.albumLinkId, PAGE)
+            }.getOrElse { e ->
+                if (e is CancellationException) throw e
+                Log.w(TAG, "album query failed: ${e.message}"); break
+            }
+            if (batch.isEmpty()) break
+            pagesWalked++
+
+            val resolved = resolveXAttrs(userId, batch, shareIdOverride = ctx.sharingShareId)
+            if (resolved.ids.isEmpty()) {
+                Log.d(TAG, "shared album page resolved 0 revisions, pausing pass, a later open retries")
+                break
+            }
+
+            if (writeDurationsForPage(userId, batch, resolved, "shared album") == 0) break
+
+            // Trickle the album the same way the owner walk trickles the library, so a shared album of
+            // many videos stays gentle on the Drive API while the grid is being looked at.
+            delay(PAGE_DELAY_MS)
         }
     }
 
@@ -185,10 +265,16 @@ class VideoDurationBackfillScheduler @Inject constructor(
      * [retryWithBackoff], so a transient blip backs off rather than spamming. A fetch that still fails is
      * left out of [ResolvedXAttrs.ids] for a later run; a successful fetch with no XAttr is resolved but
      * absent from [byLinkId], so [durationFor] simply yields nothing for it.
+     *
+     * [shareIdOverride] is what the shared-album pass passes its sharing share id through: the shareId
+     * stored on such a row is this user's own primary share, which the revision endpoint does not accept
+     * for a link that lives on the owner's volume. Left null, each row speaks for itself, which is the
+     * right answer for every row the owner walk sees.
      */
     private suspend fun resolveXAttrs(
         userId: UserId,
         batch: List<PhotoListingEntity>,
+        shareIdOverride: String? = null,
     ): ResolvedXAttrs {
         val map = ConcurrentHashMap<String, String>(batch.size)
         val resolvedIds = ConcurrentHashMap.newKeySet<String>()
@@ -211,7 +297,11 @@ class VideoDurationBackfillScheduler @Inject constructor(
                         val xAttr = fetchSemaphore.withPermit {
                             retryWithBackoff(maxAttempts = FETCH_MAX_ATTEMPTS, baseMs = FETCH_RETRY_BASE_MS) {
                                 linkDetailHelpers.fetchRevisionXAttrOrThrow(
-                                    userId, row.volumeId, row.shareId, row.linkId, row.revisionId,
+                                    userId,
+                                    row.volumeId,
+                                    shareIdOverride ?: row.shareId,
+                                    row.linkId,
+                                    row.revisionId,
                                 )
                             }
                         }
@@ -233,6 +323,53 @@ class VideoDurationBackfillScheduler @Inject constructor(
         return ResolvedXAttrs(map, resolvedIds)
     }
 
+    /**
+     * Decrypt one page's durations and persist them, returning how many rows got a value. [label] only
+     * names the walk in the log line, so the owner walk and a shared album's pass stay tellable apart.
+     *
+     * Shared by both walks so each paces its decrypts through [semaphore], isolates a per-row failure to
+     * that row, and writes per linkId, since a full-row upsert would race a concurrent metadata refresh.
+     * A row that gets a value drops out of the next page's query; a row that resolved but carried no
+     * duration (unusual for a video) stays NULL, and each walk's own zero-write bound keeps it from
+     * looping on such a stuck tail.
+     */
+    private suspend fun writeDurationsForPage(
+        userId: UserId,
+        batch: List<PhotoListingEntity>,
+        resolved: ResolvedXAttrs,
+        label: String,
+    ): Int {
+        val durations = ConcurrentHashMap<String, Long>()
+        coroutineScope {
+            batch.forEach { row ->
+                if (row.linkId !in resolved.ids) return@forEach
+                launch {
+                    try {
+                        semaphore.withPermit {
+                            durationFor(userId, row, resolved.byLinkId[row.linkId])?.let {
+                                durations[row.linkId] = it
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "duration decrypt ${row.linkId} failed: ${e.message}")
+                    }
+                }
+            }
+        }
+
+        Log.d(TAG, "$label page: walked=${batch.size} xattrResolved=${resolved.ids.size} durations=${durations.size}")
+        durations.forEach { (linkId, ms) ->
+            runCatching { photoListingDao.updateDurationMs(linkId, ms) }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    Log.w(TAG, "updateDurationMs $linkId failed: ${it.message}")
+                }
+        }
+        return durations.size
+    }
+
     /** Decrypt one row's XAttr and return its duration in milliseconds, or null when it carries no
      *  duration / can't be resolved. [armoredXAttr] is the row's cached XAttr or, for pre-encXAttr rows,
      *  the value fetched in [resolveXAttrs]. The parent key resolution mirrors the GPS backfill's
@@ -246,25 +383,35 @@ class VideoDurationBackfillScheduler @Inject constructor(
         val encNodeKey = row.encNodeKey ?: return null
         val encNodePass = row.encNodePassphrase ?: return null
         val parentLinkId = row.parentLinkId ?: return null
-        val parentKey = getParentKeyBytes(userId, parentLinkId, row.volumeId) ?: return null
-        val nodeKeyBytes = cryptoServiceClient.decryptNodeKey(encNodeKey, encNodePass, parentKey)
-        val json = cryptoServiceClient.decryptXAttr(encXAttr, nodeKeyBytes) ?: return null
-        return parsePhotoDuration(json)
+        // Background duration backfill yields the process-global crypto gate to interactive decrypts,
+        // the parent-key resolution included since it decrypts on a cache miss.
+        return withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
+            val parentKey = getParentKeyBytes(userId, parentLinkId, row.volumeId) ?: return@withContext null
+            val nodeKeyBytes = cryptoServiceClient.decryptNodeKey(encNodeKey, encNodePass, parentKey)
+            val json = cryptoServiceClient.decryptXAttr(encXAttr, nodeKeyBytes) ?: return@withContext null
+            parsePhotoDuration(json)
+        }
     }
 
     /**
      * Decrypted node-key bytes for [parentLinkId], replicating the owner-side resolution in
      * [CloudGpsBackfillScheduler]:
      *   • Photos root link → [PhotosShareService.getRootLinkKeyBytes] (itself cached).
+     *   • Shared-with-me album → the album key held by [SharedAlbumKeyStore].
      *   • Owner-side album → fetch the album's BatchLinkDto, decrypt its nodeKey with the root key,
      *     and memoise in [parentKeyCache].
-     * Returns null when the album link can't be fetched / decrypted (e.g. a shared-with-me album).
+     * Returns null when the album link can't be fetched / decrypted.
      */
     private suspend fun getParentKeyBytes(userId: UserId, parentLinkId: String, volumeId: String): ByteArray? {
         if (parentLinkId == shareService.photosRootLinkId()) {
             return shareService.getRootLinkKeyBytes(userId)
         }
         parentKeyCache[parentLinkId]?.let { return it }
+
+        // A shared-with-me album answers from the key store, ahead of the resolution below: that one
+        // walks this user's own root key and volume, neither of which reaches an album living on the
+        // owner's volume, so it can only ever return null for these rows.
+        sharedAlbumKeyStore.contextFor(userId, parentLinkId)?.let { return it.albumKeyBytes }
 
         val rootKey = shareService.getRootLinkKeyBytes(userId) ?: return null
         val albumDetail = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, listOf(parentLinkId))[parentLinkId]
@@ -301,5 +448,9 @@ class VideoDurationBackfillScheduler @Inject constructor(
 
         /** Rows pulled per page, bounds how many entities + their crypto material are resident. */
         const val PAGE = 200
+
+        /** Hard cap on the pages one shared album's pass walks, so it terminates even if the album
+         *  keeps offering rows whose duration never resolves. Far above any real album's video count. */
+        const val MAX_ALBUM_PAGES = 40
     }
 }

@@ -233,5 +233,434 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
+    /**
+     * Carries this user's own permission bitmask on a shared-with-me album (4 = viewer,
+     * 6 = viewer + editor), so the app can tell whether it may offer to add photos.
+     *
+     * Nullable with no default: an existing row genuinely has no answer yet, and null is read as
+     * "not an editor" everywhere, so old rows stay read-only until the next refresh fills them in.
+     */
+    val MIGRATION_16_17 = object : Migration(16, 17) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE cloud_albums ADD COLUMN permissions INTEGER DEFAULT NULL")
+        }
+    }
+
+    /**
+     * v17 → v18: photo_listing gains the per-row "lives only inside an album" fact, which tells a
+     * photo contributed to a shared album apart from one the user backed up themselves. Both sit in
+     * the same table under the same userId on the same volume, and only the parent distinguishes them.
+     *
+     * The backfill is what makes an upgraded install correct: every row already parented to a cached
+     * album is an album child, and without marking them they would keep surfacing on the timeline
+     * whenever their album's membership edges are absent, and keep being swept away as stale.
+     */
+    val MIGRATION_17_18 = object : Migration(17, 18) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE photo_listing ADD COLUMN isChildOfAlbum INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                "UPDATE photo_listing SET isChildOfAlbum = 1 " +
+                    "WHERE parentLinkId IN (SELECT linkId FROM cloud_albums)"
+            )
+        }
+    }
+
+    /**
+     * v18 → v19: photo_listing records a digest of the encrypted name each row's displayName came
+     * from, so a refresh can tell a photo renamed elsewhere from one that never changed without
+     * decrypting every name it walks past.
+     *
+     * No backfill: the digest belongs to ciphertext this migration cannot see. Null is deliberately
+     * the state every existing row lands in, because null means "recheck", and that one pass is what
+     * repairs the names that already drifted.
+     */
+    val MIGRATION_18_19 = object : Migration(18, 19) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE photo_listing ADD COLUMN nameFingerprint TEXT")
+        }
+    }
+
+    /**
+     * v19 → v20: new `listing_sweep_snapshot` table, which holds one refresh pass's sweep candidates
+     * from before its listing walk starts until pagination reaches the end.
+     *
+     * No backfill, and the empty table is the correct state to arrive at. A row's whole value is
+     * that it was read at a known moment relative to a walk, and this migration has no walk in
+     * flight to speak for; the first pass that starts fresh materialises the generation it consumes.
+     */
+    val MIGRATION_19_20 = object : Migration(19, 20) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `listing_sweep_snapshot` (" +
+                    "`userId` TEXT NOT NULL, `volumeId` TEXT NOT NULL, `linkId` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `volumeId`, `linkId`))"
+            )
+        }
+    }
+
+    /**
+     * v20 → v21: local_tag gains the categories a user picked for a device photo, held apart from
+     * the scanner's own `tagsCsv` so a re-detection cannot overwrite them.
+     *
+     * Empty on every existing row is the correct state, and no backfill could improve on it: the
+     * column records an answer only a person gives, while the column beside it holds what a detector
+     * guessed, so copying one into the other would dress a guess up as a decision.
+     */
+    val MIGRATION_20_21 = object : Migration(20, 21) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE local_tag ADD COLUMN userTagsCsv TEXT NOT NULL DEFAULT ''")
+        }
+    }
+
+    /**
+     * v21 → v22: two new tables backing People; `face` holds one detected face per row, keyed by a
+     * stable id the indexer derives from the photo, and `person` holds the clusters those faces group
+     * into. Both are additive and rebuildable: the empty tables are the correct state to arrive at,
+     * since a face and its embedding come from re-reading images this migration cannot see, and no
+     * backfill could conjure them. Existing tables are untouched.
+     */
+    val MIGRATION_21_22 = object : Migration(21, 22) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `face` (`id` TEXT NOT NULL, `userId` TEXT NOT NULL, " +
+                    "`photoKey` TEXT NOT NULL, `left` REAL NOT NULL, `top` REAL NOT NULL, " +
+                    "`right` REAL NOT NULL, `bottom` REAL NOT NULL, `landmarks` TEXT NOT NULL, " +
+                    "`embedding` BLOB NOT NULL, `personId` INTEGER, `score` REAL NOT NULL, " +
+                    "PRIMARY KEY(`id`))"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_face_photoKey` ON `face` (`photoKey`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_face_personId` ON `face` (`personId`)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_face_userId` ON `face` (`userId`)")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `person` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`userId` TEXT NOT NULL, `displayName` TEXT, `coverFaceId` TEXT, " +
+                    "`faceCount` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL)"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_person_userId` ON `person` (`userId`)")
+        }
+    }
+
+    /** v23: a per-face Laplacian sharpness score, so a blurred crop can be held to a stricter cluster
+     *  distance. Nullable, so rows indexed before it stay valid until the next re-index fills them. */
+    val MIGRATION_22_23 = object : Migration(22, 23) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `face` ADD COLUMN `blur` REAL")
+        }
+    }
+
+    /**
+     * v23 → v24: new `face_scan` table, one marker per photo the face indexer has fully scanned, so a
+     * re-run skips a photo it already looked at whether or not it held a face, instead of re-decoding
+     * every faceless photo on each pass. Additive and rebuildable: the empty table is the correct state
+     * to arrive at, since the marker records a scan this migration cannot redo, and the first pass after
+     * the upgrade re-derives it. Existing tables are untouched.
+     */
+    val MIGRATION_23_24 = object : Migration(23, 24) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `face_scan` (`userId` TEXT NOT NULL, " +
+                    "`photoKey` TEXT NOT NULL, PRIMARY KEY(`userId`, `photoKey`))"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_face_scan_userId` ON `face_scan` (`userId`)")
+            // Seed the marker from photos already carrying a face, so an existing library is not
+            // re-scanned (and, for a cloud photo, re-downloaded) just to record what it already knows.
+            // Faceless photos were never persisted, so they get scanned once and marked from then on.
+            db.execSQL(
+                "INSERT OR IGNORE INTO `face_scan` (`userId`, `photoKey`) " +
+                    "SELECT DISTINCT `userId`, `photoKey` FROM `face`"
+            )
+        }
+    }
+
+    /** People curation: a per-face "removed by the user" flag so a manual removal survives a rescan,
+     *  and a table of photos the user manually attached to a named person (keyed by name so the
+     *  membership follows the person across a clustering rebuild). Both are additive. */
+    val MIGRATION_24_25 = object : Migration(24, 25) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `face` ADD COLUMN `rejected` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `person_manual_photo` (`userId` TEXT NOT NULL, " +
+                    "`personName` TEXT NOT NULL, `photoKey` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `personName`, `photoKey`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_person_manual_photo_userId_personName` " +
+                    "ON `person_manual_photo` (`userId`, `personName`)"
+            )
+        }
+    }
+
+    /** Teaching: a per-face confirmed person name. A face the user confirms (by adding its photo to a
+     *  person) anchors that person and pulls matching faces in on the next clustering pass. Additive
+     *  and nullable, so existing faces stay unconfirmed. */
+    val MIGRATION_25_26 = object : Migration(25, 26) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `face` ADD COLUMN `manualName` TEXT")
+        }
+    }
+
+    /** People suggestions: a "not this person" feedback table, so a rejected match ("Is this X? No")
+     *  is never re-offered nor pulled into that person again. Keyed by name so it survives a rebuild. */
+    val MIGRATION_26_27 = object : Migration(26, 27) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `not_person` (`userId` TEXT NOT NULL, " +
+                    "`personName` TEXT NOT NULL, `faceId` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `personName`, `faceId`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_not_person_userId_personName` " +
+                    "ON `not_person` (`userId`, `personName`)"
+            )
+        }
+    }
+
+    /** Un-poison people: a manual "add to person" used to auto-label the photo's single detected face,
+     *  which mislabels a bystander when the person's own face was too small to detect. Drop every label
+     *  that sits on a manually attached photo, so the next rebuild reclusters those faces by likeness
+     *  alone. The manual attachments themselves (the display membership) are untouched. */
+    val MIGRATION_27_28 = object : Migration(27, 28) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "UPDATE `face` SET `manualName` = NULL WHERE EXISTS (" +
+                    "SELECT 1 FROM `person_manual_photo` p " +
+                    "WHERE p.`photoKey` = `face`.`photoKey` AND p.`userId` = `face`.`userId`)"
+            )
+        }
+    }
+
+    /** Custom person covers: the photo a user picked as a named person's cover, overriding the
+     *  automatic clearest-face pick. Keyed by name so the choice follows the person across a rebuild.
+     *  Additive. */
+    val MIGRATION_28_29 = object : Migration(28, 29) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `person_cover` (`userId` TEXT NOT NULL, " +
+                    "`personName` TEXT NOT NULL, `photoKey` TEXT NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `personName`))"
+            )
+        }
+    }
+
+    /** v29 to v30: new `pending_metadata_edit` table, one persisted row per queued cloud/synced
+     *  metadata edit, so the durable drain survives a process kill. Additive, and the empty table is
+     *  the correct state to arrive at: a pending edit exists only once the editor enqueues one, and
+     *  nothing this migration can see stands in for an edit a person has not yet made. */
+    val MIGRATION_29_30 = object : Migration(29, 30) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pending_metadata_edit` (" +
+                    "`linkId` TEXT NOT NULL, `userId` TEXT NOT NULL, `deviceUri` TEXT, " +
+                    "`newCaptureMs` INTEGER, `locationMode` TEXT NOT NULL, `lat` REAL, `lng` REAL, " +
+                    "`description` TEXT, `artist` TEXT, `copyright` TEXT, `enqueuedAt` INTEGER NOT NULL, " +
+                    "`newLinkId` TEXT, PRIMARY KEY(`linkId`))"
+            )
+        }
+    }
+
+    /** v30 to v31: bring `pending_metadata_edit` to its final shape (the resume-state `newLinkId`
+     *  column). An unreleased v30 created the table without that column on some test builds, so this
+     *  drops and recreates it: the table is a transient edit queue, so an empty table is the correct
+     *  state to arrive at, and a fresh v29 to v31 path never had a pending edit to preserve. */
+    val MIGRATION_30_31 = object : Migration(30, 31) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS `pending_metadata_edit`")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pending_metadata_edit` (" +
+                    "`linkId` TEXT NOT NULL, `userId` TEXT NOT NULL, `deviceUri` TEXT, " +
+                    "`newCaptureMs` INTEGER, `locationMode` TEXT NOT NULL, `lat` REAL, `lng` REAL, " +
+                    "`description` TEXT, `artist` TEXT, `copyright` TEXT, `enqueuedAt` INTEGER NOT NULL, " +
+                    "`newLinkId` TEXT, PRIMARY KEY(`linkId`))"
+            )
+        }
+    }
+
+    /** v31 to v32: face_scan gains a hi-res-swept marker, so the "find more photos" sweep re-checks
+     *  each faceless photo at the high-resolution detector setting at most once ever instead of
+     *  re-scanning the whole faceless set on every call. Additive with a false default: an existing
+     *  marker is read as not yet hi-res swept, so the first sweep after the upgrade looks at it once
+     *  and records that it has. */
+    val MIGRATION_31_32 = object : Migration(31, 32) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE face_scan ADD COLUMN hiResScanned INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    val MIGRATION_32_33 = object : Migration(32, 33) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE person ADD COLUMN isOther INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    /** v33 to v34: new `cluster_summary` table, one cached per-person centroid so an incremental
+     *  clustering pass can place a newly indexed face against the people already grouped without
+     *  re-reading every stored embedding. Additive and rebuildable: the cache derives entirely from the
+     *  `face` and `person` tables, so the empty table is the correct state to arrive at and a full
+     *  recluster refills it. Existing tables are untouched. */
+    val MIGRATION_33_34 = object : Migration(33, 34) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `cluster_summary` (`personId` INTEGER NOT NULL, " +
+                    "`userId` TEXT NOT NULL, `centroid` BLOB NOT NULL, `memberCount` INTEGER NOT NULL, " +
+                    "`modelVersion` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL DEFAULT 0, " +
+                    "PRIMARY KEY(`personId`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_cluster_summary_userId` " +
+                    "ON `cluster_summary` (`userId`)"
+            )
+        }
+    }
+
+    /** v34 to v35: new `pending_import` table, one row per Google Takeout media entry successfully
+     *  uploaded to Drive, so the resumable import worker survives a process kill and skips the entries
+     *  it already sent. Additive, and the empty table is the correct state to arrive at: a marker exists
+     *  only once an import uploads an entry, and nothing this migration can see stands in for an import a
+     *  person has not yet started. Existing tables are untouched. */
+    val MIGRATION_34_35 = object : Migration(34, 35) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pending_import` (" +
+                    "`zipId` TEXT NOT NULL, `entryName` TEXT NOT NULL, `linkId` TEXT NOT NULL, " +
+                    "`importedAt` INTEGER NOT NULL, PRIMARY KEY(`zipId`, `entryName`))"
+            )
+        }
+    }
+
+    /** v35 to v36: two new tables for the import review queue. `import_staged` holds one row per media
+     *  entry awaiting the user's review before upload, carrying its resolved metadata and a cached
+     *  thumbnail path; `import_history` records one row per completed run. Additive, and both empty
+     *  tables are the correct state to arrive at: a staged row exists only once a run is picked and
+     *  reviewed, and a history row only once a run finishes, so nothing this migration can see stands in
+     *  for either. Existing tables, `pending_import` included, are untouched. */
+    val MIGRATION_35_36 = object : Migration(35, 36) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `import_staged` (" +
+                    "`zipId` TEXT NOT NULL, `entryName` TEXT NOT NULL, `title` TEXT, " +
+                    "`dateMs` INTEGER, `lat` REAL, `lng` REAL, `description` TEXT, " +
+                    "`sizeBytes` INTEGER NOT NULL, `thumbPath` TEXT, `excluded` INTEGER NOT NULL, " +
+                    "`uploaded` INTEGER NOT NULL, `stagedAt` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`zipId`, `entryName`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_import_staged_zipId` " +
+                    "ON `import_staged` (`zipId`)"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `import_history` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `zipId` TEXT NOT NULL, " +
+                    "`fileName` TEXT NOT NULL, `importedAt` INTEGER NOT NULL, `total` INTEGER NOT NULL, " +
+                    "`uploaded` INTEGER NOT NULL, `skipped` INTEGER NOT NULL, `failed` INTEGER NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_import_history_importedAt` " +
+                    "ON `import_history` (`importedAt`)"
+            )
+        }
+    }
+
+    /** v36 to v37: the import ledger that backs undoing a run. `import_history` gains a `runId` tying
+     *  each summary to the per-photo rows, and a new `import_uploaded` table records one row per photo a
+     *  run sent to Drive, carrying its linkId and content sha1 so an undo moves exactly the photos still
+     *  matching what was uploaded. Additive: the ALTER leaves every existing history row intact with a
+     *  null runId, and the empty ledger is the correct state to arrive at, since a row exists only once a
+     *  run uploads a photo and nothing this migration can see stands in for a run a person has not yet
+     *  made. Existing tables are untouched. */
+    val MIGRATION_36_37 = object : Migration(36, 37) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE import_history ADD COLUMN runId TEXT")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `import_uploaded` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `runId` TEXT NOT NULL, " +
+                    "`linkId` TEXT NOT NULL, `sha1` TEXT NOT NULL, `name` TEXT, `dateMs` INTEGER, " +
+                    "`undone` INTEGER NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_import_uploaded_runId` " +
+                    "ON `import_uploaded` (`runId`)"
+            )
+        }
+    }
+
+    /** v37 to v38: the import ledger gains an `alreadyInDrive` flag so a deduped photo, one the run found
+     *  already in Drive and did not upload, is recorded against the run under the pre-existing link with
+     *  the flag set; the history can then badge it and an undo skips it rather than trashing a photo the
+     *  run never created. The ADD carries a `DEFAULT 0`, required for a NOT NULL column on a populated
+     *  table, so every existing ledger row reads back as a real upload. The dead `pending_import` table
+     *  is dropped, superseded by `import_staged` and `import_uploaded`; nothing reads it, so the drop is
+     *  safe. Every other table is untouched. */
+    val MIGRATION_37_38 = object : Migration(37, 38) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE import_uploaded ADD COLUMN alreadyInDrive INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("DROP TABLE IF EXISTS pending_import")
+        }
+    }
+
+    /** v38 to v39: the import review gains album recreation and an upfront already-in-Drive badge.
+     *  `import_staged` gets a nullable `albumName` (the export album folder an entry came from, null for a
+     *  timeline entry) and an `alreadyInDrive` flag set at stage time, its ADD carrying a `DEFAULT 0`
+     *  required for a NOT NULL column on a populated table so every existing staged row reads back as not
+     *  yet in Drive. A new `import_album_member` table records one row per (uploaded photo, album) pair so
+     *  a later pass can recreate each export album from the links a run created. Additive, and the empty
+     *  membership table is the correct state to arrive at: a row exists only once a run uploads a photo that
+     *  belonged to an album, and nothing this migration can see stands in for one. Existing tables are
+     *  otherwise untouched. */
+    val MIGRATION_38_39 = object : Migration(38, 39) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE import_staged ADD COLUMN albumName TEXT")
+            db.execSQL("ALTER TABLE import_staged ADD COLUMN alreadyInDrive INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `import_album_member` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `runId` TEXT NOT NULL, " +
+                    "`albumName` TEXT NOT NULL, `linkId` TEXT NOT NULL)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_import_album_member_runId` " +
+                    "ON `import_album_member` (`runId`)"
+            )
+        }
+    }
+
+    /** v39 to v40: new `image_embedding` table, one CLIP image embedding per photo backing on-device
+     *  semantic search. The row's presence doubles as the "already embedded" marker, so a re-run skips a
+     *  photo it has already indexed without a separate scan table. Additive and rebuildable: the empty
+     *  table is the correct state to arrive at, since an embedding comes from re-reading images this
+     *  migration cannot see, and the first indexing pass after the upgrade re-derives it. Existing tables
+     *  are untouched. */
+    val MIGRATION_39_40 = object : Migration(39, 40) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `image_embedding` (`userId` TEXT NOT NULL, " +
+                    "`photoKey` TEXT NOT NULL, `embedding` BLOB NOT NULL, " +
+                    "`modelVersion` INTEGER NOT NULL, `indexedAt` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `photoKey`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_image_embedding_userId` " +
+                    "ON `image_embedding` (`userId`)"
+            )
+        }
+    }
+
+    /** v40 to v41: the near-duplicate finder moves from a 64-bit difference hash to a 256-bit DCT
+     *  fingerprint carrying a quality score and a coarse colour signature (see
+     *  [eu.akoos.photos.util.PdqHash]). The old single-column `perceptual_hash` cache cannot hold the new
+     *  shape, and every row would have to be recomputed under the new algorithm anyway, so the rebuildable
+     *  cache is dropped and recreated empty; the background filler repopulates it on the next open. Every
+     *  other table is untouched. */
+    val MIGRATION_40_41 = object : Migration(40, 41) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS `perceptual_hash`")
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `perceptual_hash` (`key` TEXT NOT NULL, " +
+                    "`h0` INTEGER NOT NULL, `h1` INTEGER NOT NULL, `h2` INTEGER NOT NULL, " +
+                    "`h3` INTEGER NOT NULL, `quality` INTEGER NOT NULL, `color` BLOB NOT NULL, " +
+                    "`isCloud` INTEGER NOT NULL, `freshness` TEXT NOT NULL, " +
+                    "`algoVersion` INTEGER NOT NULL, `computedAt` INTEGER NOT NULL, PRIMARY KEY(`key`))"
+            )
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40, MIGRATION_40_41)
 }

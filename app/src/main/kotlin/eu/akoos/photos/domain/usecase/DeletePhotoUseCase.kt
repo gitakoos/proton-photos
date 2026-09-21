@@ -70,7 +70,7 @@ class DeletePhotoUseCase @Inject constructor(
      *     overlay rather than appearing as a generic cloud-only photo.
      */
     suspend operator fun invoke(
-        userId: UserId,
+        userId: UserId?,
         items: List<GalleryItem>,
         freeUpSpace: Boolean,
         deleteFromCloud: Boolean,
@@ -128,6 +128,13 @@ class DeletePhotoUseCase @Inject constructor(
 
         // No local trash to wait on → run cloud delete (if any) immediately.
         if (cloudLinkIds.isNotEmpty()) {
+            // A cloud trash needs a signed-in user. Local-only mode never yields cloud targets
+            // (computeDeleteTargets produces no linkIds without a Synced/CloudOnly item), so this
+            // only guards a caller that passes cloud links with no session, never a real guest flow.
+            if (userId == null) {
+                Log.w(TAG, "Cloud delete requested with no signed-in user; skipping ${cloudLinkIds.size} link(s)")
+                return Result.CloudDeleteFailed
+            }
             try {
                 val outcome = cloudRepo.deleteFiles(userId, cloudLinkIds)
                 // The bulk endpoint can accept the batch yet reject individual links (per-link
@@ -167,13 +174,17 @@ class DeletePhotoUseCase @Inject constructor(
      * deferred cloud delete and updates SyncState for the items whose local copy was trashed.
      */
     suspend fun completeAfterPermissionGranted(
-        userId: UserId,
+        userId: UserId?,
         cloudLinkIds: List<String>,
         items: List<GalleryItem>,
         freeUpSpace: Boolean,
         hide: Boolean = false,
     ): Result {
         if (cloudLinkIds.isNotEmpty()) {
+            if (userId == null) {
+                Log.w(TAG, "Cloud delete requested with no signed-in user; skipping ${cloudLinkIds.size} link(s)")
+                return Result.CloudDeleteFailed
+            }
             try {
                 val outcome = cloudRepo.deleteFiles(userId, cloudLinkIds)
                 if (outcome.trashedLinkIds.isEmpty()) {
@@ -273,6 +284,22 @@ class DeletePhotoUseCase @Inject constructor(
                 item is GalleryItem.Synced && hide -> SyncStatus.HIDDEN
                 item is GalleryItem.Synced && freeUpSpace -> SyncStatus.CLOUD_ONLY
                 else -> null
+            }
+
+        /**
+         * Whether this delete makes [item] disappear from the gallery, as opposed to converting it into
+         * a photo that is still listed.
+         *
+         * Only three of the five delete choices actually remove anything: a Synced photo keeps a copy
+         * unless BOTH sides go, so freeing its device space leaves a cloud photo behind and trashing its
+         * cloud copy leaves the device file behind. Both of those keep the item on screen, in a
+         * different form, which is why a caller cannot treat "delete finished" as "the photo is gone".
+         */
+        fun removesFromGallery(item: GalleryItem, freeUpSpace: Boolean, deleteFromCloud: Boolean): Boolean =
+            when (item) {
+                is GalleryItem.LocalOnly -> freeUpSpace
+                is GalleryItem.CloudOnly -> deleteFromCloud
+                is GalleryItem.Synced -> freeUpSpace && deleteFromCloud
             }
     }
 }

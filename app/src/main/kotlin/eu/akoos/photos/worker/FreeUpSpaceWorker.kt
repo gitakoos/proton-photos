@@ -42,6 +42,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
+import eu.akoos.photos.util.DeviceHealthPolicy
 import java.util.concurrent.TimeUnit
 
 @HiltWorker
@@ -50,16 +51,31 @@ class FreeUpSpaceWorker @AssistedInject constructor(
     @Assisted params: WorkerParameters,
     private val freeUpSpace: FreeUpSpaceUseCase,
     private val accountManager: AccountManager,
+    private val deviceHealth: DeviceHealthPolicy,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        // Skip reclaiming device space while the OS is throttling to cool the device; freeing space
+        // is never urgent and the hourly cadence retries once the phone is cool.
+        if (deviceHealth.thermallyThrottled()) return Result.success()
         val userId = accountManager.getPrimaryUserId().first() ?: return Result.failure()
         val intervalMs = inputData.getLong(KEY_INTERVAL_MS, NO_INTERVAL_MS)
         if (!isUsableInterval(intervalMs)) {
             Log.w(TAG, "Skipping sweep: request carries no usable interval ($intervalMs)")
             return Result.failure()
         }
-        val olderThanMs = System.currentTimeMillis() - intervalMs
+        val nowMs = System.currentTimeMillis()
+        val olderThanMs = nowMs - intervalMs
+        // The sweep deletes a device copy purely on the strength of sync_state calling the photo
+        // SYNCED, which is only worth acting on while reconcile has recently checked that against
+        // the cloud. Backup being off cancels the background sync that drives reconcile, so an
+        // unopened app can otherwise keep sweeping hourly against a frozen picture of Drive and
+        // reclaim the device copy of a photo that was deleted from Drive weeks ago.
+        val verifiedAtMs = context.settingsDataStore.data.first()[SettingsKeys.cloudVerifiedAtKey(userId.id)]
+        if (!isCloudStateFreshEnough(verifiedAtMs, nowMs)) {
+            Log.w(TAG, "Skipping sweep: cloud state last verified at $verifiedAtMs, now $nowMs")
+            return Result.success()
+        }
         return try {
             // The automatic sweep protects copies the user placed on the device (downloads, undone
             // deletes); only the manual button reclaims those.
@@ -81,7 +97,7 @@ class FreeUpSpaceWorker @AssistedInject constructor(
             // Categorise failures so we only burn the retry budget on transient ones.
             // Permanent failures (file disappeared mid-sweep, MediaStore revoked write
             // access for a foreign-owned URI, the SAF tree we picked got abandoned by
-            // the OS) won't fix themselves on the next attempt — three retries against
+            // the OS) won't fix themselves on the next attempt; three retries against
             // a permanent error just chews battery and timer slots for nothing.
             // Transient failures (IO error, database lock contention) get the existing
             // 3-attempt budget.
@@ -110,6 +126,33 @@ class FreeUpSpaceWorker @AssistedInject constructor(
          * a device copy is irreversible, so a sweep nobody asked for is worse than no sweep.
          */
         fun isUsableInterval(intervalMs: Long): Boolean = intervalMs > 0L
+
+        /**
+         * How recently reconcile must have checked sync_state against a fully-listed cloud library
+         * for the automatic sweep to delete anything on the strength of it.
+         *
+         * Seven days rather than something tighter because reconcile also runs on app launch, so
+         * anyone who opens the app even weekly stays inside the window and the feature keeps
+         * working. The case this shuts out is the app going untouched for far longer with backup
+         * off, which is exactly when sync_state stops being refreshed at all.
+         */
+        internal const val CLOUD_FRESHNESS_WINDOW_MS = 7L * 24 * 60 * 60 * 1000
+
+        /**
+         * Whether [verifiedAtMs] is recent enough to sweep against. Pure and side-effect-free so
+         * the freshness gate can be pinned by a plain JVM test.
+         *
+         * Every uncertain answer is false, because the cost is asymmetric: a blocked sweep only
+         * means storage is not reclaimed automatically and the manual button still works, while an
+         * unblocked one can delete a photo's last copy. So an absent timestamp (a fresh install, or
+         * an install predating it) does NOT pass, and neither does one in the future, which is what
+         * a clock moved backwards looks like and would otherwise read as infinitely fresh.
+         */
+        fun isCloudStateFreshEnough(verifiedAtMs: Long?, nowMs: Long): Boolean {
+            if (verifiedAtMs == null || verifiedAtMs <= 0L) return false
+            if (verifiedAtMs > nowMs) return false
+            return nowMs - verifiedAtMs < CLOUD_FRESHNESS_WINDOW_MS
+        }
 
         /**
          * The constraint set every scheduled sweep runs under. Pure and side-effect-free so it can

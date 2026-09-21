@@ -37,7 +37,26 @@ data class Album(
     val sharedByEmail: String? = null,
     /** The volume this album lives in; may differ from the current user's own volume for shared-with-me albums. */
     val volumeId: String? = null,
+    /** This user's own permission bitmask on the album, for shared-with-me albums only. Drive
+     *  issues 4 (viewer) or 6 (viewer + editor); null means it was never learned, which happens for
+     *  an album the user owns and for rows cached before the field existed. */
+    val permissions: Long? = null,
 ) {
     val isShared: Boolean get() = sharingShareId != null
     val isSharedWithMe: Boolean get() = sharedByEmail != null
+
+    /**
+     * Whether this user may add photos to the album. Owning it is enough; otherwise the write bit
+     * has to be present in the permission Drive granted.
+     *
+     * Null permissions on a shared album read as NO, deliberately. An unknown grant is not an
+     * editor grant, and offering an add that the server then refuses is worse than not offering it.
+     */
+    val canAddPhotos: Boolean
+        get() = !isSharedWithMe || ((permissions ?: 0L) and PERMISSION_WRITE) != 0L
+
+    companion object {
+        /** The write bit inside Drive's share permission bitmask: 4 = viewer, 6 = viewer + editor. */
+        const val PERMISSION_WRITE = 2L
+    }
 }

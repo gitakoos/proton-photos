@@ -40,6 +40,8 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.heightIn
@@ -136,6 +138,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.derivedStateOf
@@ -166,14 +169,13 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -187,16 +189,31 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.usecase.AlbumSortMode
 import eu.akoos.photos.domain.usecase.CategorizeItem
+import eu.akoos.photos.domain.usecase.CloudMetadataSaveController
+import eu.akoos.photos.domain.usecase.CloudSavePhase
 import eu.akoos.photos.presentation.common.AlbumMembership
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.albumMembershipState
 import eu.akoos.photos.presentation.common.anyLocalOnly
+import eu.akoos.photos.presentation.common.deleteConfirmRows
+import eu.akoos.photos.presentation.common.deleteRowDescription
+import eu.akoos.photos.presentation.common.deleteRowTitleRes
 import eu.akoos.photos.presentation.common.ConfirmSheet
+import eu.akoos.photos.presentation.common.HideConfirmSheet
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
+import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.common.CloudMetadataSaveDrawer
+import eu.akoos.photos.presentation.common.PrimaryButton
+import eu.akoos.photos.presentation.common.SecondaryButton
+import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.common.message
+import eu.akoos.photos.presentation.common.shareOutcome
 import eu.akoos.photos.util.sanitizeErrorMessage
+import eu.akoos.photos.util.copySensitiveText
 import eu.akoos.photos.presentation.albums.AlbumsScreen
 import eu.akoos.photos.presentation.albums.AlbumsViewModel
 import eu.akoos.photos.presentation.shared.SharedScreen
@@ -219,12 +236,11 @@ import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.theme.pillShape
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-
-internal val pillShape = RoundedCornerShape(999.dp)
 
 internal fun formatCount(n: Int): String = when {
     n >= 1_000_000 -> "${n / 1_000_000}M"
@@ -245,6 +261,7 @@ internal fun buildContentFilterSummary(
     videosLabel: String,
     localLabel: String,
     backedUpLabel: String,
+    cloudLabel: String,
 ): String? {
     if (filter == ContentFilter()) return null
     val parts = buildList {
@@ -256,6 +273,7 @@ internal fun buildContentFilterSummary(
         when (filter.syncStatus) {
             SyncStatusFilter.LocalOnly -> add(localLabel)
             SyncStatusFilter.BackedUp  -> add(backedUpLabel)
+            SyncStatusFilter.CloudOnly -> add(cloudLabel)
             else -> {}
         }
         if (filter.year != null) add("${filter.year}")
@@ -263,10 +281,40 @@ internal fun buildContentFilterSummary(
             val monthName = java.text.SimpleDateFormat("MMM", java.util.Locale.getDefault()).format(
                 java.util.Calendar.getInstance().apply { set(java.util.Calendar.MONTH, filter.month - 1) }.time
             )
-            add(if (filter.day != null) "$monthName ${filter.day}" else monthName)
+            add(
+                when {
+                    filter.day != null && filter.dayEnd != null -> "$monthName ${filter.day}-${filter.dayEnd}"
+                    filter.day != null -> "$monthName ${filter.day}"
+                    else -> monthName
+                }
+            )
         }
     }
     return parts.joinToString(" · ").ifEmpty { null }
+}
+
+/**
+ * Where the system back gesture goes from the gallery's top-level pager (#89).
+ *
+ * The three tabs are pages of one destination rather than separate back-stack entries, so nothing
+ * pops them. Standing on a secondary tab, back returns to the configured landing tab. Standing on
+ * the landing tab it is left alone and the app exits, which is the right answer for back at the
+ * start of the shell.
+ *
+ * Selection mode is excluded so the selection handler keeps the press and clears the selection
+ * instead. That handler is composed after this one and so already wins on registration order; the
+ * check here holds the behaviour even if the two are ever reordered.
+ *
+ * Returns the page to return to, or null when back is not intercepted. [landingTab] is coerced into
+ * the pager's range so a stray stored value can't target a page that isn't there.
+ */
+internal fun galleryBackTarget(
+    currentPage: Int,
+    landingTab: Int,
+    isSelectionMode: Boolean,
+): Int? {
+    if (isSelectionMode) return null
+    return landingTab.coerceIn(0, 2).takeIf { it != currentPage }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -274,7 +322,19 @@ internal fun buildContentFilterSummary(
 fun GalleryScreen(
     onPhotoClick: (items: List<GalleryItem>, index: Int, hiddenCloudLinkIds: Set<String>) -> Unit,
     onAlbumClick: (Album) -> Unit = {},
+    /** Opens an owned album with its share drawer already up, from the Albums-tab long-press sheet. */
+    onAlbumShareClick: (Album) -> Unit = {},
+    /** Opens an album to carry out one action on arrival, from the Albums-tab long-press sheet. */
+    onAlbumActionClick: (
+        album: Album,
+        action: eu.akoos.photos.presentation.albums.AlbumOpenAction,
+    ) -> Unit = { _, _ -> },
     onDeviceFolderClick: (bucketName: String) -> Unit = {},
+    /** Opens a device folder to carry out one action on arrival, from the Albums-tab long-press sheet. */
+    onDeviceFolderActionClick: (
+        bucketName: String,
+        action: eu.akoos.photos.presentation.folders.DeviceFolderOpenAction,
+    ) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit,
     /** Opens the Activity screen on its Uploads tab, from the avatar's active-upload indicator. */
     onOpenUploads: () -> Unit = {},
@@ -288,6 +348,21 @@ fun GalleryScreen(
     /** Opens the Timeline filter screen — reached from the Albums tab's filter button now that
      *  the obsolete All/Backed-up album filter is gone (device + cloud albums show together). */
     onOpenTimelineFilter: () -> Unit = {},
+    /** Opens the date + place editor for the current multi-selection. Gated to an all-device-only
+     *  selection (matching the Strip action), so every handed item is editable. */
+    onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
+    onCreateCollage: (items: List<GalleryItem>) -> Unit = {},
+    /** Hands the single selected video to the GIF maker. The action is offered only for a one-item
+     *  selection that is a video with a local file, so the item always carries a readable URI. */
+    onCreateGif: (video: GalleryItem) -> Unit = {},
+    /** Opens the device photo picker for the logged-out "New folder" flow, carrying the folder name
+     *  the user just typed. The picked device photos come back via [newFolderPickedItems]. */
+    onStartNewFolderPick: (String) -> Unit = {},
+    /** The device photos the picker returned for the new folder, paired with [newFolderPickedName].
+     *  Consumed once into a move, then cleared via [onNewFolderPickConsumed]. */
+    newFolderPickedItems: List<GalleryItem>? = null,
+    newFolderPickedName: String? = null,
+    onNewFolderPickConsumed: () -> Unit = {},
     /** Non-null when the user tapped the home-screen photo widget. The screen waits for
      *  the items flow to populate, finds the matching item, and forwards to
      *  [onPhotoClick]. [onPendingWidgetPhotoConsumed] is invoked exactly once after
@@ -305,10 +380,17 @@ fun GalleryScreen(
     val albumsState by albumsViewModel.uiState.collectAsStateWithLifecycle()
     val sharedViewModel: SharedViewModel = hiltViewModel()
     val sharedUiState by sharedViewModel.uiState.collectAsStateWithLifecycle()
+    // Live view of the app-scoped cloud-metadata-save batch. Null once nothing is running or the
+    // drawer was sent to the background, so the sheet below mounts only while there is progress to show.
+    val cloudSaveVm: CloudSaveDrawerViewModel = hiltViewModel()
+    val cloudSaveUi by cloudSaveVm.ui.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     val appColors = AppColors.current
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    // People rail: the face bar is open either because the chip is toggled on (this flag) or because a
+    // person is selected. Local UI state, the person filter itself lives in the ViewModel.
+    var peopleExpanded by rememberSaveable { mutableStateOf(false) }
     val gridState = rememberLazyGridState()
     // Mosaic uses a staggered grid; its scroll state is hoisted here so the screen-level behaviours
     // keyed on scroll position (re-tap scroll-to-top, overlay auto-hide, look-ahead prefetch) follow
@@ -317,10 +399,11 @@ fun GalleryScreen(
     val mosaicGrid by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.MOSAIC_GRID] ?: false }
     }.collectAsState(initial = false)
-    // Text labels under the selection-mode dock buttons; on by default, toggled in Settings.
-    val showSelectionLabels by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.SHOW_SELECTION_LABELS] ?: true }
-    }.collectAsState(initial = true)
+    // Opt-in: keep each bottom tab where it was last scrolled when switching between them, so only a
+    // re-tap of the already-active tab returns to the top. Off by default, so any tab tap resets to top.
+    val keepScrollOnTabSwitch by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.KEEP_SCROLL_ON_TAB_SWITCH] == true }
+    }.collectAsStateWithLifecycle(false)
     // The scroll state the visible Photos grid is driven by; everything below observes this so the
     // mosaic path is no longer inert.
     val activeFirstVisibleItemIndex: () -> Int = {
@@ -333,7 +416,8 @@ fun GalleryScreen(
     val tabScope = rememberCoroutineScope()
     // Three top-level tabs (Photos / Albums / Shared), hosted in a pager so they can be swiped
     // between as well as tapped. Seeded from the saved tab so a config change restores the page.
-    val pagerState = rememberPagerState(initialPage = selectedTab) { 3 }
+    // A local-only session (no account) drops the cloud-only Shared page, leaving Photos + Albums.
+    val pagerState = rememberPagerState(initialPage = selectedTab) { if (state.isSignedIn) 3 else 2 }
     // Two-way sync between the pager and [selectedTab] (which drives the header rail + dock highlight).
     // Settling on a page — by swipe or by the dock's animateScrollToPage — adopts it as the active tab;
     // a tap path updates selectedTab and animates the pager below.
@@ -350,15 +434,29 @@ fun GalleryScreen(
         if (landingTabApplied) return@LaunchedEffect
         landingTabApplied = true
         val landing = context.settingsDataStore.data
-            .map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, 2) }
+            .map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, if (state.isSignedIn) 2 else 1) }
             .first()
         if (landing != selectedTab) {
             selectedTab = landing
             pagerState.scrollToPage(landing)
         }
     }
+    // The same preference, observed live, as the target the back gesture returns to (#89). Separate
+    // from the seeding effect above, which reads it once and must keep its one-shot guard: this one
+    // has to stay current, so picking another landing tab in Settings retargets back straight away
+    // rather than at the next start. Initial 0 matches the seeding default.
+    val landingTab by remember {
+        context.settingsDataStore.data.map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, if (state.isSignedIn) 2 else 1) }
+    }.collectAsState(initial = 0)
     var sharedFilter by remember { mutableStateOf(SharedFilter.SharedWithMe) }
     var albumFilter by remember { mutableStateOf(AlbumDisplayFilter.All) }
+    // Albums-tab inline search: the typed query (kept across a config change) and whether the rail's
+    // search bar is open. Hoisted beside the filter so the header rail and the Albums page read one
+    // source. Arranging takes the whole rail, so it and the search are mutually exclusive: opening the
+    // arrange mode clears an open search, and while it is on the rail hides the search entry.
+    var albumQuery by rememberSaveable { mutableStateOf("") }
+    var albumSearchActive by remember { mutableStateOf(false) }
+    var albumReorderActive by remember { mutableStateOf(false) }
     // Albums-tab view filter: default narrowing, a remember-last toggle, and the last picked value.
     val albumsDefaultFilter by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0 }
@@ -369,6 +467,14 @@ fun GalleryScreen(
     val albumsLastFilter by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_LAST_FILTER] ?: 0 }
     }.collectAsState(initial = 0)
+    // Only drives the sheet's selection; the grid reads this key on its own side.
+    val albumsSortMode by remember {
+        context.settingsDataStore.data.map { AlbumSortMode.fromOrdinal(it[SettingsKeys.ALBUMS_SORT_MODE]) }
+    }.collectAsState(initial = AlbumSortMode.Default)
+    // How many album covers sit per row on the Albums tab (default 2). Seeded from the synchronous
+    // boot mirror so returning to the tab opens at the stored size on the first frame instead of
+    // flashing 2 columns and letting the cover cards' animateItem reshuffle into the real layout.
+    val albumColumns = rememberAlbumColumns()
     // Re-resolve the filter each time the pager reaches the Albums page: last-used when remembering,
     // otherwise the configured default. Leaving and returning therefore resets to the default
     // (remember-last off) or restores the last pick (remember-last on), rather than holding whatever
@@ -476,11 +582,25 @@ fun GalleryScreen(
     }
     val notificationsBlockedMsg = stringResource(R.string.notifications_blocked_snackbar)
     val openSettingsAction = stringResource(R.string.notifications_blocked_open_settings)
+    // Back-button intercept on a secondary top-level tab: return to the landing tab rather than
+    // leave the app (#89). The tabs are pages of this one destination, so the graph has nothing to
+    // pop and back would otherwise exit from Albums or Shared. Settled page, not current, so a
+    // half-finished swipe doesn't decide the answer. This composes BEFORE the selection handler on
+    // purpose: back dispatch runs the callbacks in reverse registration order, so the later one
+    // wins and selection mode keeps the press.
+    val backTarget = galleryBackTarget(pagerState.settledPage, landingTab, state.isSelectionMode)
+    androidx.activity.compose.BackHandler(enabled = backTarget != null) {
+        val target = backTarget ?: return@BackHandler
+        // Set the tab and slide the pager, and nothing else. Routing this through the dock's
+        // onTabSelected would also force the destination grid to item 0 and throw away the
+        // scroll position the tab was left at.
+        selectedTab = target
+        tabScope.launch { pagerState.animateScrollToPage(target) }
+    }
     // Back-button intercept in selection mode: clear the selection instead of letting
-    // the OS pop the screen out of the gallery. Without this guard the user lost their
-    // multi-select work every time they hit the system back button looking for a
-    // "cancel selection" affordance (the actual cancel pill is in the selection header
-    // but isn't discoverable for a back-press user).
+    // the OS pop the screen out of the gallery. Without this guard a back press aimed at
+    // "cancel selection" throws away the multi-select work, since the drawer's close bubble
+    // is not what a back-press user reaches for.
     androidx.activity.compose.BackHandler(enabled = state.isSelectionMode) {
         viewModel.clearSelection()
     }
@@ -505,8 +625,12 @@ fun GalleryScreen(
 
     LaunchedEffect(Unit) {
         permissionLauncher.launch(mediaPermissions)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        // Ask for the notification permission at most once per install. Re-launching on every return
+        // to the gallery re-fired an instant denial (no dialog once the user has chosen), which
+        // re-showed the "notifications off" snackbar on every tab switch or photo open.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && viewModel.shouldAskNotificationPermission()) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            viewModel.markNotificationPermissionAsked()
         }
     }
 
@@ -659,8 +783,30 @@ fun GalleryScreen(
             .onFailure { viewModel.clearPendingStripIntent() }
     }
 
+    // ── Move-to-folder write-permission launcher ──────────────────────────────
+    // Moving a file the app does not own needs a one-shot system write consent; RESULT_OK replays
+    // the move on the deferred URIs (mirrors the delete + strip launchers above). The intent here is
+    // an IntentSender straight from the use case, not a PendingIntent, so it is launched directly.
+    val pendingMoveIntent by viewModel.pendingMoveIntent.collectAsStateWithLifecycle()
+    val moveToFolderPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onMovePermissionGranted()
+        else viewModel.clearPendingMove()
+    }
+    LaunchedEffect(pendingMoveIntent) {
+        val sender = pendingMoveIntent ?: return@LaunchedEffect
+        runCatching { moveToFolderPermissionLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
+            .onFailure { viewModel.clearPendingMove() }
+    }
+
     // ── Multi-select delete sheet ─────────────────────────────────────────────
     var showMultiDeleteSheet by remember { mutableStateOf(false) }
+    // The selection's hide split while its confirmation is up, null when none is. Holding the split
+    // rather than a flag is what lets the sheet describe the photos the tap was made on.
+    var hideConfirmSplit by remember {
+        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+    }
     val multiDeleteState = state.multiDeleteState
 
     LaunchedEffect(multiDeleteState) {
@@ -682,9 +828,9 @@ fun GalleryScreen(
         }
     }
 
-    // Hide has its own state channel (separate spinner on the selection bar);
-    // surface its terminal states here. On success, disclose that backed-up
-    // photos keep their Drive copies — hiding only affects this device's gallery.
+    // Hide has its own state channel, separate from the delete row's spinner; surface its
+    // terminal states here. On success, disclose that backed-up photos keep their Drive
+    // copies, since hiding only affects this device's gallery.
     val multiHideState = state.multiHideState
     LaunchedEffect(multiHideState) {
         if (multiHideState is MultiDeleteState.Done) {
@@ -706,6 +852,14 @@ fun GalleryScreen(
     }
 
     val multiDownloadState = state.multiDownloadState
+    // A download reports itself the moment it starts. Its progress lives on the Activity screen,
+    // so without this the selection clears and nothing on this screen says the work began. Keyed
+    // on the transition into Working rather than on the state, which would fire on every tick.
+    val downloadStarted = multiDownloadState is MultiDownloadState.Working
+    val downloadStartedMsg = stringResource(R.string.download_started_background)
+    LaunchedEffect(downloadStarted) {
+        if (downloadStarted) snackbarHostState.showSnackbar(downloadStartedMsg)
+    }
     LaunchedEffect(multiDownloadState) {
         if (multiDownloadState is MultiDownloadState.Done) {
             val msg = if (multiDownloadState.failed == 0)
@@ -721,6 +875,14 @@ fun GalleryScreen(
     }
 
     val multiShareState = state.multiShareState
+    // Photos that could not be prepared never reach the chooser, so the batch says what it managed.
+    LaunchedEffect(multiShareState) {
+        if (multiShareState is MultiShareState.Done) {
+            shareOutcome(multiShareState.shared, multiShareState.failed).message()
+                ?.let { snackbarHostState.showSnackbar(it.resolve(context)) }
+            viewModel.resetMultiShareState()
+        }
+    }
     // A mixed selection that includes cloud-only photos has to download those originals before they
     // can leave the app, so we warn first. A pure-local selection shares straight away.
     var showShareCloudWarning by remember { mutableStateOf(false) }
@@ -750,6 +912,20 @@ fun GalleryScreen(
         }
     }
 
+    // A batch favourite says nothing when every heart lands: the tiles and the drawer row show it.
+    // Only a write Drive refused reaches here, since the hearts go back with no other explanation.
+    LaunchedEffect(Unit) {
+        viewModel.favoriteFailure.collect { snackbarHostState.showSnackbar(it) }
+    }
+
+    // A completed move to a device folder confirms where the files landed. One-shot collect.
+    val movedToFolderTpl = stringResource(R.string.moved_to_folder)
+    LaunchedEffect(Unit) {
+        viewModel.moveConfirmation.collect { folderName ->
+            snackbarHostState.showSnackbar(movedToFolderTpl.format(folderName))
+        }
+    }
+
     // ── Unified share drawer (selection) ──────────────────────────────────────
     // The toolbar Share opens the same menu the viewer uses: Send to another app,
     // Share with people (→ add-to-album), and — only for a single cloud-backed photo —
@@ -759,7 +935,6 @@ fun GalleryScreen(
     val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val manageLinkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
-    val clipboard = LocalClipboardManager.current
     val linkCopiedMsg = stringResource(R.string.share_link_copied)
     val passwordSetMsg = stringResource(R.string.share_password_set)
     val passwordRemovedMsg = stringResource(R.string.share_password_removed)
@@ -784,8 +959,40 @@ fun GalleryScreen(
     // ── Add-to-album multi-action ─────────────────────────────────────────────
     // Drives the picker sheet, the consent dialog and the new-album inline create.
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
+    var showAddToPersonSheet by remember { mutableStateOf(false) }
     var showCreateAlbumInline by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // ── Move-to-folder multi-action ───────────────────────────────────────────
+    // The target picker (existing folders + New folder) and the typed-name dialog it hands off to.
+    var showMoveToFolderSheet by remember { mutableStateOf(false) }
+    var showNewFolderDialog by remember { mutableStateOf(false) }
+    val moveTargetFolders by viewModel.moveTargetFolders.collectAsStateWithLifecycle()
+
+    // ── New device folder (logged-out) ────────────────────────────────────────
+    // The Albums-tab "New folder" pill opens a name dialog; on confirm the device photo picker opens,
+    // and the picked photos come back via newFolderPickedItems to be moved into DCIM/<name>/.
+    var showNewFolderNameDialog by remember { mutableStateOf(false) }
+
+    // Move the device photos the picker handed back into the just-named folder, then clear the carrier
+    // so a back-pop doesn't replay it. Mirrors the collage pendingAdd handoff; only LocalOnly/Synced
+    // carry a device uri to move.
+    LaunchedEffect(newFolderPickedItems) {
+        val items = newFolderPickedItems
+        val name = newFolderPickedName
+        if (items != null && name != null) {
+            val uris = items.mapNotNull {
+                when (it) {
+                    is GalleryItem.LocalOnly -> it.local.uri
+                    is GalleryItem.Synced -> it.local.uri
+                    else -> null
+                }
+            }
+            if (uris.isNotEmpty()) viewModel.createFolderWithPhotos(name, uris)
+            onNewFolderPickConsumed()
+        }
+    }
 
     // No MediaStore consent dialog: add-to-album is a DataStore append, not a file move.
 
@@ -802,8 +1009,9 @@ fun GalleryScreen(
                 val msg: String? = when {
                     // Genuine failures the album couldn't accept — disclose the skip count so the
                     // user doesn't think the missing items disappeared.
-                    addToAlbumState.skipped > 0 -> context.getString(
-                        R.string.gallery_add_to_album_partial,
+                    addToAlbumState.skipped > 0 -> context.resources.getQuantityString(
+                        R.plurals.gallery_add_to_album_partial,
+                        addToAlbumState.skipped,
                         cloudAdded, addToAlbumState.albumName, addToAlbumState.skipped,
                     )
                     // Anything queued to upload-then-join now drives the live progress sheet, so the
@@ -849,6 +1057,7 @@ fun GalleryScreen(
 
     val isOnlineNow by viewModel.isOnline.collectAsStateWithLifecycle()
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
+    val newsUnread by viewModel.newsUnread.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -877,8 +1086,18 @@ fun GalleryScreen(
                     modifier = Modifier.fillMaxSize(),
                     indicator = {}
                 ) {
-                    when {
-                        state.isLoading && state.filteredItems.isEmpty() ->
+                    // Coarse phase so the cross-fade fires only on a real skeleton/empty/content change,
+                    // never on scroll or a thumbnail update. The grid's scroll state is remembered
+                    // outside this block, so a fade never resets the position.
+                    val galleryPhase = when {
+                        state.isLoading && state.filteredItems.isEmpty() -> 0
+                        state.filteredItems.isEmpty() && state.items.isNotEmpty() -> 1
+                        state.filteredItems.isEmpty() -> 2
+                        else -> 3
+                    }
+                    Crossfade(targetState = galleryPhase, label = "galleryContent") { phase ->
+                    when (phase) {
+                        0 ->
                             // Skeleton placeholder grid — matches the 3-col PhotoGrid layout so
                             // there's no visual jump when real content arrives.
                             LazyVerticalGrid(
@@ -895,7 +1114,7 @@ fun GalleryScreen(
                                     )
                                 }
                             }
-                        state.filteredItems.isEmpty() && state.items.isNotEmpty() ->
+                        1 ->
                             // A category / content filter matched nothing. Show a neutral "no
                             // matches" line — NOT the "sync your photos" empty state, which wrongly
                             // implies the whole library is empty when it is only filtered. The
@@ -906,7 +1125,7 @@ fun GalleryScreen(
                                     .fillMaxSize()
                                     .padding(top = headerHeightDp),
                             )
-                        state.filteredItems.isEmpty() ->
+                        2 ->
                             EmptyState(
                                 title = stringResource(R.string.gallery_empty_title),
                                 subtitle = stringResource(R.string.gallery_empty_subtitle),
@@ -950,16 +1169,28 @@ fun GalleryScreen(
                                 onDismissDenseGridWarning = viewModel::dismissDenseGridWarning,
                             )
                     }
+                    }
                 }
             }
             1 -> AlbumsScreen(
                 topPadding = headerHeightDp,
                 gridState = albumsGridState,
+                columns = albumColumns,
                 onAlbumClick = onAlbumClick,
+                onAlbumShareClick = onAlbumShareClick,
+                onAlbumActionClick = onAlbumActionClick,
                 onDeviceFolderClick = onDeviceFolderClick,
+                onDeviceFolderActionClick = onDeviceFolderActionClick,
+                onHideDeviceFolder = viewModel::requestHideFolder,
                 onMemoriesClick = onMemoriesClick,
                 createRequestSignal = albumCreateSignal,
                 displayFilter = albumFilter,
+                query = albumQuery,
+                onReorderModeChange = { active ->
+                    albumReorderActive = active
+                    // Search and arrange cannot share the rail; opening arrange closes an open search.
+                    if (active) { albumSearchActive = false; albumQuery = "" }
+                },
             )
             2 -> SharedScreen(
                 topPadding = headerHeightDp,
@@ -976,14 +1207,38 @@ fun GalleryScreen(
         // transition DURING the swipe rather than after it settles. Crossfade swaps the per-tab content
         // and animateContentSize animates the height between the taller Photos header (2 rows + category
         // rail) and the shorter Albums/Shared ones, so the shrink/grow is smooth instead of a snap.
+        // People rail data handed to the category rail (inside the header) through a CompositionLocal,
+        // so the People chip + face bar render without new header parameters. The bar is open when the
+        // chip is toggled on or a person is selected; toggling it off also clears any person filter.
+        val peopleActive = peopleExpanded || state.selectedPersonId != null
+        val peopleRail = remember(state.people, state.selectedPersonId, peopleActive) {
+            PeopleRailData(
+                people = state.people,
+                selectedPersonId = state.selectedPersonId,
+                active = peopleActive,
+                onToggle = {
+                    if (peopleActive) {
+                        peopleExpanded = false
+                        viewModel.onPersonSelected(null)
+                    } else {
+                        peopleExpanded = true
+                    }
+                },
+                onPersonSelected = { id ->
+                    peopleExpanded = true
+                    viewModel.onPersonSelected(if (state.selectedPersonId == id) null else id)
+                },
+            )
+        }
         AnimatedVisibility(
             visible = showOverlays && !state.isSelectionMode,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier.align(Alignment.TopCenter),
         ) {
             Box(modifier = Modifier.animateContentSize()) {
                 Crossfade(targetState = pagerState.currentPage, label = "headerTab") { page ->
+                    CompositionLocalProvider(LocalPeopleRail provides peopleRail) {
                     GalleryHeader(
                         selectedTab = page,
                         galleryState = state,
@@ -996,9 +1251,11 @@ fun GalleryScreen(
                         onCalendarClick = onCalendarClick,
                         onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
                         onHiddenAlbumClick = onHiddenAlbumClick,
-                        // The Photos-tab filter pill opens the Timeline filter screen.
-                        onShowAlbumsFilterSheet = onOpenTimelineFilter,
+                        // The Photos-tab filter icon opens the content-filter drawer (sync status
+                        // + date), the same sheet the Search screen shows.
+                        onShowAlbumsFilterSheet = { showFilterSheet = true },
                         onNewAlbumClick = { albumCreateSignal++ },
+                        onNewLocalFolder = { showNewFolderNameDialog = true },
                         albumFilter = albumFilter,
                         onAlbumFilterSelected = { picked ->
                             albumFilter = picked
@@ -1007,6 +1264,12 @@ fun GalleryScreen(
                             }
                         },
                         onOpenAlbumsFilterSheet = { showAlbumsFilterSheet = true },
+                        albumQuery = albumQuery,
+                        onAlbumQueryChange = { albumQuery = it },
+                        albumSearchActive = albumSearchActive,
+                        onAlbumSearchActiveChange = { albumSearchActive = it },
+                        // Arranging owns the whole rail, so entering it closes any open search first.
+                        albumReorderActive = albumReorderActive,
                         onSharedFilterSelected = { filter ->
                             sharedFilter = filter
                             activeEmailFilter = null
@@ -1019,114 +1282,138 @@ fun GalleryScreen(
                         // the selection-mode grid offset track the visible header, not a fading one.
                         onHeaderMeasured = { if (page == pagerState.currentPage) headerHeightPx = it },
                         updateAvailable = updateAvailable,
+                        newsUnread = newsUnread,
                         onUpdateClick = viewModel::openUpdateFromDot,
                     )
+                    }
                 }
             }
         }
 
-        // ── SELECTION HEADER (top: cancel + count + share + delete) ───────────
-        AnimatedVisibility(
+        // ── SELECTION DRAWER (every bulk action, in one place) ────────────────
+        // The grid's top inset stays at the FULL browse-header height while selecting: the browse
+        // header's last measurement stays in headerHeightPx (AnimatedVisibility stops re-measuring
+        // it while it's hidden), so the content holds instead of jumping up.
+        val selectionActions = rememberGallerySelectionActions(
+            selectedItems = state.selectedItems,
+            favoriteIds = state.favoriteIds,
+            offlinePinIds = state.offlinePinIds,
+            favoriteState = state.favoriteState,
+            multiShareState = multiShareState,
+            multiDeleteState = multiDeleteState,
+            multiDownloadState = multiDownloadState,
+            multiStripState = multiStripState,
+            addToAlbumState = addToAlbumState,
+            allSelected = state.filteredItems.isNotEmpty() &&
+                state.selectedItems.size == state.filteredItems.size,
+            isSignedIn = state.isSignedIn,
+            // Offer Add-to-person to a guest too, once there are people to add to; the account-only
+            // actions in the same list stay behind isSignedIn.
+            showAddToPerson = state.isSignedIn || state.people.isNotEmpty(),
+            onSelectAll = {
+                val all = state.filteredItems.toSet()
+                viewModel.setSelection(if (state.selectedItems.size == all.size) emptySet() else all)
+            },
+            onShare = {
+                // Open the unified share drawer (Send to app / Share with people / Public
+                // link) instead of sharing straight to the OS chooser.
+                showShareSheet = true
+            },
+            onHide = {
+                // A hide ends in a permanent removal of the device originals it vaults, so it is
+                // confirmed exactly as the delete beside it is. The split is read at the tap, so
+                // the sheet names what THIS selection will have done to it.
+                hideConfirmSplit = viewModel.hideSplitForSelection().takeIf { !it.isEmpty }
+            },
+            onRequestDelete = { showMultiDeleteSheet = true },
+            onDownload = viewModel::downloadSelected,
+            onMakeAvailableOffline = viewModel::toggleSelectedOffline,
+            onRequestAddToAlbum = { showAddToAlbumSheet = true },
+            onRequestAddToPerson = { showAddToPersonSheet = true },
+            onToggleFavorite = viewModel::toggleSelectedFavorite,
+            onBackUp = { showBackUpConfirm = true },
+            onStripMetadata = viewModel::stripMetadataSelected,
+            onEditMetadata = { onEditMetadata(state.selectedItems.toList()) },
+            onCreateCollage = { onCreateCollage(state.selectedItems.toList()) },
+            onCreateGif = { state.selectedItems.singleOrNull()?.let(onCreateGif) },
+            onRequestMoveToFolder = { showMoveToFolderSheet = true },
+        )
+        SelectionDrawer(
             visible = state.isSelectionMode,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier.align(Alignment.TopCenter),
-        ) {
-            GallerySelectionHeader(
-                selectedItems = state.selectedItems,
-                selectedCount = state.selectedCount,
-                multiShareState = multiShareState,
-                multiDeleteState = multiDeleteState,
-                allSelected = state.filteredItems.isNotEmpty() &&
-                    state.selectedItems.size == state.filteredItems.size,
-                onCancel = viewModel::clearSelection,
-                onSelectAll = {
-                    val all = state.filteredItems.toSet()
-                    viewModel.setSelection(if (state.selectedItems.size == all.size) emptySet() else all)
-                },
-                onShare = {
-                    // Open the unified share drawer (Send to app / Share with people / Public
-                    // link) instead of sharing straight to the OS chooser.
-                    showShareSheet = true
-                },
-                onHide = viewModel::hideSelected,
-                onRequestDelete = { showMultiDeleteSheet = true },
-                // Keep the grid's top inset at the FULL browse-header height while selecting, so it
-                // doesn't jump up when the shorter selection header (no category rail) replaces the
-                // taller browse header. The browse header's last measurement stays in headerHeightPx —
-                // AnimatedVisibility stops re-measuring it while it's hidden — so the content holds.
-                onHeaderHeightChanged = { },
-            )
-        }
-
-        // ── SELECTION BOTTOM DOCK (add to album / back up / download / more) ──
-        AnimatedVisibility(
-            visible = state.isSelectionMode,
-            enter = fadeIn(),
-            exit = fadeOut(),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 24.dp),
-        ) {
-            GallerySelectionBottomBar(
-                selectedItems = state.selectedItems,
-                offlinePinIds = state.offlinePinIds,
-                multiDownloadState = multiDownloadState,
-                multiStripState = multiStripState,
-                addToAlbumState = addToAlbumState,
-                showLabels = showSelectionLabels,
-                onDownload = viewModel::downloadSelected,
-                onMakeAvailableOffline = viewModel::toggleSelectedOffline,
-                onRequestAddToAlbum = { showAddToAlbumSheet = true },
-                onBackUp = { showBackUpConfirm = true },
-                onStripMetadata = viewModel::stripMetadataSelected,
-            )
-        }
+            items = remember(state.selectedItems) { state.selectedItems.toList() },
+            actions = selectionActions,
+            onDismiss = viewModel::clearSelection,
+            // Whichever Photos grid is on screen: scrolling it collapses the drawer, so reaching
+            // past it to carry on through the timeline needs no deliberate pull or tap first.
+            contentScrolling = if (mosaicGrid) {
+                staggeredState.isScrollInProgress
+            } else {
+                gridState.isScrollInProgress
+            },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
 
         // ── UNIFIED PROGRESS PILL ─────────────────────────────────────────────
-        // One surface for multi-download, multi-share and add-to-album, matching the
-        // device-folder back-up and album bulk actions. Sits just under the selection header,
-        // which stays visible while these run.
-        val opDownloadingTpl = stringResource(R.string.op_downloading_fmt)
+        // One surface for the timeline's own long work, matching the device-folder back-up and
+        // album bulk actions. Sits at the top edge, clear of the selection drawer, which stays
+        // visible while these run. A multi-download is not here: it registers with the
+        // TransferCenter, so the Activity screen lists its photos and cancels the batch, and a
+        // second copy would just be a pill with no cancel of its own.
         val opSharingTpl = stringResource(R.string.op_sharing_fmt)
         val opAddingLabel = stringResource(R.string.op_adding_to_album)
         val opBackingUpTpl = stringResource(R.string.op_backing_up_fmt)
         val opDeletingLabel = stringResource(R.string.op_deleting)
         val opHidingLabel = stringResource(R.string.op_hiding)
-        val dlS = multiDownloadState
+        val folderHidingTpl = stringResource(R.string.device_folder_hiding_fmt)
         val shS = multiShareState
-        // Background back-up surfaces as the same pill as downloads/shares, so the user sees
-        // progress (and can cancel) in-app instead of only from the notification.
+        // Background back-up surfaces as the same pill as the share, so the user sees progress (and
+        // can cancel) in-app instead of only from the notification.
         val uploadActive = state.isSyncing && state.uploadTotalCount > 0
+        // Hiding a device folder from the Albums tab reports here too: it copies file by file and a
+        // folder can hold thousands, so it takes the pill's count and cancel rather than a blocking
+        // sheet the user would have to sit through.
+        val fh = viewModel.folderHideProgress.collectAsStateWithLifecycle().value
         val galleryOpProgress = when {
-            dlS is MultiDownloadState.Working ->
-                eu.akoos.photos.presentation.common.OperationProgress(
-                    dlS.done, dlS.total, opDownloadingTpl.format(dlS.done, dlS.total))
             shS is MultiShareState.Working ->
                 eu.akoos.photos.presentation.common.OperationProgress(
                     shS.done, shS.total, opSharingTpl.format(shS.done, shS.total))
+            fh != null ->
+                eu.akoos.photos.presentation.common.OperationProgress(
+                    fh.done, fh.total, folderHidingTpl.format(fh.done, fh.total))
             uploadActive ->
                 eu.akoos.photos.presentation.common.OperationProgress(
                     state.uploadDoneIdx, state.uploadTotalCount,
                     opBackingUpTpl.format(state.uploadDoneIdx, state.uploadTotalCount))
             else -> null
         }
-        // Only the back-up is cancellable from the pill (downloads/shares finish quickly + have
-        // their own controls). Mirrors the upload notification's cancel.
-        val galleryOpCancel: (() -> Unit)? =
-            if (uploadActive && dlS !is MultiDownloadState.Working &&
-                shS !is MultiShareState.Working && addToAlbumState !is AddToAlbumState.Working
-            ) {
-                { viewModel.cancelUpload() }
-            } else null
-        eu.akoos.photos.presentation.common.OperationProgressPill(
-            progress = galleryOpProgress,
-            onCancel = galleryOpCancel,
+        // Only the folder hide and the back-up are cancellable from the pill (a share finishes
+        // quickly and has its own controls). The branches mirror the chain above, so the X always
+        // belongs to the operation on show. Mirrors the upload notification's cancel.
+        val galleryOpCancel: (() -> Unit)? = when {
+            shS is MultiShareState.Working -> null
+            fh != null -> { { viewModel.cancelFolderHide() } }
+            uploadActive -> { { viewModel.cancelUpload() } }
+            else -> null
+        }
+        // Hold the last non-null progress so the pill can animate OUT cleanly when the work finishes,
+        // instead of vanishing the instant it goes null.
+        var lastOpProgress by remember { mutableStateOf(galleryOpProgress) }
+        if (galleryOpProgress != null) lastOpProgress = galleryOpProgress
+        // Rides the same scroll-hide signal as the header and dock, so it never sits orphaned over the
+        // grid once the rest of the chrome slides away (issue #98). Kept during selection mode.
+        AnimatedVisibility(
+            visible = showOverlays && galleryOpProgress != null,
+            enter = fadeIn() + slideInVertically { -it },
+            exit = fadeOut() + slideOutVertically { -it },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = if (headerHeightPx > 0) headerHeightDp + 4.dp else 8.dp),
-        )
+        ) {
+            eu.akoos.photos.presentation.common.OperationProgressPill(
+                progress = lastOpProgress,
+                onCancel = galleryOpCancel,
+            )
+        }
 
         // Foreground bulk actions (delete / hide / move to album) take over the screen with a
         // blocking drawer so a second destructive tap can't land on a half-finished one. Background
@@ -1145,26 +1432,33 @@ fun GalleryScreen(
         // ── BOTTOM DOCK ───────────────────────────────────────────────────────
         AnimatedVisibility(
             visible = showOverlays && !state.isSelectionMode,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .padding(bottom = 24.dp),
         ) {
             BottomDock(
-                selectedTab = pagerState.currentPage,
+                // The live fractional page position drives the sliding highlight, so it follows a swipe.
+                position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
+                // A local-only session has no account, so the cloud-only Shared tab is omitted.
+                showShared = state.isSignedIn,
                 onTabSelected = { tab ->
-                    // Always land at the visual top (item 0): re-tapping the active tab or switching
-                    // to another both reset that tab's scroll, so a page never reopens half-scrolled
-                    // where you left it. The Photos tab targets whichever grid is showing (staggered
-                    // when mosaic is on), and item 0 is the top in every order — including reversed,
-                    // where the top is the oldest photo by design.
-                    when (tab) {
-                        0 -> tabScope.launch {
-                            if (mosaicGrid) staggeredState.scrollToItem(0) else gridState.scrollToItem(0)
+                    // Re-tapping the active tab always returns it to the visual top (item 0). Switching
+                    // to a different tab also resets to the top, unless "keep place when switching tabs"
+                    // is on, in which case the target page stays where it was last scrolled. At this
+                    // point [selectedTab] still holds the previous tab, so tab == selectedTab marks a
+                    // re-tap. The Photos tab targets whichever grid is showing (staggered when mosaic is
+                    // on), and item 0 is the top in every order, including reversed, where the top is
+                    // the oldest photo by design.
+                    if (!keepScrollOnTabSwitch || tab == selectedTab) {
+                        when (tab) {
+                            0 -> tabScope.launch {
+                                if (mosaicGrid) staggeredState.scrollToItem(0) else gridState.scrollToItem(0)
+                            }
+                            1 -> tabScope.launch { albumsGridState.scrollToItem(0) }
                         }
-                        1 -> tabScope.launch { albumsGridState.scrollToItem(0) }
                     }
                     // Drive the pager so a tap slides to the page; the rail and dock highlight both
                     // follow pagerState.currentPage, which flips as the slide crosses the midpoint —
@@ -1207,14 +1501,29 @@ fun GalleryScreen(
 
     // ── Bottom sheets — extracted to GalleryDialogs.kt for JIT-blob shrink ────
     if (showFilterSheet) {
-        GalleryContentFilterDialog(
-            currentFilter = state.contentFilter,
-            currentCategory = state.selectedFilter,
+        ModalBottomSheet(
+            onDismissRequest = { showFilterSheet = false },
             sheetState = filterSheetState,
-            onApply = { filter -> viewModel.setContentFilter(filter) },
-            onCategorySelected = { cat -> viewModel.onFilterSelected(cat) },
-            onDismiss = { showFilterSheet = false },
-        )
+            containerColor = AppColors.current.sheetBg,
+            scrimColor = Color.Black.copy(alpha = 0.5f),
+        ) {
+            ContentFilterSheet(
+                currentFilter = state.contentFilter,
+                currentCategory = state.selectedFilter,
+                onApply = { filter -> viewModel.setContentFilter(filter) },
+                onCategorySelected = { cat -> viewModel.onFilterSelected(cat) },
+                onDismiss = { showFilterSheet = false },
+                // Categories + media type live inline in the timeline rail, so the drawer keeps the
+                // sync-status + date pickers only, matching the Search screen's sheet.
+                showCategorySection = false,
+                showMediaTypeSection = false,
+                showDateSection = false,
+                // Signed out there is only on-device media, so the backed-up / cloud chips are hidden.
+                showSyncStatusSection = state.isSignedIn,
+                // Timeline-only bottom row into the full layout / categories / folders screen.
+                onOpenTimelineSettings = onOpenTimelineFilter,
+            )
+        }
     }
     if (showEmailFilterSheet) {
         GallerySharedEmailFilterDialog(
@@ -1232,7 +1541,15 @@ fun GalleryScreen(
             sheetState = albumsFilterSheetState,
             default = AlbumDisplayFilter.entries[albumsDefaultFilter.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)],
             rememberLast = albumsRememberLastFilter,
+            sortMode = albumsSortMode,
+            columns = albumColumns,
             onDefaultChange = { picked ->
+                // Show it now, not only on the next visit. The sheet writes the filter the Albums
+                // tab opens on, and picking one while looking at that tab is a statement about the
+                // list on screen as much as about the next open: persisting it alone left the grid
+                // unchanged, so the pick read as ignored until the user left the tab and came back,
+                // which is when the entry effect re-resolves this key.
+                albumFilter = picked
                 tabScope.launch {
                     context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] = picked.ordinal }
                 }
@@ -1240,6 +1557,16 @@ fun GalleryScreen(
             onRememberLastChange = { value ->
                 tabScope.launch {
                     context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] = value }
+                }
+            },
+            onSortModeChange = { picked ->
+                tabScope.launch {
+                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_SORT_MODE] = picked.ordinal }
+                }
+            },
+            onColumnsChange = { picked ->
+                tabScope.launch {
+                    context.settingsDataStore.edit { it[SettingsKeys.ALBUM_GRID_COLUMNS] = picked }
                 }
             },
             onDismiss = { showAlbumsFilterSheet = false },
@@ -1277,6 +1604,28 @@ fun GalleryScreen(
             onDismiss = { showBackUpConfirm = false },
         )
     }
+    hideConfirmSplit?.let { split ->
+        HideConfirmSheet(
+            split = split,
+            title = stringResource(R.string.hide_confirm_title),
+            onConfirm = {
+                hideConfirmSplit = null
+                viewModel.hideSelected()
+            },
+            onDismiss = { hideConfirmSplit = null },
+        )
+    }
+    // A device folder's card asks the same question, and holds its confirm until the folder has been
+    // read: the count comes from a device query rather than from a selection already in hand.
+    val folderHideRequest by viewModel.folderHideRequest.collectAsStateWithLifecycle()
+    folderHideRequest?.let { request ->
+        HideConfirmSheet(
+            split = request.split,
+            title = stringResource(R.string.device_folder_hide_card),
+            onConfirm = { viewModel.confirmHideFolder() },
+            onDismiss = { viewModel.dismissHideFolderRequest() },
+        )
+    }
     if (showMultiDeleteSheet && state.selectedItems.isNotEmpty()) {
         GalleryMultiDeleteDialog(
             selectedItems = state.selectedItems,
@@ -1290,7 +1639,7 @@ fun GalleryScreen(
     if (showAddToAlbumSheet && state.selectedItems.isNotEmpty()) {
         GalleryAddToAlbumDialog(
             selectedItems = state.selectedItems,
-            cloudAlbums = albumsState.albums,
+            cloudAlbums = albumsState.addableAlbums,
             sheetState = addToAlbumSheetState,
             onCreateNew = {
                 showAddToAlbumSheet = false
@@ -1307,6 +1656,17 @@ fun GalleryScreen(
             hiddenAlbumIds = state.hiddenAlbumIds,
         )
     }
+    if (showAddToPersonSheet && state.selectedItems.isNotEmpty()) {
+        GalleryAddToPersonSheet(
+            people = state.people,
+            sheetState = addToPersonSheetState,
+            onPersonSelected = { personId ->
+                showAddToPersonSheet = false
+                viewModel.addSelectedToPerson(personId)
+            },
+            onDismiss = { showAddToPersonSheet = false },
+        )
+    }
     if (showCreateAlbumInline) {
         GalleryNewAlbumDialog(
             onDismiss = { showCreateAlbumInline = false },
@@ -1314,6 +1674,48 @@ fun GalleryScreen(
                 showCreateAlbumInline = false
                 viewModel.createAlbumThenAddSelected(name)
             },
+        )
+    }
+    // ── Move-to-folder picker + new-folder name dialog ────────────────────────
+    if (showMoveToFolderSheet && state.selectedItems.isNotEmpty()) {
+        MoveToFolderSheet(
+            folders = moveTargetFolders,
+            onPick = { name ->
+                showMoveToFolderSheet = false
+                viewModel.moveSelectedToFolder(name)
+            },
+            onNewFolder = {
+                showMoveToFolderSheet = false
+                showNewFolderDialog = true
+            },
+            onDismiss = { showMoveToFolderSheet = false },
+        )
+    }
+    if (showNewFolderDialog) {
+        NewFolderNameDialog(
+            onConfirm = { name ->
+                showNewFolderDialog = false
+                viewModel.moveSelectedToFolder(name)
+            },
+            onDismiss = { showNewFolderDialog = false },
+        )
+    }
+    // Logged-out "New folder": name the folder in the shared edit sheet, then hand off to the device
+    // photo picker. The picked photos come back via newFolderPickedItems and are moved into
+    // DCIM/<name>/ by the LaunchedEffect above; the moveConfirmation snackbar reports where they landed.
+    if (showNewFolderNameDialog) {
+        EditFieldSheet(
+            title = stringResource(R.string.new_folder),
+            hint = stringResource(R.string.move_to_folder_name_hint),
+            initialValue = "",
+            singleLine = true,
+            confirmLabel = stringResource(R.string.new_folder_create),
+            onDismiss = { showNewFolderNameDialog = false },
+            onSave = { name ->
+                showNewFolderNameDialog = false
+                onStartNewFolderPick(name.trim())
+            },
+            canConfirm = { it.isNotBlank() },
         )
     }
 
@@ -1324,7 +1726,8 @@ fun GalleryScreen(
             // Offer the Public link row for any single selection (like the viewer); only a
             // backed-up cloud photo can actually mint a link, a local one shows the back-up note.
             canCreateLink = shareSinglePhotoHasLink,
-            showPublicLink = shareSingleSelected,
+            showPublicLink = shareSingleSelected && state.isSignedIn,
+            showShareWithPeople = state.isSignedIn,
             localUploadEnabled = true,
             onDismiss = { showShareSheet = false },
             onSendToApp = {
@@ -1357,7 +1760,7 @@ fun GalleryScreen(
             onUploadAndCreate = { viewModel.uploadAndCreateSelectedLink() },
             onCopyLink = {
                 viewModel.currentPublicLinkUrl()?.let { url ->
-                    clipboard.setText(AnnotatedString(url))
+                    copySensitiveText(context, "Photo link", url)
                     tabScope.launch { snackbarHostState.showSnackbar(linkCopiedMsg) }
                 }
             },
@@ -1369,6 +1772,12 @@ fun GalleryScreen(
             },
         )
     }
+
+    // ── Cloud metadata save drawer ────────────────────────────────────────────
+    // The editor hands its staged cloud edits to the app-scoped controller and closes; this is where
+    // the batch's live per-step status shows over the timeline. "Continue in background" hides the
+    // drawer while the upload keeps running, still tracked by the Activity transfer list.
+    CloudMetadataSaveDrawer(ui = cloudSaveUi, onDismiss = { cloudSaveVm.dismiss() })
 }
 
 // ── Add-to-album picker sheet ─────────────────────────────────────────────────
@@ -1508,7 +1917,11 @@ internal fun GalleryAddToAlbumPickerSheet(
                             }
                             Text(
                                 stringResource(
-                                    R.string.gallery_album_picker_count_drive,
+                                    // Someone else's album reads "Shared" instead of "Drive", so a
+                                    // row that adds to another person's album is never mistaken for
+                                    // one of your own.
+                                    if (album.isSharedWithMe) R.string.gallery_album_picker_count_shared
+                                    else R.string.gallery_album_picker_count_drive,
                                     androidx.compose.ui.res.pluralStringResource(
                                         R.plurals.count_photos_plural, album.photoCount, album.photoCount,
                                     ),
@@ -1593,6 +2006,7 @@ internal fun MultiDeleteSheet(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .padding(horizontal = 20.dp)
             .padding(bottom = 40.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -1602,76 +2016,40 @@ internal fun MultiDeleteSheet(
             color = colors.fgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
         )
 
-        if (hasLocal && hasCloud) {
+        val rows = deleteConfirmRows(
+            hasLocal, hasCloud,
+            reclaimableBytes = selectedItems.sumOf {
+                when (it) {
+                    is GalleryItem.LocalOnly -> it.local.sizeBytes
+                    is GalleryItem.Synced -> it.local.sizeBytes
+                    is GalleryItem.CloudOnly -> 0L
+                }
+            },
+        )
+        if (rows.size > 1) {
             Text(
                 stringResource(R.string.delete_multi_mixed_msg),
                 color = colors.fgDim, fontSize = 14.sp,
             )
         }
-
-        if (hasLocal) {
+        rows.forEach { row ->
+            val bg = if (row.destructive) DeleteTint else colors.cardBg
+            val borderColor = if (row.destructive) ErrorColor.copy(alpha = 0.3f) else colors.cardBorder
+            val titleColor = if (row.destructive) ErrorColor else colors.fgPrimary
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(colors.cardBg, RoundedCornerShape(12.dp))
-                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp))
-                    .clickable { onDelete(true, false) }
+                    .background(bg, RoundedCornerShape(12.dp))
+                    .border(0.5.dp, borderColor, RoundedCornerShape(12.dp))
+                    .clickable { onDelete(row.freeUpSpace, row.deleteFromCloud) }
                     .padding(horizontal = 16.dp, vertical = 14.dp),
             ) {
                 Text(
-                    if (hasCloud) stringResource(R.string.delete_multi_remove_device)
-                    else stringResource(R.string.delete_multi_move_trash),
-                    color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                    stringResource(deleteRowTitleRes(row.kind)),
+                    color = titleColor, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                 )
                 Text(
-                    if (hasCloud) stringResource(R.string.delete_multi_remove_device_desc)
-                    else stringResource(R.string.delete_multi_move_trash_desc),
-                    color = colors.fgMute, fontSize = 12.sp,
-                )
-            }
-        }
-
-        // Middle option (mixed selections only): drop the cloud copies, keep all local files.
-        // Mirrors the per-photo viewer dialog so the user has a consistent "remove just one side"
-        // choice everywhere. Single-side selections don't need this row because there's nothing
-        // to keep on the local side.
-        if (hasLocal && hasCloud) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(colors.cardBg, RoundedCornerShape(12.dp))
-                    .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp))
-                    .clickable { onDelete(false, true) }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-            ) {
-                Text(
-                    stringResource(R.string.delete_multi_remove_cloud),
-                    color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    stringResource(R.string.delete_multi_remove_cloud_desc),
-                    color = colors.fgMute, fontSize = 12.sp,
-                )
-            }
-        }
-
-        if (hasCloud) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(DeleteTint, RoundedCornerShape(12.dp))
-                    .border(0.5.dp, ErrorColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                    .clickable { onDelete(hasLocal, true) }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-            ) {
-                Text(
-                    if (hasLocal) stringResource(R.string.delete_multi_move_trash_everywhere)
-                    else stringResource(R.string.delete_multi_drive_trash),
-                    color = ErrorColor, fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    if (hasLocal) stringResource(R.string.delete_multi_move_trash_everywhere_desc)
-                    else stringResource(R.string.delete_multi_drive_trash_desc),
+                    deleteRowDescription(row),
                     color = colors.fgMute, fontSize = 12.sp,
                 )
             }

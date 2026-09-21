@@ -163,6 +163,9 @@ class UploadPipelineIntegrationTest {
             networkObserver = networkObserver,
             transferCenter = mockk<TransferCenter>(relaxed = true),
             uploadAlbumTargetDao = targetDao,
+            pendingMetadataEditDao = db.pendingMetadataEditDao(),
+            photoLocationDao = db.photoLocationDao(),
+            structuralStripper = UploadStructuralStripper(context),
             context = context,
             appScope = appScope,
         )
@@ -427,6 +430,53 @@ class UploadPipelineIntegrationTest {
         }
     }
 
+    // ── Scenario 5: a queued photo deleted before it uploads ────────────────────────
+
+    @Test
+    fun `a queued photo deleted before upload is dropped and the rest still upload`() = runTest {
+        val keep = "content://media/keep"
+        val gone = "content://media/gone"
+        local.add(localItem(keep))
+        local.add(localItem(gone))
+        // Queue both as explicit MANUAL uploads (bypasses the bulk gates).
+        forceUploadUseCase.forceUpload(userId, listOf(keep, gone))
+        // The user deletes one from the device before the batch runs.
+        local.remove(gone)
+
+        val result = uploadUseCase(userId)
+
+        // The surviving photo backed up; the deleted one did not.
+        assertEquals(1, cloud.photos.value.size)
+        assertEquals(SyncStatus.SYNCED, row(keep)!!.status)
+        // The deleted photo's orphaned LOCAL_ONLY row was dropped, so it is neither re-processed nor
+        // left behind as a phantom "Queued" tile.
+        assertNull("a deleted queued photo's row must be dropped", row(gone))
+        // The whole batch was attempted (so the "N of M" count can still complete), but only the
+        // surviving photo counts as a success, and the deleted one must not read as a failure either.
+        assertEquals(2, result.attempted)
+        assertEquals(1, result.successCount)
+    }
+
+    @Test
+    fun `reconcile drops a queued MANUAL row whose file was deleted and never re-queues it`() = runTest {
+        seedBulkUploadGates(folder = "Camera")
+        val gone = "content://media/gone-manual"
+        local.add(localItem(gone, bucket = "Camera"))
+        syncRepo.upsert(localOnlyRow(gone), userId)
+        syncRepo.markQueued(gone, QueueSource.MANUAL, System.currentTimeMillis())
+        // The user deletes the file from the device.
+        local.remove(gone)
+
+        reconcileUseCase(userId).collectToEnd()
+
+        // The orphaned row is dropped, not left queued and not re-queued under its MANUAL source.
+        assertNull("a deleted MANUAL-queued photo's row must be dropped", row(gone))
+
+        // A second reconcile must not resurrect or re-queue it.
+        reconcileUseCase(userId).collectToEnd()
+        assertNull("reconcile must not re-create a deleted photo's row", row(gone))
+    }
+
     private fun localOnlyRow(uri: String) = SyncState(
         localUri = uri,
         cloudFileId = null,
@@ -448,199 +498,6 @@ private suspend fun Flow<*>.collectToEnd() {
 // ── Fakes ───────────────────────────────────────────────────────────────────────────
 
 /**
- * In-memory [DrivePhotoRepository]. Only the members the upload pipeline touches are real:
- *  - [observeCloudPhotos] emits the live [photos] list so reconcile sees uploads + deletes.
- *  - [uploadFile] appends a [CloudPhoto] with a deterministic linkId and returns it.
- *  - [deleteFiles] removes matching linkIds from the list.
- *  - [addPhotosToAlbum] records membership into [albumMembership]; [failAddPhotosOnce] flips it to
- *    throw exactly once (the retry scenario).
- *  - [loadAlbums] / [createDriveAlbum] are minimal; [retryPendingOrphanDeletes] is a no-op;
- *    [cloudContentHash] returns null.
- * Every other member is an unused no-op / empty result, never hit by the pipeline under test.
- */
-private class FakeDrivePhotoRepository : DrivePhotoRepository {
-
-    val photos = MutableStateFlow<List<CloudPhoto>>(emptyList())
-    private val albumMembership = mutableMapOf<String, MutableList<String>>()
-    private var counter = 0
-
-    /** When true, the next [addPhotosToAlbum] call throws, then resets itself. Models a transient
-     *  add failure so the pipeline's target-row retry can be exercised. */
-    var failAddPhotosOnce = false
-
-    fun add(photo: CloudPhoto) {
-        photos.value = photos.value + photo
-    }
-
-    fun removeByLinkId(linkId: String) {
-        photos.value = photos.value.filterNot { it.linkId == linkId }
-    }
-
-    fun albumMembers(albumLinkId: String): List<String> = albumMembership[albumLinkId].orEmpty()
-
-    override fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>> = photos.asStateFlow()
-
-    override fun observeHiddenAlbumMemberLinkIds(): Flow<Set<String>> = MutableStateFlow(emptySet<String>()).asStateFlow()
-
-    override suspend fun uploadFile(
-        userId: UserId,
-        item: LocalMediaItem,
-        sha1HexContentDigest: String,
-        uploadUri: String,
-        xAttrMetadata: UploadXAttrMetadata,
-        onProgress: ((phase: UploadPhase, doneBytes: Long, totalBytes: Long) -> Unit)?,
-    ): String {
-        val linkId = "cloud-${counter++}-${item.uri.hashCode().toUInt().toString(16)}"
-        add(
-            CloudPhoto(
-                linkId = linkId,
-                shareId = "share",
-                volumeId = "vol1",
-                captureTime = item.dateTaken / 1000L,
-                displayName = item.displayName,
-                mimeType = item.mimeType,
-                sizeBytes = item.sizeBytes,
-                thumbnailUrl = null,
-                revisionId = "rev-$linkId",
-                contentHash = sha1HexContentDigest.takeIf { it.isNotEmpty() },
-            ),
-        )
-        return linkId
-    }
-
-    override suspend fun addPhotosToAlbum(
-        userId: UserId,
-        albumLinkId: String,
-        photoLinkIds: List<String>,
-    ): DrivePhotoRepository.AddPhotosToAlbumResult {
-        if (failAddPhotosOnce) {
-            failAddPhotosOnce = false
-            error("simulated transient album-add failure")
-        }
-        albumMembership.getOrPut(albumLinkId) { mutableListOf() }.addAll(photoLinkIds)
-        return DrivePhotoRepository.AddPhotosToAlbumResult(
-            succeededLinkIds = photoLinkIds,
-            failedLinkIds = emptyList(),
-        )
-    }
-
-    override suspend fun deleteFiles(userId: UserId, linkIds: List<String>): CloudTrashOutcome {
-        photos.value = photos.value.filterNot { it.linkId in linkIds }
-        return CloudTrashOutcome(trashedLinkIds = linkIds.toSet(), failedLinkIds = emptySet())
-    }
-
-    override suspend fun loadAlbums(userId: UserId): List<Album> = emptyList()
-    override suspend fun createDriveAlbum(userId: UserId, name: String): Album =
-        Album(linkId = "album-$name", name = name, photoCount = 0, coverLinkId = null, lastActivityTimeMs = null)
-
-    override suspend fun retryPendingOrphanDeletes(userId: UserId) {}
-    override fun cloudContentHash(localSha1Hex: String): String? = null
-
-    // ── Unused members: never reached by the upload pipeline under test ──────────────
-    override suspend fun getVolumeId(userId: UserId): String = "vol1"
-    override suspend fun getShareId(userId: UserId, volumeId: String): String = "share"
-    override fun observePhotosByLinkIds(linkIds: List<String>): Flow<List<CloudPhoto>> =
-        MutableStateFlow(emptyList())
-    override suspend fun refreshCloudPhotos(userId: UserId, force: Boolean) {}
-    override suspend fun refreshCloudPhotosIncremental(userId: UserId) {}
-    override suspend fun loadAlbumsCached(): List<Album> = emptyList()
-    override suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>) {}
-    override suspend fun getAlbumMemberships(userId: UserId): Map<String, String> = emptyMap()
-    override suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> = emptyMap()
-    override suspend fun loadAlbumChildren(userId: UserId, albumLinkId: String): List<AlbumChild> = emptyList()
-    override suspend fun loadAlbumPhotos(
-        userId: UserId,
-        albumLinkId: String,
-        volumeId: String?,
-        sharingShareId: String?,
-        onLinkIdsResolved: ((List<String>) -> Unit)?,
-    ): List<CloudPhoto> = emptyList()
-    override suspend fun loadAlbumPhotosCached(albumLinkId: String): List<CloudPhoto> = emptyList()
-    override suspend fun downloadFullResPhoto(
-        userId: UserId,
-        photo: CloudPhoto,
-        preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
-        onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
-    ): File = error("unused")
-    override suspend fun renameOrCopyCloudPhoto(
-        userId: UserId,
-        photo: CloudPhoto,
-        newName: String,
-        trashOriginal: Boolean,
-    ): String = error("unused")
-    override suspend fun setCloudFavorite(userId: UserId, photo: CloudPhoto, favorite: Boolean): Boolean = false
-    override suspend fun setCloudTag(userId: UserId, photo: CloudPhoto, tagId: Int, add: Boolean): Boolean = false
-    override suspend fun deleteAlbum(userId: UserId, albumLinkId: String) {}
-    override suspend fun removePhotosFromAlbum(
-        userId: UserId,
-        albumLinkId: String,
-        photoLinkIds: List<String>,
-    ): List<String> = emptyList()
-    override suspend fun renameAlbum(userId: UserId, albumLinkId: String, newName: String) {}
-    override suspend fun setAlbumCover(userId: UserId, albumLinkId: String, coverPhotoLinkId: String) {}
-    override suspend fun getCloudTrash(userId: UserId): List<CloudTrashItem> = emptyList()
-    override suspend fun restoreFromCloudTrash(
-        userId: UserId,
-        linkIds: List<String>,
-    ): eu.akoos.photos.data.repository.drive.CloudRestoreOutcome =
-        eu.akoos.photos.data.repository.drive.CloudRestoreOutcome(emptySet(), emptySet(), false)
-    override suspend fun deleteFromCloudForever(
-        userId: UserId,
-        linkIds: List<String>,
-    ): eu.akoos.photos.data.repository.drive.CloudDeleteOutcome =
-        eu.akoos.photos.data.repository.drive.CloudDeleteOutcome(emptySet(), emptySet())
-    override suspend fun createAlbumShareLink(userId: UserId, albumLinkId: String): String = ""
-    override suspend fun createPhotoShareLink(userId: UserId, photoLinkId: String): String = ""
-    override suspend fun getPhotoShareLink(userId: UserId, photoLinkId: String): String? = null
-    override suspend fun revokePhotoShareLink(userId: UserId, photoLinkId: String) {}
-    override suspend fun setPhotoLinkPassword(userId: UserId, photoLinkId: String, password: String?): String = ""
-    override suspend fun inviteToAlbum(userId: UserId, albumLinkId: String, email: String) {}
-    override suspend fun saveSharedAlbumToOwnLibrary(
-        userId: UserId,
-        sharingShareId: String,
-        sourceAlbumLinkId: String,
-        sourceAlbumDecryptedName: String,
-        sourceVolumeId: String,
-    ): DrivePhotoRepository.SaveSharedAlbumOutcome = error("unused")
-    override fun startSaveSharedAlbumToOwnLibrary(
-        userId: UserId,
-        sharingShareId: String,
-        sourceAlbumLinkId: String,
-        sourceAlbumDecryptedName: String,
-        sourceVolumeId: String,
-    ) {}
-    override val saveSharedAlbumState: StateFlow<DrivePhotoRepository.SaveSharedAlbumProgress> =
-        MutableStateFlow(DrivePhotoRepository.SaveSharedAlbumProgress.Idle)
-    override fun acknowledgeSaveSharedAlbumResult() {}
-    override fun cancelSaveSharedAlbumToOwnLibrary() {}
-    override suspend fun deleteShare(userId: UserId, shareId: String) {}
-    override suspend fun leaveSharedAlbum(userId: UserId, shareId: String, albumLinkId: String) {}
-    override suspend fun revokeShareUrlOnly(userId: UserId, shareId: String) {}
-    override suspend fun changeMemberPermission(userId: UserId, shareId: String, memberId: String, permissions: Int) {}
-    override suspend fun changeInvitationPermission(userId: UserId, shareId: String, invitationId: String, permissions: Int) {}
-    override suspend fun loadSharedWithMeAlbums(userId: UserId): List<Album> = emptyList()
-    override suspend fun loadSharedByMePhotos(userId: UserId): List<SharedPhoto> = emptyList()
-    override fun observeSharedByMePhotos(linkIds: List<String>): Flow<List<SharedPhoto>> =
-        MutableStateFlow(emptyList())
-    override suspend fun loadShareInvitations(userId: UserId, shareId: String): List<ShareInvitation> = emptyList()
-    override suspend fun revokeShareInvitation(userId: UserId, shareId: String, invitationId: String) {}
-    override suspend fun loadShareMembers(userId: UserId, shareId: String): List<ShareMember> = emptyList()
-    override suspend fun removeShareMember(userId: UserId, shareId: String, memberId: String) {}
-    override suspend fun loadPendingInvitations(userId: UserId): List<PendingInvitation> = emptyList()
-    override suspend fun declineInvitation(userId: UserId, invitationId: String) {}
-    override suspend fun acceptInvitation(userId: UserId, invitationId: String) {}
-    override suspend fun clearCacheForSignOut(userId: UserId) {}
-    override fun requestThumbnailDecrypt(userId: UserId, linkId: String) {}
-    override fun cancelThumbnailDecrypt(linkId: String) {}
-    override fun prefetchThumbnailDecrypt(userId: UserId, linkIds: List<String>) {}
-    override suspend fun clearCachedThumbnailUrls() {}
-    override fun requestThumbnailDecrypt(userId: UserId, linkIds: List<String>) {}
-    override fun backfillThumbnails(userId: UserId) {}
-    override suspend fun backfillCloudGps(userId: UserId) {}
-    override suspend fun backfillVideoDurations(userId: UserId) {}
-}
-
-/**
  * In-memory [LocalMediaRepository]. [observeLocalMedia] + [queryByUri] are real over the [items]
  * list (the upload pipeline reads bucket names + the per-URI item through these); every other
  * member is a no-op.
@@ -652,11 +509,19 @@ private class FakeLocalMediaRepository : LocalMediaRepository {
         items.value = items.value + item
     }
 
+    /** Simulate the user deleting the file from the device: it leaves the library and its
+     *  content-URI stops resolving, exactly as a MediaStore delete does. */
+    fun remove(uri: String) {
+        items.value = items.value.filterNot { it.uri == uri }
+    }
+
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = items.asStateFlow()
     override suspend fun queryByUri(uri: String): LocalMediaItem? = items.value.firstOrNull { it.uri == uri }
+    override suspend fun queryByBucket(bucketName: String): List<LocalMediaItem> =
+        items.value.filter { it.bucketName == bucketName }
     override suspend fun sha1(uri: String): String? = null
 
     override fun observeTrashedMedia(): Flow<List<LocalMediaItem>> = MutableStateFlow(emptyList())
     override fun hasMediaPermission(): Flow<Boolean> = MutableStateFlow(true)
-    override fun notifyPermissionChanged() {}
+    override fun notifyMediaChanged() {}
 }

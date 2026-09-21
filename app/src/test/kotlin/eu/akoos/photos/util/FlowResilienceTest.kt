@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -62,6 +63,36 @@ class FlowResilienceTest {
         val value = flow { emit(7) }.retryOnDbTear("test") { retries++ }.first()
         assertEquals(7, value)
         assertEquals("a healthy stream must not retry", 0, retries)
+    }
+
+    @Test
+    fun the_retry_cap_stops_re_subscribing_and_lets_the_failure_through() = runTest {
+        val subscribes = AtomicInteger(0)
+        // Deterministic failure, the shape a cap exists for: no number of retries will fix it.
+        val source = flow<Int> {
+            subscribes.getAndIncrement()
+            throw IllegalStateException("too many SQL variables")
+        }
+
+        val thrown = runCatching { source.retryOnDbTear("test", maxAttempts = 3).first() }.exceptionOrNull()
+
+        assertTrue("the failure must surface, not be retried away", thrown is IllegalStateException)
+        assertEquals("the original cause must reach the collector", "too many SQL variables", thrown?.message)
+        assertEquals("one initial subscribe plus three retries", 4, subscribes.get())
+    }
+
+    @Test
+    fun the_default_keeps_retrying_a_source_that_recovers_late() = runTest {
+        val subscribes = AtomicInteger(0)
+        val source = flow {
+            if (subscribes.getAndIncrement() < 20) throw IllegalStateException("torn cursor window")
+            emit(11)
+        }
+
+        val value = source.retryOnDbTear("test").first()
+
+        assertEquals("an uncapped stream must still survive a long run of tears", 11, value)
+        assertEquals(21, subscribes.get())
     }
 
     @Test

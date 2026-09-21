@@ -28,13 +28,18 @@ import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.PerceptualHashEntity
 import kotlinx.coroutines.flow.Flow
 
-/** Lean projection of a fingerprint row: only the columns the duplicate finder reads (key, hash,
- *  freshness). Skipping the unused `isCloud` / `computedAt` / `algoVersion` columns keeps the row
- *  small so a whole-library stream fits far more rows per cursor window. Mirrors the PhotoListingLite
- *  pattern the timeline feed uses. */
+/** Lean projection of a fingerprint row: only the columns the duplicate finder reads (the 256-bit hash,
+ *  the quality score, the colour signature, the key and freshness). Skipping the unused `isCloud` /
+ *  `computedAt` / `algoVersion` columns keeps the row small so a whole-library stream fits far more rows
+ *  per cursor window. Mirrors the PhotoListingLite pattern the timeline feed uses. */
 data class PerceptualHashLite(
     val key: String,
-    val hash: Long,
+    val h0: Long,
+    val h1: Long,
+    val h2: Long,
+    val h3: Long,
+    val quality: Int,
+    val color: ByteArray,
     val freshness: String,
 )
 
@@ -54,7 +59,7 @@ interface PerceptualHashDao {
      *  projected to the three columns it uses. Filtering `algoVersion` in SQL (instead of loading every
      *  row and dropping stale ones in Kotlin) plus the narrow projection is what keeps a 50k-library
      *  fingerprint stream from pinning the heap. */
-    @Query("SELECT `key`, hash, freshness FROM perceptual_hash WHERE algoVersion = :algo")
+    @Query("SELECT `key`, h0, h1, h2, h3, quality, color, freshness FROM perceptual_hash WHERE algoVersion = :algo")
     fun observeLite(algo: Int): Flow<List<PerceptualHashLite>>
 
     /** One-shot read of every stored fingerprint, for the scheduler's missing/stale check. */

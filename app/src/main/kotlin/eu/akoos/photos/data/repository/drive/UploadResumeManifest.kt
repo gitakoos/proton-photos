@@ -82,7 +82,7 @@ internal data class UploadResumeManifest(
     @SerialName("totalBlocks") val totalBlocks: Int,
     @SerialName("blockSize") val blockSize: Int,
     @SerialName("sizeBytes") val sizeBytes: Long,
-    /** Server-issued file identifier from createPhoto / createFileByVolume. Reused on
+    /** Server-issued file identifier from createFileByVolume. Reused on
      *  resume so the cached blocks correlate to the right Drive record. If the server
      *  has TTL-cleaned this stale uncommitted file by the time we resume, commit fails
      *  and the caller's next batch will start fresh (the wipe in the non-retryable

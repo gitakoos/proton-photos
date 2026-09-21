@@ -289,7 +289,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // a green "downloaded" indicator on a photo that no longer exists on this device.
         //
         // IMPORTANT: this check uses [allLocalItems] (every file MediaStore sees), NOT the
-        // backup-filtered [localItems]. A photo downloaded into `Pictures/Proton Photos/` is
+        // backup-filtered [localItems]. A photo downloaded into `DCIM/<AlbumName>/` is
         // still on the device even though that folder typically isn't in the backup selection
         // (the user doesn't want their downloads loop-uploaded). Using the filtered set would
         // demote every just-downloaded SyncState to CLOUD_ONLY on the next reconcile, breaking
@@ -309,10 +309,10 @@ class ReconcileSyncStateUseCase @Inject constructor(
                 // past the grace window — by then a true cloud-side delete is real.
                 state.cloudFileId !in cloudByLinkId ->
                     if (nowMs - (state.lastSyncSuccessMs ?: 0L) > CLOUD_ABSENCE_GRACE_MS) {
-                        syncStateRepo.upsert(
-                            state.copy(status = SyncStatus.LOCAL_ONLY, cloudFileId = null),
-                            userId,
-                        )
+                        // Demote only while the row still carries the cloud id this snapshot saw: a twin
+                        // genuinely gone still matches and is demoted, but one an upload re-promoted
+                        // mid-pass now carries a different id and is left alone (its pairing survives).
+                        syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
                         // The cloud copy is genuinely gone (past the grace window). This row's prior
                         // upload intent is spent, so clear it: without this the stranded-intent
                         // recovery below would re-queue a photo the user deleted from the cloud and
@@ -331,13 +331,31 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val localOnlyCount = newStates.count { it.status == SyncStatus.LOCAL_ONLY }
         val syncedCount    = newStates.count { it.status == SyncStatus.SYNCED }
         Log.d(TAG, "reconcile done: $syncedCount SYNCED, $localOnlyCount LOCAL_ONLY (will upload)")
-        syncStateRepo.upsertAll(newStates, userId)
+        // Split the batch so a row an upload promoted to SYNCED+cloudFileId after the pre-loop snapshot
+        // is never clobbered back to LOCAL_ONLY. Only a computed-LOCAL_ONLY row that ALREADY EXISTED in
+        // that snapshot is clobber-prone (an upload cannot claim a sync_state row that does not exist
+        // yet); route those through the guarded update, which no-ops on a row now finished uploading.
+        // Everything else stays in the plain batch: a genuinely new row (which must still INSERT) and
+        // every SYNCED/promote write.
+        val (guardedDemotions, rest) = newStates.partition {
+            it.status == SyncStatus.LOCAL_ONLY && existingByUri.containsKey(it.localUri)
+        }
+        syncStateRepo.upsertAll(rest, userId)
+        // A guarded update that changed no row means the row is SYNCED now (the upload won the race),
+        // so its uri must not be re-queued below: a finished upload is never queued for a duplicate.
+        val skippedDemotionUris = mutableSetOf<String>()
+        for (state in guardedDemotions) {
+            if (syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(state, userId) == 0) {
+                skippedDemotionUris += state.localUri
+            }
+        }
         // Now that the fresh rows are durable, stamp each newly-unmatched in-scope local as
         // queued=AUTO_FOLDER (why it is up for backup + when). markQueued is a per-row UPDATE, so it
         // must run AFTER the upsert that created the row. The processor selects on LOCAL_ONLY AND
         // queued, so this stamp is what makes a folder-selected backup upload.
         val autoFolderNow = System.currentTimeMillis()
         for (uri in freshAutoFolderUris) {
+            if (uri in skippedDemotionUris) continue
             syncStateRepo.markQueued(uri, eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER, autoFolderNow)
         }
         // RULE 1: clear the queued flag on every row paired to a cloud copy this pass. Unguarded
@@ -363,7 +381,31 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // the normal folder scope by design, and clearing its queued flag would make the very next
         // upload pass skip it so the explicit upload would silently never run.
         val inScopeUris = newStates.map { it.localUri }.toSet()
-        val staleLocalOnly = syncStateRepo.observeAll(userId).first()
+
+        // A queued photo the user deleted from the device before it uploaded leaves an orphaned
+        // LOCAL_ONLY row. The folder-scope cleanup below deliberately spares an explicit MANUAL /
+        // ALBUM_ADD / EDITOR intent, and the stranded-intent recovery further down would re-queue such
+        // a row every pass, so its now-missing file keeps the queue count from ever completing. Drop
+        // any QUEUED LOCAL_ONLY row whose file is gone from the WHOLE device (checked against
+        // allLocalItems, every file MediaStore sees, NOT the folder-filtered inScopeUris, so an
+        // out-of-folder photo that still exists is untouched), whatever queued it. deleteLocalOnlyByUris
+        // is status-guarded, so a row another pass just claimed to UPLOADING is left alone.
+        val allLocalUris = allLocalItems.mapTo(HashSet(allLocalItems.size)) { it.uri }
+        val goneQueued = syncStateRepo.observeAll(userId).first().filter {
+            it.status == SyncStatus.LOCAL_ONLY && it.queued && it.localUri !in allLocalUris
+        }
+        if (goneQueued.isNotEmpty()) {
+            syncStateRepo.deleteLocalOnlyByUris(goneQueued.map { it.localUri })
+            Log.d(TAG, "reconcile: dropped ${goneQueued.size} queued LOCAL_ONLY rows whose file is gone")
+        }
+
+        // One post-delete snapshot serves both this out-of-scope de-queue and the stranded-intent
+        // recovery below. Their row sets are disjoint (this pass is queued rows with a null/AUTO_FOLDER
+        // source, the next is un-queued rows with a MANUAL/ALBUM_ADD/EDITOR source), so the clearQueued
+        // writes here never fall into that filter and a single read is enough.
+        val afterDropSnapshot = syncStateRepo.observeAll(userId).first()
+
+        val staleLocalOnly = afterDropSnapshot
             .filter {
                 it.status == SyncStatus.LOCAL_ONLY &&
                     it.queued &&
@@ -386,10 +428,14 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // row that flips to UPLOADING between this snapshot and markQueued is harmless (claimForUpload
         // guards on status, and a queued flag on an UPLOADING row is cleared when it reaches SYNCED).
         val recoverNow = System.currentTimeMillis()
-        val strandedIntent = syncStateRepo.observeAll(userId).first()
+        val strandedIntent = afterDropSnapshot
             .filter {
                 it.status == SyncStatus.LOCAL_ONLY &&
                     !it.queued &&
+                    // The file must still be on the device: a deleted intent has nothing to upload, and
+                    // re-queuing it would loop forever against a gone file (the gone-file drop above
+                    // clears the queued ones; this stops the un-queued survivors coming back).
+                    it.localUri in allLocalUris &&
                     // A stranded upload has no cloud copy by definition. Requiring cloudFileId == null
                     // stops a backed-up photo whose cloud copy was later removed (it demotes to
                     // LOCAL_ONLY) from being re-queued into an endless re-upload of a deletion.
@@ -412,6 +458,11 @@ class ReconcileSyncStateUseCase @Inject constructor(
         if (initialListingComplete) {
             context.settingsDataStore.edit { p ->
                 p[SettingsKeys.pairingSettledKey(userId.id)] = true
+                // Same condition, same moment: this pass checked sync_state against the full cloud
+                // set, so anything whose twin had gone has been demoted by now. The automatic
+                // free-up sweep reads this to decide whether its picture of the cloud is recent
+                // enough to delete a device copy against.
+                p[SettingsKeys.cloudVerifiedAtKey(userId.id)] = System.currentTimeMillis()
             }
         }
 

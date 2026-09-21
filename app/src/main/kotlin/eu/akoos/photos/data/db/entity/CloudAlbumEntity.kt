@@ -50,6 +50,9 @@ data class CloudAlbumEntity(
     /** Wall-clock ms when the repository last refreshed this row from the network. */
     @ColumnInfo(defaultValue = "0")
     val lastFetchedMs: Long = 0L,
+    /** This user's own permission bitmask, for shared-with-me albums only. Null for owned albums
+     *  and for rows written before the column existed. */
+    val permissions: Long? = null,
 ) {
     fun toDomain(): Album = Album(
         linkId = linkId,
@@ -62,6 +65,7 @@ data class CloudAlbumEntity(
         sharingShareUrlId = sharingShareUrlId,
         sharedByEmail = sharedByEmail,
         volumeId = volumeId,
+        permissions = permissions,
     )
 
     companion object {
@@ -77,6 +81,7 @@ data class CloudAlbumEntity(
                 sharedByEmail = album.sharedByEmail,
                 volumeId = album.volumeId,
                 lastFetchedMs = nowMs,
+                permissions = album.permissions,
             )
     }
 }

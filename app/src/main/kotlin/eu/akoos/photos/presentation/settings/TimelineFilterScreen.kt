@@ -96,6 +96,7 @@ import eu.akoos.photos.presentation.theme.StatusError
 @Composable
 fun TimelineFilterScreen(
     onBack: () -> Unit,
+    isSignedIn: Boolean = true,
     onOpenLayout: () -> Unit = {},
     onOpenCategories: () -> Unit = {},
     onOpenAlbums: () -> Unit = {},
@@ -112,8 +113,11 @@ fun TimelineFilterScreen(
             RowDivider()
             NavRow(label = stringResource(R.string.timeline_filter_categories_header), onClick = onOpenCategories)
             RowDivider()
-            NavRow(label = stringResource(R.string.timeline_filter_albums_header), onClick = onOpenAlbums)
-            RowDivider()
+            // Albums live only on Proton Drive, so the row is hidden for a local-only session.
+            if (isSignedIn) {
+                NavRow(label = stringResource(R.string.timeline_filter_albums_header), onClick = onOpenAlbums)
+                RowDivider()
+            }
             NavRow(label = stringResource(R.string.device_folders_section), onClick = onOpenDeviceFolders)
             RowDivider()
             NavRow(label = stringResource(R.string.settings_landing_tab), onClick = onOpenLandingTab)
@@ -144,6 +148,13 @@ fun TimelineLayoutScreen(
                 description = stringResource(R.string.grid_remember_last_desc),
                 checked = settings.gridRememberLast,
                 onCheckedChange = settingsViewModel::setGridRememberLast,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_keep_scroll_tabs),
+                description = stringResource(R.string.settings_keep_scroll_tabs_desc),
+                checked = settings.keepScrollOnTabSwitch,
+                onCheckedChange = settingsViewModel::setKeepScrollOnTabSwitch,
             )
         }
         Spacer(Modifier.height(16.dp))
@@ -199,13 +210,6 @@ fun TimelineLayoutScreen(
                 onCheckedChange = settingsViewModel::setSeamlessGrid,
             )
             RowDivider()
-            ToggleRow(
-                label = stringResource(R.string.settings_show_selection_labels),
-                description = stringResource(R.string.settings_show_selection_labels_desc),
-                checked = settings.showSelectionLabels,
-                onCheckedChange = settingsViewModel::setShowSelectionLabels,
-            )
-            RowDivider()
             // "On this day" memories carousel on the Photos tab — display toggle, default on.
             ToggleRow(
                 label = stringResource(R.string.gallery_on_this_day),
@@ -213,6 +217,20 @@ fun TimelineLayoutScreen(
                 onCheckedChange = { on ->
                     scope.launch { ctx.settingsDataStore.edit { it[SettingsKeys.SHOW_ON_THIS_DAY] = on } }
                 },
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_gif_autoplay_grid),
+                description = stringResource(R.string.settings_gif_autoplay_grid_summary),
+                checked = settings.gifAutoplayGrid,
+                onCheckedChange = settingsViewModel::setGifAutoplayGrid,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_gif_autoplay_covers),
+                description = stringResource(R.string.settings_gif_autoplay_covers_summary),
+                checked = settings.gifAutoplayCovers,
+                onCheckedChange = settingsViewModel::setGifAutoplayCovers,
             )
         }
         Spacer(Modifier.height(24.dp))

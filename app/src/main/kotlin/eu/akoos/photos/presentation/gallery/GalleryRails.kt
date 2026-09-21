@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.datastore.preferences.core.edit
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -30,28 +32,35 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallMade
 import androidx.compose.material.icons.automirrored.filled.CallReceived
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Lock
@@ -64,6 +73,8 @@ import androidx.compose.material.icons.filled.NewReleases
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -71,11 +82,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateDpAsState
@@ -87,21 +101,32 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import eu.akoos.photos.R
@@ -112,18 +137,166 @@ import eu.akoos.photos.presentation.theme.ArcTrack
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
+import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.theme.pillShape
+import android.graphics.Bitmap
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.Face
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.transform.Transformation
+
+/**
+ * Data and callbacks the People chip and face bar on the category rail read, handed down by
+ * [eu.akoos.photos.presentation.gallery.GalleryScreen] through a CompositionLocal so [CategoryRail]
+ * can render them without new parameters threaded through the header. Empty by default, so a rail
+ * composed with the AI features off, no indexed people, or outside the provider (the search screen)
+ * shows no People chip and no bar.
+ */
+internal data class PeopleRailData(
+    val people: List<PersonUi> = emptyList(),
+    val selectedPersonId: Long? = null,
+    /** True while the People bar is revealed (the chip is toggled on or a person is selected). */
+    val active: Boolean = false,
+    val onToggle: () -> Unit = {},
+    val onPersonSelected: (Long) -> Unit = {},
+)
+
+internal val LocalPeopleRail = compositionLocalOf { PeopleRailData() }
 
 @Composable
 internal fun AlbumsFilterRail(
     onHiddenAlbumClick: () -> Unit = {},
     onNewAlbumClick: () -> Unit = {},
+    /** Logged-out only: create a real device folder from picked local photos (Android 10+). */
+    onNewLocalFolder: () -> Unit = {},
     selectedFilter: AlbumDisplayFilter = AlbumDisplayFilter.All,
     onFilterSelected: (AlbumDisplayFilter) -> Unit = {},
     onOpenSheet: () -> Unit = {},
+    isSignedIn: Boolean = true,
+    /** Albums-tab inline search, hoisted in the gallery and threaded through the header. */
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
+    searchActive: Boolean = false,
+    onSearchActiveChange: (Boolean) -> Unit = {},
+    /** True while the page arranges albums; hides the search entry so the two never share the rail. */
+    reorderActive: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    // Focus the field only as the bar opens, never on a plain tab visit.
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(searchActive) { if (searchActive) focusRequester.requestFocus() }
+    // Back closes the bar and clears the query before it leaves the tab.
+    BackHandler(enabled = searchActive) { onSearchActiveChange(false); onSearchQueryChange("") }
+
+    BoxWithConstraints(modifier = modifier) {
+        // The rail is the weighted half of the header row, so it already stops before the avatar: the
+        // open bar fills the whole rail width, collapsed it is one 38dp icon pinned at the end.
+        val searchWidth by animateDpAsState(
+            targetValue = if (searchActive) maxWidth else 38.dp,
+            animationSpec = tween(220),
+            label = "albumsSearchWidth",
+        )
+        // Filter, Hidden and New pills, taken off the rail while the bar is open so none is pressed by
+        // accident. The avatar beside the rail stays in place throughout.
+        if (!searchActive) {
+            AlbumsRailPills(
+                onHiddenAlbumClick = onHiddenAlbumClick,
+                onNewAlbumClick = onNewAlbumClick,
+                onNewLocalFolder = onNewLocalFolder,
+                selectedFilter = selectedFilter,
+                onFilterSelected = onFilterSelected,
+                onOpenSheet = onOpenSheet,
+                isSignedIn = isSignedIn,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        // Morphing search element: a 38dp icon collapsed, the input bar filling the rail open. Gone
+        // while arranging, which takes the whole rail for its own bar.
+        if (!reorderActive) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(searchWidth)
+                    .height(38.dp)
+                    .clip(pillShape)
+                    .background(PillBg, pillShape)
+                    .border(0.5.dp, if (searchQuery.isNotEmpty()) Accent else PillBorder, pillShape)
+                    .clickable(enabled = !searchActive) { onSearchActiveChange(true) },
+            ) {
+                if (searchActive) {
+                    Row(
+                        modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = FgDim, modifier = Modifier.size(18.dp))
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.albums_search_hint),
+                                    color = FgMute,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                )
+                            }
+                            BasicTextField(
+                                value = searchQuery,
+                                onValueChange = onSearchQueryChange,
+                                singleLine = true,
+                                textStyle = TextStyle(color = FgPrimary, fontSize = 14.sp),
+                                cursorBrush = SolidColor(Accent),
+                                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                            )
+                        }
+                        // Clears a non-empty query, then closes the bar on the next tap.
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .clickable { if (searchQuery.isNotEmpty()) onSearchQueryChange("") else onSearchActiveChange(false) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = stringResource(R.string.cd_clear_search),
+                                tint = FgDim,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                } else {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = stringResource(R.string.search_title),
+                        tint = FgDim,
+                        modifier = Modifier.align(Alignment.Center).size(18.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The Albums rail's fixed pills (view filter, Hidden, New), lifted out so the search bar can take
+ *  their place while it is open without re-indenting or duplicating them. */
+@Composable
+private fun AlbumsRailPills(
+    onHiddenAlbumClick: () -> Unit,
+    onNewAlbumClick: () -> Unit,
+    onNewLocalFolder: () -> Unit,
+    selectedFilter: AlbumDisplayFilter,
+    onFilterSelected: (AlbumDisplayFilter) -> Unit,
+    onOpenSheet: () -> Unit,
+    isSignedIn: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -137,10 +310,12 @@ internal fun AlbumsFilterRail(
     ]
     val hiddenLabel = stringResource(R.string.gallery_filter_hidden)
     val newAlbumLabel = stringResource(R.string.albums_new_album)
+    val newFolderLabel = stringResource(R.string.new_folder)
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(end = 8.dp),
+        // Room at the end so a pill never slides under the collapsed search icon.
+        contentPadding = PaddingValues(end = 46.dp),
     ) {
         // All / Cloud / Local view filter. Tapping the label cycles All to Cloud to Local; the
         // filter icon after the separator opens the sheet (default + remember-last). Highlighted
@@ -213,17 +388,37 @@ internal fun AlbumsFilterRail(
                 Icon(Icons.Default.Lock, hiddenLabel, tint = FgDim, modifier = Modifier.size(15.dp))
             }
         }
-        // New album: compact icon button that opens the create-album dialog.
-        item(key = "new_album") {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .background(PillBg, pillShape)
-                    .border(0.5.dp, PillBorder, pillShape)
-                    .clickable { onNewAlbumClick() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Default.Add, newAlbumLabel, tint = FgDim, modifier = Modifier.size(17.dp))
+        // New album: compact icon button that opens the create-album dialog. A local-only session
+        // has no cloud to create an album in, so the pill is present only when signed in.
+        if (isSignedIn) {
+            item(key = "new_album") {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .background(PillBg, pillShape)
+                        .border(0.5.dp, PillBorder, pillShape)
+                        .clickable { onNewAlbumClick() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.CreateNewFolder, newAlbumLabel, tint = FgDim, modifier = Modifier.size(17.dp))
+                }
+            }
+        }
+        // New folder: the logged-out counterpart in the same spot. A local-only session has no cloud
+        // album to create, but it can make a real device folder from picked photos; the in-place move
+        // that fills it is a scoped-storage write, so the pill needs Android 10+.
+        if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            item(key = "new_local_folder") {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .background(PillBg, pillShape)
+                        .border(0.5.dp, PillBorder, pillShape)
+                        .clickable { onNewLocalFolder() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.CreateNewFolder, newFolderLabel, tint = FgDim, modifier = Modifier.size(17.dp))
+                }
             }
         }
     }
@@ -249,6 +444,7 @@ internal fun AvatarButton(
     hasActiveDownload: Boolean = false,
     isOffline: Boolean = false,
     updateAvailable: Boolean = false,
+    newsUnread: Boolean = false,
     onClick: () -> Unit,
     onUpdateClick: () -> Unit = onClick,
     onUploadClick: () -> Unit = onClick,
@@ -453,6 +649,17 @@ internal fun AvatarButton(
                     modifier = Modifier.size(8.dp),
                 )
             }
+            // Unread-news dot. A quiet mark at the opposite corner from the gear, drawn on its own so
+            // it never touches the pill's sync/transfer/update precedence beside the avatar.
+            if (newsUnread) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .align(Alignment.TopEnd)
+                        .background(Accent2, CircleShape)
+                        .border(1.5.dp, Bg2, CircleShape),
+                )
+            }
         }
     }
 }
@@ -474,9 +681,10 @@ internal fun FilterRail(
     val videosLabel = stringResource(R.string.filter_type_videos)
     val localLabel = stringResource(R.string.filter_sync_local)
     val backedUpLabel = stringResource(R.string.filter_sync_backedup)
+    val cloudLabel = stringResource(R.string.filter_sync_cloud)
     val allLabel = stringResource(R.string.gallery_filter_all)
-    val filterSummary = remember(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel) {
-        buildContentFilterSummary(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel)
+    val filterSummary = remember(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel) {
+        buildContentFilterSummary(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel)
     }
 
     LazyRow(
@@ -497,10 +705,11 @@ internal fun FilterRail(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // Summary + count — tap to clear the active content filter (unchanged behaviour).
+                // Summary + count. Tap opens the timeline filter drawer (same as the funnel), or
+                // clears the filter when one is active so the pill keeps its quick-clear shortcut.
                 Row(
                     modifier = Modifier
-                        .clickable(enabled = isContentFilterActive) { onClearContentFilter() }
+                        .clickable { if (isContentFilterActive) onClearContentFilter() else onOpenTimelineFilter() }
                         .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -523,9 +732,9 @@ internal fun FilterRail(
                         )
                     }
                 }
-                // Hairline separator + filter button. Opens the Timeline filter (hide device
-                // folders / albums from the timeline) right here, so it is discoverable from the
-                // timeline instead of only from Settings.
+                // Hairline separator + filter button. Opens the content-filter drawer (sync status
+                // + date) right here, so it is discoverable from the timeline instead of only from
+                // Settings.
                 Box(
                     modifier = Modifier
                         .height(18.dp)
@@ -614,42 +823,329 @@ internal fun CategoryRail(
     selectedFilter: GalleryFilter,
     onFilterSelected: (GalleryFilter) -> Unit,
     modifier: Modifier = Modifier,
+    shape: Shape = pillShape,
 ) {
     val context = LocalContext.current
+    val peopleRail = LocalPeopleRail.current
 
     val savedCsv by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_ORDER] }
     }.collectAsState(initial = null)
-    val order = remember(savedCsv) { resolveCategoryOrder(savedCsv) }
+    val hidden by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet() }
+    }.collectAsState(initial = emptySet())
+    val order = remember(savedCsv, hidden) {
+        resolveCategoryOrder(savedCsv).filterNot { it.name in hidden }
+    }
 
+    // A category hidden while it was the active filter would leave the timeline filtered with no
+    // chip left to clear it, so fall back to All.
+    LaunchedEffect(selectedFilter, hidden) {
+        if (selectedFilter != GalleryFilter.All && selectedFilter.name in hidden) {
+            onFilterSelected(GalleryFilter.All)
+        }
+    }
+
+    Column(modifier = modifier) {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+        ) {
+            itemsIndexed(order, key = { _, f -> f.name }) { _, cat ->
+                val selected = selectedFilter == cat
+                val chipBg by animateColorAsState(
+                    if (selected) Accent.copy(alpha = 0.18f) else PillBg, label = "catChipBg")
+                val chipFg by animateColorAsState(if (selected) Accent else FgDim, label = "catChipFg")
+                Row(
+                    modifier = Modifier
+                        .height(34.dp)
+                        .clip(shape)
+                        .background(chipBg, shape)
+                        .then(if (!selected) Modifier.border(0.5.dp, PillBorder, shape) else Modifier)
+                        .clickable { onFilterSelected(if (selected) GalleryFilter.All else cat) }
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    GalleryCategoryIcon(cat, tint = chipFg)
+                    Text(
+                        categoryLabel(cat),
+                        color = chipFg,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            // People chip: present only once at least one person is indexed (which already implies
+            // the AI features are on). Toggles the face bar below; highlighted while it is open.
+            if (peopleRail.people.isNotEmpty()) {
+                item(key = "people") {
+                    val selected = peopleRail.active
+                    val chipBg by animateColorAsState(
+                        if (selected) Accent.copy(alpha = 0.18f) else PillBg, label = "peopleChipBg")
+                    val chipFg by animateColorAsState(if (selected) Accent else FgDim, label = "peopleChipFg")
+                    Row(
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(shape)
+                            .background(chipBg, shape)
+                            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, shape) else Modifier)
+                            .clickable { peopleRail.onToggle() }
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Face,
+                            contentDescription = null,
+                            tint = chipFg,
+                            modifier = Modifier.size(15.dp),
+                        )
+                        Text(
+                            stringResource(R.string.gallery_category_people),
+                            color = chipFg,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+        }
+        if (peopleRail.active && peopleRail.people.isNotEmpty()) {
+            PeopleBar(
+                people = peopleRail.people,
+                selectedPersonId = peopleRail.selectedPersonId,
+                onPersonSelected = peopleRail.onPersonSelected,
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            )
+        }
+    }
+}
+
+/**
+ * Horizontal row of round face thumbnails, one per indexed [PersonUi], shown under the category rail
+ * when the People chip is open. Tapping a face filters the timeline to that person; the selected
+ * face carries an accent ring. The list is small (cover references only) and the tiles decode at a
+ * low target size, so this stays memory-light on the timeline screen.
+ */
+@Composable
+private fun PeopleBar(
+    people: List<PersonUi>,
+    selectedPersonId: Long?,
+    onPersonSelected: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     LazyRow(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(horizontal = 20.dp),
     ) {
-        itemsIndexed(order, key = { _, f -> f.name }) { _, cat ->
-            val selected = selectedFilter == cat
-            Row(
-                modifier = Modifier
-                    .height(34.dp)
-                    .clip(pillShape)
-                    .background(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape)
-                    .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
-                    .clickable { onFilterSelected(if (selected) GalleryFilter.All else cat) }
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                GalleryCategoryIcon(cat, tint = if (selected) Accent else FgDim)
+        items(people, key = { it.personId }) { person ->
+            PersonTile(
+                person = person,
+                selected = person.personId == selectedPersonId,
+                onClick = { onPersonSelected(person.personId) },
+            )
+        }
+    }
+}
+
+/** One round face tile: the cover photo's thumbnail cropped to the face box inside a circle, with the
+ *  person's name below when one is set. Reuses the timeline's linkId → decrypted-thumbnail resolution
+ *  ([LocalThumbnailUrls]); a local cover falls back to its own content uri. */
+@Composable
+internal fun PersonTile(
+    person: PersonUi,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    val model = LocalThumbnailUrls.current.value[person.coverPhotoKey] ?: person.coverPhotoKey
+    val request = remember(model, person.faceBox) {
+        ImageRequest.Builder(context)
+            .data(model)
+            .size(FACE_TILE_PX)
+            .crossfade(false)
+            .apply { person.faceBox?.let { transformations(FaceCropTransformation(it)) } }
+            .build()
+    }
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(Bg2)
+                .then(if (selected) Modifier.border(2.dp, Accent, CircleShape) else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = request,
+                contentDescription = person.displayName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
+        }
+        val name = person.displayName?.takeIf { it.isNotBlank() }
+        // Reserve the caption line whether or not the person is named, so a row that mixes named and
+        // not-yet-named tiles keeps one height instead of shrinking as it scrolls onto the unnamed ones.
+        Spacer(Modifier.height(4.dp))
+        Box(modifier = Modifier.height(16.dp), contentAlignment = Alignment.Center) {
+            if (name != null) {
                 Text(
-                    categoryLabel(cat),
+                    name,
                     color = if (selected) Accent else FgDim,
-                    fontSize = 13.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
     }
+}
+
+/**
+ * Album-style People card: the person's face-cropped cover filling a rounded rectangle, captioned with
+ * the name and a photo count, mirroring the memories [SeasonCard] (same aspect, corners, background and
+ * caption treatment) but for a person. Fills its grid cell width. Reuses [PersonTile]'s cover resolution
+ * ([LocalThumbnailUrls] keyed by coverPhotoKey) and the same [FaceCropTransformation], clipped to the
+ * card corners instead of a circle; an unresolved cover falls back to the card's [Bg2] background.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+internal fun PersonCard(
+    person: PersonUi,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    selected: Boolean = false,
+) {
+    val context = LocalContext.current
+    val model = LocalThumbnailUrls.current.value[person.coverPhotoKey] ?: person.coverPhotoKey
+    val request = remember(model, person.faceBox) {
+        ImageRequest.Builder(context)
+            .data(model)
+            .size(FACE_CARD_PX)
+            .crossfade(false)
+            .apply { person.faceBox?.let { transformations(FaceCropTransformation(it)) } }
+            .build()
+    }
+    val name = when {
+        person.isOther -> stringResource(R.string.person_unsorted)
+        else -> person.displayName ?: stringResource(R.string.person_detail_unnamed)
+    }
+    val countLabel = pluralStringResource(
+        R.plurals.count_photos_plural, person.faceCount, person.faceCount,
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(132f / 168f)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Bg2)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    ) {
+        AsyncImage(
+            model = request,
+            contentDescription = name,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
+        // Bottom gradient so the caption stays legible over bright covers.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(76.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.66f)),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+        ) {
+            Text(
+                text = name,
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = countLabel,
+                color = Color.White.copy(alpha = 0.85f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        if (selected) {
+            Box(modifier = Modifier.matchParentSize().background(Accent.copy(alpha = 0.30f)))
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .background(Accent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Decode width for the small circular face tile (56dp). The crop keeps only the face region, so the
+ *  source is decoded well above the tile's pixel size to leave the cropped face sharp. */
+private const val FACE_TILE_PX = 320
+
+/** Decode width for the larger album-style [PersonCard]. The face box is a fraction of the frame, so
+ *  cropping it out of a small decode would upscale a tiny region; a generous source keeps the card as
+ *  crisp as the uncropped Season card (a cloud cover is still capped by its thumbnail's own size). */
+private const val FACE_CARD_PX = 1024
+
+/**
+ * Crops a Coil-decoded cover thumbnail to a square around the stored face box (given as fractions of
+ * the image, so it is correct at any decode resolution), with a little padding, so a tile reads as a
+ * face portrait rather than the whole photo. The output square is clipped to a circle by the tile.
+ */
+internal class FaceCropTransformation(private val box: FaceBox) : Transformation {
+    override val cacheKey: String = "face:${box.left},${box.top},${box.right},${box.bottom}"
+
+    override suspend fun transform(input: Bitmap, size: coil.size.Size): Bitmap {
+        val w = input.width
+        val h = input.height
+        if (w <= 0 || h <= 0) return input
+        val faceW = (box.right - box.left) * w
+        val faceH = (box.bottom - box.top) * h
+        val cx = ((box.left + box.right) / 2f) * w
+        val cy = ((box.top + box.bottom) / 2f) * h
+        val side = (maxOf(faceW, faceH) * 1.4f).coerceIn(1f, minOf(w, h).toFloat())
+        val half = side / 2f
+        val left = (cx - half).roundToInt().coerceIn(0, w - 1)
+        val top = (cy - half).roundToInt().coerceIn(0, h - 1)
+        val s = side.roundToInt().coerceIn(1, minOf(w - left, h - top))
+        return Bitmap.createBitmap(input, left, top, s, s)
+    }
+
+    override fun equals(other: Any?): Boolean = other is FaceCropTransformation && other.box == box
+    override fun hashCode(): Int = box.hashCode()
 }
 
 /**
@@ -667,6 +1163,9 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
     val savedCsv by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_ORDER] }
     }.collectAsState(initial = null)
+    val hidden by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet() }
+    }.collectAsState(initial = emptySet())
     var order by remember { mutableStateOf<List<GalleryFilter>>(emptyList()) }
     LaunchedEffect(savedCsv) { order = resolveCategoryOrder(savedCsv) }
 
@@ -681,6 +1180,18 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
         }
     }
 
+    fun toggleHidden(cat: GalleryFilter) {
+        scope.launch {
+            runCatching {
+                context.settingsDataStore.edit {
+                    val current = it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet()
+                    it[SettingsKeys.CATEGORY_RAIL_HIDDEN] =
+                        if (cat.name in current) current - cat.name else current + cat.name
+                }
+            }
+        }
+    }
+
     var draggedCat by remember { mutableStateOf<GalleryFilter?>(null) }
     var dragOffsetY by remember { mutableStateOf(0f) }
 
@@ -688,6 +1199,7 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
         order.forEachIndexed { index, cat ->
             key(cat) {
                 val isDragged = cat == draggedCat
+                val isHidden = cat.name in hidden
                 Row(
                     modifier = Modifier
                         .zIndex(if (isDragged) 1f else 0f)
@@ -701,14 +1213,34 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    GalleryCategoryIcon(cat, tint = FgDim)
+                    GalleryCategoryIcon(cat, tint = if (isHidden) FgDim.copy(alpha = 0.45f) else FgDim)
                     Text(
                         categoryLabel(cat),
-                        color = FgPrimary,
+                        color = if (isHidden) FgPrimary.copy(alpha = 0.45f) else FgPrimary,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.weight(1f),
                     )
+                    // Show / hide this category on the timeline + search rail. A hidden row dims but
+                    // stays in place so its position in the order is kept for when it is shown again.
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .clickable { toggleHidden(cat) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (isHidden) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = stringResource(
+                                if (isHidden) R.string.gallery_category_show
+                                else R.string.gallery_category_hide,
+                                categoryLabel(cat),
+                            ),
+                            tint = if (isHidden) FgDim else Accent,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                     // Drag handle — grab and drag; the row lifts and follows the finger while the
                     // list reorders live as it passes neighbours. Keyed on the item so the gesture
                     // survives the reorder recompositions mid-drag.
@@ -760,32 +1292,45 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
 // ── Bottom dock ───────────────────────────────────────────────────────────────
 
 @Composable
-internal fun BottomDock(selectedTab: Int, onTabSelected: (Int) -> Unit) {
-    Row(
+internal fun BottomDock(position: Float, onTabSelected: (Int) -> Unit, showShared: Boolean = true) {
+    val density = LocalDensity.current
+    // Each tab's measured left offset + size (labels differ in width), so the single highlight can slide
+    // to the selected one instead of the fill just snapping between tabs.
+    val tabX = remember { mutableStateListOf(0f, 0f, 0f) }
+    val tabW = remember { mutableStateListOf(0f, 0f, 0f) }
+    var tabH by remember { mutableFloatStateOf(0f) }
+    val selectedTab = position.roundToInt().coerceIn(0, 2)
+    // Drive the highlight off the pager's LIVE fractional position, interpolating between the two tabs it
+    // sits over, so it tracks a swiping finger the whole way (and a tap, which the pager animates) rather
+    // than only sliding once the page has settled.
+    val lower = position.toInt().coerceIn(0, 2)
+    val upper = (lower + 1).coerceAtMost(2)
+    val frac = (position - lower).coerceIn(0f, 1f)
+    val hlX = lerp(tabX[lower], tabX[upper], frac)
+    val hlW = lerp(tabW[lower], tabW[upper], frac)
+    Box(
         modifier = Modifier
             .background(PillBgOpaque, pillShape)
             .border(0.5.dp, PillBorder, pillShape)
             .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        DockTab(
-            icon = Icons.Default.Photo,
-            label = stringResource(R.string.gallery_tab_photos),
-            selected = selectedTab == 0,
-            onClick = { onTabSelected(0) },
-        )
-        DockTab(
-            icon = Icons.Default.Collections,
-            label = stringResource(R.string.gallery_tab_albums),
-            selected = selectedTab == 1,
-            onClick = { onTabSelected(1) },
-        )
-        DockTab(
-            icon = Icons.Default.Share,
-            label = stringResource(R.string.gallery_tab_shared),
-            selected = selectedTab == 2,
-            onClick = { onTabSelected(2) },
-        )
+        // The sliding fill, drawn behind the tab row and animated to the active tab's bounds.
+        if (hlW > 0f && tabH > 0f) {
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(hlX.roundToInt(), 0) }
+                    .size(width = with(density) { hlW.toDp() }, height = with(density) { tabH.toDp() })
+                    .background(Accent.copy(alpha = 0.18f), RoundedCornerShape(999.dp)),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            DockTab(Icons.Default.Photo, stringResource(R.string.gallery_tab_photos), selectedTab == 0, { onTabSelected(0) }) { x, w, h -> tabX[0] = x; tabW[0] = w; tabH = h }
+            DockTab(Icons.Default.Collections, stringResource(R.string.gallery_tab_albums), selectedTab == 1, { onTabSelected(1) }) { x, w, h -> tabX[1] = x; tabW[1] = w; tabH = h }
+            // Cloud-only: a local-only session omits the Shared tab, leaving a two-tab control.
+            if (showShared) {
+                DockTab(Icons.Default.Share, stringResource(R.string.gallery_tab_shared), selectedTab == 2, { onTabSelected(2) }) { x, w, h -> tabX[2] = x; tabW[2] = w; tabH = h }
+            }
+        }
     }
 }
 
@@ -795,16 +1340,20 @@ private fun DockTab(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
+    onBounds: (x: Float, width: Float, height: Float) -> Unit,
 ) {
     // Compact padding + maxLines/softWrap=false so the labels never wrap onto two lines
     // on narrow screens (6.1"-class and smaller screens). The text shrinks to
     // ellipsis if a localised label is unusually long instead of breaking the pill.
+    // No own background: the shared sliding highlight in BottomDock fills the active tab. Just report
+    // this tab's position and size so the highlight can animate to it, and animate the icon/label colour.
+    val tabFg by animateColorAsState(if (selected) Accent else FgDim, label = "dockTabFg")
     Row(
         modifier = Modifier
-            .background(
-                if (selected) Accent.copy(alpha = 0.18f) else Color.Transparent,
-                RoundedCornerShape(999.dp),
-            )
+            .onGloballyPositioned { c ->
+                onBounds(c.positionInParent().x, c.size.width.toFloat(), c.size.height.toFloat())
+            }
+            .clip(RoundedCornerShape(999.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -813,12 +1362,12 @@ private fun DockTab(
         Icon(
             icon,
             contentDescription = null,
-            tint = if (selected) Accent else FgDim,
+            tint = tabFg,
             modifier = Modifier.size(16.dp),
         )
         Text(
             text = label,
-            color = if (selected) Accent else FgDim,
+            color = tabFg,
             fontSize = 12.5.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,

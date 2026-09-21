@@ -67,6 +67,20 @@ data class PhotoListingEntity(
     val encNodePassphrase: String? = null,
     /** linkId of this photo's parent (root or album). Needed to look up the parent's decrypted nodeKey at thumbnail-decrypt time. */
     val parentLinkId: String? = null,
+    /**
+     * True when this row exists ONLY as a direct child of an album, never in the user's own photo
+     * stream. That is what a photo someone else contributed to a shared album looks like: the copy
+     * lands on the album owner's volume parented to the album, so the volume's photo listing never
+     * returns it.
+     *
+     * A photo the user uploaded and then added to one of their own albums stays false: adding to an
+     * album rewraps the passphrase but leaves the photo parented to the photos root, so it is still
+     * a stream photo and still belongs on the timeline.
+     *
+     * Held per row rather than derived from `album_photo_membership`, so the answer does not depend
+     * on whether an album's edges happen to be cached, and so the timeline query stays subquery-free.
+     */
+    val isChildOfAlbum: Boolean = false,
     /** Armored encrypted XAttr blob for this photo's active revision. Decrypted later (off the read
      *  path) to recover the GPS Location block for the map; null for rows captured before this column. */
     val encXAttr: String? = null,
@@ -76,6 +90,14 @@ data class PhotoListingEntity(
      *  seconds, converted on parse). Populated for our own uploads at pairing time and for every other
      *  video by the bounded background duration backfill. Null for images and for rows not yet walked. */
     val durationMs: Long? = null,
+    /**
+     * Change-detection digest of the ENCRYPTED name this row's [displayName] was decrypted from.
+     * A rename on another client changes that ciphertext, so a refresh can spot one by comparing
+     * digests instead of decrypting every name on every pass, which is what keeps PGP off the sync
+     * walk. Null on a row written without one, and null is read as "recheck", so the first pass
+     * after that repairs any name that already drifted.
+     */
+    val nameFingerprint: String? = null,
 ) {
     fun toDomain() = CloudPhoto(
         linkId = linkId,

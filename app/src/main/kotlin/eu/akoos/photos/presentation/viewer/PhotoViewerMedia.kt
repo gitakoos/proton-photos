@@ -61,12 +61,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -92,6 +92,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -100,15 +101,32 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.decoderFallbackRenderersFactory
 import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
 import eu.akoos.photos.presentation.theme.FgPrimary
+import androidx.compose.ui.graphics.toArgb
+import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.util.formatVideoTime
+import kotlin.math.roundToInt
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 
 // ── Video player ───────────────────────────────────────────────────────────────
+
+/** The on-screen size of a decoded frame: Media3 reports coded width/height plus a pixel aspect and a
+ *  rotation the surface applies, so a 90/270 clip is shown with its sides swapped. Mirrors PlayerView's
+ *  own TextureView handling, so face tags letterbox to exactly the frame the player draws. The rotation
+ *  field is 0 on modern decoders (the codec rotates the output) and non-zero on older ones, so reading
+ *  it stays correct across both. */
+@Suppress("DEPRECATION")
+private fun displaySizeOf(v: androidx.media3.common.VideoSize): IntSize {
+    if (v.width <= 0 || v.height <= 0) return IntSize.Zero
+    val w = (v.width * v.pixelWidthHeightRatio).roundToInt().coerceAtLeast(1)
+    val rotated = v.unappliedRotationDegrees == 90 || v.unappliedRotationDegrees == 270
+    return if (rotated) IntSize(v.height, w) else IntSize(w, v.height)
+}
 
 /**
  * Plays a video file or content URI using ExoPlayer (Media3).
@@ -130,11 +148,19 @@ internal fun VideoPlayer(
     onEnded: (() -> Unit)? = null,
     /** Holds the screen awake only while a video is actually playing; clears on pause/stop/close. */
     keepOn: Boolean = false,
+    /** The decoded frame's on-screen size (pixel aspect and rotation applied), for pinning face tags
+     *  over the playing surface. Reports [IntSize.Zero] until the decoder knows the size. */
+    onVideoSize: (IntSize) -> Unit = {},
+    /** Pinch-zoom transform, applied to the PlayerView itself (view.scaleX / scaleY / translation)
+     *  rather than a Compose graphicsLayer, which cannot scale a SurfaceView's separate compositor
+     *  layer. The same shared center-pivot scale/offset the still image uses; 1f / Zero = no zoom. */
+    scale: Float = 1f,
+    offset: androidx.compose.ui.geometry.Offset = androidx.compose.ui.geometry.Offset.Zero,
 ) {
     val context = LocalContext.current
     val loop = onEnded == null
     val exoPlayer = remember(uri, reloadKey) {
-        ExoPlayer.Builder(context).build().apply {
+        ExoPlayer.Builder(context, decoderFallbackRenderersFactory(context)).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
             prepare()
             playWhenReady = autoPlay
@@ -163,8 +189,15 @@ internal fun VideoPlayer(
                     android.widget.Toast.LENGTH_LONG,
                 ).show()
             }
+            // Face tags letterbox to the frame, so report its size the moment the decoder knows it
+            // (and again if a track change resizes it).
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                onVideoSize(displaySizeOf(videoSize))
+            }
         }
         exoPlayer.addListener(listener)
+        // A reused player may already know its size, so no fresh callback fires; emit it once now.
+        exoPlayer.videoSize.let { if (it.width > 0 && it.height > 0) onVideoSize(displaySizeOf(it)) }
         onDispose {
             exoPlayer.removeListener(listener)
             exoPlayer.release()
@@ -179,21 +212,40 @@ internal fun VideoPlayer(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    // Inflate PlayerView from XML where surface_type="texture_view" is set. The TextureView surface
-    // lets Compose graphicsLayer scale the frames for pinch-zoom (a SurfaceView lives on its own
-    // compositor layer that ignores parent transforms), while resize_mode="fit" wraps it in an
-    // AspectRatioFrameLayout that letterboxes the video so its aspect ratio is preserved instead of
-    // stretched. The controller stays off; our own pill and the ExoPlayer listeners drive playback.
+    // Inflate PlayerView from XML where surface_type="surface_view" is set. The decoder writes straight
+    // to a dedicated compositor layer (lower power, and reliable on quirky hardware decoders that render
+    // a TextureView's GL surface wrong); pinch-zoom scales the PlayerView itself via view.scaleX /
+    // scaleY / translation in the update lambda below, because a SurfaceView's separate layer ignores a
+    // Compose graphicsLayer. resize_mode="fit" wraps it in an AspectRatioFrameLayout that letterboxes the
+    // video so its aspect ratio is preserved instead of stretched. The controller stays off; our own pill
+    // and the ExoPlayer listeners drive playback.
+    // Fill the PlayerView shutter (shown until the first frame) and its letterbox with the viewer page
+    // background (Bg0) in both themes, instead of the XML's opaque black, so a video opens without a white
+    // flash or a white-to-black jump and matches the surrounding viewer and the photo path.
+    val shutterColor = Bg0.toArgb()
     AndroidView(
         factory = { ctx ->
             (android.view.LayoutInflater.from(ctx)
-                .inflate(R.layout.view_video_player_texture, null) as PlayerView)
-                .apply { player = exoPlayer }
+                .inflate(R.layout.view_video_player, null) as PlayerView)
+                .apply {
+                    player = exoPlayer
+                    setShutterBackgroundColor(shutterColor)
+                    setBackgroundColor(shutterColor)
+                }
         },
         update = { view ->
             view.player = exoPlayer
+            view.setShutterBackgroundColor(shutterColor)
+            view.setBackgroundColor(shutterColor)
             // Drives FLAG_KEEP_SCREEN_ON on the host window; auto-clears when keepOn goes false.
             view.keepScreenOn = keepOn
+            // Pinch-zoom: transform the PlayerView directly (its SurfaceView surface would ignore a
+            // Compose graphicsLayer). The View's default pivot is its centre, matching the still image's
+            // center-pivot scale/offset, so face-tag and text overlays keep lining up with the frame.
+            view.scaleX = scale
+            view.scaleY = scale
+            view.translationX = offset.x
+            view.translationY = offset.y
         },
         modifier = modifier,
     )
@@ -367,7 +419,7 @@ private fun FrameStepButton(player: ExoPlayer?, forward: Boolean) {
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            if (forward) Icons.Default.KeyboardArrowRight else Icons.Default.KeyboardArrowLeft,
+            if (forward) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.KeyboardArrowLeft,
             contentDescription = null,
             tint = FgPrimary,
             modifier = Modifier.size(20.dp),

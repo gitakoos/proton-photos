@@ -80,6 +80,13 @@
 -keep class org.osmdroid.** { *; }
 -dontwarn org.osmdroid.**
 
+# ── ONNX Runtime (on-device text detection) ──────────────────────────────
+# The AAR ships no consumer rules, and the native side constructs and throws
+# Java objects that nothing in Kotlin ever references, so the shrinker cannot
+# see they are used. Keeping the package whole is the only reliable answer.
+-keep class ai.onnxruntime.** { *; }
+-dontwarn ai.onnxruntime.**
+
 # ── App-side: Workers (HiltWorker reflection) + Application class ────────
 -keep class eu.akoos.photos.App { *; }
 -keep class * extends androidx.work.ListenableWorker { <init>(...); }

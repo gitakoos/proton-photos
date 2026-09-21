@@ -128,9 +128,9 @@ internal class InputSurface(surface: Surface) {
  * Wraps an EXTERNAL_OES texture in a SurfaceTexture + Surface the decoder writes frames into.
  * [awaitNewImage] blocks the encoder thread until a frame is ready, then [drawImage] composes it.
  */
-internal class OutputSurface : SurfaceTexture.OnFrameAvailableListener {
+internal class OutputSurface(colorMatrix: FloatArray? = null) : SurfaceTexture.OnFrameAvailableListener {
 
-    private val textureRenderer = TextureRenderer()
+    private val textureRenderer = TextureRenderer(colorMatrix)
     private var surfaceTexture: SurfaceTexture? = null
     val surface: Surface
 
@@ -152,12 +152,17 @@ internal class OutputSurface : SurfaceTexture.OnFrameAvailableListener {
 
     fun awaitNewImage(timeoutMs: Long = 5_000L) {
         synchronized(frameSyncObject) {
+            // Loop against a real deadline: Object.wait can return spuriously before the timeout, so a
+            // bare "woke up and still no frame -> throw" would fail the save on a spurious wakeup. Only
+            // give up once the full timeout has actually elapsed.
+            val deadlineNs = System.nanoTime() + timeoutMs * 1_000_000L
             while (!frameAvailable) {
+                val remainingMs = (deadlineNs - System.nanoTime()) / 1_000_000L
+                if (remainingMs <= 0L) {
+                    throw RuntimeException("Decoder did not produce a frame within ${timeoutMs}ms")
+                }
                 try {
-                    frameSyncObject.wait(timeoutMs)
-                    if (!frameAvailable) {
-                        throw RuntimeException("Decoder did not produce a frame within ${timeoutMs}ms")
-                    }
+                    frameSyncObject.wait(remainingMs)
                 } catch (ie: InterruptedException) {
                     throw RuntimeException(ie)
                 }
@@ -196,7 +201,15 @@ internal class OutputSurface : SurfaceTexture.OnFrameAvailableListener {
  * External-OES texture quad shader. Combines SurfaceTexture's intrinsic transform with our
  * crop+rotate 4x4 in the vertex shader, keeping cropping math in matrix space.
  */
-private class TextureRenderer {
+private class TextureRenderer(colorMatrix: FloatArray?) {
+
+    // Identity when no filter: the shader always multiplies, so a null filter is a no-op matrix.
+    private val colorMatrix: FloatArray = colorMatrix ?: floatArrayOf(
+        1f, 0f, 0f, 0f,
+        0f, 1f, 0f, 0f,
+        0f, 0f, 1f, 0f,
+        0f, 0f, 0f, 1f,
+    )
 
     var textureId: Int = -1
         private set
@@ -204,6 +217,7 @@ private class TextureRenderer {
     private var program: Int = 0
     private var uMVPMatrixLoc: Int = 0
     private var uSTMatrixLoc: Int = 0
+    private var uColorMatrixLoc: Int = 0
     private var aPositionLoc: Int = 0
     private var aTextureCoordLoc: Int = 0
 
@@ -221,6 +235,7 @@ private class TextureRenderer {
         aTextureCoordLoc = GLES20.glGetAttribLocation(program, "aTextureCoord")
         uMVPMatrixLoc = GLES20.glGetUniformLocation(program, "uMVPMatrix")
         uSTMatrixLoc = GLES20.glGetUniformLocation(program, "uSTMatrix")
+        uColorMatrixLoc = GLES20.glGetUniformLocation(program, "uColorMatrix")
 
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
@@ -251,6 +266,7 @@ private class TextureRenderer {
 
         GLES20.glUniformMatrix4fv(uMVPMatrixLoc, 1, false, mvpMatrix, 0)
         GLES20.glUniformMatrix4fv(uSTMatrixLoc, 1, false, stMatrix, 0)
+        GLES20.glUniformMatrix4fv(uColorMatrixLoc, 1, false, colorMatrix, 0)
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
         GLES20.glFinish()
@@ -317,8 +333,11 @@ private class TextureRenderer {
             precision mediump float;
             varying vec2 vTextureCoord;
             uniform samplerExternalOES sTexture;
+            uniform mat4 uColorMatrix;
             void main() {
-                gl_FragColor = texture2D(sTexture, vTextureCoord);
+                vec4 c = texture2D(sTexture, vTextureCoord);
+                vec4 g = uColorMatrix * vec4(c.rgb, 1.0);
+                gl_FragColor = vec4(clamp(g.rgb, 0.0, 1.0), c.a);
             }
         """
     }

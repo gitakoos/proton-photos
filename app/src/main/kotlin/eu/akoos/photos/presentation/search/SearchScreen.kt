@@ -25,6 +25,7 @@
 package eu.akoos.photos.presentation.search
 
 import android.app.Activity
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -32,10 +33,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.foundation.layout.PaddingValues
@@ -51,9 +57,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -61,12 +69,16 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -78,6 +90,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.Text
+import eu.akoos.photos.presentation.gallery.PersonTile
+import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
@@ -85,60 +99,73 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.data.preferences.SettingsKeys
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.common.SelectionBottomDock
-import eu.akoos.photos.presentation.common.SelectionDockItem
-import eu.akoos.photos.presentation.common.SelectionTopBar
-import eu.akoos.photos.presentation.common.SelectionTopButton
+import eu.akoos.photos.presentation.common.AppSearchField
+import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.SelectionAction
+import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.common.favoriteSelectionAction
+import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.anyCloudOnly
-import eu.akoos.photos.presentation.common.anyHideable
 import eu.akoos.photos.presentation.common.anyLocalOnly
+import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.common.hasDownloadable
+import eu.akoos.photos.presentation.common.offlinePinnableLinkIds
+import eu.akoos.photos.presentation.common.offlineTurnsOn
 import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.MultiStripState
+import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.ScrollScrubber
-import androidx.compose.material.icons.filled.MoreVert
+import eu.akoos.photos.presentation.common.ShimmerSquare
 import androidx.compose.material.icons.filled.PrivacyTip
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.foundation.BorderStroke
-import eu.akoos.photos.presentation.common.selectionMimeCounts
 import eu.akoos.photos.presentation.gallery.CategoryRail
+import eu.akoos.photos.presentation.gallery.LocalPeopleRail
+import eu.akoos.photos.presentation.gallery.PeopleRailData
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.ContentFilterSheet
 import eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog
+import eu.akoos.photos.presentation.gallery.GalleryAddToPersonSheet
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog
+import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
+import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
-import eu.akoos.photos.presentation.memories.FloatingMemoriesHeader
 import eu.akoos.photos.presentation.search.components.CalendarPreviewCard
 import eu.akoos.photos.presentation.search.components.OfflinePreviewCard
+import eu.akoos.photos.presentation.search.components.PeoplePreviewCard
 import eu.akoos.photos.presentation.search.components.JumpToMonthHeader
 import eu.akoos.photos.presentation.search.components.MonthTileRow
-import eu.akoos.photos.presentation.search.components.MapPreviewCard
+import eu.akoos.photos.presentation.search.components.MapPreviewSwitcher
 import eu.akoos.photos.presentation.search.components.OnThisDayRow
 import eu.akoos.photos.presentation.search.components.RecentRow
 import eu.akoos.photos.presentation.search.components.MonthBucket
@@ -153,12 +180,6 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.util.computeOnThisDay
 import java.util.Calendar
 
-// Shared rounded shape for the filter rail's pill controls. A real corner radius —
-// rather than a full-capsule RoundedCornerShape(50) — keeps the hairline border crisp
-// at the chip ends instead of breaking up into a faint, fragmented outline. Matches the
-// filter-sheet chip radius so the two surfaces read as the same control family.
-private val chipShape = RoundedCornerShape(10.dp)
-
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
@@ -166,13 +187,25 @@ fun SearchScreen(
     onOpenMap: () -> Unit = {},
     onOpenCalendar: () -> Unit = {},
     onOpenOffline: () -> Unit = {},
+    onOpenPeople: () -> Unit = {},
+    /** Opens the date + place editor for the current selection, matching the timeline's entry. */
+    onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
+    /** Opens a matched person's page from the name suggestion row. */
+    onOpenPerson: (Long) -> Unit = {},
     vm: SearchViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
     val query by vm.query.collectAsStateWithLifecycle()
+    val peopleSuggestions by vm.peopleSuggestions.collectAsStateWithLifecycle()
     val results by vm.results.collectAsStateWithLifecycle()
+    val semanticSearching by vm.semanticSearching.collectAsStateWithLifecycle()
+    val semanticSearchEnabled by vm.semanticSearchEnabled.collectAsStateWithLifecycle()
     val filter by vm.contentFilter.collectAsStateWithLifecycle()
     val selectedCategory by vm.selectedCategory.collectAsStateWithLifecycle()
+    val people by vm.people.collectAsStateWithLifecycle()
+    val selectedPersonId by vm.selectedPersonId.collectAsStateWithLifecycle()
+    // Whether the People face bar is revealed under the category rail (mirrors the timeline).
+    var peopleExpanded by remember { mutableStateOf(false) }
     val allItems by vm.allItems.collectAsStateWithLifecycle()
     val geotaggedPins by vm.geotaggedPins.collectAsStateWithLifecycle()
     val distinctCityCount by vm.distinctCityCount.collectAsStateWithLifecycle()
@@ -182,16 +215,17 @@ fun SearchScreen(
     val isDeleting by vm.isDeleting.collectAsStateWithLifecycle()
     val pendingStripIntent by vm.pendingStripIntent.collectAsStateWithLifecycle()
     val multiStripState by vm.multiStripState.collectAsStateWithLifecycle()
+    val favoriteIds by vm.favoriteIds.collectAsStateWithLifecycle()
+    val offlinePinIds by vm.offlinePinIds.collectAsStateWithLifecycle()
+    val favoriteState by vm.favoriteState.collectAsStateWithLifecycle()
+    val isSignedIn by vm.isSignedIn.collectAsStateWithLifecycle()
+    val faceEnabled by vm.faceEnabled.collectAsStateWithLifecycle()
 
     val isSelectionMode = selectedItems.isNotEmpty()
     // In selection mode the back button cancels the selection instead of leaving the screen.
     BackHandler(enabled = isSelectionMode) { vm.clearSelection() }
 
     val context = LocalContext.current
-    // Text labels under the selection-mode dock buttons; on by default, toggled in Settings.
-    val showSelectionLabels by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.SHOW_SELECTION_LABELS] ?: true }
-    }.collectAsStateWithLifecycle(initialValue = true)
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -214,10 +248,37 @@ fun SearchScreen(
             }
         }
     }
+    // An action that did not do all it said says so; the message already reads for the user.
+    LaunchedEffect(Unit) {
+        vm.actionFailure.collect { snackbarHostState.showSnackbar(it) }
+    }
+
+    // A download says it began the moment it does. Its progress is shown on the Activity screen and
+    // the selection clears straight away, so this screen said nothing at all until the whole batch
+    // had finished, which on a slow connection reads as a button that did nothing. Same wording the
+    // timeline uses for the same moment.
+    val downloadStartedMsg = stringResource(R.string.download_started_background)
+    LaunchedEffect(Unit) {
+        vm.downloadStarted.collect { snackbarHostState.showSnackbar(downloadStartedMsg) }
+    }
 
     var showDeleteSheet by remember { mutableStateOf(false) }
+    // The selection's hide split while its confirmation is up, null when none is. Holding the split
+    // rather than a flag is what lets the sheet describe the photos the tap was made on.
+    var hideConfirmSplit by remember {
+        mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
+    }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showAddToPersonSheet by remember { mutableStateOf(false) }
+    val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // The picker's own "New album" row, which names an album and then adds the selection to it.
+    var showCreateAlbumInline by remember { mutableStateOf(false) }
+    // Move the device selection into another folder, logged-out, device-data only. The picker's
+    // targets and the write consent ride the shared host; the selection is snapshotted in the VM.
+    var showMoveSheet by remember { mutableStateOf(false) }
+    val moveTargetFolders by vm.moveTargetFolders.collectAsStateWithLifecycle()
+    val pendingMoveIntent by vm.pendingMoveIntent.collectAsStateWithLifecycle()
     // System trash-dialog launcher for a delete/hide that needs MANAGE_MEDIA on Android 11+.
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
@@ -267,9 +328,56 @@ fun SearchScreen(
     var showFilterSheet by remember { mutableStateOf(false) }
     val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val resultsGridState = rememberLazyGridState()
-    // Hide the secondary filter rows once results are scrolled so browsing reclaims that
-    // vertical space; they slide back at the top. The search field + title stay put.
-    val filterRowsVisible by remember { derivedStateOf { resultsGridState.firstVisibleItemIndex == 0 } }
+    val idleListState = rememberLazyListState()
+    // The whole search header (back button, field, filter, categories) hides while the active list is
+    // scrolled DOWN, and slides back on a scroll up or once scrolling stops, like the timeline's chrome
+    // behaviour. Only one of the two lists is on screen at a time, so whichever is scrolling drives it.
+    var resultsScrollingDown by remember { mutableStateOf(false) }
+    LaunchedEffect(resultsGridState) {
+        var prevIndex = resultsGridState.firstVisibleItemIndex
+        var prevOffset = resultsGridState.firstVisibleItemScrollOffset
+        snapshotFlow { resultsGridState.firstVisibleItemIndex to resultsGridState.firstVisibleItemScrollOffset }
+            .collect { (idx, off) ->
+                resultsScrollingDown = idx > prevIndex || (idx == prevIndex && off > prevOffset)
+                prevIndex = idx
+                prevOffset = off
+            }
+    }
+    var idleScrollingDown by remember { mutableStateOf(false) }
+    LaunchedEffect(idleListState) {
+        var prevIndex = idleListState.firstVisibleItemIndex
+        var prevOffset = idleListState.firstVisibleItemScrollOffset
+        snapshotFlow { idleListState.firstVisibleItemIndex to idleListState.firstVisibleItemScrollOffset }
+            .collect { (idx, off) ->
+                idleScrollingDown = idx > prevIndex || (idx == prevIndex && off > prevOffset)
+                prevIndex = idx
+                prevOffset = off
+            }
+    }
+    // A real finger drag on either list dismisses the keyboard (clears the field focus), so browsing
+    // results hides the header the same as the timeline. The auto-scroll a growing result set emits
+    // while typing is not a drag, so typing keeps its focus.
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(resultsGridState, idleListState) {
+        merge(
+            resultsGridState.interactionSource.interactions,
+            idleListState.interactionSource.interactions,
+        ).collect { if (it is DragInteraction.Start) focusManager.clearFocus() }
+    }
+    // Match the timeline exactly: the header shows while the active list is scrolled UP or sits at the
+    // top, and hides while it is scrolled down. It does NOT pop back on a mere stop, which is what read
+    // as an instant, off-tempo reappearance.
+    val showingResults = rememberUpdatedState(results.isNotEmpty())
+    val headerVisible by remember {
+        derivedStateOf {
+            if (showingResults.value) {
+                !resultsScrollingDown || resultsGridState.firstVisibleItemIndex == 0
+            } else {
+                !idleScrollingDown || idleListState.firstVisibleItemIndex == 0
+            }
+        }
+    }
+    var searchFocused by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -279,111 +387,16 @@ fun SearchScreen(
       // Search content fills the screen; the floating header overlays it (added after this
       // Column in the Box so it draws on top). The status-bar inset plus a top pad clears
       // the collapsed header row so the search field never slips under the title pill.
-      Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(top = 52.dp),
-      ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            // Slim single-line search field (a plain OutlinedTextField sits at ~56dp and reads as
-            // two rows tall). Custom row keeps it compact and matches the filter button's height.
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(46.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(colors.chipUnselectedBg)
-                    .border(
-                        1.dp,
-                        if (query.isNotEmpty()) colors.accent else colors.line,
-                        RoundedCornerShape(14.dp),
-                    )
-                    .padding(start = 12.dp, end = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Filled.Search,
-                    contentDescription = null,
-                    tint = colors.fgDim,
-                    modifier = Modifier.size(20.dp),
-                )
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.search_placeholder),
-                            color = colors.fgMute,
-                            maxLines = 1,
-                        )
-                    }
-                    BasicTextField(
-                        value = query,
-                        onValueChange = vm::setQuery,
-                        singleLine = true,
-                        textStyle = TextStyle(color = colors.fgPrimary),
-                        cursorBrush = SolidColor(colors.accent),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                if (query.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .clickable { vm.setQuery("") },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Filled.Close,
-                            contentDescription = stringResource(R.string.cd_clear_search),
-                            tint = colors.fgDim,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-            }
-            // Filter button beside the search field — opens the sheet (sync status). Accent
-            // outline + tint when a sheet filter is active, so it reads as "filters applied".
-            val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (sheetFilterActive) colors.accent.copy(alpha = 0.15f) else colors.chipUnselectedBg)
-                    .border(1.dp, if (sheetFilterActive) colors.accent else colors.line, RoundedCornerShape(14.dp))
-                    .clickable { showFilterSheet = true },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.FilterList,
-                    contentDescription = stringResource(R.string.filter_title),
-                    tint = if (sheetFilterActive) colors.accent else colors.fgDim,
-                )
-            }
-        }
+      // The content fills the screen and scrolls up under the floating header. The header is drawn
+      // after the content (below) so it overlays it, and its measured height pads the content clear
+      // of it so the first row never starts hidden.
+      val density = LocalDensity.current
+      // Seed with an estimate so the very first frame already insets the content, instead of flashing
+      // it under the header for the frame before onSizeChanged reports the real height.
+      var headerHeightPx by remember { mutableIntStateOf(with(density) { 150.dp.roundToPx() }) }
+      val headerPad = with(density) { headerHeightPx.toDp() }
 
-        AnimatedVisibility(visible = filterRowsVisible) {
-            Column {
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Tap-to-filter category chips (same row as the timeline). Tapping a category
-                // narrows the results immediately, without opening the filter sheet.
-                CategoryRail(
-                    selectedFilter = selectedCategory,
-                    onFilterSelected = vm::onCategorySelected,
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-        }
-
+      Box(modifier = Modifier.fillMaxSize()) {
         val isIdle = query.isBlank() && filter == ContentFilter() && selectedCategory == GalleryFilter.All
         if (results.isEmpty() && isIdle) {
             // Idle empty state — surface "On this day" memories + a month-jump grid
@@ -404,7 +417,6 @@ fun SearchScreen(
                 value = withContext(Dispatchers.Default) { buildMonthBuckets(allItems) }
             }
             val recent = remember(allItems) { allItems.take(6) }
-            val idleListState = rememberLazyListState()
             val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
@@ -412,10 +424,10 @@ fun SearchScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .navigationBarsPadding(),
-                contentPadding = PaddingValues(bottom = 24.dp),
+                contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = 24.dp),
             ) {
                 item(key = "map_preview_section") {
-                    MapPreviewCard(
+                    MapPreviewSwitcher(
                         pins = geotaggedPins,
                         cityCount = distinctCityCount,
                         onOpenMap = onOpenMap,
@@ -426,6 +438,13 @@ fun SearchScreen(
                 }
                 item(key = "offline_preview_section") {
                     OfflinePreviewCard(onClick = onOpenOffline)
+                }
+                // Entry point to the People page, shown whenever on-device face grouping is on and
+                // independent of sign-in, so a local-only guest can reach and name their clusters.
+                if (faceEnabled) {
+                    item(key = "people_preview_section") {
+                        PeoplePreviewCard(onClick = onOpenPeople)
+                    }
                 }
                 if (recent.isNotEmpty()) {
                     item(key = "recent_section") {
@@ -495,14 +514,19 @@ fun SearchScreen(
             // month rows make the page long enough to be worth jumping.
             ScrollScrubber(
                 listState = idleListState,
-                topPadding = 8.dp,
+                topPadding = headerPad + 8.dp,
                 bottomPadding = 24.dp + navBottom,
                 minItemsToShow = 8,
             )
             }
+        } else if (results.isEmpty() && semanticSearching) {
+            // A content search is running and nothing keyword-matched yet (say "sunset", which no
+            // filename matches): show shimmering placeholder tiles rather than a blank "no results"
+            // that the matches then pop into once the model returns.
+            SemanticSearchSkeletonGrid(topPadding = headerPad)
         } else if (results.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().padding(top = headerPad),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -530,13 +554,23 @@ fun SearchScreen(
                     enabled = !isDeleting,
                 )
                 val seamless = rememberSeamlessGrid()
+                // Land back on the photo the viewer closed on. Results are one flat run with no
+                // header and nothing ahead of them. The cells key on the prefixed local keyOf(),
+                // which the viewer knows nothing about, so match on the gallery identity instead.
+                val returnGroups = remember(results) { listOf(results) }
+                ReturnToViewerPhoto(
+                    gridState = resultsGridState,
+                    groups = returnGroups,
+                    headerPerGroup = false,
+                    keyOf = { it.stableId },
+                )
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
                     state = resultsGridState,
                     contentPadding = PaddingValues(
                         start = if (seamless) 0.dp else 6.dp,
                         end = if (seamless) 0.dp else 6.dp,
-                        top = 4.dp,
+                        top = headerPad + 4.dp,
                         bottom = 12.dp,
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
@@ -547,7 +581,9 @@ fun SearchScreen(
                         .then(dragSelectModifier),
                 ) {
                     itemsIndexed(results, key = { _, it -> keyOf(it) }) { idx, item ->
-                        val inputs = remember(item) { photoCellInputsFor(item) }
+                        val inputs = remember(item, favoriteIds) {
+                            photoCellInputsFor(item, favoriteIds = favoriteIds)
+                        }
                         val isSelected = item in selectedItems
                         PhotoCell(
                             imageData = inputs.imageData,
@@ -584,7 +620,7 @@ fun SearchScreen(
                     gridState = resultsGridState,
                     items = results,
                     grouping = TimelineGrouping.Month,
-                    topPadding = 8.dp,
+                    topPadding = headerPad + 8.dp,
                     bottomPadding = 24.dp,
                     keyOf = { keyOf(it) },
                 )
@@ -592,15 +628,131 @@ fun SearchScreen(
         }
       }
 
-        // Floating title pill — drops down to switch to the Map or Calendar view, like the
-        // Collection. It carries its own statusBarsPadding and floats over the search content.
-        // Hidden while selecting so it does not collide with the selection top bar.
-        if (!isSelectionMode) {
-            FloatingMemoriesHeader(
-                title = stringResource(R.string.search_title),
-                onBack = onBack,
-            )
+      // Floating header, drawn after the content so it overlays and lets the grid scroll under it.
+      // The whole thing slides away on a downward scroll and returns on scroll up / stop, like the
+      // timeline chrome. Its measured height feeds `headerPad` above so the first row clears it; the
+      // height sticks while hidden, so the content padding does not jump as the header slides.
+      AnimatedVisibility(
+        // While the field is focused the header stays mounted, so a results-driven scroll does not
+        // dispose the text field mid-typing and drop the keyboard; hide-on-scroll still applies otherwise.
+        visible = headerVisible || searchFocused,
+        enter = fadeIn() + slideInVertically { -it },
+        exit = fadeOut() + slideOutVertically { -it },
+      ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                // Measure the FULL header (status-bar inset + paddings + content) so the content inset
+                // matches the visible bar. onSizeChanged MUST sit above the paddings; below them it
+                // reports only the children, leaving the inset short and the content tucked under the bar.
+                .onSizeChanged { headerHeightPx = it.height }
+                // Scrim under the floating bar so buttons stay legible over photos: solid at the top,
+                // still darkening through the category row, fading out just below it.
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to colors.bg0,
+                        0.55f to colors.bg0.copy(alpha = 0.82f),
+                        0.9f to colors.bg0.copy(alpha = 0.4f),
+                        1.0f to colors.bg0.copy(alpha = 0f),
+                    )
+                )
+                .statusBarsPadding()
+                .padding(top = 8.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Back button matches the search field's surface (not the darker pill) so the two
+                // read as one control row.
+                IconBubble(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.onboarding_back),
+                    onClick = { if (isSelectionMode) vm.clearSelection() else onBack() },
+                    background = colors.chipUnselectedBg,
+                    borderColor = colors.line,
+                )
+                AppSearchField(
+                    query = query,
+                    onQueryChange = vm::setQuery,
+                    // With semantic search on the field matches any description, so "by filename"
+                    // would read as wrong; fall back to it only when semantic search is off.
+                    placeholder = stringResource(
+                        if (semanticSearchEnabled) R.string.search_placeholder_semantic
+                        else R.string.search_placeholder,
+                    ),
+                    modifier = Modifier.weight(1f),
+                    onFocusChanged = { searchFocused = it },
+                )
+                // Filter button beside the search field — opens the sheet (sync status). Accent
+                // outline + tint when a sheet filter is active, so it reads as "filters applied".
+                val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (sheetFilterActive) colors.accent.copy(alpha = 0.15f) else colors.chipUnselectedBg)
+                        .border(1.dp, if (sheetFilterActive) colors.accent else colors.line, RoundedCornerShape(14.dp))
+                        .clickable { showFilterSheet = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.FilterList,
+                        contentDescription = stringResource(R.string.filter_title),
+                        tint = if (sheetFilterActive) colors.accent else colors.fgDim,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Tap-to-filter category chips (same row as the timeline). Tapping a category narrows the
+            // results immediately, without opening the filter sheet.
+            // The shared category rail also renders the People chip + face bar when a person is
+            // available, driven through the LocalPeopleRail CompositionLocal exactly like the timeline.
+            val peopleActive = peopleExpanded || selectedPersonId != null
+            val peopleRail = remember(people, selectedPersonId, peopleActive) {
+                PeopleRailData(
+                    people = people,
+                    selectedPersonId = selectedPersonId,
+                    active = peopleActive,
+                    onToggle = {
+                        if (peopleActive) {
+                            peopleExpanded = false
+                            vm.onPersonSelected(null)
+                        } else {
+                            peopleExpanded = true
+                        }
+                    },
+                    onPersonSelected = { id ->
+                        peopleExpanded = true
+                        vm.onPersonSelected(if (selectedPersonId == id) null else id)
+                    },
+                )
+            }
+            CompositionLocalProvider(LocalPeopleRail provides peopleRail) {
+                CategoryRail(
+                    selectedFilter = selectedCategory,
+                    onFilterSelected = vm::onCategorySelected,
+                    shape = RoundedCornerShape(14.dp),
+                )
+            }
+
+            // People whose name matches the query, above the results so a name search reaches a
+            // person even when no photo filename matches the text.
+            if (query.isNotBlank() && peopleSuggestions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = onOpenPerson)
+            }
+
+            // Breathing room below the header so the content clears the category bar instead of
+            // tucking right under it, and the scrim keeps a soft tail.
+            Spacer(modifier = Modifier.height(10.dp))
         }
+      }
 
         // A multi-select delete blocks the screen behind a progress drawer so a second tap can't
         // fire into a half-finished delete.
@@ -609,74 +761,83 @@ fun SearchScreen(
             if (isDeleting) eu.akoos.photos.presentation.common.OperationProgress(0, 0, opDeletingLabel, indeterminate = true) else null,
         )
 
-        // Selection-mode overlay — the shared top bar + bottom dock, matching the gallery,
-        // album and device-folder selection surfaces.
-        if (isSelectionMode) {
-            val counts = selectionMimeCounts(selectedItems)
-            val selPhotosText = androidx.compose.ui.res.pluralStringResource(
-                R.plurals.count_photos_plural, counts.photos, counts.photos,
-            )
-            val selVideosText = androidx.compose.ui.res.pluralStringResource(
-                R.plurals.count_videos_plural, counts.videos, counts.videos,
-            )
-            val selectionLabel = when {
-                counts.photos > 0 && counts.videos > 0 -> "$selPhotosText, $selVideosText"
-                counts.videos > 0 -> selVideosText
-                else -> selPhotosText
-            }
-            val allResultsSelected = results.isNotEmpty() && selectedItems.size == results.size
-            SelectionTopBar(
-                onCancel = { vm.clearSelection() },
-                countText = selectionLabel,
-            ) {
-                SelectionTopButton(
+        // Selection-mode overlay: the shared drawer, so every bulk action sits in one place here
+        // exactly as it does on the timeline, album and device-folder surfaces.
+        val allResultsSelected = results.isNotEmpty() && selectedItems.size == results.size
+        var showStripPicker by remember { mutableStateOf(false) }
+        // Which way the offline row goes, so it names the press rather than the state: a pin while
+        // anything pinnable in the selection is still un-pinned, a removal once none is.
+        val offlinePinsSelection = remember(selectedItems, offlinePinIds) {
+            offlineTurnsOn(offlinePinnableLinkIds(selectedItems), offlinePinIds)
+        }
+        val searchSelectionActions = buildList {
+            add(
+                SelectionAction(
                     icon = Icons.Default.SelectAll,
-                    contentDescription = stringResource(
+                    label = stringResource(
                         if (allResultsSelected) R.string.gallery_deselect_all else R.string.select_all,
                     ),
-                    active = allResultsSelected,
                     onClick = { if (allResultsSelected) vm.clearSelection() else vm.selectAll() },
                 )
-                Spacer(Modifier.size(4.dp))
-                SelectionTopButton(
+            )
+            add(
+                SelectionAction(
                     icon = Icons.Default.Share,
-                    contentDescription = stringResource(R.string.share_action),
+                    label = stringResource(R.string.sel_label_share),
                     onClick = { vm.shareSelected() },
                 )
-                // Hide any non-empty selection: device-backed photos move into the vault, cloud-only
-                // photos hide client-side by linkId.
-                if (anyHideable(selectedItems)) {
-                    Spacer(Modifier.size(4.dp))
-                    SelectionTopButton(
-                        icon = Icons.Default.VisibilityOff,
-                        contentDescription = stringResource(R.string.gallery_hide_selected),
-                        enabled = !isDeleting,
-                        onClick = { vm.hideSelected() },
+            )
+            // Add-to-album needs a Drive destination, so it stays behind a signed-in session.
+            if (isSignedIn) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.PhotoAlbum,
+                        label = stringResource(R.string.gallery_add_to_album),
+                        onClick = { showAddToAlbumSheet = true },
                     )
-                }
-                Spacer(Modifier.size(4.dp))
-                SelectionTopButton(
-                    icon = Icons.Default.DeleteOutline,
-                    contentDescription = stringResource(R.string.gallery_delete_selected),
-                    tint = ErrorColor,
-                    enabled = !isDeleting,
-                    onClick = { showDeleteSheet = true },
                 )
             }
-
-            SelectionBottomDock {
-                SelectionDockItem(
-                    icon = Icons.Default.PhotoAlbum,
-                    label = stringResource(R.string.sel_label_album),
-                    showLabel = showSelectionLabels,
-                    onClick = { showAddToAlbumSheet = true },
+            // Add-to-person runs on-device, so a guest with named people sees it too. Only the
+            // account-backed actions in this list stay behind isSignedIn.
+            if (isSignedIn || people.isNotEmpty()) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.Person,
+                        label = stringResource(R.string.gallery_add_to_person),
+                        onClick = { showAddToPersonSheet = true },
+                    )
                 )
-                // Back up the not-yet-uploaded (LocalOnly) photos in the selection.
-                if (anyLocalOnly(selectedItems)) {
-                    SelectionDockItem(
+            }
+            // Move the device selection into another folder, the logged-out counterpart to
+            // Add-to-album, offered only without an account and on the Android 10+ MediaStore floor.
+            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                add(
+                    SelectionAction(
+                        icon = Icons.AutoMirrored.Filled.DriveFileMove,
+                        label = stringResource(R.string.move_to_folder),
+                        onClick = { showMoveSheet = true },
+                    )
+                )
+            }
+            // Favourite the whole result set in one press. Search is how a batch worth favouriting
+            // gets assembled in the first place, so the action belongs where the results are rather
+            // than one photo at a time in the viewer.
+            add(
+                favoriteSelectionAction(
+                    turnsOn = remember(selectedItems, favoriteIds) {
+                        favoriteTurnsOn(selectedItems, favoriteIds)
+                    },
+                    state = favoriteState,
+                    onClick = { vm.toggleSelectedFavorite() },
+                )
+            )
+            // Back up the not-yet-uploaded (LocalOnly) photos in the selection. Needs a Drive
+            // destination, so it stays behind a signed-in session.
+            if (isSignedIn && anyLocalOnly(selectedItems)) {
+                add(
+                    SelectionAction(
                         icon = Icons.Default.CloudUpload,
-                        label = stringResource(R.string.sel_label_upload),
-                        showLabel = showSelectionLabels,
+                        label = stringResource(R.string.sel_label_back_up),
                         onClick = {
                             vm.backUpSelected { queued ->
                                 if (queued > 0) scope.launch {
@@ -685,13 +846,14 @@ fun SearchScreen(
                             }
                         },
                     )
-                }
-                // Download / offline apply to cloud-only photos (no local file yet).
-                if (hasDownloadable(selectedItems)) {
-                    SelectionDockItem(
+                )
+            }
+            // Download / offline apply to cloud-only photos (no local file yet).
+            if (hasDownloadable(selectedItems)) {
+                add(
+                    SelectionAction(
                         icon = Icons.Default.FileDownload,
                         label = stringResource(R.string.sel_label_download),
-                        showLabel = showSelectionLabels,
                         onClick = {
                             vm.downloadSelected { succeeded, failed ->
                                 val msg = when {
@@ -703,53 +865,100 @@ fun SearchScreen(
                             }
                         },
                     )
-                }
-                if (anyCloudOnly(selectedItems)) {
-                    SelectionDockItem(
+                )
+            }
+            if (anyCloudOnly(selectedItems)) {
+                add(
+                    SelectionAction(
                         icon = Icons.Default.OfflinePin,
-                        label = stringResource(R.string.sel_label_offline),
-                        showLabel = showSelectionLabels,
+                        label = stringResource(
+                            if (offlinePinsSelection) R.string.offline_make_available
+                            else R.string.offline_remove,
+                        ),
                         onClick = { vm.toggleSelectedOffline() },
                     )
-                }
-                // Overflow with the metadata strip, shown only when every selected photo is
-                // device-only. A Synced photo keeps its Drive copy's EXIF, so stripping just the
-                // local file is a misleading half-strip; the timeline hides it the same way.
-                if (allLocalOnly(selectedItems)) {
-                    Box {
-                        var moreExpanded by remember { mutableStateOf(false) }
-                        SelectionDockItem(
-                            icon = Icons.Default.MoreVert,
-                            label = stringResource(R.string.more_label),
-                            showLabel = showSelectionLabels,
-                            onClick = { moreExpanded = true },
-                        )
-                        DropdownMenu(
-                            expanded = moreExpanded,
-                            onDismissRequest = { moreExpanded = false },
-                            shape = RoundedCornerShape(18.dp),
-                            containerColor = colors.cardBg,
-                            border = BorderStroke(0.5.dp, colors.pillBorder),
-                        ) {
-                            DropdownMenuItem(
-                                text = {
-                                    Text(stringResource(R.string.gallery_strip_metadata), color = colors.fgPrimary)
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.PrivacyTip, null,
-                                        tint = colors.fgPrimary, modifier = Modifier.size(20.dp),
-                                    )
-                                },
-                                onClick = {
-                                    moreExpanded = false
-                                    vm.stripMetadataSelected()
-                                },
-                            )
-                        }
-                    }
-                }
+                )
             }
+            // The date + place editor opens for any editable photo (a device photo, or a cloud or
+            // backed-up image the corrected-copy replace can rewrite), so a mixed selection keeps the
+            // entry (the editor writes exactly those photos and names the count).
+            if (anyMetadataEditable(selectedItems)) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.EditNote,
+                        label = stringResource(R.string.metadata_editor_edit_metadata),
+                        onClick = { onEditMetadata(selectedItems.toList()) },
+                    )
+                )
+            }
+            // The strip stays behind an all-device-only selection: a Synced photo keeps its Drive
+            // copy's EXIF, so stripping just the local file is a misleading half-strip.
+            if (allLocalOnly(selectedItems)) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.PrivacyTip,
+                        label = stringResource(R.string.gallery_strip_metadata),
+                        onClick = { showStripPicker = true },
+                    )
+                )
+            }
+            // Hide any non-empty selection: a photo that lives only on this device moves into the
+            // vault, one with a cloud copy is filtered by linkId.
+            if (selectedItems.isNotEmpty()) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.VisibilityOff,
+                        label = stringResource(R.string.sel_label_hide),
+                        enabled = !isDeleting,
+                        // A hide ends in a permanent removal of the device originals it vaults, so it
+                        // is confirmed exactly as the delete beside it is. The split is read at the
+                        // tap, so the sheet names what THIS selection will have done to it.
+                        onClick = { hideConfirmSplit = vm.hideSplitForSelection().takeIf { !it.isEmpty } },
+                    )
+                )
+            }
+            add(
+                SelectionAction(
+                    icon = Icons.Default.DeleteOutline,
+                    label = stringResource(R.string.sel_label_delete),
+                    tint = ErrorColor,
+                    enabled = !isDeleting,
+                    onClick = { showDeleteSheet = true },
+                )
+            )
+        }
+        SelectionDrawer(
+            visible = isSelectionMode,
+            items = remember(selectedItems) { selectedItems.toList() },
+            actions = searchSelectionActions,
+            onDismiss = { vm.clearSelection() },
+            // Scrolling the results collapses the drawer, so reaching past it to carry on through
+            // them needs no deliberate pull or tap first.
+            contentScrolling = resultsGridState.isScrollInProgress,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+        if (showStripPicker) {
+            MetadataStripPickerDialog(
+                onConfirm = {
+                    showStripPicker = false
+                    vm.stripMetadataSelected(it)
+                },
+                onDismiss = { showStripPicker = false },
+            )
+        }
+
+        // Hide confirmation — the shared sheet every hide surface raises, worded from this
+        // selection's own split.
+        hideConfirmSplit?.let { split ->
+            eu.akoos.photos.presentation.common.HideConfirmSheet(
+                split = split,
+                title = stringResource(R.string.hide_confirm_title),
+                onConfirm = {
+                    hideConfirmSplit = null
+                    vm.hideSelected()
+                },
+                onDismiss = { hideConfirmSplit = null },
+            )
         }
 
         // Bulk-delete sheet — reuses the gallery's dialog so options + copy stay identical.
@@ -771,7 +980,10 @@ fun SearchScreen(
                 selectedItems = selectedItems,
                 cloudAlbums = albums,
                 sheetState = addToAlbumSheetState,
-                onCreateNew = { showAddToAlbumSheet = false },
+                onCreateNew = {
+                    showAddToAlbumSheet = false
+                    showCreateAlbumInline = true
+                },
                 onCloudAlbumSelected = { album ->
                     showAddToAlbumSheet = false
                     vm.addSelectedToAlbum(album.linkId) { joined, _ ->
@@ -786,6 +998,52 @@ fun SearchScreen(
             )
         }
 
+        // Add-to-person sheet reuses the gallery's picker. The membership is stored on-device
+        // against the person's name, so a guest reaches it too once a person is named.
+        if (showAddToPersonSheet && selectedItems.isNotEmpty()) {
+            GalleryAddToPersonSheet(
+                people = people,
+                sheetState = addToPersonSheetState,
+                onPersonSelected = { personId ->
+                    showAddToPersonSheet = false
+                    vm.addSelectedToPerson(personId)
+                },
+                onDismiss = { showAddToPersonSheet = false },
+            )
+        }
+
+        // Name a brand-new album for the selection, then create it and add the photos to it — the
+        // same two steps the timeline's picker runs, so the row means the same thing on both.
+        if (showCreateAlbumInline) {
+            eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
+                onDismiss = { showCreateAlbumInline = false },
+                onCreate = { name ->
+                    showCreateAlbumInline = false
+                    vm.createAlbumThenAddSelected(name) { joined, _, error ->
+                        val msg = error
+                            ?: context.getString(R.string.gallery_added_to_album, joined, name)
+                        scope.launch { snackbarHostState.showSnackbar(msg) }
+                    }
+                },
+            )
+        }
+
+        // Move-to-folder host: the picker, the new-folder name dialog, the write-consent launcher a
+        // foreign-file move needs and the completion snackbar, all logged-out and device-only. The
+        // selection is snapshotted in the ViewModel, so the host carries only the picked name.
+        MoveToFolderHost(
+            targetFolders = moveTargetFolders,
+            show = showMoveSheet,
+            pendingMoveIntent = pendingMoveIntent,
+            moveConfirmation = vm.moveConfirmation,
+            onPick = { vm.moveSelectedToFolder(it) },
+            onCreate = { vm.createFolderWithPhotos(it) },
+            onGranted = { vm.onMovePermissionGranted() },
+            onClear = { vm.clearPendingMove() },
+            onDismiss = { showMoveSheet = false },
+            snackbarHostState = snackbarHostState,
+        )
+
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
             snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -796,7 +1054,7 @@ fun SearchScreen(
         ModalBottomSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = filterSheetState,
-            containerColor = colors.cardBg,
+            containerColor = colors.sheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
         ) {
             ContentFilterSheet(
@@ -809,6 +1067,8 @@ fun SearchScreen(
                 // sync-status + precise date pickers only.
                 showCategorySection = false,
                 showMediaTypeSection = false,
+                // Signed out there is only on-device media, so the backed-up / cloud chips are hidden.
+                showSyncStatusSection = isSignedIn,
             )
         }
     }
@@ -818,4 +1078,69 @@ private fun keyOf(item: GalleryItem): String = when (item) {
     is GalleryItem.LocalOnly -> "L:" + item.local.uri
     is GalleryItem.Synced    -> "S:" + item.local.uri
     is GalleryItem.CloudOnly -> "C:" + item.cloud.linkId
+}
+
+/**
+ * Placeholder grid shown while a content (semantic) search runs and nothing has keyword-matched yet, so
+ * a query like "sunset" that no filename matches shimmers rather than flashing "no results" and then
+ * popping the photos in. A fixed three-column block of shimmer squares, matching the results grid's
+ * columns, side padding and spacing so the switch to the real grid is seamless. Non-scrolling: it lives
+ * for only the length of one search.
+ */
+@Composable
+private fun SemanticSearchSkeletonGrid(topPadding: Dp) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+            .padding(start = 6.dp, end = 6.dp, top = topPadding + 4.dp),
+    ) {
+        repeat(4) { row ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                repeat(3) {
+                    ShimmerSquare(modifier = Modifier.weight(1f), cornerRadius = 10.dp)
+                }
+            }
+            if (row < 3) Spacer(Modifier.height(4.dp))
+        }
+    }
+}
+
+/**
+ * A horizontally scrolling row of the people whose name matches the search query, each shown as the
+ * same circular face tile the timeline rail uses. Tapping one opens that person's page. Sits above the
+ * results so a name search reaches a person even when no photo text matches.
+ */
+@Composable
+private fun PeopleSuggestionRow(
+    people: List<PersonUi>,
+    onOpenPerson: (Long) -> Unit,
+) {
+    val colors = AppColors.current
+    Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp)) {
+        Text(
+            text = stringResource(R.string.gallery_category_people),
+            color = colors.fgDim,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            people.forEach { person ->
+                PersonTile(
+                    person = person,
+                    selected = false,
+                    onClick = { onOpenPerson(person.personId) },
+                )
+            }
+        }
+    }
 }

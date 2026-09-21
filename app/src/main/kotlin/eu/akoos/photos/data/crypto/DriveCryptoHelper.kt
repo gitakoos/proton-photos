@@ -52,6 +52,7 @@ import javax.inject.Singleton
 internal object DriveSignatureContexts {
     val INVITER = SignatureContext(value = "drive.share-member.inviter", isCritical = true)
     val MEMBER  = SignatureContext(value = "drive.share-member.member", isCritical = true)
+    val EXTERNAL = SignatureContext(value = "drive.share-member.external-invitation", isCritical = true)
 }
 
 private const val TAG = "DriveCrypto"
@@ -253,38 +254,51 @@ class DriveCryptoHelper @Inject constructor(
         sharePassphraseArmored: String,
     ): ByteArray {
         shareKeyCache[userId.id]?.let { return it }
-        val addresses = userAddressRepository.getAddresses(userId, false)
-            .filter { it.enabled && it.keys.isNotEmpty() }
-            .sortedBy { it.order }
-        if (addresses.isEmpty()) error("No active address for userId=${userId.id}")
 
-        // Try every active address: the share passphrase is encrypted to ONE of them, not always
-        // the primary (aliases, multi-address, changed primary all hit "Cannot decrypt with
-        // provided Key list" otherwise). The WHOLE attempt (decrypt + unlock) must be in one
-        // runCatching — a non-matching address can decrypt to bytes that only fail at unlock(), and
-        // wrapping just decryptData would let that throw escape the loop instead of trying the next.
         var lastError: Throwable? = null
-        for (address in addresses) {
-            val attempt = runCatching {
-                // useKeys + unlock both enter libgojni; lock so the post-login burst doesn't race.
-                cryptoLock.withLock {
-                    val passphraseBytes = address.useKeys(cryptoContext) {
-                        decryptData(sharePassphraseArmored)
+        // Try every active address in one fetch of the address list. The share passphrase is encrypted
+        // to ONE of them, not always the primary (aliases, multi-address, a changed primary all hit
+        // "Cannot decrypt with provided Key list" otherwise). The WHOLE attempt (decrypt + unlock) stays
+        // in one runCatching, because a non-matching address can decrypt to bytes that only fail at
+        // unlock(), so wrapping just decryptData would let that throw escape the loop instead of trying
+        // the next. Returns the key bytes, or null when no active address matched (the last real failure
+        // is kept in [lastError] so the caller can surface a reason).
+        suspend fun tryAddresses(refresh: Boolean): ByteArray? {
+            val addresses = userAddressRepository.getAddresses(userId, refresh)
+                .filter { it.enabled && it.keys.isNotEmpty() }
+                .sortedBy { it.order }
+            for (address in addresses) {
+                val attempt = runCatching {
+                    // useKeys + unlock both enter libgojni; lock so the post-login burst doesn't race.
+                    cryptoLock.withLock {
+                        val passphraseBytes = address.useKeys(cryptoContext) {
+                            decryptData(sharePassphraseArmored)
+                        }
+                        val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
+                        val keyBytes = unlockedKey.value.copyOf()
+                        unlockedKey.close()
+                        keyBytes
                     }
-                    val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
-                    val keyBytes = unlockedKey.value.copyOf()
-                    unlockedKey.close()
-                    keyBytes
                 }
+                if (attempt.isSuccess) return attempt.getOrThrow()
+                val e = attempt.exceptionOrNull()
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                lastError = e
             }
-            if (attempt.isSuccess) {
-                val keyBytes = attempt.getOrThrow()
-                shareKeyCache[userId.id] = keyBytes
-                return keyBytes
-            }
-            lastError = attempt.exceptionOrNull()
+            return null
         }
-        throw lastError ?: error("Share passphrase did not match any address key")
+
+        // Steady state uses the locally cached addresses (refresh=false). If none decrypt, that cache
+        // may be stale versus the passphrase's real recipient key (a key rotation, an address added on
+        // Drive web, or an incomplete post-login fetch), which otherwise leaves the root link key
+        // unavailable and blanks every album surface (the viewer's cloud-albums row, add-to-album, the
+        // duplicate caption) until a logout or a full data wipe. Force ONE network refresh of the
+        // address list and retry before giving up, so a stale cache self-heals in place.
+        (tryAddresses(refresh = false) ?: tryAddresses(refresh = true))?.let { keyBytes ->
+            shareKeyCache[userId.id] = keyBytes
+            return keyBytes
+        }
+        throw lastError ?: error("getOrDecryptShareKey: no active address matched for userId=${userId.id}")
     }
 
     fun decryptNodeKey(
@@ -515,24 +529,30 @@ class DriveCryptoHelper @Inject constructor(
     }
 
     /**
-     * Re-targets a link Name to a new parent key the way Drive Android's ChangeMessage does: reuse
-     * the OLD name's session key, re-encrypt + embed-sign the plaintext under it, write a fresh
-     * PKESK to the new parent. Preserving the session-key lineage matters — Drive web's decryptName
-     * rejects fresh-session-key re-wraps (the same failure [reencryptNodePassphraseForCopy] fixed).
+     * The one rule every write to an existing link Name obeys: recover the session key already bound
+     * to [oldNameArmored], encrypt + embed-sign [newPlaintextName] under THAT key, and join a fresh
+     * PKESK for [targetPublicKeyArmored] to it. Mirrors Drive Android's ChangeMessage
+     * (getSessionKeyFromEncryptedMessage → encrypt under it → encryptSessionKey → join), down to the
+     * binary literal: PGPCrypto exposes no text-mode session-key encryption, and encryptAndSignData
+     * is the primitive the official client renames through.
+     *
+     * Throws when no PKESK opens with [oldDecryptKeyBytes]. Quietly minting a fresh session key is
+     * the defect itself — it orphans every key packet already issued against the old one.
      */
-    fun changeNameRecipient(
+    private fun changeNameUnderSameSessionKey(
         oldNameArmored: String,
         oldDecryptKeyBytes: ByteArray,
         newPlaintextName: String,
         targetPublicKeyArmored: String,
         signerKeyBytes: ByteArray,
+        caller: String,
     ): String = cryptoLock.withLock {
         val packets = cryptoContext.pgpCrypto.getEncryptedPackets(oldNameArmored)
         val pkesks = packets.filter { it.type == PacketType.Key }.map { it.packet }
-        require(pkesks.isNotEmpty()) { "changeNameRecipient: source has no PKESK" }
+        require(pkesks.isNotEmpty()) { "$caller: source has no PKESK" }
         val sessionKey = pkesks.firstNotNullOfOrNull { pk ->
             runCatching { cryptoContext.pgpCrypto.decryptSessionKey(pk, oldDecryptKeyBytes) }.getOrNull()
-        } ?: error("changeNameRecipient: no PKESK decrypted with source key")
+        } ?: error("$caller: no PKESK decrypted with source key")
         val dataPacket = cryptoContext.pgpCrypto.encryptAndSignData(
             newPlaintextName.toByteArray(Charsets.UTF_8),
             sessionKey,
@@ -542,6 +562,57 @@ class DriveCryptoHelper @Inject constructor(
         val keyPacket = cryptoContext.pgpCrypto.encryptSessionKey(sessionKey, targetPublicKeyArmored)
         cryptoContext.pgpCrypto.getArmored(keyPacket + dataPacket, PGPHeader.Message)
     }
+
+    /**
+     * Re-targets a link Name to a new parent key. Preserving the session-key lineage matters — Drive
+     * web's decryptName rejects fresh-session-key re-wraps (the same failure
+     * [reencryptNodePassphraseForCopy] fixed).
+     */
+    fun changeNameRecipient(
+        oldNameArmored: String,
+        oldDecryptKeyBytes: ByteArray,
+        newPlaintextName: String,
+        targetPublicKeyArmored: String,
+        signerKeyBytes: ByteArray,
+    ): String = changeNameUnderSameSessionKey(
+        oldNameArmored = oldNameArmored,
+        oldDecryptKeyBytes = oldDecryptKeyBytes,
+        newPlaintextName = newPlaintextName,
+        targetPublicKeyArmored = targetPublicKeyArmored,
+        signerKeyBytes = signerKeyBytes,
+        caller = "changeNameRecipient",
+    )
+
+    /**
+     * Renames a link in place, keeping its Name session key.
+     *
+     * That session key is immutable for the life of the link. Sharing a link uploads the Name's
+     * session key re-encrypted under the share key as `NameKeyPacket`; the server cannot decrypt
+     * anything, so all it can do is substitute that stored packet when it serves the link in a share
+     * context, and no endpoint refreshes it afterwards. Encrypting the new name under a fresh session
+     * key therefore leaves every recipient holding a key packet that opens nothing, and the shared
+     * name collapses to a link-id stub (#88).
+     *
+     * [oldNameArmored] is the Name ciphertext currently stored on the link and [oldDecryptKeyBytes]
+     * the key that reads it — normally the same parent key whose public half is
+     * [parentPublicKeyArmored]. The new data packet carries a binary literal, matching the official
+     * client's rename; [encryptName]'s text literal applies only to a name being minted for the
+     * first time, where no session key exists to keep.
+     */
+    fun renameNamePreservingSessionKey(
+        oldNameArmored: String,
+        oldDecryptKeyBytes: ByteArray,
+        newPlaintextName: String,
+        parentPublicKeyArmored: String,
+        signerKeyBytes: ByteArray,
+    ): String = changeNameUnderSameSessionKey(
+        oldNameArmored = oldNameArmored,
+        oldDecryptKeyBytes = oldDecryptKeyBytes,
+        newPlaintextName = newPlaintextName,
+        targetPublicKeyArmored = parentPublicKeyArmored,
+        signerKeyBytes = signerKeyBytes,
+        caller = "renameNamePreservingSessionKey",
+    )
 
     /**
      * Re-wraps a Link Name for the copy pipeline: decrypts with the source parent key, re-encrypts +
@@ -598,6 +669,9 @@ class DriveCryptoHelper @Inject constructor(
     /**
      * Encrypts the link name to [parentPublicKeyArmored] AND signs it. The web client always signs
      * names; without a signature it shows "Missing signature for name".
+     *
+     * Only for a name that does not exist yet — this mints a fresh session key, so renaming an
+     * existing link belongs in [renameNamePreservingSessionKey].
      */
     fun encryptName(
         name: String,
@@ -848,6 +922,35 @@ class DriveCryptoHelper @Inject constructor(
         )
         val unarmoredSig = cryptoContext.pgpCrypto.getUnarmored(armoredSig)
         keyPacketBase64 to Base64.encodeToString(unarmoredSig, Base64.NO_WRAP)
+    }
+
+    /**
+     * Produces the Base64 `ExternalInvitationSignature` a non-Proton album invitation carries (#54).
+     *
+     * A non-Proton invitee has no published key to encrypt to, so the invite is authenticated rather
+     * than sealed: the inviter signs, but does not encrypt, the tuple binding the recipient's address
+     * to the share's session key. The signed input is the UTF-8 bytes of
+     * `"$inviteeEmail|$sessionKeyBase64"`, where `sessionKeyBase64` is the raw album share session-key
+     * bytes ([SessionKey.key]) Base64-encoded with NO_WRAP. The detached signature carries the
+     * [DriveSignatureContexts.EXTERNAL] critical context (the server rejects it otherwise), and its
+     * unarmored bytes are Base64-encoded (NO_WRAP) for the POST body.
+     */
+    fun signExternalInvitation(
+        inviteeEmail: String,
+        sessionKey: SessionKey,
+        signerKeyBytes: ByteArray,
+    ): String = cryptoLock.withLock {
+        // signData (armoring) + getUnarmored enter libgojni; serialize. The base64 + concat are pure
+        // CPU but kept inside to mirror encryptAndSignSessionKeyForInvitee.
+        val sessionKeyBase64 = Base64.encodeToString(sessionKey.key, Base64.NO_WRAP)
+        val signedInput = "$inviteeEmail|$sessionKeyBase64".toByteArray(Charsets.UTF_8)
+        val armoredSig = cryptoContext.pgpCrypto.signData(
+            signedInput,
+            signerKeyBytes,
+            DriveSignatureContexts.EXTERNAL,
+        )
+        val unarmoredSig = cryptoContext.pgpCrypto.getUnarmored(armoredSig)
+        Base64.encodeToString(unarmoredSig, Base64.NO_WRAP)
     }
 
     /**
@@ -1367,17 +1470,21 @@ class DriveCryptoHelper @Inject constructor(
             // useKeys and the follow-up unlock both enter libgojni; serialize each. Locks taken
             // per iteration so they're never held across loop control flow; addresses fetched above.
             val attempt = runCatching {
-                cryptoLock.withLock { address.useKeys(cryptoContext) { decryptData(sharePassphraseArmored) } }
-            }
-            if (attempt.isSuccess) {
-                val passphraseBytes = attempt.getOrThrow()
-                val keyBytes = cryptoLock.withLock {
+                // Decrypt AND unlock inside one guard: gopenpgp's decryptData can succeed with garbage
+                // bytes on a non-matching address, and only unlock() then throws. Keeping unlock here
+                // lets a wrong address fall through to the next instead of aborting the whole loop,
+                // mirroring getOrDecryptShareKey.
+                cryptoLock.withLock {
+                    val passphraseBytes = address.useKeys(cryptoContext) { decryptData(sharePassphraseArmored) }
                     val unlockedKey = cryptoContext.pgpCrypto.unlock(shareKeyArmored, passphraseBytes)
                     val bytes = unlockedKey.value.copyOf()
                     unlockedKey.close()
                     bytes
                 }
-                Log.d(TAG, "decryptExternalShareKey: succeeded (passphraseBytes=${passphraseBytes.size} keyBytes=${keyBytes.size})")
+            }
+            if (attempt.isSuccess) {
+                val keyBytes = attempt.getOrThrow()
+                Log.d(TAG, "decryptExternalShareKey: succeeded (keyBytes=${keyBytes.size})")
                 return keyBytes
             }
             lastError = attempt.exceptionOrNull()

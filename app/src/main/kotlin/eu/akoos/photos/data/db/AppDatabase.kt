@@ -112,18 +112,46 @@ import me.proton.core.usersettings.data.entity.OrganizationKeysEntity
 import me.proton.core.usersettings.data.entity.UserSettingsEntity
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
+import eu.akoos.photos.data.db.dao.ClusterSummaryDao
 import eu.akoos.photos.data.db.dao.DayMetaDao
+import eu.akoos.photos.data.db.dao.FaceDao
+import eu.akoos.photos.data.db.dao.FaceScanDao
+import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
+import eu.akoos.photos.data.db.dao.ImportAlbumMemberDao
+import eu.akoos.photos.data.db.dao.ImportHistoryDao
+import eu.akoos.photos.data.db.dao.ImportStagedDao
+import eu.akoos.photos.data.db.dao.ImportUploadedDao
+import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PerceptualHashDao
+import eu.akoos.photos.data.db.dao.NotPersonDao
+import eu.akoos.photos.data.db.dao.PersonCoverDao
+import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
+import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
+import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import eu.akoos.photos.data.db.entity.DayMetaEntity
+import eu.akoos.photos.data.db.entity.FaceEntity
+import eu.akoos.photos.data.db.entity.FaceScanEntity
+import eu.akoos.photos.data.db.entity.ImageEmbeddingEntity
+import eu.akoos.photos.data.db.entity.ImportAlbumMemberEntity
+import eu.akoos.photos.data.db.entity.ImportHistoryEntity
+import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.db.entity.ImportUploadedEntity
+import eu.akoos.photos.data.db.entity.ListingSweepSnapshotEntity
 import eu.akoos.photos.data.db.entity.LocalTagEntity
 import eu.akoos.photos.data.db.entity.PerceptualHashEntity
+import eu.akoos.photos.data.db.entity.PendingMetadataEditEntity
+import eu.akoos.photos.data.db.entity.NotPersonEntity
+import eu.akoos.photos.data.db.entity.PersonCoverEntity
+import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
@@ -152,6 +180,20 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         PhotoLocationEntity::class,
         PerceptualHashEntity::class,
         UploadAlbumTargetEntity::class,
+        PendingMetadataEditEntity::class,
+        ImportStagedEntity::class,
+        ImportHistoryEntity::class,
+        ImportUploadedEntity::class,
+        ImportAlbumMemberEntity::class,
+        ListingSweepSnapshotEntity::class,
+        FaceEntity::class,
+        PersonEntity::class,
+        FaceScanEntity::class,
+        PersonManualPhotoEntity::class,
+        NotPersonEntity::class,
+        PersonCoverEntity::class,
+        ClusterSummaryEntity::class,
+        ImageEmbeddingEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -191,7 +233,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 16,
+    version = 41,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -220,6 +262,20 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun photoLocationDao(): PhotoLocationDao
     abstract fun perceptualHashDao(): PerceptualHashDao
     abstract fun uploadAlbumTargetDao(): UploadAlbumTargetDao
+    abstract fun pendingMetadataEditDao(): PendingMetadataEditDao
+    abstract fun importStagedDao(): ImportStagedDao
+    abstract fun importHistoryDao(): ImportHistoryDao
+    abstract fun importUploadedDao(): ImportUploadedDao
+    abstract fun importAlbumMemberDao(): ImportAlbumMemberDao
+    abstract fun listingSweepSnapshotDao(): ListingSweepSnapshotDao
+    abstract fun faceDao(): FaceDao
+    abstract fun personDao(): PersonDao
+    abstract fun faceScanDao(): FaceScanDao
+    abstract fun personManualPhotoDao(): PersonManualPhotoDao
+    abstract fun notPersonDao(): NotPersonDao
+    abstract fun personCoverDao(): PersonCoverDao
+    abstract fun clusterSummaryDao(): ClusterSummaryDao
+    abstract fun imageEmbeddingDao(): ImageEmbeddingDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

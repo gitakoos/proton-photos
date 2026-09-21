@@ -27,11 +27,15 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.Rect
+import android.graphics.RectF
 import android.net.Uri
 import android.os.Build
 import coil.imageLoader
@@ -41,19 +45,33 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
+import kotlin.math.hypot
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import eu.akoos.photos.R
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
+import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.face.FaceDetector
+import eu.akoos.photos.data.face.FaceModelManager
+import eu.akoos.photos.data.face.FaceModelPreparation
+import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -87,10 +105,18 @@ enum class FilterPreset(@androidx.annotation.StringRes val labelRes: Int) {
     Vivid(R.string.editor_filter_vivid),
     Cool(R.string.editor_filter_cool),
     Warm(R.string.editor_filter_warm),
+    Noir(R.string.editor_filter_noir),
+    Chrome(R.string.editor_filter_chrome),
+    Matte(R.string.editor_filter_matte),
+    Dramatic(R.string.editor_filter_dramatic),
+    Fresh(R.string.editor_filter_fresh),
 }
 
 /** Redact stroke mode — what to draw under the user's finger. */
 enum class RedactMode { Black, Pixelate }
+
+/** How a face cover obscures its area: a block mosaic or a heavy blur. */
+enum class FaceCoverStyle { Pixelate, Blur }
 
 /**
  * A single redaction stroke. Points are in SOURCE-BITMAP coordinates so they survive
@@ -101,6 +127,47 @@ data class RedactionStroke(
     val brushSize: Float,
     val mode: RedactMode,
 )
+
+/**
+ * A freehand pen stroke. Unlike a redaction stroke its geometry is NORMALISED: [points] are 0..1
+ * fractions of the framed image and [widthFraction] is a fraction of the image width, so it renders
+ * correctly at any resolution (the 720px preview and the full-res save alike) with no full-res fallback.
+ */
+data class DrawStroke(
+    val points: List<android.graphics.PointF>,
+    val color: Int,
+    val widthFraction: Float,
+)
+
+/**
+ * A text overlay. [cx]/[cy] are the NORMALISED centre (0..1) and [sizeFraction] is the font size as a
+ * fraction of the image height, so it bakes identically at any resolution. [id] is a stable handle for
+ * selecting, moving, re-editing and deleting one item among several.
+ */
+data class TextItem(
+    val id: Int,
+    val text: String,
+    val cx: Float,
+    val cy: Float,
+    val color: Int,
+    val sizeFraction: Float,
+    /** Rotation in degrees, applied around the text centre. Snaps to 45-degree detents while dragging. */
+    val rotation: Float = 0f,
+)
+
+/** One HSL colour band (red..magenta). [hue]/[sat]/[light] are -100..100 and only affect pixels near
+ *  the band's hue, blended into the neighbours. */
+data class HslBand(val hue: Int = 0, val sat: Int = 0, val light: Int = 0)
+
+/** A tone-curve control point in 0..1 (x = input level, y = output level). A plain class (not
+ *  android PointF) so the LUT maths is unit-testable off-device. */
+data class CurvePoint(val x: Float, val y: Float)
+
+/** The neutral straight-line curve (input maps to itself). */
+val IDENTITY_CURVE: List<CurvePoint> = listOf(CurvePoint(0f, 0f), CurvePoint(1f, 1f))
+
+/** Which tone curve is being edited: the RGB master (all channels) or one colour channel. */
+enum class CurveChannel { RGB, R, G, B }
 
 data class EditorAdjustments(
     /** -100..100; 0 = unchanged. */
@@ -117,16 +184,66 @@ data class EditorAdjustments(
     val temperature: Int = 0,
     /** Green (+) / magenta (-) — shifts G up (or down). */
     val tone: Int = 0,
+    /** Radial edge shading: positive darkens the corners, negative lightens them. Drawn on the framed image. */
+    val vignette: Int = 0,
+    /** Faded / matte look: positive lifts the black point and eases contrast, negative deepens it (punch). */
+    val fade: Int = 0,
+    /** Vibrance: boosts saturation weighted toward less-saturated pixels (positive) so already-vivid
+     *  areas and skin are protected; negative pulls colour out. Per-pixel, applied after the colour matrix. */
+    val vibrance: Int = 0,
+    /** Unsharp sharpening (positive) via a blurred difference; negative softens. Per-pixel. */
+    val sharpen: Int = 0,
+    /** Film grain: adds monochrome noise. Per-pixel, applied last of the colour effects. */
+    val grain: Int = 0,
     val rotationDegrees: Int = 0, // 0, 90, 180, 270
     val flipHorizontal: Boolean = false,
     val flipVertical: Boolean = false,
+    /** Fine straighten rotation, -100..100 mapped to about -15..+15 degrees, auto-cropped so no empty
+     *  corners show. Applied after the 90-degree rotation, before crop. */
+    val straighten: Int = 0,
+    /** Vertical keystone, -100..100: positive narrows the top (converge up), negative narrows the bottom. */
+    val perspectiveV: Int = 0,
+    /** Horizontal keystone, -100..100: positive narrows the left, negative narrows the right. */
+    val perspectiveH: Int = 0,
     val filter: FilterPreset = FilterPreset.None,
     /** Crop in display-space coords (the rotated/flipped orientation the user sees), consumed after
      *  the pipeline's rotate step so it stays in its authoring space. null = no crop. */
     val cropRect: Rect? = null,
     /** Black-out / pixelate strokes applied after all color and geometry transforms. */
     val redactStrokes: List<RedactionStroke> = emptyList(),
+    /** Oriented ellipses covering detected faces, composited alongside the redaction step. Coordinates
+     *  are absolute pixels of the rendered (post-crop) image, the same convention as [redactStrokes],
+     *  so they land identically on the full-res preview and the full-res save. */
+    val faceCovers: List<OvalSpec> = emptyList(),
+    /** How the face covers obscure their area: a block mosaic or a heavy blur. */
+    val faceCoverStyle: FaceCoverStyle = FaceCoverStyle.Pixelate,
+    /** 0..1 face-cover intensity; larger values coarsen the mosaic or blur harder. */
+    val faceCoverStrength: Float = 0.5f,
+    /** Per-colour HSL: eight bands (red, orange, yellow, green, aqua, blue, purple, magenta). */
+    val hslBands: List<HslBand> = List(8) { HslBand() },
+    /** Tone curves: a master applied to every channel, then a per-channel curve. */
+    val curveRgb: List<CurvePoint> = IDENTITY_CURVE,
+    val curveR: List<CurvePoint> = IDENTITY_CURVE,
+    val curveG: List<CurvePoint> = IDENTITY_CURVE,
+    val curveB: List<CurvePoint> = IDENTITY_CURVE,
+    /** Freehand pen strokes (normalised), drawn on top of everything. */
+    val drawStrokes: List<DrawStroke> = emptyList(),
+    /** Text overlays (normalised), drawn last. */
+    val textItems: List<TextItem> = emptyList(),
 )
+
+/**
+ * Where the Hide-faces tool is in its one-shot detect flow, surfaced so the panel can show a spinner
+ * while a run is in flight, a face count when it settles, a consent prompt before the model download,
+ * or a failure. Detection is only ever started by a user action, never a per-frame loop.
+ */
+sealed interface HideFacesState {
+    data object Idle : HideFacesState
+    data object Detecting : HideFacesState
+    data class Ready(val faceCount: Int) : HideFacesState
+    data object NeedsConsent : HideFacesState
+    data class Failed(val message: String) : HideFacesState
+}
 
 data class EditorUiState(
     val source: EditorSource? = null,
@@ -139,6 +256,13 @@ data class EditorUiState(
      */
     val adjustedBitmapNoCrop: Bitmap? = null,
     val adjustments: EditorAdjustments = EditorAdjustments(),
+    /** Redact brush diameter in screen dp, adjustable from the Redact panel (default 28). */
+    val redactBrushDp: Float = 28f,
+    /** The text overlay currently selected for moving / editing / colour+size in the Text tool. */
+    val selectedTextId: Int? = null,
+    /** True while the Text tool is active: the preview is then rendered WITHOUT baking the text (the
+     *  overlay draws it live), so moving a text is a cheap overlay redraw instead of a full re-render. */
+    val textToolActive: Boolean = false,
     val isSaving: Boolean = false,
     val saveResult: SaveResult? = null,
     val isLoading: Boolean = true,
@@ -149,6 +273,8 @@ data class EditorUiState(
     /** OS delete-consent dialog ([MediaStore.createDeleteRequest]) when a Synced Overwrite falls back
      *  to copy, so the orphaned original can be removed. Mirrors [pendingWriteIntent]. */
     val pendingDeleteIntent: android.app.PendingIntent? = null,
+    /** Where the Hide-faces tool is in its one-shot detect flow. */
+    val hideFacesState: HideFacesState = HideFacesState.Idle,
 )
 
 sealed class SaveResult {
@@ -156,7 +282,10 @@ sealed class SaveResult {
     /** Overwrite fell back to a new file (source read-only, or its format cannot be overwritten in
      *  place); original untouched, edit at [uri]. [messageRes] is the toast explaining which case. */
     data class SuccessAsCopy(val uri: Uri?, val messageRes: Int = R.string.editor_saved_as_copy_toast) : SaveResult()
-    data class Failed(val message: String) : SaveResult()
+    /** [message] is shown to the user. [asDialog] surfaces it in the bottom-sheet dialog for a genuine
+     *  blocking failure (e.g. no internet on a cloud edit); the default renders it as the inline hint,
+     *  which suits a benign outcome such as a user-cancelled overwrite (not an error worth a modal). */
+    data class Failed(val message: String, val asDialog: Boolean = false) : SaveResult()
 }
 
 /**
@@ -174,6 +303,85 @@ enum class SaveMode { Overwrite, Copy }
 internal fun overwriteCoercesToCopy(overwritable: Boolean, isMotionPhoto: Boolean): Boolean =
     !overwritable || isMotionPhoto
 
+/**
+ * The pixel size an export downscales to: the longest edge capped at [maxDim], aspect preserved, and
+ * never upscaled (a smaller image is returned unchanged). Backs the Full / 2048 / 1024 export-size
+ * choice, and is pure so the resize maths is verified in a test.
+ */
+internal fun exportTargetSize(width: Int, height: Int, maxDim: Int): Pair<Int, Int> {
+    val longest = maxOf(width, height)
+    if (longest <= maxDim) return width to height
+    val scale = maxDim.toFloat() / longest
+    return (width * scale).roundToInt().coerceAtLeast(1) to (height * scale).roundToInt().coerceAtLeast(1)
+}
+
+/** The output level (0..1) a tone curve maps [x] (0..1) to: linear between its sorted control points,
+ *  flat beyond the ends. Pure so the curve maths is unit-tested off-device. */
+internal fun curveValueAt(points: List<CurvePoint>, x: Float): Float {
+    if (points.isEmpty()) return x
+    val pts = points.sortedBy { it.x }
+    if (x <= pts.first().x) return pts.first().y
+    if (x >= pts.last().x) return pts.last().y
+    for (i in 0 until pts.size - 1) {
+        val a = pts[i]
+        val b = pts[i + 1]
+        if (x in a.x..b.x) {
+            val t = if (b.x > a.x) (x - a.x) / (b.x - a.x) else 0f
+            return a.y + (b.y - a.y) * t
+        }
+    }
+    return x
+}
+
+/** A 256-entry lookup table (0..255 -> 0..255) for a tone curve. */
+internal fun buildCurveLut(points: List<CurvePoint>): IntArray =
+    IntArray(256) { i -> (curveValueAt(points, i / 255f) * 255f).roundToInt().coerceIn(0, 255) }
+
+/** True when a curve is the neutral straight line (nothing to apply). */
+internal fun isIdentityCurve(points: List<CurvePoint>): Boolean =
+    points.size == 2 && points[0].x == 0f && points[0].y == 0f && points[1].x == 1f && points[1].y == 1f
+
+/** Centre hue (degrees) of each HSL band: red, orange, yellow, green, aqua, blue, purple, magenta. */
+val HSL_BAND_CENTERS = floatArrayOf(0f, 30f, 60f, 120f, 180f, 240f, 280f, 320f)
+
+/** Shortest distance between two hues on the 0..360 wheel. */
+internal fun hueDistance(a: Float, b: Float): Float {
+    val d = abs(a - b) % 360f
+    return if (d > 180f) 360f - d else d
+}
+
+/** How strongly an HSL band centred at [centerDeg] affects a pixel at [hue]: 1 at the centre, ramping to
+ *  0 by 60 degrees away, so adjacent bands blend. */
+internal fun hslBandWeight(hue: Float, centerDeg: Float): Float =
+    (1f - hueDistance(hue, centerDeg) / 60f).coerceAtLeast(0f)
+
+/** The angle a rotated text overlay actually draws at: the raw angle, but pulled to the nearest 45-degree
+ *  detent when within ~5 degrees of it (a magnet at horizontal / diagonal / vertical). Applied only at
+ *  draw time, so the stored raw angle keeps accumulating and a twist can pass through a detent. */
+internal fun snapTextAngle(deg: Float): Float {
+    val norm = ((deg % 360f) + 360f) % 360f
+    val nearest = (norm / 45f).roundToInt() * 45f
+    return if (kotlin.math.abs(norm - nearest) <= 5f) (nearest % 360f) else norm
+}
+
+/**
+ * The format a COPY defaults to: the source's own, when `Bitmap.compress` can write it, so editing a PNG
+ * keeps a lossless PNG (with its transparency) and a WebP stays WebP instead of silently turning into a
+ * lossy JPEG. A format the encoder cannot produce (HEIC, RAW, GIF) falls back to JPEG. The user can still
+ * override this in the picker.
+ */
+internal fun copyDefaultFormat(mimeType: String, displayName: String): Bitmap.CompressFormat {
+    val mime = mimeType.lowercase()
+    val ext = displayName.substringAfterLast('.', "").lowercase()
+    return when {
+        mime == "image/png" || ext == "png" -> Bitmap.CompressFormat.PNG
+        mime == "image/webp" || ext == "webp" ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Bitmap.CompressFormat.WEBP_LOSSY
+            else @Suppress("DEPRECATION") Bitmap.CompressFormat.WEBP
+        else -> Bitmap.CompressFormat.JPEG
+    }
+}
+
 @HiltViewModel
 class PhotoEditorViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -183,9 +391,16 @@ class PhotoEditorViewModel @Inject constructor(
     // Reports the background edit-upload to the Activity monitor + avatar ring, the same surface the
     // gallery download / offline pin loops use. The upload itself is unchanged; this only tracks it.
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
+    // A vaulted photo is an app-private file with no MediaStore row: a copy of one has to be written
+    // and recorded by the vault, or it leaves the hidden area.
+    private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
+    private val hiddenVaultEditor: eu.akoos.photos.data.hidden.HiddenVaultEditor,
     // Application-lifetime scope for the cloud upload that outlives the editor: it must keep running
     // after save() returns and the screen navigates away (viewModelScope is cancelled at that point).
     @eu.akoos.photos.di.AppScope private val appScope: CoroutineScope,
+    // Fast pre-check for a cloud edit's save: validated internet, so an offline save fails at once
+    // instead of starting an upload that hangs on a connected-but-dead network.
+    private val networkObserver: eu.akoos.photos.util.NetworkObserver,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(EditorUiState())
@@ -234,14 +449,16 @@ class PhotoEditorViewModel @Inject constructor(
         while (redoStack.size > 30) redoStack.removeFirst()
         _canUndo.value = undoStack.isNotEmpty()
         _canRedo.value = redoStack.isNotEmpty()
+        // Commit the target immediately so a following edit builds on it; render async under the render
+        // token so a slow undo render can't land after a newer one (a filter tapped right after) and undo it.
+        _state.update { it.copy(adjustments = previous) }
+        val gen = ++renderGen
         viewModelScope.launch(Dispatchers.Default) {
-            val newPreview = applyAdjustments(orig, previous)
+            val newPreview = applyAdjustments(orig, forPreview(previous))
             val noCropPreview = applyColorOnly(orig, previous)
-            _state.update { it.copy(
-                adjustments = previous,
-                previewBitmap = newPreview,
-                adjustedBitmapNoCrop = noCropPreview,
-            ) }
+            if (gen == renderGen) {
+                _state.update { it.copy(previewBitmap = newPreview, adjustedBitmapNoCrop = noCropPreview) }
+            }
         }
     }
 
@@ -254,14 +471,14 @@ class PhotoEditorViewModel @Inject constructor(
         while (undoStack.size > 30) undoStack.removeFirst()
         _canUndo.value = undoStack.isNotEmpty()
         _canRedo.value = redoStack.isNotEmpty()
+        _state.update { it.copy(adjustments = next) }
+        val gen = ++renderGen
         viewModelScope.launch(Dispatchers.Default) {
-            val newPreview = applyAdjustments(orig, next)
+            val newPreview = applyAdjustments(orig, forPreview(next))
             val noCropPreview = applyColorOnly(orig, next)
-            _state.update { it.copy(
-                adjustments = next,
-                previewBitmap = newPreview,
-                adjustedBitmapNoCrop = noCropPreview,
-            ) }
+            if (gen == renderGen) {
+                _state.update { it.copy(previewBitmap = newPreview, adjustedBitmapNoCrop = noCropPreview) }
+            }
         }
     }
 
@@ -270,6 +487,11 @@ class PhotoEditorViewModel @Inject constructor(
     private var previewSourceSmall: Bitmap? = null
     /** Most-recent slider-drag render job; cancelled on the next tick to keep only one in flight. */
     private var sliderRenderJob: kotlinx.coroutines.Job? = null
+
+    /** Monotonic render token. Every render path stamps its request and only writes the result if it is
+     *  still the latest, so an older render (a slider release) can't land after and overwrite a newer one
+     *  (a chip reset) once they race on the Default dispatcher. Bumped on the main thread only. */
+    @Volatile private var renderGen = 0L
 
     /** Build (or return cached) downsampled source for fast previews. Max edge 720px → ~5 ms/tick. */
     private fun ensureSmallSource(src: Bitmap): Bitmap {
@@ -287,6 +509,21 @@ class PhotoEditorViewModel @Inject constructor(
         return small
     }
 
+    /** Scale a full-res crop rect down to the small preview source, so a smooth small-source render still
+     *  crops in the right place. [sc] is the small source's scale factor (smallWidth / originalWidth). */
+    private fun scaleCropForSmall(adj: EditorAdjustments, sc: Float): EditorAdjustments {
+        val crop = adj.cropRect ?: return adj
+        if (sc >= 1f) return adj
+        return adj.copy(
+            cropRect = Rect(
+                (crop.left * sc).roundToInt(),
+                (crop.top * sc).roundToInt(),
+                (crop.right * sc).roundToInt(),
+                (crop.bottom * sc).roundToInt(),
+            ),
+        )
+    }
+
     /** On slider release: full-res re-render so the saved output matches the preview, and the whole
      *  drag is folded into one undo entry (snapshot taken at drag start, dropped if it was a no-op).
      *  Preview bitmaps are never recycled here — Compose may still draw the old one one frame past
@@ -297,13 +534,16 @@ class PhotoEditorViewModel @Inject constructor(
         val snap = sliderUndoSnapshot
         sliderUndoSnapshot = null
         if (snap != null && snap != adj) pushUndo(snap)
+        val gen = ++renderGen
         viewModelScope.launch(Dispatchers.Default) {
-            val full = applyAdjustments(orig, adj)
+            val full = applyAdjustments(orig, forPreview(adj))
             val noCropFull = applyColorOnly(orig, adj)
-            _state.update { it.copy(
-                previewBitmap = full,
-                adjustedBitmapNoCrop = noCropFull,
-            ) }
+            if (gen == renderGen) {
+                _state.update { it.copy(
+                    previewBitmap = full,
+                    adjustedBitmapNoCrop = noCropFull,
+                ) }
+            }
         }
     }
 
@@ -324,6 +564,35 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     val hasCloudCounterpart: StateFlow<Boolean> = _hasCloudCounterpart.asStateFlow()
+
+    // ── Hide faces ─────────────────────────────────────────────────────────────
+    /** Master AI-features gate (Settings, AI and machine learning). Off hides the Hide-faces tool from
+     *  the editor tool row so no face model is ever fetched. Observed, so a change made in Settings is
+     *  reflected the next time the editor is opened. */
+    val aiFeaturesEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
+     *  the Hide-faces tool is offered, so turning faces off drops the tool while the master AI switch
+     *  stays on. Observed, so a change made in Settings is reflected the next time the editor is opened. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.FACE_ENABLED] ?: false }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Resolves the SCRFD model (side-loaded, cached, or downloaded on consent). Built lazily so the
+     *  editor pays nothing for it until the user reaches for Hide faces. */
+    private val faceModelManager by lazy { FaceModelManager(context) }
+    /** Detector holding one open ONNX session, reused across detects and rebuilt only if the resolved
+     *  model path changes. Closed in [onCleared]. */
+    private var faceDetector: FaceDetector? = null
+    private var faceDetectorModelPath: String? = null
+
+    /** Longest edge the detection copy is capped to, so a large source never inflates ARGB_8888 past
+     *  the heap during a detect. Results are scaled back up to full-res image pixels afterwards. */
+    private val faceDetectMaxEdge = 1920
 
     /** Longest-edge cap on decode: a 50 MP photo as ARGB_8888 (~200 MB) exceeds the ~100 MB a hardware
      *  Canvas can draw ("too large bitmap"). ~12 MP photos pass through untouched. */
@@ -516,6 +785,48 @@ class PhotoEditorViewModel @Inject constructor(
     fun updateShadows(v: Int) = updateAdjustmentsFast { it.copy(shadows = v.coerceIn(-100, 100)) }
     fun updateTemperature(v: Int) = updateAdjustmentsFast { it.copy(temperature = v.coerceIn(-100, 100)) }
     fun updateTone(v: Int) = updateAdjustmentsFast { it.copy(tone = v.coerceIn(-100, 100)) }
+    fun updateVignette(v: Int) = updateAdjustmentsFast { it.copy(vignette = v.coerceIn(-100, 100)) }
+    fun updateFade(v: Int) = updateAdjustmentsFast { it.copy(fade = v.coerceIn(-100, 100)) }
+    fun updateVibrance(v: Int) = updateAdjustmentsFast { it.copy(vibrance = v.coerceIn(-100, 100)) }
+    fun updateSharpen(v: Int) = updateAdjustmentsFast { it.copy(sharpen = v.coerceIn(-100, 100)) }
+    fun updateGrain(v: Int) = updateAdjustmentsFast { it.copy(grain = v.coerceIn(-100, 100)) }
+
+    /** Live curve edit (a graph drag): renders on the fast path. [points] are the channel's control points. */
+    fun setCurve(channel: CurveChannel, points: List<CurvePoint>) = updateAdjustmentsFast { adj ->
+        when (channel) {
+            CurveChannel.RGB -> adj.copy(curveRgb = points)
+            CurveChannel.R -> adj.copy(curveR = points)
+            CurveChannel.G -> adj.copy(curveG = points)
+            CurveChannel.B -> adj.copy(curveB = points)
+        }
+    }
+
+    /** Reset one channel's curve to the straight line (a full-res render + one undo entry). */
+    fun resetCurve(channel: CurveChannel) = updateAdjustments { adj ->
+        when (channel) {
+            CurveChannel.RGB -> adj.copy(curveRgb = IDENTITY_CURVE)
+            CurveChannel.R -> adj.copy(curveR = IDENTITY_CURVE)
+            CurveChannel.G -> adj.copy(curveG = IDENTITY_CURVE)
+            CurveChannel.B -> adj.copy(curveB = IDENTITY_CURVE)
+        }
+    }
+
+    /** Live HSL edit (a band slider): renders on the fast path. */
+    fun setHslBand(index: Int, band: HslBand) = updateAdjustmentsFast { adj ->
+        if (index !in adj.hslBands.indices) return@updateAdjustmentsFast adj
+        adj.copy(
+            hslBands = adj.hslBands.toMutableList().also {
+                it[index] = HslBand(band.hue.coerceIn(-100, 100), band.sat.coerceIn(-100, 100), band.light.coerceIn(-100, 100))
+            },
+        )
+    }
+
+    /** Reset every HSL band (a full-res render + one undo entry). */
+    fun resetHsl() = updateAdjustments { it.copy(hslBands = List(8) { HslBand() }) }
+    fun updateStraighten(v: Int) = updateAdjustmentsFast { it.copy(straighten = v.coerceIn(-100, 100)) }
+    fun updatePerspectiveV(v: Int) = updateAdjustmentsFast { it.copy(perspectiveV = v.coerceIn(-100, 100)) }
+    fun updatePerspectiveH(v: Int) = updateAdjustmentsFast { it.copy(perspectiveH = v.coerceIn(-100, 100)) }
+    fun resetGeometry() = updateAdjustments { it.copy(straighten = 0, perspectiveV = 0, perspectiveH = 0) }
     /** 90° CW turn. The display-space crop rect ([EditorAdjustments.cropRect]) must be carried into the
      *  new orientation, else it cuts the wrong region: (L,T,R,B) → (oldDisplayH-B, L, oldDisplayH-T, R). */
     fun rotate90Cw() {
@@ -561,6 +872,262 @@ class PhotoEditorViewModel @Inject constructor(
     }
     fun clearRedactStrokes() = updateAdjustments { it.copy(redactStrokes = emptyList()) }
 
+    /** Set the redact brush diameter (screen dp). No re-render: it only sizes the next stroke. */
+    fun setRedactBrush(dp: Float) = _state.update { it.copy(redactBrushDp = dp.coerceIn(8f, 80f)) }
+
+    // ── Hide faces ─────────────────────────────────────────────────────────────
+
+    /**
+     * One-shot face detection for the Hide-faces tool. Resolves the model first, routing a
+     * still-unavailable model through [HideFacesState] as a consent prompt or a failure; on success it
+     * detects on a memory-bounded copy of the source and covers every face found.
+     *
+     * The detect runs on a copy whose long edge is capped so a large source never inflates ARGB_8888
+     * past the heap, then each resulting oval is scaled UP to full-res image pixels, the same space
+     * the redact strokes and the covers pipeline (step 4b) work in, so a full-res save re-renders the
+     * covers for free. Committed through [updateAdjustments], so it is one undo entry and one re-render.
+     */
+    fun detectFaces() {
+        val orig = _state.value.originalBitmap ?: return
+        _state.update { it.copy(hideFacesState = HideFacesState.Detecting) }
+        viewModelScope.launch(Dispatchers.Default) {
+            try {
+                val modelFile = when (val prep = faceModelManager.prepare()) {
+                    is FaceModelPreparation.Ready -> prep.file
+                    FaceModelPreparation.NeedsConsent -> {
+                        _state.update { it.copy(hideFacesState = HideFacesState.NeedsConsent) }
+                        return@launch
+                    }
+                    is FaceModelPreparation.Failed -> {
+                        _state.update { it.copy(hideFacesState = HideFacesState.Failed(
+                            context.getString(R.string.editor_face_model_failed),
+                        )) }
+                        return@launch
+                    }
+                }
+                val detector = ensureFaceDetector(modelFile)
+
+                val fullW = orig.width
+                val fullH = orig.height
+                val scale = (faceDetectMaxEdge.toFloat() / maxOf(fullW, fullH)).coerceAtMost(1f)
+                val detectW = (fullW * scale).roundToInt().coerceAtLeast(1)
+                val detectH = (fullH * scale).roundToInt().coerceAtLeast(1)
+                val detectBitmap = Bitmap.createScaledBitmap(orig, detectW, detectH, true)
+                val faces = try {
+                    detector.detect(detectBitmap)
+                } finally {
+                    // createScaledBitmap hands back the same instance when nothing needs scaling.
+                    if (detectBitmap !== orig && !detectBitmap.isRecycled) detectBitmap.recycle()
+                }
+
+                // Scale ovals from detect-copy pixels up to full-res image pixels. The scale is uniform
+                // (aspect preserved), so the eye-line rotation baked by faceOval carries over unchanged.
+                val sx = fullW.toFloat() / detectW.toFloat()
+                val sy = fullH.toFloat() / detectH.toFloat()
+                val covers = faces.mapNotNull { face ->
+                    if (face.landmarks.size < 2) return@mapNotNull null
+                    val leftEye = face.landmarks[0]
+                    val rightEye = face.landmarks[1]
+                    val oval = faceOval(
+                        face.box.left, face.box.top, face.box.right, face.box.bottom,
+                        leftEye.x, leftEye.y, rightEye.x, rightEye.y,
+                    )
+                    OvalSpec(
+                        centerX = oval.centerX * sx,
+                        centerY = oval.centerY * sy,
+                        radiusX = oval.radiusX * sx,
+                        radiusY = oval.radiusY * sy,
+                        rotationDegrees = oval.rotationDegrees,
+                    )
+                }
+
+                withContext(Dispatchers.Main) {
+                    updateAdjustments { it.copy(faceCovers = covers) }
+                    _state.update { it.copy(hideFacesState = HideFacesState.Ready(covers.size)) }
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                _state.update { it.copy(hideFacesState = HideFacesState.Failed(
+                    context.getString(R.string.editor_face_model_failed),
+                )) }
+            }
+        }
+    }
+
+    /** The detector for [modelFile], reusing its open session unless the resolved model path changed. */
+    private fun ensureFaceDetector(modelFile: File): FaceDetector {
+        faceDetector?.let { if (faceDetectorModelPath == modelFile.absolutePath) return it }
+        faceDetector?.close()
+        return FaceDetector(modelFile).also {
+            faceDetector = it
+            faceDetectorModelPath = modelFile.absolutePath
+        }
+    }
+
+    fun setFaceCoverStyle(style: FaceCoverStyle) = updateAdjustments { it.copy(faceCoverStyle = style) }
+    /** Live strength drag: fast path per tick, folded into one undo entry by [finalizeAdjustments]. */
+    fun setFaceCoverStrength(v: Float) = updateAdjustmentsFast { it.copy(faceCoverStrength = v.coerceIn(0f, 1f)) }
+    fun clearFaceCovers() {
+        updateAdjustments { it.copy(faceCovers = emptyList()) }
+        _state.update { it.copy(hideFacesState = HideFacesState.Idle) }
+    }
+
+    /** Clear a consent / failure prompt without acting on it (the user backed out of the dialog). */
+    fun dismissHideFacesPrompt() = _state.update { it.copy(hideFacesState = HideFacesState.Idle) }
+
+    /**
+     * Records the user's agreement to fetch the face model and re-runs detection, so the tap that
+     * accepted the prompt is what produces the covers. Persisting first (the write suspends until it is
+     * durable) means the re-run's model resolve reads the accepted flag rather than racing the write.
+     */
+    fun allowFaceModelDownload() {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.FACE_MODEL_DOWNLOAD_ALLOWED] = true }
+            detectFaces()
+        }
+    }
+
+    fun addDrawStroke(stroke: DrawStroke) = updateAdjustments { it.copy(drawStrokes = it.drawStrokes + stroke) }
+    fun undoLastDrawStroke() = updateAdjustments {
+        it.copy(drawStrokes = if (it.drawStrokes.isEmpty()) it.drawStrokes else it.drawStrokes.dropLast(1))
+    }
+    fun clearDrawStrokes() = updateAdjustments { it.copy(drawStrokes = emptyList()) }
+
+    // ── Text overlays ─────────────────────────────────────────────────────────
+    private var textIdCounter = 0
+
+    /** Add a text overlay at the centre and select it. Blank text is ignored. */
+    fun addTextItem(text: String) {
+        if (text.isBlank()) return
+        val id = ++textIdCounter
+        updateAdjustments {
+            it.copy(textItems = it.textItems + TextItem(id, text, 0.5f, 0.5f, android.graphics.Color.WHITE, 0.08f))
+        }
+        _state.update { it.copy(selectedTextId = id) }
+    }
+
+    fun updateTextItemText(id: Int, text: String) {
+        if (text.isBlank()) { removeTextItem(id); return }
+        updateAdjustments { it.copy(textItems = it.textItems.map { t -> if (t.id == id) t.copy(text = text) else t }) }
+    }
+
+    /** Live drag of a text overlay: fast small-source render, finalised on release. */
+    fun moveTextItem(id: Int, cx: Float, cy: Float) = updateAdjustmentsFast {
+        it.copy(textItems = it.textItems.map { t -> if (t.id == id) t.copy(cx = cx.coerceIn(0f, 1f), cy = cy.coerceIn(0f, 1f)) else t })
+    }
+
+    /** One transform tick on a text overlay: pan it by [dcx]/[dcy] (fractions) and scale by [zoom]
+     *  (pinch). One finger drags, two fingers resize. Fast small-source render, finalised on release. */
+    fun nudgeTextItem(id: Int, dcx: Float, dcy: Float, zoom: Float) = updateAdjustmentsFast {
+        it.copy(textItems = it.textItems.map { t ->
+            if (t.id == id) t.copy(
+                cx = (t.cx + dcx).coerceIn(0f, 1f),
+                cy = (t.cy + dcy).coerceIn(0f, 1f),
+                sizeFraction = (t.sizeFraction * zoom).coerceIn(0.02f, 0.35f),
+            ) else t
+        })
+    }
+
+    fun setTextItemColor(id: Int, color: Int) = updateAdjustments {
+        it.copy(textItems = it.textItems.map { t -> if (t.id == id) t.copy(color = color) else t })
+    }
+
+    fun setTextItemSize(id: Int, sizeFraction: Float) = updateAdjustmentsFast {
+        it.copy(textItems = it.textItems.map { t -> if (t.id == id) t.copy(sizeFraction = sizeFraction.coerceIn(0.02f, 0.35f)) else t })
+    }
+
+    fun removeTextItem(id: Int) {
+        updateAdjustments { it.copy(textItems = it.textItems.filterNot { t -> t.id == id }) }
+        _state.update { if (it.selectedTextId == id) it.copy(selectedTextId = null) else it }
+    }
+
+    fun selectTextItem(id: Int?) = _state.update { it.copy(selectedTextId = id) }
+
+    /** Enter/leave the Text tool. Re-renders the preview so the baked text clears (entering: the overlay
+     *  draws it live) or reappears (leaving). Not an undo step; it is only a preview-mode toggle. */
+    fun setTextToolActive(active: Boolean) {
+        if (_state.value.textToolActive == active) return
+        _state.update { it.copy(textToolActive = active) }
+        updateAdjustmentsNoUndo { it }
+    }
+
+    /** Strip the pen strokes and text overlays from EVERY preview render, so they live as a Compose layer
+     *  over the image (drawn by the overlays) instead of being re-baked on every slider tick or filter tap.
+     *  The redact strokes stay baked (their pixelate mode needs the pixels). Save keeps the full pipeline. */
+    private fun forPreview(adj: EditorAdjustments): EditorAdjustments =
+        adj.copy(drawStrokes = emptyList(), textItems = emptyList())
+
+    /** Live drag/pinch of a text overlay, WITHOUT a re-render: the overlay draws the text, so only the
+     *  state changes. [commitTextMove] pushes one undo entry when the gesture ends. */
+    private var textMoveSnapshot: EditorAdjustments? = null
+    fun nudgeTextItemLive(id: Int, dcx: Float, dcy: Float, zoom: Float, dRotation: Float) = _state.update { s ->
+        if (textMoveSnapshot == null) textMoveSnapshot = s.adjustments
+        s.copy(adjustments = s.adjustments.copy(textItems = s.adjustments.textItems.map { t ->
+            if (t.id == id) t.copy(
+                cx = (t.cx + dcx).coerceIn(0f, 1f),
+                cy = (t.cy + dcy).coerceIn(0f, 1f),
+                sizeFraction = (t.sizeFraction * zoom).coerceIn(0.02f, 0.35f),
+                // Store the RAW accumulated angle; the 45-degree snap is applied at DRAW time only, so a
+                // slow twist keeps accumulating and can escape a detent instead of being pinned to it.
+                rotation = t.rotation + dRotation,
+            ) else t
+        }))
+    }
+    fun commitTextMove() {
+        val snap = textMoveSnapshot ?: return
+        textMoveSnapshot = null
+        if (snap != _state.value.adjustments) pushUndo(snap)
+    }
+
+    // ── Inline text editing (typed directly on the photo, no dialog) ──────────────
+    private var textEditSnapshot: EditorAdjustments? = null
+
+    /** Create an empty text at the centre and open it for inline editing. Returns its id. */
+    fun addEmptyTextItem(): Int {
+        val id = ++textIdCounter
+        textEditSnapshot = _state.value.adjustments
+        _state.update { s ->
+            s.copy(
+                adjustments = s.adjustments.copy(
+                    textItems = s.adjustments.textItems + TextItem(id, "", 0.5f, 0.5f, android.graphics.Color.WHITE, 0.08f),
+                ),
+                selectedTextId = id,
+            )
+        }
+        return id
+    }
+
+    /** Snapshot before editing an existing text so the whole edit folds into one undo entry. */
+    fun beginTextEdit(id: Int) {
+        textEditSnapshot = _state.value.adjustments
+        _state.update { it.copy(selectedTextId = id) }
+    }
+
+    /** Live inline text change: a plain state update (the overlay field shows it), no heavy re-render. */
+    fun setTextItemTextLive(id: Int, text: String) = _state.update { s ->
+        s.copy(adjustments = s.adjustments.copy(textItems = s.adjustments.textItems.map { if (it.id == id) it.copy(text = text) else it }))
+    }
+
+    /** Finish inline editing: drop the text if left blank, and push one undo entry for the whole edit. */
+    fun commitTextEdit(id: Int) {
+        val snap = textEditSnapshot
+        textEditSnapshot = null
+        val item = _state.value.adjustments.textItems.firstOrNull { it.id == id }
+        if (item != null && item.text.isBlank()) {
+            _state.update { s ->
+                s.copy(
+                    adjustments = s.adjustments.copy(textItems = s.adjustments.textItems.filterNot { it.id == id }),
+                    selectedTextId = if (s.selectedTextId == id) null else s.selectedTextId,
+                )
+            }
+        }
+        if (snap != null && snap != _state.value.adjustments) pushUndo(snap)
+    }
+
+    /** Reset a single adjustment to its neutral value (a long-press on its chip), one undo entry. */
+    fun resetAdjustment(transform: (EditorAdjustments) -> EditorAdjustments) = updateAdjustments(transform)
+
     fun resetAll() {
         clearUndoStacks()
         updateAdjustmentsNoUndo { EditorAdjustments() }
@@ -594,18 +1161,22 @@ class PhotoEditorViewModel @Inject constructor(
             }
             val mean = (sum / pixels.size.toLong()).toInt()
             val spread = maxL - minL
-            val brightnessDelta = when {
-                mean < 100 -> 15
-                mean > 155 -> -10
+            // Gentle, highlight-safe auto-fix. It corrects luminance through EXPOSURE (a multiplicative gain
+            // that rolls off near white) rather than BRIGHTNESS (a flat offset that clips the highlights and
+            // was blowing photos out), always pulls a blown top back down, lifts crushed shadows, and adds a
+            // little contrast/saturation only when the photo is genuinely flat. A good photo is barely moved.
+            val brightnessDelta = 0
+            val exposureDelta = when {
+                mean < 85 -> 10
+                mean < 110 -> 5
+                mean > 175 -> -8
                 else -> 0
             }
-            val contrastDelta = if (spread >= 220) 0 else 12
-            val saturationDelta = 10
-            // Conservative tonal nudges: raise exposure on dark scenes, pull blown highlights down,
-            // lift crushed shadows. Temperature/tone stay 0 — auto-WB off one luma histogram is unreliable.
-            val exposureDelta = if (mean < 90) 8 else 0
-            val highlightsDelta = if (maxL > 240) -15 else 0
-            val shadowsDelta = if (minL < 15) 15 else 0
+            val contrastDelta = if (spread < 140) 8 else 0
+            val saturationDelta = if (spread < 200) 6 else 3
+            // Temperature/tone stay 0: auto-WB off one luma histogram is unreliable.
+            val highlightsDelta = if (maxL > 232) -14 else 0
+            val shadowsDelta = if (minL < 22) 12 else 0
             withContext(Dispatchers.Main) {
                 updateAdjustments {
                     it.copy(
@@ -626,14 +1197,29 @@ class PhotoEditorViewModel @Inject constructor(
         val previous = _state.value.adjustments
         val newAdj = transform(previous)
         if (newAdj != previous) pushUndo(previous)
+        val gen = ++renderGen
         viewModelScope.launch(Dispatchers.Default) {
-            val newPreview = applyAdjustments(orig, newAdj)
+            // Instant screen-res preview first, so a filter / rotate / crop / auto-fix shows immediately
+            // instead of after the slow full-res pass on a big photo, with the crop scaled down to the
+            // small source. Redact strokes and face covers skip it (their geometry is in full-res
+            // coordinates and the small source would drift it).
+            if (newAdj.redactStrokes.isEmpty() && newAdj.faceCovers.isEmpty()) {
+                val small = ensureSmallSource(orig)
+                val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
+                val smallPreview = applyAdjustments(small, scaleCropForSmall(forPreview(newAdj), sc))
+                if (gen == renderGen) {
+                    _state.update { it.copy(adjustments = newAdj, previewBitmap = smallPreview) }
+                }
+            }
+            val newPreview = applyAdjustments(orig, forPreview(newAdj))
             val noCropPreview = applyColorOnly(orig, newAdj)
-            _state.update { it.copy(
-                adjustments = newAdj,
-                previewBitmap = newPreview,
-                adjustedBitmapNoCrop = noCropPreview,
-            ) }
+            if (gen == renderGen) {
+                _state.update { it.copy(
+                    adjustments = newAdj,
+                    previewBitmap = newPreview,
+                    adjustedBitmapNoCrop = noCropPreview,
+                ) }
+            }
             // No eager recycle of the old previewBitmap — see finalizeAdjustments.
         }
     }
@@ -642,14 +1228,17 @@ class PhotoEditorViewModel @Inject constructor(
     private fun updateAdjustmentsNoUndo(transform: (EditorAdjustments) -> EditorAdjustments) {
         val orig = _state.value.originalBitmap ?: return
         val newAdj = transform(_state.value.adjustments)
+        val gen = ++renderGen
         viewModelScope.launch(Dispatchers.Default) {
-            val newPreview = applyAdjustments(orig, newAdj)
+            val newPreview = applyAdjustments(orig, forPreview(newAdj))
             val noCropPreview = applyColorOnly(orig, newAdj)
-            _state.update { it.copy(
-                adjustments = newAdj,
-                previewBitmap = newPreview,
-                adjustedBitmapNoCrop = noCropPreview,
-            ) }
+            if (gen == renderGen) {
+                _state.update { it.copy(
+                    adjustments = newAdj,
+                    previewBitmap = newPreview,
+                    adjustedBitmapNoCrop = noCropPreview,
+                ) }
+            }
         }
     }
 
@@ -663,11 +1252,25 @@ class PhotoEditorViewModel @Inject constructor(
         // Snapshot the pre-drag state on the first tick only; finalizeAdjustments pushes it on release.
         if (sliderUndoSnapshot == null) sliderUndoSnapshot = previous
         val newAdj = transform(previous)
+        // Commit the VALUE immediately so the slider / curve graph follows the finger without waiting for
+        // the render; the preview catches up async below. Without this the value only landed inside the
+        // render coroutine, so a heavy per-pixel effect (HSL, curves) made the control itself stutter by
+        // the render duration. No render-gen guard on this path: the live control needs every tick, and
+        // one render in flight (the job cancel) is enough; the gen guard is only for the full-res paths.
+        _state.update { it.copy(adjustments = newAdj) }
         sliderRenderJob?.cancel()
         sliderRenderJob = viewModelScope.launch(Dispatchers.Default) {
-            val small = ensureSmallSource(orig)
-            val newPreview = applyAdjustments(small, newAdj)
-            _state.update { it.copy(adjustments = newAdj, previewBitmap = newPreview) }
+            // Smooth small-source render, with the crop scaled down to match, so a live slider stays fast
+            // even after a crop. Redact strokes and face covers force the full-res path (their geometry is
+            // in full-res coordinates and the small source would drift it); that case is rare.
+            val newPreview = if (newAdj.redactStrokes.isEmpty() && newAdj.faceCovers.isEmpty()) {
+                val small = ensureSmallSource(orig)
+                val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
+                applyAdjustments(small, scaleCropForSmall(forPreview(newAdj), sc))
+            } else {
+                applyAdjustments(orig, forPreview(newAdj))
+            }
+            _state.update { it.copy(previewBitmap = newPreview) }
         }
     }
 
@@ -689,12 +1292,52 @@ class PhotoEditorViewModel @Inject constructor(
             else Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
     }
 
+    /** Fine straighten + vertical/horizontal keystone, drawn onto a SAME-SIZE bitmap so the crop and
+     *  colour steps after it are unaffected. Returns [source] untouched when nothing is set. The straighten
+     *  auto-crops (scales to cover the rotated frame); the keystone scales up so the narrowed edge still
+     *  reaches the frame, and the widened edge is simply cropped by the output bounds. */
+    private fun applyGeometry(source: Bitmap, adj: EditorAdjustments): Bitmap {
+        if (adj.straighten == 0 && adj.perspectiveV == 0 && adj.perspectiveH == 0) return source
+        val w = source.width
+        val h = source.height
+        val angle = adj.straighten / 100f * 15f
+        val pv = adj.perspectiveV / 100f * 0.28f * w / 2f
+        val ph = adj.perspectiveH / 100f * 0.28f * h / 2f
+        val topInset = if (pv > 0) pv else 0f
+        val botInset = if (pv < 0) -pv else 0f
+        val leftInset = if (ph > 0) ph else 0f
+        val rightInset = if (ph < 0) -ph else 0f
+        val src = floatArrayOf(0f, 0f, w.toFloat(), 0f, w.toFloat(), h.toFloat(), 0f, h.toFloat())
+        val dst = floatArrayOf(
+            topInset, leftInset,
+            w - topInset, rightInset,
+            w - botInset, h - rightInset,
+            botInset, h - leftInset,
+        )
+        val m = Matrix()
+        m.setPolyToPoly(src, 0, dst, 0, 4)
+        val maxInset = maxOf(topInset, botInset, leftInset, rightInset)
+        val perspScale = if (maxInset > 0f) (w / (w - 2f * maxInset)).coerceIn(1f, 1.7f) else 1f
+        val rad = Math.toRadians(Math.abs(angle.toDouble()))
+        val cos = Math.cos(rad).toFloat()
+        val sin = Math.sin(rad).toFloat()
+        val rotScale = maxOf((w * cos + h * sin) / w, (w * sin + h * cos) / h)
+        val post = Matrix().apply {
+            postRotate(angle, w / 2f, h / 2f)
+            postScale(perspScale * rotScale, perspScale * rotScale, w / 2f, h / 2f)
+        }
+        m.postConcat(post)
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(source, m, Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
+        return out
+    }
+
     /**
      * Colour matrix + rotation/flip, but not crop or redact strokes, in display orientation — what the
      * Crop overlay renders. May return [source] (don't treat as owned). Run on a background dispatcher.
      */
     private fun applyColorOnly(source: Bitmap, adj: EditorAdjustments): Bitmap {
-        val oriented = rotateAndFlip(source, adj)
+        val oriented = applyGeometry(rotateAndFlip(source, adj), adj)
         val colorMatrix = buildColorMatrix(adj) ?: return oriented
         val out = Bitmap.createBitmap(oriented.width, oriented.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
@@ -702,6 +1345,290 @@ class PhotoEditorViewModel @Inject constructor(
             colorFilter = ColorMatrixColorFilter(colorMatrix)
         }
         canvas.drawBitmap(oriented, 0f, 0f, paint)
+        return out
+    }
+
+    /** Radial edge shading: darkens (strength > 0) or lightens (< 0) the corners, clear in the centre out
+     *  to mid-radius then ramping to the edge. Draws onto [canvas] in place, so pass an owned bitmap. */
+    private fun drawVignette(canvas: Canvas, w: Int, h: Int, strength: Int) {
+        if (strength == 0) return
+        val cx = w / 2f
+        val cy = h / 2f
+        val radius = hypot(cx, cy).coerceAtLeast(1f)
+        val edgeAlpha = (abs(strength) / 100f * 0.7f * 255f).toInt().coerceIn(0, 255)
+        val edgeColor = if (strength > 0) Color.argb(edgeAlpha, 0, 0, 0) else Color.argb(edgeAlpha, 255, 255, 255)
+        val shader = RadialGradient(
+            cx, cy, radius,
+            intArrayOf(Color.TRANSPARENT, Color.TRANSPARENT, edgeColor),
+            floatArrayOf(0f, 0.5f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.shader = shader }
+        canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+    }
+
+    /**
+     * Per-pixel colour effects (vibrance, sharpen, grain) on an owned copy of [source]. Every pass is
+     * BANDED (a slab of rows at a time) so a full-resolution save never allocates a whole-image pixel
+     * array; the preview runs on the 720px source where it is trivially cheap. Returns [source] when all
+     * three are zero. Sharpen is guarded: a low-memory failure degrades to no sharpening, not a crash.
+     */
+    private fun applyPixelEffects(source: Bitmap, adj: EditorAdjustments): Bitmap {
+        val hasCurve = !isIdentityCurve(adj.curveRgb) || !isIdentityCurve(adj.curveR) ||
+            !isIdentityCurve(adj.curveG) || !isIdentityCurve(adj.curveB)
+        val hasHsl = adj.hslBands.any { it.hue != 0 || it.sat != 0 || it.light != 0 }
+        if (adj.vibrance == 0 && adj.sharpen == 0 && adj.grain == 0 && !hasCurve && !hasHsl) return source
+        val target = try {
+            source.copy(Bitmap.Config.ARGB_8888, true)
+        } catch (e: OutOfMemoryError) {
+            return source
+        } ?: return source
+        if (adj.sharpen != 0) {
+            try {
+                sharpenInto(source, target, adj.sharpen)
+            } catch (e: OutOfMemoryError) {
+                // Keep the copied pixels (the rest can still run); just skip sharpening.
+            }
+        }
+        if (adj.vibrance != 0 || adj.grain != 0 || hasCurve || hasHsl) {
+            applyPerPixelColor(target, adj, hasCurve, hasHsl)
+        }
+        return target
+    }
+
+    /** Rows to process per band so a pass holds about two million pixels at a time, never the whole image. */
+    private fun bandRowsFor(width: Int, height: Int): Int = (2_000_000 / width.coerceAtLeast(1)).coerceIn(1, height)
+
+    /** Tone curves + per-colour HSL + vibrance + film grain in ONE banded in-place pass, in that order
+     *  (tone, then colour band, then vibrance, then grain). Curves and HSL are opt-in via the flags so a
+     *  photo with neither pays nothing for them. */
+    private fun applyPerPixelColor(bmp: Bitmap, adj: EditorAdjustments, hasCurve: Boolean, hasHsl: Boolean) {
+        val w = bmp.width
+        val h = bmp.height
+        val vib = adj.vibrance / 100f
+        val grainAmp = abs(adj.grain) / 100f * 40f // up to +/-40 of monochrome noise
+        val rnd = java.util.Random(0x5EED_1234L) // fixed seed: grain is stable across re-renders (no flicker)
+        // Per-channel curve = the channel's own curve composed onto the master (RGB) curve.
+        val master = if (hasCurve) buildCurveLut(adj.curveRgb) else null
+        val lutR = if (hasCurve) composeLut(buildCurveLut(adj.curveR), master!!) else null
+        val lutG = if (hasCurve) composeLut(buildCurveLut(adj.curveG), master!!) else null
+        val lutB = if (hasCurve) composeLut(buildCurveLut(adj.curveB), master!!) else null
+        val hslLuts = if (hasHsl) buildHslLuts(adj.hslBands) else null
+        val rows = bandRowsFor(w, h)
+        val band = IntArray(w * rows)
+        var y = 0
+        while (y < h) {
+            val n = minOf(rows, h - y)
+            bmp.getPixels(band, 0, w, 0, y, w, n)
+            for (i in 0 until w * n) {
+                val p = band[i]
+                val a = (p ushr 24) and 0xFF
+                var r = (p ushr 16) and 0xFF
+                var g = (p ushr 8) and 0xFF
+                var b = p and 0xFF
+                if (hasCurve) {
+                    r = lutR!![r]; g = lutG!![g]; b = lutB!![b]
+                }
+                if (hslLuts != null) {
+                    val packed = hslAdjustPixel(r, g, b, hslLuts[0], hslLuts[1], hslLuts[2])
+                    r = (packed ushr 16) and 0xFF; g = (packed ushr 8) and 0xFF; b = packed and 0xFF
+                }
+                if (vib != 0f) {
+                    val gray = 0.299f * r + 0.587f * g + 0.114f * b
+                    val sat = (maxOf(r, g, b) - minOf(r, g, b)) / 255f
+                    val boost = 1f + vib * (1f - sat)
+                    r = (gray + (r - gray) * boost).roundToInt().coerceIn(0, 255)
+                    g = (gray + (g - gray) * boost).roundToInt().coerceIn(0, 255)
+                    b = (gray + (b - gray) * boost).roundToInt().coerceIn(0, 255)
+                }
+                if (grainAmp != 0f) {
+                    val noise = ((rnd.nextFloat() - 0.5f) * 2f * grainAmp).roundToInt()
+                    r = (r + noise).coerceIn(0, 255)
+                    g = (g + noise).coerceIn(0, 255)
+                    b = (b + noise).coerceIn(0, 255)
+                }
+                band[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            }
+            bmp.setPixels(band, 0, w, 0, y, w, n)
+            y += n
+        }
+    }
+
+    /** Compose two 256-LUTs: apply [first] (the master) then [second] (the channel). */
+    private fun composeLut(second: IntArray, first: IntArray): IntArray = IntArray(256) { i -> second[first[i]] }
+
+    /** Apply the HSL band adjustments to one pixel; returns packed RGB (no alpha). A near-gray pixel has
+     *  no stable hue, so it is returned unchanged. */
+    /** Precompute the per-hue HSL adjustment (hue shift in degrees, saturation multiplier, lightness add)
+     *  from the 8 bands ONCE per render, so the pixel loop is one lookup instead of an 8-band blend. Index
+     *  is the whole-degree hue 0..359. This is what makes an HSL drag smooth. */
+    private fun buildHslLuts(bands: List<HslBand>): Array<FloatArray> {
+        val hueShift = FloatArray(360)
+        val satMul = FloatArray(360)
+        val lightAdd = FloatArray(360)
+        for (deg in 0 until 360) {
+            var hs = 0f
+            var sm = 0f
+            var la = 0f
+            for (i in bands.indices) {
+                val bd = bands[i]
+                if (bd.hue == 0 && bd.sat == 0 && bd.light == 0) continue
+                val wgt = hslBandWeight(deg.toFloat(), HSL_BAND_CENTERS[i])
+                if (wgt <= 0f) continue
+                hs += wgt * (bd.hue / 100f) * 30f
+                sm += wgt * (bd.sat / 100f)
+                la += wgt * (bd.light / 100f) * 0.3f
+            }
+            hueShift[deg] = hs
+            satMul[deg] = sm
+            lightAdd[deg] = la
+        }
+        return arrayOf(hueShift, satMul, lightAdd)
+    }
+
+    private fun hslAdjustPixel(r0: Int, g0: Int, b0: Int, hueShiftLut: FloatArray, satMulLut: FloatArray, lightAddLut: FloatArray): Int {
+        val rf = r0 / 255f
+        val gf = g0 / 255f
+        val bf = b0 / 255f
+        val max = maxOf(rf, gf, bf)
+        val min = minOf(rf, gf, bf)
+        val delta = max - min
+        if (delta < 1e-4f) return (r0 shl 16) or (g0 shl 8) or b0
+        val l = (max + min) / 2f
+        val s = if (l > 0.5f) delta / (2f - max - min) else delta / (max + min)
+        var hue = when (max) {
+            rf -> ((gf - bf) / delta) % 6f
+            gf -> (bf - rf) / delta + 2f
+            else -> (rf - gf) / delta + 4f
+        } * 60f
+        if (hue < 0f) hue += 360f
+        val hi = hue.toInt().coerceIn(0, 359)
+        val hueShift = hueShiftLut[hi]
+        val satMul = satMulLut[hi]
+        val lightAdd = lightAddLut[hi]
+        if (hueShift == 0f && satMul == 0f && lightAdd == 0f) return (r0 shl 16) or (g0 shl 8) or b0
+        var nh = (hue + hueShift) % 360f
+        if (nh < 0f) nh += 360f
+        val ns = (s * (1f + satMul)).coerceIn(0f, 1f)
+        val nl = (l + lightAdd).coerceIn(0f, 1f)
+        val c = (1f - abs(2f * nl - 1f)) * ns
+        val x = c * (1f - abs((nh / 60f) % 2f - 1f))
+        val m = nl - c / 2f
+        val rr: Float
+        val gg: Float
+        val bb: Float
+        when {
+            nh < 60f -> { rr = c; gg = x; bb = 0f }
+            nh < 120f -> { rr = x; gg = c; bb = 0f }
+            nh < 180f -> { rr = 0f; gg = c; bb = x }
+            nh < 240f -> { rr = 0f; gg = x; bb = c }
+            nh < 300f -> { rr = x; gg = 0f; bb = c }
+            else -> { rr = c; gg = 0f; bb = x }
+        }
+        val ri = ((rr + m) * 255f).roundToInt().coerceIn(0, 255)
+        val gi = ((gg + m) * 255f).roundToInt().coerceIn(0, 255)
+        val bi = ((bb + m) * 255f).roundToInt().coerceIn(0, 255)
+        return (ri shl 16) or (gi shl 8) or bi
+    }
+
+    /** Unsharp mask: blur (downscale then upscale) and push each pixel away from the blurred value. Reads
+     *  [source] (unmodified) and writes [target], banded, so band edges stay correct. */
+    private fun sharpenInto(source: Bitmap, target: Bitmap, sharpen: Int) {
+        val w = source.width
+        val h = source.height
+        val amt = sharpen / 100f
+        val ds = 3
+        val small = Bitmap.createScaledBitmap(source, (w / ds).coerceAtLeast(1), (h / ds).coerceAtLeast(1), true)
+        val blurred = Bitmap.createScaledBitmap(small, w, h, true)
+        if (small !== blurred && !small.isRecycled) small.recycle()
+        val rows = bandRowsFor(w, h)
+        val srcBand = IntArray(w * rows)
+        val blurBand = IntArray(w * rows)
+        var y = 0
+        while (y < h) {
+            val n = minOf(rows, h - y)
+            source.getPixels(srcBand, 0, w, 0, y, w, n)
+            blurred.getPixels(blurBand, 0, w, 0, y, w, n)
+            for (i in 0 until w * n) {
+                val sp = srcBand[i]
+                val bp = blurBand[i]
+                val a = (sp ushr 24) and 0xFF
+                val r = sharpenChannel((sp ushr 16) and 0xFF, (bp ushr 16) and 0xFF, amt)
+                val g = sharpenChannel((sp ushr 8) and 0xFF, (bp ushr 8) and 0xFF, amt)
+                val b = sharpenChannel(sp and 0xFF, bp and 0xFF, amt)
+                srcBand[i] = (a shl 24) or (r shl 16) or (g shl 8) or b
+            }
+            target.setPixels(srcBand, 0, w, 0, y, w, n)
+            y += n
+        }
+        if (!blurred.isRecycled) blurred.recycle()
+    }
+
+    private fun sharpenChannel(orig: Int, blur: Int, amt: Float): Int =
+        (orig + amt * (orig - blur)).roundToInt().coerceIn(0, 255)
+
+    /** Burns each normalised pen stroke into a copy of [src]. Points and width are fractions of the
+     *  framed image, so a stroke drawn on the small preview renders identically at full-res on save. */
+    private fun applyDrawStrokes(src: Bitmap, strokes: List<DrawStroke>): Bitmap {
+        val w = src.width
+        val h = src.height
+        val out = src.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(out)
+        for (stroke in strokes) {
+            if (stroke.points.isEmpty()) continue
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+                strokeWidth = (stroke.widthFraction * w).coerceAtLeast(1f)
+                color = stroke.color
+            }
+            if (stroke.points.size == 1) {
+                val p = stroke.points[0]
+                canvas.drawCircle(p.x * w, p.y * h, paint.strokeWidth / 2f, paint.apply { style = Paint.Style.FILL })
+            } else {
+                val path = android.graphics.Path()
+                stroke.points.forEachIndexed { i, p ->
+                    if (i == 0) path.moveTo(p.x * w, p.y * h) else path.lineTo(p.x * w, p.y * h)
+                }
+                canvas.drawPath(path, paint)
+            }
+        }
+        return out
+    }
+
+    /** Bakes each text overlay onto a copy of [src]. Centre and size are fractions of the framed image,
+     *  so text placed on the small preview lands identically on the full-res save. Splits on newlines. */
+    private fun applyTextItems(src: Bitmap, items: List<TextItem>): Bitmap {
+        val w = src.width
+        val h = src.height
+        val out = src.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(out)
+        for (item in items) {
+            if (item.text.isBlank()) continue
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = item.color
+                textSize = (item.sizeFraction * h).coerceAtLeast(8f)
+                textAlign = Paint.Align.CENTER
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                // A soft shadow keeps light text legible over a bright photo.
+                setShadowLayer(textSize * 0.08f, 0f, textSize * 0.04f, Color.argb(140, 0, 0, 0))
+            }
+            val cxPx = item.cx * w
+            val cyPx = item.cy * h
+            val lines = item.text.split("\n")
+            val lineH = paint.textSize * 1.2f
+            val totalH = lineH * lines.size
+            canvas.save()
+            val angle = snapTextAngle(item.rotation)
+            if (angle != 0f) canvas.rotate(angle, cxPx, cyPx)
+            var baseline = cyPx - totalH / 2f + paint.textSize
+            for (line in lines) {
+                canvas.drawText(line, cxPx, baseline, paint)
+                baseline += lineH
+            }
+            canvas.restore()
+        }
         return out
     }
 
@@ -727,19 +1654,24 @@ class PhotoEditorViewModel @Inject constructor(
         val rotated = rotateAndFlip(source, adj)
         recycle(source, rotated)
 
-        // 2. crop — clamped against the ROTATED bitmap's dimensions (display space).
+        // 1b. straighten + keystone geometry (same size as [rotated]), before crop so the crop rect,
+        //     authored on this straightened image (see applyColorOnly), lands on the matching pixels.
+        val geo = applyGeometry(rotated, adj)
+        recycle(rotated, geo)
+
+        // 2. crop, clamped against the geometry bitmap's dimensions (display space).
         val cropped = adj.cropRect?.let {
             val safe = Rect(
-                it.left.coerceIn(0, rotated.width - 1),
-                it.top.coerceIn(0, rotated.height - 1),
-                it.right.coerceIn(1, rotated.width),
-                it.bottom.coerceIn(1, rotated.height),
+                it.left.coerceIn(0, geo.width - 1),
+                it.top.coerceIn(0, geo.height - 1),
+                it.right.coerceIn(1, geo.width),
+                it.bottom.coerceIn(1, geo.height),
             )
             if (safe.width() > 0 && safe.height() > 0)
-                Bitmap.createBitmap(rotated, safe.left, safe.top, safe.width(), safe.height())
-            else rotated
-        } ?: rotated
-        recycle(rotated, cropped)
+                Bitmap.createBitmap(geo, safe.left, safe.top, safe.width(), safe.height())
+            else geo
+        } ?: geo
+        recycle(geo, cropped)
 
         // 3. color matrix (brightness, contrast, saturation, filter)
         val colorMatrix = buildColorMatrix(adj)
@@ -754,10 +1686,38 @@ class PhotoEditorViewModel @Inject constructor(
         }
         recycle(cropped, colored)
 
-        // 4. redaction strokes — drawn LAST so they cover the final visible content
-        val final = if (adj.redactStrokes.isEmpty()) colored
-            else applyRedactStrokes(colored, adj.redactStrokes, recycleIntermediates)
-        recycle(colored, final)
+        // 3b. per-pixel colour effects (vibrance, sharpen, grain), between the colour matrix and vignette.
+        val toned = applyPixelEffects(colored, adj)
+        recycle(colored, toned)
+
+        // 3c. vignette: radial edge shading on the framed image, before redaction so marks stay on top.
+        val vignetted = if (adj.vignette == 0) toned else {
+            val out = Bitmap.createBitmap(toned.width, toned.height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(out)
+            canvas.drawBitmap(toned, 0f, 0f, null)
+            drawVignette(canvas, toned.width, toned.height, adj.vignette)
+            out
+        }
+        recycle(toned, vignetted)
+
+        // 4. redaction strokes cover the final visible content
+        val redacted = if (adj.redactStrokes.isEmpty()) vignetted
+            else applyRedactStrokes(vignetted, adj.redactStrokes, recycleIntermediates)
+        recycle(vignetted, redacted)
+
+        // 4b. face covers: oriented ellipses over detected faces, in the same display space as the
+        //     redact strokes, so a full-res save re-renders them for free through this same path.
+        val faceCovered = if (adj.faceCovers.isEmpty()) redacted
+            else applyFaceCovers(redacted, adj.faceCovers, adj.faceCoverStyle, adj.faceCoverStrength, recycleIntermediates)
+        recycle(redacted, faceCovered)
+
+        // 5. pen strokes (normalised geometry, any resolution)
+        val drawn = if (adj.drawStrokes.isEmpty()) faceCovered else applyDrawStrokes(faceCovered, adj.drawStrokes)
+        recycle(faceCovered, drawn)
+
+        // 6. text overlays, drawn last, on top of everything.
+        val final = if (adj.textItems.isEmpty()) drawn else applyTextItems(drawn, adj.textItems)
+        recycle(drawn, final)
 
         // Preview calls (recycleIntermediates=false) leave transients to GC — see finalizeAdjustments.
         return final
@@ -845,96 +1805,139 @@ class PhotoEditorViewModel @Inject constructor(
         canvas.restoreToCount(saveCount)
     }
 
+    /**
+     * Composites [covers] onto [src] and returns a new bitmap. Each oval is drawn as a rotated filled
+     * ellipse into an alpha mask, then the obscured pixels show through that mask via SRC_IN, exactly
+     * like the pixelate redact stroke. Oval coordinates are already this render bitmap's own pixels, so
+     * nothing is scaled here, the same reason the redact strokes stay in full-res coordinates.
+     *
+     * [FaceCoverStyle.Pixelate] mosaics each face on its own bounded region with hard blocks sized to the
+     * face, so memory stays small regardless of the image size. [FaceCoverStyle.Blur] builds one soft
+     * downscale of the whole render and shows it only through the combined ovals. Strength drives both.
+     */
+    private fun applyFaceCovers(
+        src: Bitmap,
+        covers: List<OvalSpec>,
+        style: FaceCoverStyle,
+        strength: Float,
+        recycleIntermediates: Boolean = false,
+    ): Bitmap {
+        if (covers.isEmpty()) return src
+        val w = src.width
+        val h = src.height
+        val out = src.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(out)
+
+        val s = strength.coerceIn(0f, 1f)
+        val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
+
+        when (style) {
+            FaceCoverStyle.Pixelate -> {
+                val layerPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+                val srcInPaint = Paint().apply {
+                    xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN)
+                }
+
+                for (oval in covers) {
+                    val cx = oval.centerX
+                    val cy = oval.centerY
+                    val rx = oval.radiusX
+                    val ry = oval.radiusY
+
+                    // Blocks scale to the face: ~22 fine blocks across at low strength, ~7 chunky ones high.
+                    val blocksAcross = 22f + (7f - 22f) * s
+                    val faceSpan = minOf(2f * rx, 2f * ry)
+                    val block = (faceSpan / blocksAcross).coerceAtLeast(2f)
+
+                    // A rotated ellipse fits inside a circle of radius max(rx, ry), so this square contains it at
+                    // any angle; clamp to the bitmap so the crop stays in bounds.
+                    val half = maxOf(rx, ry)
+                    val left = floor(cx - half).toInt().coerceIn(0, w)
+                    val top = floor(cy - half).toInt().coerceIn(0, h)
+                    val right = ceil(cx + half).toInt().coerceIn(0, w)
+                    val bottom = ceil(cy + half).toInt().coerceIn(0, h)
+                    val regionW = right - left
+                    val regionH = bottom - top
+                    if (regionW <= 0 || regionH <= 0) continue
+
+                    val region = Bitmap.createBitmap(src, left, top, regionW, regionH)
+
+                    // Downscale by the block size and back up with no filtering for hard mosaic squares.
+                    val smallW = (regionW / block).roundToInt().coerceAtLeast(1)
+                    val smallH = (regionH / block).roundToInt().coerceAtLeast(1)
+                    val small = Bitmap.createScaledBitmap(region, smallW, smallH, false)
+                    val cover = Bitmap.createScaledBitmap(small, regionW, regionH, false)
+                    if (small !== cover && small !== region && !small.isRecycled) small.recycle()
+
+                    // Per-oval rotated mask in the region's own coordinate space (offset by the crop origin).
+                    val mask = Bitmap.createBitmap(regionW, regionH, Bitmap.Config.ALPHA_8)
+                    val maskCanvas = Canvas(mask)
+                    maskCanvas.save()
+                    maskCanvas.translate(-left.toFloat(), -top.toFloat())
+                    maskCanvas.rotate(oval.rotationDegrees, cx, cy)
+                    maskCanvas.drawOval(RectF(cx - rx, cy - ry, cx + rx, cy + ry), maskPaint)
+                    maskCanvas.restore()
+
+                    // Show the mosaic only through this oval, on an offscreen layer bounded to the region.
+                    val bounds = RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat())
+                    val saveCount = canvas.saveLayer(bounds, layerPaint)
+                    canvas.drawBitmap(mask, left.toFloat(), top.toFloat(), null)
+                    canvas.drawBitmap(cover, left.toFloat(), top.toFloat(), srcInPaint)
+                    canvas.restoreToCount(saveCount)
+
+                    // On the save path recycle every per-oval intermediate; off it, leave them to GC.
+                    if (recycleIntermediates) {
+                        if (!mask.isRecycled) mask.recycle()
+                        if (cover !== region && !cover.isRecycled) cover.recycle()
+                        if (region !== src && !region.isRecycled) region.recycle()
+                    }
+                }
+            }
+            FaceCoverStyle.Blur -> {
+                // One soft downscale of the whole render, shown only through the combined ovals.
+                val downscale = (10f + s * 30f).roundToInt().coerceAtLeast(1)
+                val small = Bitmap.createScaledBitmap(
+                    src, (w / downscale).coerceAtLeast(1), (h / downscale).coerceAtLeast(1), true)
+                val coverLayer = Bitmap.createScaledBitmap(small, w, h, true)
+                if (small !== coverLayer && !small.isRecycled) small.recycle()
+
+                val mask = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
+                val maskCanvas = Canvas(mask)
+                for (oval in covers) {
+                    maskCanvas.save()
+                    maskCanvas.rotate(oval.rotationDegrees, oval.centerX, oval.centerY)
+                    maskCanvas.drawOval(
+                        RectF(oval.centerX - oval.radiusX, oval.centerY - oval.radiusY,
+                            oval.centerX + oval.radiusX, oval.centerY + oval.radiusY),
+                        maskPaint,
+                    )
+                    maskCanvas.restore()
+                }
+                drawPixelatedThroughMask(canvas, coverLayer, mask)
+
+                if (recycleIntermediates) {
+                    if (!mask.isRecycled) mask.recycle()
+                    if (coverLayer !== out && !coverLayer.isRecycled) coverLayer.recycle()
+                }
+            }
+        }
+        return out
+    }
+
     private fun buildColorMatrix(adj: EditorAdjustments): ColorMatrix? {
-        if (adj.brightness == 0 && adj.contrast == 0 && adj.saturation == 0
-            && adj.exposure == 0 && adj.highlights == 0 && adj.shadows == 0
-            && adj.temperature == 0 && adj.tone == 0
-            && adj.filter == FilterPreset.None) {
-            return null
+        // Adjustment math lives in the shared, JVM-testable colorAdjustmentMatrix; the filter preset is
+        // still composed here (postConcat last, so it applies after the adjustments) to keep this path and
+        // its return-null-when-nothing-to-do behaviour identical to before the extraction.
+        val adjustments = colorAdjustmentMatrix(
+            adj.brightness, adj.exposure, adj.contrast, adj.highlights, adj.shadows,
+            adj.saturation, adj.temperature, adj.tone, adj.fade,
+        )?.let { ColorMatrix(it) }
+        val filter = filterMatrix(adj.filter)
+        return when {
+            adjustments == null -> filter
+            filter == null -> adjustments
+            else -> adjustments.apply { postConcat(filter) }
         }
-        val brightness = adj.brightness * 1.5f       // -150..150 range on 0..255 channel
-        val contrast = 1f + adj.contrast / 100f       // 0..2 multiplier
-        val saturation = 1f + adj.saturation / 100f   // 0..2 multiplier
-        val translate = (1f - contrast) * 128f + brightness
-
-        val mAdjust = ColorMatrix(floatArrayOf(
-            contrast, 0f, 0f, 0f, translate,
-            0f, contrast, 0f, 0f, translate,
-            0f, 0f, contrast, 0f, translate,
-            0f, 0f, 0f, 1f, 0f,
-        ))
-        val mSat = ColorMatrix().apply { setSaturation(saturation) }
-        val mFilter = filterMatrix(adj.filter)
-
-        val combined = ColorMatrix()
-        combined.postConcat(mSat)
-        combined.postConcat(mAdjust)
-
-        // Exposure: multiplicative RGB gain (1 + exposure/100) — proportional, unlike additive brightness.
-        if (adj.exposure != 0) {
-            val expScale = 1f + adj.exposure / 100f
-            val mExposure = ColorMatrix(floatArrayOf(
-                expScale, 0f, 0f, 0f, 0f,
-                0f, expScale, 0f, 0f, 0f,
-                0f, 0f, expScale, 0f, 0f,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mExposure)
-        }
-
-        // Highlights: scale RGB by (1 - h/200) plus a small offset — pulls brights down without crushing
-        // midtones. ColorMatrix approximation of a real per-pixel highlight curve.
-        if (adj.highlights != 0) {
-            val hScale = 1f - adj.highlights / 200f  // -0.5..+0.5 → 1.5..0.5 scale
-            val hOffset = -adj.highlights * 0.3f      // tiny additive push back
-            val mHigh = ColorMatrix(floatArrayOf(
-                hScale, 0f, 0f, 0f, hOffset,
-                0f, hScale, 0f, 0f, hOffset,
-                0f, 0f, hScale, 0f, hOffset,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mHigh)
-        }
-
-        // Shadows: opposite of highlights — positive scale + offset lift the dark end.
-        if (adj.shadows != 0) {
-            val sScale = 1f + adj.shadows / 200f      // -0.5..+0.5 → 0.5..1.5 scale
-            val sOffset = adj.shadows * 0.3f          // additive lift on darks
-            val mShadow = ColorMatrix(floatArrayOf(
-                sScale, 0f, 0f, 0f, sOffset,
-                0f, sScale, 0f, 0f, sOffset,
-                0f, 0f, sScale, 0f, sOffset,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mShadow)
-        }
-
-        // Temperature: warm (+) shifts R up / B down, cool (-) the reverse; 0.5 scale (+100 → ±50).
-        if (adj.temperature != 0) {
-            val t = adj.temperature * 0.5f
-            val mTemp = ColorMatrix(floatArrayOf(
-                1f, 0f, 0f, 0f, t,
-                0f, 1f, 0f, 0f, 0f,
-                0f, 0f, 1f, 0f, -t,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mTemp)
-        }
-
-        // Tone: green (+) / magenta (-) shifts only G; 0.5 scale to match temperature.
-        if (adj.tone != 0) {
-            val g = adj.tone * 0.5f
-            val mTone = ColorMatrix(floatArrayOf(
-                1f, 0f, 0f, 0f, 0f,
-                0f, 1f, 0f, 0f, g,
-                0f, 0f, 1f, 0f, 0f,
-                0f, 0f, 0f, 1f, 0f,
-            ))
-            combined.postConcat(mTone)
-        }
-
-        mFilter?.let { combined.postConcat(it) }
-        return combined
     }
 
     private fun filterMatrix(filter: FilterPreset): ColorMatrix? = when (filter) {
@@ -970,6 +1973,36 @@ class PhotoEditorViewModel @Inject constructor(
             0f, 0f, 0.9f, 0f, 0f,
             0f, 0f, 0f, 1f, 0f,
         ))
+        FilterPreset.Noir -> ColorMatrix(floatArrayOf(
+            0.389f, 0.763f, 0.148f, 0f, -35f,
+            0.389f, 0.763f, 0.148f, 0f, -35f,
+            0.389f, 0.763f, 0.148f, 0f, -35f,
+            0f, 0f, 0f, 1f, 0f,
+        ))
+        FilterPreset.Chrome -> ColorMatrix(floatArrayOf(
+            1.18f, 0f, 0f, 0f, -8f,
+            0f, 1.16f, 0f, 0f, -6f,
+            0f, 0f, 1.22f, 0f, 2f,
+            0f, 0f, 0f, 1f, 0f,
+        ))
+        FilterPreset.Matte -> ColorMatrix(floatArrayOf(
+            0.88f, 0f, 0f, 0f, 22f,
+            0f, 0.88f, 0f, 0f, 20f,
+            0f, 0f, 0.86f, 0f, 16f,
+            0f, 0f, 0f, 1f, 0f,
+        ))
+        FilterPreset.Dramatic -> ColorMatrix(floatArrayOf(
+            1.25f, -0.06f, -0.06f, 0f, -20f,
+            -0.06f, 1.25f, -0.06f, 0f, -20f,
+            -0.06f, -0.06f, 1.25f, 0f, -20f,
+            0f, 0f, 0f, 1f, 0f,
+        ))
+        FilterPreset.Fresh -> ColorMatrix(floatArrayOf(
+            1.06f, 0f, 0f, 0f, 8f,
+            0f, 1.1f, 0f, 0f, 12f,
+            0f, 0f, 1.08f, 0f, 12f,
+            0f, 0f, 0f, 1f, 0f,
+        ))
     }
 
     /**
@@ -981,7 +2014,15 @@ class PhotoEditorViewModel @Inject constructor(
     private var pendingWriteMode: SaveMode? = null
     private var pendingWriteQuality: Int = 92
 
-    fun save(mode: SaveMode, quality: Int = 92, allowWriteRequestRecovery: Boolean = true) {
+    fun save(
+        mode: SaveMode,
+        quality: Int = 92,
+        /** Export container for a COPY (device/external). Overwrite/cloud/synced/vault ignore it. */
+        format: Bitmap.CompressFormat = Bitmap.CompressFormat.JPEG,
+        /** Longest-edge cap for the exported pixels; null keeps the full edited resolution. */
+        maxDim: Int? = null,
+        allowWriteRequestRecovery: Boolean = true,
+    ) {
         val s = _state.value
         val source = s.source ?: return
         val orig = s.originalBitmap ?: return
@@ -1010,8 +2051,9 @@ class PhotoEditorViewModel @Inject constructor(
             val coerceMessageRes = if (overwritable) R.string.editor_overwrite_motion_coerced_to_copy
                 else R.string.editor_overwrite_coerced_to_copy
             // Re-render full-res from the original, not the 720px slider preview (which would degrade the
-            // save). Off-screen, so intermediates are safe to recycle.
-            val bitmap = applyAdjustments(orig, s.adjustments, recycleIntermediates = true)
+            // save). Off-screen, so intermediates are safe to recycle. Then apply the export size choice.
+            val rendered = applyAdjustments(orig, s.adjustments, recycleIntermediates = true)
+            val bitmap = if (maxDim != null) downscaleToMax(rendered, maxDim) else rendered
             // One timestamp shared by the device save AND the cloud upload so they get the same filename;
             // reconcile's byNameAndDate then pairs them as Synced without a download. Only the FILENAME
             // stamp uses the edit instant; the saved DATE is the original capture time (below).
@@ -1027,12 +2069,27 @@ class PhotoEditorViewModel @Inject constructor(
                 is EditorSource.External -> editTimestampMs
             }
             val saveResult: SaveResult = try {
-                // Cloud-only edit: there is no local file to write, so the whole save is the network
-                // upload. Run it in appScope (survives navigation) and return an optimistic Success right
-                // away. This upload is best-effort: there is no local sync_state row to reconcile against
-                // (unlike a Synced edit), so a background failure is NOT retried, only logged in the
-                // transfer center. The user can re-edit to try again.
+                // Cloud-only edit: there is no local file to write, so the whole save IS the network upload.
                 if (source is EditorSource.Cloud) {
+                    // A cloud edit can only go to Drive. Check for actually-validated internet first: a
+                    // network can be attached with no usable internet (Wi-Fi kept on in airplane mode, a
+                    // dead router), which the plain online flag still reports as connected, so without this
+                    // the save would start an upload that just hangs. With no validated internet, fail at
+                    // once with a clear message and leave the editor open with the edit intact, so the user
+                    // can reconnect and save again, or discard it. Nothing is written locally.
+                    if (!networkObserver.currentlyValidated()) {
+                        _state.update {
+                            it.copy(
+                                isSaving = false,
+                                saveResult = SaveResult.Failed(
+                                    context.getString(R.string.editor_save_failed_no_network),
+                                    asDialog = true,
+                                ),
+                            )
+                        }
+                        return@launch
+                    }
+                    // Real internet: upload in appScope (survives navigation) and report success right away.
                     appScope.launch {
                         val thumbUri = "file://" + File(context.cacheDir, "thumbnails/thumb_${source.photo.linkId}.jpg").absolutePath
                         val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(thumbUri))
@@ -1057,7 +2114,7 @@ class PhotoEditorViewModel @Inject constructor(
                     return@launch
                 }
                 val uri = when (source) {
-                    is EditorSource.Local -> saveLocal(bitmap, source, effectiveMode, quality, editTimestampMs, originalCaptureMs)
+                    is EditorSource.Local -> saveLocal(bitmap, source, effectiveMode, quality, editTimestampMs, originalCaptureMs, format)
                     is EditorSource.Cloud -> null // handled above
                     is EditorSource.External -> {
                         // Always a fresh MediaStore copy (foreign URI, no overwrite; device-only, no upload).
@@ -1070,6 +2127,7 @@ class PhotoEditorViewModel @Inject constructor(
                             useOriginalName = false,
                             editTimestampMs = editTimestampMs,
                             dateTakenMs = originalCaptureMs,
+                            format = format,
                         )
                         if (resultUri != null) {
                             _state.update { it.copy(savedAsCopy = true) }
@@ -1343,11 +2401,71 @@ class PhotoEditorViewModel @Inject constructor(
         else -> "image/webp" // WEBP / WEBP_LOSSY / WEBP_LOSSLESS
     }
 
-    private fun saveLocal(bitmap: Bitmap, source: EditorSource.Local, mode: SaveMode, quality: Int, editTimestampMs: Long, dateTakenMs: Long): Uri? {
+    private fun extensionForFormat(format: Bitmap.CompressFormat): String = when (format) {
+        Bitmap.CompressFormat.PNG -> "png"
+        Bitmap.CompressFormat.JPEG -> "jpg"
+        else -> "webp"
+    }
+
+    /** Downscale [bitmap] so its longest edge is at most [maxDim] (export size choice); returns the same
+     *  bitmap when it already fits, so "Original" and small photos pay nothing. */
+    private fun downscaleToMax(bitmap: Bitmap, maxDim: Int): Bitmap {
+        if (maxOf(bitmap.width, bitmap.height) <= maxDim) return bitmap
+        val (w, h) = exportTargetSize(bitmap.width, bitmap.height, maxDim)
+        return Bitmap.createScaledBitmap(bitmap, w, h, true)
+    }
+
+    private suspend fun saveLocal(bitmap: Bitmap, source: EditorSource.Local, mode: SaveMode, quality: Int, editTimestampMs: Long, dateTakenMs: Long, format: Bitmap.CompressFormat): Uri? {
         return when (mode) {
             SaveMode.Overwrite -> overwriteLocal(bitmap, source, quality)
-            SaveMode.Copy      -> insertLocalCopy(bitmap, source, quality, editTimestampMs = editTimestampMs, dateTakenMs = dateTakenMs)
+            // A copy of a vaulted photo stays in the vault. The MediaStore insert below would put the
+            // edited pixels of a photo the user hid into a plain visible file in the camera folder, which is
+            // the hide undone rather than a copy of it.
+            SaveMode.Copy      ->
+                if (hiddenStorage.isHiddenUri(source.uri))
+                    insertVaultCopy(bitmap, source, quality, editTimestampMs = editTimestampMs, dateTakenMs = dateTakenMs)
+                else
+                    insertLocalCopy(bitmap, source, quality, editTimestampMs = editTimestampMs, dateTakenMs = dateTakenMs, format = format)
         }
+    }
+
+    /**
+     * Writes the edited pixels as a SECOND vaulted photo, returning its `file://` uri, and leaves the
+     * one that was edited exactly as it is.
+     *
+     * The vault's own writer produces the file, so the copy is named the way every hidden photo is —
+     * a private code carrying its capture time, which is what the grid sorts on and what a reveal
+     * rebuilds DATE_TAKEN from — and the vault then records it as a hidden photo of its own, giving it
+     * the same name, folder and reveal every other one has.
+     */
+    private suspend fun insertVaultCopy(
+        bitmap: Bitmap,
+        source: EditorSource.Local,
+        quality: Int,
+        editTimestampMs: Long,
+        dateTakenMs: Long,
+    ): Uri? {
+        val copyUri = hiddenStorage.create("jpg", dateTakenMs) { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        } ?: error("Could not write the copy into the hidden area")
+        // Re-inject the source's EXIF so the copy is a metadata-complete twin except for the pixels,
+        // matching what a copy of any other device photo keeps.
+        val originalExif = ExifHelper.readExifSnapshot(context, source.uri)
+        if (originalExif != null) {
+            runCatching {
+                context.contentResolver.openFileDescriptor(Uri.parse(copyUri), "rw")?.use { pfd ->
+                    ExifHelper.copyExifPreservingOrientation(
+                        originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
+                    )
+                }
+            }
+        }
+        hiddenVaultEditor.adoptCopy(
+            sourceUri = source.uri,
+            copyUri = copyUri,
+            displayName = HiddenVaultRecords.recordedName(stamp(source.displayName, editTimestampMs), "jpg"),
+        )
+        return Uri.parse(copyUri)
     }
 
     // Throws SecurityException on foreign URIs (caller recovers). No IS_PENDING dance — on a foreign
@@ -1449,12 +2567,16 @@ class PhotoEditorViewModel @Inject constructor(
         /** The DATE stamped on the copy: the original photo's capture time (ms), so the edit sorts next
          *  to the original. Defaults to [editTimestampMs] for the Overwrite-fallback path. */
         dateTakenMs: Long = editTimestampMs,
+        /** Output container for the copy (the export format choice). Only the copy path exposes it; the
+         *  Overwrite-fallback keeps JPEG. Cloud/synced copies stay JPEG so reconcile pairs them by name. */
+        format: Bitmap.CompressFormat = Bitmap.CompressFormat.JPEG,
     ): Uri? {
         val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        val newName = if (useOriginalName) source.displayName else stamp(source.displayName, editTimestampMs)
+        val newName = if (useOriginalName) source.displayName
+            else stamp(source.displayName, editTimestampMs, extensionForFormat(format))
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, newName)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.MIME_TYPE, mimeForFormat(format))
             // Explicit DATE_TAKEN (ms) so reconcile.byNameAndDate finds the cloud sibling; DATE_MODIFIED is seconds.
             put(MediaStore.Images.Media.DATE_TAKEN, dateTakenMs)
             put(MediaStore.Images.Media.DATE_MODIFIED, dateTakenMs / 1000L)
@@ -1466,7 +2588,7 @@ class PhotoEditorViewModel @Inject constructor(
         val uri = context.contentResolver.insert(collection, values)
             ?: error("MediaStore insert failed")
         context.contentResolver.openOutputStream(uri)?.use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            bitmap.compress(format, quality, out)
         } ?: error("openOutputStream returned null")
         // Re-inject the original's EXIF (capture time, camera, GPS) into the fresh copy while it is still
         // pending, so the published file is a metadata-complete twin of the original except the pixels.
@@ -1683,12 +2805,12 @@ class PhotoEditorViewModel @Inject constructor(
      * Appends a "_edit_<ts>" suffix to the filename. Pass the SAME [atMs] to the device + cloud
      * saves so they get identical names (independent format(Date()) calls drift) and reconcile pairs them.
      */
-    private fun stamp(displayName: String, atMs: Long = System.currentTimeMillis()): String {
+    private fun stamp(displayName: String, atMs: Long = System.currentTimeMillis(), ext: String = "jpg"): String {
         val dotIdx = displayName.lastIndexOf('.')
         val base = if (dotIdx > 0) displayName.substring(0, dotIdx) else displayName
         val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.ROOT)
             .format(java.util.Date(atMs))
-        return "${base}_edit_$ts.jpg"
+        return "${base}_edit_$ts.$ext"
     }
 
     /**
@@ -1703,11 +2825,15 @@ class PhotoEditorViewModel @Inject constructor(
             ?: return Triple(false, false, MetadataStripConfig())
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
         val mirrorStripToLocal = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
+        // Authorship rides on the software setting exactly as in [UploadPendingUseCase]: the upload
+        // strip is driven by one preference, so both tag groups move together here too.
+        val stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false
         val config = MetadataStripConfig(
             stripGps = prefs[SettingsKeys.STRIP_GPS] ?: false,
             stripCameraInfo = prefs[SettingsKeys.STRIP_CAMERA_INFO] ?: false,
             stripTimestamp = prefs[SettingsKeys.STRIP_TIMESTAMP] ?: false,
-            stripSoftwareInfo = prefs[SettingsKeys.STRIP_SOFTWARE_INFO] ?: false,
+            stripSoftwareInfo = stripSoftwareInfo,
+            stripAuthorship = stripSoftwareInfo,
         )
         return Triple(stripOnUpload, mirrorStripToLocal, config)
     }
@@ -1793,6 +2919,10 @@ class PhotoEditorViewModel @Inject constructor(
      */
     override fun onCleared() {
         super.onCleared()
+        // Release the ONNX session the face detector holds; nothing runs it once the editor is gone.
+        faceDetector?.close()
+        faceDetector = null
+        faceDetectorModelPath = null
         val s = _state.value
         val original = s.originalBitmap
         fun releaseIfPrivate(bmp: Bitmap?) {
