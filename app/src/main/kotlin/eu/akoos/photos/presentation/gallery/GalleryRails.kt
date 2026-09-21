@@ -705,10 +705,11 @@ internal fun FilterRail(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                // Summary + count — tap to clear the active content filter (unchanged behaviour).
+                // Summary + count. Tap opens the timeline filter drawer (same as the funnel), or
+                // clears the filter when one is active so the pill keeps its quick-clear shortcut.
                 Row(
                     modifier = Modifier
-                        .clickable(enabled = isContentFilterActive) { onClearContentFilter() }
+                        .clickable { if (isContentFilterActive) onClearContentFilter() else onOpenTimelineFilter() }
                         .padding(vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),

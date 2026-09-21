@@ -1881,6 +1881,9 @@
     <string name="duplicates_scanning">Scanning for similar photos…</string>
     <string name="duplicates_similar_hint">These look alike but may differ in file or metadata</string>
     <string name="duplicates_details">Details</string>
+    <string name="duplicates_leave_title">Discard selection?</string>
+    <string name="duplicates_leave_message">You have %1$d selected. If you leave now, your selection is cleared.</string>
+    <string name="duplicates_leave_confirm">Leave</string>
 
     <!-- What's new -->
     <string name="whats_new_title">What\'s new</string>
@@ -2026,6 +2029,14 @@
     <string name="whats_new_offlineedit_body">Editing a cloud photo or video with no connection tells you and keeps your edit, instead of stalling.</string>
     <string name="whats_new_videoaudiodate_title">Better video edits</string>
     <string name="whats_new_videoaudiodate_body">Adding an mp3 or other soundtrack to a video now saves, and an edited cloud video keeps its original date.</string>
+    <string name="whats_new_searchready_title">Accurate search status</string>
+    <string name="whats_new_searchready_body">Photo search shows as ready once your library is indexed, and finishes the last few quietly instead of looking stuck.</string>
+    <string name="whats_new_dupleave_title">Safer duplicate cleanup</string>
+    <string name="whats_new_dupleave_body">The duplicate finder warns before you leave with photos still selected, and shows how much space a delete will free.</string>
+    <string name="whats_new_collectionwide_title">Collection fills wide screens</string>
+    <string name="whats_new_collectionwide_body">Collection previews use the full width, and the timeline filter pill opens the filters.</string>
+    <string name="whats_new_searchperson_title">Add to a person from search</string>
+    <string name="whats_new_searchperson_body">Select photos in search results and add them to a person, and the search field keeps focus as you type.</string>
     <string name="whats_new_diag_title">Testing this preview?</string>
     <string name="whats_new_diag_body">Thanks for trying a preview build. If anything looks wrong, please send the diagnostics so a file problem can be told apart from something else: copy them from Settings, then email support@photosforproton.eu, or post on Discord or GitHub.</string>
     <string name="whats_new_section_new">New</string>

@@ -26,6 +26,7 @@ import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.ImageEmbeddingEntity
+import kotlinx.coroutines.flow.Flow
 
 /**
  * One photo's key paired with its packed embedding blob, the two columns the search ranks. Projected so
@@ -69,6 +70,12 @@ interface ImageEmbeddingDao {
     /** How many photos are embedded for the account, so the indexer can report progress. */
     @Query("SELECT COUNT(*) FROM image_embedding WHERE userId = :userId")
     suspend fun countForUser(userId: String): Int
+
+    /** A live count of the account's embeddings, so a settings card can tell an empty index (nothing
+     *  searchable yet) from one that already has embedded photos, even right after launch before a walk
+     *  reports progress. */
+    @Query("SELECT COUNT(*) FROM image_embedding WHERE userId = :userId")
+    fun observeCountForUser(userId: String): Flow<Int>
 
     /** Every embedding for the account, key + blob, the search's input: it ranks these in memory by
      *  cosine similarity and keeps the top matches. */

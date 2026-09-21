@@ -33,6 +33,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,6 +78,7 @@ import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
@@ -114,6 +116,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -121,6 +124,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -148,6 +152,7 @@ import eu.akoos.photos.presentation.gallery.PeopleRailData
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.ContentFilterSheet
 import eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog
+import eu.akoos.photos.presentation.gallery.GalleryAddToPersonSheet
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
@@ -265,6 +270,8 @@ fun SearchScreen(
     }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showAddToPersonSheet by remember { mutableStateOf(false) }
+    val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // The picker's own "New album" row, which names an album and then adds the selection to it.
     var showCreateAlbumInline by remember { mutableStateOf(false) }
     // Move the device selection into another folder, logged-out, device-data only. The picker's
@@ -347,6 +354,16 @@ fun SearchScreen(
                 prevOffset = off
             }
     }
+    // A real finger drag on either list dismisses the keyboard (clears the field focus), so browsing
+    // results hides the header the same as the timeline. The auto-scroll a growing result set emits
+    // while typing is not a drag, so typing keeps its focus.
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(resultsGridState, idleListState) {
+        merge(
+            resultsGridState.interactionSource.interactions,
+            idleListState.interactionSource.interactions,
+        ).collect { if (it is DragInteraction.Start) focusManager.clearFocus() }
+    }
     // Match the timeline exactly: the header shows while the active list is scrolled UP or sits at the
     // top, and hides while it is scrolled down. It does NOT pop back on a mere stop, which is what read
     // as an instant, off-tempo reappearance.
@@ -360,6 +377,7 @@ fun SearchScreen(
             }
         }
     }
+    var searchFocused by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -615,7 +633,9 @@ fun SearchScreen(
       // timeline chrome. Its measured height feeds `headerPad` above so the first row clears it; the
       // height sticks while hidden, so the content padding does not jump as the header slides.
       AnimatedVisibility(
-        visible = headerVisible,
+        // While the field is focused the header stays mounted, so a results-driven scroll does not
+        // dispose the text field mid-typing and drop the keyboard; hide-on-scroll still applies otherwise.
+        visible = headerVisible || searchFocused,
         enter = fadeIn() + slideInVertically { -it },
         exit = fadeOut() + slideOutVertically { -it },
       ) {
@@ -665,6 +685,7 @@ fun SearchScreen(
                         else R.string.search_placeholder,
                     ),
                     modifier = Modifier.weight(1f),
+                    onFocusChanged = { searchFocused = it },
                 )
                 // Filter button beside the search field — opens the sheet (sync status). Accent
                 // outline + tint when a sheet filter is active, so it reads as "filters applied".
@@ -773,6 +794,17 @@ fun SearchScreen(
                         icon = Icons.Default.PhotoAlbum,
                         label = stringResource(R.string.gallery_add_to_album),
                         onClick = { showAddToAlbumSheet = true },
+                    )
+                )
+            }
+            // Add-to-person runs on-device, so a guest with named people sees it too. Only the
+            // account-backed actions in this list stay behind isSignedIn.
+            if (isSignedIn || people.isNotEmpty()) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.Person,
+                        label = stringResource(R.string.gallery_add_to_person),
+                        onClick = { showAddToPersonSheet = true },
                     )
                 )
             }
@@ -963,6 +995,20 @@ fun SearchScreen(
                     }
                 },
                 onDismiss = { showAddToAlbumSheet = false },
+            )
+        }
+
+        // Add-to-person sheet reuses the gallery's picker. The membership is stored on-device
+        // against the person's name, so a guest reaches it too once a person is named.
+        if (showAddToPersonSheet && selectedItems.isNotEmpty()) {
+            GalleryAddToPersonSheet(
+                people = people,
+                sheetState = addToPersonSheetState,
+                onPersonSelected = { personId ->
+                    showAddToPersonSheet = false
+                    vm.addSelectedToPerson(personId)
+                },
+                onDismiss = { showAddToPersonSheet = false },
             )
         }
 

@@ -124,12 +124,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
+import eu.akoos.photos.data.face.FACE_INDEX_FOREGROUND_THRESHOLD
 import eu.akoos.photos.data.face.FaceIndexingState
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.ocr.OcrModelAssets
+import eu.akoos.photos.data.semantic.SEMANTIC_INDEX_FOREGROUND_THRESHOLD
 import eu.akoos.photos.data.semantic.SemanticIndexingProgress
 import eu.akoos.photos.data.semantic.SemanticIndexingState
 import eu.akoos.photos.data.semantic.SemanticModelAssets
+import eu.akoos.photos.data.semantic.SemanticStatusLabel
+import eu.akoos.photos.data.semantic.semanticStatusLabel
 import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.search.SearchFilter
@@ -1367,7 +1371,13 @@ private fun FaceStatusCard(
     // While a walk is active or pending, a persistent device-health block is what has actually parked
     // it: the scheduler keeps reporting Running when it stands down for a warm phone, a low battery or
     // the power saver, so name that reason in place of the plain running / paused label.
-    val healthLabel = if (state == FaceIndexingState.Running || state == FaceIndexingState.Paused) {
+    // Only a genuine bulk index (a backlog large enough to also run the background notification) surfaces
+    // progress; a small residual retrying in the background, or newly added photos, index silently and the
+    // card shows just the people summary, exactly like automatic new-photo indexing. So the last few
+    // un-downloadable photos, and every index after the first, no longer look stuck on re-entry.
+    val faceBulkIndex = (state == FaceIndexingState.Running || state == FaceIndexingState.Paused) &&
+        (ui.total - ui.indexed).coerceAtLeast(0) >= FACE_INDEX_FOREGROUND_THRESHOLD
+    val healthLabel = if (faceBulkIndex) {
         when (ui.blockReason) {
             HealthBlockReason.LOW_BATTERY -> stringResource(R.string.settings_ai_indexing_paused_battery)
             HealthBlockReason.WARM -> stringResource(R.string.settings_ai_indexing_paused_warm)
@@ -1377,22 +1387,21 @@ private fun FaceStatusCard(
     } else {
         null
     }
-    // Indexing is automatic, so a status line only appears while something is actually happening; an
-    // idle or finished scan shows just the people summary, with no "not started" wording. Standing by
-    // behind the semantic walk (they share one model gate) takes precedence over the plain running label,
-    // so a frozen count reads as the wait it is.
-    val stateLabel = if (waitingForOther && (state == FaceIndexingState.Running || state == FaceIndexingState.Paused)) {
-        stringResource(R.string.settings_ai_indexing_waiting_other)
-    } else {
-        healthLabel ?: when (state) {
+    // A status line only appears for a bulk index (or while waiting for the model); an idle or finished
+    // scan, and a small background residual, show just the people summary with no "not started" wording.
+    // Standing by behind the semantic walk (they share one model gate) takes precedence over the plain
+    // running label, so a frozen count reads as the wait it is.
+    val stateLabel = when {
+        state == FaceIndexingState.WaitingModel -> stringResource(R.string.settings_ai_indexing_waiting)
+        !faceBulkIndex -> null
+        waitingForOther -> stringResource(R.string.settings_ai_indexing_waiting_other)
+        else -> healthLabel ?: when (state) {
             FaceIndexingState.Running -> stringResource(R.string.settings_ai_indexing_running)
-            FaceIndexingState.WaitingModel -> stringResource(R.string.settings_ai_indexing_waiting)
             FaceIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
             else -> null
         }
     }
-    val showBar = (state == FaceIndexingState.Running || state == FaceIndexingState.Paused) &&
-        ui.total > 0
+    val showBar = faceBulkIndex
 
     SettingsCard {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -1451,31 +1460,33 @@ private fun FaceStatusCard(
                 }
             }
 
-            // No manual start: indexing runs automatically and new photos are picked up on their own,
-            // so the only control is to pause a live scan or resume a paused one. Idle, finished and
-            // model-waiting states show no button at all.
-            when (state) {
-                FaceIndexingState.Running -> {
-                    Spacer(Modifier.height(16.dp))
-                    PrimaryButton(
-                        label = stringResource(R.string.settings_ai_pause),
-                        icon = Icons.Default.Pause,
-                        onClick = { onSetPaused(true) },
-                        enabled = ui.actionEnabled,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+            // No manual start: indexing runs automatically and new photos are picked up on their own, so the
+            // only control is to pause a live bulk scan or resume a paused one. Idle, finished, a small
+            // background residual, and model-waiting show no button at all.
+            if (faceBulkIndex) {
+                when (state) {
+                    FaceIndexingState.Running -> {
+                        Spacer(Modifier.height(16.dp))
+                        PrimaryButton(
+                            label = stringResource(R.string.settings_ai_pause),
+                            icon = Icons.Default.Pause,
+                            onClick = { onSetPaused(true) },
+                            enabled = ui.actionEnabled,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    FaceIndexingState.Paused -> {
+                        Spacer(Modifier.height(16.dp))
+                        PrimaryButton(
+                            label = stringResource(R.string.settings_ai_resume),
+                            icon = Icons.Default.PlayArrow,
+                            onClick = { onSetPaused(false) },
+                            enabled = ui.actionEnabled,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    else -> {}
                 }
-                FaceIndexingState.Paused -> {
-                    Spacer(Modifier.height(16.dp))
-                    PrimaryButton(
-                        label = stringResource(R.string.settings_ai_resume),
-                        icon = Icons.Default.PlayArrow,
-                        onClick = { onSetPaused(false) },
-                        enabled = ui.actionEnabled,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                else -> {}
             }
         }
     }
@@ -1610,6 +1621,7 @@ fun SemanticSearchScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val progress by viewModel.semanticIndexingProgress.collectAsStateWithLifecycle()
+    val semanticIndexedCount by viewModel.semanticIndexedCount.collectAsStateWithLifecycle()
     val mlActiveRail by viewModel.mlActiveRail.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
@@ -1682,6 +1694,7 @@ fun SemanticSearchScreen(
             Spacer(Modifier.height(20.dp))
             SemanticStatusCard(
                 progress = progress,
+                indexedCount = semanticIndexedCount,
                 // Running state but the face walk holds the shared model gate = standing by behind it.
                 waitingForOther = mlActiveRail == eu.akoos.photos.util.MlRail.FACE &&
                     progress.state == SemanticIndexingState.Running,
@@ -1743,30 +1756,34 @@ fun SemanticSearchScreen(
 @Composable
 private fun SemanticStatusCard(
     progress: SemanticIndexingProgress,
+    indexedCount: Int,
     waitingForOther: Boolean,
     onSetPaused: (Boolean) -> Unit,
 ) {
     val colors = AppColors.current
     val state = progress.state
-    val title = when (state) {
-        SemanticIndexingState.Running -> stringResource(R.string.settings_ai_indexing_running)
-        SemanticIndexingState.WaitingModel -> stringResource(R.string.settings_ai_semantic_indexing_waiting)
-        SemanticIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
-        // Done means the whole library is embedded; Idle (fresh, or right after a clear) has nothing
-        // indexed, so it must not claim the photos are searchable.
-        SemanticIndexingState.Done -> stringResource(R.string.settings_ai_semantic_ready)
-        else -> stringResource(R.string.settings_ai_semantic_not_indexed)
+    // Only a genuine bulk index shows a progress bar; a settled walk, a small residual retrying in the
+    // background, or newly added photos read as ready once the library is searchable, and as not indexed
+    // only when nothing is embedded. So the last few un-downloadable photos, and every index after the
+    // first, finish silently instead of looking stuck.
+    val label = semanticStatusLabel(state, indexedCount, (progress.total - progress.indexed).coerceAtLeast(0))
+    val title = when (label) {
+        SemanticStatusLabel.Indexing -> stringResource(R.string.settings_ai_indexing_running)
+        SemanticStatusLabel.WaitingModel -> stringResource(R.string.settings_ai_semantic_indexing_waiting)
+        SemanticStatusLabel.Paused -> stringResource(R.string.settings_ai_indexing_paused)
+        SemanticStatusLabel.Ready -> stringResource(R.string.settings_ai_semantic_ready)
+        SemanticStatusLabel.NotIndexed -> stringResource(R.string.settings_ai_semantic_not_indexed)
     }
-    val showBar = (state == SemanticIndexingState.Running || state == SemanticIndexingState.Paused) &&
-        progress.total > 0
+    val showBar = label == SemanticStatusLabel.Indexing
 
     SettingsCard {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(title, color = colors.fgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
 
             // Standing by behind the other on-device walk (they share one model gate), so say so rather
-            // than leave the count looking frozen.
-            if (waitingForOther) {
+            // than leave the count looking frozen. Only while a bulk index is on screen; a small residual
+            // waits silently.
+            if (waitingForOther && showBar) {
                 Spacer(Modifier.height(4.dp))
                 Text(
                     stringResource(R.string.settings_ai_indexing_waiting_other),
@@ -1791,9 +1808,10 @@ private fun SemanticStatusCard(
             }
 
             // Indexing runs automatically and new photos are picked up on their own, so the only control is
-            // to pause a live walk or resume a paused one. Idle, finished and model-waiting states show none.
-            when (state) {
-                SemanticIndexingState.Running -> {
+            // to pause a live bulk index or resume a paused one. A settled walk, a small background residual,
+            // and the model-waiting state show none.
+            when (label) {
+                SemanticStatusLabel.Indexing -> {
                     Spacer(Modifier.height(16.dp))
                     PrimaryButton(
                         label = stringResource(R.string.settings_ai_pause),
@@ -1802,7 +1820,7 @@ private fun SemanticStatusCard(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                SemanticIndexingState.Paused -> {
+                SemanticStatusLabel.Paused -> {
                     Spacer(Modifier.height(16.dp))
                     PrimaryButton(
                         label = stringResource(R.string.settings_ai_resume),

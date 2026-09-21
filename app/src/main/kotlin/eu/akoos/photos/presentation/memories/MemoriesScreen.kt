@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -209,23 +208,33 @@ fun MemoriesScreen(
                             title = stringResource(R.string.gallery_on_this_day),
                             onClick = { onSeeAll(MemoryCategory.ON_THIS_DAY) },
                         )
-                        // Four random entries in a fixed 2×2 grid (the sub-page lists every entry),
+                        // A horizontally scrolling row of entries (the sub-page lists every one),
                         // keyed on the set of years (not the list instance) so the shuffle stays stable
                         // across decrypt-driven re-emits, then resolved against the latest state each
                         // recomposition so covers still refresh without the preview jumping.
                         val pickedYears = remember(state.onThisDay.map { it.first }) {
-                            state.onThisDay.map { it.first }.shuffled().take(4)
+                            state.onThisDay.map { it.first }.shuffled().take(12)
                         }
                         val previewOnThisDay = pickedYears.mapNotNull { yr ->
                             state.onThisDay.firstOrNull { it.first == yr }
                         }
-                        PreviewGrid(previewOnThisDay) { (year, items) ->
-                            OnThisDayCard(
-                                coverItem = items.first(),
-                                yearsAgo = (now - year).coerceAtLeast(1),
-                                count = items.size,
-                                onClick = { onPhotoClick(items, 0) },
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            previewOnThisDay.forEach { (year, items) ->
+                                Box(Modifier.width(132.dp)) {
+                                    OnThisDayCard(
+                                        coverItem = items.first(),
+                                        yearsAgo = (now - year).coerceAtLeast(1),
+                                        count = items.size,
+                                        onClick = { onPhotoClick(items, 0) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -236,18 +245,28 @@ fun MemoriesScreen(
                             onClick = { onSeeAll(MemoryCategory.SEASONS) },
                         )
                         val pickedSeasons = remember(state.seasons.map { it.title }) {
-                            state.seasons.map { it.title }.shuffled().take(4)
+                            state.seasons.map { it.title }.shuffled().take(12)
                         }
                         val previewSeasons = pickedSeasons.mapNotNull { title ->
                             state.seasons.firstOrNull { it.title == title }
                         }
-                        PreviewGrid(previewSeasons) { bucket ->
-                            SeasonCard(
-                                coverItem = bucket.cover,
-                                title = bucket.title,
-                                count = bucket.items.size,
-                                onClick = { onPhotoClick(bucket.items, 0) },
-                            )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            previewSeasons.forEach { bucket ->
+                                Box(Modifier.width(132.dp)) {
+                                    SeasonCard(
+                                        coverItem = bucket.cover,
+                                        title = bucket.title,
+                                        count = bucket.items.size,
+                                        onClick = { onPhotoClick(bucket.items, 0) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -297,39 +316,6 @@ private fun MemoriesSkeleton(contentTopPad: Dp) {
                             }
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Non-scrolling 2×2 preview: a [Column] of two [Row]s, each holding two weighted cells so the
- * columns share the row width. With an odd count the trailing cell is an empty spacer.
- */
-@Composable
-private fun <T> PreviewGrid(items: List<T>, card: @Composable (T) -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        items.chunked(2).forEach { rowItems ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                rowItems.forEach { item ->
-                    Box(
-                        modifier = Modifier.weight(1f),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        card(item)
-                    }
-                }
-                if (rowItems.size == 1) {
-                    Spacer(modifier = Modifier.weight(1f))
                 }
             }
         }

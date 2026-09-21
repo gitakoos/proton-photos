@@ -100,6 +100,7 @@ class SearchViewModel @Inject constructor(
     private val semanticSearchUseCase: SemanticSearchUseCase,
     private val faceDao: FaceDao,
     private val moveController: MoveToFolderController,
+    private val addPhotosToPersonUseCase: eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -556,6 +557,17 @@ class SearchViewModel @Inject constructor(
     fun onStripPermissionGranted() = sel.onStripPermissionGranted()
     fun clearPendingStripIntent() = sel.clearPendingStripIntent()
     fun resetMultiStripState() = sel.resetMultiStripState()
+
+    /** Attach the current selection to a named person, then exit selection. The membership survives a
+     *  rescan (stored against the person's name); an unnamed person is a no-op inside the use case. */
+    fun addSelectedToPerson(personId: Long) {
+        val keys = selectedItems.value.map { it.stableId }
+        if (keys.isEmpty()) return
+        viewModelScope.launch {
+            addPhotosToPersonUseCase(personId, keys)
+            clearSelection()
+        }
+    }
 
     // ── Move to a device folder (logged-out, device data only) ──────────────────────────────────
     // Delegated to the shared [MoveToFolderController], the same relocation the timeline offers, so a

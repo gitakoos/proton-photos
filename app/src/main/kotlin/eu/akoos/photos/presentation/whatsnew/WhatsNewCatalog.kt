@@ -126,10 +126,10 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         version = "2.5.0",
         hero = null,
         features = listOf(
-            WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_videosmooth_title, R.string.whats_new_videosmooth_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.ZoomIn, R.string.whats_new_focalzoom_title, R.string.whats_new_focalzoom_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.CloudOff, R.string.whats_new_offlineedit_title, R.string.whats_new_offlineedit_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_videoaudiodate_title, R.string.whats_new_videoaudiodate_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Search, R.string.whats_new_searchready_title, R.string.whats_new_searchready_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_dupleave_title, R.string.whats_new_dupleave_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_collectionwide_title, R.string.whats_new_collectionwide_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_searchperson_title, R.string.whats_new_searchperson_body, WhatsNewCategory.Improved),
         ),
     ),
     WhatsNewRelease(
@@ -219,6 +219,11 @@ internal val WhatsNew250EarlierPreviews: List<WhatsNewFeature> = listOf(
     WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_indexsettle_title, R.string.whats_new_indexsettle_body, WhatsNewCategory.Improved),
     WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_videoplay_title, R.string.whats_new_videoplay_body, WhatsNewCategory.Improved),
     WhatsNewFeature(Icons.Default.GroupAdd, R.string.whats_new_mergefast_title, R.string.whats_new_mergefast_body, WhatsNewCategory.Improved),
+    // Moved down from the 2.5.0 head card when test8 took the head: these are the test7 cards.
+    WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_videosmooth_title, R.string.whats_new_videosmooth_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.ZoomIn, R.string.whats_new_focalzoom_title, R.string.whats_new_focalzoom_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.CloudOff, R.string.whats_new_offlineedit_title, R.string.whats_new_offlineedit_body, WhatsNewCategory.Improved),
+    WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_videoaudiodate_title, R.string.whats_new_videoaudiodate_body, WhatsNewCategory.Improved),
 )
 
 /** Looks up a release by its version string, falling back to the newest for an unknown one. */

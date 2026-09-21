@@ -1819,6 +1819,9 @@
     <string name="whats_new_news_title">Notizie e feedback</string>
     <string name="whats_new_news_body">Una schermata delle notizie porta gli aggiornamenti sull\'app, e un pulsante ti porta subito dove puoi inviare un feedback o segnalare un bug.</string>
     <string name="duplicates_details">Dettagli</string>
+    <string name="duplicates_leave_title">Annullare la selezione?</string>
+    <string name="duplicates_leave_message">Hai selezionato %1$d elementi. Se esci ora, la selezione andrà persa.</string>
+    <string name="duplicates_leave_confirm">Esci</string>
     <string name="metadata_editor_date_mode_filename">Dal nome file</string>
     <string name="metadata_editor_filename_hint">Imposta la data di ogni foto in base alla data scritta nel nome del file.</string>
     <string name="metadata_editor_filename_apply">Correggi le date</string>
@@ -2041,6 +2044,14 @@
     <string name="whats_new_offlineedit_body">Modificare una foto o un video del cloud senza connessione ti avvisa e conserva la tua modifica, invece di bloccarsi.</string>
     <string name="whats_new_videoaudiodate_title">Modifiche video migliori</string>
     <string name="whats_new_videoaudiodate_body">Aggiungere un mp3 o un\'altra colonna sonora a un video ora viene salvato, e un video del cloud modificato mantiene la sua data originale.</string>
+    <string name="whats_new_searchready_title">Stato di ricerca accurato</string>
+    <string name="whats_new_searchready_body">La ricerca delle foto risulta pronta non appena la libreria è indicizzata, e completa le ultime in silenzio invece di sembrare bloccata.</string>
+    <string name="whats_new_dupleave_title">Pulizia dei duplicati più sicura</string>
+    <string name="whats_new_dupleave_body">Il rilevatore di duplicati avvisa prima che tu esca con foto ancora selezionate, e mostra quanto spazio libererà un\'eliminazione.</string>
+    <string name="whats_new_collectionwide_title">La raccolta riempie gli schermi larghi</string>
+    <string name="whats_new_collectionwide_body">Le anteprime della raccolta usano tutta la larghezza, e toccare il filtro della cronologia apre i filtri.</string>
+    <string name="whats_new_searchperson_title">Aggiungi a una persona dalla ricerca</string>
+    <string name="whats_new_searchperson_body">Seleziona le foto nei risultati di ricerca e aggiungile a una persona; il campo di ricerca mantiene il focus mentre digiti.</string>
     <string name="whats_new_diag_title">Stai provando questa anteprima?</string>
     <string name="whats_new_diag_body">Grazie per provare un\'anteprima. Se qualcosa non va, invia la diagnostica così un problema di file può essere distinto da qualcos\'altro: copiala dalle Impostazioni e scrivi a support@photosforproton.eu, oppure pubblica su Discord o GitHub.</string>
     <string name="whats_new_section_new">Novità</string>

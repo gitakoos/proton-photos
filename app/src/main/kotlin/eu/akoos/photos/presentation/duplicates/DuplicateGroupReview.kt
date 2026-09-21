@@ -494,12 +494,15 @@ internal fun DuplicateGroupReview(
             // A backed-up copy carries its device file with it: leaving that file behind would only have
             // the next backup re-upload it and put the duplicate straight back.
             val takesDeviceCopyToo = group.items.any { it.stableId in selected && it is GalleryItem.Synced }
+            val freed = duplicatesFreedBytes(group.items.filter { it.stableId in selected })
+            val baseMessage = stringResource(
+                if (takesDeviceCopyToo) R.string.duplicates_confirm_message_synced
+                else R.string.duplicates_confirm_message
+            )
+            val freesNote = stringResource(R.string.delete_frees_note, formatBytes(freed))
             ConfirmDialog(
                 title = stringResource(R.string.duplicates_confirm_title),
-                message = stringResource(
-                    if (takesDeviceCopyToo) R.string.duplicates_confirm_message_synced
-                    else R.string.duplicates_confirm_message
-                ),
+                message = if (freed > 0) "$baseMessage $freesNote" else baseMessage,
                 confirmLabel = stringResource(R.string.duplicates_confirm_delete),
                 dismissLabel = stringResource(R.string.cancel),
                 destructive = true,

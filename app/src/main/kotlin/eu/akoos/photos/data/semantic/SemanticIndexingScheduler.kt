@@ -115,6 +115,39 @@ data class SemanticIndexingProgress(
     val total: Int,
 )
 
+/** How the semantic-search settings card should summarise the walk, kept out of the Compose card so the
+ *  state-to-label decision is unit-tested without Android. */
+enum class SemanticStatusLabel { WaitingModel, Indexing, Paused, Ready, NotIndexed }
+
+/**
+ * The label for the semantic status card. Only a genuine bulk index ([pending] at least
+ * [SEMANTIC_INDEX_FOREGROUND_THRESHOLD], the same backlog that also runs the background notification)
+ * surfaces as [SemanticStatusLabel.Indexing] or [SemanticStatusLabel.Paused] with a progress bar. A
+ * settled walk, or a small residual retrying quietly in the background (a few photos still to download, or
+ * newly added ones), reads as [SemanticStatusLabel.Ready] whenever at least one photo is embedded and so
+ * searchable; only a truly empty index (fresh, or right after a clear) is [SemanticStatusLabel.NotIndexed].
+ * So a large library that settled a few un-downloadable photos short, and every after-the-first index,
+ * runs silently and reads as searchable rather than stuck or not indexed. Pure so it is unit-tested
+ * without Android.
+ */
+fun semanticStatusLabel(
+    state: SemanticIndexingState,
+    indexedCount: Int,
+    pending: Int,
+): SemanticStatusLabel {
+    val bulkIndex = pending >= SEMANTIC_INDEX_FOREGROUND_THRESHOLD
+    return when (state) {
+        SemanticIndexingState.WaitingModel -> SemanticStatusLabel.WaitingModel
+        SemanticIndexingState.Running -> if (bulkIndex) SemanticStatusLabel.Indexing else settledSemanticLabel(indexedCount)
+        SemanticIndexingState.Paused -> if (bulkIndex) SemanticStatusLabel.Paused else settledSemanticLabel(indexedCount)
+        SemanticIndexingState.Done -> SemanticStatusLabel.Ready
+        SemanticIndexingState.Idle -> settledSemanticLabel(indexedCount)
+    }
+}
+
+private fun settledSemanticLabel(indexedCount: Int): SemanticStatusLabel =
+    if (indexedCount > 0) SemanticStatusLabel.Ready else SemanticStatusLabel.NotIndexed
+
 /**
  * Whether a photo whose source failed to load should be recorded embedded (a zero-vector tombstone the
  * search ranks at similarity 0, so a re-run skips it) rather than left pending. A device item that
@@ -227,6 +260,7 @@ class SemanticIndexingScheduler @Inject constructor(
 
     init {
         watchSettings()
+        watchNetworkResume()
         // Mirror every progress emit into the copied diagnostics, so an index standing still short of the
         // end is legible there (on a release build, where the logs are stripped) rather than a blind spot.
         scope.launch { progress.collect { SemanticDiagnostics.record(it.state.name, it.indexed, it.total) } }
@@ -238,6 +272,23 @@ class SemanticIndexingScheduler @Inject constructor(
             context.settingsDataStore.data.collect { prefs ->
                 aiEnabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.SEMANTIC_ENABLED] == true
                 fullresWifiOnly = prefs[SettingsKeys.FULLRES_WIFI_ONLY] ?: true
+            }
+        }
+    }
+
+    /** Resume a walk that stalled while off Wi-Fi once the connection becomes unmetered again. An off-Wi-Fi
+     *  cloud backlog otherwise sits settled with a residual until a manual trigger or a relaunch, because a
+     *  pass that embeds nothing does not re-kick itself. Mirrors the face walk's watcher. Only a signed-in
+     *  account has cloud items to defer, so a guest (lastUserId null) never kicks; indexAll collapses an
+     *  overlapping call. */
+    private fun watchNetworkResume() {
+        scope.launch {
+            var wasUnmetered = networkObserver.isUnmetered.value
+            networkObserver.isUnmetered.collect { nowUnmetered ->
+                if (shouldResumeSemanticScanOnUnmetered(wasUnmetered, nowUnmetered)) {
+                    lastUserId?.let { uid -> runCatching { indexAll(uid) } }
+                }
+                wasUnmetered = nowUnmetered
             }
         }
     }
@@ -887,3 +938,9 @@ class SemanticIndexingScheduler @Inject constructor(
         const val DECRYPT_TIMEOUT_MS = 20_000L
     }
 }
+
+/** True only on the edge where the network becomes unmetered, so a walk deferred while off Wi-Fi resumes
+ *  on reconnect rather than staying settled, without kicking on the initial replayed state. Mirrors the
+ *  face walk's predicate. */
+internal fun shouldResumeSemanticScanOnUnmetered(wasUnmetered: Boolean, nowUnmetered: Boolean): Boolean =
+    !wasUnmetered && nowUnmetered

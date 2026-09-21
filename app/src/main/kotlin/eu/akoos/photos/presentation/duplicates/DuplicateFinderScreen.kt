@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.duplicates
 
 import android.app.Activity
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -103,6 +104,7 @@ import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.FilterSectionLabel
+import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg0
@@ -213,6 +215,12 @@ fun DuplicateFinderScreen(
         // The ticked copies across every visible group, flattened for the shared selection drawer.
         val selectedItems = batchSelections.flatMap { (g, remove) -> g.items.filter { it.stableId in remove } }
         var showBatchConfirm by remember { mutableStateOf(false) }
+        // A selection lives only on this screen, so leaving the overview would silently drop the ticked
+        // copies. Guard both exits (system back and the header arrow) whenever anything is ticked. The
+        // review overlay keeps its own back handling and wins while it is open.
+        var showLeaveConfirm by remember { mutableStateOf(false) }
+        val confirmedOnBack: () -> Unit = { if (selectedItems.isNotEmpty()) showLeaveConfirm = true else onBack() }
+        BackHandler(enabled = selectedItems.isNotEmpty()) { showLeaveConfirm = true }
 
         when {
             state.isLoading -> Box(
@@ -358,7 +366,7 @@ fun DuplicateFinderScreen(
         val filtersActive = scope != DupScope.ALL || filter != DupFilter.ALL
         FloatingHeader(
             title = stringResource(R.string.duplicates_title),
-            onBack = onBack,
+            onBack = confirmedOnBack,
             trailing = {
                 IconBubble(
                     icon = Icons.Default.FilterList,
@@ -394,12 +402,15 @@ fun DuplicateFinderScreen(
             val takesDeviceCopyToo = batchSelections.any { (g, remove) ->
                 g.items.any { it.stableId in remove && it is GalleryItem.Synced }
             }
+            val freed = duplicatesFreedBytes(selectedItems)
+            val baseMessage = stringResource(
+                if (takesDeviceCopyToo) R.string.duplicates_confirm_message_synced
+                else R.string.duplicates_confirm_message
+            )
+            val freesNote = stringResource(R.string.delete_frees_note, formatBytes(freed))
             ConfirmDialog(
                 title = stringResource(R.string.duplicates_confirm_title),
-                message = stringResource(
-                    if (takesDeviceCopyToo) R.string.duplicates_confirm_message_synced
-                    else R.string.duplicates_confirm_message
-                ),
+                message = if (freed > 0) "$baseMessage $freesNote" else baseMessage,
                 confirmLabel = stringResource(R.string.duplicates_confirm_delete),
                 dismissLabel = stringResource(R.string.cancel),
                 onConfirm = {
@@ -411,6 +422,20 @@ fun DuplicateFinderScreen(
                     )
                 },
                 onDismiss = { showBatchConfirm = false },
+                destructive = true,
+            )
+        }
+        if (showLeaveConfirm) {
+            ConfirmDialog(
+                title = stringResource(R.string.duplicates_leave_title),
+                message = stringResource(R.string.duplicates_leave_message, selectedItems.size),
+                confirmLabel = stringResource(R.string.duplicates_leave_confirm),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = {
+                    showLeaveConfirm = false
+                    onBack()
+                },
+                onDismiss = { showLeaveConfirm = false },
                 destructive = true,
             )
         }
@@ -488,6 +513,17 @@ internal fun keepIdsForRemoval(allIds: Set<String>, removeIds: Set<String>): Set
  *  empty rather than carrying a stale tick for a copy it no longer holds. */
 internal fun duplicateGroupKey(group: DuplicateGroup): String =
     group.items.joinToString("|") { it.stableId }
+
+/** Device bytes reclaimed by deleting [items], matching the regular delete confirmation: a device or
+ *  synced copy frees its device file, and a cloud-only copy counts as zero, since deleting it moves the
+ *  Drive object to trash rather than reclaiming quota straight away. */
+internal fun duplicatesFreedBytes(items: List<GalleryItem>): Long = items.sumOf { item ->
+    when (item) {
+        is GalleryItem.LocalOnly -> item.local.sizeBytes
+        is GalleryItem.Synced -> item.local.sizeBytes
+        is GalleryItem.CloudOnly -> 0L
+    }
+}
 
 /**
  * The duplicate-list filter sheet, opened from the header filter bubble: a sync-status section (on

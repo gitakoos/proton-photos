@@ -1787,6 +1787,9 @@
     <string name="whats_new_news_title">Hírek és visszajelzés</string>
     <string name="whats_new_news_body">A hírek képernyő az alkalmazás újdonságait hozza, egy gomb pedig egyenesen oda visz, ahol visszajelzést küldhetsz vagy hibát jelenthetsz.</string>
     <string name="duplicates_details">Részletek</string>
+    <string name="duplicates_leave_title">Elveted a kijelölést?</string>
+    <string name="duplicates_leave_message">%1$d elem van kijelölve. Ha most kilépsz, a kijelölésed elveszik.</string>
+    <string name="duplicates_leave_confirm">Kilépés</string>
     <string name="metadata_editor_date_mode_filename">Fájlnévből</string>
     <string name="metadata_editor_filename_hint">Minden fotó dátumát a fájlnevében szereplő dátumból állítja be.</string>
     <string name="metadata_editor_filename_apply">Dátumok javítása</string>
@@ -2005,6 +2008,14 @@
     <string name="whats_new_offlineedit_body">Ha internet nélkül szerkesztesz egy felhős fotót vagy videót, szól neked és megőrzi a szerkesztésedet, ahelyett, hogy megakadna.</string>
     <string name="whats_new_videoaudiodate_title">Jobb videószerkesztés</string>
     <string name="whats_new_videoaudiodate_body">Egy mp3 vagy más hangsáv hozzáadása egy videóhoz mostantól elmentődik, egy szerkesztett felhős videó pedig megtartja az eredeti dátumát.</string>
+    <string name="whats_new_searchready_title">Pontos keresési állapot</string>
+    <string name="whats_new_searchready_body">A fotókeresés készként jelenik meg, amint a könyvtár be van indexelve, az utolsó néhányat pedig csendben fejezi be, és nem tűnik beragadtnak.</string>
+    <string name="whats_new_dupleave_title">Biztonságosabb duplikátum-takarítás</string>
+    <string name="whats_new_dupleave_body">A duplikátumkereső figyelmeztet, mielőtt kijelölt fotókkal lépnél ki, és megmutatja, mennyi helyet szabadít fel a törlés.</string>
+    <string name="whats_new_collectionwide_title">A Gyűjtemény kitölti a széles képernyőt</string>
+    <string name="whats_new_collectionwide_body">A Gyűjtemény előnézetei a teljes szélességet használják, az idővonal szűrőgombjára koppintva pedig megnyílnak a szűrők.</string>
+    <string name="whats_new_searchperson_title">Személyhez adás a keresésből</string>
+    <string name="whats_new_searchperson_body">Jelölj ki fotókat a keresési találatok között, és add hozzá őket egy személyhez; a keresőmező közben megtartja a fókuszt gépelés közben.</string>
     <string name="whats_new_diag_title">Teszteled ezt az előzetest?</string>
     <string name="whats_new_diag_body">Köszönöm, hogy kipróbálod ezt a tesztverziót. Ha valami hibásnak tűnik, küldd el a diagnosztikát, hogy egy fájlprobléma megkülönböztethető legyen valami mástól: másold ki a Beállításokból, majd írj a support@photosforproton.eu címre, vagy oszd meg Discordon vagy GitHubon.</string>
     <string name="whats_new_section_new">Új</string>

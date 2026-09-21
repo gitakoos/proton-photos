@@ -62,6 +62,7 @@ import me.proton.core.user.domain.usecase.GetUser
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.FaceDao
+import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
 import eu.akoos.photos.data.db.dao.FaceScanDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
@@ -166,6 +167,7 @@ class SettingsViewModel @Inject constructor(
     private val deviceHealth: DeviceHealthPolicy,
     private val personDao: PersonDao,
     private val faceDao: FaceDao,
+    private val imageEmbeddingDao: ImageEmbeddingDao,
     private val faceScanDao: FaceScanDao,
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val notPersonDao: NotPersonDao,
@@ -256,6 +258,14 @@ class SettingsViewModel @Inject constructor(
      *  semantic-search sub-page can label its state and offer pause / resume. Mirrors
      *  [faceIndexingProgress]. */
     val semanticIndexingProgress: StateFlow<SemanticIndexingProgress> = semanticIndexingScheduler.progress
+
+    /** How many photos are embedded for the active account, or the guest's local partition. Lets the
+     *  status card tell a searchable library from an empty index even before a walk reports progress, so a
+     *  settled index that stopped a few un-downloadable photos short still reads as ready, not "not
+     *  indexed". Re-resolves on an account switch. */
+    val semanticIndexedCount: StateFlow<Int> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId -> imageEmbeddingDao.observeCountForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
 
     /** Which background ML walk holds the shared model gate right now (or null when free). The face and
      *  semantic walks share one gate so their ONNX sessions are never both resident, so whichever asked

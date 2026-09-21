@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.common
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -41,9 +42,13 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
@@ -72,11 +77,19 @@ internal fun AppSearchField(
     // drawer passes the smaller values so it reads 1:1 with the floating bar that raised it.
     iconSize: Dp = 20.dp,
     textSize: TextUnit = TextUnit.Unspecified,
+    onFocusChanged: (Boolean) -> Unit = {},
 ) {
     val colors = AppColors.current
+    val focusRequester = remember { FocusRequester() }
     Row(
         modifier = modifier
             .height(46.dp)
+            // A tap anywhere on the pill focuses the field, not just the thin text line; no ripple so
+            // the surface looks unchanged.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { focusRequester.requestFocus() }
             .clip(RoundedCornerShape(14.dp))
             .background(background)
             .border(
@@ -104,7 +117,10 @@ internal fun AppSearchField(
                 singleLine = true,
                 textStyle = TextStyle(color = colors.fgPrimary, fontSize = textSize),
                 cursorBrush = SolidColor(colors.accent),
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { onFocusChanged(it.isFocused) },
             )
         }
         if (query.isNotEmpty()) {
