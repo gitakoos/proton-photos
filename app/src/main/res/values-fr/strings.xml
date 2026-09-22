@@ -1001,6 +1001,7 @@
     <string name="cd_editor_reset">Réinitialiser</string>
     <string name="cd_viewer_edit">Modifier</string>
     <string name="cd_viewer_metadata_edit">Modifier le champ</string>
+    <string name="cd_viewer_open_map">Afficher sur la carte</string>
     <string name="cd_clear_search">Effacer la recherche</string>
 
     <string name="shared_save_to_library">Enregistrer dans ma bibliothèque</string>

@@ -61,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -91,6 +92,10 @@ import org.osmdroid.views.overlay.Marker
 private const val WORLD_ZOOM = 5.0
 private const val LOCATED_ZOOM = 5.0
 
+// A map opened on one place starts at city level, well inside the 5 (country) to 15 (district) range the
+// view allows, so the place reads with its surroundings.
+private const val FOCUS_ZOOM = 13.0
+
 // Plotting every fix gets expensive on a large located library (each pin is a decoded thumbnail +
 // a composited bitmap). Cap to an evenly-sampled subset; clustering arrives in a later piece.
 private const val MARKER_CAP = 150
@@ -114,6 +119,9 @@ private const val PIN_THUMB_PX = 120
  * decoded. Tapping a pin opens the full-screen place page ([onOpenPlace]) for the pin's
  * coordinates, the same located-photos view the world map and the Places browser open, so a place
  * opens one way everywhere. Clustering arrives in a later piece.
+ *
+ * Opened with a [focus], the map starts centred on that place at city level with an accent marker on the
+ * point, and the located photos plot around it without moving the camera.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -121,6 +129,7 @@ fun MapScreen(
     onBack: () -> Unit,
     onOpenPlace: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
     onSwitchStyle: () -> Unit = {},
+    focus: MapFocus? = null,
     vm: MapViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
@@ -137,6 +146,12 @@ fun MapScreen(
     // Held false until the camera has been positioned on real data; the opaque cover over the map reads
     // from it, so the one-time re-centre happens behind the spinner instead of as a visible jump.
     var centered by remember { mutableStateOf(false) }
+
+    // Set once the camera has been placed on the focus or on the located photos. A later pins emission (a
+    // thumbnail decrypt, a backfill write) then re-plots the markers without pulling the camera back from
+    // wherever the user has moved it. The world-view fallback leaves it unset, so fixes a backfill finds
+    // afterwards still get framed once.
+    var framed by remember { mutableStateOf(false) }
 
     // Staggered entrance, mirroring the globe: the map settles first, then a beat later the header and
     // bottom search fade and slide in, so the map reads before the chrome lands.
@@ -218,15 +233,40 @@ fun MapScreen(
         mapView.invalidate()
     }
 
+    // The place the map was opened on, in the accent. Rebuilt only when the place or the accent changes;
+    // the plot below re-adds it after each clear, last so it draws over the photo pins.
+    val focusColor = colors.accent.toArgb()
+    val focusMarker = remember(mapView, focus, focusColor) {
+        focus?.let { place ->
+            Marker(mapView).apply {
+                position = GeoPoint(place.latitude, place.longitude)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                icon = BitmapDrawable(context.resources, focusMarkerBitmap(focusColor, density))
+                // Not a tap target of its own: a tap falls through to the photo pin under it.
+                setOnMarkerClickListener { _, _ -> false }
+            }
+        }
+    }
+
     // Re-plot whenever the located set changes. Placeholder pins are added synchronously at the top
     // of this effect (before the first suspension point) so the map populates on the next frame;
     // the thumbnails then load off-thread and swap their icon in. Driving this from a LaunchedEffect
     // means a new `locations` emission cancels the previous run's in-flight loaders rather than
-    // leaving them to repaint markers that were already cleared. Center on the average of the points
-    // so the first frame frames the user's photos; fall back to a world view when nothing is located.
-    LaunchedEffect(mapView, pins, placesLoaded) {
+    // leaving them to repaint markers that were already cleared. The camera is placed once per visit:
+    // on the focus when there is one, otherwise on the average of the points so the first frame frames
+    // the user's photos, with a world view when nothing is located.
+    LaunchedEffect(mapView, pins, placesLoaded, focusMarker) {
         mapView.overlays.clear()
+        // A map opened on one place is framed on it from the start, so it reveals at once rather than
+        // waiting on the located photos, which then plot around it.
+        if (focus != null && !framed) {
+            mapView.controller.setZoom(FOCUS_ZOOM)
+            mapView.controller.setCenter(GeoPoint(focus.latitude, focus.longitude))
+            framed = true
+            centered = true
+        }
         if (pins.isEmpty()) {
+            focusMarker?.let { mapView.overlays.add(it) }
             // Nothing located yet and the query has not produced its first result: keep the cover's
             // spinner up and leave the camera alone, so the world view is never shown only to jump to
             // the fixes a moment later.
@@ -235,9 +275,11 @@ fun MapScreen(
                 return@LaunchedEffect
             }
             // The query has settled and the account genuinely has no located photos: rest on the world
-            // view and reveal it as a world map.
-            mapView.controller.setZoom(WORLD_ZOOM)
-            mapView.controller.setCenter(GeoPoint(0.0, 0.0))
+            // view and reveal it as a world map, unless the camera is already placed.
+            if (!centered) {
+                mapView.controller.setZoom(WORLD_ZOOM)
+                mapView.controller.setCenter(GeoPoint(0.0, 0.0))
+            }
             mapView.invalidate()
             centered = true
             return@LaunchedEffect
@@ -267,14 +309,18 @@ fun MapScreen(
                 }
             }.also { mapView.overlays.add(it) }
         }
+        focusMarker?.let { mapView.overlays.add(it) }
 
-        val avgLat = pins.sumOf { it.latitude } / pins.size
-        val avgLon = pins.sumOf { it.longitude } / pins.size
-        mapView.controller.setZoom(LOCATED_ZOOM)
-        mapView.controller.setCenter(GeoPoint(avgLat, avgLon))
+        if (!framed) {
+            val avgLat = pins.sumOf { it.latitude } / pins.size
+            val avgLon = pins.sumOf { it.longitude } / pins.size
+            mapView.controller.setZoom(LOCATED_ZOOM)
+            mapView.controller.setCenter(GeoPoint(avgLat, avgLon))
+            framed = true
+        }
         mapView.invalidate()
-        // Camera now frames the located photos; drop the cover so the map is revealed already centred,
-        // ahead of the thumbnails that swap in below.
+        // Camera now frames the located photos (or the focus); drop the cover so the map is revealed
+        // already centred, ahead of the thumbnails that swap in below.
         centered = true
 
         // Now fill in thumbnails. Each pin's resolved library item supplies the same image source the
@@ -438,4 +484,31 @@ private fun darkTileFilter(): android.graphics.ColorMatrixColorFilter {
     )
     m.postConcat(android.graphics.ColorMatrix().apply { setSaturation(0.55f) })
     return android.graphics.ColorMatrixColorFilter(m)
+}
+
+/**
+ * The focus marker: an [accent] dot in the white frame and soft drop shadow the photo pins wear, inside a
+ * faint accent halo, so the place the map was opened on stands apart from the pins around it. Sized off
+ * the screen [density]; the caller anchors it at its centre, on the point itself.
+ */
+private fun focusMarkerBitmap(accent: Int, density: Float): android.graphics.Bitmap {
+    val haloRadius = 20f * density
+    val frameRadius = 10.5f * density
+    val dotRadius = 8f * density
+    val size = (haloRadius * 2).toInt()
+    val out = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(out)
+    val c = size / 2f
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    paint.color = accent
+    paint.alpha = 60
+    canvas.drawCircle(c, c, haloRadius - 1f, paint)
+    // The shadow margin (blur plus drop) stays inside the halo, so it is never clipped at the edge.
+    paint.color = android.graphics.Color.WHITE
+    paint.setShadowLayer(5f * density, 0f, 2f * density, android.graphics.Color.argb(70, 0, 0, 0))
+    canvas.drawCircle(c, c, frameRadius, paint)
+    paint.clearShadowLayer()
+    paint.color = accent
+    canvas.drawCircle(c, c, dotRadius, paint)
+    return out
 }

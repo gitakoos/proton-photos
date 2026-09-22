@@ -470,7 +470,7 @@ private fun MapCardSubtitle(pins: List<MapPin>, cityCount: Int) {
  * and water, readable labels). Saturation is muted afterwards so the inverted hues don't read as
  * garish neon.
  */
-private fun darkTileFilter(): android.graphics.ColorMatrixColorFilter {
+internal fun darkTileFilter(): android.graphics.ColorMatrixColorFilter {
     val m = android.graphics.ColorMatrix(
         floatArrayOf(
             -1f, 0f, 0f, 0f, 255f,

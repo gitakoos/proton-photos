@@ -1024,6 +1024,7 @@
     <string name="cd_editor_reset">Visszaállítás</string>
     <string name="cd_viewer_edit">Szerkesztés</string>
     <string name="cd_viewer_metadata_edit">Mező szerkesztése</string>
+    <string name="cd_viewer_open_map">Megjelenítés a térképen</string>
     <string name="cd_clear_search">Keresés törlése</string>
 
     <string name="shared_save_to_library">Mentés a könyvtáramba</string>

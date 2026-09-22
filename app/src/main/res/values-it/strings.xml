@@ -1014,6 +1014,7 @@
     <string name="cd_editor_reset">Ripristina</string>
     <string name="cd_viewer_edit">Modifica</string>
     <string name="cd_viewer_metadata_edit">Modifica campo</string>
+    <string name="cd_viewer_open_map">Mostra sulla mappa</string>
     <string name="cd_clear_search">Cancella ricerca</string>
 
     <string name="shared_save_to_library">Salva nella mia libreria</string>

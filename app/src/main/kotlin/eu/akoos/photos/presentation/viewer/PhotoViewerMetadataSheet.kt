@@ -119,6 +119,13 @@ internal fun PhotoMetadataSheet(
      *  device-only item — vaulting removes the MediaStore row that paired it with its cloud half — so
      *  the Source row would otherwise say it is the only copy while the badge above says it is not. */
     hasCloudCopy: Boolean = false,
+    /** The People box, drawn first under the title. Emitting nothing leaves it out, gap included. */
+    peopleBox: @Composable () -> Unit = {},
+    /** Whether the Map box may show under the People box. The caller turns it off for a photo whose
+     *  place stays private, since the classic style fetches map tiles around the spot. */
+    showMapBox: Boolean = false,
+    /** Opens the full map centred on the photo's fix from the Map box. Null leaves the box inert. */
+    onOpenMap: ((latitude: Double, longitude: Double) -> Unit)? = null,
 ) {
     if (item == null) return
     val isLocal = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
@@ -147,6 +154,20 @@ internal fun PhotoMetadataSheet(
                 stringResource(R.string.viewer_menu_details),
                 color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
             )
+
+            // Who is in the photo and where it was taken lead the panel, ahead of the file's details.
+            // The map places the same fix the Location rows below state.
+            peopleBox()
+            val shown = shownCoordinates(resolvedGps, exif)
+            val mapPoint = if (showMapBox) mappablePoint(shown.latitude, shown.longitude) else null
+            if (mapPoint != null) {
+                DetailsMapBox(
+                    latitude = mapPoint.latitude,
+                    longitude = mapPoint.longitude,
+                    placeLabel = place,
+                    onOpen = onOpenMap?.let { open -> { open(mapPoint.latitude, mapPoint.longitude) } },
+                )
+            }
 
             val rowFile = stringResource(R.string.viewer_meta_row_file)
             val rowDate = stringResource(R.string.viewer_meta_row_date)
@@ -264,7 +285,6 @@ internal fun PhotoMetadataSheet(
                 // The place name is the coarse reading of the very fix the coordinates state
                 // exactly, so both belong under one heading and take the same resolved fix.
                 MetaRow(rowPlace, place ?: "—", onEdit = onEditMetadata)
-                val shown = shownCoordinates(resolvedGps, exif)
                 shown.latitude?.let {
                     MetaRow(stringResource(R.string.viewer_meta_row_latitude), "%.6f°".format(it))
                 }

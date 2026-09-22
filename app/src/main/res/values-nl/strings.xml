@@ -1013,6 +1013,7 @@
     <string name="cd_editor_reset">Herstellen</string>
     <string name="cd_viewer_edit">Bewerken</string>
     <string name="cd_viewer_metadata_edit">Veld bewerken</string>
+    <string name="cd_viewer_open_map">Op de kaart tonen</string>
     <string name="cd_clear_search">Zoekopdracht wissen</string>
 
     <!-- Save shared album to my library -->

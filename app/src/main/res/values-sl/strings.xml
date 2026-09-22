@@ -1170,6 +1170,7 @@
     <string name="cd_editor_reset">Ponastavi</string>
     <string name="cd_viewer_edit">Uredi</string>
     <string name="cd_viewer_metadata_edit">Uredi polje</string>
+    <string name="cd_viewer_open_map">Pokaži na zemljevidu</string>
     <string name="cd_clear_search">Počisti iskanje</string>
     <string name="cd_album_fully_backed_up">Popolnoma varnostno kopirano</string>
     <string name="cd_album_partially_backed_up">Delno varnostno kopirano</string>

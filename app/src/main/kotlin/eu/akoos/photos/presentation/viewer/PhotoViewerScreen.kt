@@ -339,6 +339,8 @@ fun PhotoViewerScreen(
     onEditMetadata: (GalleryItem) -> Unit = {},
     /** Opens the page of the person the face index grouped, from the "people in this photo" bar. */
     onOpenPerson: (Long) -> Unit = {},
+    /** Opens the full map centred on the photo's place, from the map box in the details panel. */
+    onOpenMapAt: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
     /** True when the viewer was opened from the Trash screen: adds a Restore / Delete-forever bar to
      *  the bottom chrome. The mutating chrome is already suppressed through [isReadOnlyAlbum]. */
     trashMode: Boolean = false,
@@ -438,6 +440,8 @@ fun PhotoViewerScreen(
     // The people the face index found on the settled photo, and whether their name tags are pinned over
     // the faces. Reset on every page settle so tags never carry a previous photo's faces.
     val peopleInPhoto by viewModel.peopleInPhoto.collectAsStateWithLifecycle()
+    // The photo that list was read for, so the details panel shows only the settled photo's people.
+    val peopleInPhotoKey by viewModel.peopleInPhotoKey.collectAsStateWithLifecycle()
     var facesMode by remember { mutableStateOf(false) }
     // The single Unsorted face the user tapped in the tags overlay to name, or null when no sheet is open.
     var faceToName by remember { mutableStateOf<String?>(null) }
@@ -2581,6 +2585,25 @@ fun PhotoViewerScreen(
                 viewModel.loadDetailsAlbums(item)
             }
         }
+        // A face crop or a pin on the map gives away what a vaulted or hidden photo shows, and the
+        // viewer blurs a photo hidden on this device, so neither box is drawn for one.
+        val detailsLinkId = when (item) {
+            is GalleryItem.CloudOnly -> item.cloud.linkId
+            is GalleryItem.Synced -> item.cloud.linkId
+            else -> null
+        }
+        val detailsPrivate = secure || isVaultedItem || isHidden ||
+            (detailsLinkId != null && detailsLinkId in hiddenCloudLinkIds)
+        val showPeopleBox = !trashMode && !detailsPrivate && aiFeaturesEnabled && faceEnabled &&
+            peopleBelongTo(peopleInPhotoKey, item)
+        // The model the pager draws this photo from, so each face is cropped out of the image on screen.
+        val detailsThumbUrls = LocalThumbnailUrls.current.value
+        val faceSource: Any? = when (item) {
+            is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
+            is GalleryItem.Synced -> Uri.parse(item.local.uri)
+            is GalleryItem.CloudOnly -> detailsThumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
+            null -> null
+        }
         ModalBottomSheet(
             onDismissRequest = { showMetadata = false },
             sheetState = metadataSheetState,
@@ -2624,6 +2647,31 @@ fun PhotoViewerScreen(
                     !anyMetadataEditable(listOf(item))
                 ) null else {
                     { showMetadata = false; onEditMetadata(item) }
+                },
+                peopleBox = {
+                    if (showPeopleBox) {
+                        DetailsPeopleBox(
+                            people = peopleInPhoto,
+                            faceSource = faceSource,
+                            onPersonClick = { person ->
+                                showMetadata = false
+                                // An Unsorted face has no person page to open, so it is named on the spot.
+                                if (person.isOther) {
+                                    faceToName = person.faceId
+                                } else {
+                                    onOpenPerson(person.personId)
+                                }
+                            },
+                        )
+                    }
+                },
+                showMapBox = !detailsPrivate,
+                // Inert in trash, where the photo is on its way out rather than something to explore.
+                onOpenMap = if (trashMode) null else {
+                    { latitude: Double, longitude: Double ->
+                        showMetadata = false
+                        onOpenMapAt(latitude, longitude)
+                    }
                 },
             )
         }

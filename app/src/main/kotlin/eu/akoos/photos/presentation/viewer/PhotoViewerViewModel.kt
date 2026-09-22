@@ -35,6 +35,8 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -162,6 +164,20 @@ internal fun favoriteAfterCloudWrite(previous: Boolean, attempted: Boolean, ok: 
  */
 internal fun metadataOutlivesPhoto(describes: String?, settled: String): Boolean =
     describes != null && describes != settled
+
+/**
+ * Whether the people read for the photo keyed [loadedFor] (its stableId) describe [item].
+ *
+ * A device photo whose upload lands while it is on screen becomes a backed-up one in place, and its
+ * stable id turns from the device uri into the Drive linkId. A list read under that device uri is still
+ * this photo's, so it matches the backed-up item through the uri the two share. Any other key, or no
+ * key or item at all, belongs to some other photo.
+ */
+internal fun peopleBelongTo(loadedFor: String?, item: GalleryItem?): Boolean {
+    if (loadedFor == null || item == null) return false
+    if (loadedFor == item.stableId) return true
+    return item is GalleryItem.Synced && loadedFor == item.local.uri
+}
 
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
@@ -624,18 +640,45 @@ class PhotoViewerViewModel @Inject constructor(
     /** The people found on the settled photo, named first; empty when AI is off or none are grouped. */
     val peopleInPhoto: StateFlow<List<ViewerPerson>> = _peopleInPhoto.asStateFlow()
 
+    private val _peopleInPhotoKey = MutableStateFlow<String?>(null)
+    /** The stableId of the photo [peopleInPhoto] was read for, published together with the list, so a
+     *  surface can tell a list still describing the photo swiped away from apart from the settled one's
+     *  (see [peopleBelongTo]). Null until the first read lands. */
+    val peopleInPhotoKey: StateFlow<String?> = _peopleInPhotoKey.asStateFlow()
+
+    /** The people read in flight, cancelled by the next [loadPeopleInPhoto] so a slow read for a photo
+     *  swiped past can never land over the read for the photo now on screen. Main thread only. */
+    private var peopleJob: Job? = null
+
+    /** The stableId the latest [loadPeopleInPhoto] was started for, the photo the viewer settled on. A
+     *  scan or a naming that finishes after a swipe checks it before touching the list. Main thread only. */
+    private var peopleRequestedFor: String? = null
+
+    private fun publishPeople(photoKey: String, people: List<ViewerPerson>) {
+        _peopleInPhoto.value = people
+        _peopleInPhotoKey.value = photoKey
+    }
+
     /**
      * Resolve the grouped faces on [photoKey] to the people they belong to, so the viewer can offer a
      * jump to each. One chip per person (the clearest face), named people before unnamed clusters.
-     * Clears when AI is off, so nothing is read or shown for a user who never opted in.
+     * Clears when AI is off, so nothing is read or shown for a user who never opted in. A new call
+     * cancels the read still running for the previous photo.
      */
     fun loadPeopleInPhoto(item: GalleryItem) {
-        viewModelScope.launch {
+        val photoKey = item.stableId
+        peopleRequestedFor = photoKey
+        peopleJob?.cancel()
+        peopleJob = viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
             val prefs = context.settingsDataStore.data.first()
             val aiOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
-            _peopleInPhoto.value =
+            val people: List<ViewerPerson> =
                 if (!aiOn) emptyList() else resolvePeople(item, userId, detectIfEmpty = false)
+            // resolvePeople turns a failed read into an empty list, a cancelled one included, so a read
+            // cancelled by the next photo's is stopped here before it can publish.
+            ensureActive()
+            publishPeople(photoKey, people)
         }
     }
 
@@ -651,7 +694,8 @@ class PhotoViewerViewModel @Inject constructor(
         val aiOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
         if (!aiOn) return emptyList()
         val list = resolvePeople(item, userId, detectIfEmpty = true)
-        _peopleInPhoto.value = list
+        // A swipe during the scan started the next photo's own read, and that photo's people stay.
+        if (peopleBelongTo(peopleRequestedFor, item)) publishPeople(item.stableId, list)
         return list
     }
 
@@ -697,8 +741,10 @@ class PhotoViewerViewModel @Inject constructor(
      * Name one face on the photo now on screen: assign it to an existing person called [rawName], or a
      * fresh one, and label it so the name survives a rebuild. For a face stuck in the Unsorted leftover
      * bucket (which cannot be named as a whole), this is how a single face is lifted out into a real
-     * person. A recluster is requested so the new name pulls in that person's other faces. Guest-safe via
-     * the local sentinel; the chips on this photo are refreshed so the named face shows its name at once.
+     * person; a face already grouped under someone else moves the same way, which is how a wrong match
+     * is corrected. A recluster is requested so the new name pulls in that person's other faces.
+     * Guest-safe via the local sentinel; the chips on this photo are refreshed so the named face shows
+     * its name at once.
      */
     fun nameFace(item: GalleryItem, faceId: String, rawName: String) {
         val name = rawName.trim()
@@ -712,7 +758,11 @@ class PhotoViewerViewModel @Inject constructor(
             faceDao.reassignFacesToPerson(listOf(faceId), target)
             faceDao.labelFacesByIds(listOf(faceId), name)
             faceIndexingScheduler.requestRecluster(userId)
-            loadPeopleInPhoto(item)
+            // On the main thread, where the reads are started and cancelled, and only while the viewer
+            // is still on this photo, so a swipe made meanwhile keeps the next photo's people.
+            withContext(Dispatchers.Main) {
+                if (peopleBelongTo(peopleRequestedFor, item)) loadPeopleInPhoto(item)
+            }
         }
     }
 
@@ -1951,6 +2001,13 @@ class PhotoViewerViewModel @Inject constructor(
                 // fields are null.
                 _metadata.value = withContext(Dispatchers.IO) {
                     ExifHelper.readMetadata(context, originalUriForExif(context, uri))
+                }
+                // A GPS strip takes the location out of the file, so the resolved place and fix go with
+                // it; left standing, the Location rows and the map box would keep naming a spot the
+                // file no longer carries.
+                if (config.stripGps && metadataItemKey == uri) {
+                    _detailsGps.value = null
+                    _detailsPlace.value = null
                 }
                 // The file is live in MediaStore, so a GPS strip also has to drop the fix stored for
                 // it; otherwise the map and the place groupings keep plotting the coordinates the

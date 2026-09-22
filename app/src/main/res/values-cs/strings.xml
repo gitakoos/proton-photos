@@ -1169,6 +1169,7 @@
     <string name="cd_editor_reset">Obnovit</string>
     <string name="cd_viewer_edit">Upravit</string>
     <string name="cd_viewer_metadata_edit">Upravit pole</string>
+    <string name="cd_viewer_open_map">Zobrazit na mapě</string>
     <string name="cd_clear_search">Vymazat hledání</string>
     <string name="cd_album_fully_backed_up">Plně zálohováno</string>
     <string name="cd_album_partially_backed_up">Částečně zálohováno</string>

@@ -100,6 +100,7 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.PlaceCity
+import eu.akoos.photos.presentation.map.MapFocus
 import eu.akoos.photos.presentation.map.MapViewModel
 import eu.akoos.photos.presentation.map.ThumbnailPin
 import eu.akoos.photos.presentation.places.PlaceSearchSheet
@@ -122,12 +123,17 @@ import kotlin.math.sqrt
 // BEEN — visited countries filled and outlined, a thumbnail pin plus label for each visited city. It
 // renders everything itself, with no map tiles.
 
+// The zoom a globe opened on one place starts at: the place's region, roughly a thousand kilometres across
+// the screen's shorter side.
+private const val FOCUS_ZOOM = 12f
+
 /**
  * A rotating vector globe that surfaces the account's own places. The whole world is drawn as a light
  * base map; the countries with photos are washed in the accent and given a thicker outline, and each
  * city with photos gets a rounded thumbnail of a photo taken there plus its name. Drag spins the globe
  * with a bit of glide, pinch zooms, a tap on a city thumbnail opens its photos and a tap on a highlighted
- * country opens its cities. Reached from the existing map and fully removable with it.
+ * country opens its cities. Reached from the existing map and fully removable with it. Opened with a
+ * [focus], the globe starts turned to that place and zoomed in to its region, with an accent dot on it.
  */
 @Composable
 fun CustomMapScreen(
@@ -135,6 +141,7 @@ fun CustomMapScreen(
     onCountryClick: (countryCode: String) -> Unit,
     onCityClick: (latitude: Double, longitude: Double) -> Unit,
     onSwitchStyle: () -> Unit = {},
+    focus: MapFocus? = null,
     vm: MapViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
@@ -193,9 +200,11 @@ fun CustomMapScreen(
         }
     }
 
-    var centerLat by remember { mutableFloatStateOf(30f) }
-    var centerLng by remember { mutableFloatStateOf(10f) }
-    var zoom by remember { mutableFloatStateOf(1f) }
+    // A focus decides the view up front: the globe opens turned to the place and zoomed in to its region,
+    // within the latitude band a drag allows.
+    var centerLat by remember { mutableFloatStateOf(focus?.latitude?.toFloat()?.coerceIn(-85f, 85f) ?: 30f) }
+    var centerLng by remember { mutableFloatStateOf(focus?.longitude?.toFloat() ?: 10f) }
+    var zoom by remember { mutableFloatStateOf(if (focus != null) FOCUS_ZOOM else 1f) }
     var centered by remember { mutableStateOf(false) }
     val flingScope = rememberCoroutineScope()
     var flingJob by remember { mutableStateOf<Job?>(null) }
@@ -207,10 +216,13 @@ fun CustomMapScreen(
     // Open already centred on the busiest city so the account's places face the viewer, rather than
     // starting on a default view and visibly rotating there. Gated on [placesLoaded] (not the city
     // list, which reads empty both while loading and when genuinely empty) so the globe stays hidden
-    // until its centre is decided, then fades in in place.
+    // until its centre is decided, then fades in in place. A focus has already placed the view, so it
+    // keeps it and only waits for the places to fade in with them.
     LaunchedEffect(placesLoaded) {
         if (!placesLoaded || centered) return@LaunchedEffect
-        cities.firstOrNull()?.let { centerLat = it.latitude.toFloat(); centerLng = it.longitude.toFloat() }
+        if (focus == null) {
+            cities.firstOrNull()?.let { centerLat = it.latitude.toFloat(); centerLng = it.longitude.toFloat() }
+        }
         centered = true
     }
 
@@ -394,6 +406,19 @@ fun CustomMapScreen(
                 }
                 cityPaint.alpha = (210 * fade).toInt()
                 drawIntoCanvas { it.nativeCanvas.drawText(city.city, px, py + 24f, cityPaint) }
+            }
+
+            // The place the globe was opened on: an accent dot in a white ring inside a faint accent halo,
+            // drawn last so it sits over the city pins, and kept compact so the name under a pin's tip
+            // stays mostly readable.
+            if (focus != null) {
+                val gp = GlobeProjection.project(focus.latitude, focus.longitude, cLat, cLng, radius)
+                if (gp.visible) {
+                    val at = Offset(cx + gp.x, cy + gp.y)
+                    drawCircle(highlight, 16f * density, at, alpha = 0.28f * fade)
+                    drawCircle(Color.White, 7.5f * density, at, alpha = fade)
+                    drawCircle(highlight, 5.5f * density, at, alpha = fade)
+                }
             }
         }
 

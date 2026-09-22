@@ -1169,6 +1169,7 @@
     <string name="cd_editor_reset">Resetuj</string>
     <string name="cd_viewer_edit">Edytuj</string>
     <string name="cd_viewer_metadata_edit">Edytuj pole</string>
+    <string name="cd_viewer_open_map">Pokaż na mapie</string>
     <string name="cd_clear_search">Wyczyść wyszukiwanie</string>
     <string name="cd_album_fully_backed_up">W pełni skopiowane</string>
     <string name="cd_album_partially_backed_up">Częściowo skopiowane</string>

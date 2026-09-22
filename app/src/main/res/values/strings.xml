@@ -1579,6 +1579,7 @@
     <string name="cd_editor_reset">Reset</string>
     <string name="cd_viewer_edit">Edit</string>
     <string name="cd_viewer_metadata_edit">Edit field</string>
+    <string name="cd_viewer_open_map">Show on map</string>
     <string name="cd_clear_search">Clear search</string>
     <string name="cd_album_fully_backed_up">Fully backed up</string>
     <string name="cd_album_partially_backed_up">Partially backed up</string>
