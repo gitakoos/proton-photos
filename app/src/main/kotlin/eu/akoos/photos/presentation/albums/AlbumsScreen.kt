@@ -313,9 +313,14 @@ fun AlbumsScreen(
     // auto-scroll the finger's own place in the grid rather than the card's corner.
     var dragGrip by remember { mutableStateOf(Offset.Zero) }
     // Switching the All / Cloud / Device filter changes the list under the same scroll index, which
-    // reads as the grid jumping — snap back to the top whenever the filter changes. The filter also
+    // reads as the grid jumping, so snap back to the top whenever the filter changes. The filter also
     // decides whether cloud albums are on screen at all, so an arrangement in progress ends with it.
+    // The filter last seen is saved with the page, so composing again with it unchanged (a return to
+    // the tab, or the gallery rebuilt when an album pops) is no change and keeps the restored scroll.
+    var lastSeenFilter by rememberSaveable { mutableStateOf(displayFilter) }
     LaunchedEffect(displayFilter) {
+        if (displayFilter == lastSeenFilter) return@LaunchedEffect
+        lastSeenFilter = displayFilter
         reorderMode = false
         gridState.scrollToItem(0)
     }

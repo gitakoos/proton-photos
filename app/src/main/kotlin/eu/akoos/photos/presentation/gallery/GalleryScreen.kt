@@ -448,8 +448,14 @@ fun GalleryScreen(
     val landingTab by remember {
         context.settingsDataStore.data.map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, if (state.isSignedIn) 2 else 1) }
     }.collectAsState(initial = 0)
-    var sharedFilter by remember { mutableStateOf(SharedFilter.SharedWithMe) }
-    var albumFilter by remember { mutableStateOf(AlbumDisplayFilter.All) }
+    // Saved, like [activeEmailFilter] below, so the gallery rebuilt when a shared album pops comes back
+    // on the scope and sender it showed rather than on "Shared with me" with the sender dropped.
+    var sharedFilter by rememberSaveable { mutableStateOf(SharedFilter.SharedWithMe) }
+    // The Albums view filter, and whether it is decided for the current stay on the Albums page (by
+    // the entry effect below, or by a pick). Both are saved, so the gallery rebuilt when a pushed screen
+    // pops (an album, a folder, Settings) comes back on the filter it showed, with no pass through All.
+    var albumFilter by rememberSaveable { mutableStateOf(AlbumDisplayFilter.All) }
+    var albumFilterSettled by rememberSaveable { mutableStateOf(false) }
     // Albums-tab inline search: the typed query (kept across a config change) and whether the rail's
     // search bar is open. Hoisted beside the filter so the header rail and the Albums page read one
     // source. Arranging takes the whole rail, so it and the search are mutually exclusive: opening the
@@ -457,16 +463,18 @@ fun GalleryScreen(
     var albumQuery by rememberSaveable { mutableStateOf("") }
     var albumSearchActive by remember { mutableStateOf(false) }
     var albumReorderActive by remember { mutableStateOf(false) }
-    // Albums-tab view filter: default narrowing, a remember-last toggle, and the last picked value.
-    val albumsDefaultFilter by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0 }
-    }.collectAsState(initial = 0)
-    val albumsRememberLastFilter by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] ?: false }
-    }.collectAsState(initial = false)
-    val albumsLastFilter by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_LAST_FILTER] ?: 0 }
-    }.collectAsState(initial = 0)
+    // Albums-tab view filter settings: default narrowing, a remember-last toggle, and the last picked
+    // value, as one snapshot. Null until the store delivers, so the entry effect below can wait for the
+    // stored values instead of resolving from placeholders.
+    val albumsFilterPrefs by remember {
+        context.settingsDataStore.data.map {
+            AlbumsFilterPrefs(
+                defaultOrdinal = it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0,
+                rememberLast = it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] ?: false,
+                lastOrdinal = it[SettingsKeys.ALBUMS_LAST_FILTER] ?: 0,
+            )
+        }
+    }.collectAsState(initial = null)
     // Only drives the sheet's selection; the grid reads this key on its own side.
     val albumsSortMode by remember {
         context.settingsDataStore.data.map { AlbumSortMode.fromOrdinal(it[SettingsKeys.ALBUMS_SORT_MODE]) }
@@ -479,16 +487,23 @@ fun GalleryScreen(
     // otherwise the configured default. Leaving and returning therefore resets to the default
     // (remember-last off) or restores the last pick (remember-last on), rather than holding whatever
     // was left on screen from a prior visit. Keyed on currentPage (which advances during the swipe)
-    // and resolved from the already-collected state so the target filter is applied before the page
-    // settles, with no visible "All" flash from awaiting a fresh DataStore read.
-    LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage != 1) return@LaunchedEffect
-        val ordinal = if (albumsRememberLastFilter) albumsLastFilter else albumsDefaultFilter
-        albumFilter = AlbumDisplayFilter.entries[ordinal.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)]
+    // and resolved from the already-collected snapshot so the target filter is applied before the page
+    // settles, with no visible "All" flash from awaiting a fresh DataStore read. The snapshot arriving
+    // is a key too: an arrival before the store delivers waits for it rather than resolving placeholders.
+    // A filter already settled for this stay is kept, which is what brings the gallery back from a
+    // popped screen on the filter it showed. The rule itself is [nextAlbumsEntryFilterState].
+    LaunchedEffect(pagerState.currentPage, albumsFilterPrefs != null) {
+        val next = nextAlbumsEntryFilterState(
+            current = AlbumsEntryFilterState(albumFilter, albumFilterSettled),
+            onAlbumsPage = pagerState.currentPage == 1,
+            prefs = albumsFilterPrefs,
+        )
+        albumFilter = next.filter
+        albumFilterSettled = next.settled
     }
     var showAlbumsFilterSheet by remember { mutableStateOf(false) }
     val albumsFilterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var activeEmailFilter by remember { mutableStateOf<String?>(null) }
+    var activeEmailFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var showEmailFilterSheet by remember { mutableStateOf(false) }
     // Bump to ask AlbumsScreen to open its create-album dialog (the Albums-tab "New album" pill).
     var albumCreateSignal by remember { mutableIntStateOf(0) }
@@ -1259,6 +1274,7 @@ fun GalleryScreen(
                         albumFilter = albumFilter,
                         onAlbumFilterSelected = { picked ->
                             albumFilter = picked
+                            albumFilterSettled = true
                             tabScope.launch {
                                 context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_LAST_FILTER] = picked.ordinal }
                             }
@@ -1539,8 +1555,8 @@ fun GalleryScreen(
     if (showAlbumsFilterSheet) {
         AlbumsFilterSheet(
             sheetState = albumsFilterSheetState,
-            default = AlbumDisplayFilter.entries[albumsDefaultFilter.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)],
-            rememberLast = albumsRememberLastFilter,
+            default = albumDisplayFilterAt(albumsFilterPrefs?.defaultOrdinal ?: 0),
+            rememberLast = albumsFilterPrefs?.rememberLast == true,
             sortMode = albumsSortMode,
             columns = albumColumns,
             onDefaultChange = { picked ->
@@ -1550,6 +1566,7 @@ fun GalleryScreen(
                 // unchanged, so the pick read as ignored until the user left the tab and came back,
                 // which is when the entry effect re-resolves this key.
                 albumFilter = picked
+                albumFilterSettled = true
                 tabScope.launch {
                     context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] = picked.ordinal }
                 }
