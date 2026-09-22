@@ -45,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -54,20 +55,93 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.search.SearchFilter
+import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.theme.AppColors
+import java.text.Collator
+import java.util.Locale
 
-/** Case- and diacritic-insensitive name filter over the account's cities, shared by the Places screen
- *  and the vector map so both search the same way. */
-internal fun filterPlaceCities(cities: List<PlaceCity>, query: String): List<PlaceCity> {
+/**
+ * Case- and diacritic-insensitive filter over the account's cities, shared by the Places screen and the
+ * vector map so both search the same way. A city matches on its own name or on its country's, either the
+ * heading [countryLabelOf] gives it in the app's language or the name the geocode stored, so typing a
+ * country lists every city of it under that country's heading.
+ */
+internal fun filterPlaceCities(
+    cities: List<PlaceCity>,
+    query: String,
+    countryLabelOf: (PlaceCity) -> String = { it.countryName },
+): List<PlaceCity> {
     val q = SearchFilter.fold(query.trim())
     if (q.isEmpty()) return cities
-    return cities.filter { SearchFilter.fold(it.city).contains(q) }
+    return cities.filter {
+        SearchFilter.fold(it.city).contains(q) ||
+            SearchFilter.fold(countryLabelOf(it)).contains(q) ||
+            SearchFilter.fold(it.countryName).contains(q)
+    }
+}
+
+/** One line of the grouped place search: a country's heading, or one of its cities. */
+internal sealed interface PlaceSearchEntry {
+    val key: String
+
+    data class Country(override val key: String, val label: String) : PlaceSearchEntry
+
+    data class City(override val key: String, val city: PlaceCity) : PlaceSearchEntry
+}
+
+/**
+ * The heading a country's cities sit under: [displayNameOf] names the ISO [countryCode] in the app's
+ * language, and the [storedName] the geocode carried stands in when there is no code or the platform
+ * has no name for it (it then hands the code back, or nothing).
+ */
+internal fun placeCountryLabel(
+    countryCode: String,
+    storedName: String,
+    displayNameOf: (String) -> String,
+): String {
+    val code = countryCode.trim()
+    val displayed = if (code.isEmpty()) "" else displayNameOf(code).trim()
+    return when {
+        displayed.isNotEmpty() && !displayed.equals(code, ignoreCase = true) -> displayed
+        storedName.isNotBlank() -> storedName
+        else -> code
+    }
+}
+
+/**
+ * Lays [cities] out under one heading per country: countries in [order] of the heading
+ * [countryLabelOf] gives them, cities in [order] of name within each, so the list reads alphabetically
+ * in the app's language. A block is one country code under one heading, which keeps a country whole
+ * even when its cities carry stored names from different languages. Pure.
+ */
+internal fun groupPlaceSearch(
+    cities: List<PlaceCity>,
+    order: Comparator<in String>,
+    countryLabelOf: (PlaceCity) -> String,
+): List<PlaceSearchEntry> {
+    val labelled = cities.map { it to countryLabelOf(it) }.sortedWith(
+        compareBy<Pair<PlaceCity, String>, String>(order) { it.second }
+            .thenBy { it.first.countryCode }
+            .thenBy(order) { it.first.city },
+    )
+    val entries = ArrayList<PlaceSearchEntry>(labelled.size + 8)
+    var block: Pair<String, String>? = null
+    for ((city, label) in labelled) {
+        val next = city.countryCode to label
+        if (next != block) {
+            entries += PlaceSearchEntry.Country(key = "country ${city.countryCode} $label", label = label)
+            block = next
+        }
+        entries += PlaceSearchEntry.City(key = city.city + " " + city.countryCode, city = city)
+    }
+    return entries
 }
 
 /**
  * A tall bottom drawer that searches every city the account has photos in: a name field filters the
- * cities, each result shows "City, Country" with its photo count, and picking one returns that
- * [PlaceCity]. Shared so the Places screen and the vector map open the identical search.
+ * cities by city or country name, the cities sit under a heading per country, each result shows the
+ * city with its photo count, and picking one returns that [PlaceCity]. Shared so the Places screen and
+ * the vector map open the identical search.
  */
 @Composable
 internal fun PlaceSearchSheet(
@@ -78,7 +152,17 @@ internal fun PlaceSearchSheet(
     val colors = AppColors.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var query by remember { mutableStateOf("") }
-    val filtered = remember(cities, query) { filterPlaceCities(cities, query) }
+    // Country names come from the ISO code in the language this drawer's own strings resolve in, so the
+    // headings match the rest of it and a country is found by the name the heading shows.
+    val appLocale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
+    val countryLabelOf: (PlaceCity) -> String = remember(appLocale) {
+        { city ->
+            placeCountryLabel(city.countryCode, city.countryName) { code ->
+                Locale("", code).getDisplayCountry(appLocale)
+            }
+        }
+    }
+    val filtered = remember(cities, query, countryLabelOf) { filterPlaceCities(cities, query, countryLabelOf) }
 
     ModalBottomSheet(
         sheetState = sheetState,
@@ -109,17 +193,21 @@ internal fun PlaceSearchSheet(
             if (filtered.isEmpty()) {
                 Text(stringResource(R.string.map_search_no_places), color = colors.fgMute, fontSize = 14.sp)
             } else {
-                // Cities are grouped by country: a thin line sits between one country's cities and the
-                // next, without a country heading, so the list reads as tidy blocks per place.
-                val grouped = remember(filtered) {
-                    filtered.sortedWith(compareBy({ it.countryName }, { it.city }))
+                // Cities are grouped by country, each block under its country's name with a thin line
+                // closing the block above.
+                val entries = remember(filtered, appLocale, countryLabelOf) {
+                    groupPlaceSearch(filtered, Collator.getInstance(appLocale), countryLabelOf)
                 }
                 LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                    itemsIndexed(grouped, key = { _, c -> c.city + " " + c.countryCode }) { index, city ->
-                        if (index > 0 && grouped[index - 1].countryCode != city.countryCode) {
-                            HorizontalDivider(color = colors.line2, thickness = 0.5.dp)
+                    itemsIndexed(
+                        entries,
+                        key = { _, entry -> entry.key },
+                        contentType = { _, entry -> entry is PlaceSearchEntry.Country },
+                    ) { index, entry ->
+                        when (entry) {
+                            is PlaceSearchEntry.Country -> PlaceSearchCountryHeader(entry.label, divided = index > 0)
+                            is PlaceSearchEntry.City -> PlaceSearchRow(city = entry.city, onClick = { onPick(entry.city) })
                         }
-                        PlaceSearchRow(city = city, onClick = { onPick(city) })
                     }
                 }
             }
@@ -127,7 +215,20 @@ internal fun PlaceSearchSheet(
     }
 }
 
-/** One city row in the Places search: its "City, Country" label above the photo count. */
+/** A country's heading in the Places search: the thin line closing the block above (none over the
+ *  first), then the country name as the app's section label. */
+@Composable
+private fun PlaceSearchCountryHeader(label: String, divided: Boolean) {
+    val colors = AppColors.current
+    Column(modifier = Modifier.fillMaxWidth()) {
+        if (divided) HorizontalDivider(color = colors.line2, thickness = 0.5.dp)
+        Spacer(Modifier.height(if (divided) 16.dp else 4.dp))
+        if (label.isNotBlank()) SectionLabel(label)
+    }
+}
+
+/** One city row in the Places search: its name above the photo count. The country is the heading the
+ *  row sits under, so the row does not repeat it. */
 @Composable
 private fun PlaceSearchRow(city: PlaceCity, onClick: () -> Unit) {
     val colors = AppColors.current
@@ -138,7 +239,7 @@ private fun PlaceSearchRow(city: PlaceCity, onClick: () -> Unit) {
             .padding(vertical = 12.dp),
     ) {
         Text(
-            text = "${city.city}, ${city.countryName}",
+            text = city.city,
             color = colors.fgPrimary,
             fontSize = 15.sp,
             fontWeight = FontWeight.Medium,

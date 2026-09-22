@@ -45,7 +45,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -86,6 +86,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -119,14 +120,18 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.monthYearFormat
+import java.util.Date
+import java.util.TimeZone
 
 /**
  * The located-photos body behind the full-screen place page ([PlaceCityScreen]): the hero header,
- * the photo grid with drag multi-select, the shared selection drawer with the full action set (share,
- * add-to-album, move-to-folder, favourite, back up, download, offline, edit metadata, strip, hide,
- * delete) and the save-as-album flow. [modifier] shapes the host, [contentTopPadding] clears a
- * floating header, [headerOverlay] draws one on top, and [showDragHandle] adds a pull-down grip.
- * [onEditMetadata] opens the date + place editor for the current selection, matching the timeline.
+ * the photo grid under month headers with drag multi-select, the shared selection drawer with the
+ * full action set (share, add-to-album, move-to-folder, favourite, back up, download, offline, edit
+ * metadata, strip, hide, delete) and the save-as-album flow. [modifier] shapes the host,
+ * [contentTopPadding] clears a floating header, [headerOverlay] draws one on top, and
+ * [showDragHandle] adds a pull-down grip. [onEditMetadata] opens the date + place editor for the
+ * current selection, matching the timeline.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -315,9 +320,9 @@ fun LocationPhotosContent(
         val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
         val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
         // Drag-to-select: long-press a photo then drag to sweep a range (shares the timeline gesture).
-        // Cells key on the shared keyOf() (LocalOnly/Synced by uri, CloudOnly by linkId); the swept
-        // keys map back to the whole GalleryItem the selection holds.
-        val selectableKeys = remember(state.items) { state.items.map { keyOf(it) } }
+        // Cells key on the shared locationCellKey() (LocalOnly/Synced by uri, CloudOnly by linkId); the
+        // swept keys map back to the whole GalleryItem the selection holds.
+        val selectableKeys = remember(state.items) { state.items.map { locationCellKey(it) } }
         val keyToIndex = remember(selectableKeys) { selectableKeys.mapIndexed { i, k -> k to i }.toMap() }
         // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
         // cell back off (otherwise a stationary long-press would select then immediately deselect).
@@ -331,6 +336,14 @@ fun LocationPhotosContent(
             tapGuard = tapGuard,
             enabled = !isDeleting,
         )
+        // Month headers over the photos, as on the device-folder page. A photo row keeps its position
+        // in the list, so a tap opens the viewer on the photo tapped and the drag sweep's key map above
+        // is untouched; the rows and the list the viewer is handed are the same snapshot.
+        val photos = state.items
+        val gridRows = remember(photos) {
+            val fmt = monthYearFormat()
+            locationGridRows(photos, TimeZone.getDefault()) { fmt.format(Date(it)) }
+        }
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
             state = gridState,
@@ -411,41 +424,49 @@ fun LocationPhotosContent(
                     }
                 }
             } else {
-                itemsIndexed(
-                    items = state.items,
-                    key = { _, item -> keyOf(item) },
-                ) { index, item ->
-                    val isSelected = item in selectedItems
-                    val inputs = remember(item, favoriteIds) {
-                        photoCellInputsFor(item, favoriteIds = favoriteIds)
+                items(
+                    items = gridRows,
+                    key = { row -> row.key },
+                    span = { row -> GridItemSpan(if (row is LocationGridRow.Header) maxLineSpan else 1) },
+                    contentType = { row -> row is LocationGridRow.Header },
+                ) { row ->
+                    when (row) {
+                        is LocationGridRow.Header -> LocationMonthHeader(label = row.label, seamless = seamless)
+                        is LocationGridRow.Photo -> {
+                            val item = row.item
+                            val isSelected = item in selectedItems
+                            val inputs = remember(item, favoriteIds) {
+                                photoCellInputsFor(item, favoriteIds = favoriteIds)
+                            }
+                            PhotoCell(
+                                imageData = inputs.imageData,
+                                stableKey = inputs.stableKey,
+                                isVideo = inputs.isVideo,
+                                isLocalVideo = inputs.isLocalVideo,
+                                durationMs = inputs.durationMs,
+                                isPlaceholder = inputs.isPlaceholder,
+                                selected = isSelected,
+                                isSelectionMode = isSelectionMode,
+                                showCloudBadge = inputs.showCloudBadge,
+                                showSyncedBadge = inputs.showSyncedBadge,
+                                isFavorite = inputs.isFavorite,
+                                typeBadgeRes = inputs.typeBadgeRes,
+                                typeBadgeCdRes = inputs.typeBadgeCdRes,
+                                columns = cols,
+                                cornerRadius = if (seamless) 0.dp else 10.dp,
+                                onClick = {
+                                    // Skip the release-tap that follows a long-press select; it would
+                                    // otherwise toggle the just-anchored cell back off.
+                                    if (tapGuard.value) tapGuard.value = false
+                                    else if (isSelectionMode) viewModel.toggleSelection(item)
+                                    else onPhotoClick(photos, row.index)
+                                },
+                                // Long-press + drag is handled by the grid-level drag-select; a plain
+                                // long-press there selects this single cell and enters selection mode.
+                                onLongClick = null,
+                            )
+                        }
                     }
-                    PhotoCell(
-                        imageData = inputs.imageData,
-                        stableKey = inputs.stableKey,
-                        isVideo = inputs.isVideo,
-                        isLocalVideo = inputs.isLocalVideo,
-                        durationMs = inputs.durationMs,
-                        isPlaceholder = inputs.isPlaceholder,
-                        selected = isSelected,
-                        isSelectionMode = isSelectionMode,
-                        showCloudBadge = inputs.showCloudBadge,
-                        showSyncedBadge = inputs.showSyncedBadge,
-                        isFavorite = inputs.isFavorite,
-                        typeBadgeRes = inputs.typeBadgeRes,
-                        typeBadgeCdRes = inputs.typeBadgeCdRes,
-                        columns = cols,
-                        cornerRadius = if (seamless) 0.dp else 10.dp,
-                        onClick = {
-                            // Skip the release-tap that follows a long-press select; it would
-                            // otherwise toggle the just-anchored cell back off.
-                            if (tapGuard.value) tapGuard.value = false
-                            else if (isSelectionMode) viewModel.toggleSelection(item)
-                            else onPhotoClick(state.items, index)
-                        },
-                        // Long-press + drag is handled by the grid-level drag-select; a plain
-                        // long-press there selects this single cell and enters selection mode.
-                        onLongClick = null,
-                    )
                 }
             }
         }
@@ -797,10 +818,21 @@ fun LocationPhotosContent(
     )
 }
 
-/** Cell / drag-select key: local uri where a device copy exists, else the cloud linkId, prefixed so
- *  the two id spaces never collide. Shared by the grid cells, the drag sweep and the index map. */
-private fun keyOf(item: GalleryItem): String = when (item) {
-    is GalleryItem.LocalOnly -> "L:" + item.local.uri
-    is GalleryItem.Synced    -> "S:" + item.local.uri
-    is GalleryItem.CloudOnly -> "C:" + item.cloud.linkId
+/** A month header over the place grid's photos, styled like the device-folder and album pages'. The
+ *  label keeps clear of the screen edge in seamless mode, where the tiles below bleed to 0. */
+@Composable
+private fun LocationMonthHeader(label: String, seamless: Boolean) {
+    Text(
+        label,
+        color = FgPrimary,
+        fontSize = 22.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.44).sp,
+        modifier = Modifier.fillMaxWidth().padding(
+            start = if (seamless) 20.dp else 4.dp,
+            end = if (seamless) 20.dp else 4.dp,
+            top = 24.dp,
+            bottom = 10.dp,
+        ),
+    )
 }
