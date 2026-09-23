@@ -27,7 +27,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -45,7 +48,6 @@ import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PrivacyTip
-import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -62,12 +64,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.FavoriteActionState
+import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.anyCloudOnly
@@ -79,6 +83,7 @@ import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.hasDownloadable
 import eu.akoos.photos.presentation.common.offlinePinnableLinkIds
 import eu.akoos.photos.presentation.common.offlineTurnsOn
+import eu.akoos.photos.presentation.common.selectionDrawerRestingHeight
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.util.MetadataStripConfig
@@ -109,8 +114,45 @@ internal fun GalleryItem.videoCloudPhoto(): CloudPhoto? = when (this) {
 }
 
 /**
- * Every bulk action the timeline offers over a multi-select, in the order the shared selection
- * drawer lists them: select-all first, then the everyday ones, then the destructive pair last.
+ * What the selection drawer's Select all would select: the surface's whole selectable [total], or
+ * null once [selected] already holds that many, so a complete selection offers no Select all.
+ */
+internal fun selectAllCountFor(total: Int, selected: Int): Int? =
+    if (total > 0 && selected != total) total else null
+
+/**
+ * The bottom content padding of a grid the selection drawer rests over: [base] outside selection
+ * mode, and while [selecting] at least the part of [drawerHeight] the grid does not already keep
+ * clear through its own [gridInset], so the last row still scrolls out from under the drawer.
+ */
+internal fun gridBottomPadding(base: Dp, selecting: Boolean, drawerHeight: Dp, gridInset: Dp = 0.dp): Dp =
+    if (selecting) maxOf(base, drawerHeight - gridInset) else base
+
+/**
+ * [gridBottomPadding] against the resting selection drawer. [gridPadsNavigationBar] is set for a
+ * grid whose own modifier already clears the navigation bar, which the drawer's height counts too.
+ */
+@Composable
+internal fun selectionGridBottomPadding(
+    base: Dp,
+    selecting: Boolean,
+    gridPadsNavigationBar: Boolean = false,
+): Dp = gridBottomPadding(
+    base = base,
+    selecting = selecting,
+    drawerHeight = selectionDrawerRestingHeight(),
+    gridInset = if (gridPadsNavigationBar) {
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    } else {
+        0.dp
+    },
+)
+
+/**
+ * Every bulk action the timeline offers over a multi-select: the everyday ones first and the
+ * destructive pair last. Share, the organizing move (Add to album signed in, Move to folder without
+ * an account) and Delete take the drawer's primary slots, so they also stand as its fixed buttons.
+ * Select all sits in the drawer's header rather than in this list.
  *
  * Each entry carries its own gate, so an action that cannot apply to the current selection is
  * absent rather than dead: Back up needs a photo that is still device-only, Download and the
@@ -134,13 +176,11 @@ fun rememberGallerySelectionActions(
     multiDownloadState: MultiDownloadState,
     multiStripState: MultiStripState,
     addToAlbumState: AddToAlbumState,
-    allSelected: Boolean,
     isSignedIn: Boolean = true,
     // Add-to-person runs on-device and its name step can create the person, so it is offered whenever
     // face recognition is on, guest included; the account-only actions (add-to-album, back-up) stay
     // behind isSignedIn.
     showAddToPerson: Boolean = isSignedIn,
-    onSelectAll: () -> Unit,
     onShare: () -> Unit,
     onHide: () -> Unit,
     onRequestDelete: () -> Unit,
@@ -173,21 +213,13 @@ fun rememberGallerySelectionActions(
     val actions = buildList {
         add(
             SelectionAction(
-                icon = Icons.Default.SelectAll,
-                label = stringResource(
-                    if (allSelected) R.string.gallery_deselect_all else R.string.select_all,
-                ),
-                onClick = onSelectAll,
-            )
-        )
-        add(
-            SelectionAction(
                 icon = Icons.Default.Share,
                 label = stringResource(R.string.sel_label_share),
                 working = sharing != null,
                 progress = sharing?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
                 enabled = sharing == null,
                 onClick = onShare,
+                slot = PrimarySlot.Share,
             )
         )
         if (isSignedIn) {
@@ -198,6 +230,7 @@ fun rememberGallerySelectionActions(
                     working = isAddingToAlbum,
                     enabled = !isAddingToAlbum,
                     onClick = onRequestAddToAlbum,
+                    slot = PrimarySlot.Organize,
                 )
             )
         }
@@ -314,6 +347,7 @@ fun rememberGallerySelectionActions(
                     icon = Icons.AutoMirrored.Filled.DriveFileMove,
                     label = stringResource(R.string.move_to_folder),
                     onClick = onRequestMoveToFolder,
+                    slot = PrimarySlot.Organize,
                 )
             )
         }
@@ -337,6 +371,7 @@ fun rememberGallerySelectionActions(
                 working = isDeleting,
                 enabled = !isDeleting,
                 onClick = onRequestDelete,
+                slot = PrimarySlot.Delete,
             )
         )
     }

@@ -1548,6 +1548,12 @@
     <string name="sel_label_unhide">Sacar de Fotos ocultas</string>
     <string name="sel_show_actions">Mostrar acciones</string>
     <string name="sel_hide_actions">Ocultar acciones</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">¿Seleccionar %1$d foto?</item>
+        <item quantity="many">¿Seleccionar %1$d fotos?</item>
+        <item quantity="other">¿Seleccionar %1$d fotos?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Trabajar con tantas fotos a la vez puede tardar un rato.</string>
     <string name="picker_filter_all">Todo</string>
     <string name="picker_filter_cloud">Nube</string>
     <string name="picker_filter_device">Dispositivo</string>

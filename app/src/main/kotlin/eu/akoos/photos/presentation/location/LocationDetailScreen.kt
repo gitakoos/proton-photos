@@ -63,7 +63,6 @@ import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PrivacyTip
-import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -98,6 +97,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.MultiStripState
+import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.allLocalOnly
@@ -113,6 +113,8 @@ import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
+import eu.akoos.photos.presentation.gallery.selectAllCountFor
+import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.ErrorColor
@@ -363,7 +365,7 @@ fun LocationPhotosContent(
                 start = if (seamless) 0.dp else 20.dp,
                 end = if (seamless) 0.dp else 20.dp,
                 top = contentTopPadding,
-                bottom = 24.dp,
+                bottom = selectionGridBottomPadding(24.dp, isSelectionMode),
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
@@ -515,8 +517,9 @@ fun LocationPhotosContent(
         )
 
         // Selection drawer: the shared surface every multi-select uses, so the located-photos bulk
-        // actions all sit in one list, in the order every other surface lists them.
-        val allSelected = state.items.isNotEmpty() && selectedItems.size == state.items.size
+        // actions all sit in one list, in the order every other surface lists them. Its header's
+        // Select all takes in every photo of the place.
+        val selectAllCount = selectAllCountFor(total = state.items.size, selected = selectedItems.size)
         // Which way the offline row goes, so it names the press rather than the state: a pin while
         // anything pinnable in the selection is still un-pinned, a removal once none is.
         val offlinePinsSelection = remember(selectedItems, offlinePinIds) {
@@ -525,18 +528,10 @@ fun LocationPhotosContent(
         val locationSelectionActions = buildList {
             add(
                 SelectionAction(
-                    icon = Icons.Default.SelectAll,
-                    label = stringResource(
-                        if (allSelected) R.string.gallery_deselect_all else R.string.select_all,
-                    ),
-                    onClick = { if (allSelected) viewModel.clearSelection() else viewModel.selectAll() },
-                )
-            )
-            add(
-                SelectionAction(
                     icon = Icons.Default.Share,
                     label = stringResource(R.string.sel_label_share),
                     onClick = { viewModel.shareSelected() },
+                    slot = PrimarySlot.Share,
                 )
             )
             // Add-to-album needs a Drive destination, so it stays behind a signed-in session.
@@ -546,6 +541,7 @@ fun LocationPhotosContent(
                         icon = Icons.Default.PhotoAlbum,
                         label = stringResource(R.string.gallery_add_to_album),
                         onClick = { showAddToAlbumSheet = true },
+                        slot = PrimarySlot.Organize,
                     )
                 )
             }
@@ -557,6 +553,7 @@ fun LocationPhotosContent(
                         icon = Icons.AutoMirrored.Filled.DriveFileMove,
                         label = stringResource(R.string.move_to_folder),
                         onClick = { showMoveSheet = true },
+                        slot = PrimarySlot.Organize,
                     )
                 )
             }
@@ -663,6 +660,7 @@ fun LocationPhotosContent(
                     tint = ErrorColor,
                     enabled = !isDeleting,
                     onClick = { showDeleteSheet = true },
+                    slot = PrimarySlot.Delete,
                 )
             )
         }
@@ -675,6 +673,12 @@ fun LocationPhotosContent(
             // photos needs no deliberate pull or tap first.
             contentScrolling = gridState.isScrollInProgress,
             modifier = Modifier.align(Alignment.BottomCenter),
+            selectAllCount = selectAllCount,
+            onSelectAll = if (selectAllCount != null) {
+                { viewModel.selectAll() }
+            } else {
+                null
+            },
         )
 
         // Jump-to-top pill - appears once scrolled down, hidden during selection so it never

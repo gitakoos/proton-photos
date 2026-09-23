@@ -1591,6 +1591,13 @@
     <string name="sel_label_unhide">Przenieś z Ukrytych zdjęć</string>
     <string name="sel_show_actions">Pokaż akcje</string>
     <string name="sel_hide_actions">Ukryj akcje</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">Zaznaczyć %1$d zdjęcie?</item>
+        <item quantity="few">Zaznaczyć %1$d zdjęcia?</item>
+        <item quantity="many">Zaznaczyć %1$d zdjęć?</item>
+        <item quantity="other">Zaznaczyć %1$d zdjęcia?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Praca na tak wielu zdjęciach naraz może chwilę potrwać.</string>
     <string name="picker_filter_all">Wszystko</string>
     <string name="picker_filter_cloud">Chmura</string>
     <string name="picker_filter_device">Urządzenie</string>

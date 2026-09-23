@@ -987,6 +987,11 @@
     <string name="sel_label_unhide">Move out of Hidden Photos</string>
     <string name="sel_show_actions">Show actions</string>
     <string name="sel_hide_actions">Hide actions</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">Select %1$d photo?</item>
+        <item quantity="other">Select %1$d photos?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Working on this many photos at once can take a while.</string>
     <string name="share_role_can_view_desc">Can look at the album and its photos.</string>
     <string name="share_role_can_edit_desc">Can add and remove photos.</string>
 

@@ -1544,6 +1544,11 @@
     <string name="sel_label_unhide">Uit Verborgen foto\'s halen</string>
     <string name="sel_show_actions">Acties tonen</string>
     <string name="sel_hide_actions">Acties verbergen</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">%1$d foto selecteren?</item>
+        <item quantity="other">%1$d foto\'s selecteren?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Met zoveel foto\'s tegelijk werken kan even duren.</string>
     <string name="picker_filter_all">Alles</string>
     <string name="picker_filter_cloud">Cloud</string>
     <string name="picker_filter_device">Apparaat</string>

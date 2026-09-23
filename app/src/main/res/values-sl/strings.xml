@@ -1598,6 +1598,13 @@
     <string name="sel_label_unhide">Premakni iz Skritih fotografij</string>
     <string name="sel_show_actions">Pokaži dejanja</string>
     <string name="sel_hide_actions">Skrij dejanja</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">Izbrati %1$d fotografijo?</item>
+        <item quantity="two">Izbrati %1$d fotografiji?</item>
+        <item quantity="few">Izbrati %1$d fotografije?</item>
+        <item quantity="other">Izbrati %1$d fotografij?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Delo s tolikšnim številom fotografij hkrati lahko traja nekaj časa.</string>
     <string name="picker_filter_all">Vse</string>
     <string name="picker_filter_cloud">Oblak</string>
     <string name="picker_filter_device">Naprava</string>

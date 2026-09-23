@@ -1517,6 +1517,12 @@
     <string name="sel_label_unhide">Sortir de Photos masquées</string>
     <string name="sel_show_actions">Afficher les actions</string>
     <string name="sel_hide_actions">Masquer les actions</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">Sélectionner %1$d photo ?</item>
+        <item quantity="many">Sélectionner %1$d photos ?</item>
+        <item quantity="other">Sélectionner %1$d photos ?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Traiter autant de photos à la fois peut prendre un moment.</string>
     <string name="picker_filter_all">Tout</string>
     <string name="picker_filter_cloud">Cloud</string>
     <string name="picker_filter_device">Appareil</string>

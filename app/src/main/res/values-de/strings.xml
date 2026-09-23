@@ -1517,6 +1517,11 @@
     <string name="sel_label_unhide">Aus Versteckten Fotos herausnehmen</string>
     <string name="sel_show_actions">Aktionen anzeigen</string>
     <string name="sel_hide_actions">Aktionen ausblenden</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">%1$d Foto auswählen?</item>
+        <item quantity="other">%1$d Fotos auswählen?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Aktionen mit so vielen Fotos auf einmal können eine Weile dauern.</string>
     <string name="picker_filter_all">Alle</string>
     <string name="picker_filter_cloud">Cloud</string>
     <string name="picker_filter_device">Gerät</string>

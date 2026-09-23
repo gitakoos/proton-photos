@@ -66,7 +66,6 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -100,6 +99,7 @@ import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.HideConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.SelectionAction
@@ -114,6 +114,8 @@ import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.ScrollDateLabel
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
 import eu.akoos.photos.presentation.gallery.TimelineScrubber
+import eu.akoos.photos.presentation.gallery.selectAllCountFor
+import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import kotlinx.coroutines.flow.map
@@ -465,7 +467,7 @@ fun DeviceFolderDetailScreen(
             contentPadding = PaddingValues(
                 start = if (seamless) 0.dp else 20.dp,
                 end = if (seamless) 0.dp else 20.dp,
-                bottom = 24.dp,
+                bottom = selectionGridBottomPadding(24.dp, isSelectionMode),
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
@@ -689,8 +691,8 @@ fun DeviceFolderDetailScreen(
         // The photo a cover may be pinned to, or null when the selection names none. Shared with
         // the confirmation and the write, so all three answer the same question.
         val coverCandidate = FolderCoverSelection.pinnable(selectedUris, vaultedUris)
-        // Toggles every selectable photo in the folder (cloud-only entries have no uri and stay
-        // excluded): select all, or clear once everything selectable is selected.
+        // Every selectable photo in the folder, for the drawer header's Select all (cloud-only
+        // entries have no uri and stay excluded).
         val selectableUris = if (!isSelectionMode) emptyList() else items.mapNotNull { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> item.local.uri
@@ -698,21 +700,10 @@ fun DeviceFolderDetailScreen(
                 is GalleryItem.CloudOnly -> null
             }
         }
-        val allFolderSelected = selectableUris.isNotEmpty() && selectedUris.size == selectableUris.size
+        val selectAllCount = selectAllCountFor(total = selectableUris.size, selected = selectedUris.size)
         val anyDeviceOnlySelected = selectedDeviceItems.any { it is GalleryItem.LocalOnly }
         var showStripPicker by remember { mutableStateOf(false) }
         val folderSelectionActions = buildList {
-            add(
-                SelectionAction(
-                    icon = Icons.Default.SelectAll,
-                    label = stringResource(
-                        if (allFolderSelected) R.string.gallery_deselect_all else R.string.select_all,
-                    ),
-                    onClick = {
-                        viewModel.setSelectedUris(if (allFolderSelected) emptySet() else selectableUris.toSet())
-                    },
-                )
-            )
             // Share selected to other apps - device files share their URI directly, no download.
             if (selectedDeviceItems.isNotEmpty()) {
                 add(
@@ -720,6 +711,7 @@ fun DeviceFolderDetailScreen(
                         icon = Icons.Default.Share,
                         label = stringResource(R.string.sel_label_share),
                         onClick = { showPhotoShareSheet = true },
+                        slot = PrimarySlot.Share,
                     )
                 )
             }
@@ -732,6 +724,7 @@ fun DeviceFolderDetailScreen(
                         icon = Icons.Default.PhotoAlbum,
                         label = stringResource(R.string.gallery_add_to_album),
                         onClick = { showAddToAlbumSheet = true },
+                        slot = PrimarySlot.Organize,
                     )
                 )
             }
@@ -744,6 +737,7 @@ fun DeviceFolderDetailScreen(
                         icon = Icons.AutoMirrored.Filled.DriveFileMove,
                         label = stringResource(R.string.move_to_folder),
                         onClick = { showMoveSheet = true },
+                        slot = PrimarySlot.Organize,
                     )
                 )
             }
@@ -844,6 +838,7 @@ fun DeviceFolderDetailScreen(
                         label = stringResource(R.string.sel_label_delete),
                         tint = ErrorColor,
                         onClick = { showDeleteSheet = true },
+                        slot = PrimarySlot.Delete,
                     )
                 )
             }
@@ -857,6 +852,12 @@ fun DeviceFolderDetailScreen(
             // through the photos needs no deliberate pull or tap first.
             contentScrolling = gridState.isScrollInProgress,
             modifier = Modifier.align(Alignment.BottomCenter),
+            selectAllCount = selectAllCount,
+            onSelectAll = if (selectAllCount != null) {
+                { viewModel.setSelectedUris(selectableUris.toSet()) }
+            } else {
+                null
+            },
         )
         if (showStripPicker) {
             MetadataStripPickerDialog(

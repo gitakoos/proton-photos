@@ -1547,6 +1547,12 @@
     <string name="sel_label_unhide">Togli da Foto nascoste</string>
     <string name="sel_show_actions">Mostra azioni</string>
     <string name="sel_hide_actions">Nascondi azioni</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">Selezionare %1$d foto?</item>
+        <item quantity="many">Selezionare %1$d foto?</item>
+        <item quantity="other">Selezionare %1$d foto?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Lavorare su così tante foto in una volta può richiedere un po\' di tempo.</string>
     <string name="picker_filter_all">Tutto</string>
     <string name="picker_filter_cloud">Cloud</string>
     <string name="picker_filter_device">Dispositivo</string>

@@ -31,23 +31,32 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -60,10 +69,14 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,10 +87,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -93,8 +108,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -105,11 +125,16 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.PhotoCellInputs
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
+import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgDim
+import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
+import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBorder
 import kotlinx.coroutines.launch
 
 /**
@@ -122,6 +147,10 @@ import kotlinx.coroutines.launch
  * A working row is inert, so a second tap cannot land on work already under way. An action whose
  * tap is what stops that work sets [clickableWhileWorking] and stays live throughout: the album
  * download is one, where the running row is also the batch's cancel control.
+ *
+ * [slot] marks one of the actions a selection reaches for most. A slotted action also gets a fixed
+ * button under the selected photos, one tap away from the resting drawer, and leads the open list
+ * in slot order.
  */
 data class SelectionAction(
     val icon: ImageVector,
@@ -134,7 +163,15 @@ data class SelectionAction(
     val workingLabel: String? = null,
     val progress: Float? = null,
     val clickableWhileWorking: Boolean = false,
+    val slot: PrimarySlot? = null,
 )
+
+/**
+ * The fixed buttons of a resting selection drawer, in the order they stand. [Organize] is whichever
+ * action files the selection somewhere on that surface: Add to album, Move to folder without an
+ * account, or Move to album inside an album.
+ */
+enum class PrimarySlot { Share, Organize, Delete }
 
 /**
  * The favourite action every selection drawer lists, so none of the surfaces decides the wording or
@@ -170,6 +207,8 @@ fun favoriteSelectionAction(
 private class FrozenSelection {
     var items: List<GalleryItem> = emptyList()
     var actions: List<SelectionAction> = emptyList()
+    var selectAllCount: Int? = null
+    var onSelectAll: (() -> Unit)? = null
 }
 
 /** Height of one action pill and the gap between two of them, matching the app's other action
@@ -209,23 +248,165 @@ private const val SETTLE_VELOCITY = 400f
  *  grid, so it keeps most of the photos on screen even fully open. */
 private const val MAX_EXPANDED_FRACTION = 0.55f
 
+/** The resting bar from the top: the handle band, the count row's round controls and the gap under
+ *  them, the air above the strip, and the rule under the strip with its own gap, then the air above
+ *  the bottom edge. The resting height is summed from these, so a surface can reserve it before the
+ *  drawer lays out. */
+private val HANDLE_PADDING = 10.dp
+private val HANDLE_THICKNESS = 4.dp
+private val HEADER_CONTROL_SIZE = 36.dp
+private val HEADER_BOTTOM_GAP = 8.dp
+private val HEADER_ITEM_GAP = 8.dp
+private val STRIP_TOP_GAP = 10.dp
+private val DIVIDER_TOP_GAP = 10.dp
+private val DIVIDER_THICKNESS = 1.dp
+private val DRAWER_BOTTOM_GAP = 12.dp
+
+/** The count and the Select all label. Their line heights are pinned, so the count row's height is
+ *  known before layout at any text size. */
+private val COUNT_FONT_SIZE = 16.sp
+private val COUNT_LINE_HEIGHT = 24.sp
+private val SELECT_ALL_FONT_SIZE = 13.sp
+private val SELECT_ALL_LINE_HEIGHT = 16.sp
+private val SELECT_ALL_PADDING_H = 12.dp
+private val SELECT_ALL_PADDING_V = 6.dp
+
+/** One primary button: the action's glyph alone, named by its label for accessibility, in a pill of
+ *  the action rows' own fill and border. The labelled rows are one pull away in the open list, so the
+ *  resting bar stays low. The buttons of a row share one width, capped so a tablet keeps them
+ *  compact. */
+private val PRIMARY_ICON_SIZE = 22.dp
+private val PRIMARY_BUTTON_PADDING_H = 3.dp
+private val PRIMARY_BUTTON_PADDING_V = 9.dp
+private val PRIMARY_BUTTON_GAP = 6.dp
+private val PRIMARY_BUTTON_MAX_WIDTH = 120.dp
+private val PRIMARY_BUTTON_CORNER = 12.dp
+private val PRIMARY_GLYPH_SIZE = 18.dp
+
+/** Air between the rule under the strip and the primary row. */
+private val PRIMARY_ROW_TOP_GAP = 8.dp
+
+/** The shortest travel the detent drag keeps, for an open list barely taller than the row it
+ *  replaces. */
+private val MIN_DETENT_TRAVEL = 24.dp
+
+/** A window shorter than this, such as a phone on its side, takes the compact drawer: the primary
+ *  actions sit in the count row as glyphs and the resting bar grows by nothing. */
+private const val COMPACT_HEIGHT_DP = 480
+
+/** Past this many photos, Select all asks before it selects. */
+internal const val SELECT_ALL_CONFIRM_THRESHOLD = 500
+
+/** The slotted actions in slot order. The sort is stable, so two actions sharing a slot keep the
+ *  order the surface gave them. */
+internal fun primaryActions(actions: List<SelectionAction>): List<SelectionAction> =
+    actions.filter { it.slot != null }.sortedBy { it.slot?.ordinal }
+
+/** The open list: the primary actions first, in the order the resting row shows them, then every
+ *  other action in the order given. */
+internal fun expandedActionOrder(actions: List<SelectionAction>): List<SelectionAction> =
+    primaryActions(actions) + actions.filter { it.slot == null }
+
+/** More ends the primary row only while the open list has something the row lacks. The compact
+ *  drawer has none: its chevron sits right beside the glyphs and opens the same list. */
+internal fun showsMoreButton(actions: List<SelectionAction>, compact: Boolean): Boolean =
+    !compact && actions.any { it.slot != null } && actions.any { it.slot == null }
+
+/** Whether Select all asks first: only when it would select more than [SELECT_ALL_CONFIRM_THRESHOLD]
+ *  photos. An unknown count selects at once. */
+internal fun selectAllNeedsConfirm(selectAllCount: Int?): Boolean =
+    selectAllCount != null && selectAllCount > SELECT_ALL_CONFIRM_THRESHOLD
+
+/** Whether a window [screenHeightDp] tall takes the compact drawer. */
+internal fun isCompactDrawer(screenHeightDp: Int): Boolean = screenHeightDp < COMPACT_HEIGHT_DP
+
+/** Whether the Select all label fits beside the count at full length, all in pixels. When it does
+ *  not, the control shows a glyph instead, so the count is never cut short for it. */
+internal fun selectAllFitsAsText(available: Int, countWidth: Int, labelWidth: Int, gap: Int): Boolean =
+    countWidth + gap + labelWidth <= available
+
+/** One primary button: its padding around its glyph. It carries no text, so it keeps this height at
+ *  any text size. */
+internal fun primaryButtonHeight(): Dp = PRIMARY_BUTTON_PADDING_V * 2 + PRIMARY_ICON_SIZE
+
+/** The band the primary row adds to the resting bar: the air under the rule and one button. */
+internal fun primaryRowHeight(): Dp = PRIMARY_ROW_TOP_GAP + primaryButtonHeight()
+
+/** The count row: the tallest of its round controls, its count and its Select all label, and the gap
+ *  under it. */
+internal fun headerRowHeight(countLine: Dp, selectAllLine: Dp): Dp =
+    maxOf(HEADER_CONTROL_SIZE, countLine, selectAllLine + SELECT_ALL_PADDING_V * 2) + HEADER_BOTTOM_GAP
+
+/**
+ * The resting drawer above the navigation-bar inset, from the text line heights as the current text
+ * size resolves them. [primaryRow] adds the button band; the [compact] drawer carries its buttons in
+ * the count row and adds nothing.
+ */
+internal fun restingDrawerHeight(
+    countLine: Dp,
+    selectAllLine: Dp,
+    primaryRow: Boolean,
+    compact: Boolean,
+): Dp {
+    val primaryBand = if (primaryRow && !compact) primaryRowHeight() else 0.dp
+    return HANDLE_PADDING * 2 + HANDLE_THICKNESS + headerRowHeight(countLine, selectAllLine) +
+        STRIP_TOP_GAP + THUMB_SIZE + DIVIDER_TOP_GAP + DIVIDER_THICKNESS + primaryBand +
+        DRAWER_BOTTOM_GAP
+}
+
+/** How far the drawer's top edge travels between its detents: the open list's height less the
+ *  primary row that folds away on the way, never below [minTravel]. */
+internal fun detentTravel(listHeight: Float, primaryRowHeight: Float, minTravel: Float): Float =
+    (listHeight - primaryRowHeight).coerceAtLeast(minTravel)
+
+/** How open the drawer is, 0 at rest and 1 fully open, for [reveal] of [travel]. */
+internal fun openFraction(reveal: Float, travel: Float): Float =
+    if (travel <= 0f) 0f else (reveal / travel).coerceIn(0f, 1f)
+
+/**
+ * The height the drawer covers at rest, the navigation-bar inset included, so the grid behind it can
+ * pad its end by as much and still scroll its last row clear. It follows the text size and the
+ * compact variant the way the drawer does. [withPrimaryRow] is false for a surface that slots no
+ * action and so has no button row.
+ */
+@Composable
+fun selectionDrawerRestingHeight(withPrimaryRow: Boolean = true): Dp {
+    val compact = isCompactDrawer(LocalConfiguration.current.screenHeightDp)
+    val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val resting = with(LocalDensity.current) {
+        restingDrawerHeight(
+            countLine = COUNT_LINE_HEIGHT.toDp(),
+            selectAllLine = SELECT_ALL_LINE_HEIGHT.toDp(),
+            primaryRow = withPrimaryRow,
+            compact = compact,
+        )
+    }
+    return resting + navInset
+}
+
 /**
  * The bottom drawer every multi-select surface shares, with two detents the user drags between.
  *
  * Rest is the state it opens in: a low bar carrying the selected photos as a horizontally
- * scrollable strip of thumbnails, the media-typed count, a chevron and a drag handle. No action row
- * shows through, nothing behind it is covered by a scrim and no action list is thrown up the
- * screen, so selecting carries on underneath. Dragging the grab area up, tapping the handle or
- * tapping the chevron reveals the actions as a vertical list of labelled rows; dragging down
- * returns to rest and stops there. Leaving selection mode is the close bubble's job alone.
+ * scrollable strip of thumbnails, the media-typed count, a chevron and a drag handle, and under the
+ * strip a fixed row of buttons for the actions a surface slots through [SelectionAction.slot],
+ * ended by More while other actions remain. Nothing behind it is covered by a scrim and no action
+ * list is thrown up the screen, so selecting carries on underneath. Dragging the grab area up,
+ * tapping the handle, the chevron or More reveals every action as a vertical list of labelled rows,
+ * the slotted ones first, while the button row folds away; dragging down returns to rest and stops
+ * there. Leaving selection mode is the close bubble's job alone. A short window carries the slotted
+ * actions as glyphs in the count row instead, so the resting bar does not grow there.
  *
  * Tapping a thumbnail blows it up in place for a closer look and puts the rows below it further
- * down; scrolling the strip or touching an action row settles it back. The preview never changes
+ * down; scrolling the strip or touching an action settles it back. The preview never changes
  * the selection.
  *
  * [visible] drives the slide in and out. [items] is the live selection, [actions] the action set
- * built for it, and [onDismiss] leaves selection mode from the drawer's own close control. The
- * caller positions the drawer through [modifier], normally bottom-aligned inside a Box.
+ * built for it, and [onDismiss] leaves selection mode from the drawer's own close control. With
+ * [onSelectAll] set, the count row offers Select all, which asks first when [selectAllCount], the
+ * number it would select, passes [SELECT_ALL_CONFIRM_THRESHOLD]. The caller positions the drawer
+ * through [modifier], normally bottom-aligned inside a Box, and can pad what scrolls behind it by
+ * [selectionDrawerRestingHeight].
  */
 @Composable
 fun SelectionDrawer(
@@ -236,18 +417,23 @@ fun SelectionDrawer(
     contentScrolling: Boolean = false,
     cacheThumbnails: Boolean = true,
     modifier: Modifier = Modifier,
+    selectAllCount: Int? = null,
+    onSelectAll: (() -> Unit)? = null,
 ) {
     // Selection mode is derived from the selection itself, so clearing it empties [items] and
     // [actions] while the drawer is still animating out. The drawer renders this snapshot whenever
-    // the incoming selection is empty, which keeps its thumbnails and its action list exactly as
-    // they were for the whole exit.
+    // the incoming selection is empty, which keeps its thumbnails, its buttons, its Select all and
+    // its action list exactly as they were for the whole exit.
     val frozen = remember { FrozenSelection() }
-    if (items.isNotEmpty()) {
+    val live = items.isNotEmpty()
+    if (live) {
         frozen.items = items
         frozen.actions = actions
+        frozen.selectAllCount = selectAllCount
+        frozen.onSelectAll = onSelectAll
     }
-    val shownItems = if (items.isNotEmpty()) items else frozen.items
-    val shownActions = if (items.isNotEmpty()) actions else frozen.actions
+    val shownItems = if (live) items else frozen.items
+    val shownActions = if (live) actions else frozen.actions
 
     AnimatedVisibility(
         visible = visible,
@@ -263,14 +449,17 @@ fun SelectionDrawer(
             onDismiss = onDismiss,
             contentScrolling = contentScrolling,
             cacheThumbnails = cacheThumbnails,
+            selectAllCount = if (live) selectAllCount else frozen.selectAllCount,
+            onSelectAll = if (live) onSelectAll else frozen.onSelectAll,
         )
     }
 }
 
 /**
  * The drawer surface itself, always rendered from an already-resolved (and possibly frozen)
- * selection. [opened] re-seats the drawer at rest each time it comes back, and is deliberately not
- * consulted for anything else so a closing drawer holds its geometry as well as its content.
+ * selection. [opened] re-seats the drawer at rest each time it comes back and keeps a closing
+ * drawer's Select all from acting; it is deliberately not consulted for anything else, so a closing
+ * drawer holds its geometry as well as its content.
  */
 @Composable
 private fun SelectionDrawerBody(
@@ -280,41 +469,66 @@ private fun SelectionDrawerBody(
     onDismiss: () -> Unit,
     contentScrolling: Boolean,
     cacheThumbnails: Boolean,
+    selectAllCount: Int?,
+    onSelectAll: (() -> Unit)?,
 ) {
     val colors = AppColors.current
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val shape = RoundedCornerShape(topStart = SHEET_CORNER, topEnd = SHEET_CORNER)
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
 
-    // Full expanded travel: every action pill, the gaps between them and the padding around the
-    // list. Capped so the drawer never owns most of the screen.
+    // The slotted actions lead twice, in the same order: as the fixed buttons under the strip at
+    // rest and as the first rows of the open list. A short window carries them as glyphs in the
+    // count row instead.
+    val compact = isCompactDrawer(screenHeightDp)
+    val primary = primaryActions(actions)
+    val listed = expandedActionOrder(actions)
+    val showMore = showsMoreButton(actions, compact)
+    val buttonHeight = primaryButtonHeight()
+    val rowBand = if (primary.isNotEmpty() && !compact) primaryRowHeight() else 0.dp
+
+    // Full open list: every action pill, the gaps between them and the padding around the list.
+    // Capped so the drawer never owns most of the screen.
     val naturalExpanded = ACTION_LIST_INSET * 2 + STRIP_TO_ACTIONS_GAP +
-        ACTION_ROW_HEIGHT * actions.size +
-        ACTION_ROW_GAP * (actions.size - 1).coerceAtLeast(0)
-    val maxExpanded = (LocalConfiguration.current.screenHeightDp * MAX_EXPANDED_FRACTION).dp
+        ACTION_ROW_HEIGHT * listed.size +
+        ACTION_ROW_GAP * (listed.size - 1).coerceAtLeast(0)
+    val maxExpanded = (screenHeightDp * MAX_EXPANDED_FRACTION).dp
     // The action list scrolls only when it genuinely overflows. While it fits, a vertical drag over
     // the rows belongs to the drawer: a scroll that is always on consumes that drag first, which
     // leaves the handle as the only way to pull the drawer shut.
     val listOverflows = naturalExpanded > maxExpanded
     val listScroll = rememberScrollState()
-    val expandedTravelPx = with(density) { minOf(naturalExpanded, maxExpanded).toPx() }
+    val listHeightPx = with(density) { minOf(naturalExpanded, maxExpanded).toPx() }
+    // The top edge travels the list's height less the button row folding away under it, so the
+    // drawer tracks the finger one to one and the open detent still lands on the end of the list.
+    val travelPx = detentTravel(
+        listHeight = listHeightPx,
+        primaryRowHeight = with(density) { rowBand.toPx() },
+        minTravel = with(density) { MIN_DETENT_TRAVEL.toPx() },
+    )
 
     // Rest is zero travel: the action list measures nothing there, so the resting bar is the
-    // handle, the count, the chevron, the close bubble and the thumbnail strip.
+    // handle, the count row, the thumbnail strip and the button row.
     val reveal = remember { Animatable(0f) }
     LaunchedEffect(opened) { if (opened) reveal.snapTo(0f) }
-    LaunchedEffect(expandedTravelPx) {
-        if (reveal.value > expandedTravelPx) reveal.snapTo(expandedTravelPx)
+    LaunchedEffect(travelPx) {
+        if (reveal.value > travelPx) reveal.snapTo(travelPx)
     }
-    val expanded = reveal.value > expandedTravelPx / 2f
+    val fraction = openFraction(reveal.value, travelPx)
+    val expanded = reveal.value > travelPx / 2f
+    // The buttons fade over the first half of the opening, as the list's rows for the same actions
+    // arrive, and take no tap once they are gone.
+    val primaryAlpha = (1f - fraction * 2f).coerceIn(0f, 1f)
+    val primaryLive = primaryAlpha > 0f
     val dragState = rememberDraggableState { delta ->
-        scope.launch { reveal.snapTo((reveal.value - delta).coerceIn(0f, expandedTravelPx)) }
+        scope.launch { reveal.snapTo((reveal.value - delta).coerceIn(0f, travelPx)) }
     }
     // A scrolling list wins a vertical drag before the drawer sees it, so a list long enough to
     // scroll would leave the handle as the only way to pull the drawer shut. This hands back what
     // the list could not use: at its top there is nothing above to reach, so a further pull down
     // belongs to the drawer.
-    val listHandoff = remember(expandedTravelPx) {
+    val listHandoff = remember(travelPx) {
         object : NestedScrollConnection {
             override fun onPostScroll(
                 consumed: Offset,
@@ -322,19 +536,19 @@ private fun SelectionDrawerBody(
                 source: NestedScrollSource,
             ): Offset {
                 if (available.y <= 0f || reveal.value <= 0f) return Offset.Zero
-                val settled = (reveal.value - available.y).coerceIn(0f, expandedTravelPx)
+                val settled = (reveal.value - available.y).coerceIn(0f, travelPx)
                 val used = reveal.value - settled
                 scope.launch { reveal.snapTo(settled) }
                 return Offset(0f, used)
             }
 
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                if (reveal.value <= 0f || reveal.value >= expandedTravelPx) return Velocity.Zero
+                if (reveal.value <= 0f || reveal.value >= travelPx) return Velocity.Zero
                 // Same reason as the drag settle: run it on the drawer's own scope so the fling
                 // handoff finishes settling even after the scroll gesture that raised it has ended.
                 scope.launch {
                     reveal.animateTo(
-                        if (reveal.value > expandedTravelPx / 2f) expandedTravelPx else 0f,
+                        if (reveal.value > travelPx / 2f) travelPx else 0f,
                         tween(240),
                     )
                 }
@@ -342,10 +556,13 @@ private fun SelectionDrawerBody(
             }
         }
     }
-    // Both detents are travel positions, so no drag, fling or chevron tap can end the selection.
-    // The close bubble is the one control that dismisses.
+    // Both detents are travel positions, so no drag, fling, chevron or More tap can end the
+    // selection. The close bubble is the one control that dismisses.
     val toggleDetent: () -> Unit = {
-        scope.launch { reveal.animateTo(if (expanded) 0f else expandedTravelPx, tween(240)) }
+        scope.launch { reveal.animateTo(if (expanded) 0f else travelPx, tween(240)) }
+    }
+    val openFully: () -> Unit = {
+        scope.launch { reveal.animateTo(travelPx, tween(240)) }
     }
 
     // Scrolling what sits behind the drawer collapses it, so reaching past it to carry on through
@@ -364,6 +581,23 @@ private fun SelectionDrawerBody(
     LaunchedEffect(stripState.isScrollInProgress) {
         if (stripState.isScrollInProgress) previewKey = null
     }
+    val previewOpen = previewKey != null
+    val settlePreview: () -> Unit = { previewKey = null }
+
+    // Select all acts at once up to the threshold and asks first past it. A drawer on its way out
+    // takes no new selection.
+    var confirmSelectAllCount by remember { mutableStateOf<Int?>(null) }
+    val requestSelectAll: (() -> Unit)? = onSelectAll?.let { selectAll ->
+        {
+            if (opened) {
+                if (selectAllNeedsConfirm(selectAllCount)) {
+                    confirmSelectAllCount = selectAllCount
+                } else {
+                    selectAll()
+                }
+            }
+        }
+    }
 
     // The detent drag, shared by the grab area and the action list below it, so the drawer can
     // be pulled shut from anywhere it covers rather than from its handle alone. The thumbnail
@@ -374,9 +608,9 @@ private fun SelectionDrawerBody(
         state = dragState,
         onDragStopped = { velocity ->
             val target = when {
-                velocity < -SETTLE_VELOCITY -> expandedTravelPx
+                velocity < -SETTLE_VELOCITY -> travelPx
                 velocity > SETTLE_VELOCITY -> 0f
-                reveal.value > expandedTravelPx / 2f -> expandedTravelPx
+                reveal.value > travelPx / 2f -> travelPx
                 else -> 0f
             }
             // Settle on the drawer's own scope rather than the drag gesture's: the gesture scope does
@@ -408,31 +642,41 @@ private fun SelectionDrawerBody(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(onClick = toggleDetent)
-                    .padding(vertical = 10.dp),
+                    .padding(vertical = HANDLE_PADDING),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
                     modifier = Modifier
                         .width(32.dp)
-                        .height(4.dp)
+                        .height(HANDLE_THICKNESS)
                         .background(colors.fgMute.copy(alpha = 0.5f), CircleShape),
                 )
             }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = SHEET_SIDE_PADDING, end = 12.dp, bottom = 8.dp),
+                    .padding(start = SHEET_SIDE_PADDING, end = 12.dp, bottom = HEADER_BOTTOM_GAP),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    selectionCountLabel(items),
-                    color = colors.fgPrimary,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                CountWithSelectAll(
+                    countLabel = selectionCountLabel(items),
+                    onSelectAll = requestSelectAll,
                     modifier = Modifier.weight(1f),
                 )
+                if (compact && primary.isNotEmpty()) {
+                    Spacer(Modifier.width(HEADER_ITEM_GAP))
+                    Row(
+                        modifier = Modifier
+                            .alpha(primaryAlpha)
+                            .settlesPreviewFirst(previewOpen, settlePreview),
+                        horizontalArrangement = Arrangement.spacedBy(HEADER_ITEM_GAP),
+                    ) {
+                        primary.forEach { action ->
+                            PrimaryGlyphButton(action = action, live = primaryLive)
+                        }
+                    }
+                }
+                Spacer(Modifier.width(HEADER_ITEM_GAP))
                 // Chevron toggle: the same two detents the drag settles on, reachable without a
                 // drag. It points the way the drawer will move.
                 IconBubble(
@@ -441,15 +685,15 @@ private fun SelectionDrawerBody(
                         if (expanded) R.string.sel_hide_actions else R.string.sel_show_actions,
                     ),
                     onClick = toggleDetent,
-                    diameter = 36.dp,
+                    diameter = HEADER_CONTROL_SIZE,
                     iconSize = 20.dp,
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(HEADER_ITEM_GAP))
                 IconBubble(
                     icon = Icons.Default.Close,
                     contentDescription = stringResource(R.string.gallery_cancel_selection),
                     onClick = onDismiss,
-                    diameter = 36.dp,
+                    diameter = HEADER_CONTROL_SIZE,
                     iconSize = 16.dp,
                 )
             }
@@ -457,7 +701,7 @@ private fun SelectionDrawerBody(
 
         // Clear air under the count row, so the photos read as their own band instead of crowding
         // the header above them.
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(STRIP_TOP_GAP))
         LazyRow(
             state = stripState,
             modifier = Modifier.fillMaxWidth(),
@@ -477,38 +721,56 @@ private fun SelectionDrawerBody(
                 )
             }
         }
-        // A rule under the selected photos, drawn the way every other sheet draws one, so the first
-        // action reads as the start of its own list rather than as something hanging off the last
+        // A rule under the selected photos, drawn the way every other sheet draws one, so the
+        // actions below read as their own band rather than as something hanging off the last
         // thumbnail.
         HorizontalDivider(
             color = Line2,
-            modifier = Modifier.padding(top = 10.dp, start = SHEET_SIDE_PADDING, end = SHEET_SIDE_PADDING),
+            thickness = DIVIDER_THICKNESS,
+            modifier = Modifier.padding(
+                top = DIVIDER_TOP_GAP, start = SHEET_SIDE_PADDING, end = SHEET_SIDE_PADDING,
+            ),
         )
 
-        // The expanded half. Its height is the drag position, so at rest it measures zero and the
+        // The fixed buttons. They fold away as the drawer opens, measured at full height and
+        // clipped from below, so the open list's own rows for the same actions take their place
+        // and no action shows twice. While a thumbnail is enlarged the first touch here only
+        // settles that thumbnail back.
+        if (rowBand > 0.dp) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(rowBand * (1f - fraction))
+                    .then(if (fraction > 0f) Modifier.clipToBounds() else Modifier)
+                    .alpha(primaryAlpha)
+                    .settlesPreviewFirst(previewOpen, settlePreview),
+            ) {
+                PrimaryActionRow(
+                    actions = primary,
+                    onMore = if (showMore) openFully else null,
+                    buttonHeight = buttonHeight,
+                    live = primaryLive,
+                    modifier = Modifier
+                        .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                        .padding(
+                            top = PRIMARY_ROW_TOP_GAP, start = SHEET_SIDE_PADDING, end = SHEET_SIDE_PADDING,
+                        ),
+                )
+            }
+        }
+
+        // The expanded half. Its height follows the drag, so at rest it measures zero and the
         // rows are clipped away entirely rather than pushed up the screen. While a thumbnail is
-        // enlarged the first touch here only settles that thumbnail back, so the row the preview
-        // pushed down cannot fire by accident.
-        val previewOpen = previewKey != null
+        // enlarged the first touch here only settles that thumbnail back, so a tap meant to put
+        // the preview away cannot fire a row instead.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(with(density) { reveal.value.toDp() })
+                .height(with(density) { (listHeightPx * fraction).toDp() })
                 .clipToBounds()
                 .nestedScroll(listHandoff)
                 .then(detentDrag)
-                .pointerInput(previewOpen) {
-                    if (!previewOpen) return@pointerInput
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            if (event.type == PointerEventType.Press) {
-                                event.changes.forEach { it.consume() }
-                                previewKey = null
-                            }
-                        }
-                    }
-                },
+                .settlesPreviewFirst(previewOpen, settlePreview),
         ) {
             Column(
                 modifier = Modifier
@@ -522,16 +784,12 @@ private fun SelectionDrawerBody(
                 // them. No rule between two of them.
                 verticalArrangement = Arrangement.spacedBy(ACTION_ROW_GAP),
             ) {
-                actions.forEach { action ->
+                listed.forEach { action ->
                     // Pinned to the row height the expanded travel was computed from, so the open
                     // detent still lands on the end of the list.
                     ActionSheetRow(
                         icon = action.icon,
-                        title = if (action.working && action.workingLabel != null) {
-                            action.workingLabel
-                        } else {
-                            action.label
-                        },
+                        title = action.shownLabel(),
                         onClick = action.onClick,
                         modifier = Modifier.height(ACTION_ROW_HEIGHT),
                         enabled = action.enabled,
@@ -545,9 +803,250 @@ private fun SelectionDrawerBody(
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(DRAWER_BOTTOM_GAP))
+    }
+
+    confirmSelectAllCount?.let { count ->
+        ConfirmDialog(
+            title = pluralStringResource(R.plurals.select_all_confirm_title, count, count),
+            message = stringResource(R.string.select_all_confirm_body),
+            confirmLabel = stringResource(R.string.select_all),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                confirmSelectAllCount = null
+                onSelectAll?.invoke()
+            },
+            onDismiss = { confirmSelectAllCount = null },
+        )
     }
 }
+
+/**
+ * The media-typed count and, when [onSelectAll] is set, a Select all control right after it. The
+ * control keeps its label while both fit on the line and shows a glyph when they do not, so the
+ * count is never cut short for it.
+ */
+@Composable
+private fun CountWithSelectAll(
+    countLabel: String,
+    onSelectAll: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    val selectAllLabel = stringResource(R.string.select_all)
+    val baseStyle = LocalTextStyle.current
+    val countStyle = baseStyle.merge(
+        TextStyle(fontSize = COUNT_FONT_SIZE, lineHeight = COUNT_LINE_HEIGHT, fontWeight = FontWeight.SemiBold),
+    )
+    val selectAllStyle = baseStyle.merge(
+        TextStyle(fontSize = SELECT_ALL_FONT_SIZE, lineHeight = SELECT_ALL_LINE_HEIGHT, fontWeight = FontWeight.Medium),
+    )
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier = modifier) {
+        val available = constraints.maxWidth
+        val labelFits = if (onSelectAll == null) {
+            false
+        } else {
+            remember(countLabel, selectAllLabel, countStyle, selectAllStyle, available, density) {
+                selectAllFitsAsText(
+                    available = available,
+                    countWidth = measurer.measure(countLabel, countStyle, maxLines = 1).size.width,
+                    labelWidth = measurer.measure(selectAllLabel, selectAllStyle, maxLines = 1).size.width +
+                        with(density) { (SELECT_ALL_PADDING_H * 2).roundToPx() },
+                    gap = with(density) { HEADER_ITEM_GAP.roundToPx() },
+                )
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                countLabel,
+                color = FgPrimary,
+                style = countStyle,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (onSelectAll != null) {
+                Spacer(Modifier.width(HEADER_ITEM_GAP))
+                if (labelFits) {
+                    SelectAllPill(label = selectAllLabel, style = selectAllStyle, onClick = onSelectAll)
+                } else {
+                    IconBubble(
+                        icon = Icons.Default.SelectAll,
+                        contentDescription = selectAllLabel,
+                        onClick = onSelectAll,
+                        diameter = HEADER_CONTROL_SIZE,
+                        iconSize = 18.dp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Select all as a labelled pill, as tall as the round controls beside it. */
+@Composable
+private fun SelectAllPill(label: String, style: TextStyle, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .defaultMinSize(minHeight = HEADER_CONTROL_SIZE)
+            .background(PillBg, CircleShape)
+            .border(0.5.dp, PillBorder, CircleShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = SELECT_ALL_PADDING_H, vertical = SELECT_ALL_PADDING_V),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, color = FgPrimary, style = style, maxLines = 1)
+    }
+}
+
+/**
+ * The fixed buttons under the selected photos: [actions] in slot order, then More when [onMore] is
+ * set. The buttons share the row's width equally up to [PRIMARY_BUTTON_MAX_WIDTH] each and stay
+ * centred beyond it. [live] turns their taps off while the row fades out.
+ */
+@Composable
+private fun PrimaryActionRow(
+    actions: List<SelectionAction>,
+    onMore: (() -> Unit)?,
+    buttonHeight: Dp,
+    live: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val more = onMore?.let {
+        SelectionAction(
+            icon = Icons.Default.MoreHoriz,
+            label = stringResource(R.string.viewer_menu_more),
+            onClick = it,
+        )
+    }
+    val buttons = if (more != null) actions + more else actions
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+        Row(
+            modifier = Modifier
+                .widthIn(max = PRIMARY_BUTTON_MAX_WIDTH * buttons.size + PRIMARY_BUTTON_GAP * (buttons.size - 1))
+                .fillMaxWidth()
+                .height(buttonHeight),
+            horizontalArrangement = Arrangement.spacedBy(PRIMARY_BUTTON_GAP),
+        ) {
+            buttons.forEach { action ->
+                PrimaryActionButton(
+                    action = action,
+                    live = live,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+            }
+        }
+    }
+}
+
+/** One primary button: the action's glyph, or its spinner while it works, named by its label for
+ *  accessibility. The open list shows the same action with its label. */
+@Composable
+private fun PrimaryActionButton(
+    action: SelectionAction,
+    live: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(PRIMARY_BUTTON_CORNER)
+    val label = action.shownLabel()
+    Box(
+        modifier = modifier
+            .background(PillBg, shape)
+            .border(0.5.dp, PillBorder, shape)
+            .clickable(enabled = live && action.takesTaps(), onClick = action.onClick)
+            .semantics { contentDescription = label }
+            .padding(horizontal = PRIMARY_BUTTON_PADDING_H, vertical = PRIMARY_BUTTON_PADDING_V),
+        contentAlignment = Alignment.Center,
+    ) {
+        ActionGlyph(action = action, size = PRIMARY_ICON_SIZE, alpha = if (action.enabled) 1f else 0.5f)
+    }
+}
+
+/** A primary action in the compact count row: its glyph alone in a round button, named by its label
+ *  for accessibility. */
+@Composable
+private fun PrimaryGlyphButton(action: SelectionAction, live: Boolean) {
+    val label = action.shownLabel()
+    Box(
+        modifier = Modifier
+            .size(HEADER_CONTROL_SIZE)
+            .background(PillBg, CircleShape)
+            .border(0.5.dp, PillBorder, CircleShape)
+            .clickable(enabled = live && action.takesTaps(), onClick = action.onClick)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        ActionGlyph(action = action, size = PRIMARY_GLYPH_SIZE, alpha = if (action.enabled) 1f else 0.5f)
+    }
+}
+
+/** An action's glyph in its tint, or while it works a spinner in the same tint, determinate once it
+ *  reports progress and carrying its working mark. */
+@Composable
+private fun ActionGlyph(action: SelectionAction, size: Dp, alpha: Float) {
+    val tint = action.tint.takeOrElse { Accent }
+    val progress = action.progress
+    val workingIcon = action.workingIcon
+    Box(modifier = Modifier.size(size), contentAlignment = Alignment.Center) {
+        when {
+            action.working && progress != null -> CircularProgressIndicator(
+                progress = { progress },
+                color = tint,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(size),
+            )
+            action.working -> CircularProgressIndicator(
+                color = tint,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(size),
+            )
+            else -> Icon(
+                action.icon,
+                contentDescription = null,
+                tint = tint.copy(alpha = alpha),
+                modifier = Modifier.size(size),
+            )
+        }
+        if (action.working && workingIcon != null) {
+            Icon(
+                workingIcon,
+                contentDescription = null,
+                tint = ErrorColor,
+                modifier = Modifier.size(size / 2),
+            )
+        }
+    }
+}
+
+/** The label an action shows: its working label while it works, when it has one. */
+private fun SelectionAction.shownLabel(): String =
+    if (working && workingLabel != null) workingLabel else label
+
+/** Whether a tap reaches the action: it is enabled, and not already at work unless its tap is what
+ *  stops that work. */
+private fun SelectionAction.takesTaps(): Boolean = enabled && (!working || clickableWhileWorking)
+
+/**
+ * While a thumbnail is enlarged, the first press here only settles it back, so a tap meant to put
+ * the preview away cannot fire an action instead. [previewOpen] keys the guard, which stands down
+ * once the preview is gone.
+ */
+private fun Modifier.settlesPreviewFirst(previewOpen: Boolean, onSettle: () -> Unit): Modifier =
+    pointerInput(previewOpen) {
+        if (!previewOpen) return@pointerInput
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.type == PointerEventType.Press) {
+                    event.changes.forEach { it.consume() }
+                    onSettle()
+                }
+            }
+        }
+    }
 
 /** The media-typed count the resting bar carries: "5 photos, 2 videos" rather than an
  *  undifferentiated total, since the storage and network cost of a video differs a lot. */

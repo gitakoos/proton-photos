@@ -55,6 +55,8 @@ import androidx.compose.foundation.layout.statusBars
 import eu.akoos.photos.presentation.gallery.ScrollDateLabel
 import eu.akoos.photos.presentation.gallery.TimelineScrubber
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
+import eu.akoos.photos.presentation.gallery.selectAllCountFor
+import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
 import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -88,7 +90,6 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.RemoveCircleOutline
-import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import eu.akoos.photos.presentation.common.CloudMetadataSaveDrawer
@@ -133,6 +134,7 @@ import eu.akoos.photos.presentation.viewer.PhotoShareSheet
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
@@ -570,7 +572,7 @@ fun AlbumDetailScreen(
             contentPadding = PaddingValues(
                 start = if (seamless) 0.dp else 20.dp,
                 end = if (seamless) 0.dp else 20.dp,
-                bottom = 24.dp,
+                bottom = selectionGridBottomPadding(24.dp, state.isSelectionMode),
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
@@ -865,8 +867,8 @@ fun AlbumDetailScreen(
         // library, which the header action already offers. Same line the hide and cover affordances
         // draw.
         val canTakeCopies = !state.isSharedWithMe
-        val allAlbumSelected = state.photos.isNotEmpty() &&
-            state.selectedPhotos.size == state.photos.size
+        // The drawer header's Select all takes in every photo of the album.
+        val selectAllCount = selectAllCountFor(total = state.photos.size, selected = state.selectedPhotos.size)
         val isSharingPhotos = state.shareState is AlbumShareState.Working
         val selectedAlbumPhotos = remember(state.photos, state.selectedPhotos) {
             state.photos.filter { it.linkId in state.selectedPhotos }
@@ -881,18 +883,6 @@ fun AlbumDetailScreen(
         val albumSelectionActions = buildList {
             add(
                 SelectionAction(
-                    icon = Icons.Default.SelectAll,
-                    label = stringResource(
-                        if (allAlbumSelected) R.string.gallery_deselect_all else R.string.select_all,
-                    ),
-                    onClick = {
-                        val all = state.photos.map { it.linkId }.toSet()
-                        viewModel.setSelectedPhotos(if (allAlbumSelected) emptySet() else all)
-                    },
-                )
-            )
-            add(
-                SelectionAction(
                     icon = Icons.Default.Share,
                     label = stringResource(R.string.sel_label_share),
                     enabled = !isSharingPhotos,
@@ -901,6 +891,7 @@ fun AlbumDetailScreen(
                         if (it.total > 0) it.done.toFloat() / it.total else 0f
                     },
                     onClick = { showPhotoShareSheet = true },
+                    slot = PrimarySlot.Share,
                 )
             )
             // Edit date + place, placed right after Share so it is reachable without scrolling the
@@ -1012,6 +1003,7 @@ fun AlbumDetailScreen(
                         label = stringResource(R.string.album_move_to_album),
                         enabled = !state.isDeletingPhotos,
                         onClick = { showMoveToAlbumSheet = true },
+                        slot = PrimarySlot.Organize,
                     )
                 )
             }
@@ -1042,6 +1034,7 @@ fun AlbumDetailScreen(
                         enabled = !state.isDeletingPhotos,
                         working = state.isDeletingPhotos,
                         onClick = { showDeleteConfirm = true },
+                        slot = PrimarySlot.Delete,
                     )
                 )
             }
@@ -1055,6 +1048,12 @@ fun AlbumDetailScreen(
             // through the photos needs no deliberate pull or tap first.
             contentScrolling = gridState.isScrollInProgress,
             modifier = Modifier.align(Alignment.BottomCenter),
+            selectAllCount = selectAllCount,
+            onSelectAll = if (selectAllCount != null) {
+                { viewModel.setSelectedPhotos(state.photos.map { it.linkId }.toSet()) }
+            } else {
+                null
+            },
         )
 
         // Unified progress pill: one surface for save-to-library and multi-share, matching the

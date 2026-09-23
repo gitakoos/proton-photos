@@ -81,7 +81,6 @@ import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
@@ -130,6 +129,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
@@ -160,6 +160,8 @@ import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
+import eu.akoos.photos.presentation.gallery.selectAllCountFor
+import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
 import eu.akoos.photos.presentation.search.components.CalendarPreviewCard
 import eu.akoos.photos.presentation.search.components.OfflinePreviewCard
 import eu.akoos.photos.presentation.search.components.PeoplePreviewCard
@@ -570,7 +572,7 @@ fun SearchScreen(
                         start = if (seamless) 0.dp else 6.dp,
                         end = if (seamless) 0.dp else 6.dp,
                         top = headerPad + 4.dp,
-                        bottom = 12.dp,
+                        bottom = selectionGridBottomPadding(12.dp, isSelectionMode, gridPadsNavigationBar = true),
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
@@ -761,8 +763,9 @@ fun SearchScreen(
         )
 
         // Selection-mode overlay: the shared drawer, so every bulk action sits in one place here
-        // exactly as it does on the timeline, album and device-folder surfaces.
-        val allResultsSelected = results.isNotEmpty() && selectedItems.size == results.size
+        // exactly as it does on the timeline, album and device-folder surfaces. Its header's Select
+        // all takes in every result.
+        val selectAllCount = selectAllCountFor(total = results.size, selected = selectedItems.size)
         var showStripPicker by remember { mutableStateOf(false) }
         // Which way the offline row goes, so it names the press rather than the state: a pin while
         // anything pinnable in the selection is still un-pinned, a removal once none is.
@@ -772,18 +775,10 @@ fun SearchScreen(
         val searchSelectionActions = buildList {
             add(
                 SelectionAction(
-                    icon = Icons.Default.SelectAll,
-                    label = stringResource(
-                        if (allResultsSelected) R.string.gallery_deselect_all else R.string.select_all,
-                    ),
-                    onClick = { if (allResultsSelected) vm.clearSelection() else vm.selectAll() },
-                )
-            )
-            add(
-                SelectionAction(
                     icon = Icons.Default.Share,
                     label = stringResource(R.string.sel_label_share),
                     onClick = { vm.shareSelected() },
+                    slot = PrimarySlot.Share,
                 )
             )
             // Add-to-album needs a Drive destination, so it stays behind a signed-in session.
@@ -793,6 +788,7 @@ fun SearchScreen(
                         icon = Icons.Default.PhotoAlbum,
                         label = stringResource(R.string.gallery_add_to_album),
                         onClick = { showAddToAlbumSheet = true },
+                        slot = PrimarySlot.Organize,
                     )
                 )
             }
@@ -815,6 +811,7 @@ fun SearchScreen(
                         icon = Icons.AutoMirrored.Filled.DriveFileMove,
                         label = stringResource(R.string.move_to_folder),
                         onClick = { showMoveSheet = true },
+                        slot = PrimarySlot.Organize,
                     )
                 )
             }
@@ -923,6 +920,7 @@ fun SearchScreen(
                     tint = ErrorColor,
                     enabled = !isDeleting,
                     onClick = { showDeleteSheet = true },
+                    slot = PrimarySlot.Delete,
                 )
             )
         }
@@ -935,6 +933,12 @@ fun SearchScreen(
             // them needs no deliberate pull or tap first.
             contentScrolling = resultsGridState.isScrollInProgress,
             modifier = Modifier.align(Alignment.BottomCenter),
+            selectAllCount = selectAllCount,
+            onSelectAll = if (selectAllCount != null) {
+                { vm.selectAll() }
+            } else {
+                null
+            },
         )
         if (showStripPicker) {
             MetadataStripPickerDialog(

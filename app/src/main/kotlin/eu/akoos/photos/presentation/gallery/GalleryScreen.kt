@@ -1321,16 +1321,10 @@ fun GalleryScreen(
             multiDownloadState = multiDownloadState,
             multiStripState = multiStripState,
             addToAlbumState = addToAlbumState,
-            allSelected = state.filteredItems.isNotEmpty() &&
-                state.selectedItems.size == state.filteredItems.size,
             isSignedIn = state.isSignedIn,
             // Add-to-person runs on-device and can name a new person, so it follows face recognition
             // alone, for a guest too; the account-only actions in the same list stay behind isSignedIn.
             showAddToPerson = faceEnabled,
-            onSelectAll = {
-                val all = state.filteredItems.toSet()
-                viewModel.setSelection(if (state.selectedItems.size == all.size) emptySet() else all)
-            },
             onShare = {
                 // Open the unified share drawer (Send to app / Share with people / Public
                 // link) instead of sharing straight to the OS chooser.
@@ -1355,6 +1349,12 @@ fun GalleryScreen(
             onCreateGif = { state.selectedItems.singleOrNull()?.let(onCreateGif) },
             onRequestMoveToFolder = { showMoveToFolderSheet = true },
         )
+        // Select all stands in the drawer's header and takes in every photo the filtered timeline
+        // shows.
+        val selectAllCount = selectAllCountFor(
+            total = state.filteredItems.size,
+            selected = state.selectedItems.size,
+        )
         SelectionDrawer(
             visible = state.isSelectionMode,
             items = remember(state.selectedItems) { state.selectedItems.toList() },
@@ -1368,6 +1368,12 @@ fun GalleryScreen(
                 gridState.isScrollInProgress
             },
             modifier = Modifier.align(Alignment.BottomCenter),
+            selectAllCount = selectAllCount,
+            onSelectAll = if (selectAllCount != null) {
+                { viewModel.setSelection(state.filteredItems.toSet()) }
+            } else {
+                null
+            },
         )
 
         // ── UNIFIED PROGRESS PILL ─────────────────────────────────────────────

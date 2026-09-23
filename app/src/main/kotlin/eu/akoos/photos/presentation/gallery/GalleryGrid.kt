@@ -525,7 +525,7 @@ internal fun PhotoGrid(
         state = gridState,
         contentPadding = PaddingValues(
             top = topContentPadding + 8.dp,
-            bottom = 120.dp,
+            bottom = selectionGridBottomPadding(120.dp, isSelectionMode),
             start = if (seamless) 0.dp else 20.dp,
             end = if (seamless) 0.dp else 20.dp,
         ),
@@ -784,7 +784,7 @@ private fun MosaicPhotoGrid(
             state = staggeredState,
             contentPadding = PaddingValues(
                 top = topContentPadding + 8.dp,
-                bottom = 120.dp,
+                bottom = selectionGridBottomPadding(120.dp, isSelectionMode),
                 start = if (seamless) 0.dp else 20.dp,
                 end = if (seamless) 0.dp else 20.dp,
             ),

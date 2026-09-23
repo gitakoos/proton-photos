@@ -1516,6 +1516,11 @@
     <string name="sel_label_unhide">Kivétel a Rejtett fotókból</string>
     <string name="sel_show_actions">Műveletek megjelenítése</string>
     <string name="sel_hide_actions">Műveletek elrejtése</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">Kijelölsz %1$d fotót?</item>
+        <item quantity="other">Kijelölsz %1$d fotót?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Egyszerre ennyi fotóval dolgozni eltarthat egy ideig.</string>
     <string name="picker_filter_all">Összes</string>
     <string name="picker_filter_cloud">Felhő</string>
     <string name="picker_filter_device">Eszköz</string>

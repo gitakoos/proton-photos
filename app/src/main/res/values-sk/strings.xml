@@ -1601,6 +1601,13 @@
     <string name="sel_label_unhide">Presunúť zo Skrytých fotiek</string>
     <string name="sel_show_actions">Zobraziť akcie</string>
     <string name="sel_hide_actions">Skryť akcie</string>
+    <plurals name="select_all_confirm_title">
+        <item quantity="one">Vybrať %1$d fotku?</item>
+        <item quantity="few">Vybrať %1$d fotky?</item>
+        <item quantity="many">Vybrať %1$d fotky?</item>
+        <item quantity="other">Vybrať %1$d fotiek?</item>
+    </plurals>
+    <string name="select_all_confirm_body">Práca s toľkými fotkami naraz môže chvíľu trvať.</string>
     <string name="picker_filter_all">Všetko</string>
     <string name="picker_filter_cloud">Cloud</string>
     <string name="picker_filter_device">Zariadenie</string>
