@@ -202,7 +202,6 @@ class GalleryViewModel @Inject constructor(
     private val cryptoServiceClient: eu.akoos.photos.crypto.CryptoServiceClient,
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
-    private val addPhotosToPersonUseCase: eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase,
     private val moveToFolder: MoveToFolderUseCase,
 ) : ViewModel() {
 
@@ -301,6 +300,14 @@ class GalleryViewModel @Inject constructor(
      *  entry the user has not opened yet, and always false while news is switched off. */
     val newsUnread: StateFlow<Boolean> = newsRepository.observeUnreadCount()
         .map { it > 0 }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Whether on-device face recognition is on (the AI master and the face switch), which offers Add to
+     *  person on the selection, for a guest as for an account. Off until the switches resolve, so the
+     *  action never flashes in. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+        .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Avatar dot tap → re-run a check, which re-opens the update dialog if an update is still
@@ -2294,17 +2301,6 @@ class GalleryViewModel @Inject constructor(
      * @param albumLinkId Drive link ID of the target album.
      * @param albumName   Album display name, used only for the success snackbar.
      */
-    /** Attach the current selection to a named person, then exit selection. The membership survives a
-     *  rescan (stored against the person's name); an unnamed person is a no-op inside the use case. */
-    fun addSelectedToPerson(personId: Long) {
-        val keys = _uiState.value.selectedItems.map { it.stableId }
-        if (keys.isEmpty()) return
-        viewModelScope.launch {
-            addPhotosToPersonUseCase(personId, keys)
-            clearSelection()
-        }
-    }
-
     fun addSelectedToAlbum(
         albumLinkId: String,
         albumName: String,

@@ -52,7 +52,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -75,7 +74,6 @@ import eu.akoos.photos.data.repository.drive.AlbumSharingService
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.FavoriteWriter
 import eu.akoos.photos.presentation.common.buildDeleteUndoAction
-import eu.akoos.photos.presentation.gallery.toPersonUi
 import eu.akoos.photos.presentation.common.buildHideUndoAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOnForCloudPhotos
 import eu.akoos.photos.presentation.common.message
@@ -270,8 +268,6 @@ class AlbumDetailViewModel @Inject constructor(
     private val hiddenStorage: HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
     private val favoriteWriter: FavoriteWriter,
-    private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
-    private val addPhotosToPersonUseCase: eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase,
     private val resolveCoverGifUseCase: eu.akoos.photos.domain.usecase.ResolveCoverGifUseCase,
 ) : ViewModel() {
 
@@ -795,29 +791,13 @@ class AlbumDetailViewModel @Inject constructor(
 
     fun clearSelection() = _uiState.update { it.copy(selectedPhotos = emptySet()) }
 
-    /** People for the "add to person" sheet, resolved to UI tiles from the merged library so a cover
-     *  renders. Only collected while the sheet observes it. */
-    val people: StateFlow<List<eu.akoos.photos.presentation.gallery.PersonUi>> =
-        accountManager.getPrimaryUserId()
-            .flatMapLatest { userId ->
-                if (userId == null) flowOf(emptyList())
-                else observePeopleUseCase(userId, getGalleryItems.invoke(userId))
-                    .map { list -> list.mapNotNull { it.toPersonUi() } }
-            }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** Attach the selected album photos to a person, mapping each album linkId to the item's stableId
-     *  (a synced photo keys on its local uri, not the linkId) so the membership matches the person's
-     *  keyspace. Survives a rescan; an unnamed person is a no-op inside the use case. */
-    fun addSelectedToPerson(personId: Long) {
-        val st = _uiState.value
-        val keys = st.selectedPhotos.map { linkId -> st.localUriByLinkId[linkId] ?: linkId }
-        if (keys.isEmpty()) return
-        viewModelScope.launch {
-            addPhotosToPersonUseCase(personId, keys)
-            clearSelection()
-        }
-    }
+    /** Whether on-device face recognition is on (the AI master and the face switch), which offers Add to
+     *  person on the album selection, the same gate the timeline and Search use. Off until the switches
+     *  resolve, so the action never flashes in. */
+    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
     fun setSelectedPhotos(linkIds: Set<String>) = _uiState.update { it.copy(selectedPhotos = linkIds) }

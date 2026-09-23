@@ -117,7 +117,6 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
-import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
@@ -166,6 +165,8 @@ import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.common.LocalVideoThumb
 import eu.akoos.photos.presentation.common.rememberLocalVideoThumbnail
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.people.NameOrMergeSheet
+import eu.akoos.photos.presentation.people.NameOrMergeSubject
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.CloudBadgeSurface
@@ -258,6 +259,28 @@ internal fun applyVaultMoves(
         )
     }
     return if (moved == items) items else moved
+}
+
+/**
+ * What the naming sheet asks about when [person]'s face tag or People pill is tapped, or null for a
+ * named person, whose page opens instead.
+ *
+ * A single Unsorted face is named on its own, never as the whole bucket. An unnamed group is asked about
+ * as the group, headed by its face as it appears on this photo. [faceSource] is the model the viewer draws
+ * the photo from, the one the face is cropped out of.
+ */
+internal fun nameOrMergeSubjectFor(
+    person: PhotoViewerViewModel.ViewerPerson,
+    faceSource: Any?,
+): NameOrMergeSubject? = when {
+    person.isOther -> NameOrMergeSubject.Face(person.faceId, faceSource, person.faceBox)
+    person.name.isNullOrBlank() -> NameOrMergeSubject.Group(
+        personId = person.personId,
+        photoCount = person.photoCount,
+        coverSource = faceSource,
+        faceBox = person.faceBox,
+    )
+    else -> null
 }
 
 /** One press's outcome for the viewer's hand-rolled tap detector: a lift (a tap), a hold past the
@@ -443,8 +466,9 @@ fun PhotoViewerScreen(
     // The photo that list was read for, so the details panel shows only the settled photo's people.
     val peopleInPhotoKey by viewModel.peopleInPhotoKey.collectAsStateWithLifecycle()
     var facesMode by remember { mutableStateOf(false) }
-    // The single Unsorted face the user tapped in the tags overlay to name, or null when no sheet is open.
-    var faceToName by remember { mutableStateOf<String?>(null) }
+    // The nameless face or group a face tag or a People pill was tapped for, or null while the naming
+    // sheet is closed.
+    var nameOrMergeSubject by remember { mutableStateOf<NameOrMergeSubject?>(null) }
     // The settled photo's decoded pixel size, shared by the tags and the long-press face hit-test.
     var settledImageSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     // Once any settled photo decodes to HDR, hold the window in HDR colour mode for the rest of the
@@ -1637,8 +1661,8 @@ fun PhotoViewerScreen(
                     // Face name tags over the settled photo or video when the menu has them on, placed
                     // through the same fit and zoom the media rides so each tag stays on its face while
                     // panning and pinching. A video uses its decoded frame size once the player reports
-                    // it, a still its decoded size; the still's size stands in until then. A tap opens
-                    // the person, or names a lone Unsorted face on the spot. Drawn under the hidden-blur
+                    // it, a still its decoded size; the still's size stands in until then. A tap opens a
+                    // named person, or the sheet that names a nameless face. Drawn under the hidden-blur
                     // below so a hidden item never shows tags on top.
                     val faceOverlaySize = if (
                         state is PhotoViewerViewModel.ViewerState.ShowVideo &&
@@ -1654,12 +1678,13 @@ fun PhotoViewerScreen(
                             offset = offset,
                             people = peopleInPhoto,
                             onFaceClick = { person ->
-                                // A leftover (Unsorted) face has no person to open, so name this one
-                                // face into a real person right here, and KEEP the overlay up so the next
-                                // face in a group photo can be tagged without reopening it. Opening a real
-                                // person navigates away, so there the overlay is dropped.
-                                if (person.isOther) {
-                                    faceToName = person.faceId
+                                // A nameless face opens the naming sheet, cropped from this page's model as
+                                // the People box crops it, and the overlay STAYS up so the next face in a
+                                // group photo can be tagged without reopening it. A named person's page
+                                // navigates away, so there the overlay is dropped.
+                                val subject = nameOrMergeSubjectFor(person, thumbModel)
+                                if (subject != null) {
+                                    nameOrMergeSubject = subject
                                 } else {
                                     facesMode = false
                                     onOpenPerson(person.personId)
@@ -2654,10 +2679,11 @@ fun PhotoViewerScreen(
                             people = peopleInPhoto,
                             faceSource = faceSource,
                             onPersonClick = { person ->
+                                // The details sheet goes first, so the naming sheet never opens over it.
                                 showMetadata = false
-                                // An Unsorted face has no person page to open, so it is named on the spot.
-                                if (person.isOther) {
-                                    faceToName = person.faceId
+                                val subject = nameOrMergeSubjectFor(person, faceSource)
+                                if (subject != null) {
+                                    nameOrMergeSubject = subject
                                 } else {
                                     onOpenPerson(person.personId)
                                 }
@@ -2897,23 +2923,18 @@ fun PhotoViewerScreen(
         }
     }
 
-    // ── Name a single Unsorted face tapped in the tags overlay ─────────────────
-    // A leftover face has no person page to open, so naming happens here: type a name and this one face
-    // becomes (or joins) that person, lifting it out of the Unsorted pile.
-    if (faceToName != null) {
-        val settledItem = items.getOrNull(pagerState.settledPage)
-        val fid = faceToName
-        EditFieldSheet(
-            title = stringResource(R.string.person_add_name),
-            hint = stringResource(R.string.person_rename_hint),
-            initialValue = "",
-            singleLine = true,
-            confirmLabel = stringResource(R.string.person_add_name),
-            onDismiss = { faceToName = null },
-            onSave = { name ->
-                if (fid != null && settledItem != null) viewModel.nameFace(settledItem, fid, name)
+    // ── Name a nameless face tapped in the tags overlay or the People box ──────
+    // A single Unsorted face goes to a picked or typed person; an unnamed group takes a name or joins
+    // someone. Once done, the settled photo's people are read again so its tags and pills show the name.
+    nameOrMergeSubject?.let { subject ->
+        NameOrMergeSheet(
+            subject = subject,
+            onDismiss = { nameOrMergeSubject = null },
+            onOpenGroup = { personId ->
+                facesMode = false
+                onOpenPerson(personId)
             },
-            canConfirm = { it.isNotBlank() },
+            onDone = { _ -> items.getOrNull(pagerState.settledPage)?.let { viewModel.loadPeopleInPhoto(it) } },
         )
     }
 }

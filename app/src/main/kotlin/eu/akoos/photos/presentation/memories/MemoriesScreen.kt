@@ -48,7 +48,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -60,11 +62,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.domain.usecase.MIN_FACES_TO_SHOW_PERSON
+import eu.akoos.photos.domain.usecase.isNameableCluster
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
 import eu.akoos.photos.presentation.gallery.PersonCard
+import eu.akoos.photos.presentation.gallery.PersonUi
+import eu.akoos.photos.presentation.people.NameOrMergeSheet
+import eu.akoos.photos.presentation.people.PersonTapTarget
+import eu.akoos.photos.presentation.people.personTapTarget
+import eu.akoos.photos.presentation.people.rememberGroupSubject
 import eu.akoos.photos.presentation.places.PlaceCard
 import eu.akoos.photos.presentation.theme.AppColors
 import java.util.Calendar
@@ -92,6 +99,7 @@ fun MemoriesScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
+    var nameOrMerge by remember { mutableStateOf<PersonUi?>(null) }
 
     Box(
         modifier = Modifier
@@ -104,14 +112,9 @@ fun MemoriesScreen(
         val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val contentTopPad = statusBarTop + 72.dp
 
-        // Only people in at least two photos reach the preview, so a stray detection cannot open its own
-        // section; the empty state keys off the same set. The preview shows the people you have NAMED,
-        // falling back to the clusters worth naming before any are named so the first is still reachable.
-        val peopleNamed = state.people.filter { !it.displayName.isNullOrBlank() }
-        val peopleToName = state.people.filter {
-            it.displayName.isNullOrBlank() && it.faceCount >= MIN_FACES_TO_SHOW_PERSON
-        }
-        val peopleShown = if (peopleNamed.isNotEmpty()) peopleNamed else peopleToName
+        // The people you have named, or before any are named the groups worth naming (see
+        // collectionPeople); the empty state keys off the same set.
+        val peopleShown = collectionPeople(state.people)
         val isEmpty = state.onThisDay.isEmpty() && state.seasons.isEmpty() &&
             peopleShown.isEmpty() && state.places.isEmpty()
         // Loading / empty / content phase, cross-faded so the neutral empty state never flashes before
@@ -165,9 +168,16 @@ fun MemoriesScreen(
                         ) {
                             peopleShown.take(12).forEach { person ->
                                 Box(Modifier.width(132.dp)) {
+                                    // A named person opens their page; a group with no name opens the
+                                    // name-or-merge sheet, whose "See photos" opens the group's page.
                                     PersonCard(
                                         person = person,
-                                        onClick = { onPersonClick(person.personId) },
+                                        onClick = {
+                                            when (personTapTarget(person)) {
+                                                PersonTapTarget.Page -> onPersonClick(person.personId)
+                                                PersonTapTarget.NameOrMerge -> { nameOrMerge = person }
+                                            }
+                                        },
                                     )
                                 }
                             }
@@ -281,7 +291,24 @@ fun MemoriesScreen(
             onBack = onBack,
         )
     }
+
+    nameOrMerge?.let { group ->
+        NameOrMergeSheet(
+            subject = rememberGroupSubject(group),
+            onDismiss = { nameOrMerge = null },
+            onOpenGroup = onPersonClick,
+        )
+    }
 }
+
+/**
+ * The people the Collection previews: the ones you have named, or, before anyone is named, the groups
+ * worth naming ([isNameableCluster]) so the first can still be reached. Never the Unsorted bucket, the
+ * leftover pile of faces to sort rather than a person. The given order (most photographed first) is kept.
+ */
+internal fun collectionPeople(people: List<PersonUi>): List<PersonUi> =
+    people.filter { !it.isOther && !it.displayName.isNullOrBlank() }
+        .ifEmpty { people.filter { isNameableCluster(it.displayName, it.isOther, it.faceCount) } }
 
 /**
  * Loading stand-in for the Collection preview: a couple of section headers, each over a 2×2 grid of

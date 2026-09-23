@@ -237,10 +237,9 @@ fun AlbumDetailScreen(
     var showManageLinkSheet by remember { mutableStateOf(false) }
     val manageLinkSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val publicLinkState by viewModel.publicLinkState.collectAsStateWithLifecycle()
-    // Add-to-person drawer for the album selection.
+    // Add-to-person flow for the album selection, offered while face recognition is on.
     var showAddToPersonSheet by remember { mutableStateOf(false) }
-    val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val albumPeople by viewModel.people.collectAsStateWithLifecycle()
+    val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
     var showMoveToAlbumSheet by remember { mutableStateOf(false) }
     val moveToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showCreateAlbumForMove by remember { mutableStateOf(false) }
@@ -917,13 +916,17 @@ fun AlbumDetailScreen(
                     )
                 )
             }
-            add(
-                SelectionAction(
-                    icon = Icons.Default.PersonAdd,
-                    label = stringResource(R.string.gallery_add_to_person),
-                    onClick = { showAddToPersonSheet = true },
+            // Add-to-person runs on-device and can name a new person, so it follows face recognition
+            // alone, the same gate the timeline and Search use.
+            if (faceEnabled) {
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.PersonAdd,
+                        label = stringResource(R.string.gallery_add_to_person),
+                        onClick = { showAddToPersonSheet = true },
+                    )
                 )
-            )
+            }
             // Favourite the selection. An album is where a set worth favouriting is already
             // gathered, and the cells carry the heart, so the press shows on the grid it came
             // from. Off a shared-with-me album: tag 0 belongs to the owner's photo, the same
@@ -1117,14 +1120,26 @@ fun AlbumDetailScreen(
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
-    // Add the album selection to a person, mirroring the timeline's add-to-person.
+    // Add the album selection to a person, the same face-first flow as the timeline's.
     if (showAddToPersonSheet && state.selectedCount > 0) {
-        eu.akoos.photos.presentation.gallery.GalleryAddToPersonSheet(
-            people = albumPeople,
-            sheetState = addToPersonSheetState,
-            onPersonSelected = { personId ->
+        // Each photo goes in as the album's own item for it, so it keys on its Drive linkId, the stable
+        // id the face index and a person's photos use, as on the timeline.
+        val facePhotos = remember(
+            state.selectedPhotos, state.photos, state.localItemByLinkId, state.localUriByLinkId,
+        ) {
+            val byId = state.photos.associateBy { it.linkId }
+            state.selectedPhotos.mapNotNull { linkId ->
+                val photo = byId[linkId] ?: return@mapNotNull null
+                AlbumPhotoItems.galleryItem(
+                    photo, state.localItemByLinkId[linkId], state.localUriByLinkId[linkId],
+                )
+            }
+        }
+        eu.akoos.photos.presentation.people.AddToPersonFaceSheet(
+            photos = facePhotos,
+            onDone = {
                 showAddToPersonSheet = false
-                viewModel.addSelectedToPerson(personId)
+                viewModel.clearSelection()
             },
             onDismiss = { showAddToPersonSheet = false },
         )

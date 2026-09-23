@@ -1730,7 +1730,6 @@
     <string name="people_none_named">Je hebt nog niemand een naam gegeven. Open de controle om de personen die de app heeft gevonden een naam te geven, samen te voegen en op te ruimen.</string>
     <string name="people_review_empty">Momenteel geen naamloze personen. Terwijl je foto\'s worden doorzocht, verschijnen hier groepen om een naam te geven en samen te voegen.</string>
     <string name="people_review_title">Personen om een naam te geven</string>
-    <string name="person_add_needs_name">Geef deze persoon eerst een naam en voeg er dan foto\'s aan toe.</string>
     <string name="person_add_photos">Foto\'s toevoegen</string>
     <string name="person_add_photos_title">Aan deze persoon toevoegen</string>
     <string name="person_merge">Personen samenvoegen</string>
@@ -1752,6 +1751,14 @@
     <string name="person_merge_confirm_title">Personen samenvoegen?</string>
     <string name="person_merge_empty">Er zijn geen andere personen om samen te voegen.</string>
     <string name="person_merge_name_title">Samenvoegen met een persoon</string>
+    <string name="name_or_merge_title">Wie is dit?</string>
+    <string name="name_or_merge_see_photos">Foto\'s bekijken</string>
+    <string name="name_or_merge_merge_body">Deze groep wordt bij %1$s gevoegd, en de twee worden vanaf nu als dezelfde persoon behandeld. Dit kan niet automatisch weer worden gesplitst.</string>
+    <string name="name_or_merge_failed">Kon de wijziging niet opslaan</string>
+    <string name="add_to_person_choose_faces">Kies de gezichten</string>
+    <string name="add_to_person_no_face">Geen gezicht gevonden</string>
+    <string name="add_to_person_find_faces">Gezichten zoeken</string>
+    <string name="add_to_person_needs_face">Nog geen personen met een naam. Kies een gezicht om er een aan te maken.</string>
     <string name="person_merge_pick_title">Kies de persoon om samen te voegen</string>
     <string name="person_not_a_person">Dit is geen persoon</string>
     <string name="person_not_a_person_body">De geselecteerde gezichten worden uit Personen verwijderd en bij elke toekomstige scan overgeslagen. Gebruik dit voor standbeelden, posters en vergissingen. De foto\'s zelf worden niet verwijderd.</string>

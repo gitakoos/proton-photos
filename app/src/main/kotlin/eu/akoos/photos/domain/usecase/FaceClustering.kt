@@ -344,6 +344,41 @@ fun resolveClusterNames(
 }
 
 /**
+ * Gives each confirmed name that won no cluster in [resolveClusterNames] a cluster of its own, so a face
+ * the user moved to a new person keeps that name even while it still groups with a bigger named person:
+ * the faces confirmed for such a name leave whatever cluster the base pass put them in (the unassigned
+ * leftover included) and form one fresh cluster carrying the name. A confirmed name that won a cluster
+ * is left to [attractToNamedClusters], which moves its confirmed faces there, and an unconfirmed face
+ * never moves here, so it keeps following the majority. [manualNamePerFace] and [clusterPerFace] are
+ * parallel, and [nameForCluster] is [resolveClusterNames]'s result. Fresh cluster ids start past every
+ * id in use, one per name in name order, so the result is deterministic. Returns the updated assignment
+ * and the cluster names extended with the fresh clusters.
+ */
+fun splitOutUnclaimedNames(
+    manualNamePerFace: List<String?>,
+    clusterPerFace: IntArray,
+    nameForCluster: Map<Int, String>,
+): Pair<IntArray, Map<Int, String>> {
+    val result = clusterPerFace.copyOf()
+    val claimed = nameForCluster.values.toHashSet()
+    val unclaimed = manualNamePerFace.filterNotNull().filterTo(sortedSetOf<String>()) { it !in claimed }
+    if (unclaimed.isEmpty()) return result to nameForCluster
+    val names = HashMap(nameForCluster)
+    val clusterByName = HashMap<String, Int>()
+    var next = maxOf(clusterPerFace.maxOrNull() ?: -1, nameForCluster.keys.maxOrNull() ?: -1) + 1
+    for (name in unclaimed) {
+        clusterByName[name] = next
+        names[next] = name
+        next++
+    }
+    for (i in result.indices) {
+        val target = manualNamePerFace[i]?.let { clusterByName[it] } ?: continue
+        result[i] = target
+    }
+    return result to names
+}
+
+/**
  * Teaches from the user's confirmations without disturbing the base clustering: every face the user
  * confirmed for a person is moved into that person's cluster, and then any face still sitting in an
  * unnamed cluster is pulled into the named cluster whose confirmed faces it best matches, when that

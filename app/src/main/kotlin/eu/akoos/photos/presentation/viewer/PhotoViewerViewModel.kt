@@ -634,6 +634,8 @@ class PhotoViewerViewModel @Inject constructor(
         /** True when the face sits in the Unsorted leftover bucket, which cannot be named as a whole; the
          *  viewer names this one face into a new or existing person instead of opening the bucket. */
         val isOther: Boolean,
+        /** How many photos the person holds, the count the People page shows; 0 for an Unsorted face. */
+        val photoCount: Int = 0,
     )
 
     private val _peopleInPhoto = MutableStateFlow<List<ViewerPerson>>(emptyList())
@@ -651,7 +653,7 @@ class PhotoViewerViewModel @Inject constructor(
     private var peopleJob: Job? = null
 
     /** The stableId the latest [loadPeopleInPhoto] was started for, the photo the viewer settled on. A
-     *  scan or a naming that finishes after a swipe checks it before touching the list. Main thread only. */
+     *  scan that finishes after a swipe checks it before touching the list. Main thread only. */
     private var peopleRequestedFor: String? = null
 
     private fun publishPeople(photoKey: String, people: List<ViewerPerson>) {
@@ -725,45 +727,19 @@ class PhotoViewerViewModel @Inject constructor(
             // so every leftover face on the photo can be named on its own instead of all collapsing into the
             // single grab-bag bucket (which is what left them unnameable from here).
             if (!isOther && !seenPerson.add(pid)) continue
-            val name = if (isOther) null else personDao.personById(pid)?.displayName?.takeIf { it.isNotBlank() }
+            val person = if (isOther) null else personDao.personById(pid)
             result.add(
                 ViewerPerson(
-                    pid, name,
-                    eu.akoos.photos.presentation.gallery.FaceBox(f.left, f.top, f.right, f.bottom),
-                    f.id, isOther,
+                    personId = pid,
+                    name = person?.displayName?.takeIf { it.isNotBlank() },
+                    faceBox = eu.akoos.photos.presentation.gallery.FaceBox(f.left, f.top, f.right, f.bottom),
+                    faceId = f.id,
+                    isOther = isOther,
+                    photoCount = person?.faceCount ?: 0,
                 ),
             )
         }
         return result.sortedByDescending { it.name != null }
-    }
-
-    /**
-     * Name one face on the photo now on screen: assign it to an existing person called [rawName], or a
-     * fresh one, and label it so the name survives a rebuild. For a face stuck in the Unsorted leftover
-     * bucket (which cannot be named as a whole), this is how a single face is lifted out into a real
-     * person; a face already grouped under someone else moves the same way, which is how a wrong match
-     * is corrected. A recluster is requested so the new name pulls in that person's other faces.
-     * Guest-safe via the local sentinel; the chips on this photo are refreshed so the named face shows
-     * its name at once.
-     */
-    fun nameFace(item: GalleryItem, faceId: String, rawName: String) {
-        val name = rawName.trim()
-        if (faceId.isEmpty() || name.isEmpty()) return
-        viewModelScope.launch(Dispatchers.IO) {
-            val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-            val target = personDao.namedPeopleForUser(account)
-                .firstOrNull { it.displayName == name }?.id
-                ?: personDao.insert(eu.akoos.photos.data.db.entity.PersonEntity(userId = account, displayName = name))
-            faceDao.reassignFacesToPerson(listOf(faceId), target)
-            faceDao.labelFacesByIds(listOf(faceId), name)
-            faceIndexingScheduler.requestRecluster(userId)
-            // On the main thread, where the reads are started and cancelled, and only while the viewer
-            // is still on this photo, so a swipe made meanwhile keeps the next photo's people.
-            withContext(Dispatchers.Main) {
-                if (peopleBelongTo(peopleRequestedFor, item)) loadPeopleInPhoto(item)
-            }
-        }
     }
 
     /**

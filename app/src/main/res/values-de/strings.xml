@@ -1703,7 +1703,6 @@
     <string name="people_none_named">Du hast noch niemanden benannt. Öffne die Überprüfung, um die von der App gefundenen Personen zu benennen, zusammenzuführen und aufzuräumen.</string>
     <string name="people_review_empty">Gerade keine unbenannten Personen. Während deine Fotos durchsucht werden, erscheinen hier Gruppen zum Benennen und Zusammenführen.</string>
     <string name="people_review_title">Zu benennende Personen</string>
-    <string name="person_add_needs_name">Benenne diese Person zuerst, füge dann Fotos zu ihr hinzu.</string>
     <string name="person_add_photos">Fotos hinzufügen</string>
     <string name="person_add_photos_title">Zu dieser Person hinzufügen</string>
     <string name="person_merge">Personen zusammenführen</string>
@@ -1725,6 +1724,14 @@
     <string name="person_merge_confirm_title">Personen zusammenführen?</string>
     <string name="person_merge_empty">Es gibt keine anderen Personen zum Zusammenführen.</string>
     <string name="person_merge_name_title">Mit einer Person zusammenführen</string>
+    <string name="name_or_merge_title">Wer ist das?</string>
+    <string name="name_or_merge_see_photos">Fotos ansehen</string>
+    <string name="name_or_merge_merge_body">Diese Gruppe wird mit %1$s zusammengeführt, und beide gelten ab jetzt als dieselbe Person. Dies kann nicht automatisch wieder getrennt werden.</string>
+    <string name="name_or_merge_failed">Änderung konnte nicht gespeichert werden</string>
+    <string name="add_to_person_choose_faces">Gesichter auswählen</string>
+    <string name="add_to_person_no_face">Kein Gesicht gefunden</string>
+    <string name="add_to_person_find_faces">Gesichter finden</string>
+    <string name="add_to_person_needs_face">Noch keine benannten Personen. Wähle ein Gesicht, um eine zu erstellen.</string>
     <string name="person_merge_pick_title">Wähle die Person zum Zusammenführen</string>
     <string name="person_not_a_person">Das ist keine Person</string>
     <string name="person_not_a_person_body">Die ausgewählten Gesichter werden aus Personen entfernt und bei jedem künftigen Scan übersprungen. Verwende dies für Statuen, Poster und Fehler. Die Fotos selbst werden nicht gelöscht.</string>

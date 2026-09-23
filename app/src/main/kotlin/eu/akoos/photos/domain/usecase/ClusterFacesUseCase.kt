@@ -148,13 +148,17 @@ class ClusterFacesUseCase @Inject constructor(
         if (assignment != null) {
             // The name follows the cluster holding the most of each person's faces, carry and confirmations
             // counted together, so a lone confirmed suggestion cannot strip the name off the person's bulk.
-            nameForCluster.putAll(resolveClusterNames(oldPersonIds, manualNames, assignment, oldNameById))
+            val votedNames = resolveClusterNames(oldPersonIds, manualNames, assignment, oldNameById)
+            // A confirmed name that won no cluster (its faces still group with a bigger named person) gets
+            // a cluster of its own, so a face moved to a new person keeps that name across the rebuild.
+            val (namedAssignment, clusterNames) = splitOutUnclaimedNames(manualNames, assignment, votedNames)
+            nameForCluster.putAll(clusterNames)
             // Teach from the confirmations: confirmed faces anchor their person and pull matching split
             // faces in, off the database (pure CPU).
             finalAssignment = attractToNamedClusters(
                 embeddings = samples.map { it.embedding },
                 scores = FloatArray(samples.size) { samples[it].score },
-                assignment = assignment,
+                assignment = namedAssignment,
                 clusterName = nameForCluster,
                 manualName = manualNames,
                 threshold = FACE_CLUSTER_THRESHOLD,

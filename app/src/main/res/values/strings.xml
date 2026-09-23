@@ -1327,7 +1327,6 @@
     <string name="person_rename_hint">Name</string>
     <string name="person_add_photos">Add photos</string>
     <string name="person_add_photos_title">Add to this person</string>
-    <string name="person_add_needs_name">Name this person first, then add photos to them.</string>
     <string name="person_remove_from">Remove from person</string>
     <string name="person_move_to_title">Move to another person</string>
     <string name="person_remove_confirm_title">Remove from this person?</string>
@@ -1375,6 +1374,14 @@
     <string name="person_picker_create">Create \"%1$s\"</string>
     <string name="person_picker_empty">No named people yet. Type a name above to create one.</string>
     <string name="person_merge_name_title">Merge into a person</string>
+    <string name="name_or_merge_title">Who is this?</string>
+    <string name="name_or_merge_see_photos">See photos</string>
+    <string name="name_or_merge_merge_body">This group joins %1$s, and from now on they are treated as the same person. This cannot be split back apart automatically.</string>
+    <string name="name_or_merge_failed">Couldn\'t save the change</string>
+    <string name="add_to_person_choose_faces">Choose the faces</string>
+    <string name="add_to_person_no_face">No face found</string>
+    <string name="add_to_person_find_faces">Find faces</string>
+    <string name="add_to_person_needs_face">No named people yet. Choose a face to create one.</string>
     <string name="person_not_a_person_title">Not a person?</string>
     <string name="person_not_a_person_body">The selected faces are dropped from People and skipped on every future scan. Use this for statues, posters and mistakes. The photos themselves are not deleted.</string>
     <string name="person_suggestions_review">Review suggestions</string>

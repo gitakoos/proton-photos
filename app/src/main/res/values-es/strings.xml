@@ -1735,7 +1735,6 @@
     <string name="people_none_named">Aún no has nombrado a nadie. Abre la revisión para nombrar, combinar y ordenar las personas que encontró la aplicación.</string>
     <string name="people_review_empty">No hay personas sin nombre por ahora. A medida que se analizan tus fotos, aquí aparecen grupos para nombrar y combinar.</string>
     <string name="people_review_title">Personas por nombrar</string>
-    <string name="person_add_needs_name">Primero nombra a esta persona y luego añádele fotos.</string>
     <string name="person_add_photos">Añadir fotos</string>
     <string name="person_add_photos_title">Añadir a esta persona</string>
     <string name="person_merge">Combinar personas</string>
@@ -1757,6 +1756,14 @@
     <string name="person_merge_confirm_title">¿Combinar personas?</string>
     <string name="person_merge_empty">No hay otras personas para combinar.</string>
     <string name="person_merge_name_title">Combinar con una persona</string>
+    <string name="name_or_merge_title">¿Quién es?</string>
+    <string name="name_or_merge_see_photos">Ver fotos</string>
+    <string name="name_or_merge_merge_body">Este grupo se une a %1$s, y ambos se tratan como la misma persona a partir de ahora. Esto no se puede separar de nuevo automáticamente.</string>
+    <string name="name_or_merge_failed">No se pudo guardar el cambio</string>
+    <string name="add_to_person_choose_faces">Elige las caras</string>
+    <string name="add_to_person_no_face">No se encontró ninguna cara</string>
+    <string name="add_to_person_find_faces">Buscar caras</string>
+    <string name="add_to_person_needs_face">Aún no hay personas con nombre. Elige una cara para crear una.</string>
     <string name="person_merge_pick_title">Elige la persona a combinar</string>
     <string name="person_not_a_person">Esto no es una persona</string>
     <string name="person_not_a_person_body">Las caras seleccionadas se eliminan de Personas y se omiten en cada análisis futuro. Úsalo para estatuas, carteles y errores. Las fotos en sí no se eliminan.</string>

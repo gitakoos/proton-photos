@@ -1704,7 +1704,6 @@
     <string name="people_none_named">Vous n\'avez encore nommé personne. Ouvrez la révision pour nommer, fusionner et organiser les personnes trouvées par l\'application.</string>
     <string name="people_review_empty">Aucune personne sans nom pour le moment. À mesure que vos photos sont analysées, des groupes à nommer et à fusionner apparaissent ici.</string>
     <string name="people_review_title">Personnes à nommer</string>
-    <string name="person_add_needs_name">Nommez d\'abord cette personne, puis ajoutez-lui des photos.</string>
     <string name="person_add_photos">Ajouter des photos</string>
     <string name="person_add_photos_title">Ajouter à cette personne</string>
     <string name="person_merge">Fusionner des personnes</string>
@@ -1726,6 +1725,14 @@
     <string name="person_merge_confirm_title">Fusionner des personnes ?</string>
     <string name="person_merge_empty">Il n\'y a pas d\'autres personnes à fusionner.</string>
     <string name="person_merge_name_title">Fusionner avec une personne</string>
+    <string name="name_or_merge_title">Qui est-ce ?</string>
+    <string name="name_or_merge_see_photos">Voir les photos</string>
+    <string name="name_or_merge_merge_body">Ce groupe rejoint %1$s, et les deux sont désormais considérés comme la même personne. Il n\'est pas possible de les séparer à nouveau automatiquement.</string>
+    <string name="name_or_merge_failed">Impossible d\'enregistrer la modification</string>
+    <string name="add_to_person_choose_faces">Choisissez les visages</string>
+    <string name="add_to_person_no_face">Aucun visage trouvé</string>
+    <string name="add_to_person_find_faces">Rechercher des visages</string>
+    <string name="add_to_person_needs_face">Aucune personne nommée pour l\'instant. Choisissez un visage pour en créer une.</string>
     <string name="person_merge_pick_title">Choisissez la personne à fusionner</string>
     <string name="person_not_a_person">Ce n\'est pas une personne</string>
     <string name="person_not_a_person_body">Les visages sélectionnés sont retirés de Personnes et ignorés lors de chaque analyse future. Utilisez ceci pour les statues, les affiches et les erreurs. Les photos elles-mêmes ne sont pas supprimées.</string>

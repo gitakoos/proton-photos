@@ -31,13 +31,19 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.withIndex
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
@@ -67,6 +73,8 @@ import javax.inject.Inject
 import kotlin.math.sqrt
 
 data class PersonDetailUiState(
+    /** The person the page shows, set as soon as it starts loading. */
+    val personId: Long? = null,
     /** The person's given name, or null while none is set (the screen shows a fallback then). */
     val personName: String? = null,
     val isLoading: Boolean = true,
@@ -74,6 +82,9 @@ data class PersonDetailUiState(
     /** True for the single "Unsorted" bucket, so the screen labels it, explains it, and offers only
      *  curation (move a real person out, mark the rest not a person) rather than naming the whole pile. */
     val isOther: Boolean = false,
+    /** The person's face tile as the people lists draw it, the face the name-or-merge sheet shows; null
+     *  until the people list is read, or while the person has no live cover. */
+    val tile: PersonUi? = null,
 )
 
 /**
@@ -132,12 +143,13 @@ class PersonDetailViewModel @Inject constructor(
     /**
      * Observe the person's photos: the faces they appear in (minus removed ones) unioned with any
      * manually attached photos, each resolved to a [GalleryItem] newest-first. Keyed on the person id
-     * so re-entering a different person reloads cleanly, and re-run after a rename so manual adds keyed
-     * on the new name are picked up.
+     * so re-entering a different person reloads cleanly. The person's own row is followed too, so a
+     * name given while the page is open (the name-or-merge sheet over it, or a rename) retitles the
+     * page and re-reads the photos attached under that name.
      */
     fun load(personId: Long) {
         loadJob?.cancel()
-        _uiState.update { it.copy(isLoading = true) }
+        _uiState.update { it.copy(personId = personId, isLoading = true) }
         loadJob = viewModelScope.launch {
             try {
                 val userId = accountManager.getPrimaryUserId().first()
@@ -149,23 +161,29 @@ class PersonDetailViewModel @Inject constructor(
                     _uiState.update { it.copy(isLoading = false, items = emptyList()) }
                     return@launch
                 }
-                val person = personDao.personById(personId)
-                val name = person?.displayName
-                _uiState.update { it.copy(personName = name, isOther = person?.isOther == true) }
+                val library = if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId)
+                var wasNamed: Boolean? = null
+                observeIdentity(account, personId).collectLatest { identity ->
+                    val name = identity.name
+                    _uiState.update { it.copy(personName = name, isOther = identity.isOther) }
+                    // A group named from the sheet offers its look-alikes at once, as a rename does.
+                    if (looksForSuggestionOnNaming(wasNamed, isNamed = name != null)) loadMergeSuggestion(personId)
+                    wasNamed = name != null
 
-                val manualKeys = if (name.isNullOrBlank()) flowOf(emptyList())
-                    else personManualPhotoDao.photoKeysForName(account, name)
+                    val manualKeys = if (name == null) flowOf(emptyList())
+                        else personManualPhotoDao.photoKeysForName(account, name)
 
-                combine(
-                    faceDao.photoKeysForPerson(account, personId),
-                    manualKeys,
-                    if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
-                ) { faceKeys, added, library ->
-                    val keys = (faceKeys + added).toSet()
-                    library.filter { it.stableId in keys }
-                        .sortedByDescending { it.captureTimeMs }
-                }.collect { matched ->
-                    _uiState.update { it.copy(isLoading = false, items = matched) }
+                    combine(
+                        faceDao.photoKeysForPerson(account, personId),
+                        manualKeys,
+                        library,
+                    ) { faceKeys, added, items ->
+                        val keys = (faceKeys + added).toSet()
+                        items.filter { it.stableId in keys }
+                            .sortedByDescending { it.captureTimeMs }
+                    }.collect { matched ->
+                        _uiState.update { it.copy(isLoading = false, items = matched) }
+                    }
                 }
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -174,6 +192,22 @@ class PersonDetailViewModel @Inject constructor(
             }
         }
     }
+
+    /** The page's title as it changes: the person's name and whether it is the Unsorted bucket. A row
+     *  missing from the first read still emits, as an unnamed person, so the grid settles; one that
+     *  disappears later (merged away, or an emptied Unsorted bucket) emits nothing, so the title holds
+     *  while the page leaves. */
+    private fun observeIdentity(account: String, personId: Long): Flow<PageIdentity> =
+        personDao.observePeopleForUser(account)
+            .map { people -> people.firstOrNull { it.id == personId } }
+            .withIndex()
+            .filter { (index, row) -> index == 0 || row != null }
+            .map { (_, row) ->
+                PageIdentity(name = row?.displayName?.takeIf { it.isNotBlank() }, isOther = row?.isOther == true)
+            }
+            .distinctUntilChanged()
+
+    private data class PageIdentity(val name: String?, val isOther: Boolean)
 
     /** Observe the person's current photo keys (faces minus removed, plus manual adds), so the add
      *  picker can exclude what the person already holds. */
@@ -194,19 +228,21 @@ class PersonDetailViewModel @Inject constructor(
     }
 
     /** Load the merge picker: every other person, ordered by how closely their mean face matches this
-     *  person's, so a likely duplicate sits first. */
+     *  person's, so a likely duplicate sits first. The same read refreshes this person's own face tile,
+     *  the face the name-or-merge sheet shows. */
     fun loadMergeCandidates(personId: Long) {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-            val centroids = withContext(Dispatchers.Default) {
-                centroidsByPerson(faceDao.allFacesByScoreDesc(account))
-            }
-            val target = centroids[personId]
             val people = observePeopleUseCase(
                 userId,
                 if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
             ).first().mapNotNull { it.toPersonUi() }
+            _uiState.update { state -> state.copy(tile = people.firstOrNull { it.personId == personId }) }
+            val centroids = withContext(Dispatchers.Default) {
+                centroidsByPerson(faceDao.allFacesByScoreDesc(account))
+            }
+            val target = centroids[personId]
             _mergeCandidates.value = people
                 .filter { it.personId != personId && !it.displayName.isNullOrBlank() }
                 .sortedByDescending { c ->
@@ -610,3 +646,11 @@ class PersonDetailViewModel @Inject constructor(
         return chosen ?: faceDao.topFaceForPerson(account, personId)
     }
 }
+
+/**
+ * Whether the page looks for a merge suggestion as its person's name is read again: only when a group
+ * that was open unnamed ([wasNamed] false) has just been given a name. The first read ([wasNamed] null)
+ * is the page opening, which looks for one on its own.
+ */
+internal fun looksForSuggestionOnNaming(wasNamed: Boolean?, isNamed: Boolean): Boolean =
+    wasNamed == false && isNamed

@@ -1702,7 +1702,6 @@
     <string name="people_none_named">Még senkit sem neveztél el. Nyisd meg az áttekintést, hogy elnevezd, egyesítsd és rendezd az alkalmazás által talált embereket.</string>
     <string name="people_review_empty">Jelenleg nincsenek el nem nevezett emberek. Ahogy a fotóid átvizsgálásra kerülnek, itt jelennek meg az elnevezendő és egyesítendő csoportok.</string>
     <string name="people_review_title">Elnevezendő emberek</string>
-    <string name="person_add_needs_name">Előbb nevezd el ezt az embert, aztán adj hozzá fotókat.</string>
     <string name="person_add_photos">Fotók hozzáadása</string>
     <string name="person_add_photos_title">Hozzáadás ehhez az emberhez</string>
     <string name="person_merge">Emberek egyesítése</string>
@@ -1724,6 +1723,14 @@
     <string name="person_merge_confirm_title">Egyesíted az embereket?</string>
     <string name="person_merge_empty">Nincsenek más emberek az egyesítéshez.</string>
     <string name="person_merge_name_title">Egyesítés egy emberrel</string>
+    <string name="name_or_merge_title">Ki ez?</string>
+    <string name="name_or_merge_see_photos">Fotók megtekintése</string>
+    <string name="name_or_merge_merge_body">Ez a csoport %1$s része lesz, és mostantól ugyanannak az embernek számít. Ez automatikusan nem választható szét újra.</string>
+    <string name="name_or_merge_failed">A módosítást nem sikerült menteni</string>
+    <string name="add_to_person_choose_faces">Válaszd ki az arcokat</string>
+    <string name="add_to_person_no_face">Nem található arc</string>
+    <string name="add_to_person_find_faces">Arcok keresése</string>
+    <string name="add_to_person_needs_face">Még nincsenek elnevezett emberek. Válassz egy arcot, hogy újat hozz létre.</string>
     <string name="person_merge_pick_title">Válaszd ki az egyesítendő embert</string>
     <string name="person_not_a_person">Ez nem egy ember</string>
     <string name="person_not_a_person_body">A kijelölt arcok kikerülnek az Emberek közül, és minden későbbi vizsgálat kihagyja őket. Ezt szobrokhoz, plakátokhoz és tévedésekhez használd. Maguk a fotók nem törlődnek.</string>

@@ -31,6 +31,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,8 +49,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -64,16 +65,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
+import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
- * A tall bottom drawer for choosing a person by name, shared by BOTH merge entry points (a single
- * person's "merge with", and the review screen's bulk merge) so they look and behave the same. It
- * carries a search field that filters the named people and, when the typed text matches nobody, offers
- * to create a new person with that name; the people fill a scrollable grid of face tiles. [onPick]
- * returns the chosen name, existing or new.
+ * A tall bottom drawer for choosing a person by name, shared by every surface that picks or names a
+ * person (a single person's "merge with", the review screen's bulk merge, the People search, and the
+ * name-or-merge sheet) so they look and behave the same. It carries the app's search field, which narrows
+ * the named people by name ignoring case and accents, and, when the typed text names nobody, offers to
+ * create a new person with that name; the people fill a scrollable grid of face tiles. Text that already
+ * names someone, case and accents aside, commits to that person, so no second person of the same name is
+ * created from here. [onPick] returns the chosen person, [onCreateNew] a new name.
+ *
+ * [header], when given, is drawn in the title line's place above the search field, for a sheet that opens
+ * with more than a title (the face it asks about); it then shows the title itself.
  */
 @Composable
 fun PersonPickerSheet(
@@ -84,6 +92,7 @@ fun PersonPickerSheet(
     onCreateNew: ((String) -> Unit)? = null,
     searchPlaceholder: String? = null,
     emptyText: String? = null,
+    header: (@Composable () -> Unit)? = null,
 ) {
     val colors = AppColors.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -96,11 +105,13 @@ fun PersonPickerSheet(
     val emptyStateText = emptyText ?: stringResource(R.string.person_picker_empty)
 
     val q = query.trim()
-    val filtered = remember(people, query) {
-        if (q.isEmpty()) people
-        else people.filter { it.displayName?.contains(q, ignoreCase = true) == true }
+    val filtered = remember(people, q) { PersonPickerSearch.filter(people, q) }
+    val namedAlready = remember(people, q) { PersonPickerSearch.personNamed(people, q) }
+    val commitTyped: () -> Unit = {
+        if (q.isNotEmpty()) {
+            if (namedAlready != null) onPick(namedAlready) else onCreateNew?.invoke(q)
+        }
     }
-    val exactExists = people.any { it.displayName.equals(q, ignoreCase = true) }
 
     ModalBottomSheet(
         sheetState = sheetState,
@@ -116,36 +127,40 @@ fun PersonPickerSheet(
                 .padding(horizontal = 20.dp)
                 .padding(top = 4.dp, bottom = 16.dp),
         ) {
-            Text(
-                title,
-                color = colors.fgPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                shape = RoundedCornerShape(14.dp),
-                placeholder = { Text(placeholderText, color = colors.fgMute) },
-                singleLine = true,
+            if (header != null) {
+                Box(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) { header() }
+            } else {
+                Text(
+                    title,
+                    color = colors.fgPrimary,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 12.dp),
+                )
+            }
+            AppSearchField(
+                query = query,
+                onQueryChange = { query = it },
+                placeholder = placeholderText,
                 modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = colors.accent,
-                    unfocusedBorderColor = colors.line2,
-                    focusedTextColor = colors.fgPrimary,
-                    unfocusedTextColor = colors.fgPrimary,
-                    cursorColor = colors.accent,
-                ),
+                // The keyboard's Done key commits the typed name the same way the Create row or the
+                // matching person's tile does, then closes the keyboard as usual.
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    commitTyped()
+                    defaultKeyboardAction(ImeAction.Done)
+                }),
             )
             Spacer(Modifier.height(12.dp))
 
-            if (onCreateNew != null && q.isNotEmpty() && !exactExists) {
+            // Offered only for a name nobody has yet; a name someone already has shows as their tile in
+            // the grid below instead, so the row never reads "Create" for an existing person.
+            if (onCreateNew != null && q.isNotEmpty() && namedAlready == null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { onCreateNew(q) }
+                        .clickable(onClick = commitTyped)
                         .padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -189,5 +204,33 @@ fun PersonPickerSheet(
                 }
             }
         }
+    }
+}
+
+/** The picker's name matching, kept free of Compose so it is tested on the JVM. */
+internal object PersonPickerSearch {
+
+    /** [people] whose name contains [query], ignoring case and accents, so "akos" finds "Ákos"; everyone
+     *  for a blank query. The given order is kept. */
+    fun filter(people: List<PersonUi>, query: String): List<PersonUi> {
+        val needle = SearchFilter.fold(query.trim())
+        if (needle.isEmpty()) return people
+        return people.filter { SearchFilter.fold(it.displayName.orEmpty()).contains(needle) }
+    }
+
+    /**
+     * The person [typed] is the name of, so committing it picks them rather than creating a second person
+     * of that name: the exact spelling first, else the name that matches once case and accents are set
+     * aside, the most photographed when several do. Null for blank text or a name nobody has. The whole
+     * name has to match, and unnamed people and the Unsorted bucket never do.
+     */
+    fun personNamed(people: List<PersonUi>, typed: String): PersonUi? {
+        val name = typed.trim()
+        if (name.isEmpty()) return null
+        val named = people.filter { !it.isOther && !it.displayName.isNullOrBlank() }
+        named.filter { it.displayName?.trim() == name }.maxByOrNull { it.faceCount }?.let { return it }
+        val folded = SearchFilter.fold(name)
+        return named.filter { SearchFilter.fold(it.displayName.orEmpty().trim()) == folded }
+            .maxByOrNull { it.faceCount }
     }
 }

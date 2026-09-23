@@ -151,7 +151,8 @@ class MemoriesViewModel @Inject constructor(
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MemoriesUiState())
 
-    /** Map a clustered person to the round-tile model, dropping any without a resolvable cover. */
+    /** Map a clustered person to the round-tile model, dropping any without a resolvable cover. The
+     *  Unsorted flag rides along so the Collection can keep that pile off its people row. */
     private fun PersonSummary.toPersonUi(): PersonUi? {
         val cover = coverPhotoKey ?: return null
         return PersonUi(
@@ -160,6 +161,7 @@ class MemoriesViewModel @Inject constructor(
             coverPhotoKey = cover,
             faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
             faceCount = faceCount,
+            isOther = isOther,
         )
     }
 

@@ -36,6 +36,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
@@ -78,6 +80,9 @@ internal fun AppSearchField(
     iconSize: Dp = 20.dp,
     textSize: TextUnit = TextUnit.Unspecified,
     onFocusChanged: (Boolean) -> Unit = {},
+    // A field whose keyboard key does something (a picker committing the typed name) passes its own.
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
 ) {
     val colors = AppColors.current
     val focusRequester = remember { FocusRequester() }
@@ -117,6 +122,8 @@ internal fun AppSearchField(
                 singleLine = true,
                 textStyle = TextStyle(color = colors.fgPrimary, fontSize = textSize),
                 cursorBrush = SolidColor(colors.accent),
+                keyboardOptions = keyboardOptions,
+                keyboardActions = keyboardActions,
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)

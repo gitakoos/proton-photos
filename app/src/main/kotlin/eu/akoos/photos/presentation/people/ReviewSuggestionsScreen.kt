@@ -62,14 +62,16 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.PersonCard
+import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
- * Review screen: every cluster the app found but the user has not named, as a grid. Tap one to open
- * and name it; long-press to start a multi-selection, then MERGE the selected clusters into one named
- * person (folds a face split across a few clusters back together) or mark them NOT A PERSON (drops
- * statues, posters and false detections for good).
+ * Review screen: every cluster the app found but the user has not named, as a grid. Tap one to name it
+ * or merge it into someone through the shared [NameOrMergeSheet], whose "See photos" opens the cluster;
+ * the Unsorted pile opens instead, to be sorted face by face. Long-press to start a multi-selection,
+ * then MERGE the selected clusters into one named person (folds a face split across a few clusters back
+ * together) or mark them NOT A PERSON (drops statues, posters and false detections for good).
  */
 @Composable
 fun ReviewSuggestionsScreen(
@@ -95,6 +97,7 @@ fun ReviewSuggestionsScreen(
     var showMerge by remember { mutableStateOf(false) }
     var pendingBulkMerge by remember { mutableStateOf<Pair<Set<Long>, String>?>(null) }
     var showNotPerson by remember { mutableStateOf(false) }
+    var nameOrMerge by remember { mutableStateOf<PersonUi?>(null) }
     val selecting = selection.isNotEmpty()
 
     fun toggle(id: Long) {
@@ -169,9 +172,15 @@ fun ReviewSuggestionsScreen(
                                     selected = person.personId in selection,
                                     // The Unsorted bucket is opened to curate its faces one by one, never bulk-merged
                                     // or bulk-rejected as a whole, so it always opens and cannot join a selection.
+                                    // Outside a selection any other cluster opens the name-or-merge sheet.
                                     onClick = {
-                                        if (selecting && !person.isOther) toggle(person.personId)
-                                        else onOpenCluster(person.personId)
+                                        when {
+                                            selecting && !person.isOther -> toggle(person.personId)
+                                            personTapTarget(person) == PersonTapTarget.NameOrMerge -> {
+                                                nameOrMerge = person
+                                            }
+                                            else -> onOpenCluster(person.personId)
+                                        }
                                     },
                                     onLongClick = if (person.isOther) null else { { toggle(person.personId) } },
                                 )
@@ -231,6 +240,14 @@ fun ReviewSuggestionsScreen(
                 onBack = onBack,
             )
         }
+    }
+
+    nameOrMerge?.let { cluster ->
+        NameOrMergeSheet(
+            subject = rememberGroupSubject(cluster),
+            onDismiss = { nameOrMerge = null },
+            onOpenGroup = onOpenCluster,
+        )
     }
 
     if (showMerge) {
@@ -293,3 +310,21 @@ fun ReviewSuggestionsScreen(
         )
     }
 }
+
+/** What tapping a person's tile or card opens. */
+internal enum class PersonTapTarget {
+    /** The person's own page of photos. */
+    Page,
+
+    /** The shared [NameOrMergeSheet], for a group that has no name yet. */
+    NameOrMerge,
+}
+
+/**
+ * The one rule every surface that lists people follows for a tap, so a nameless group is named the same
+ * way everywhere: a named person opens their page, a group with no name opens the name-or-merge sheet
+ * (whose "See photos" leads on to the page), and the Unsorted bucket opens its page, where its faces are
+ * sorted one by one, since the pile is never named or merged as a whole.
+ */
+internal fun personTapTarget(person: PersonUi): PersonTapTarget =
+    if (person.isOther || !person.displayName.isNullOrBlank()) PersonTapTarget.Page else PersonTapTarget.NameOrMerge

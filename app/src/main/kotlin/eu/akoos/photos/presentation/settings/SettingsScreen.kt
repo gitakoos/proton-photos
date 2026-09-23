@@ -136,6 +136,10 @@ import eu.akoos.photos.data.semantic.SemanticStatusLabel
 import eu.akoos.photos.data.semantic.semanticStatusLabel
 import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.presentation.gallery.PersonTile
+import eu.akoos.photos.presentation.people.NameOrMergeSheet
+import eu.akoos.photos.presentation.people.PersonTapTarget
+import eu.akoos.photos.presentation.people.personTapTarget
+import eu.akoos.photos.presentation.people.rememberGroupSubject
 import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ConfirmSheet
@@ -1354,8 +1358,9 @@ fun FaceRecognitionScreen(
 
 /**
  * Status of the face scan: the groups found (named and not-yet-named) and the faces detected, a one-line
- * state label, a progress bar only while a walk is running or paused, a preview row of the groups that
- * opens one to name it, and a pause / resume control while a walk is live.
+ * state label, a progress bar only while a walk is running or paused, a preview row of the groups where
+ * a named person opens their page and a nameless group the name-or-merge sheet, and a pause / resume
+ * control while a walk is live.
  */
 @Composable
 private fun FaceStatusCard(
@@ -1368,6 +1373,7 @@ private fun FaceStatusCard(
 ) {
     val colors = AppColors.current
     val state = ui.state
+    var nameOrMerge by remember { mutableStateOf<eu.akoos.photos.presentation.gallery.PersonUi?>(null) }
     // While a walk is active or pending, a persistent device-health block is what has actually parked
     // it: the scheduler keeps reporting Running when it stands down for a warm phone, a low battery or
     // the power saver, so name that reason in place of the plain running / paused label.
@@ -1446,8 +1452,9 @@ private fun FaceStatusCard(
                 )
             }
 
-            // The groups the scan has formed, named and not-yet-named alike, as round face tiles; tapping
-            // one opens that group to name it or browse its photos.
+            // The groups the scan has formed, named and not-yet-named alike, as round face tiles. A named
+            // person opens their page; a group with no name opens the name-or-merge sheet, whose "See
+            // photos" opens the group's page.
             if (groups.isNotEmpty()) {
                 Spacer(Modifier.height(14.dp))
                 LazyRow(
@@ -1455,7 +1462,16 @@ private fun FaceStatusCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     items(groups, key = { it.personId }) { person ->
-                        PersonTile(person = person, selected = false, onClick = { onOpenPerson(person.personId) })
+                        PersonTile(
+                            person = person,
+                            selected = false,
+                            onClick = {
+                                when (personTapTarget(person)) {
+                                    PersonTapTarget.Page -> onOpenPerson(person.personId)
+                                    PersonTapTarget.NameOrMerge -> { nameOrMerge = person }
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -1489,6 +1505,14 @@ private fun FaceStatusCard(
                 }
             }
         }
+    }
+
+    nameOrMerge?.let { group ->
+        NameOrMergeSheet(
+            subject = rememberGroupSubject(group),
+            onDismiss = { nameOrMerge = null },
+            onOpenGroup = onOpenPerson,
+        )
     }
 }
 

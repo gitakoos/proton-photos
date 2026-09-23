@@ -1789,7 +1789,6 @@
     <string name="people_none_named">Zatím jste nikoho nepojmenovali. Otevřete kontrolu, kde můžete pojmenovat, sloučit a uspořádat osoby, které aplikace našla.</string>
     <string name="people_review_empty">Momentálně nejsou žádné nepojmenované osoby. Během prohledávání fotek se zde objeví skupiny k pojmenování a sloučení.</string>
     <string name="people_review_title">Osoby k pojmenování</string>
-    <string name="person_add_needs_name">Nejprve tuto osobu pojmenujte, potom k ní přidejte fotky.</string>
     <string name="person_add_photos">Přidat fotky</string>
     <string name="person_add_photos_title">Přidat k této osobě</string>
     <string name="person_merge">Sloučit osoby</string>
@@ -1811,6 +1810,14 @@
     <string name="person_merge_confirm_title">Sloučit osoby?</string>
     <string name="person_merge_empty">Nejsou žádné další osoby ke sloučení.</string>
     <string name="person_merge_name_title">Sloučit s osobou</string>
+    <string name="name_or_merge_title">Kdo to je?</string>
+    <string name="name_or_merge_see_photos">Zobrazit fotky</string>
+    <string name="name_or_merge_merge_body">Tato skupina se připojí k osobě %1$s a obě budou od nynějška považovány za stejnou osobu. Tuto akci nelze automaticky rozdělit zpět.</string>
+    <string name="name_or_merge_failed">Změnu se nepodařilo uložit</string>
+    <string name="add_to_person_choose_faces">Vyberte obličeje</string>
+    <string name="add_to_person_no_face">Nebyl nalezen žádný obličej</string>
+    <string name="add_to_person_find_faces">Najít obličeje</string>
+    <string name="add_to_person_needs_face">Zatím žádné pojmenované osoby. Vyberte obličej a vytvořte novou.</string>
     <string name="person_merge_pick_title">Vyberte osobu, kterou chcete sloučit</string>
     <string name="person_not_a_person">Toto není osoba</string>
     <string name="person_not_a_person_body">Vybrané obličeje budou odebrány z Osob a přeskočeny při každém dalším prohledávání. Použijte to pro sochy, plakáty a omyly. Samotné fotky se nesmažou.</string>

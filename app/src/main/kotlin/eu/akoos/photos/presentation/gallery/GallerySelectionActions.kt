@@ -136,8 +136,9 @@ fun rememberGallerySelectionActions(
     addToAlbumState: AddToAlbumState,
     allSelected: Boolean,
     isSignedIn: Boolean = true,
-    // Add-to-person runs on-device, so it is offered whenever there are people to add to, guest
-    // included; the account-only actions (add-to-album, back-up) stay behind isSignedIn.
+    // Add-to-person runs on-device and its name step can create the person, so it is offered whenever
+    // face recognition is on, guest included; the account-only actions (add-to-album, back-up) stay
+    // behind isSignedIn.
     showAddToPerson: Boolean = isSignedIn,
     onSelectAll: () -> Unit,
     onShare: () -> Unit,

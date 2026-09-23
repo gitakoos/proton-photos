@@ -93,8 +93,9 @@ private fun screenRectOf(
 /**
  * Name tags pinned over the grouped faces on the photo now on screen. Each face's stored 0..1 box is
  * mapped to the screen through the same letterbox fit and pinch the image rides ([imagePointToScreen]),
- * so a tag stays on its face while the photo is panned and zoomed. Tapping a named or clustered face opens
- * that person; an Unsorted leftover face shows an add chip that names that one face on the spot.
+ * so a tag stays on its face while the photo is panned and zoomed. Tapping a named face opens that person;
+ * a nameless one, an unnamed group or a single Unsorted face, shows an add chip that opens the sheet to
+ * name it.
  *
  * The name label is placed dynamically around each face (below, above, or to a side) and nudged off any
  * label already placed, so a group shot reads as a set of separate names rather than one overlapping

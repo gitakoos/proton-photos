@@ -152,7 +152,7 @@ import eu.akoos.photos.presentation.gallery.PeopleRailData
 import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.ContentFilterSheet
 import eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog
-import eu.akoos.photos.presentation.gallery.GalleryAddToPersonSheet
+import eu.akoos.photos.presentation.people.AddToPersonFaceSheet
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
@@ -271,7 +271,6 @@ fun SearchScreen(
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showAddToPersonSheet by remember { mutableStateOf(false) }
-    val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // The picker's own "New album" row, which names an album and then adds the selection to it.
     var showCreateAlbumInline by remember { mutableStateOf(false) }
     // Move the device selection into another folder, logged-out, device-data only. The picker's
@@ -797,9 +796,9 @@ fun SearchScreen(
                     )
                 )
             }
-            // Add-to-person runs on-device, so a guest with named people sees it too. Only the
-            // account-backed actions in this list stay behind isSignedIn.
-            if (isSignedIn || people.isNotEmpty()) {
+            // Add-to-person runs on-device and can name a new person, so it follows face recognition
+            // alone, for a guest too. Only the account-backed actions in this list stay behind isSignedIn.
+            if (faceEnabled) {
                 add(
                     SelectionAction(
                         icon = Icons.Default.Person,
@@ -998,15 +997,14 @@ fun SearchScreen(
             )
         }
 
-        // Add-to-person sheet reuses the gallery's picker. The membership is stored on-device
-        // against the person's name, so a guest reaches it too once a person is named.
+        // Add-to-person runs the same face-first flow as the timeline, on-device, so a guest has it too.
         if (showAddToPersonSheet && selectedItems.isNotEmpty()) {
-            GalleryAddToPersonSheet(
-                people = people,
-                sheetState = addToPersonSheetState,
-                onPersonSelected = { personId ->
+            val personPhotos = remember(selectedItems) { selectedItems.toList() }
+            AddToPersonFaceSheet(
+                photos = personPhotos,
+                onDone = {
                     showAddToPersonSheet = false
-                    vm.addSelectedToPerson(personId)
+                    vm.clearSelection()
                 },
                 onDismiss = { showAddToPersonSheet = false },
             )

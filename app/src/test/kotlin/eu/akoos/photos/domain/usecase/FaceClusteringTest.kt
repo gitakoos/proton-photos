@@ -335,6 +335,91 @@ class FaceClusteringTest {
     }
 
     @Test
+    fun a_face_confirmed_as_a_new_name_keeps_it_inside_a_bigger_named_cluster() {
+        // Person 5 ("Ákos") holds four faces; the fifth, a near-identical crop, was moved to a new person
+        // 6 ("Béla"), which confirmed it. The base pass still groups all five together, so Ákos wins the
+        // vote, yet the confirmed face must come out under its own name.
+        val embeddings = listOf(
+            unit(1f, 0f, 0f), unit(0.99f, 0.1f, 0f), unit(0.98f, 0f, 0.2f), unit(0.97f, 0.2f, 0f),
+            unit(0.99f, 0.05f, 0.05f),
+        )
+        val scores = FloatArray(embeddings.size) { 0.9f }
+        val manualNames = listOf(null, null, null, null, "Béla")
+        val assignment = clusterFaces(
+            embeddings.mapIndexed { i, v -> FaceSample(v, scores[i], confirmed = manualNames[i] != null) },
+        )
+        assertEquals("the base pass keeps the five faces together", 1, clusterCount(assignment))
+
+        val voted = resolveClusterNames(
+            oldPersonIdPerFace = listOf(5L, 5L, 5L, 5L, 6L),
+            manualNamePerFace = manualNames,
+            clusterPerFace = assignment,
+            names = mapOf(5L to "Ákos", 6L to "Béla"),
+        )
+        assertEquals("the bigger person wins the shared cluster", mapOf(assignment[0] to "Ákos"), voted)
+
+        val (split, names) = splitOutUnclaimedNames(manualNames, assignment, voted)
+        val placed = attractToNamedClusters(
+            embeddings = embeddings,
+            scores = scores,
+            assignment = split,
+            clusterName = names,
+            manualName = manualNames,
+            threshold = FACE_CLUSTER_THRESHOLD,
+        )
+        assertEquals("the confirmed face keeps its new name", "Béla", names[placed[4]])
+        for (i in 0..3) assertEquals("the other faces stay with the majority", "Ákos", names[placed[i]])
+    }
+
+    @Test
+    fun an_unclaimed_confirmed_name_gets_a_fresh_cluster_and_only_its_confirmed_faces_move() {
+        val (result, names) = splitOutUnclaimedNames(
+            manualNamePerFace = listOf(null, "Ákos", "Béla", null, "Béla"),
+            clusterPerFace = intArrayOf(0, 0, 0, 1, 1),
+            nameForCluster = mapOf(0 to "Ákos"),
+        )
+        assertArrayEquals(
+            "the Béla faces move to one fresh cluster past every id in use; the rest stay put",
+            intArrayOf(0, 0, 2, 1, 2),
+            result,
+        )
+        assertEquals(mapOf(0 to "Ákos", 2 to "Béla"), names)
+    }
+
+    @Test
+    fun a_confirmed_name_that_won_a_cluster_is_left_to_the_attract_pass() {
+        val assignment = intArrayOf(0, 0, 1)
+        val voted = mapOf(0 to "Ákos", 1 to "Béla")
+        val (result, names) = splitOutUnclaimedNames(listOf(null, "Béla", null), assignment, voted)
+        assertArrayEquals("nothing moves when every confirmed name holds a cluster", assignment, result)
+        assertEquals(voted, names)
+    }
+
+    @Test
+    fun a_confirmed_face_in_the_leftover_is_split_out_under_its_name() {
+        // Past the cluster cap a confirmed face can sit in the -1 leftover: its name still gets a cluster,
+        // while an unconfirmed leftover face stays unassigned.
+        val (result, names) = splitOutUnclaimedNames(
+            manualNamePerFace = listOf(null, "Béla", null),
+            clusterPerFace = intArrayOf(0, -1, -1),
+            nameForCluster = mapOf(0 to "Ákos"),
+        )
+        assertArrayEquals(intArrayOf(0, 1, -1), result)
+        assertEquals(mapOf(0 to "Ákos", 1 to "Béla"), names)
+    }
+
+    @Test
+    fun several_unclaimed_names_take_fresh_ids_in_name_order() {
+        val (result, names) = splitOutUnclaimedNames(
+            manualNamePerFace = listOf("Dóra", "Béla", null),
+            clusterPerFace = intArrayOf(0, 0, 0),
+            nameForCluster = mapOf(0 to "Ákos"),
+        )
+        assertArrayEquals(intArrayOf(2, 1, 0), result)
+        assertEquals(mapOf(0 to "Ákos", 1 to "Béla", 2 to "Dóra"), names)
+    }
+
+    @Test
     fun a_confirmed_face_moves_into_the_cluster_carrying_its_name() {
         val v = unit(1f, 0f, 0f)
         val result = attractToNamedClusters(

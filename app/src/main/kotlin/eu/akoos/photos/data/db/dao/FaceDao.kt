@@ -84,6 +84,22 @@ data class UnclusteredFace(
     }
 }
 
+/**
+ * One face reduced to its photo, its stored box, its detection [score] and the person it is grouped
+ * under ([personId], null while it waits to be clustered). The embedding blob is left out, so listing
+ * the faces across a selection of photos never loads the recognition vectors.
+ */
+data class FaceOnPhoto(
+    val id: String,
+    val photoKey: String,
+    val personId: Long?,
+    val boxLeft: Float,
+    val boxTop: Float,
+    val boxRight: Float,
+    val boxBottom: Float,
+    val score: Float,
+)
+
 @Dao
 interface FaceDao {
 
@@ -116,6 +132,37 @@ interface FaceDao {
             "AND rejected = 0 AND personId IS NOT NULL ORDER BY score DESC",
     )
     suspend fun groupedFacesForPhoto(userId: String, photoKey: String): List<FaceEntity>
+
+    /** Every kept face on the given photos, grouped or not (an ungrouped face has a null personId), so
+     *  adding photos to a person can offer the faces clustering has not placed yet. Clearest first within
+     *  each photo, without the embedding blob. Chunked for the SQL host-variable limit. */
+    suspend fun facesOnPhotos(userId: String, photoKeys: Collection<String>): List<FaceOnPhoto> {
+        val out = ArrayList<FaceOnPhoto>()
+        photoKeys.toSet().forEachSqlChunk { out += facesOnPhotosChunk(userId, it) }
+        return out
+    }
+
+    @Query(
+        "SELECT id, photoKey, personId, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, " +
+            "`bottom` AS boxBottom, score FROM face WHERE userId = :userId AND photoKey IN (:photoKeys) " +
+            "AND rejected = 0 ORDER BY photoKey, score DESC",
+    )
+    suspend fun facesOnPhotosChunk(userId: String, photoKeys: List<String>): List<FaceOnPhoto>
+
+    /** The account's faces among the given ids with their current person, so an assignment writes only
+     *  this account's faces and knows which people it takes them from. Removed faces are included, since
+     *  assigning one brings it back. Chunked for the SQL host-variable limit. */
+    suspend fun facesByIds(userId: String, faceIds: Collection<String>): List<FaceOnPhoto> {
+        val out = ArrayList<FaceOnPhoto>()
+        faceIds.toSet().forEachSqlChunk { out += facesByIdsChunk(userId, it) }
+        return out
+    }
+
+    @Query(
+        "SELECT id, photoKey, personId, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, " +
+            "`bottom` AS boxBottom, score FROM face WHERE userId = :userId AND id IN (:faceIds)",
+    )
+    suspend fun facesByIdsChunk(userId: String, faceIds: List<String>): List<FaceOnPhoto>
 
     /** Every face assigned to one person (not removed), so a caller can build the person's mean face
      *  (centroid) to match candidates against in a "find more photos" sweep. */

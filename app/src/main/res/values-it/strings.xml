@@ -1734,7 +1734,6 @@
     <string name="people_none_named">Non hai ancora dato un nome a nessuno. Apri la revisione per nominare, unire e sistemare le persone trovate dall\'app.</string>
     <string name="people_review_empty">Nessuna persona senza nome al momento. Man mano che le tue foto vengono analizzate, qui compaiono gruppi da nominare e unire.</string>
     <string name="people_review_title">Persone da nominare</string>
-    <string name="person_add_needs_name">Prima assegna un nome a questa persona, poi aggiungici delle foto.</string>
     <string name="person_add_photos">Aggiungi foto</string>
     <string name="person_add_photos_title">Aggiungi a questa persona</string>
     <string name="person_merge">Unisci persone</string>
@@ -1756,6 +1755,14 @@
     <string name="person_merge_confirm_title">Unire le persone?</string>
     <string name="person_merge_empty">Non ci sono altre persone da unire.</string>
     <string name="person_merge_name_title">Unisci a una persona</string>
+    <string name="name_or_merge_title">Chi è?</string>
+    <string name="name_or_merge_see_photos">Vedi le foto</string>
+    <string name="name_or_merge_merge_body">Questo gruppo si unisce a %1$s e, da ora in poi, i due vengono trattati come la stessa persona. Non possono più essere separati automaticamente.</string>
+    <string name="name_or_merge_failed">Impossibile salvare la modifica</string>
+    <string name="add_to_person_choose_faces">Scegli i volti</string>
+    <string name="add_to_person_no_face">Nessun volto trovato</string>
+    <string name="add_to_person_find_faces">Trova volti</string>
+    <string name="add_to_person_needs_face">Ancora nessuna persona con nome. Scegli un volto per crearne una.</string>
     <string name="person_merge_pick_title">Scegli la persona da unire</string>
     <string name="person_not_a_person">Questa non è una persona</string>
     <string name="person_not_a_person_body">I volti selezionati vengono rimossi da Persone e ignorati in ogni analisi futura. Usalo per statue, poster ed errori. Le foto stesse non vengono eliminate.</string>

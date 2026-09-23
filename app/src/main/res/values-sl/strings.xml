@@ -1788,7 +1788,6 @@
     <string name="people_none_named">Nikogar še niste poimenovali. Odprite pregled, da poimenujete, združite in uredite osebe, ki jih je našla aplikacija.</string>
     <string name="people_review_empty">Trenutno ni nepoimenovanih oseb. Med pregledovanjem vaših fotografij se tukaj pojavijo skupine za poimenovanje in združevanje.</string>
     <string name="people_review_title">Osebe za poimenovanje</string>
-    <string name="person_add_needs_name">Najprej poimenujte to osebo, nato ji dodajte fotografije.</string>
     <string name="person_add_photos">Dodaj fotografije</string>
     <string name="person_add_photos_title">Dodaj tej osebi</string>
     <string name="person_merge">Združi osebe</string>
@@ -1810,6 +1809,14 @@
     <string name="person_merge_confirm_title">Združi osebe?</string>
     <string name="person_merge_empty">Ni drugih oseb za združevanje.</string>
     <string name="person_merge_name_title">Združi z osebo</string>
+    <string name="name_or_merge_title">Kdo je to?</string>
+    <string name="name_or_merge_see_photos">Prikaži fotografije</string>
+    <string name="name_or_merge_merge_body">Ta skupina se pridruži osebi %1$s, obe pa se odslej obravnavata kot ista oseba. Tega ni mogoče samodejno razdružiti nazaj.</string>
+    <string name="name_or_merge_failed">Spremembe ni bilo mogoče shraniti</string>
+    <string name="add_to_person_choose_faces">Izberite obraze</string>
+    <string name="add_to_person_no_face">Ni bilo najdenega obraza</string>
+    <string name="add_to_person_find_faces">Poišči obraze</string>
+    <string name="add_to_person_needs_face">Še ni poimenovanih oseb. Izberite obraz, da ustvarite novo.</string>
     <string name="person_merge_pick_title">Izberi osebo za združitev</string>
     <string name="person_not_a_person">To ni oseba</string>
     <string name="person_not_a_person_body">Izbrani obrazi se odstranijo iz Oseb in se preskočijo pri vsakem prihodnjem pregledu. Uporabite to za kipe, plakate in napake. Same fotografije se ne izbrišejo.</string>

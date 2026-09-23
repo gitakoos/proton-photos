@@ -216,6 +216,7 @@ import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.util.copySensitiveText
 import eu.akoos.photos.presentation.albums.AlbumsScreen
 import eu.akoos.photos.presentation.albums.AlbumsViewModel
+import eu.akoos.photos.presentation.people.AddToPersonFaceSheet
 import eu.akoos.photos.presentation.shared.SharedScreen
 import eu.akoos.photos.presentation.shared.SharedViewModel
 import eu.akoos.photos.presentation.viewer.ManagePublicLinkSheet
@@ -977,7 +978,6 @@ fun GalleryScreen(
     var showAddToPersonSheet by remember { mutableStateOf(false) }
     var showCreateAlbumInline by remember { mutableStateOf(false) }
     val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val addToPersonSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // ── Move-to-folder multi-action ───────────────────────────────────────────
     // The target picker (existing folders + New folder) and the typed-name dialog it hands off to.
@@ -1073,6 +1073,7 @@ fun GalleryScreen(
     val isOnlineNow by viewModel.isOnline.collectAsStateWithLifecycle()
     val updateAvailable by viewModel.updateAvailable.collectAsStateWithLifecycle()
     val newsUnread by viewModel.newsUnread.collectAsStateWithLifecycle()
+    val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -1323,9 +1324,9 @@ fun GalleryScreen(
             allSelected = state.filteredItems.isNotEmpty() &&
                 state.selectedItems.size == state.filteredItems.size,
             isSignedIn = state.isSignedIn,
-            // Offer Add-to-person to a guest too, once there are people to add to; the account-only
-            // actions in the same list stay behind isSignedIn.
-            showAddToPerson = state.isSignedIn || state.people.isNotEmpty(),
+            // Add-to-person runs on-device and can name a new person, so it follows face recognition
+            // alone, for a guest too; the account-only actions in the same list stay behind isSignedIn.
+            showAddToPerson = faceEnabled,
             onSelectAll = {
                 val all = state.filteredItems.toSet()
                 viewModel.setSelection(if (state.selectedItems.size == all.size) emptySet() else all)
@@ -1674,12 +1675,12 @@ fun GalleryScreen(
         )
     }
     if (showAddToPersonSheet && state.selectedItems.isNotEmpty()) {
-        GalleryAddToPersonSheet(
-            people = state.people,
-            sheetState = addToPersonSheetState,
-            onPersonSelected = { personId ->
+        val personPhotos = remember(state.selectedItems) { state.selectedItems.toList() }
+        AddToPersonFaceSheet(
+            photos = personPhotos,
+            onDone = {
                 showAddToPersonSheet = false
-                viewModel.addSelectedToPerson(personId)
+                viewModel.clearSelection()
             },
             onDismiss = { showAddToPersonSheet = false },
         )

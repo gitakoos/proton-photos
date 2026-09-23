@@ -1791,7 +1791,6 @@
     <string name="people_none_named">Zatiaľ ste nikoho nepomenovali. Otvorte kontrolu, kde môžete pomenovať, zlúčiť a usporiadať osoby, ktoré aplikácia našla.</string>
     <string name="people_review_empty">Momentálne nie sú žiadne nepomenované osoby. Pri prehľadávaní vašich fotiek sa tu objavia skupiny na pomenovanie a zlúčenie.</string>
     <string name="people_review_title">Osoby na pomenovanie</string>
-    <string name="person_add_needs_name">Najprv túto osobu pomenujte, potom k nej pridajte fotky.</string>
     <string name="person_add_photos">Pridať fotky</string>
     <string name="person_add_photos_title">Pridať k tejto osobe</string>
     <string name="person_merge">Zlúčiť osoby</string>
@@ -1813,6 +1812,14 @@
     <string name="person_merge_confirm_title">Zlúčiť osoby?</string>
     <string name="person_merge_empty">Nie sú žiadne ďalšie osoby na zlúčenie.</string>
     <string name="person_merge_name_title">Zlúčiť s osobou</string>
+    <string name="name_or_merge_title">Kto je to?</string>
+    <string name="name_or_merge_see_photos">Zobraziť fotky</string>
+    <string name="name_or_merge_merge_body">Táto skupina sa pripojí k osobe %1$s a obe sa odteraz považujú za tú istú osobu. Toto sa nedá automaticky rozdeliť späť.</string>
+    <string name="name_or_merge_failed">Zmenu sa nepodarilo uložiť</string>
+    <string name="add_to_person_choose_faces">Vyberte tváre</string>
+    <string name="add_to_person_no_face">Nenašla sa žiadna tvár</string>
+    <string name="add_to_person_find_faces">Nájsť tváre</string>
+    <string name="add_to_person_needs_face">Zatiaľ žiadne pomenované osoby. Vyberte tvár a vytvorte novú.</string>
     <string name="person_merge_pick_title">Vyberte osobu na zlúčenie</string>
     <string name="person_not_a_person">Toto nie je osoba</string>
     <string name="person_not_a_person_body">Vybrané tváre budú odstránené z Osôb a preskočené pri každom budúcom prehľadávaní. Použite to pre sochy, plagáty a omyly. Samotné fotky sa nevymažú.</string>
