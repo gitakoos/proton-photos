@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.places
 
 import eu.akoos.photos.domain.usecase.PlaceCity
+import eu.akoos.photos.util.countryLabel
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.text.Collator
@@ -53,7 +54,7 @@ class PlaceSearchGroupingTest {
         names: Map<String, String> = hungarian,
         order: Comparator<in String> = naturalOrder(),
     ): List<PlaceSearchEntry> = groupPlaceSearch(cities, order) { city ->
-        placeCountryLabel(city.countryCode, city.countryName) { code -> names[code].orEmpty() }
+        countryLabel(city.countryCode, city.countryName) { code -> names[code].orEmpty() }
     }
 
     /** The entries in short: "# label" for a heading, the city name for a city. */
@@ -96,11 +97,11 @@ class PlaceSearchGroupingTest {
     @Test
     fun `the stored name stands in when the code has no name`() {
         // The platform hands an unknown code back as it is, or nothing at all.
-        assertEquals("Kosovo", placeCountryLabel("XK", "Kosovo") { it })
-        assertEquals("Kosovo", placeCountryLabel("XK", "Kosovo") { "" })
-        assertEquals("Somewhere", placeCountryLabel("", "Somewhere") { "Unused" })
-        assertEquals("XK", placeCountryLabel("XK", "") { it })
-        assertEquals("Magyarország", placeCountryLabel("HU", "Hungary") { "Magyarország" })
+        assertEquals("Kosovo", countryLabel("XK", "Kosovo") { it })
+        assertEquals("Kosovo", countryLabel("XK", "Kosovo") { "" })
+        assertEquals("Somewhere", countryLabel("", "Somewhere") { "Unused" })
+        assertEquals("XK", countryLabel("XK", "") { it })
+        assertEquals("Magyarország", countryLabel("HU", "Hungary") { "Magyarország" })
     }
 
     @Test
@@ -148,7 +149,7 @@ class PlaceSearchGroupingTest {
 
     private fun search(query: String, names: Map<String, String> = hungarian): List<String> =
         filterPlaceCities(library, query) { city ->
-            placeCountryLabel(city.countryCode, city.countryName) { code -> names[code].orEmpty() }
+            countryLabel(city.countryCode, city.countryName) { code -> names[code].orEmpty() }
         }.map { it.city }
 
     @Test

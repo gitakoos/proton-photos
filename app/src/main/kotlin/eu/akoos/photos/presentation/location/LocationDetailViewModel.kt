@@ -66,8 +66,12 @@ data class SaveAsAlbumResult(
 )
 
 data class LocationDetailUiState(
-    /** "City, Country" resolved from the tapped pin - the screen title. */
-    val placeName: String = "",
+    /** The tapped pin's city, blank until it resolves. The screen names the place from the three parts. */
+    val city: String = "",
+    /** ISO code of the city's country, named in the app language on screen. */
+    val countryCode: String = "",
+    /** The country name the geocode carried, the fallback for a code the platform cannot name. */
+    val countryName: String = "",
     val isLoading: Boolean = true,
     val items: List<GalleryItem> = emptyList(),
     /** True while the "Save as album" round-trip is in flight. */
@@ -78,12 +82,13 @@ data class LocationDetailUiState(
 
 /**
  * Backs the place page ([LocationPhotosContent] in [PlaceCityScreen]): an album-style view of every
- * geotagged photo taken in one place (city). The coordinates resolve to a "City, Country" label via
+ * geotagged photo taken in one place (city). The coordinates resolve to a city and its country via
  * [OfflineGeocoder]; the screen then shows every located photo whose own coordinates geocode to the
- * SAME label, resolved to its [GalleryItem] from the shared library merge so each cell opens the
- * viewer with the correct synced / cloud state. "Save as album" creates a real Drive album named
- * after the city and adds those photos (uploading any local-only ones first), reusing the same
- * album-create + add-to-album path as the gallery and device-folder surfaces.
+ * SAME city and country ([isPhotoInPlace]), resolved to its [GalleryItem] from the shared library merge
+ * so each cell opens the viewer with the correct synced / cloud state. The screen names the place in
+ * the app language. "Save as album" creates a real Drive album under the name the screen shows and adds
+ * those photos (uploading any local-only ones first), reusing the same album-create + add-to-album path
+ * as the gallery and device-folder surfaces.
  *
  * The multi-select (share / add-to-album / back-up / download / offline / favourite / hide / delete /
  * strip) runs through the shared [GalleryItemSelectionController], the same one the timeline and search
@@ -117,8 +122,8 @@ class LocationDetailViewModel @Inject constructor(
     private var loadJob: Job? = null
 
     /**
-     * Resolve the tapped pin to its place label, then collect every located photo that geocodes to
-     * the same place and resolve each to a [GalleryItem]. Keyed on the coordinates so re-entering a
+     * Resolve the tapped pin to its city and country, then collect every located photo that geocodes
+     * to the same place and resolve each to a [GalleryItem]. Keyed on the coordinates so re-entering a
      * different pin reloads cleanly.
      */
     fun load(latitude: Double, longitude: Double) {
@@ -129,11 +134,13 @@ class LocationDetailViewModel @Inject constructor(
                 val userId = accountManager.getPrimaryUserId().first()
                 // The tapped pin's place is the title. A null geocode (dataset missing) leaves the
                 // screen empty rather than guessing.
-                val target = OfflineGeocoder.reverseGeocode(context, latitude, longitude) ?: run {
+                val target = OfflineGeocoder.reverseGeocodeDetailed(context, latitude, longitude) ?: run {
                     _uiState.update { it.copy(isLoading = false) }
                     return@launch
                 }
-                _uiState.update { it.copy(placeName = target) }
+                _uiState.update {
+                    it.copy(city = target.city, countryCode = target.countryCode, countryName = target.countryName)
+                }
 
                 // The merged library is the single source the gallery / search / calendar open the
                 // viewer with, so a resolved item carries the right synced / cloud state.
@@ -161,8 +168,9 @@ class LocationDetailViewModel @Inject constructor(
                     val seen = LinkedHashSet<String>()
                     val out = ArrayList<GalleryItem>()
                     for (loc in located) {
-                        val place = OfflineGeocoder.reverseGeocode(context, loc.latitude, loc.longitude)
-                        if (place != target) continue
+                        val geo = OfflineGeocoder.reverseGeocodeDetailed(context, loc.latitude, loc.longitude)
+                            ?: continue
+                        if (!isPhotoInPlace(target.city, target.countryCode, geo.city, geo.countryCode)) continue
                         val item = itemByKey[loc.id] ?: continue
                         // De-dup: a Synced item is reachable by both its uri and its linkId.
                         if (!seen.add(item.stableId)) continue
@@ -274,21 +282,21 @@ class LocationDetailViewModel @Inject constructor(
     // ── Save as album ──────────────────────────────────────────────────────────────
 
     /**
-     * Create a Drive album named after the city and add every photo in this place to it. Local-only
-     * photos upload first and join afterwards; the first cloud-backed photo becomes the cover. This
-     * is the same create + add-to-album path the gallery's "New album from selection" uses.
+     * Create a Drive album named [name], the place's title exactly as the confirmation showed it, and
+     * add every photo in this place to it. Local-only photos upload first and join afterwards; the first
+     * cloud-backed photo becomes the cover. This is the same create + add-to-album path the gallery's
+     * "New album from selection" uses.
      */
-    fun saveAsAlbum() {
+    fun saveAsAlbum(name: String) {
         val items = _uiState.value.items
-        val placeName = _uiState.value.placeName
-        if (items.isEmpty() || placeName.isBlank() || _uiState.value.isSavingAsAlbum) return
+        if (items.isEmpty() || name.isBlank() || _uiState.value.isSavingAsAlbum) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: run {
                 _uiState.update { it.copy(error = context.getString(R.string.viewer_not_signed_in)) }
                 return@launch
             }
             _uiState.update { it.copy(isSavingAsAlbum = true, error = null) }
-            val album: Album = runCatching { driveRepo.createDriveAlbum(userId, placeName) }
+            val album: Album = runCatching { driveRepo.createDriveAlbum(userId, name) }
                 .getOrElse { e ->
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     val friendly = friendlyNetworkError(e, true, context)
@@ -316,7 +324,7 @@ class LocationDetailViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     isSavingAsAlbum = false,
-                    saveAsAlbumResult = SaveAsAlbumResult(joined, queued, placeName),
+                    saveAsAlbumResult = SaveAsAlbumResult(joined, queued, name),
                 )
             }
         }
@@ -364,3 +372,16 @@ class LocationDetailViewModel @Inject constructor(
         return joined to queued
     }
 }
+
+/**
+ * Whether a photo whose coordinates geocode to [photoCity] in [photoCountryCode] belongs on the page of
+ * [placeCity] in [placeCountryCode]: the same city in the same country, the pair the Places list groups
+ * a city by. The country's name plays no part, so the match holds whatever language names it. Parts
+ * compare exactly, so a blank one matches only a blank one.
+ */
+internal fun isPhotoInPlace(
+    placeCity: String,
+    placeCountryCode: String,
+    photoCity: String,
+    photoCountryCode: String,
+): Boolean = photoCity == placeCity && photoCountryCode == placeCountryCode

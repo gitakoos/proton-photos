@@ -316,11 +316,12 @@ class PhotoViewerViewModel @Inject constructor(
     private val _metadata = MutableStateFlow<PhotoMetadata?>(null)
     val metadata: StateFlow<PhotoMetadata?> = _metadata.asStateFlow()
 
-    /** Geocoded place name for the details overview's Location row, or null while it resolves / when
-     *  the photo carries no GPS. Loaded per item by [loadDetailsPlace] so the row reserves its slot
-     *  and fills in like the Size row instead of only appearing once a location is found. */
-    private val _detailsPlace = MutableStateFlow<String?>(null)
-    val detailsPlace: StateFlow<String?> = _detailsPlace.asStateFlow()
+    /** Geocoded place for the details overview's Location row, or null while it resolves / when the
+     *  photo carries no GPS. Held as its parts so the screen names the country in the app language.
+     *  Loaded per item by [loadDetailsPlace] so the row reserves its slot and fills in like the Size
+     *  row instead of only appearing once a location is found. */
+    private val _detailsPlace = MutableStateFlow<OfflineGeocoder.GeoLabel?>(null)
+    val detailsPlace: StateFlow<OfflineGeocoder.GeoLabel?> = _detailsPlace.asStateFlow()
 
     /** The fix [detailsPlace] is the coarse reading of, so the sheet's coordinate rows state the very
      *  location its place row names. Filled by [loadDetailsPlace] alongside the place name; null while
@@ -900,7 +901,7 @@ class PhotoViewerViewModel @Inject constructor(
             } ?: metadataGps()
             _detailsGps.value = latLng?.let { DetailsGps(it.first, it.second) }
             if (latLng != null) {
-                _detailsPlace.value = OfflineGeocoder.reverseGeocode(context, latLng.first, latLng.second)
+                _detailsPlace.value = OfflineGeocoder.reverseGeocodeDetailed(context, latLng.first, latLng.second)
             }
         }
     }

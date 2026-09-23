@@ -25,6 +25,7 @@ package eu.akoos.photos.util
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.text.Collator
 import java.text.Normalizer
 import java.util.Locale
 import kotlin.math.cos
@@ -121,17 +122,19 @@ object OfflineGeocoder {
     private fun countryDisplayName(code: String): String =
         Locale("", code).getDisplayCountry(Locale.getDefault()).ifBlank { code }
 
+    /** [countries] named and ordered in the platform default locale. */
+    suspend fun countries(context: Context): List<GeoCountry> = countries(context, Locale.getDefault())
+
     /**
-     * The distinct countries present in the dataset, each with its localized display name, sorted by
-     * that name. Empty when the dataset can't be loaded. Suspends on [Dispatchers.Default] like
+     * The distinct countries present in the dataset, each named in [locale] (see [countryName]) and
+     * ordered the way [locale] alphabetizes, so an accented initial sorts beside its base letter rather
+     * than after Z. Empty when the dataset can't be loaded. Suspends on [Dispatchers.Default] like
      * [reverseGeocode] and reuses the same cached dataset.
      */
-    suspend fun countries(context: Context): List<GeoCountry> =
+    suspend fun countries(context: Context, locale: Locale): List<GeoCountry> =
         withContext(Dispatchers.Default) {
             val d = ensureLoaded(context.applicationContext) ?: return@withContext emptyList()
-            distinctCountries(d.rows) { code ->
-                Locale("", code).getDisplayCountry(Locale.getDefault()).ifBlank { code }
-            }
+            distinctCountries(d.rows, { code -> countryName(code, locale) }, Collator.getInstance(locale))
         }
 
     /**
@@ -257,19 +260,30 @@ object OfflineGeocoder {
 
     /**
      * The distinct ISO country codes in [rows], each mapped to a display name via [displayNameFor] and
-     * sorted by that name. [displayNameFor] is injected (production passes the platform locale lookup)
-     * so the mapping is pinned in tests without depending on the JVM's locale data. Pure.
+     * sorted by that name, by code point. [displayNameFor] is injected (production passes the platform
+     * locale lookup) so the mapping is pinned in tests without depending on the JVM's locale data. Pure.
      */
     internal fun distinctCountries(
         rows: List<CityRow>,
         displayNameFor: (String) -> String,
+    ): List<GeoCountry> = distinctCountries(rows, displayNameFor, naturalOrder())
+
+    /**
+     * [distinctCountries] with the names ranked by [order]. A locale's [Collator] ranks them the way that
+     * language alphabetizes, so "Írország" lands beside "Izland", where a code-point order puts it after
+     * "Zambia". Pure.
+     */
+    internal fun distinctCountries(
+        rows: List<CityRow>,
+        displayNameFor: (String) -> String,
+        order: Comparator<in String>,
     ): List<GeoCountry> =
         rows.asSequence()
             .map { it.countryCode }
             .filter { it.isNotBlank() }
             .distinct()
             .map { code -> GeoCountry(code, displayNameFor(code)) }
-            .sortedBy { it.displayName }
+            .sortedWith(compareBy<GeoCountry, String>(order) { it.displayName })
             .toList()
 
     /** Lower-cases [value] and strips diacritics so "Zürich" and "zurich" compare equal. */

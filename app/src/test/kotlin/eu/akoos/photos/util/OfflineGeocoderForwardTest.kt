@@ -26,12 +26,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.text.Collator
+import java.util.Locale
 
 /**
  * Pure coverage for the forward-geocode helpers extracted from [OfflineGeocoder]: TSV parsing, the
- * prefix-over-substring name ranking with a country filter and cap, the distinct + sorted country
- * list, and the country centroid. A synthetic in-memory dataset feeds every case, so no asset is read
- * and no Android / Context is touched. Diacritic folding is pinned by matching "zurich" to "Zürich".
+ * prefix-over-substring name ranking with a country filter and cap, the distinct country list sorted
+ * by code point or by a locale's collation, and the country centroid. A synthetic in-memory dataset
+ * feeds every case, so no asset is read and no Android / Context is touched. Diacritic folding is
+ * pinned by matching "zurich" to "Zürich".
  */
 class OfflineGeocoderForwardTest {
 
@@ -150,5 +153,27 @@ class OfflineGeocoderForwardTest {
         // "Aaa" (US) sorts ahead of every "z-…" entry.
         assertEquals("US", countries.first().code)
         assertEquals("Aaa", countries.first().displayName)
+    }
+
+    @Test
+    fun `distinctCountries ranks names by a locale's collation`() {
+        val hungarianNames = mapOf(
+            "AT" to "Ausztria",
+            "IE" to "Írország",
+            "IS" to "Izland",
+            "OM" to "Omán",
+            "AM" to "Örményország",
+            "ZM" to "Zambia",
+        )
+        val rows = listOf("ZM", "AM", "IS", "AT", "OM", "IE").map { row("City", it, 0.0, 0.0) }
+        val collator = Collator.getInstance(Locale.forLanguageTag("hu"))
+
+        val countries = OfflineGeocoder.distinctCountries(rows, { hungarianNames.getValue(it) }, collator)
+
+        // A code-point order would put "Írország" and "Örményország" after "Zambia".
+        assertEquals(
+            listOf("Ausztria", "Írország", "Izland", "Omán", "Örményország", "Zambia"),
+            countries.map { it.displayName },
+        )
     }
 }

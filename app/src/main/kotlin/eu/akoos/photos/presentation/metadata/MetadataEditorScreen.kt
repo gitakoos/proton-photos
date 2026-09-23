@@ -117,8 +117,12 @@ import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.util.OfflineGeocoder
+import eu.akoos.photos.util.cityCountryLabel
+import eu.akoos.photos.util.countryName
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -717,6 +721,11 @@ private fun PlaceField(
 ) {
     val colors = AppColors.current
     var expanded by remember { mutableStateOf(false) }
+    // "City, Country" with the country named in the app language, like the labels around it.
+    val locale = appLocale()
+    val placeName = remember(state.place, locale) {
+        state.place?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
+    }
 
     FieldCard {
         FieldHeaderRow(
@@ -730,7 +739,7 @@ private fun PlaceField(
         val placeText = if (state.bulk && !state.placeChosen) {
             stringResource(R.string.metadata_editor_bulk_apply_hint)
         } else {
-            state.placeLabel ?: stringResource(R.string.metadata_editor_place_none)
+            placeName ?: stringResource(R.string.metadata_editor_place_none)
         }
         Text(
             text = placeText,
@@ -773,14 +782,19 @@ private fun LocationEditor(
 ) {
     val context = LocalContext.current
     val colors = AppColors.current
+    // Country names and their order follow the app language, which the system default need not match.
+    val locale = appLocale()
     var countries by remember { mutableStateOf<List<OfflineGeocoder.GeoCountry>>(emptyList()) }
     var showCountryPicker by remember { mutableStateOf(false) }
     var selectedCountry by remember { mutableStateOf<OfflineGeocoder.GeoCountry?>(null) }
     var cityQuery by remember { mutableStateOf("") }
     var cityResults by remember { mutableStateOf<List<OfflineGeocoder.GeoPlace>>(emptyList()) }
+    val selectedCountryName = remember(selectedCountry, locale) {
+        selectedCountry?.let { countryName(it.code, locale, it.displayName) }
+    }
 
-    LaunchedEffect(Unit) {
-        if (countries.isEmpty()) countries = OfflineGeocoder.countries(context)
+    LaunchedEffect(locale) {
+        countries = OfflineGeocoder.countries(context, locale)
     }
     // In-memory scan after the first parse, so a per-keystroke search stays cheap; a short query is
     // ignored to keep the result list meaningful.
@@ -804,7 +818,7 @@ private fun LocationEditor(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = selectedCountry?.displayName
+                text = selectedCountryName
                     ?: stringResource(R.string.metadata_editor_place_choose_country),
                 color = if (selectedCountry != null) colors.fgPrimary else colors.fgMute,
                 fontSize = 14.sp,
@@ -844,12 +858,11 @@ private fun LocationEditor(
                     .border(0.5.dp, colors.line2, RoundedCornerShape(10.dp)),
             ) {
                 cityResults.forEach { place ->
-                    val country = remember(place.countryCode) {
-                        Locale("", place.countryCode).getDisplayCountry(Locale.getDefault())
-                            .ifBlank { place.countryCode }
+                    val label = remember(place, locale) {
+                        cityCountryLabel(place.name, place.countryCode, "", locale)
                     }
                     Text(
-                        text = "${place.name}, $country",
+                        text = label,
                         color = colors.fgPrimary,
                         fontSize = 14.sp,
                         modifier = Modifier
@@ -910,10 +923,11 @@ private fun CountryPickerDialog(
 ) {
     val colors = AppColors.current
     var filter by remember { mutableStateOf("") }
+    // Case- and accent-insensitive, so "irorszag" finds "Írország".
     val shown = remember(filter, countries) {
-        val f = filter.trim()
+        val f = SearchFilter.fold(filter.trim())
         if (f.isEmpty()) countries
-        else countries.filter { it.displayName.contains(f, ignoreCase = true) }
+        else countries.filter { SearchFilter.fold(it.displayName).contains(f) }
     }
     Dialog(onDismissRequest = onDismiss) {
         Surface(shape = RoundedCornerShape(20.dp), color = colors.bg2) {

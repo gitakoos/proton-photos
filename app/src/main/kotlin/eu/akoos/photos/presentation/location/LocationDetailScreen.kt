@@ -120,7 +120,9 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.presentation.util.monthYearFormat
+import eu.akoos.photos.util.cityCountryLabel
 import java.util.Date
 import java.util.TimeZone
 
@@ -158,6 +160,13 @@ fun LocationPhotosContent(
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
 
     val isSelectionMode = selectedItems.isNotEmpty()
+
+    // The place named in the app language. The hero shows it, and the save-as-album confirmation shows
+    // it and hands it on as the album's name, so the album is named exactly as the dialog said.
+    val locale = appLocale()
+    val placeTitle = remember(state.city, state.countryCode, state.countryName, locale) {
+        cityCountryLabel(state.city, state.countryCode, state.countryName, locale)
+    }
 
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -366,13 +375,14 @@ fun LocationPhotosContent(
                 Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
                 eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
                     coverModel = coverModel,
-                    title = state.placeName,
+                    title = placeTitle,
                     photoCountText = countLabel,
                     coverParallax = {
                         if (gridState.firstVisibleItemIndex == 0)
                             gridState.firstVisibleItemScrollOffset.toFloat() else 0f
                     },
-                    titleActions = if (state.items.isNotEmpty()) {
+                    // A Drive album needs an account, so the action is not offered to a guest at all.
+                    titleActions = if (isSignedIn && state.items.isNotEmpty()) {
                         {
                             // Create a Drive album from this place - a progress ring while the
                             // round-trip runs, otherwise the library-add glyph.
@@ -790,12 +800,12 @@ fun LocationPhotosContent(
     if (showSaveAsAlbumConfirm) {
         ConfirmDialog(
             title = stringResource(R.string.location_save_as_album_confirm_title),
-            message = stringResource(R.string.location_save_as_album_confirm_body_fmt, state.placeName),
+            message = stringResource(R.string.location_save_as_album_confirm_body_fmt, placeTitle),
             confirmLabel = stringResource(R.string.action_save),
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = {
                 showSaveAsAlbumConfirm = false
-                viewModel.saveAsAlbum()
+                viewModel.saveAsAlbum(placeTitle)
             },
             onDismiss = { showSaveAsAlbumConfirm = false },
         )

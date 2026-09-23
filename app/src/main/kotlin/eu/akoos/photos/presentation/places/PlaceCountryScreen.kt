@@ -39,6 +39,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.util.countryName
 
 /**
  * The middle level of the Places browser: a two-column grid of one [PlaceCard] per city in the opened
@@ -55,10 +57,12 @@ fun PlaceCountryScreen(
 ) {
     val colors = AppColors.current
     val data by viewModel.places.collectAsStateWithLifecycle()
+    val locale = appLocale()
     val cities = data.cities.filter { it.countryCode == countryCode }
-    val title = data.countries.firstOrNull { it.countryCode == countryCode }?.countryName
+    val storedName = data.countries.firstOrNull { it.countryCode == countryCode }?.countryName
         ?: cities.firstOrNull()?.countryName
-        ?: countryCode
+        ?: ""
+    val title = countryName(countryCode, locale, storedName)
 
     Box(
         modifier = Modifier

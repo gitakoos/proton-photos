@@ -107,6 +107,8 @@ import eu.akoos.photos.presentation.places.PlaceSearchSheet
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.util.countryName
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -180,6 +182,11 @@ fun CustomMapScreen(
     val world by produceState<WorldMap?>(null) { value = WorldMapData.load(context) }
     val shapeByIso = remember(world) { world?.countries?.associateBy { it.iso2 }.orEmpty() }
     val highlightCodes = remember(countries) { countries.mapTo(HashSet()) { it.countryCode.uppercase() } }
+    // The visited countries' names in the app's language, display only: fills and taps key on the code.
+    val locale = appLocale()
+    val countryLabels = remember(countries, locale) {
+        countries.associate { it.countryCode to countryName(it.countryCode, locale, it.countryName) }
+    }
 
     // Build each visited city's marker (the exact Google-Photos-style pin the OSM map uses) from its
     // cover, off the main thread and cached. Rendered large so it stays crisp as the globe zooms in.
@@ -375,7 +382,8 @@ fun CustomMapScreen(
                 val gp = GlobeProjection.project(shape.centroid.lat, shape.centroid.lng, cLat, cLng, radius)
                 if (!gp.visible) continue
                 countryPaint.alpha = (150 * fade).toInt()
-                drawIntoCanvas { it.nativeCanvas.drawText(country.countryName, cx + gp.x, cy + gp.y, countryPaint) }
+                val label = countryLabels[country.countryCode] ?: country.countryName
+                drawIntoCanvas { it.nativeCanvas.drawText(label, cx + gp.x, cy + gp.y, countryPaint) }
             }
 
             // A thumbnail pin + name for each visited city, over everything else.

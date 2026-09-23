@@ -35,6 +35,8 @@ import eu.akoos.photos.presentation.location.LocationDetailViewModel
 import eu.akoos.photos.presentation.location.LocationPhotosContent
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.util.cityCountryLabel
 
 /**
  * Full-screen page for one place: every photo taken in a city, reached by a coordinate. Opens like
@@ -62,6 +64,7 @@ fun PlaceCityScreen(
 
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val appColors = AppColors.current
+    val locale = appLocale()
 
     LocationPhotosContent(
         onPhotoClick = onPhotoClick,
@@ -73,7 +76,7 @@ fun PlaceCityScreen(
         onEditMetadata = onEditMetadata,
         headerOverlay = {
             FloatingHeader(
-                title = state.placeName,
+                title = cityCountryLabel(state.city, state.countryCode, state.countryName, locale),
                 onBack = onBack,
             )
         },

@@ -69,6 +69,8 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.util.countryName
 
 /**
  * Top of the hierarchical Places browser: a two-column grid of one album-style [PlaceCard] per country
@@ -86,6 +88,7 @@ fun PlacesScreen(
 ) {
     val colors = AppColors.current
     val data by viewModel.places.collectAsStateWithLifecycle()
+    val locale = appLocale()
     var showSearch by remember { mutableStateOf(false) }
 
     Box(
@@ -117,7 +120,7 @@ fun PlacesScreen(
                 items(items = data.countries, key = { it.countryCode }) { country ->
                     PlaceCard(
                         coverItem = country.cover,
-                        title = country.countryName,
+                        title = countryName(country.countryCode, locale, country.countryName),
                         count = country.count,
                         onClick = { onCountryClick(country.countryCode) },
                     )

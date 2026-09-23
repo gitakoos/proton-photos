@@ -68,7 +68,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
-import java.util.Locale
 import javax.inject.Inject
 
 /** Which source the shown capture date is read from, so the screen can label it. The display basis
@@ -113,9 +112,10 @@ data class MetadataEditorUiState(
     val dateSource: DateSource = DateSource.DEVICE,
     /** Null when the date is editable; otherwise why the picker is locked. */
     val dateLock: EditLock? = null,
-    /** Resolved "City, Country" for the current coordinates, or null while it resolves / when there
-     *  are none (the screen then shows its "No location" placeholder). */
-    val placeLabel: String? = null,
+    /** The place the current coordinates resolve to, or null while it resolves / when there are none
+     *  (the screen then shows its "No location" placeholder). A country-only pick leaves the city blank.
+     *  The country stays an ISO code here, so the screen names it in the app language. */
+    val place: OfflineGeocoder.GeoLabel? = null,
     val hasLocation: Boolean = false,
     val latitude: Double? = null,
     val longitude: Double? = null,
@@ -332,7 +332,7 @@ class MetadataEditorViewModel @Inject constructor(
          *  write time from [filenameDateByUri]. */
         data object FilenameDate : PendingAction
 
-        data class Location(val lat: Double, val lon: Double, val label: String) : PendingAction
+        data class Location(val lat: Double, val lon: Double, val place: OfflineGeocoder.GeoLabel) : PendingAction
         data object ClearLocation : PendingAction
         data class Text(val tag: MetadataTextTag, val value: String) : PendingAction
     }
@@ -543,13 +543,13 @@ class MetadataEditorViewModel @Inject constructor(
                     _state.update { it.copy(hasLocation = false) }
                     return@launch
                 }
-                val label = OfflineGeocoder.reverseGeocode(context, coords.first, coords.second)
+                val place = OfflineGeocoder.reverseGeocodeDetailed(context, coords.first, coords.second)
                 _state.update {
                     it.copy(
                         hasLocation = true,
                         latitude = coords.first,
                         longitude = coords.second,
-                        placeLabel = label,
+                        place = place,
                     )
                 }
             }
@@ -647,27 +647,24 @@ class MetadataEditorViewModel @Inject constructor(
                 _events.send(MetadataEditorEvent.Failed)
                 return@launch
             }
-            val label = Locale("", code).getDisplayCountry(Locale.getDefault()).ifBlank { code }
-            performBatch(PendingAction.Location(point.first, point.second, label), placeTargetUris)
+            val picked = OfflineGeocoder.GeoLabel(city = "", countryCode = code, countryName = "")
+            performBatch(PendingAction.Location(point.first, point.second, picked), placeTargetUris)
             val cloudTargets = cloudImageTargets + syncedImageTargets
             if (cloudTargets.isEmpty()) return@launch
             stageCloudLocation(cloudTargets, LocationEdit.Set(point.first, point.second))
-            _state.update { it.copy(hasLocation = true, placeLabel = label, placeChosen = true) }
+            _state.update { it.copy(hasLocation = true, place = picked, placeChosen = true) }
         }
     }
 
     /** Places every editable image at [place]'s coordinates, labelling it "City, Country". */
     fun pickCity(place: OfflineGeocoder.GeoPlace) {
         if (_state.value.placeLock != null) return
-        val country = Locale("", place.countryCode)
-            .getDisplayCountry(Locale.getDefault())
-            .ifBlank { place.countryCode }
-        val label = "${place.name}, $country"
-        performBatch(PendingAction.Location(place.latitude, place.longitude, label), placeTargetUris)
+        val picked = OfflineGeocoder.GeoLabel(city = place.name, countryCode = place.countryCode, countryName = "")
+        performBatch(PendingAction.Location(place.latitude, place.longitude, picked), placeTargetUris)
         val cloudTargets = cloudImageTargets + syncedImageTargets
         if (cloudTargets.isEmpty()) return
         stageCloudLocation(cloudTargets, LocationEdit.Set(place.latitude, place.longitude))
-        _state.update { it.copy(hasLocation = true, placeLabel = label, placeChosen = true) }
+        _state.update { it.copy(hasLocation = true, place = picked, placeChosen = true) }
     }
 
     /** Strips the GPS location from every editable image. */
@@ -677,7 +674,7 @@ class MetadataEditorViewModel @Inject constructor(
         val cloudTargets = cloudImageTargets + syncedImageTargets
         if (cloudTargets.isEmpty()) return
         stageCloudLocation(cloudTargets, LocationEdit.Clear)
-        _state.update { it.copy(hasLocation = false, placeLabel = null, placeChosen = true) }
+        _state.update { it.copy(hasLocation = false, place = null, placeChosen = true) }
     }
 
     /** Records typing in [tag]'s box. The value is capped at the length one EXIF text tag holds, so what
@@ -994,14 +991,14 @@ class MetadataEditorViewModel @Inject constructor(
                     hasLocation = true,
                     latitude = action.lat,
                     longitude = action.lon,
-                    placeLabel = action.label,
+                    place = action.place,
                     placeChosen = true,
                 )
                 PendingAction.ClearLocation -> it.copy(
                     hasLocation = false,
                     latitude = null,
                     longitude = null,
-                    placeLabel = null,
+                    place = null,
                     placeChosen = true,
                 )
                 // The box takes the ASCII form the file received, so what it shows after a save is

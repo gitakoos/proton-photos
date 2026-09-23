@@ -45,7 +45,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -57,8 +56,9 @@ import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.util.countryName
 import java.text.Collator
-import java.util.Locale
 
 /**
  * Case- and diacritic-insensitive filter over the account's cities, shared by the Places screen and the
@@ -87,25 +87,6 @@ internal sealed interface PlaceSearchEntry {
     data class Country(override val key: String, val label: String) : PlaceSearchEntry
 
     data class City(override val key: String, val city: PlaceCity) : PlaceSearchEntry
-}
-
-/**
- * The heading a country's cities sit under: [displayNameOf] names the ISO [countryCode] in the app's
- * language, and the [storedName] the geocode carried stands in when there is no code or the platform
- * has no name for it (it then hands the code back, or nothing).
- */
-internal fun placeCountryLabel(
-    countryCode: String,
-    storedName: String,
-    displayNameOf: (String) -> String,
-): String {
-    val code = countryCode.trim()
-    val displayed = if (code.isEmpty()) "" else displayNameOf(code).trim()
-    return when {
-        displayed.isNotEmpty() && !displayed.equals(code, ignoreCase = true) -> displayed
-        storedName.isNotBlank() -> storedName
-        else -> code
-    }
 }
 
 /**
@@ -154,13 +135,9 @@ internal fun PlaceSearchSheet(
     var query by remember { mutableStateOf("") }
     // Country names come from the ISO code in the language this drawer's own strings resolve in, so the
     // headings match the rest of it and a country is found by the name the heading shows.
-    val appLocale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
-    val countryLabelOf: (PlaceCity) -> String = remember(appLocale) {
-        { city ->
-            placeCountryLabel(city.countryCode, city.countryName) { code ->
-                Locale("", code).getDisplayCountry(appLocale)
-            }
-        }
+    val locale = appLocale()
+    val countryLabelOf: (PlaceCity) -> String = remember(locale) {
+        { city -> countryName(city.countryCode, locale, city.countryName) }
     }
     val filtered = remember(cities, query, countryLabelOf) { filterPlaceCities(cities, query, countryLabelOf) }
 
@@ -195,8 +172,8 @@ internal fun PlaceSearchSheet(
             } else {
                 // Cities are grouped by country, each block under its country's name with a thin line
                 // closing the block above.
-                val entries = remember(filtered, appLocale, countryLabelOf) {
-                    groupPlaceSearch(filtered, Collator.getInstance(appLocale), countryLabelOf)
+                val entries = remember(filtered, locale, countryLabelOf) {
+                    groupPlaceSearch(filtered, Collator.getInstance(locale), countryLabelOf)
                 }
                 LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
                     itemsIndexed(

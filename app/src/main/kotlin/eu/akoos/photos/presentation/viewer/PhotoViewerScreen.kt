@@ -178,7 +178,9 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.presentation.util.findActivity
+import eu.akoos.photos.util.cityCountryLabel
 import eu.akoos.photos.util.copySensitiveText
 
 internal val bubbleShape = CircleShape
@@ -2629,6 +2631,11 @@ fun PhotoViewerScreen(
             is GalleryItem.CloudOnly -> detailsThumbUrls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
             null -> null
         }
+        // "City, Country" for the Place row and the map caption, the country named in the app language.
+        val locale = appLocale()
+        val placeLabel = remember(detailsPlace, locale) {
+            detailsPlace?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
+        }
         ModalBottomSheet(
             onDismissRequest = { showMetadata = false },
             sheetState = metadataSheetState,
@@ -2638,7 +2645,7 @@ fun PhotoViewerScreen(
             PhotoMetadataSheet(
                 item = item,
                 exif = metadata,
-                place = detailsPlace,
+                place = placeLabel,
                 resolvedGps = detailsGps,
                 localFolder = detailsAlbums.localFolder,
                 cloudAlbums = detailsAlbums.cloudAlbums,
