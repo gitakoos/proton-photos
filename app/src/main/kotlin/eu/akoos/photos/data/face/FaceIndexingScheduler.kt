@@ -97,6 +97,7 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.service.FaceIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.FaceDiagnostics
+import eu.akoos.photos.util.FaceDiagnostics.RegroupTrigger
 import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.NetworkObserver
 import java.io.File
@@ -150,6 +151,57 @@ fun shouldRunForegroundIndex(pending: Int, backgroundEnabled: Boolean): Boolean 
  */
 internal fun shouldMarkScannedOnNullSource(isLocalOnly: Boolean, loadTimedOut: Boolean): Boolean =
     isLocalOnly || loadTimedOut
+
+/**
+ * Whether a finished walk pass should group the account's waiting faces into people. It needs a walk
+ * that is still permitted and at least one face not yet grouped ([ungrouped]), however many faces the
+ * pass itself found, so faces already stored are grouped even when this pass loads nothing. A walk about
+ * to stop groups at once; a continuing drain groups at most once per [minIntervalMs]. Pure so it is
+ * unit-tested without Android.
+ */
+internal fun shouldGroupAtPassEnd(
+    active: Boolean,
+    willContinue: Boolean,
+    ungrouped: Int,
+    msSinceLastGroup: Long,
+    minIntervalMs: Long,
+): Boolean = active && ungrouped > 0 && (!willContinue || msSinceLastGroup >= minIntervalMs)
+
+/**
+ * Whether the pass-end grouping follows its incremental placement with a full regroup: when the
+ * incremental path could not handle the pass (no usable cache, a large backlog, a failure), or when a
+ * [settled] walk (about to stop rather than continue) still holds faces the incremental path left
+ * unplaced, so the full regroup groups them and routes the weak ones to Unsorted instead of leaving any
+ * orphaned. A regroup that timed out or threw less than [failureBackoffMs] ago is not retried;
+ * [msSinceLastFailedRegroup] is null when none has failed. Nor does one run before [cooledDown]
+ * ([fullRegroupCooledDown]) allows it. Pure so it is unit-tested without Android.
+ */
+internal fun shouldRunFullRegroup(
+    incrementalHandled: Boolean,
+    settled: Boolean,
+    ungroupedAfterIncremental: Int,
+    msSinceLastFailedRegroup: Long?,
+    failureBackoffMs: Long,
+    cooledDown: Boolean = true,
+): Boolean =
+    (!incrementalHandled || (settled && ungroupedAfterIncremental > 0)) &&
+        (msSinceLastFailedRegroup == null || msSinceLastFailedRegroup >= failureBackoffMs) &&
+        cooledDown
+
+/**
+ * Whether enough time has passed since the last completed full regroup for the pass-end grouping to
+ * start another: at least [minIntervalMs], and at least [dutyFactor] times as long as that regroup took,
+ * so on a large library the full regroups (which read every stored embedding) take a bounded share of
+ * the time and memory while the scan runs. [msSinceLastRegroup] is null before any has completed. Pure
+ * so it is unit-tested without Android.
+ */
+internal fun fullRegroupCooledDown(
+    msSinceLastRegroup: Long?,
+    lastRegroupDurationMs: Long,
+    minIntervalMs: Long,
+    dutyFactor: Long,
+): Boolean =
+    msSinceLastRegroup == null || msSinceLastRegroup >= maxOf(minIntervalMs, dutyFactor * lastRegroupDurationMs)
 
 /**
  * Walks the whole library once and records the faces in each photo, in the background, only while
@@ -267,6 +319,15 @@ class FaceIndexingScheduler @Inject constructor(
      *  drain without re-clustering on every pass. */
     @Volatile private var lastIncrementalClusterMs = 0L
 
+    /** When a full regroup last timed out or threw (elapsedRealtime), or null when none has, so the
+     *  pass-end grouping backs off a failing regroup instead of retrying it on every settled pass. */
+    @Volatile private var lastFailedRegroupMs: Long? = null
+
+    /** When the last full regroup completed (elapsedRealtime), or null before any has, and how long it
+     *  ran, so the pass-end grouping spaces full regroups by their cost ([fullRegroupCooledDown]). */
+    @Volatile private var lastRegroupEndMs: Long? = null
+    @Volatile private var lastRegroupDurationMs = 0L
+
     private val _progress = MutableStateFlow(FaceIndexingProgress(FaceIndexingState.Idle, 0, 0))
     val progress: StateFlow<FaceIndexingProgress> = _progress.asStateFlow()
 
@@ -379,7 +440,7 @@ class FaceIndexingScheduler @Inject constructor(
             // bar climbs steadily to full instead of resetting to 0 with a shrinking total each pass.
             val libraryTotal = items.size
             val scannedBefore = libraryTotal - total
-            // Nothing left to scan: the library is fully drained, so this is the one place clustering
+            // Nothing left to scan: the library is fully drained, so this is where the final grouping
             // runs. Only when new faces were added since the last cluster, so a gallery re-entry that
             // finds everything already grouped does no work. A debug build re-clusters every drained
             // pass instead, so changing the cluster threshold and relaunching re-groups the stored
@@ -395,7 +456,7 @@ class FaceIndexingScheduler @Inject constructor(
                 val paramsOutdated =
                     (prefs[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] ?: 0) != FACE_CLUSTER_PARAMS_VERSION
                 if (BuildConfig.DEBUG || reattached || paramsOutdated) {
-                    val grouped = cluster(userId)
+                    val grouped = cluster(userId, RegroupTrigger.DRAINED)
                     if (paramsOutdated && grouped) {
                         context.settingsDataStore.edit {
                             it[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] = FACE_CLUSTER_PARAMS_VERSION
@@ -407,7 +468,7 @@ class FaceIndexingScheduler @Inject constructor(
                     // a few. Only the weak faces it cannot confidently place are left over, and those fall to
                     // a full regroup (which routes them to Unsorted) so none are orphaned.
                     tryAssignNewFaces(userId)
-                    if (faceDao.unclusteredCount(account) > 0) cluster(userId)
+                    if (faceDao.unclusteredCount(account) > 0) cluster(userId, RegroupTrigger.DRAINED)
                 }
                 // Opt-in auto-merge: once the groups have settled, fold each named person's closest
                 // look-alike cluster in (the same matches the manual suggestion card would offer), so the
@@ -416,6 +477,7 @@ class FaceIndexingScheduler @Inject constructor(
                     runCatching { autoMergePeople(account) }
                         .onFailure { Log.w(TAG, "auto-merge failed: ${it.message}") }
                 }
+                pushLibraryCounts(userId)
                 _progress.value = FaceIndexingProgress(FaceIndexingState.Done, libraryTotal, libraryTotal)
                 return
             }
@@ -541,25 +603,47 @@ class FaceIndexingScheduler @Inject constructor(
                     .onFailure { Log.w(TAG, "scan marker flush failed: ${it.message}") }
             }
 
-            // Cluster DURING the walk, not only when the whole library drains. Two triggers, both
-            // bounded and cancellable (cluster() runs under a timeout): (1) the walk is about to pause
-            // rather than continue (off Wi-Fi, health-parked, nothing more to source this pass), so
-            // group what is indexed instead of leaving it until a drain that may never come, the
-            // "scan stalls, no groups" failure case; (2) a long continuous drain crossed the refresh
-            // interval, so people appear and grow as the scan runs. Rate-limited by the interval so a
-            // fast drain does not re-cluster every pass.
+            // Group DURING the walk, not only when the whole library drains, whenever faces wait ungrouped
+            // (however many this pass found), so a library whose remainder never drains still gets its
+            // people. Two triggers, both bounded (cluster() runs under a timeout): (1) the walk is about
+            // to stop rather than continue (off Wi-Fi, health-parked, nothing more to source this pass),
+            // so group what is indexed instead of waiting for a drain that may never come; (2) a long
+            // continuous drain crossed the refresh interval, so people appear and grow as the scan runs.
+            // Incremental placement runs first. A settled walk then regroups fully while faces are still
+            // unplaced, as the drained branch does, so the weak ones land in Unsorted instead of staying
+            // orphaned; a continuing drain regroups fully only when the incremental path cannot be used.
+            // A full regroup that timed out or threw is not retried from here until its backoff passes.
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             val willContinue = restartRequested || (active() && sourcesLoaded.get() > 0)
             val nowMs = SystemClock.elapsedRealtime()
-            if (active() && facesThisPass.get() > 0 &&
-                (!willContinue || nowMs - lastIncrementalClusterMs >= INCREMENTAL_CLUSTER_MIN_INTERVAL_MS) &&
-                runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0) > 0
+            if (shouldGroupAtPassEnd(
+                    active = active(),
+                    willContinue = willContinue,
+                    ungrouped = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0),
+                    msSinceLastGroup = nowMs - lastIncrementalClusterMs,
+                    minIntervalMs = INCREMENTAL_CLUSTER_MIN_INTERVAL_MS,
+                )
             ) {
                 lastIncrementalClusterMs = nowMs
-                // Place just this pass's new faces against the cached people first; only fall back to the
-                // whole-library rebuild when the cache is not usable (first run, stale, or a big backlog).
-                if (!tryAssignNewFaces(userId)) cluster(userId)
+                val handled = tryAssignNewFaces(userId)
+                if (shouldRunFullRegroup(
+                        incrementalHandled = handled,
+                        settled = !willContinue,
+                        ungroupedAfterIncremental = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0),
+                        msSinceLastFailedRegroup = lastFailedRegroupMs?.let { nowMs - it },
+                        failureBackoffMs = FULL_REGROUP_FAILURE_BACKOFF_MS,
+                        cooledDown = fullRegroupCooledDown(
+                            msSinceLastRegroup = lastRegroupEndMs?.let { nowMs - it },
+                            lastRegroupDurationMs = lastRegroupDurationMs,
+                            minIntervalMs = INCREMENTAL_CLUSTER_MIN_INTERVAL_MS,
+                            dutyFactor = FULL_REGROUP_DUTY_FACTOR,
+                        ),
+                    )
+                ) {
+                    cluster(userId, if (willContinue) RegroupTrigger.PASS_CONTINUING else RegroupTrigger.PASS_SETTLED)
+                }
             }
+            pushLibraryCounts(userId)
             val indexedNow = scannedBefore + persistedThisPass.get() + scannedKeys.size
             _progress.value = when {
                 !aiEnabled -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
@@ -653,7 +737,7 @@ class FaceIndexingScheduler @Inject constructor(
 
     /** Re-run clustering now (e.g. right after the user named or merged a person) so the name attracts
      *  its other faces without waiting for the next scan pass. Forced, so it runs even while paused. */
-    fun requestRecluster(userId: UserId?) { scope.launch { runCatching { cluster(userId, force = true) } } }
+    fun requestRecluster(userId: UserId?) { scope.launch { runCatching { cluster(userId, RegroupTrigger.REQUEST, force = true) } } }
 
     /**
      * Scan just the photo now on screen, so the viewer can offer a face to tag before the background
@@ -707,7 +791,7 @@ class FaceIndexingScheduler @Inject constructor(
         // fallback stays forced, so it clusters even while background indexing is paused (the common state
         // after the first scan); a plain call would no-op there and leave the freshly scanned faces with a
         // null person id, so the viewer's grouped-faces read stays empty and the photo reads as "no faces".
-        if (!tryAssignNewFaces(userId)) cluster(userId, force = true)
+        if (!tryAssignNewFaces(userId)) cluster(userId, RegroupTrigger.ON_DEMAND, force = true)
         return true
     }
 
@@ -887,7 +971,7 @@ class FaceIndexingScheduler @Inject constructor(
         // the background walk clusters from its drained branch. Forced, since "Find more photos" is a
         // user action that must group its results even while background indexing is paused. Skipped
         // when nothing was persisted.
-        if (newFaces.get() > 0) cluster(userId, force = true)
+        if (newFaces.get() > 0) cluster(userId, RegroupTrigger.ON_DEMAND, force = true)
     }.flowOn(Dispatchers.Default)
 
     /**
@@ -898,6 +982,9 @@ class FaceIndexingScheduler @Inject constructor(
     suspend fun reset() {
         stopRequested = true
         lastUserId = null
+        lastFailedRegroupMs = null
+        lastRegroupEndMs = null
+        lastRegroupDurationMs = 0L
         _progress.value = FaceIndexingProgress(FaceIndexingState.Idle, 0, 0)
         FaceDiagnostics.clear()
         runCatching { context.settingsDataStore.edit { it.remove(SettingsKeys.FACE_INDEXING_PAUSED) } }
@@ -1213,8 +1300,8 @@ class FaceIndexingScheduler @Inject constructor(
                             )
                             runCatching { faceDao.upsert(entity) }
                                 .onFailure { Log.w(TAG, "face upsert $photoKey#$index failed: ${it.message}") }
+                            facesFound?.incrementAndGet()
                             if (BuildConfig.DEBUG) {
-                                facesFound?.incrementAndGet()
                                 acceptedScores?.add(face.score)
                                 blur?.let { acceptedBlur?.add(it) }
                             }
@@ -1637,26 +1724,36 @@ class FaceIndexingScheduler @Inject constructor(
         }
 
     /**
-     * Group every stored face into people, once the library is fully scanned and is still permitted
-     * to run. A clustering failure is logged and swallowed so it never fails the walk; cancellation
-     * still propagates. Returns true only when a grouping actually completed (not skipped, timed out,
-     * or failed), so the caller can record that a parameter generation was applied.
+     * Group every stored face into people while the walk is still permitted to run (a forced call runs
+     * regardless). A clustering failure is logged and swallowed so it never fails the walk; cancellation
+     * still propagates. A timeout or a failure stamps [lastFailedRegroupMs], so the pass-end grouping
+     * backs off. Returns true only when a grouping actually completed (not skipped, timed out, or
+     * failed), so the caller can record that a parameter generation was applied. Each run's [trigger] and
+     * outcome, and the library totals after it, go to the copied diagnostics.
      */
-    private suspend fun cluster(userId: UserId?, force: Boolean = false): Boolean {
+    private suspend fun cluster(userId: UserId?, trigger: RegroupTrigger, force: Boolean = false): Boolean {
         if (!force && !active()) return false
-        return try {
+        FaceDiagnostics.recordRegroupStarted(trigger)
+        val grouped = try {
             // Hard ceiling on a single clustering round. The clusterer is bounded and cancellable
             // (MAX_CLUSTERS + a polled cancellation check), so this only fires in a pathological case;
             // when it does, the in-transaction rebuild rolls back and the walk carries on rather than
             // hanging. withTimeoutOrNull absorbs its own timeout, so it never reads as a walk cancel.
+            val startMs = SystemClock.elapsedRealtime()
             val finished = withTimeoutOrNull(CLUSTER_TIMEOUT_MS) {
                 clusterFacesUseCase(userId)
                 true
             }
             if (finished == null) {
                 Log.w(TAG, "clustering timed out after ${CLUSTER_TIMEOUT_MS}ms, skipped this round")
+                lastFailedRegroupMs = SystemClock.elapsedRealtime()
+                FaceDiagnostics.recordRegroupTimedOut()
                 false
             } else {
+                val endMs = SystemClock.elapsedRealtime()
+                lastRegroupDurationMs = endMs - startMs
+                lastRegroupEndMs = endMs
+                FaceDiagnostics.recordRegroupCompleted(durationMs = endMs - startMs, endMs = endMs)
                 if (BuildConfig.DEBUG) {
                     // The debug threshold sweep reads per-account samples through the non-null diagnostic
                     // path; a guest still clusters above, it just skips this measurement-only log.
@@ -1668,8 +1765,32 @@ class FaceIndexingScheduler @Inject constructor(
             throw e
         } catch (e: Throwable) {
             Log.w(TAG, "clustering failed: ${e.message}")
+            lastFailedRegroupMs = SystemClock.elapsedRealtime()
+            FaceDiagnostics.recordRegroupFailed(e)
             false
         }
+        pushLibraryCounts(userId)
+        return grouped
+    }
+
+    /**
+     * Read the account's library totals into the copied diagnostics: stored faces, faces not yet grouped,
+     * people (the single Unsorted bucket excluded) and named people. Each read is guarded, so one that
+     * fails prints as unknown and never fails the caller. Skipped once a sign-out has asked the walk to
+     * stop, so the next account never inherits these totals, and when cancelled, so a cancelled read
+     * never overwrites the last good ones.
+     */
+    private suspend fun pushLibraryCounts(userId: UserId?) {
+        if (stopRequested) return
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        val faces = runCatching { faceDao.countForUser(account) }.getOrDefault(-1)
+        val ungrouped = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(-1)
+        val people = runCatching {
+            personDao.countForUser(account) - (if (personDao.otherPersonId(account) != null) 1 else 0)
+        }.getOrDefault(-1)
+        val named = runCatching { personDao.namedCountForUser(account) }.getOrDefault(-1)
+        if (!coroutineContext.isActive) return
+        FaceDiagnostics.recordLibraryCounts(faces, ungrouped, people, named)
     }
 
     /**
@@ -1898,6 +2019,14 @@ class FaceIndexingScheduler @Inject constructor(
         /** Least time between two mid-walk clusterings during a long continuous drain, so groups
          *  refresh periodically without re-clustering on every pass. */
         const val INCREMENTAL_CLUSTER_MIN_INTERVAL_MS = 60_000L
+
+        /** Thirty minutes in which the pass-end grouping holds off a full regroup after one timed out or
+         *  threw, so a regroup that keeps failing is not retried on every settled pass. */
+        const val FULL_REGROUP_FAILURE_BACKOFF_MS = 1_800_000L
+
+        /** A full regroup started from the pass end waits at least this many times as long as the last one
+         *  ran, so the full regroups take at most about a tenth of the time while a large library scans. */
+        const val FULL_REGROUP_DUTY_FACTOR = 9L
 
         /** How many accrued scan markers trigger a mid-pass flush, so a long single-pass drain that is
          *  killed keeps the photos it already scanned instead of restarting from zero. */

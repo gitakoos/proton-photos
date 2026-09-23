@@ -33,16 +33,19 @@ import java.util.concurrent.atomic.AtomicLong
  * a handful of live fields the scheduler pushes and a numbers-only [snapshot] the user copies from
  * Settings. Nothing here is auto-sent.
  *
- * Every value is a NON-IDENTIFYING count, flag, short label, or a deliberately truncated id fragment.
- * The in-flight item pointer and each rolling per-item line are cut to a short prefix so they can show
- * WHERE a scan wedged and how each item performed without ever carrying a full photo name, key, path,
- * or token; everything else is an aggregate count, a duration, a byte total, or the health gate's own
+ * Every value is a NON-IDENTIFYING count, flag, short label, exception class name, or a deliberately
+ * truncated id fragment. The in-flight item pointer and each rolling per-item line are cut to a short
+ * prefix so they can show WHERE a scan wedged and how each item performed without ever carrying a full
+ * photo name, key, path, or token; everything else is an aggregate count, a duration, a byte total, a
+ * fixed regroup-trigger label, an exception class name (never its message), or the health gate's own
  * short reason string.
  *
  * The scheduler pushes from up to three worker coroutines plus the foreground service, so the counters
  * are atomics, the in-flight pointers are a per-worker concurrent map (so one worker clearing its own
  * entry never blanks another's live label), and the rolling per-item ring plus the slowest-item pair are
- * guarded by `@Synchronized`; only the latest-wins progress and park fields stay `@Volatile`.
+ * guarded by `@Synchronized`; only the latest-wins fields (progress, park, library totals, latest
+ * regroup) stay `@Volatile`, the library totals and the latest completed regroup each swapped in as one
+ * immutable value.
  */
 object FaceDiagnostics {
 
@@ -95,6 +98,53 @@ object FaceDiagnostics {
     /** Total faces the detector has returned this session, before the blur / size gates drop any, so a
      *  "0 people found" report separates no-faces-in-library from faces-but-no-cluster. */
     private val facesDetected = AtomicInteger(0)
+
+    /** The account's library totals as last read from the database: stored faces, faces not yet grouped,
+     *  people (the Unsorted bucket excluded) and named people. Beside [facesDetected] they tell "no faces
+     *  stored" apart from "faces stored but never grouped". A count whose read failed is negative and
+     *  prints "?"; null until the first read. */
+    @Volatile
+    private var libraryCounts: LibraryCounts? = null
+
+    /** Full regroups this session: how many started, and how each one that returned ended. A start with
+     *  no outcome is still running or was cancelled. Atomic: a walk's regroup and a forced one can
+     *  overlap. */
+    private val regroupsStarted = AtomicInteger(0)
+    private val regroupsCompleted = AtomicInteger(0)
+    private val regroupsTimedOut = AtomicInteger(0)
+    private val regroupsFailed = AtomicInteger(0)
+
+    /** What started the latest regroup, the exception class name (never the message) of the latest one
+     *  that threw, and the run time and finish time of the latest one that completed. Null before any. */
+    @Volatile
+    private var lastRegroupTrigger: RegroupTrigger? = null
+    @Volatile
+    private var lastRegroupFailure: String? = null
+    @Volatile
+    private var lastRegroupCompleted: CompletedRegroup? = null
+
+    /** What started a full regroup, printed as its fixed [label]: the drained walk, a pass end about to
+     *  stop or about to continue, a scan brought forward from the viewer or a find-more sweep, or a
+     *  request after a naming or merge edit. A closed set, so a trigger never carries free text. */
+    enum class RegroupTrigger(val label: String) {
+        DRAINED("drained"),
+        PASS_SETTLED("pass-settled"),
+        PASS_CONTINUING("pass-continuing"),
+        ON_DEMAND("on-demand"),
+        REQUEST("request"),
+    }
+
+    /** One read of the library totals and the elapsedRealtime it was taken at. */
+    private data class LibraryCounts(
+        val faces: Int,
+        val ungrouped: Int,
+        val people: Int,
+        val named: Int,
+        val atMs: Long,
+    )
+
+    /** A completed regroup's run time and the elapsedRealtime it finished at. */
+    private data class CompletedRegroup(val durationMs: Long, val endMs: Long)
 
     /** elapsedRealtime the foreground service last began a session, or 0 when it is not running, so the
      *  snapshot can show how long the dataSync service has run against the platform's daily budget. */
@@ -168,6 +218,42 @@ object FaceDiagnostics {
     /** Add the faces one successful detect() returned to the running total. */
     fun recordFacesDetected(count: Int) {
         if (count > 0) facesDetected.addAndGet(count)
+    }
+
+    /** Record the account's library totals as just read, at [atMs] (elapsedRealtime); a negative count
+     *  marks one whose read failed. */
+    fun recordLibraryCounts(
+        faces: Int,
+        ungrouped: Int,
+        people: Int,
+        named: Int,
+        atMs: Long = SystemClock.elapsedRealtime(),
+    ) {
+        libraryCounts = LibraryCounts(faces, ungrouped, people, named, atMs)
+    }
+
+    /** Note a full regroup starting, and what started it. */
+    fun recordRegroupStarted(trigger: RegroupTrigger) {
+        regroupsStarted.incrementAndGet()
+        lastRegroupTrigger = trigger
+    }
+
+    /** Note a full regroup completing after [durationMs], finishing at [endMs] (elapsedRealtime). */
+    fun recordRegroupCompleted(durationMs: Long, endMs: Long = SystemClock.elapsedRealtime()) {
+        regroupsCompleted.incrementAndGet()
+        lastRegroupCompleted = CompletedRegroup(durationMs, endMs)
+    }
+
+    /** Note a full regroup given up at its timeout. */
+    fun recordRegroupTimedOut() {
+        regroupsTimedOut.incrementAndGet()
+    }
+
+    /** Note a full regroup that threw. Only the exception's simple class name is kept, never its message,
+     *  so nothing about the account or a photo can reach the copied text. */
+    fun recordRegroupFailed(error: Throwable) {
+        regroupsFailed.incrementAndGet()
+        lastRegroupFailure = error.javaClass.simpleName.ifEmpty { error.javaClass.name.substringAfterLast('.') }
     }
 
     /** Mark the foreground service session as started, once: a re-kick while it is already running does
@@ -266,6 +352,14 @@ object FaceDiagnostics {
         lastParkReason = "none"
         lastAdvanceMs.set(0L)
         facesDetected.set(0)
+        libraryCounts = null
+        regroupsStarted.set(0)
+        regroupsCompleted.set(0)
+        regroupsTimedOut.set(0)
+        regroupsFailed.set(0)
+        lastRegroupTrigger = null
+        lastRegroupFailure = null
+        lastRegroupCompleted = null
         fgsStartMs.set(0L)
         fgsTimeouts.set(0)
         imagesProcessed.set(0)
@@ -276,19 +370,22 @@ object FaceDiagnostics {
     }
 
     /** Live numbers-only block for the copied diagnostics: state, progress, how long since the count last
-     *  moved, pending, skips, faces, the in-flight pointer, the last park reason, the foreground-service
-     *  runtime and budget-timeout count, the run aggregates, the slowest item, and the rolling per-item
-     *  detail newest-first. Pending is what is left to reach the whole library, so a scan stuck short of
-     *  the end is obvious at a glance. */
-    fun snapshot(): String {
+     *  moved, pending, skips, faces detected, the library totals, the regroup tallies with the latest
+     *  trigger, failure class and completion, the in-flight pointer, the last park reason, the
+     *  foreground-service runtime and budget-timeout count, the run aggregates, the slowest item, and the
+     *  rolling per-item detail newest-first. Pending is what is left to reach the whole library, so a scan
+     *  stuck short of the end is obvious at a glance. Every relative age is measured from [now]
+     *  (elapsedRealtime). */
+    fun snapshot(now: Long = SystemClock.elapsedRealtime()): String {
         val pending = (total - indexed).coerceAtLeast(0)
-        val now = SystemClock.elapsedRealtime()
         val adv = lastAdvanceMs.get()
         val lastAdvance = if (adv == 0L) "never" else "${((now - adv) / 1000L).coerceAtLeast(0L)}s ago"
         val fgs = fgsStartMs.get()
         val fgsRuntime = if (fgs == 0L) "off" else formatMmSs(now - fgs)
         val slowest = slowestSnapshot()
         val recentLines = recentNewestFirst()
+        val counts = libraryCounts
+        val completed = lastRegroupCompleted
         return buildString {
             append("state=").append(state).append('\n')
             append("indexed=").append(indexed).append('/').append(total)
@@ -298,6 +395,25 @@ object FaceDiagnostics {
             append("skippedUnloadable=").append(unloadableLocal.get()).append('\n')
             append("watchdogSkips=").append(watchdogTimeouts.get()).append('\n')
             append("facesDetected=").append(facesDetected.get()).append('\n')
+            append("storedFaces=").append(countText(counts?.faces))
+            append(" ungrouped=").append(countText(counts?.ungrouped))
+            append(" people=").append(countText(counts?.people))
+            append(" named=").append(countText(counts?.named))
+            append(" counted=").append(if (counts == null) "never" else secondsAgo(now, counts.atMs)).append('\n')
+            append("regroupsStarted=").append(regroupsStarted.get())
+            append(" completed=").append(regroupsCompleted.get())
+            append(" timedOut=").append(regroupsTimedOut.get())
+            append(" failed=").append(regroupsFailed.get())
+            lastRegroupFailure?.let { append(" (").append(it).append(')') }
+            append('\n')
+            append("lastRegroupTrigger=").append(lastRegroupTrigger?.label ?: "none")
+            append(" lastRegroupCompleted=")
+            if (completed == null) {
+                append("never")
+            } else {
+                append(secondsAgo(now, completed.endMs)).append(" (").append(completed.durationMs).append("ms)")
+            }
+            append('\n')
             append("inFlight=").append(inFlightSnapshot()).append('\n')
             append("lastPark=").append(lastParkReason).append('\n')
             append("fgsRuntime=").append(fgsRuntime)
@@ -323,6 +439,12 @@ object FaceDiagnostics {
         if (inFlight.isEmpty()) return "none"
         return inFlight.entries.sortedBy { it.key }.joinToString(" ") { "${it.key}:${it.value}" }
     }
+
+    /** A library total for the copied text, "?" when it was never read or its read failed. */
+    private fun countText(count: Int?): String = if (count == null || count < 0) "?" else count.toString()
+
+    /** Whole seconds from [atMs] to [now] (both elapsedRealtime), as "Ns ago". */
+    private fun secondsAgo(now: Long, atMs: Long): String = "${((now - atMs) / 1000L).coerceAtLeast(0L)}s ago"
 
     /** Bytes to a one-decimal MB string with no locale dependence, so the copied text is stable. "?" for
      *  a missing size. Internal so the byte formatting is unit-tested. */

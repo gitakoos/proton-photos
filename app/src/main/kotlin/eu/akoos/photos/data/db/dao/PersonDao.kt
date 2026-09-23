@@ -91,4 +91,11 @@ interface PersonDao {
     /** How many people an owner holds, so a sign-in migration can report what it carried or dropped. */
     @Query("SELECT COUNT(*) FROM person WHERE userId = :userId")
     suspend fun countForUser(userId: String): Int
+
+    /** How many of the account's people carry a name (the Unsorted bucket never counts), for the diagnostics. */
+    @Query(
+        "SELECT COUNT(*) FROM person WHERE userId = :userId AND isOther = 0 " +
+            "AND displayName IS NOT NULL AND TRIM(displayName) != ''",
+    )
+    suspend fun namedCountForUser(userId: String): Int
 }
