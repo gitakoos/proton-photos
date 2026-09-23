@@ -29,12 +29,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.shareIn
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -44,7 +46,6 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
-import eu.akoos.photos.domain.repository.SyncStateRepository
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -57,7 +58,7 @@ private const val RECOMPUTE_THROTTLE_MS = 280L
 class GetGalleryItemsUseCase @Inject constructor(
     private val localRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
-    private val syncStateRepo: SyncStateRepository,
+    private val syncStateSnapshot: SyncStateSnapshot,
     @AppScope private val appScope: CoroutineScope,
 ) {
     // One shared upstream merge per user, so the associateBy/groupBy/sort runs ONCE across all
@@ -74,14 +75,16 @@ class GetGalleryItemsUseCase @Inject constructor(
                 // below never re-runs for a write that changed nothing.
                 localRepo.observeLocalMedia().distinctUntilChanged(),
                 cloudRepo.observeCloudPhotos(userId).distinctUntilChanged(),
-                syncStateRepo.observeAll(userId).distinctUntilChanged(),
+                // The app-wide lean copy of the sync rows: distinct already, and read again at most
+                // once a second however fast a backup writes the table.
+                syncStateSnapshot.observe(userId),
                 // Client-side hidden albums: the member linkIds to drop from EVERY listing. This is
                 // the single choke point all surfaces share (they all collect this flow), so one
                 // filter here hides a hidden album's photos from timeline, search, map, calendar,
                 // memories, folders and pickers at once. Empty + query-free when nothing is hidden.
                 cloudRepo.observeHiddenAlbumMemberLinkIds().distinctUntilChanged(),
-            ) { local, cloud, syncStates, hidden ->
-                MergeInput(local, cloud, syncStates, hidden)
+            ) { local, cloud, sync, hidden ->
+                MergeInput(local, cloud, sync, hidden)
             }
                 // Throttle the EXPENSIVE recompute. On a large library the cold listing writes the
                 // DB thousands of times; without this gate the merge+sort would re-run on the full,
@@ -92,7 +95,7 @@ class GetGalleryItemsUseCase @Inject constructor(
                 // period), then cached by shareIn(replay=1) for any late collector. `distinctUntilChanged`
                 // above already suppressed no-op re-emits, so a quiet library samples its one real value.
                 .sample(RECOMPUTE_THROTTLE_MS)
-                .map { merge(it.local, it.cloud, it.syncStates, it.hiddenLinkIds) }
+                .map { merge(it.local, it.cloud, it.sync, it.hiddenLinkIds) }
                 // The merge/sort over the full library is CPU work that must not run on the
                 // collector's Main dispatcher — a decrypt burst re-emits this per write.
                 .flowOn(Dispatchers.Default)
@@ -103,7 +106,11 @@ class GetGalleryItemsUseCase @Inject constructor(
                 // crash the whole app, every collector at once (timeline, duplicate finder, search).
                 // Re-subscribing rebuilds the stream and the next emission refills each screen.
                 .retryOnDbTear("GetGalleryItems")
-                .shareIn(appScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+                // Conflated, so a slow collector skips to the newest list instead of holding up to a
+                // buffer's worth of whole-library lists queued for it. Dropped once no one has
+                // collected it for the stop window, so no merged list outlives the screens reading it.
+                .conflate()
+                .shareIn(appScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
         }
 
     /** Session-free gallery feed for the no-account (local-only) mode: the device's own media with
@@ -112,7 +119,19 @@ class GetGalleryItemsUseCase @Inject constructor(
      *  album-hide filter never removes a local-only item (those carry no cloud linkId), so the hidden
      *  member source is not consulted here. Reads and writes no per-user cache and mints no UserId:
      *  a structural null-session branch. */
-    fun invokeLocalOnly(): Flow<List<GalleryItem>> =
+    fun invokeLocalOnly(): Flow<List<GalleryItem>> = localOnlyFeed
+
+    /**
+     * [invokeLocalOnly]'s one merge, shared by every guest surface (timeline, search, map, people)
+     * the way [invoke]'s is for a signed-in user, so the device library is merged once rather than
+     * once per collector. Built on first use, so a signed-in session never starts it.
+     *
+     * Conflated, so a slow collector skips to the newest list instead of holding the others back
+     * with copies queued for it. Dropped once no one has collected it for the stop window, so a
+     * later one-shot reader merges a current scan rather than a snapshot kept from a screen long
+     * closed, and no guest-mode list outlives the session that needed it.
+     */
+    private val localOnlyFeed: SharedFlow<List<GalleryItem>> by lazy {
         localRepo.observeLocalMedia()
             .distinctUntilChanged()
             .map { merge(it, emptyList(), emptyList()) }
@@ -121,12 +140,15 @@ class GetGalleryItemsUseCase @Inject constructor(
             .flowOn(Dispatchers.Default)
             .distinctUntilChanged()
             .retryOnDbTear("GetGalleryItemsLocalOnly")
+            .conflate()
+            .shareIn(appScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
+    }
 
     /** Bundles the four merge inputs so the sample+map pipeline carries them without a tuple type. */
     private data class MergeInput(
         val local: List<LocalMediaItem>,
         val cloud: List<CloudPhoto>,
-        val syncStates: List<SyncState>,
+        val sync: SyncStateSnapshot.Rows,
         val hiddenLinkIds: Set<String>,
     )
 
@@ -138,8 +160,50 @@ class GetGalleryItemsUseCase @Inject constructor(
         cloud: List<CloudPhoto>,
         syncStates: List<SyncState>,
         hiddenLinkIds: Set<String> = emptySet(),
+    ): List<GalleryItem> = mergeRows(
+        local = local,
+        cloud = cloud,
+        syncByUri = syncStates.associateBy { it.localUri },
+        cloudFileIdOf = { it.cloudFileId },
+        localHashOf = { it.localHash },
+        hiddenSyncedLinkIds = syncStates.asSequence()
+            .filter { it.status == SyncStatus.HIDDEN }
+            .mapNotNull { it.cloudFileId }
+            .toSet(),
+        hiddenLinkIds = hiddenLinkIds,
+    )
+
+    /** [merge] over the shared lean copy of the sync rows, which the feed runs on. It reads the same
+     *  columns of each row, so it pairs, badges and hides exactly as the full rows do. */
+    internal fun merge(
+        local: List<LocalMediaItem>,
+        cloud: List<CloudPhoto>,
+        sync: SyncStateSnapshot.Rows,
+        hiddenLinkIds: Set<String> = emptySet(),
+    ): List<GalleryItem> = mergeRows(
+        local = local,
+        cloud = cloud,
+        syncByUri = sync.byUri,
+        cloudFileIdOf = { it.cloudFileId },
+        localHashOf = { it.localHash },
+        hiddenSyncedLinkIds = sync.hiddenCloudIds,
+        hiddenLinkIds = hiddenLinkIds,
+    )
+
+    /**
+     * The merge itself, over whichever form of the sync rows the caller holds: [syncByUri] maps a
+     * device file's uri to its row, read through [cloudFileIdOf] and [localHashOf], and
+     * [hiddenSyncedLinkIds] holds the cloud ids on the rows of vaulted photos.
+     */
+    private fun <R : Any> mergeRows(
+        local: List<LocalMediaItem>,
+        cloud: List<CloudPhoto>,
+        syncByUri: Map<String, R>,
+        cloudFileIdOf: (R) -> String?,
+        localHashOf: (R) -> String,
+        hiddenSyncedLinkIds: Set<String>,
+        hiddenLinkIds: Set<String>,
     ): List<GalleryItem> {
-        val syncByUri = syncStates.associateBy { it.localUri }
         // Fast lookup of cloud entries by both linkId AND contentHash so we can pair a local
         // file with its cloud counterpart even when the SyncState is missing (e.g. user just
         // downloaded the album from a fresh install — no SyncState row exists yet but the
@@ -199,14 +263,14 @@ class GetGalleryItemsUseCase @Inject constructor(
             // Each cloud entry can only be claimed by ONE local item — that's why we check
             // [usedCloudIds] before pairing. Without this, a download that races a sync can
             // produce two Synced entries pointing at the same cloud linkId.
-            val cloudFromSync = sync?.cloudFileId
+            val cloudFromSync = sync?.let(cloudFileIdOf)
                 ?.takeIf { it !in usedCloudIds }
                 ?.let { cloudByLinkId[it] }
             // localHash is the bare SHA-1; cloudByHash is keyed by the cloud ContentHash
             // (HMAC-SHA256(rootNodeHashKey, sha1Hex)), so convert before the lookup — this pairs a
             // photo to its cloud copy by content even when rename-on-upload changed the cloud name.
             val cloudFromHash = if (cloudFromSync == null)
-                sync?.localHash?.takeIf { it.isNotEmpty() }
+                sync?.let(localHashOf)?.takeIf { it.isNotEmpty() }
                     ?.let { cloudRepo.cloudContentHash(it) }
                     ?.let { cloudByHash[it] }
                     ?.takeIf { it.linkId !in usedCloudIds }
@@ -282,10 +346,6 @@ class GetGalleryItemsUseCase @Inject constructor(
         // CloudOnly; a HIDDEN row's cloudFileId is exactly that twin's cloud.linkId (the key
         // cloudByLinkId is built on), so unioning it here drops the twin from every surface instead
         // of leaving it visible. HIDDEN is a tiny subset and the union allocates only when non-empty.
-        val hiddenSyncedLinkIds = syncStates.asSequence()
-            .filter { it.status == SyncStatus.HIDDEN }
-            .mapNotNull { it.cloudFileId }
-            .toSet()
         val effectiveHiddenLinkIds = when {
             hiddenSyncedLinkIds.isEmpty() -> hiddenLinkIds
             hiddenLinkIds.isEmpty() -> hiddenSyncedLinkIds

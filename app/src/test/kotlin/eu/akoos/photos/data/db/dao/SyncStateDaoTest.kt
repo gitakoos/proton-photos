@@ -424,4 +424,78 @@ class SyncStateDaoTest {
         assertEquals(SyncStatus.SYNCED, row?.status)
         assertEquals("B", row?.cloudFileId)
     }
+
+    // ── getAllLite: the lean columns of one account's rows ──────────────────────────────────────
+
+    @Test
+    fun `the lean read returns the projected columns of the account's rows only`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "c-1").copy(localHash = "sha-1"))
+        dao.upsert(entity("uri://2", status = SyncStatus.LOCAL_ONLY))
+        dao.markQueued("uri://2", source = "MANUAL", at = 1L)
+        dao.upsert(entity("uri://3", status = SyncStatus.HIDDEN, cloudFileId = "c-3"))
+        dao.upsert(entity("uri://4", userId = "user2", status = SyncStatus.SYNCED, cloudFileId = "c-4"))
+
+        val rows = dao.getAllLite("user1").sortedBy { it.localUri }
+
+        assertEquals(
+            listOf(
+                SyncStateLite("uri://1", "c-1", "sha-1", SyncStatus.SYNCED, queued = false),
+                SyncStateLite("uri://2", null, "", SyncStatus.LOCAL_ONLY, queued = true),
+                SyncStateLite("uri://3", "c-3", "", SyncStatus.HIDDEN, queued = false),
+            ),
+            rows,
+        )
+    }
+
+    @Test
+    fun `the lean read carries the same pairing, status and queue flag as the full rows`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "c-1", backedUpAtMs = 5L))
+        dao.upsert(entity("uri://2", status = SyncStatus.LOCAL_ONLY).copy(localHash = "sha-2"))
+        dao.markQueued("uri://2", source = "AUTO_FOLDER", at = 2L)
+
+        val full = dao.observeAll("user1").first()
+            .map { SyncStateLite(it.localUri, it.cloudFileId, it.localHash, it.status, it.queued) }
+            .sortedBy { it.localUri }
+
+        assertEquals(full, dao.getAllLite("user1").sortedBy { it.localUri })
+    }
+
+    @Test
+    fun `the lean read lists the rows in the order the full read does`() = runTest {
+        for ((i, uri) in listOf("uri://c", "uri://a", "uri://d", "uri://b").withIndex()) {
+            val status = if (i % 2 == 0) SyncStatus.SYNCED else SyncStatus.LOCAL_ONLY
+            dao.upsert(entity(uri, status = status, cloudFileId = "c-$i"))
+            dao.upsert(entity("$uri-other", userId = "user2"))
+        }
+        // A row rewritten in place keeps its position.
+        dao.upsert(entity("uri://c", status = SyncStatus.HIDDEN, cloudFileId = "c-0"))
+
+        assertEquals(
+            dao.observeAll("user1").first().map { it.localUri },
+            dao.getAllLite("user1").map { it.localUri },
+        )
+    }
+
+    // ── countPendingUploads: the photos waiting to back up ─────────────────────────────────────
+
+    @Test
+    fun `the pending count counts what a pass over the full rows counts`() = runTest {
+        dao.upsert(entity("uri://idle"))
+        for (uri in listOf("uri://queued-1", "uri://queued-2")) {
+            dao.upsert(entity(uri))
+            dao.markQueued(uri, source = "MANUAL", at = 1L)
+        }
+        dao.upsert(entity("uri://claimed", status = SyncStatus.UPLOADING))
+        dao.markQueued("uri://claimed", source = "AUTO_FOLDER", at = 2L)
+        dao.upsert(entity("uri://done", status = SyncStatus.SYNCED, cloudFileId = "c-done"))
+        dao.markQueued("uri://done", source = "ALBUM_ADD", at = 3L)
+        dao.upsert(entity("uri://other-account", userId = "user2"))
+        dao.markQueued("uri://other-account", source = "MANUAL", at = 4L)
+
+        val fullRowCount = dao.observeAll("user1").first()
+            .count { it.status == SyncStatus.LOCAL_ONLY && it.queued }
+
+        assertEquals(2, fullRowCount)
+        assertEquals(fullRowCount, dao.countPendingUploads("user1").first())
+    }
 }

@@ -50,7 +50,34 @@ object PerfDiagnostics {
 
     private const val BYTES_PER_MB = 1024L * 1024L
 
+    // Phase markers keep a ring of their own, so a burst of them cannot evict the heap samples and a
+    // long run of samples cannot evict them.
+    private const val MAX_PHASE_LINES = 64
+
+    // Distinct phase labels tracked for the peaks table and the open start marks. A fixed pipeline has
+    // far fewer; the cap only stops a misbehaving caller from growing the maps.
+    private const val MAX_PHASES = 24
+
+    private const val MAX_LABEL_CHARS = 32
+    private const val START_SUFFIX = ":start"
+    private const val END_SUFFIX = ":end"
+
     private val lines = ArrayDeque<String>(MAX_LINES)
+
+    private val phaseLines = ArrayDeque<String>(MAX_PHASE_LINES)
+
+    // Used heap (MB) and wall clock at each phase's start mark, keyed by the label before the colon.
+    private val openPhases = HashMap<String, LongArray>()
+
+    // Highest values seen per phase, which outlive the ring once it has rolled past them.
+    private val phasePeaks = LinkedHashMap<String, PhasePeak>()
+
+    private class PhasePeak {
+        var marks = 0
+        var maxItems = 0
+        var maxHeapMb = 0L
+        var maxGrowthMb: Long? = null
+    }
 
     // Anchor for the relative timestamp: wall-clock of the first appended line (same as
     // SyncDiagnostics), so the dump carries no locally-identifying absolute timeline.
@@ -139,6 +166,90 @@ object PerfDiagnostics {
         )
     }
 
+    /**
+     * Numbers-only marker at a big pipeline phase boundary (device scan, cloud listing refresh, reconcile,
+     * upload batch, tag scan, EXIF walk): records the used Java heap, the native heap and [items]. Name
+     * the edges `<phase>:start` and `<phase>:end`; an end whose start was recorded also reports how far
+     * the heap grew across the phase and how long it ran, and each phase keeps its peaks, so the copied
+     * diagnostics show which phase grows the heap.
+     *
+     * [phase] must be a fixed label, never a name, path or id: it is lowercased and cut down to letters,
+     * `:`, `-`, `_` and `.`, so digits, slashes and `@` can never reach the buffer.
+     */
+    @Synchronized
+    fun mark(phase: String, items: Int) {
+        val label = phaseLabel(phase)
+        val base = label.substringBefore(':')
+        val rt = Runtime.getRuntime()
+        val usedMb = (rt.totalMemory() - rt.freeMemory()) / BYTES_PER_MB
+        val maxMb = rt.maxMemory() / BYTES_PER_MB
+        val nativeMb = android.os.Debug.getNativeHeapAllocatedSize() / BYTES_PER_MB
+        if (usedMb > peakHeapUsedMb) peakHeapUsedMb = usedMb
+        val now = System.currentTimeMillis()
+
+        val opened = if (label.endsWith(END_SUFFIX)) openPhases.remove(base) else null
+        if (label.endsWith(START_SUFFIX)) {
+            if (base !in openPhases && openPhases.size >= MAX_PHASES) openPhases.clear()
+            openPhases[base] = longArrayOf(usedMb, now)
+        }
+        val growthMb = opened?.let { usedMb - it[0] }
+        val tookMs = opened?.let { now - it[1] }
+
+        val peak = phasePeaks[base]
+            ?: if (phasePeaks.size < MAX_PHASES) PhasePeak().also { phasePeaks[base] = it } else null
+        if (peak != null) {
+            peak.marks++
+            peak.maxItems = maxOf(peak.maxItems, items)
+            peak.maxHeapMb = maxOf(peak.maxHeapMb, usedMb)
+            if (growthMb != null) peak.maxGrowthMb = maxOf(peak.maxGrowthMb ?: growthMb, growthMb)
+        }
+
+        if (phaseLines.size >= MAX_PHASE_LINES) phaseLines.removeFirst()
+        phaseLines.addLast(stamp(now, phaseLine(label, items, usedMb, maxMb, nativeMb, growthMb, tookMs)))
+    }
+
+    /** The newest [max] phase lines, oldest first. The buffer dies with the process, so an OOM crash
+     *  keeps which phase was running only when the crash record carries this tail. */
+    @Synchronized
+    fun phaseTail(max: Int = 8): String = phaseLines.takeLast(max.coerceAtLeast(0)).joinToString("\n")
+
+    /** [phase] cut down to the fixed-label alphabet [mark] documents; never empty. */
+    internal fun phaseLabel(phase: String): String =
+        phase.lowercase(Locale.US)
+            .filter { it in 'a'..'z' || it == ':' || it == '-' || it == '_' || it == '.' }
+            .take(MAX_LABEL_CHARS)
+            .ifEmpty { "phase" }
+
+    /** One phase line: the label, the item count, the heap numbers and, for a closed phase, the growth. */
+    internal fun phaseLine(
+        label: String,
+        items: Int,
+        usedMb: Long,
+        maxMb: Long,
+        nativeMb: Long,
+        growthMb: Long?,
+        tookMs: Long?,
+    ): String = buildString {
+        append(label).append(" items=").append(items)
+        append(" heap=").append(usedMb).append('/').append(maxMb).append("MB")
+        append(" nativeMB=").append(nativeMb)
+        if (growthMb != null && tookMs != null) {
+            append(" grew=").append(signedMb(growthMb))
+            append(String.format(Locale.US, " in %.1fs", tookMs / 1000.0))
+        }
+    }
+
+    /** One row of the per-phase peaks table. */
+    internal fun peakLine(base: String, marks: Int, maxItems: Int, maxHeapMb: Long, maxGrowthMb: Long?): String =
+        buildString {
+            append(base).append(" marks=").append(marks)
+            append(" maxItems=").append(maxItems)
+            append(" maxHeap=").append(maxHeapMb).append("MB")
+            if (maxGrowthMb != null) append(" maxGrowth=").append(signedMb(maxGrowthMb))
+        }
+
+    private fun signedMb(mb: Long): String = (if (mb >= 0) "+" else "") + mb + "MB"
+
     /** Live point-in-time block (no buffer) for the copied diagnostics: heap, native heap, device RAM,
      *  library size, thumbnail-cache size. Numbers only. */
     fun snapshot(context: android.content.Context): String {
@@ -167,25 +278,44 @@ object PerfDiagnostics {
         }
     }
 
+    /** The sample lines, then the phase markers and the per-phase peaks when any phase was marked. */
     @Synchronized
-    fun dump(): String = lines.joinToString("\n")
+    fun dump(): String = buildString {
+        lines.joinTo(this, "\n")
+        if (phaseLines.isNotEmpty()) {
+            if (isNotEmpty()) append('\n')
+            append("phases:\n")
+            phaseLines.joinTo(this, "\n")
+            append("\nphase peaks:")
+            for ((base, peak) in phasePeaks) {
+                append('\n').append(peakLine(base, peak.marks, peak.maxItems, peak.maxHeapMb, peak.maxGrowthMb))
+            }
+        }
+    }
 
     @Synchronized
-    fun isEmpty(): Boolean = lines.isEmpty()
+    fun isEmpty(): Boolean = lines.isEmpty() && phaseLines.isEmpty()
 
     @Synchronized
     fun clear() {
         lines.clear()
+        phaseLines.clear()
+        openPhases.clear()
+        phasePeaks.clear()
         startedAtMs = 0L
         lastAppendedAtMs = 0L
     }
 
     private fun append(now: Long, message: String) {
+        if (lines.size >= MAX_LINES) lines.removeFirst()
+        lines.addLast(stamp(now, message))
+        lastAppendedAtMs = now
+    }
+
+    /** [message] behind the relative timestamp shared by the sample lines and the phase markers. */
+    private fun stamp(now: Long, message: String): String {
         if (startedAtMs == 0L) startedAtMs = now
         val elapsedSeconds = (now - startedAtMs) / 1000.0
-        val stamp = String.format(Locale.US, "[%7.1fs] %s", elapsedSeconds, message)
-        if (lines.size >= MAX_LINES) lines.removeFirst()
-        lines.addLast(stamp)
-        lastAppendedAtMs = now
+        return String.format(Locale.US, "[%7.1fs] %s", elapsedSeconds, message)
     }
 }

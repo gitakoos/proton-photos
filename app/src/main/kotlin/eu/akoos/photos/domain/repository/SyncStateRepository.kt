@@ -28,6 +28,9 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 
 interface SyncStateRepository {
+    /** Every row [userId] holds with all its columns, read again in full on each write to the table.
+     *  Legacy: a reader that needs only the pairing, the status or the queue flag takes
+     *  [eu.akoos.photos.data.repository.SyncStateSnapshot], one lean read the whole app shares. */
     fun observeAll(userId: UserId): Flow<List<SyncState>>
     /** Live count of LOCAL_ONLY rows that also carry a queued upload intent, the photos genuinely
      *  waiting to back up. Matches the upload processor's selector so pending-count UIs agree. */

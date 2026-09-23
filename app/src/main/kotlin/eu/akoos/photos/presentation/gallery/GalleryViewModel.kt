@@ -91,6 +91,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.model.PersonSummary
+import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.data.repository.drive.PhotoStreamService
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -169,6 +170,21 @@ private data class GalleryComputed(
     val onThisDay: List<Pair<Int, List<GalleryItem>>>,
 )
 
+/**
+ * Cloud ids of the SYNCED rows that name a device file: the backed-up photos this device also holds.
+ * A row with a blank uri names no file and leaves its id out. With no such row the answer is the
+ * snapshot's own [SyncStateSnapshot.Rows.syncedCloudIds], shared with its other readers.
+ */
+internal fun syncedCloudIdsOnDevice(sync: SyncStateSnapshot.Rows): Set<String> =
+    if (sync.rows.none { it.status == SyncStatus.SYNCED && it.localUri.isBlank() }) {
+        sync.syncedCloudIds
+    } else {
+        sync.rows.asSequence()
+            .filter { it.status == SyncStatus.SYNCED && it.localUri.isNotBlank() }
+            .mapNotNull { it.cloudFileId }
+            .toSet()
+    }
+
 @HiltViewModel
 class GalleryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -191,6 +207,7 @@ class GalleryViewModel @Inject constructor(
     private val transferCenter: TransferCenter,
     private val undoController: eu.akoos.photos.presentation.common.UndoController,
     private val syncStateRepo: SyncStateRepository,
+    private val syncStateSnapshot: SyncStateSnapshot,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumPhotoMembershipDao: eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao,
     private val photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao,
@@ -324,14 +341,9 @@ class GalleryViewModel @Inject constructor(
     val downloadedCloudLinkIds: StateFlow<Set<String>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptySet())
-            else syncStateRepo.observeAll(userId).map { states ->
-                states.asSequence()
-                    .filter { it.status == SyncStatus.SYNCED }
-                    .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
-                    .map { it.cloudFileId!! }
-                    .toSet()
-            }
+            else syncStateSnapshot.observe(userId).map { syncedCloudIdsOnDevice(it) }
         }
+        .flowOn(Dispatchers.Default)
         .retryOnDbTear("GalleryDownloadedIds")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
@@ -749,18 +761,14 @@ class GalleryViewModel @Inject constructor(
             emit(emptySet())
         }
 
-        // SyncStateRepo rows with HIDDEN status carry the cloud linkId of a photo whose
+        // Sync rows with HIDDEN status carry the cloud linkId of a photo whose
         // local twin lives in the Hidden vault. The gallery shows those cloud photos but
         // marks them with a crossed-out eye overlay so the user can see which cloud
         // entries are "hidden on this device" without opening the Hidden screen.
-        val hiddenCloudLinkIdsFlow = if (userId != null) syncStateRepo.observeAll(userId).map { states ->
-            states.asSequence()
-                .filter { it.status == SyncStatus.HIDDEN && it.cloudFileId != null }
-                .map { it.cloudFileId!! }
-                .toSet()
-        }.catch {
-            // A transient DAO read during a write burst degrades to "no overlays"
-            // instead of throwing into combine.
+        val hiddenCloudLinkIdsFlow = if (userId != null) syncStateSnapshot.observe(userId).map { sync ->
+            sync.hiddenCloudIds
+        }.flowOn(Dispatchers.Default).catch {
+            // A failure here degrades to "no overlays" instead of throwing into combine.
             android.util.Log.w("GalleryVM", "hiddenCloudLinkIds source failed: ${it.message}")
             emit(emptySet())
         } else flowOf(emptySet())
@@ -1015,8 +1023,7 @@ class GalleryViewModel @Inject constructor(
             // button would be a no-op against it. Routing every trigger through the worker keeps
             // cancellation working (mirrors the download worker design). Count only queued rows: an
             // out-of-scope LOCAL_ONLY row is not upload work, so it must not keep waking the worker.
-            val pending = syncStateRepo.observeAll(userId).first()
-                .count { it.status == SyncStatus.LOCAL_ONLY && it.queued }
+            val pending = syncStateRepo.countPendingUploads(userId).first()
             if (pending > 0) {
                 val wifiOnly = context.settingsDataStore.data
                     .map { it[SettingsKeys.SYNC_WIFI_ONLY] != false }.first()

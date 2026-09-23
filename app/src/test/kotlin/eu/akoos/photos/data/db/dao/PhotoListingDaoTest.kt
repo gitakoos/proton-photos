@@ -28,6 +28,7 @@ import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.db.entity.toCloudPhotos
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -37,6 +38,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.random.Random
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -245,6 +247,40 @@ class PhotoListingDaoTest {
     }
 
     @Test
+    fun `getOwnStreamLite reads the stream's rows in the stream's order, ties included`() = runTest {
+        // The timeline copy is read through the one-shot and must hold exactly what the stream flow
+        // holds, row for row. Equal capture times are common (bursts, imports), and the gallery's
+        // content-hash lookup keeps the last of the rows sharing a hash, so a reordered tie could
+        // change which twin a device photo pairs with.
+        val random = Random(17)
+        val entities = List(500) { i ->
+            entity(
+                linkId = "link$i",
+                userId = if (random.nextInt(10) == 0) "user2" else "user1",
+                captureTime = random.nextInt(0, 8).toLong() * 100L,
+                isChildOfAlbum = random.nextInt(8) == 0,
+            ).copy(
+                mimeType = listOf("image/jpeg", "image/heic", "video/mp4", "")[random.nextInt(4)],
+                tagsCsv = listOf("", "0", "2", "0,3")[random.nextInt(4)],
+            )
+        }
+        for (chunk in entities.shuffled(random).chunked(41)) dao.insertAll(chunk)
+        // A replace deletes and re-inserts, so a rewritten row lands at a new place among its ties.
+        dao.insertAll(entities.shuffled(random).take(80).map { it.copy(sizeBytes = it.sizeBytes + 1) })
+
+        val rows = dao.getOwnStreamLite("user1")
+        val stream = dao.observeOwnStreamLite("user1").first()
+
+        assertTrue("the fixture must hold a large stream", rows.size > 300)
+        assertEquals(stream, rows)
+        assertEquals(
+            "the timeline copy maps to what the stream's rows map to",
+            stream.map { it.toDomain() },
+            rows.toCloudPhotos(),
+        )
+    }
+
+    @Test
     fun `observeOwnStreamPickerRows returns stream photos newest first and skips a direct album child`() = runTest {
         // The widget picker's pool, held to the same own-stream rule: a photo that lives only inside
         // an album someone shared is never offered as widget content, and the order is the query's.
@@ -396,6 +432,71 @@ class PhotoListingDaoTest {
         val rows = dao.getVideosMissingDuration("user1", OWN_VOLUME, 10)
 
         assertEquals(listOf("own-video"), rows.map { it.linkId })
+    }
+
+    // ── observeOwnStreamTotals: the Settings backup figures, summed in SQL ─────────────────────
+
+    @Test
+    fun `the own-stream totals equal what a pass over the listed rows counts`() = runTest {
+        // Every row shape the listing leaves out or the video test could misread: another account's
+        // rows, album children, and mime types that read as video only to a case-folding or a
+        // substring test.
+        val random = Random(23)
+        val mimeTypes = listOf(
+            "image/jpeg", "image/heic", "video/mp4", "video/quicktime", "video/",
+            "VIDEO/MP4", "Video/mp4", "videos/mp4", "image/video", "",
+        )
+        val entities = List(400) { i ->
+            entity(
+                linkId = "link$i",
+                userId = if (random.nextInt(10) == 0) "user2" else "user1",
+                captureTime = random.nextInt(0, 8).toLong() * 100L,
+                isChildOfAlbum = random.nextInt(8) == 0,
+            ).copy(
+                mimeType = mimeTypes[random.nextInt(mimeTypes.size)],
+                sizeBytes = random.nextLong(0L, 40_000_000L),
+            )
+        }
+        dao.insertAll(entities)
+
+        // The rows the timeline lists, mapped as its shared copy maps them, counted the way the
+        // Settings page counts them.
+        val listed = dao.getOwnStreamLite("user1").toCloudPhotos()
+        val videos = listed.count { it.mimeType.startsWith("video/") }
+
+        assertTrue("the fixture must hold both photos and videos", videos > 0 && listed.size > videos)
+        assertEquals(
+            OwnStreamTotals(photos = listed.size - videos, videos = videos, bytes = listed.sumOf { it.sizeBytes }),
+            dao.observeOwnStreamTotals("user1").first(),
+        )
+    }
+
+    @Test
+    fun `the totals take a video to be a case-sensitive video prefix`() = runTest {
+        // A case-folding test would count VIDEO/MP4 as a video, which the listing's readers never do.
+        dao.upsertAll(listOf(
+            entity("lower").copy(mimeType = "video/mp4"),
+            entity("bare").copy(mimeType = "video/"),
+            entity("upper").copy(mimeType = "VIDEO/MP4"),
+            entity("inner").copy(mimeType = "image/video"),
+            entity("empty").copy(mimeType = ""),
+        ))
+
+        val totals = dao.observeOwnStreamTotals("user1").first()
+
+        assertEquals(2, totals.videos)
+        assertEquals(3, totals.photos)
+    }
+
+    @Test
+    fun `the totals of a stream with no rows are zero`() = runTest {
+        // The user holds only an album child here, and another account holds the rest.
+        dao.upsertAll(listOf(contributedEntity("contributed"), entity("theirs", userId = "user2")))
+
+        assertEquals(
+            OwnStreamTotals(photos = 0, videos = 0, bytes = 0L),
+            dao.observeOwnStreamTotals("user1").first(),
+        )
     }
 
     private companion object {

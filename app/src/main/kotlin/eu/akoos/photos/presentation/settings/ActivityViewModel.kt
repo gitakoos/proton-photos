@@ -30,6 +30,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,12 +39,15 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import eu.akoos.photos.BuildConfig
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.db.dao.SyncStateLite
+import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.entity.SyncStatus
-import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.batteryLowFlow
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.domain.usecase.UploadPendingUseCase
@@ -51,6 +55,14 @@ import eu.akoos.photos.domain.usecase.UploadStatus
 import eu.akoos.photos.worker.AlbumDownloadWorker
 import java.util.UUID
 import javax.inject.Inject
+
+/**
+ * Device uris of the photos waiting to back up, in the table's order: LOCAL_ONLY rows that also carry
+ * a queued upload intent, the same set the upload processor selects and the gallery badge counts.
+ */
+internal fun pendingUploadUris(rows: List<SyncStateLite>): List<String> =
+    rows.filter { it.status == SyncStatus.LOCAL_ONLY && it.queued }
+        .mapNotNull { it.localUri.takeIf { u -> u.isNotBlank() } }
 
 /**
  * Backs the Activity screen — a single live view of the background transfers, reachable from the
@@ -62,7 +74,7 @@ import javax.inject.Inject
 class ActivityViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val upload: UploadPendingUseCase,
-    private val syncStateRepo: SyncStateRepository,
+    private val syncStateSnapshot: SyncStateSnapshot,
     private val transferCenter: TransferCenter,
     private val accountManager: AccountManager,
 ) : ViewModel() {
@@ -234,14 +246,11 @@ class ActivityViewModel @Inject constructor(
         // LOCAL_ONLY row with no upload intent is not shown as "pending" here either).
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            syncStateRepo.observeAll(userId)
+            syncStateSnapshot.observe(userId)
+                .map { pendingUploadUris(it.rows) }
+                .flowOn(Dispatchers.Default)
                 .retryOnDbTear("ActivityPending")
-                .collect { states ->
-                val pending = states
-                    .filter { it.status == SyncStatus.LOCAL_ONLY && it.queued }
-                    .mapNotNull { it.localUri?.takeIf { u -> u.isNotBlank() } }
-                _uiState.update { it.copy(pendingUris = pending) }
-            }
+                .collect { pending -> _uiState.update { it.copy(pendingUris = pending) } }
         }
         // Battery state, live: the "waiting for battery" note has to clear the moment the phone goes
         // on a charger, so a one-off read at screen open would leave a stale reason on screen.

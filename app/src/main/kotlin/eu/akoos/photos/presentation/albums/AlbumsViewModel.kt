@@ -29,6 +29,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +44,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -294,6 +296,9 @@ class AlbumsViewModel @Inject constructor(
             combine(localMediaRepo.observeLocalMedia(), folderPrefsFlow) { items, (hiddenUris, pinnedCovers) ->
                 DeviceFolderCards.build(items, hiddenUris, pinnedCovers)
             }
+                // Grouping the whole device library into cards is CPU work that must not run on the
+                // Main dispatcher this collector lives on.
+                .flowOn(Dispatchers.Default)
                 .catch { emit(emptyList()) }
                 .collect { folders ->
                     _uiState.update { it.copy(deviceFolders = folders) }

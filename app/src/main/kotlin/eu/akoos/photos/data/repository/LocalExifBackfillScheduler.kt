@@ -29,6 +29,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -41,7 +42,6 @@ import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
-import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.DeviceHealthPolicy
@@ -49,11 +49,13 @@ import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.HEALTH_PAUSE_POLL_MS
 import eu.akoos.photos.util.Mp4CreationTime
+import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.hasMediaLocationGrant
 import eu.akoos.photos.util.originalUriForExif
 import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -74,13 +76,14 @@ private const val TAG = "LocalExifBackfill"
  *
  * The same source the tag scan uses ([LocalMediaRepository]) supplies the items, and each one is
  * classified into the legs it still owes, so a file needing neither is never opened. EXIF reads
- * touch disk, so [backfillAll] runs them on a small bounded pool ([WORKER_COUNT] permits) the same
- * way the tag and thumbnail schedulers do: a whole-library walk that never floods I/O. It is
- * resumable and idempotent, each leg carrying its own skip set (the located URIs for GPS, the
- * already recorded URIs for the date), and an in-process [inFlight] set collapses overlapping calls
- * so a second invocation while one is running re-reads nothing. The date skip set holds only the
- * entries that still match their file's DATE_MODIFIED: one the file has outgrown is dropped instead,
- * which is what lets an EXIF edit made in another app reach a file the walk has already recorded.
+ * touch disk, so [backfillAll] runs them on a fixed pool of [WORKER_COUNT] workers the same way the
+ * tag and thumbnail schedulers do: a whole-library walk that never floods I/O and runs on a few
+ * coroutines, not one per photo. It is resumable and idempotent, each leg carrying its own
+ * skip set (the located URIs for GPS, the already recorded URIs for the date), and an in-process
+ * [inFlight] set collapses overlapping calls so a second invocation while one is running re-reads
+ * nothing. The date skip set holds only the entries that still match their file's DATE_MODIFIED: one
+ * the file has outgrown is dropped instead, which is what lets an EXIF edit made in another app
+ * reach a file the walk has already recorded.
  *
  * A read error on one file skips that file and never aborts the walk.
  */
@@ -91,7 +94,8 @@ class LocalExifBackfillScheduler @Inject constructor(
     private val photoLocationDao: PhotoLocationDao,
     private val deviceHealth: DeviceHealthPolicy,
 ) {
-    /** Concurrency bound on in-flight EXIF reads, a handful keeping disk I/O off any hot path. */
+    /** Concurrency bound on in-flight EXIF reads, a handful keeping disk I/O off any hot path. Shared
+     *  by every walk, so overlapping walks together still read [WORKER_COUNT] files at a time. */
     private val semaphore = Semaphore(WORKER_COUNT)
 
     /** URIs currently being read, so overlapping [backfillAll] calls don't double-read one file. */
@@ -100,8 +104,18 @@ class LocalExifBackfillScheduler @Inject constructor(
     /** Serialises the skip-set read + enqueue so two concurrent walks compute the remainder once. */
     private val walkLock = Mutex()
 
-    /** One file the walk will open, with the legs it still owes, so nothing is read twice. */
-    private class Pending(val item: LocalMediaItem, val needsGps: Boolean, val needsDate: Boolean)
+    /**
+     * One file the walk will open, with the legs it still owes, so nothing is read twice. It keeps
+     * only the fields the reads use, so a running walk does not hold the whole scanned list.
+     */
+    private class Pending(
+        val uri: String,
+        val isVideo: Boolean,
+        val dateTaken: Long,
+        val dateModified: Long,
+        val needsGps: Boolean,
+        val needsDate: Boolean,
+    )
 
     /**
      * Read every device photo that still owes a GPS fix or a capture-date check for [userId] and
@@ -113,7 +127,7 @@ class LocalExifBackfillScheduler @Inject constructor(
         if (!canReadLocation) {
             Log.i(TAG, "ACCESS_MEDIA_LOCATION not granted; GPS leg skipped, date leg still runs")
         }
-        val items = runCatching { localMediaRepository.observeLocalMedia().first() }
+        val items = runCatching { localMediaRepository.freshMedia() }
             .getOrDefault(emptyList())
         if (items.isEmpty()) return
 
@@ -158,7 +172,14 @@ class LocalExifBackfillScheduler @Inject constructor(
                 val needsDate = recorded == null
                 if (!needsGps && !needsDate) null
                 else if (!inFlight.add(item.uri)) null
-                else Pending(item, needsGps, needsDate)
+                else Pending(
+                    uri = item.uri,
+                    isVideo = item.mimeType.startsWith("video/"),
+                    dateTaken = item.dateTaken,
+                    dateModified = item.dateModified,
+                    needsGps = needsGps,
+                    needsDate = needsDate,
+                )
             }
         }
         if (pending.isEmpty() && voided.isEmpty() && adopted.isEmpty()) return
@@ -169,11 +190,14 @@ class LocalExifBackfillScheduler @Inject constructor(
         // Adoptions ride the same single edit as the walk's own findings. A later real correction for
         // the same uri overwrites this one, since the walk fills corrections after this point.
         corrections.putAll(adopted)
+        // Files the pool has finished, read or failed, so the end mark says how far the walk got.
+        val processed = AtomicInteger()
         // The reservation above runs under walkLock so a concurrent walk skips these URIs, but its
-        // removal must cover EVERY exit, including a cancellation that lands after enqueue but
-        // before a child's try. Clearing the whole reserved set in a finally on the walk guarantees
-        // no URI is stranded in inFlight for the process lifetime.
+        // removal must cover EVERY exit, including a cancellation that lands before a worker reaches
+        // a file. Clearing the whole reserved set in a finally on the walk guarantees no URI is
+        // stranded in inFlight for the process lifetime.
         try {
+            PerfDiagnostics.mark("exif:start", pending.size)
             // Defer this background walk while the phone is hot, low on battery, or in the power saver;
             // it resumes on its own once conditions clear. Not gated on interaction: it runs quietly in
             // the background and does not compete with the UI. Inside the try so a cancellation during
@@ -181,23 +205,20 @@ class LocalExifBackfillScheduler @Inject constructor(
             // call (the map, opened by the user) skips this: they asked to see their places now, so the
             // walk runs even on a low battery rather than leaving the map empty until the phone charges.
             if (respectHealthGate) while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
-            coroutineScope {
-                pending.forEach { entry ->
-                    launch {
-                        try {
-                            semaphore.withPermit { readAndStore(entry, userId, corrections) }
-                        } catch (e: Throwable) {
-                            if (e is kotlinx.coroutines.CancellationException) throw e
-                            Log.w(TAG, "exif read ${entry.item.uri} failed: ${e.message}")
-                        }
-                    }
-                }
+            forEachPooled(
+                pending,
+                workers = WORKER_COUNT,
+                finished = processed,
+                onFailure = { entry, e -> Log.w(TAG, "exif read ${entry.uri} failed: ${e.message}") },
+            ) { entry ->
+                semaphore.withPermit { readAndStore(entry, userId, corrections) }
             }
         } finally {
-            pending.forEach { inFlight.remove(it.item.uri) }
+            pending.forEach { inFlight.remove(it.uri) }
             // NonCancellable so a cancelled walk still banks the corrections it already found:
             // dropping them would only make the next walk re-read the very same files.
             withContext(NonCancellable) { persistDates(corrections, voided) }
+            PerfDiagnostics.mark("exif:end", processed.get())
         }
     }
 
@@ -208,20 +229,19 @@ class LocalExifBackfillScheduler @Inject constructor(
         userId: UserId?,
         corrections: MutableMap<String, CaptureDateOverride.Entry>,
     ) {
-        val item = entry.item
-        if (item.mimeType.startsWith("video/")) {
+        if (entry.isVideo) {
             // A video keeps neither leg in EXIF: GPS sits in the container's location atom and the
             // capture time in the mvhd, so each leg reads its own source. The GPS leg reads the
             // original-tagged URI, so Android 10+ hands back a stream with the location left in
             // (the caller already holds the grant).
             if (entry.needsGps) {
-                PhotoGpsResolver.videoGps(context, originalUriForExif(context, item.uri))
-                    ?.let { storeLocation(item.uri, userId, it) }
+                PhotoGpsResolver.videoGps(context, originalUriForExif(context, entry.uri))
+                    ?.let { storeLocation(entry.uri, userId, it) }
             }
             if (entry.needsDate) {
                 val correction = CaptureDateOverride.captureDateCorrection(
-                    rawDateTakenMs = item.dateTaken,
-                    exifMs = mvhdCaptureDate(item.uri),
+                    rawDateTakenMs = entry.dateTaken,
+                    exifMs = mvhdCaptureDate(entry.uri),
                     // An mvhd instant counts as carrying NO offset. The spec calls the field UTC, but
                     // a large share of cameras write local wall clock into it, so the exact-instant
                     // slack would read a plain zone difference as a wrong date and shift a whole video
@@ -230,33 +250,33 @@ class LocalExifBackfillScheduler @Inject constructor(
                     exifHasOffset = false,
                 )
                 if (correction != null) {
-                    corrections[item.uri] = CaptureDateOverride.Entry(correction, item.dateModified)
+                    corrections[entry.uri] = CaptureDateOverride.Entry(correction, entry.dateModified)
                 }
             }
             return
         }
         // The original-tagged URI is what the GPS leg needs; the date leg reads the plain URI,
         // because Android redacts location, not timestamps.
-        val source = if (entry.needsGps) originalUriForExif(context, item.uri) else item.uri
+        val source = if (entry.needsGps) originalUriForExif(context, entry.uri) else entry.uri
         val meta = ExifHelper.readMetadata(context, source)
         if (entry.needsGps) {
             val la = meta.gpsLatitude
             val lo = meta.gpsLongitude
-            if (la != null && lo != null) storeLocation(item.uri, userId, la to lo)
+            if (la != null && lo != null) storeLocation(entry.uri, userId, la to lo)
         }
         if (entry.needsDate) {
             val exifMs = (meta.dateTimeOriginal ?: meta.dateTime)?.let {
                 ExifDateFormat.fromExif(it, meta.offsetTimeOriginal, ZoneId.systemDefault())
             }
             val correction = CaptureDateOverride.captureDateCorrection(
-                rawDateTakenMs = item.dateTaken,
+                rawDateTakenMs = entry.dateTaken,
                 exifMs = exifMs,
                 exifHasOffset = ExifDateFormat.hasUsableOffset(meta.offsetTimeOriginal),
             )
             // The file's current DATE_MODIFIED rides along, so a later walk can tell this reading
             // apart from the same file after an external edit.
             if (correction != null) {
-                corrections[item.uri] = CaptureDateOverride.Entry(correction, item.dateModified)
+                corrections[entry.uri] = CaptureDateOverride.Entry(correction, entry.dateModified)
             }
         }
     }
@@ -321,5 +341,46 @@ class LocalExifBackfillScheduler @Inject constructor(
     private companion object {
         /** EXIF reads are light; a small pool clears a large library without disturbing scroll. */
         const val WORKER_COUNT = 4
+    }
+}
+
+/**
+ * Runs [action] on every element of [items] from a fixed pool of [workers] coroutines, each taking
+ * the next unclaimed index, so a walk of any length holds [workers] coroutines rather than one per
+ * element. An element whose action throws goes to [onFailure] and its worker moves on. Once the
+ * caller is cancelled no further element starts. [finished] counts the elements that reached an
+ * outcome, success or failure, so a caller can tell how far a cancelled walk got.
+ */
+internal suspend fun <T> forEachPooled(
+    items: List<T>,
+    workers: Int,
+    finished: AtomicInteger,
+    onFailure: (T, Throwable) -> Unit,
+    action: suspend (T) -> Unit,
+) {
+    require(workers > 0) { "workers must be positive, was $workers" }
+    val cursor = AtomicInteger(0)
+    coroutineScope {
+        repeat(minOf(workers, items.size)) {
+            launch {
+                while (true) {
+                    // The actions mostly block rather than suspend, so this check is what ends a
+                    // cancelled walk between elements.
+                    ensureActive()
+                    val index = cursor.getAndIncrement()
+                    if (index >= items.size) break
+                    val item = items[index]
+                    try {
+                        action(item)
+                    } catch (e: Throwable) {
+                        // Rethrows only for the walk's own cancellation: a cancellation raised inside
+                        // one action is that element's failure, and the worker carries on.
+                        ensureActive()
+                        onFailure(item, e)
+                    }
+                    finished.incrementAndGet()
+                }
+            }
+        }
     }
 }

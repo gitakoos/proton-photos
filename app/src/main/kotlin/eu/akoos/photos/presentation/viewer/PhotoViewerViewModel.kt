@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -63,17 +64,20 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.common.UndoAction
 import eu.akoos.photos.presentation.common.UndoController
 import eu.akoos.photos.presentation.common.buildHideUndoAction
 import eu.akoos.photos.presentation.gallery.isItemFavorite
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.db.dao.SyncStateLite
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.hidden.HiddenStorageManager
 import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
@@ -83,6 +87,7 @@ import eu.akoos.photos.data.hidden.HiddenVaultRestorer
 import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
+import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
@@ -179,6 +184,16 @@ internal fun peopleBelongTo(loadedFor: String?, item: GalleryItem?): Boolean {
     return item is GalleryItem.Synced && loadedFor == item.local.uri
 }
 
+/**
+ * Cloud linkId to device uri for every SYNCED row that names a device file: the backed-up photos this
+ * device also holds. Where two rows share a linkId, the later row's uri stands.
+ */
+internal fun syncedLocalUrisByCloudId(rows: List<SyncStateLite>): Map<String, String> =
+    rows.asSequence()
+        .filter { it.status == SyncStatus.SYNCED }
+        .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
+        .associate { it.cloudFileId!! to it.localUri }
+
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -192,7 +207,8 @@ class PhotoViewerViewModel @Inject constructor(
     private val hiddenVaultRestorer: HiddenVaultRestorer,
     private val hiddenVaultEditor: eu.akoos.photos.data.hidden.HiddenVaultEditor,
     private val offlineStore: OfflineStorageManager,
-    private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
+    private val syncStateSnapshot: SyncStateSnapshot,
+    private val localMediaRepo: LocalMediaRepository,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val forceUploadLocalUris: eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase,
@@ -521,13 +537,9 @@ class PhotoViewerViewModel @Inject constructor(
     val localUriByLinkId: StateFlow<Map<String, String>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptyMap())
-            else syncStateRepo.observeAll(userId).map { states ->
-                states.asSequence()
-                    .filter { it.status == eu.akoos.photos.domain.entity.SyncStatus.SYNCED }
-                    .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
-                    .associate { it.cloudFileId!! to it.localUri }
-            }
+            else syncStateSnapshot.observe(userId).map { syncedLocalUrisByCloudId(it.rows) }
         }
+        .flowOn(Dispatchers.Default)
         .retryOnDbTear("ViewerLocalUris")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
@@ -1491,6 +1503,9 @@ class PhotoViewerViewModel @Inject constructor(
                 val ok = runCatching { localTagDao.setUserTagsCsv(uri, UserPhotoTags.encode(next)) }
                     .onFailure { Log.w("PhotoViewerVM", "user category write failed: ${it.message}") }
                     .isSuccess
+                // The shared device list carries each file's picked categories, so it reads them
+                // again for the grid and the category search.
+                if (ok) localMediaRepo.notifyMediaChanged()
                 // Through [effectiveLocalTags] rather than [next] itself, so clearing the last
                 // category shows the automatic ones it hands the photo back to instead of leaving
                 // the chips empty against a grid badge that already says otherwise.

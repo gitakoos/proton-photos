@@ -83,7 +83,7 @@ class FaceReapWorker @AssistedInject constructor(
         var deviceTrashUris = emptySet<String>()
         var deviceTrustworthy = false
         runCatching {
-            liveDeviceUris = localMediaRepo.observeLocalMedia().first().map { it.uri }.toSet()
+            liveDeviceUris = localMediaRepo.freshMedia().map { it.uri }.toSet()
             deviceTrashUris = localMediaRepo.observeTrashedMedia().first().map { it.uri }.toSet()
             deviceTrustworthy = liveDeviceUris.isNotEmpty()
         }

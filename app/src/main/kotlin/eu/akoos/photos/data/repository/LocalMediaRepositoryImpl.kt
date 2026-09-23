@@ -30,6 +30,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.storage.StorageManager
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -37,16 +38,14 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -55,6 +54,7 @@ import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.entity.LocalTagEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.util.CaptureDateOverride
@@ -62,6 +62,7 @@ import eu.akoos.photos.util.HiddenCaptureTime
 import eu.akoos.photos.util.LocalTagPrune
 import eu.akoos.photos.util.FolderCoverMap
 import eu.akoos.photos.util.MediaScanCoverage
+import eu.akoos.photos.util.SharedQuerySource
 import eu.akoos.photos.util.forEachSqlChunk
 import eu.akoos.photos.util.mimeFromPath
 import eu.akoos.photos.worker.SyncWorker
@@ -70,26 +71,35 @@ import javax.inject.Singleton
 
 private const val TAG = "LocalMediaRepository"
 
+/** Quiet time after a MediaStore change before the shared list re-scans, so the several
+ *  notifications one capture or one batch delete fires cost a single scan. */
+private const val CHANGE_QUIET_MS = 250L
+
+/** Longest a steady stream of changes (an import landing file by file) holds the re-scan back. */
+private const val CHANGE_MAX_WAIT_MS = 2_000L
+
+/** How long the shared list outlives its last collector, so moving between screens reuses it
+ *  instead of re-scanning. After that it is dropped. The gallery feed keeps the same window. */
+private const val SHARE_STOP_TIMEOUT_MS = 5_000L
+
+/**
+ * Keeps the first item of each uri and drops the rest, in place. A cursor over a very large collection
+ * is read in windows, and a row inserted or re-dated while it is read shifts the later windows, so the
+ * same row can come back twice; every reader keys the list by uri, and a grid throws on a repeated key.
+ */
+internal fun MutableList<LocalMediaItem>.dropRepeatedUris() {
+    if (size < 2) return
+    val seen = HashSet<String>(size * 2)
+    retainAll { seen.add(it.uri) }
+}
+
 @Singleton
 class LocalMediaRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localTagDao: LocalTagDao,
     private val localTagScanScheduler: LocalTagScanScheduler,
+    @AppScope appScope: CoroutineScope,
 ) : LocalMediaRepository {
-
-    // Manual refresh trigger merged with the MediaStore ContentObserver. Permission grants do
-    // not fire onChange, so without this the gallery would stay empty after first grant until
-    // the user restarts the app. A change to a side store the scan reads rides the same trigger,
-    // the provider having no event for it either.
-    private val refreshTrigger = MutableSharedFlow<Unit>(
-        replay = 0,
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-
-    override fun notifyMediaChanged() {
-        refreshTrigger.tryEmit(Unit)
-    }
 
     /**
      * Settle-and-kick scheduler for the auto-sync trigger. OneDrive-style: when a new photo
@@ -134,10 +144,47 @@ class LocalMediaRepositoryImpl @Inject constructor(
         }
     }
 
-    override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = callbackFlow {
+    /** The grants and mounted volumes the latest device scan ran under; see [mediaEnvironment]. */
+    @Volatile private var lastScanEnvironment: String? = null
+
+    /**
+     * The device's photos and videos as one list the whole app shares.
+     *
+     * Every [observeLocalMedia] collector reads the same copy from the same scan: one MediaStore
+     * observer drives it while anything collects, a burst of changes settles into one re-scan, and
+     * the list is dropped a few seconds after the last collector leaves. [freshMedia] reads through
+     * the same gate, so two scans of the whole library never run at once, and the side effects in
+     * [queryAllMedia] (the prunes, the tag scheduling) run once per scan rather than once per reader.
+     */
+    private val deviceMedia = SharedQuerySource(
+        scope = appScope,
+        listen = ::listenForMediaChanges,
+        quietMs = CHANGE_QUIET_MS,
+        maxWaitMs = CHANGE_MAX_WAIT_MS,
+        stopTimeoutMs = SHARE_STOP_TIMEOUT_MS,
+        isStale = { lastScanEnvironment.let { it != null && it != mediaEnvironment() } },
+        onReadFailure = { Log.w(TAG, "device media scan failed: ${it.message}") },
+    ) {
+        lastScanEnvironment = mediaEnvironment()
+        queryAllMedia()
+    }
+
+    // A permission grant fires no MediaStore notification, so without this the gallery would stay
+    // empty after the first grant until the app restarts. A change to a side store the scan reads
+    // (the capture-date overrides) rides the same request, the provider having no event for it either.
+    override fun notifyMediaChanged() {
+        deviceMedia.requestRefresh()
+    }
+
+    override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = deviceMedia.shared
+
+    override suspend fun freshMedia(): List<LocalMediaItem> = deviceMedia.fresh()
+
+    /** Registers the one MediaStore observer the shared list runs on and returns its removal. */
+    private fun listenForMediaChanges(signal: () -> Unit): () -> Unit {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
-                trySend(Unit)
+                signal()
                 // New camera photos otherwise sit until the next periodic SyncWorker fire
                 // (up to 15 minutes by default). Kicking here closes the gap to "a few
                 // seconds after the picture is saved", subject to the upload-pipeline's
@@ -145,28 +192,34 @@ class LocalMediaRepositoryImpl @Inject constructor(
                 maybeKickSync()
             }
         }
+        val resolver = context.contentResolver
+        resolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer)
+        resolver.registerContentObserver(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer)
+        return { resolver.unregisterContentObserver(observer) }
+    }
 
-        context.contentResolver.registerContentObserver(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
-        )
-        context.contentResolver.registerContentObserver(
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer
-        )
-
-        trySend(Unit) // initial query
-
-        awaitClose {
-            context.contentResolver.unregisterContentObserver(observer)
+    /**
+     * What a device scan depends on besides MediaStore's own rows: the media grants and the mounted
+     * storage volumes. A change to either reaches no ContentObserver, so a reader subscribing to the
+     * shared list compares this with the value the latest scan ran under and asks for a re-scan when
+     * they differ, as a scan of its own would have picked the change up.
+     */
+    private fun mediaEnvironment(): String {
+        val grants = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            listOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+        } else {
+            listOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
-    }.let { contentChanges ->
-        merge(contentChanges, refreshTrigger.asSharedFlow())
-            .let { allTriggers ->
-                flow {
-                    allTriggers.collect {
-                        emit(queryAllMedia())
-                    }
-                }
-            }
+        val granted = grants.joinToString(",") {
+            (ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED).toString()
+        }
+        val volumes = runCatching {
+            context.getSystemService(StorageManager::class.java)?.storageVolumes
+                ?.map { "${it.uuid}:${it.state}" }
+                ?.sorted()
+                ?.joinToString(",")
+        }.getOrNull().orEmpty()
+        return "$granted|$volumes"
     }
 
     override fun observeTrashedMedia(): Flow<List<LocalMediaItem>> {
@@ -187,6 +240,48 @@ class LocalMediaRepositoryImpl @Inject constructor(
         }.let { changes ->
             flow { changes.collect { emit(queryTrashedMedia()) } }
         }
+    }
+
+    /**
+     * [queryTrashedMedia]'s row count, read off an `_ID`-only cursor per collection rather than built
+     * into items: the same collections, trash selection and permission gate, re-counted on the same
+     * MediaStore changes, with a burst of changes folding into one count.
+     */
+    override fun countTrashedMedia(): Flow<Int> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return flowOf(0)
+        suspend fun countTrashed(): Int = withContext(Dispatchers.IO) {
+            if (!checkMediaPermission()) return@withContext 0
+            val queryArgs = android.os.Bundle().apply {
+                putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY)
+            }
+            var total = 0
+            for (baseUri in listOf(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            )) {
+                try {
+                    context.contentResolver.query(baseUri, arrayOf(MediaStore.MediaColumns._ID), queryArgs, null)
+                        ?.use { cursor -> total += cursor.count }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    Log.w(TAG, "trashed media count failed: ${e.message}")
+                }
+            }
+            total
+        }
+        return callbackFlow<Unit> {
+            val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) { trySend(Unit) }
+            }
+            context.contentResolver.registerContentObserver(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer
+            )
+            context.contentResolver.registerContentObserver(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer
+            )
+            trySend(Unit)
+            awaitClose { context.contentResolver.unregisterContentObserver(observer) }
+        }.conflate().map { countTrashed() }
     }
 
     override fun hasMediaPermission(): Flow<Boolean> = flowOf(checkMediaPermission())
@@ -320,6 +415,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
 
     private suspend fun queryAllMedia(): List<LocalMediaItem> = withContext(Dispatchers.IO) {
         if (!checkMediaPermission()) return@withContext emptyList()
+        eu.akoos.photos.util.PerfDiagnostics.mark("devicescan:start", 0)
 
         val result = mutableListOf<LocalMediaItem>()
 
@@ -392,6 +488,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
                 // Skip inaccessible URIs
             }
         }
+        result.dropRepeatedUris()
 
         // Every uri-keyed side store below needs this scan's live uris to spot a row whose file is
         // gone. Built once and shared, and skipped entirely when no store holds anything, so a
@@ -451,11 +548,12 @@ class LocalMediaRepositoryImpl @Inject constructor(
         }
 
         val sorted = result.sortedByDescending { it.dateTaken }
+        eu.akoos.photos.util.PerfDiagnostics.mark("devicescan:end", sorted.size)
         // Fill/refresh the photo-category tag cache for new or changed files in the background
         // (cheap pre-filter; only large images get an XMP read), keyed on the real DATE_MODIFIED
         // this query reads — so the next scan surfaces accurate type badges instead of caching a
         // dateModified of 0 that never matches the gallery's freshness check.
-        localTagScanScheduler.schedule(sorted)
+        localTagScanScheduler.schedule(sorted, tagCache)
         sorted
     }
 

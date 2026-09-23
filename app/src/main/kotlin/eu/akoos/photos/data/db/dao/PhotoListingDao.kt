@@ -33,6 +33,24 @@ import eu.akoos.photos.data.db.entity.PhotoListingLite
 import eu.akoos.photos.data.db.entity.PhotoPickerRow
 import eu.akoos.photos.data.db.entity.ThumbnailUrlSeed
 
+/** The columns reconcile pairs a device file on: the link, its content hash, and the name, capture
+ *  second and size the name matchers compare. */
+data class PhotoPairingRow(
+    val linkId: String,
+    val contentHash: String?,
+    val captureTime: Long,
+    val displayName: String,
+    val sizeBytes: Long,
+)
+
+/** One user's own stream as the backup figures Settings shows: its photos, its videos, and their total
+ *  size in bytes. */
+data class OwnStreamTotals(
+    val photos: Int,
+    val videos: Int,
+    val bytes: Long,
+)
+
 @Dao
 interface PhotoListingDao {
 
@@ -69,12 +87,15 @@ interface PhotoListingDao {
      * ceiling on a large library. The crypto stays in the table for the per-linkId decrypt lookup.
      *
      * thumbnailUrl is DELIBERATELY not selected. A decrypt-completion writes it via [updateThumbnailUrl];
-     * Room invalidation is table-level, so that write re-runs this query either way. Dropping the column
-     * makes each re-emission byte-identical, so the distinctUntilChanged in GetGalleryItemsUseCase drops
-     * it before the merge/group rebuild; carrying it would make every thumbnail that lands during a
-     * sustained scroll a distinct emission forcing a whole-library rebuild, the churn that tripped OOM on
-     * a large account. The fresh URL reaches the cell through the in-memory [ThumbnailUrlStore] instead;
-     * the column stays in the table for persistence and next-launch seeding.
+     * Room invalidation is table-level, so that write signals a re-read either way. Dropping the column
+     * makes each re-read equal to the last, so the shared timeline copy does not publish it again and
+     * the merge/group rebuild never runs for it; carrying it would make every thumbnail that lands during
+     * a sustained scroll a distinct emission forcing a whole-library rebuild, the churn that tripped OOM
+     * on a large account. The fresh URL reaches the cell through the in-memory [ThumbnailUrlStore]
+     * instead; the column stays in the table for persistence and next-launch seeding.
+     *
+     * As a Room flow this re-runs the whole query on every write to the table. The timeline reads the
+     * same rows through [getOwnStreamLite] instead, into one copy the whole app shares.
      */
     @Query(
         "SELECT linkId, shareId, volumeId, captureTime, displayName, mimeType, sizeBytes, revisionId, " +
@@ -82,6 +103,50 @@ interface PhotoListingDao {
             "isChildOfAlbum = 0 ORDER BY captureTime DESC",
     )
     fun observeOwnStreamLite(userId: String): Flow<List<PhotoListingLite>>
+
+    /**
+     * [observeOwnStreamLite]'s rows, read once: the timeline feed's read. PhotoStreamService runs it
+     * after a write to the table has settled and at a bounded rate, however fast the writes come.
+     *
+     * The statement is [observeOwnStreamLite]'s character for character, so the rows come back in the
+     * same order, ties on the capture time included.
+     */
+    @Query(
+        "SELECT linkId, shareId, volumeId, captureTime, displayName, mimeType, sizeBytes, revisionId, " +
+            "contentHash, tagsCsv, durationMs FROM photo_listing WHERE userId = :userId AND " +
+            "isChildOfAlbum = 0 ORDER BY captureTime DESC",
+    )
+    suspend fun getOwnStreamLite(userId: String): List<PhotoListingLite>
+
+    /**
+     * Reconcile's cloud side: the rows of [observeOwnStreamLite] in the same order, as the
+     * [PhotoPairingRow] columns only, read once.
+     *
+     * The WHERE and ORDER BY must stay identical to [observeOwnStreamLite]'s. The pairing lookups keep
+     * the last of the rows that share a key, so this order decides which twin a shared content hash or
+     * name resolves to.
+     */
+    @Query(
+        "SELECT linkId, contentHash, captureTime, displayName, sizeBytes FROM photo_listing " +
+            "WHERE userId = :userId AND isChildOfAlbum = 0 ORDER BY captureTime DESC",
+    )
+    suspend fun getOwnStreamPairingRows(userId: String): List<PhotoPairingRow>
+
+    /**
+     * [getOwnStreamLite]'s rows as three numbers instead of a list: the videos among them, every other
+     * row as a photo, and their summed size. The WHERE is the listing's own, so the figures are too.
+     *
+     * GLOB rather than LIKE: LIKE folds ASCII case, while a video is a case-sensitive `video/` prefix,
+     * the test the listing's readers apply. Room re-runs this on every write to the table, each run a
+     * pass over the user's rows.
+     */
+    @Query(
+        "SELECT COUNT(*) - COUNT(CASE WHEN mimeType GLOB 'video/*' THEN 1 END) AS photos, " +
+            "COUNT(CASE WHEN mimeType GLOB 'video/*' THEN 1 END) AS videos, " +
+            "COALESCE(SUM(sizeBytes), 0) AS bytes " +
+            "FROM photo_listing WHERE userId = :userId AND isChildOfAlbum = 0",
+    )
+    fun observeOwnStreamTotals(userId: String): Flow<OwnStreamTotals>
 
     /**
      * The home-screen widget picker's grid: own-stream photos newest first, as the link id and the

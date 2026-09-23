@@ -46,6 +46,8 @@ import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.db.dao.PhotoPairingRow
 import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -169,7 +171,7 @@ class UploadPipelineIntegrationTest {
             context = context,
             appScope = appScope,
         )
-        reconcileUseCase = ReconcileSyncStateUseCase(local, cloud, syncRepo, context)
+        reconcileUseCase = ReconcileSyncStateUseCase(local, cloud, syncRepo, fakeCloudListing(), context, appScope)
         forceUploadUseCase = ForceUploadLocalUrisUseCase(context, syncRepo, cloud, targetDao)
     }
 
@@ -237,6 +239,16 @@ class UploadPipelineIntegrationTest {
     }
 
     private suspend fun row(uri: String): SyncState? = syncRepo.getByUri(uri)
+
+    /** The cloud listing reconcile reads, answering from the fake cloud the way the listing table
+     *  would: every photo it holds at that moment, newest first. */
+    private fun fakeCloudListing(): PhotoListingDao = mockk {
+        coEvery { getOwnStreamPairingRows(userId.id) } answers {
+            cloud.photos.value.sortedByDescending { it.captureTime }.map {
+                PhotoPairingRow(it.linkId, it.contentHash, it.captureTime, it.displayName, it.sizeBytes)
+            }
+        }
+    }
 
     // ── Scenario 1: manual upload ───────────────────────────────────────────────────
 

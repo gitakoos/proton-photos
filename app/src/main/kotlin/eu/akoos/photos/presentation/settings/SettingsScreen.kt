@@ -3236,10 +3236,13 @@ private fun DeviceHealthDebugCard(
 }
 
 /**
- * DEBUG-only card to drive the [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator].
- * Set N, Populate to generate N synthetic photos that exercise the real decrypt + cache treadmill
- * with no CDN traffic, or Clear to remove them. Only ever rendered behind a BuildConfig.DEBUG guard.
- * Strings are inline English, this surface never ships, so it isn't localized.
+ * DEBUG-only card to drive the [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator] and the
+ * [eu.akoos.photos.data.repository.drive.LargeLibraryDeviceSimulator]. Set N, Populate to generate N
+ * synthetic photos that exercise the real decrypt + cache treadmill with no CDN traffic, or Clear to
+ * remove them. The device part writes real tiny JPEGs into their own folder so the device scan, backup,
+ * tag scan and EXIF walk meet a library of that size, and removes exactly those again. Only ever rendered
+ * behind a BuildConfig.DEBUG guard. Strings are inline English, this surface never ships, so it isn't
+ * localized.
  */
 @Composable
 private fun LargeLibrarySimCard(
@@ -3247,7 +3250,13 @@ private fun LargeLibrarySimCard(
 ) {
     val colors = AppColors.current
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val device by viewModel.deviceState.collectAsStateWithLifecycle()
     var text by remember(state.count) { mutableStateOf(if (state.count > 0) state.count.toString() else "") }
+    var deviceText by remember(state.deviceTarget) {
+        mutableStateOf(if (state.deviceTarget > 0) state.deviceTarget.toString() else "")
+    }
+    var confirmDeviceRemove by remember { mutableStateOf(false) }
+    val deviceFolder = eu.akoos.photos.data.repository.drive.LargeLibraryDeviceSim.RELATIVE_PATH
 
     SectionLabel("Developer, large library simulator")
     Spacer(Modifier.height(8.dp))
@@ -3300,6 +3309,110 @@ private fun LargeLibrarySimCard(
                 Text(msg, color = colors.fgDim, fontSize = 12.sp)
             }
         }
+    }
+    Spacer(Modifier.height(12.dp))
+    SettingsCard {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("Device photos", color = colors.fgPrimary, fontSize = 13.sp)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Write tiny real JPEGs, dated across the years and most with GPS, into $deviceFolder so the " +
+                    "device scan, backup, tag scan and EXIF walk meet a library of that size. Generate tops " +
+                    "the folder up to the target and keeps running after Settings closes. Select the PFP-Sim " +
+                    "folder for backup to exercise reconcile and upload.",
+                color = colors.fgMute, fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            androidx.compose.material3.OutlinedTextField(
+                value = deviceText,
+                onValueChange = { raw ->
+                    val digits = raw.filter { it.isDigit() }.take(7)
+                    deviceText = digits
+                    viewModel.setDeviceTarget(digits.toIntOrNull() ?: 0)
+                },
+                label = { Text("Target photo count (e.g. 110000)") },
+                singleLine = true,
+                enabled = !device.running,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                listOf(110_000, 150_000).forEach { preset ->
+                    TextButton(
+                        onClick = {
+                            deviceText = preset.toString()
+                            viewModel.setDeviceTarget(preset)
+                        },
+                        enabled = !device.running,
+                    ) { Text("${preset / 1000}k") }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.Button(
+                    onClick = { viewModel.generateDevicePhotos() },
+                    enabled = !device.running && state.deviceTarget > 0,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Generate") }
+                Spacer(Modifier.width(12.dp))
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { confirmDeviceRemove = true },
+                    enabled = !device.running,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Remove all") }
+            }
+            if (device.running) {
+                Spacer(Modifier.height(12.dp))
+                if (device.total > 0) {
+                    LinearProgressIndicator(
+                        progress = { (device.done.toFloat() / device.total).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = colors.accent,
+                        trackColor = colors.trackBg,
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = colors.accent,
+                        trackColor = colors.trackBg,
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        String.format(java.util.Locale.US, "%,d / %,d", device.done, device.total),
+                        color = colors.fgMute, fontSize = 12.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { viewModel.cancelDeviceWork() }) { Text("Cancel") }
+                }
+            }
+            if (device.onDevice >= 0) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    String.format(java.util.Locale.US, "On the device: %,d", device.onDevice),
+                    color = colors.fgDim, fontSize = 12.sp,
+                )
+            }
+            device.message?.let { msg ->
+                Spacer(Modifier.height(6.dp))
+                Text(msg, color = colors.fgDim, fontSize = 12.sp)
+            }
+        }
+    }
+    if (confirmDeviceRemove) {
+        eu.akoos.photos.presentation.common.ConfirmDialog(
+            title = "Remove simulated device photos",
+            message = "Deletes every simulator file in $deviceFolder, and nothing else.",
+            confirmLabel = "Remove",
+            dismissLabel = "Cancel",
+            onConfirm = {
+                confirmDeviceRemove = false
+                viewModel.removeDevicePhotos()
+            },
+            onDismiss = { confirmDeviceRemove = false },
+            destructive = true,
+        )
     }
 }
 

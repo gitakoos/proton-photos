@@ -31,6 +31,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import eu.akoos.photos.data.db.dao.SyncStateLite
+import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -38,7 +40,6 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
-import eu.akoos.photos.domain.repository.SyncStateRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -57,7 +58,7 @@ class GetGalleryItemsUseCaseTest {
         useCase = GetGalleryItemsUseCase(
             mockk<LocalMediaRepository>(),
             mockk<DrivePhotoRepository>(),
-            mockk<SyncStateRepository>(),
+            mockk<SyncStateSnapshot>(),
             CoroutineScope(Dispatchers.Unconfined + CoroutineExceptionHandler { _, _ -> }),
         )
     }
@@ -409,11 +410,11 @@ class GetGalleryItemsUseCaseTest {
         val localRepo = mockk<LocalMediaRepository>()
         every { localRepo.observeLocalMedia() } returns flowOf(local)
         val cloudRepo = mockk<DrivePhotoRepository>()
-        val syncRepo = mockk<SyncStateRepository>()
+        val syncSnapshot = mockk<SyncStateSnapshot>()
         val localOnlyUseCase = GetGalleryItemsUseCase(
             localRepo,
             cloudRepo,
-            syncRepo,
+            syncSnapshot,
             CoroutineScope(Dispatchers.Unconfined + CoroutineExceptionHandler { _, _ -> }),
         )
 
@@ -428,7 +429,182 @@ class GetGalleryItemsUseCaseTest {
             result.filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri },
         )
         verify(exactly = 0) { cloudRepo.observeCloudPhotos(any()) }
-        verify(exactly = 0) { syncRepo.observeAll(any()) }
+        verify(exactly = 0) { syncSnapshot.observe(any()) }
         verify(exactly = 0) { cloudRepo.observeHiddenAlbumMemberLinkIds() }
+    }
+
+    // ─── lean sync rows ───────────────────────────────────────────────────────
+    // The signed-in feed merges against the shared lean copy of the sync rows. It must give exactly
+    // the list the full rows give: the same pairs through every pairing path, the same badges, the
+    // same hidden photos gone, in the same order. The fixture reaches every branch the rows steer.
+
+    /** The row as the lean query returns it: the five projected columns and nothing else. */
+    private fun SyncState.lite() = SyncStateLite(
+        localUri = localUri,
+        cloudFileId = cloudFileId,
+        localHash = localHash,
+        status = status,
+        queued = queued,
+    )
+
+    private fun fullRow(
+        uri: String,
+        cloudId: String?,
+        status: SyncStatus,
+        localHash: String = "",
+        queued: Boolean = false,
+    ) = SyncState(
+        localUri = uri,
+        cloudFileId = cloudId,
+        localHash = localHash,
+        // Columns the projection leaves out, set to values that would show if the merge read them.
+        cloudHash = "cloud-hash-$uri",
+        status = status,
+        lastSyncAttemptMs = 11L,
+        lastSyncSuccessMs = 12L,
+        backedUpAtMs = 13L,
+        sizeBytes = 4_096L,
+        queued = queued,
+        queueSource = if (queued) "AUTO_FOLDER" else null,
+    )
+
+    private fun device(uri: String, name: String, dateTakenMs: Long, mime: String = "image/jpeg", size: Long = 2_048L) =
+        LocalMediaItem(uri = uri, dateTaken = dateTakenMs, displayName = name, mimeType = mime, sizeBytes = size, bucketName = "Camera")
+
+    private fun drive(linkId: String, name: String, captureSec: Long, mime: String = "image/jpeg", size: Long = 0L, contentHash: String? = null) =
+        CloudPhoto(
+            linkId = linkId,
+            shareId = "share1",
+            volumeId = "vol1",
+            captureTime = captureSec,
+            displayName = name,
+            mimeType = mime,
+            sizeBytes = size,
+            thumbnailUrl = null,
+            revisionId = "rev1",
+            contentHash = contentHash,
+        )
+
+    private val fixtureDevice = listOf(
+        device("uri://paired", "IMG_1.jpg", 1_700_000_100_000L),
+        device("uri://stale-id", "DSC_2.jpg", 1_650_000_000_000L),
+        device("uri://hash", "DSC_3.jpg", 1_650_000_001_000L),
+        device("uri://name-date", "IMG_4.jpg", 1_700_000_400_500L),
+        device("uri://video", "VID_5.mp4", 1_700_000_500_000L, mime = "video/mp4", size = 5_000_000L),
+        device("uri://name-only", "Oops!.png", 1_783_900_000_000L, mime = "image/png"),
+        device("uri://claimed-twice", "DSC_7.jpg", 1_650_000_002_000L),
+        device("uri://local-only", "DSC_8.jpg", 1_650_000_003_000L),
+        device("uri://album-hidden-pair", "IMG_10.jpg", 1_700_001_000_000L),
+        device("uri://hash-miss", "DSC_11.jpg", 1_650_000_004_000L),
+    )
+
+    private val fixtureDrive = listOf(
+        drive("c-paired", "IMG_1.jpg", 1_700_000_100L),
+        drive("c-by-hash", "renamed_2.jpg", 1_700_000_200L, contentHash = "hmac-sha-2"),
+        drive("c-by-hash-only", "renamed_3.jpg", 1_700_000_300L, contentHash = "hmac-sha-3"),
+        drive("c-by-name-date", "IMG_4.jpg", 1_700_000_400L),
+        drive("c-video", "VID_5.mp4", 1_600_000_000L, mime = "video/mp4", size = 5_000_000L),
+        drive("c-name-only", "Oops!.png", 1_700_000_600L, mime = "image/png"),
+        drive("c-cloud-only", "IMG_7.jpg", 1_700_000_700L),
+        drive("c-vaulted", "IMG_8.jpg", 1_700_000_800L),
+        drive("c-album-hidden", "IMG_9.jpg", 1_700_000_900L),
+        drive("c-album-hidden-pair", "IMG_10.jpg", 1_700_001_000L),
+        drive("c-same-time-b", "IMG_12.jpg", 1_700_001_100L),
+        drive("c-same-time-a", "IMG_11.jpg", 1_700_001_100L),
+    )
+
+    private val fixtureRows = listOf(
+        // Paired by the stored cloud id.
+        fullRow("uri://paired", "c-paired", SyncStatus.SYNCED),
+        // A stored cloud id Drive no longer lists falls through to the stored content hash.
+        fullRow("uri://stale-id", "c-gone", SyncStatus.SYNCED, localHash = "sha-2"),
+        fullRow("uri://hash", null, SyncStatus.LOCAL_ONLY, localHash = "sha-3"),
+        // A row with neither id nor hash leaves the pairing to name and capture second.
+        fullRow("uri://name-date", null, SyncStatus.LOCAL_ONLY),
+        // Its cloud id is already claimed by the row above, so it must not pair a second time.
+        fullRow("uri://claimed-twice", "c-paired", SyncStatus.SYNCED),
+        fullRow("uri://local-only", null, SyncStatus.LOCAL_ONLY, queued = true),
+        fullRow("uri://album-hidden-pair", "c-album-hidden-pair", SyncStatus.SYNCED),
+        fullRow("uri://hash-miss", null, SyncStatus.LOCAL_ONLY, localHash = "sha-unknown"),
+        // Vaulted photos: the one with a cloud id drops its Drive copy, the other drops nothing.
+        fullRow("uri://vaulted", "c-vaulted", SyncStatus.HIDDEN),
+        fullRow("uri://vaulted-unpaired", null, SyncStatus.HIDDEN),
+        // A freed-up device file: its row names a device uri that is gone, so it steers nothing.
+        fullRow("uri://freed", "c-cloud-only", SyncStatus.CLOUD_ONLY),
+    )
+
+    private val fixtureAlbumHidden = setOf("c-album-hidden", "c-album-hidden-pair")
+
+    /** A use case whose Drive stand-in answers the content-hash conversion, which the hash path needs. */
+    private fun hashingUseCase(): GetGalleryItemsUseCase {
+        val cloudRepo = mockk<DrivePhotoRepository>()
+        every { cloudRepo.cloudContentHash(any()) } answers { "hmac-${firstArg<String>()}" }
+        return GetGalleryItemsUseCase(
+            mockk<LocalMediaRepository>(),
+            cloudRepo,
+            mockk<SyncStateSnapshot>(),
+            CoroutineScope(Dispatchers.Unconfined + CoroutineExceptionHandler { _, _ -> }),
+        )
+    }
+
+    @Test
+    fun `the lean sync rows merge into exactly the list the full rows give`() {
+        val merger = hashingUseCase()
+        val lean = SyncStateSnapshot.Rows(fixtureRows.map { it.lite() })
+
+        val fromFull = merger.merge(fixtureDevice, fixtureDrive, fixtureRows, hiddenLinkIds = fixtureAlbumHidden)
+        val fromLean = merger.merge(fixtureDevice, fixtureDrive, lean, hiddenLinkIds = fixtureAlbumHidden)
+
+        assertEquals("same items, same order", fromFull, fromLean)
+        assertEquals(
+            "every pairing path pairs the same device file with the same Drive copy",
+            mapOf(
+                "uri://paired" to "c-paired",
+                "uri://stale-id" to "c-by-hash",
+                "uri://hash" to "c-by-hash-only",
+                "uri://name-date" to "c-by-name-date",
+                "uri://video" to "c-video",
+                "uri://name-only" to "c-name-only",
+            ),
+            fromLean.filterIsInstance<GalleryItem.Synced>().associate { it.local.uri to it.cloud.linkId },
+        )
+        assertEquals(
+            setOf("uri://claimed-twice", "uri://local-only", "uri://hash-miss"),
+            fromLean.filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri }.toSet(),
+        )
+        assertEquals(
+            "the vaulted twin and both album-hidden photos are gone",
+            listOf("c-same-time-a", "c-same-time-b", "c-cloud-only"),
+            fromLean.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud.linkId },
+        )
+    }
+
+    @Test
+    fun `the lean sync rows merge like the full rows with no album hidden`() {
+        val merger = hashingUseCase()
+        val lean = SyncStateSnapshot.Rows(fixtureRows.map { it.lite() })
+
+        val fromFull = merger.merge(fixtureDevice, fixtureDrive, fixtureRows)
+        val fromLean = merger.merge(fixtureDevice, fixtureDrive, lean)
+
+        assertEquals(fromFull, fromLean)
+        assertTrue(
+            "the album-hidden pair shows when no album is hidden",
+            fromLean.any { it is GalleryItem.Synced && it.cloud.linkId == "c-album-hidden-pair" },
+        )
+        assertTrue(
+            "the vaulted twin stays out whatever the album hides",
+            fromLean.none { it is GalleryItem.CloudOnly && it.cloud.linkId == "c-vaulted" },
+        )
+    }
+
+    @Test
+    fun `empty lean sync rows merge like no rows at all`() {
+        val merger = hashingUseCase()
+
+        assertEquals(
+            merger.merge(fixtureDevice, fixtureDrive, emptyList()),
+            merger.merge(fixtureDevice, fixtureDrive, SyncStateSnapshot.Rows(emptyList())),
+        )
     }
 }

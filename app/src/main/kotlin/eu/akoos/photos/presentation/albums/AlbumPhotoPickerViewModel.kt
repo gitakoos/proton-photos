@@ -28,6 +28,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -43,10 +45,9 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
+import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.util.retryOnDbTear
@@ -74,7 +75,7 @@ class AlbumPhotoPickerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val getGalleryItems: GetGalleryItemsUseCase,
-    private val syncStateRepo: SyncStateRepository,
+    private val syncStateSnapshot: SyncStateSnapshot,
     private val driveRepo: DrivePhotoRepository,
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val albumPhotoMembershipDao: AlbumPhotoMembershipDao,
@@ -101,12 +102,9 @@ class AlbumPhotoPickerViewModel @Inject constructor(
     val hiddenCloudLinkIds: StateFlow<Set<String>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             if (userId == null) flowOf(emptySet())
-            else syncStateRepo.observeAll(userId).map { states ->
-                states.filter { it.status == SyncStatus.HIDDEN && it.cloudFileId != null }
-                    .mapNotNull { it.cloudFileId }
-                    .toSet()
-            }
+            else syncStateSnapshot.observe(userId).map { it.hiddenCloudIds }
         }
+        .flowOn(Dispatchers.Default)
         .retryOnDbTear("PickerHiddenIds")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 

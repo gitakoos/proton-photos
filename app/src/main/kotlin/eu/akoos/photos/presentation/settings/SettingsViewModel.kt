@@ -36,9 +36,11 @@ import androidx.work.WorkManager
 import coil.imageLoader
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,6 +55,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
@@ -68,6 +71,7 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceEmbeddingModelManager
 import eu.akoos.photos.data.face.FaceModelAssets
@@ -100,7 +104,6 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.presentation.lock.AppLockManager
 import eu.akoos.photos.service.ScreenshotOverlayService
-import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.entity.UploadCompressionTier
 import kotlinx.coroutines.flow.combine
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -159,6 +162,7 @@ class SettingsViewModel @Inject constructor(
     private val appLockManager: AppLockManager,
     private val localMediaRepo: LocalMediaRepository,
     private val cloudRepo: DrivePhotoRepository,
+    private val photoListingDao: PhotoListingDao,
     private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
     private val offlineStore: OfflineStorageManager,
     private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
@@ -807,36 +811,26 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Observes counts shown in the Sync card.
+     * Observes counts shown in the Sync card, each read as a number in SQL, never as the rows.
      *
-     * - **Backed up** = total photos that live on Proton Drive. Sourced from the cloud-photo
-     *   listing directly (Room Flow), so the number reacts immediately when a fresh upload
-     *   lands or when the user deletes a cloud photo / removes a Drive-only album. The previous
-     *   implementation counted only SyncState rows in SYNCED status — that misses photos that
-     *   exist purely in the cloud (no on-device twin), and never updates after device deletes.
+     * - **Backed up** = the photos and videos of the user's own stream on Proton Drive and their
+     *   total size, over exactly the rows the timeline lists. Cloud-only photos count, the figures
+     *   follow an upload or a cloud delete, and device-side cleanup (Free up space) leaves them be.
      *
      * - **Pending** = on-device photos that are LOCAL_ONLY AND carry a queued upload intent in
      *   SyncState (i.e. genuinely waiting to upload), the same set the upload processor selects.
-     *
-     * - **Backed-up bytes** = sum of cloud-photo sizes. Cleaner than the SyncState sum because
-     *   it survives device-side cleanup (Free up space).
      */
     private fun observeBackedUpBytes() {
         viewModelScope.launch {
             accountManager.getPrimaryUserId().collectLatest { userId ->
                 if (userId == null) return@collectLatest
                 combine(
-                    cloudRepo.observeCloudPhotos(userId),
-                    syncStateRepo.observeAll(userId),
-                ) { cloudPhotos, syncStates ->
-                    val backedUpVideos = cloudPhotos.count { it.mimeType.startsWith("video/") }
-                    val backedUpPhotos = cloudPhotos.size - backedUpVideos
-                    val backedUpBytes = cloudPhotos.sumOf { it.sizeBytes }
-                    // Only rows that are LOCAL_ONLY AND queued are genuinely waiting to back up, the
-                    // same set the upload processor and the Activity screen use. A LOCAL_ONLY row with
-                    // no queue intent (an out-of-scope local file) must not inflate the pending count.
-                    val pendingCount  = syncStates.count { it.status == SyncStatus.LOCAL_ONLY && it.queued }
-                    BackedUpSnapshot(backedUpPhotos, backedUpVideos, backedUpBytes, pendingCount)
+                    // Each read of the totals passes over the whole listing, and thumbnail, upload and
+                    // backfill writes can land on the table several times a second, so it is paced.
+                    photoListingDao.observeOwnStreamTotals(userId.id).pacedBy(BACKUP_TOTALS_MIN_INTERVAL_MS),
+                    syncStateRepo.countPendingUploads(userId),
+                ) { totals, pendingCount ->
+                    BackedUpSnapshot(totals.photos, totals.videos, totals.bytes, pendingCount)
                 }
                     .retryOnDbTear("SettingsBackedUp")
                     .collectLatest { snap ->
@@ -860,8 +854,8 @@ class SettingsViewModel @Inject constructor(
     private fun observeTrashedCount() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
             viewModelScope.launch {
-                localMediaRepo.observeTrashedMedia().collectLatest { items ->
-                    _uiState.update { it.copy(trashedCount = items.size) }
+                localMediaRepo.countTrashedMedia().collectLatest { count ->
+                    _uiState.update { it.copy(trashedCount = count) }
                 }
             }
         }
@@ -2182,3 +2176,17 @@ private data class LocalStorage(
 )
 
 private const val CLOUD_TRASH_TTL_MS = 5L * 60L * 1000L
+
+/** Shortest pause between two reads of the backup totals, each a pass over the user's whole listing. */
+private const val BACKUP_TOTALS_MIN_INTERVAL_MS = 1_000L
+
+/**
+ * Passes each value on at once, then waits [pauseMs] before asking upstream for the next. Room folds
+ * the writes to a query's tables into one pending re-run and runs it only when the next value is
+ * asked for, so a Room query flow paced this way re-runs at most once per pause, however fast its
+ * table is written.
+ */
+internal fun <T> Flow<T>.pacedBy(pauseMs: Long): Flow<T> = transform { value ->
+    emit(value)
+    delay(pauseMs)
+}

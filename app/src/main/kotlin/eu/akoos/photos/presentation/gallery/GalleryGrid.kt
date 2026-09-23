@@ -208,13 +208,8 @@ internal fun PhotoGrid(
     // position and the button agree in every mode.
 
     // Stable grid key for an item — must match the keys passed to the `items(...)` blocks below.
-    val keyOf: (GalleryItem) -> String = { item ->
-        when (item) {
-            is GalleryItem.LocalOnly -> "local_${item.local.uri}"
-            is GalleryItem.Synced    -> "synced_${item.local.uri}"
-            is GalleryItem.CloudOnly -> "cloud_${item.cloud.linkId}"
-        }
-    }
+    // [GalleryKeyIndex] owns the scheme, so the index below parses exactly what the grid is keyed on.
+    val keyOf: (GalleryItem) -> String = { item -> GalleryKeyIndex.keyOf(item) }
     val cloudLinkIdOf: (GalleryItem) -> String? = { item ->
         when (item) {
             is GalleryItem.CloudOnly -> item.cloud.linkId
@@ -225,12 +220,10 @@ internal fun PhotoGrid(
 
     // key → index, so a cell's onClick resolves the tapped photo's position in O(1) instead of
     // a List.indexOf scan per click (an N-cost call repeated across every visible cell). Built over
-    // [orderedItems] so the index matches the list the grid renders and hands to onPhotoClick.
-    val indexByKey = remember(orderedItems) {
-        HashMap<String, Int>(orderedItems.size).apply {
-            orderedItems.forEachIndexed { idx, gi -> put(keyOf(gi), idx) }
-        }
-    }
+    // [orderedItems] so the index matches the list the grid renders and hands to onPhotoClick. The
+    // drag-select, the decrypt driver and the scroll-date label resolve keys through this same index,
+    // which holds no key strings (see [GalleryKeyIndex]).
+    val indexByKey = remember(orderedItems) { GalleryKeyIndex(orderedItems) }
     // Pending-decrypt linkId for a cloud row whose thumbnail isn't in the store yet. The timeline
     // projection no longer carries thumbnailUrl on the row, so "needs decrypt" is now "the store has no
     // URL for this linkId (and the item carries none)". Rows already in the store return null so the
@@ -647,7 +640,7 @@ internal fun PhotoGrid(
                         if (tapGuard.value) {
                             tapGuard.value = false
                         } else if (isSelectionMode) onToggleSelect(item)
-                        else onPhotoClick(orderedItems, indexByKey[keyOf(item)] ?: 0)
+                        else onPhotoClick(orderedItems, indexByKey.positionOf(item).coerceAtLeast(0))
                     },
                 )
             }
@@ -683,7 +676,7 @@ internal fun PhotoGrid(
                 items = orderedItems,
                 grouping = effectiveGrouping,
                 columns = columnCount,
-                keyOf = keyOf,
+                keyIndex = indexByKey,
                 topPadding = topContentPadding + 12.dp,
                 suppressed = scrubberDragging,
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -779,7 +772,7 @@ private fun MosaicPhotoGrid(
     offlinePinIds: Set<String>,
     thumbnailUrls: Map<String, String>,
     keyOf: (GalleryItem) -> String,
-    indexByKey: Map<String, Int>,
+    indexByKey: GalleryKeyIndex,
     dragSelectModifier: Modifier,
     pinchModifier: Modifier,
     tapGuard: MutableState<Boolean>,
@@ -906,7 +899,7 @@ private fun MosaicPhotoGrid(
                             if (tapGuard.value) {
                                 tapGuard.value = false
                             } else if (isSelectionMode) onToggleSelect(item)
-                            else onPhotoClick(orderedItems, indexByKey[keyOf(item)] ?: 0)
+                            else onPhotoClick(orderedItems, indexByKey.positionOf(item).coerceAtLeast(0))
                         },
                     )
                 }
@@ -932,7 +925,7 @@ private fun MosaicPhotoGrid(
                 items = orderedItems,
                 grouping = effectiveGrouping,
                 columns = columnCount,
-                keyOf = keyOf,
+                keyIndex = indexByKey,
                 topPadding = topContentPadding + 12.dp,
                 suppressed = scrubberDragging,
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -949,6 +942,28 @@ private fun cloudLinkIdOfMosaic(item: GalleryItem): String? = when (item) {
 }
 
 /**
+ * Visible cell key → photo for the scroll-date labels. The timeline hands in its [keyIndex], so no
+ * second whole-library map is built; a caller with only [keyOf] gets a key map built once per list.
+ * Null when neither is given, which keeps the label on the scroll-fraction estimate.
+ */
+@Composable
+private fun rememberItemForKey(
+    items: List<GalleryItem>,
+    keyOf: ((GalleryItem) -> String)?,
+    keyIndex: GalleryKeyIndex?,
+): ((String) -> GalleryItem?)? = remember(items, keyOf, keyIndex) {
+    when {
+        keyIndex != null -> keyIndex::itemFor
+        keyOf != null -> {
+            val byKey = items.associateBy(keyOf)
+            val resolve: (String) -> GalleryItem? = { key -> byKey[key] }
+            resolve
+        }
+        else -> null
+    }
+}
+
+/**
  * Staggered-grid twin of [ScrollDateLabel] for the mosaic timeline. Same off-composition snapshot
  * driving and fade behaviour; only the scroll-state type differs.
  */
@@ -961,19 +976,20 @@ private fun BoxScope.ScrollDateLabelStaggered(
     suppressed: Boolean,
     columns: Int? = null,
     keyOf: ((GalleryItem) -> String)? = null,
+    keyIndex: GalleryKeyIndex? = null,
     modifier: Modifier = Modifier,
 ) {
     val dateFormat = rememberTimelineDateFormat(grouping, columns)
-    // Timeline callers pass keyOf so the label reads the EXACT first visible photo (no drift); a null
-    // keyOf keeps the lightweight scroll-fraction estimate.
-    val keyToItem = remember(items, keyOf) { keyOf?.let { k -> items.associateBy(k) } }
+    // Timeline callers pass keyIndex (or keyOf) so the label reads the EXACT first visible photo (no
+    // drift); with neither the label keeps the lightweight scroll-fraction estimate.
+    val itemForKey = rememberItemForKey(items, keyOf, keyIndex)
 
     var label by remember { mutableStateOf("") }
     var scrolling by remember { mutableStateOf(false) }
 
-    LaunchedEffect(gridState, items, dateFormat, keyToItem) {
-        val map = keyToItem
-        if (map == null) {
+    LaunchedEffect(gridState, items, dateFormat, itemForKey) {
+        val resolve = itemForKey
+        if (resolve == null) {
             // Albums / folders: the lightweight scroll-fraction estimate, on first-visible-index change.
             snapshotFlow { gridState.firstVisibleItemIndex }
                 .distinctUntilChanged()
@@ -994,7 +1010,7 @@ private fun BoxScope.ScrollDateLabelStaggered(
                 layout.visibleItemsInfo.firstNotNullOfOrNull { info ->
                     val key = info.key as? String
                     if (key != null && info.offset.y + info.size.height / 2 >= viewportTop) {
-                        map[key]?.captureTimeMs
+                        resolve(key)?.captureTimeMs
                     } else {
                         null
                     }
@@ -1057,21 +1073,23 @@ internal fun BoxScope.ScrollDateLabel(
     suppressed: Boolean,
     columns: Int? = null,
     keyOf: ((GalleryItem) -> String)? = null,
+    // The timeline's own key index, which resolves a visible cell to its photo with no extra map.
+    keyIndex: GalleryKeyIndex? = null,
     modifier: Modifier = Modifier,
 ) {
     val dateFormat = rememberTimelineDateFormat(grouping, columns)
-    // Timeline callers pass keyOf so the label reads the EXACT first visible photo (no drift); a null
-    // keyOf keeps the lightweight scroll-fraction estimate.
-    val keyToItem = remember(items, keyOf) { keyOf?.let { k -> items.associateBy(k) } }
+    // Timeline callers pass keyIndex (or keyOf) so the label reads the EXACT first visible photo (no
+    // drift); with neither the label keeps the lightweight scroll-fraction estimate.
+    val itemForKey = rememberItemForKey(items, keyOf, keyIndex)
 
     var label by remember { mutableStateOf("") }
     var scrolling by remember { mutableStateOf(false) }
 
     // Recompute the label off-composition whenever the first visible grid index changes, mapping that
     // grid index (headers + memories row included) to the photo's capture date via the shared helper.
-    LaunchedEffect(gridState, items, dateFormat, keyToItem) {
-        val map = keyToItem
-        if (map == null) {
+    LaunchedEffect(gridState, items, dateFormat, itemForKey) {
+        val resolve = itemForKey
+        if (resolve == null) {
             // Albums / folders: the lightweight scroll-fraction estimate, on first-visible-index change.
             snapshotFlow { gridState.firstVisibleItemIndex }
                 .distinctUntilChanged()
@@ -1092,7 +1110,7 @@ internal fun BoxScope.ScrollDateLabel(
                 layout.visibleItemsInfo.firstNotNullOfOrNull { info ->
                     val key = info.key as? String
                     if (key != null && info.offset.y + info.size.height / 2 >= viewportTop) {
-                        map[key]?.captureTimeMs
+                        resolve(key)?.captureTimeMs
                     } else {
                         null
                     }
@@ -1254,5 +1272,201 @@ private fun MonthHeader(
             color = FgMute,
             fontSize = 12.sp,
         )
+    }
+}
+
+/**
+ * Timeline grid cell key → position in [items]: the lookup behind tap-to-open, drag-select, the
+ * visible-range decrypt driver and the scroll-date label. Keys follow [keyOf], a `local_`, `synced_`
+ * or `cloud_` prefix on the uri or linkId the item already carries.
+ *
+ * Holds no key strings. Positions sit in an open-addressed [IntArray] hashed on that uri or linkId
+ * (whose hash the String caches after the first build), and a lookup reads the key's prefix and
+ * compares the rest of the key in place. A rebuild per list emission therefore allocates one array
+ * rather than a key String, a map node and a boxed Int per photo.
+ *
+ * A read-only [Map] so it drops into the lookups that take one. A repeated key keeps its last
+ * position, as a HashMap filled in list order would. Equality is identity: the index is rebuilt per
+ * list, and an entry-wise compare would build every key string the index exists to avoid.
+ */
+internal class GalleryKeyIndex(private val items: List<GalleryItem>) : AbstractMap<String, Int>() {
+
+    // Slot → item position + 1, with 0 marking an empty slot. Sized for a load factor of at most 2/3.
+    private val table: IntArray
+    private val mask: Int
+    private val shift: Int
+    private val distinct: Int
+
+    init {
+        val needed = items.size + items.size / 2 + 1
+        var capacity = 2
+        while (capacity < needed) capacity = capacity shl 1
+        table = IntArray(capacity)
+        mask = capacity - 1
+        shift = capacity.countLeadingZeroBits() + 1
+        var count = 0
+        for (position in items.indices) {
+            val item = items[position]
+            val kind = kindOf(item)
+            val id = rawIdOf(item)
+            val hash = id.hashCode()
+            var slot = slotFor(hash)
+            while (true) {
+                val occupant = table[slot]
+                if (occupant == 0) {
+                    table[slot] = position + 1
+                    count++
+                    break
+                }
+                if (sameKey(items[occupant - 1], kind, id, hash)) {
+                    table[slot] = position + 1
+                    break
+                }
+                slot = (slot + 1) and mask
+            }
+        }
+        distinct = count
+    }
+
+    /** Position of the photo behind grid cell [key], or -1 for a header, the memories row or a key
+     *  this list does not hold. */
+    fun positionOfKey(key: String): Int {
+        val kind = when {
+            key.startsWith(CLOUD_PREFIX) -> CLOUD
+            key.startsWith(SYNCED_PREFIX) -> SYNCED
+            key.startsWith(LOCAL_PREFIX) -> LOCAL
+            else -> return -1
+        }
+        val start = prefixOf(kind).length
+        val idLength = key.length - start
+        // String.hashCode of the key's id part, computed in place rather than on a substring.
+        var hash = 0
+        for (i in start until key.length) hash = 31 * hash + key[i].code
+        var slot = slotFor(hash)
+        while (true) {
+            val occupant = table[slot]
+            if (occupant == 0) return -1
+            val item = items[occupant - 1]
+            if (kindOf(item) == kind) {
+                val id = rawIdOf(item)
+                if (id.length == idLength && id.hashCode() == hash && key.regionMatches(start, id, 0, idLength)) {
+                    return occupant - 1
+                }
+            }
+            slot = (slot + 1) and mask
+        }
+    }
+
+    /** Position of [item] itself, found without building its key string; -1 when it is not indexed. */
+    fun positionOf(item: GalleryItem): Int {
+        val kind = kindOf(item)
+        val id = rawIdOf(item)
+        val hash = id.hashCode()
+        var slot = slotFor(hash)
+        while (true) {
+            val occupant = table[slot]
+            if (occupant == 0) return -1
+            if (sameKey(items[occupant - 1], kind, id, hash)) return occupant - 1
+            slot = (slot + 1) and mask
+        }
+    }
+
+    /** The photo behind grid cell [key], or null when the key is not one of this list's photos. */
+    fun itemFor(key: String): GalleryItem? {
+        val position = positionOfKey(key)
+        return if (position < 0) null else items[position]
+    }
+
+    override val size: Int get() = distinct
+
+    override fun isEmpty(): Boolean = distinct == 0
+
+    override operator fun get(key: String): Int? {
+        val position = positionOfKey(key)
+        return if (position < 0) null else position
+    }
+
+    override fun containsKey(key: String): Boolean = positionOfKey(key) >= 0
+
+    override fun containsValue(value: Int): Boolean =
+        value >= 0 && value < items.size && positionOf(items[value]) == value
+
+    override val entries: Set<Map.Entry<String, Int>>
+        get() = EntryView()
+
+    override fun equals(other: Any?): Boolean = this === other
+
+    override fun hashCode(): Int = System.identityHashCode(this)
+
+    override fun toString(): String = "GalleryKeyIndex(size=$distinct)"
+
+    private fun slotFor(hash: Int): Int = (hash * FIBONACCI_MULTIPLIER) ushr shift
+
+    private fun nextOccupied(from: Int): Int {
+        var slot = from
+        while (slot < table.size && table[slot] == 0) slot++
+        return slot
+    }
+
+    /** Entries built on demand while iterating; none of the grid's lookups walk them. */
+    private inner class EntryView : AbstractSet<Map.Entry<String, Int>>() {
+        override val size: Int get() = distinct
+
+        override fun iterator(): Iterator<Map.Entry<String, Int>> = object : Iterator<Map.Entry<String, Int>> {
+            private var slot = nextOccupied(0)
+
+            override fun hasNext(): Boolean = slot < table.size
+
+            override fun next(): Map.Entry<String, Int> {
+                if (slot >= table.size) throw NoSuchElementException()
+                val position = table[slot] - 1
+                slot = nextOccupied(slot + 1)
+                return java.util.AbstractMap.SimpleImmutableEntry(keyOf(items[position]), position)
+            }
+        }
+    }
+
+    companion object {
+        private const val LOCAL_PREFIX = "local_"
+        private const val SYNCED_PREFIX = "synced_"
+        private const val CLOUD_PREFIX = "cloud_"
+
+        private const val LOCAL = 0
+        private const val SYNCED = 1
+        private const val CLOUD = 2
+
+        // 2^32 divided by the golden ratio: spreads the String hashes over the table's high bits.
+        private const val FIBONACCI_MULTIPLIER = -0x61c88647
+
+        /** The timeline grid's cell key for [item]. */
+        fun keyOf(item: GalleryItem): String = when (item) {
+            is GalleryItem.LocalOnly -> LOCAL_PREFIX + item.local.uri
+            is GalleryItem.Synced    -> SYNCED_PREFIX + item.local.uri
+            is GalleryItem.CloudOnly -> CLOUD_PREFIX + item.cloud.linkId
+        }
+
+        private fun kindOf(item: GalleryItem): Int = when (item) {
+            is GalleryItem.LocalOnly -> LOCAL
+            is GalleryItem.Synced    -> SYNCED
+            is GalleryItem.CloudOnly -> CLOUD
+        }
+
+        private fun rawIdOf(item: GalleryItem): String = when (item) {
+            is GalleryItem.LocalOnly -> item.local.uri
+            is GalleryItem.Synced    -> item.local.uri
+            is GalleryItem.CloudOnly -> item.cloud.linkId
+        }
+
+        private fun prefixOf(kind: Int): String = when (kind) {
+            LOCAL -> LOCAL_PREFIX
+            SYNCED -> SYNCED_PREFIX
+            else -> CLOUD_PREFIX
+        }
+
+        private fun sameKey(item: GalleryItem, kind: Int, id: String, hash: Int): Boolean {
+            if (kindOf(item) != kind) return false
+            val other = rawIdOf(item)
+            return other === id || (other.hashCode() == hash && other == id)
+        }
     }
 }

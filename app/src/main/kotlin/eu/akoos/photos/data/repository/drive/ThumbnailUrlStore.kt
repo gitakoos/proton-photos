@@ -22,13 +22,18 @@
 
 package eu.akoos.photos.data.repository.drive
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.di.AppScope
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -45,49 +50,66 @@ import javax.inject.Singleton
  * carries the fresh URL to the affected cell instead, so a decrypt-completion repaints exactly one tile
  * and never touches the main item model.
  *
- * [urls] is a copy-on-write map: each [put] swaps in a new immutable instance with one changed entry.
- * A grid cell reads `urls[linkId]` for its own row, so the new map instance recomposes only the cells
- * whose value changed (per-cell cost stays O(1)). The DB write stays alongside every put so the URL
- * persists for [seed] on the next launch.
+ * The entries live in one [ConcurrentHashMap] that [put] updates in place, so a decrypt costs one map
+ * entry and never a copy of the whole map. [urls] carries a read-only view over those live entries,
+ * and a change publishes a fresh view object: collectors and Compose state re-read because the new
+ * view is a new value, while every view reads the same entries. Publishing is rate-limited by
+ * [CoalescingPublisher]: the first change after a quiet spell goes out at once, and a burst of
+ * decrypts collapses into at most one publish per [PUBLISH_WINDOW_MS]. A grid cell reads
+ * `urls[linkId]` for its own row, so a publish rebinds only the cells whose value changed. The DB
+ * write stays alongside every put so the URL persists for [seed] on the next launch.
  */
 @Singleton
 class ThumbnailUrlStore @Inject constructor(
     private val photoListingDao: PhotoListingDao,
+    @AppScope appScope: CoroutineScope,
 ) {
-    private val _urls = MutableStateFlow<Map<String, String>>(emptyMap())
+    private val entries = ConcurrentHashMap<String, String>()
 
-    /** linkId → decrypted `file://` thumbnail URL. Cells read their own entry off this snapshot. */
+    private val _urls = MutableStateFlow<Map<String, String>>(LiveUrls(entries))
+
+    /** linkId → decrypted `file://` thumbnail URL. Cells read their own entry off this view. */
     val urls: StateFlow<Map<String, String>> = _urls.asStateFlow()
 
-    /** Record the freshly-decrypted [url] for [linkId], swapping in a new map instance so the one cell
-     *  reading this linkId recomposes. Copy-of-one, not a re-query; this is the whole point of the
-     *  store. Idempotent: re-putting the same value is a cheap no-op emit-then-drop by StateFlow. */
+    private val publisher = CoalescingPublisher(appScope, PUBLISH_WINDOW_MS, ::publish)
+
+    // Orders seed's check-then-insert against remove() and clear(). A put needs no lock: seed only
+    // fills absent linkIds, so a live put always outranks the older seed row.
+    private val lock = Any()
+    private var generation = 0L
+
+    /** Record the freshly-decrypted [url] for [linkId]. Readable through [urls] at once; the change
+     *  signal that makes readers recompose is coalesced. Idempotent: re-putting the same value
+     *  signals nothing. */
     fun put(linkId: String, url: String) {
-        _urls.update { current ->
-            if (current[linkId] == url) current else current + (linkId to url)
-        }
+        if (entries.put(linkId, url) != url) publisher.mark()
     }
 
     /** One-time prime from the DB so cells decrypted in a previous session paint immediately, without
-     *  re-decrypting. Merges under any live [put]s that already landed (a decrypt can complete before
-     *  the seed read returns), so a just-decrypted URL is never clobbered by the older seed row. */
+     *  re-decrypting. Fills only linkIds no live [put] holds yet (a decrypt can complete before the seed
+     *  read returns), so a just-decrypted URL is never clobbered by the older seed row. A [clear] that
+     *  lands mid-seed ends it, so a signed-out account's rows are not written back. */
     suspend fun seed(userId: UserId) {
+        val seedGeneration = synchronized(lock) { generation }
         val rows = runCatching { photoListingDao.getThumbnailUrlSeed(userId.id) }.getOrDefault(emptyList())
-        if (rows.isEmpty()) return
-        _urls.update { current ->
-            val merged = HashMap<String, String>(current.size + rows.size)
-            // Keep only URLs whose backing file is still present and non-empty. An OS "Clear cache"
-            // wipes cacheDir/thumbnails/ without nulling the DB rows, so a stale file:// path would
-            // otherwise seed a deleted file and leave that cell permanently blank (the scheduler
-            // skips a re-decrypt while the row's URL is non-null). A dead path is dropped, so the
-            // cell falls back to null and re-decrypts on scroll.
-            for (row in rows) row.thumbnailUrl?.let { url ->
-                if (thumbnailFileUsable(url)) merged[row.linkId] = url
+        var added = false
+        for (row in rows) {
+            val url = row.thumbnailUrl ?: continue
+            if (entries.containsKey(row.linkId)) continue
+            val stillCurrent = synchronized(lock) {
+                if (generation != seedGeneration) return@synchronized false
+                // Keep only URLs whose backing file is still present and non-empty. An OS "Clear cache"
+                // wipes cacheDir/thumbnails/ without nulling the DB rows, so a stale file:// path would
+                // otherwise seed a deleted file and leave that cell permanently blank (the scheduler
+                // skips a re-decrypt while the row's URL is non-null). A dead path is dropped, so the
+                // cell falls back to null and re-decrypts on scroll. Checked under the lock so an
+                // eviction's remove() cannot slip between the check and the insert.
+                if (thumbnailFileUsable(url) && entries.putIfAbsent(row.linkId, url) == null) added = true
+                true
             }
-            // Live puts win over the seed snapshot.
-            merged.putAll(current)
-            merged
+            if (!stillCurrent) break
         }
+        if (added) publish()
     }
 
     /** True when a `file://` [url] points at an existing, non-empty file. Non-file URLs are kept as-is
@@ -103,13 +125,85 @@ class ThumbnailUrlStore @Inject constructor(
      *  of them are in the map. */
     fun remove(linkIds: Collection<String>) {
         if (linkIds.isEmpty()) return
-        _urls.update { current ->
-            if (linkIds.none { it in current }) current else current - linkIds.toSet()
+        var removed = false
+        synchronized(lock) {
+            for (linkId in linkIds) if (entries.remove(linkId) != null) removed = true
+        }
+        if (removed) publisher.mark()
+    }
+
+    /** Drop everything on sign-out so a re-login (same or different account) starts clean. Published
+     *  at once rather than coalesced. */
+    fun clear() {
+        val hadEntries = synchronized(lock) {
+            generation++
+            val had = entries.isNotEmpty()
+            entries.clear()
+            had
+        }
+        if (hadEntries) publish()
+    }
+
+    private fun publish() {
+        _urls.value = LiveUrls(entries)
+    }
+
+    companion object {
+        /** Shortest spacing between two coalesced publishes of [urls]. */
+        internal const val PUBLISH_WINDOW_MS = 150L
+    }
+}
+
+/**
+ * Read-only view over the store's live entries. Equality is identity: a new instance is the change
+ * signal [ThumbnailUrlStore.urls] publishes, and two views over the same live map always hold the same
+ * entries, so a content compare would swallow every change.
+ */
+private class LiveUrls(entries: Map<String, String>) : Map<String, String> by entries
+
+/**
+ * Rate-limits a change signal to at most one [publish] per [windowMs]. The first [mark] after a quiet
+ * spell publishes at once and opens a window; marks inside it share one publish when it closes, and a
+ * new window follows for as long as changes keep arriving. Every mark is followed by a publish that
+ * sees it, so the last change of a burst always lands.
+ */
+internal class CoalescingPublisher(
+    private val scope: CoroutineScope,
+    private val windowMs: Long,
+    private val publish: () -> Unit,
+) {
+    // A change is waiting for a publish. Every write to it is a read-modify-write, so a flush that
+    // reads it is ordered after every mark before it and its publish sees their changes.
+    private val owed = AtomicBoolean(false)
+
+    // A publish went out less than windowMs ago and [holdWindow] is running to close the window.
+    private val windowOpen = AtomicBoolean(false)
+
+    fun mark() {
+        owed.getAndSet(true)
+        if (windowOpen.compareAndSet(false, true)) {
+            flush()
+            scope.launch { holdWindow() }
         }
     }
 
-    /** Drop everything on sign-out so a re-login (same or different account) starts clean. */
-    fun clear() {
-        _urls.value = emptyMap()
+    private suspend fun holdWindow() {
+        while (true) {
+            delay(windowMs)
+            if (owed.get()) {
+                flush()
+                continue
+            }
+            windowOpen.set(false)
+            // A mark that landed between the check and the reset still found the window open and left
+            // its change to this loop: publish it here rather than lose it.
+            if (!owed.get() || !windowOpen.compareAndSet(false, true)) return
+            flush()
+        }
+    }
+
+    private fun flush() {
+        owed.getAndSet(false)
+        publish()
     }
 }

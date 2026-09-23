@@ -39,6 +39,7 @@ class SyncStateRepositoryImpl @Inject constructor(
     private val dao: SyncStateDao,
 ) : SyncStateRepository {
 
+    // Legacy full-row stream; lean readers take SyncStateSnapshot.
     override fun observeAll(userId: UserId): Flow<List<SyncState>> =
         dao.observeAll(userId.id).map { list -> list.map { it.toDomain() } }
 

@@ -27,13 +27,17 @@ import android.content.ContentResolver
 import android.net.Uri
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.mockkStatic
 import io.mockk.slot
+import io.mockk.verify
+import io.mockk.verifyOrder
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
@@ -53,6 +57,7 @@ import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.NetworkObserver
+import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.StripResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -92,10 +97,10 @@ class UploadPendingUseCaseTest {
         coEvery { uploadAlbumTargetDao.getTargetsFor(any()) } returns emptyList()
         context = mockk()
 
-        // Upload-time folder filter maps pending URIs to bucket names via this flow. An empty
-        // listing leaves every pending URI with a null bucket, which the allow-list filter treats
-        // as backup-able while any folder is selected — so all LOCAL_ONLY items still upload.
-        every { localRepo.observeLocalMedia() } returns flowOf(emptyList())
+        // Upload-time folder filter maps pending URIs to bucket names through a fresh device scan.
+        // An empty scan leaves every pending URI with a null bucket, which the allow-list filter
+        // treats as backup-able while any folder is selected, so all LOCAL_ONLY items still upload.
+        coEvery { localRepo.freshMedia() } returns emptyList()
 
         val contentResolver = mockk<ContentResolver>()
         every { context.contentResolver } returns contentResolver
@@ -408,6 +413,107 @@ class UploadPendingUseCaseTest {
         useCase(userId)
 
         coVerify(exactly = 0) { cloudRepo.uploadFile(any(), any(), any(), any(), any(), any()) }
+    }
+
+    // ─── upload workers (#123) ────────────────────────────────────────────────
+
+    @Test
+    fun `a batch longer than the upload parallelism uploads every row once, in queue order`() = runTest {
+        // A fixed pool of workers walks the queue, so a queue far longer than the pool still reaches
+        // every row exactly once, in the order it was queued.
+        val uris = (1..8).map { "uri://$it" }
+        every { syncStateRepo.observeAll(userId) } returns
+            flowOf(uris.map { syncState(it, SyncStatus.LOCAL_ONLY) })
+        coEvery { localRepo.queryByUri(any()) } answers { localItem(firstArg()) }
+        val uploaded = mutableListOf<String>()
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } answers {
+            uploaded += secondArg<LocalMediaItem>().uri
+            "cloud-id"
+        }
+
+        val result = useCase(userId)
+
+        assertEquals(uris, uploaded)
+        assertEquals(UploadPendingUseCase.Result(attempted = 8, successCount = 8), result)
+    }
+
+    @Test
+    fun `a stop requested mid-batch lets the running upload finish and starts no more rows`() = runTest {
+        val uris = (1..5).map { "uri://$it" }
+        every { syncStateRepo.observeAll(userId) } returns
+            flowOf(uris.map { syncState(it, SyncStatus.LOCAL_ONLY) })
+        coEvery { localRepo.queryByUri(any()) } answers { localItem(firstArg()) }
+        val uploaded = mutableListOf<String>()
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } answers {
+            val uri = secondArg<LocalMediaItem>().uri
+            uploaded += uri
+            // The user taps stop while the second photo is on its way up.
+            if (uri == "uri://2") useCase.requestStop()
+            "cloud-id"
+        }
+
+        val result = useCase(userId)
+
+        assertEquals(listOf("uri://1", "uri://2"), uploaded)
+        // The upload in flight when the stop landed still commits, and no later row is even claimed.
+        coVerify {
+            syncStateRepo.upsert(match { it.localUri == "uri://2" && it.status == SyncStatus.SYNCED }, userId)
+        }
+        coVerify(exactly = 0) { syncStateRepo.claimForUpload("uri://3") }
+        assertEquals(UploadPendingUseCase.Result(attempted = 5, successCount = 2), result)
+    }
+
+    @Test
+    fun `the upload-time folder filter judges each row by a fresh device scan`() = runTest {
+        // Where a queued photo lives now decides whether it still backs up, so the filter reads a scan
+        // taken for this pass rather than the shared device list.
+        every { syncStateRepo.observeAll(userId) } returns flowOf(
+            listOf(syncState("uri://moved", SyncStatus.LOCAL_ONLY), syncState("uri://camera", SyncStatus.LOCAL_ONLY)),
+        )
+        coEvery { localRepo.freshMedia() } returns listOf(
+            localItem("uri://moved").copy(bucketName = "Downloads"),
+            localItem("uri://camera"),
+        )
+        coEvery { localRepo.queryByUri(any()) } answers { localItem(firstArg()) }
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
+
+        useCase(userId)
+
+        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) {
+            cloudRepo.uploadFile(userId, match { it.uri == "uri://camera" }, any(), any(), any(), any())
+        }
+        coVerify(exactly = 0) { localRepo.queryByUri("uri://moved") }
+        verify(exactly = 0) { localRepo.observeLocalMedia() }
+    }
+
+    @Test
+    fun `every exit of a pass closes the upload phase it opened`() = runTest {
+        // One pass defers for Wi-Fi before selecting anything; the next, back on Wi-Fi, uploads its two
+        // rows. Each opens the phase on entry and closes it with the count it attempted.
+        every { mockPrefsRef[SettingsKeys.SYNC_WIFI_ONLY] } returns true
+        coEvery { networkObserver.currentlyOnWifi() } returns false
+        every { syncStateRepo.observeAll(userId) } returns flowOf(
+            listOf(syncState("uri://1", SyncStatus.LOCAL_ONLY), syncState("uri://2", SyncStatus.LOCAL_ONLY)),
+        )
+        coEvery { localRepo.queryByUri(any()) } answers { localItem(firstArg()) }
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
+
+        mockkObject(PerfDiagnostics) {
+            every { PerfDiagnostics.mark(any(), any()) } just Runs
+            useCase(userId)
+            coEvery { networkObserver.currentlyOnWifi() } returns true
+            useCase(userId)
+
+            verifyOrder {
+                PerfDiagnostics.mark("upload:start", 0)
+                PerfDiagnostics.mark("upload:end", 0)
+                PerfDiagnostics.mark("upload:start", 0)
+                PerfDiagnostics.mark("upload:end", 2)
+            }
+            verify(exactly = 2) { PerfDiagnostics.mark("upload:start", any()) }
+            verify(exactly = 2) { PerfDiagnostics.mark("upload:end", any()) }
+        }
     }
 
     // ─── capture-time handling ────────────────────────────────────────────────

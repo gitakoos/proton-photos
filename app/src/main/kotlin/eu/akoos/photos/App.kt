@@ -223,6 +223,12 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                     .append(" libraryPhotos=").append(eu.akoos.photos.util.PerfDiagnostics.libraryPhotoCount)
                     .append('\n')
             }
+            // The last phase markers (numbers only), so an OOM record shows which phase was growing the
+            // heap: the in-memory marker ring dies with the process, this copy does not.
+            runCatching {
+                val phases = eu.akoos.photos.util.PerfDiagnostics.phaseTail()
+                if (phases.isNotBlank()) append(phases).append('\n')
+            }
             append('\n')
         }
         file.appendText(text)

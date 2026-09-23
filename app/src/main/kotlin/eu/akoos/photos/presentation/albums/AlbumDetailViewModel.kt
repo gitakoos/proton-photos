@@ -70,6 +70,8 @@ import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.currentShareStripConfig
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.db.dao.SyncStateLite
+import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.data.repository.drive.AlbumSharingService
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.FavoriteWriter
@@ -87,7 +89,6 @@ import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
-import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.util.stripForShareOrOriginal
@@ -100,6 +101,15 @@ import javax.inject.Inject
  *  cannot succeed at all: that one would otherwise leave the grid on its skeleton with nothing
  *  said. */
 private const val PHOTO_OBSERVE_MAX_RETRIES = 5L
+
+/**
+ * Cloud linkId to device uri for every SYNCED row with a linkId. Only a SYNCED row stands for a file on
+ * the device: a CLOUD_ONLY row can keep the stale uri of a freed-up file. Where two rows share a
+ * linkId, the later row's uri stands.
+ */
+internal fun albumLocalUrisByLinkId(rows: List<SyncStateLite>): Map<String, String> =
+    rows.filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
+        .associate { it.cloudFileId!! to it.localUri }
 
 /** Summary of a bulk invite-by-email batch. [failures] is the raw error message per failed email. */
 data class InviteBatchResult(
@@ -255,7 +265,7 @@ class AlbumDetailViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val driveRepo: DrivePhotoRepository,
     private val albumSharingService: AlbumSharingService,
-    private val syncStateRepo: SyncStateRepository,
+    private val syncStateSnapshot: SyncStateSnapshot,
     private val getUser: GetUser,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
@@ -350,15 +360,11 @@ class AlbumDetailViewModel @Inject constructor(
         viewModelScope.launch { accountManager.getPrimaryUserId().collect { primaryUserId = it } }
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            syncStateRepo.observeAll(userId)
+            syncStateSnapshot.observe(userId)
+                .map { albumLocalUrisByLinkId(it.rows) }
+                .flowOn(Dispatchers.Default)
                 .retryOnDbTear("AlbumDetailSync")
-                .collect { states ->
-                // Only SYNCED rows = on-device. CLOUD_ONLY rows can keep a stale localUri (freed-up space).
-                val map = states
-                    .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
-                    .associate { it.cloudFileId!! to it.localUri }
-                _uiState.update { it.copy(localUriByLinkId = map) }
-            }
+                .collect { map -> _uiState.update { it.copy(localUriByLinkId = map) } }
         }
         // Device files for this album's members, taken from the same merged library every other
         // surface reads. The merge is the @Singleton GetGalleryItemsUseCase, so this adds no second

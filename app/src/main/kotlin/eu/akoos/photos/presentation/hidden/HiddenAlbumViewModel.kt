@@ -28,6 +28,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,6 +40,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
@@ -48,6 +50,7 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.R
+import eu.akoos.photos.data.db.dao.SyncStateLite
 import eu.akoos.photos.data.hidden.HiddenFolderProgress
 import eu.akoos.photos.data.hidden.HiddenFolderRecords
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
@@ -55,6 +58,7 @@ import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -69,6 +73,22 @@ import javax.inject.Inject
 /** Grid key prefix for a hidden cloud-photo tile in the vault, so the one shared drag-select can tell
  *  a cloud selection key from a device uri. The LazyGrid item key and the selection key use this. */
 internal const val HIDDEN_CLOUD_SELECTION_PREFIX = "hidden_cloud_"
+
+/**
+ * The linkIds among [hiddenIds] that a SYNCED row pairs to a device file: individually hidden cloud
+ * photos whose device copy is still in the phone's gallery. A vaulted photo's row reads HIDDEN, so it
+ * never counts.
+ */
+internal fun looseDeviceCopies(hiddenIds: Set<String>, rows: List<SyncStateLite>): Set<String> =
+    if (hiddenIds.isEmpty()) {
+        emptySet()
+    } else {
+        rows.asSequence()
+            .filter { it.status == SyncStatus.SYNCED }
+            .mapNotNull { it.cloudFileId }
+            .filter { it in hiddenIds }
+            .toSet()
+    }
 
 data class HiddenAlbumUiState(
     val isAuthenticated: Boolean = false,
@@ -132,7 +152,7 @@ class HiddenAlbumViewModel @Inject constructor(
     private val hiddenVaultJournal: HiddenVaultJournal,
     private val hiddenVaultRestorer: HiddenVaultRestorer,
     private val driveRepo: DrivePhotoRepository,
-    private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
+    private val syncStateSnapshot: SyncStateSnapshot,
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
 ) : ViewModel() {
 
@@ -347,17 +367,10 @@ class HiddenAlbumViewModel @Inject constructor(
             val hiddenIds = context.settingsDataStore.data
                 .map { it[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet() }
                 .distinctUntilChanged()
-            combine(hiddenIds, syncStateRepo.observeAll(userId)) { ids, states ->
-                if (ids.isEmpty()) {
-                    emptySet()
-                } else {
-                    states.asSequence()
-                        .filter { it.status == SyncStatus.SYNCED }
-                        .mapNotNull { it.cloudFileId }
-                        .filter { it in ids }
-                        .toSet()
-                }
+            combine(hiddenIds, syncStateSnapshot.observe(userId)) { ids, sync ->
+                looseDeviceCopies(ids, sync.rows)
             }
+                .flowOn(Dispatchers.Default)
                 .distinctUntilChanged()
                 .catch { emit(emptySet()) }
                 .collect { loose -> _uiState.update { it.copy(looseDeviceCopyLinkIds = loose) } }

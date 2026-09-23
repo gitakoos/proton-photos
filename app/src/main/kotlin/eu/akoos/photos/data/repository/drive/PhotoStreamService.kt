@@ -28,13 +28,24 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.retryWhen
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
@@ -47,24 +58,47 @@ import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.api.dto.PhotoLinkDto
 import eu.akoos.photos.data.api.dto.PhotoLinksResponse
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
+import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.ListingSweepSnapshotDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
+import eu.akoos.photos.data.db.entity.toCloudPhotos
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.DriveNotFoundException
+import eu.akoos.photos.util.FreshQueryGate
 import eu.akoos.photos.util.combineSqlChunks
 import eu.akoos.photos.util.flatMapSqlChunks
 import eu.akoos.photos.util.forEachSqlChunk
+import eu.akoos.photos.util.retryBackoffMs
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "PhotoStreamSvc"
+
+private const val PHOTO_LISTING_TABLE = "photo_listing"
+
+/** Wait after a change before the listing is read again, so the several writes one step of a refresh
+ *  or a backup makes land in one read. The sync-row copy waits as long. */
+internal const val CLOUD_LISTING_SETTLE_MS = 250L
+
+/**
+ * Shortest pause between the end of one change-driven read of the listing and the start of the next.
+ * A read of a large library can take longer than this, so the pause runs from the end of the read
+ * rather than its start: however fast the table is written, there is an idle gap between two
+ * whole-library reads.
+ */
+internal const val CLOUD_LISTING_MIN_INTERVAL_MS = 1_000L
+
+/** How long the listing outlives its last collector, so moving between screens reuses it instead of
+ *  reading again. After that it is dropped. The gallery feed keeps the same window. */
+internal const val CLOUD_LISTING_STOP_TIMEOUT_MS = 5_000L
 
 /**
  * Window in which a just-recorded upload (in [RecentUploadsTracker]) is protected from the
@@ -344,6 +378,85 @@ internal fun refreshPassOutcome(paginationComplete: Boolean, failedBatches: Int)
 )
 
 /**
+ * The listing copies behind [PhotoStreamService.observeCloudPhotos], one per user, each shared by
+ * every collector of that user through one StateFlow.
+ *
+ * [changes] signals a write to the table and also emits once as soon as it listens, the way Room's
+ * invalidation flow does; [read] loads one user's listing. The first read runs as soon as the
+ * listener is in place. After that a burst of writes settles into one read, a change-driven read
+ * starts [CLOUD_LISTING_MIN_INTERVAL_MS] after the previous read ended at the earliest, and a write
+ * landing during a read is always read afterwards. Reads never overlap, a re-read equal to the held
+ * copy does not reach collectors again, and a failed read keeps the held copy and is retried after a
+ * pause. The copy is dropped [CLOUD_LISTING_STOP_TIMEOUT_MS] after the last collector leaves.
+ */
+internal class CloudListingSource<T : Any>(
+    private val scope: CoroutineScope,
+    private val changes: () -> Flow<Unit>,
+    private val read: suspend (userId: String) -> T,
+    private val onReadFailure: (Throwable) -> Unit = {},
+) {
+    private val users = ConcurrentHashMap<String, UserListing>()
+
+    /** [userId]'s listing, kept current as the table changes. A new collector gets the copy already
+     *  held at once, which can trail a write still settling. */
+    fun observe(userId: String): Flow<T> = users.computeIfAbsent(userId) { UserListing(it) }.shared
+
+    private inner class UserListing(userId: String) {
+        private val gate = FreshQueryGate(scope) { read(userId) }
+
+        private val latest: StateFlow<T?> = channelFlow<T> {
+            // Subscribed before the first read can finish, so no result is missed.
+            launch(start = CoroutineStart.UNDISPATCHED) { gate.results.collect { send(it) } }
+            val pending = Channel<Unit>(Channel.CONFLATED)
+            launch {
+                flow { emitAll(changes()) }
+                    .retryWhen { cause, attempt ->
+                        // A write made while nothing listens goes unsignalled, so read what the
+                        // table holds now and listen again after a pause.
+                        onReadFailure(cause)
+                        pending.trySend(Unit)
+                        delay(retryBackoffMs(attempt))
+                        true
+                    }
+                    .collect { pending.trySend(Unit) }
+            }
+            // Runs from the end of each read for the minimum interval; null until the first.
+            var interval: Job? = null
+            var failedReads = 0L
+            while (true) {
+                pending.receive()
+                // The first signal means the listener is in place, so the first read runs at once.
+                if (interval != null) {
+                    delay(CLOUD_LISTING_SETTLE_MS)
+                    interval.join()
+                    // A write signalled before the read begins is in what the read sees.
+                    pending.tryReceive()
+                }
+                try {
+                    gate.fresh()
+                    failedReads = 0L
+                } catch (e: Throwable) {
+                    ensureActive()
+                    onReadFailure(e)
+                    val pauseMs = retryBackoffMs(failedReads++)
+                    launch {
+                        delay(pauseMs)
+                        pending.trySend(Unit)
+                    }
+                }
+                interval = launch { delay(CLOUD_LISTING_MIN_INTERVAL_MS) }
+            }
+        }.stateIn(
+            scope,
+            SharingStarted.WhileSubscribed(CLOUD_LISTING_STOP_TIMEOUT_MS, replayExpirationMillis = 0L),
+            null,
+        )
+
+        val shared: Flow<T> = latest.filterNotNull()
+    }
+}
+
+/**
  * Cloud photo stream: paginated full refresh + event-based incremental refresh +
  * observe-from-DB flows.
  *
@@ -366,8 +479,18 @@ class PhotoStreamService @Inject constructor(
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope appScope: CoroutineScope,
+    db: AppDatabase,
 ) {
     private val semaphore get() = shareService.networkSemaphore
+
+    /** The own-stream listing per user, read once per settled change and shared by every collector;
+     *  see [observeCloudPhotos]. */
+    private val cloudListing = CloudListingSource(
+        scope = appScope,
+        changes = { db.invalidationTracker.createFlow(PHOTO_LISTING_TABLE, emitInitialState = true).map { } },
+        read = { userId -> photoListingDao.getOwnStreamLite(userId).toCloudPhotos() },
+        onReadFailure = { Log.w(TAG, "cloud photo listing read failed: ${it.message}") },
+    )
 
     /**
      * Single-flight guard AND owner of the walk's lifetime.
@@ -523,28 +646,24 @@ class PhotoStreamService @Inject constructor(
                 emptySet()
             }
 
-    fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>> =
-        // observeOwnStreamLite, not observeAll: rows that live only inside an album sit in the same
-        // table, whether the album was shared with this user or a guest contributed into one of
-        // theirs, and neither kind belongs in the user's own timeline.
-        // The LITE projection selects only the display columns — NOT the per-row crypto material
-        // (encNodeKey / contentKeyPacket / encNodePassphrase / encXAttr, kilobytes each). A
-        // thumbnail-decrypt burst re-emits the whole listing on every DB write; selecting the crypto
-        // blobs for the entire library each time, only to drop them in toDomain(), materialised
-        // hundreds of MB of transient garbage per write on a large library and pinned the heap at
-        // its ceiling. flowOn(Default) keeps the per-row map off the collector's Main thread.
-        photoListingDao.observeOwnStreamLite(userId.id)
-            .map { list -> list.map { it.toDomain() } }
-            .retryWhen { cause, attempt ->
-                // A DAO read that lands mid-write can throw an IllegalStateException: the framework
-                // CursorWindow refills a result whose table was written concurrently (a cloud delete
-                // landing mid-sync). Re-subscribe (re-run the query) rather than terminating the
-                // timeline flow, with a capped backoff so a persistent failure cannot spin.
-                android.util.Log.w(TAG, "cloud photo stream read failed (attempt $attempt), retrying: ${cause.message}")
-                delay((300L * (attempt + 1)).coerceAtMost(3_000L))
-                attempt < 5
-            }
-            .flowOn(Dispatchers.Default)
+    /**
+     * The user's own photo stream, newest first: one copy per user that every collector shares, read
+     * after a write to the table has settled and at most once per [CLOUD_LISTING_MIN_INTERVAL_MS]
+     * after the previous read ended. Every thumbnail decrypt, upload and backfill page writes the
+     * table, and a whole-library read per write and per collector would hold several copies of a
+     * large library at once.
+     *
+     * The own stream, not every row: rows that live only inside an album sit in the same table,
+     * whether the album was shared with this user or a guest contributed into one of theirs, and
+     * neither kind belongs in the user's own timeline. The LITE projection selects only the display
+     * columns, never the per-row crypto material (encNodeKey / contentKeyPacket / encNodePassphrase /
+     * encXAttr, kilobytes each), and the mapping holds each repeated value once across the rows.
+     *
+     * The read and the mapping run on the app scope, off every collector's thread. A read that fails,
+     * such as one torn by a concurrent write refilling its CursorWindow, keeps the held copy and is
+     * retried after a pause, so the stream itself never fails.
+     */
+    fun observeCloudPhotos(userId: UserId): Flow<List<CloudPhoto>> = cloudListing.observe(userId.id)
 
     /** Chunked at the one layer every caller (album detail, album download, hidden album) shares, so
      *  an album larger than SQLite's host-variable cap resolves instead of failing the statement. The
@@ -618,6 +737,9 @@ class PhotoStreamService @Inject constructor(
         // Default to "incomplete" until the loop below proves the listing finished cleanly;
         // any early return or thrown error then correctly leaves the event anchor unsaved.
         lastFullRefreshComplete = false
+        // Links the walk listed this pass, for the closing phase marker.
+        var listedLinks = 0
+        eu.akoos.photos.util.PerfDiagnostics.mark("cloudrefresh:start", 0)
         try {
             val volumeId = shareService.getVolumeId(userId)
             val shareId = shareService.getShareId(userId, volumeId)
@@ -805,6 +927,7 @@ class PhotoStreamService @Inject constructor(
                 eu.akoos.photos.util.SyncDiagnostics.log("listing PAUSED (${listingErrorDetail(e)}) at ${streamLinks.size} links")
                 Log.w(TAG, "refreshCloudPhotos: stream paused at saved cursor (${e.javaClass.simpleName}: ${e.message})")
             }
+            listedLinks = streamLinks.size
 
             // The one sweep site. It runs the moment pagination ends, rather than after the much
             // slower (~30s) per-batch detail/crypto processing below, so a photo deleted on Drive
@@ -1291,6 +1414,8 @@ class PhotoStreamService @Inject constructor(
             // the entry reset, so the event anchor stays unsaved and the next launch retries a
             // full refresh. Swallow rather than rethrow: a degraded gallery beats a crash loop.
             Log.e(TAG, "refreshCloudPhotos aborted (${t.javaClass.simpleName}: ${t.message})", t)
+        } finally {
+            eu.akoos.photos.util.PerfDiagnostics.mark("cloudrefresh:end", listedLinks)
         }
     }
 
@@ -1541,6 +1666,10 @@ class PhotoStreamService @Inject constructor(
         // Held outside the try so the catch can still reach the anchor it needs to clear: the key is
         // derived from a volume lookup that is itself inside the try and can throw.
         var resettableAnchorKey: Preferences.Key<String>? = null
+        // Links the event feed named this pass, for the closing phase marker. Its own phase label, so
+        // a full refresh the pass falls back to keeps its own start and end.
+        var eventLinks = 0
+        eu.akoos.photos.util.PerfDiagnostics.mark("cloudrefresh-incremental:start", 0)
         try {
             val volumeId = shareService.getVolumeId(userId)
             val anchorKey = SettingsKeys.eventAnchorKey(userId.id, volumeId)
@@ -1650,6 +1779,7 @@ class PhotoStreamService @Inject constructor(
                 currentAnchor = eventsResp.eventId
                 hasMore = eventsResp.more != 0
             }
+            eventLinks = upsertLinkIds.size + deleteLinkIds.size
 
             if (deleteLinkIds.isNotEmpty()) {
                 // One event batch is however many deletes happened since the last pass, so the id
@@ -1836,6 +1966,8 @@ class PhotoStreamService @Inject constructor(
                 Log.e(TAG, "refreshCloudPhotosIncremental failed, falling back to full refresh", e)
                 refreshCloudPhotos(userId)
             }
+        } finally {
+            eu.akoos.photos.util.PerfDiagnostics.mark("cloudrefresh-incremental:end", eventLinks)
         }
     }
 }

@@ -63,6 +63,7 @@ import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.Mp4CreationTime
+import eu.akoos.photos.util.PerfDiagnostics
 import java.io.File
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
@@ -74,7 +75,6 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.coroutines.coroutineContext
 
 private const val UPLOAD_TAG = "UploadUseCase"
 
@@ -282,6 +282,9 @@ class UploadPendingUseCase @Inject constructor(
     suspend operator fun invoke(
         userId: UserId,
     ): Result = mutex.withLock {
+        // The pending count is known only after the selection below, so each return's end mark
+        // carries the count the pass attempted.
+        PerfDiagnostics.mark("upload:start", 0)
         // Fresh batch: clear any stop left over from a previous run so a later natural trigger
         // (new photo / periodic / app-open) resumes normally. The flag only affects the batch that
         // was in flight when the user tapped stop.
@@ -398,6 +401,7 @@ class UploadPendingUseCase @Inject constructor(
         if (wifiOnly && !hasExplicitBypass && !networkObserver.currentlyOnWifi()) {
             Log.d(UPLOAD_TAG, "Wi-Fi-only on and not on Wi-Fi — skipping auto-sync upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.WaitingForWifi, 0, 0))
+            PerfDiagnostics.mark("upload:end", 0)
             return@withLock Result(attempted = 0, successCount = 0)
         }
 
@@ -418,12 +422,14 @@ class UploadPendingUseCase @Inject constructor(
         if ((!initialListingComplete || !pairingSettled) && !hasExplicitBypass) {
             Log.d(UPLOAD_TAG, "Cloud listing/pairing not settled yet — deferring bulk upload to avoid duplicates")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.PreparingBackup, 0, 0))
+            PerfDiagnostics.mark("upload:end", 0)
             return@withLock Result(attempted = 0, successCount = 0)
         }
 
         if (!backupEverything && (selectedFolders == null || selectedFolders.isEmpty()) && !hasExplicitBypass) {
             Log.d(UPLOAD_TAG, "No backup folders configured — skipping upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
+            PerfDiagnostics.mark("upload:end", 0)
             return@withLock Result(attempted = 0, successCount = 0)
         }
 
@@ -529,7 +535,7 @@ class UploadPendingUseCase @Inject constructor(
         // backup looks like it ignores the toggle. bucketName lives on LocalMediaItem, not
         // SyncState, so one MediaStore query mapped by URI resolves each pending row's folder.
         if (pending.isNotEmpty()) {
-            val bucketByUri: Map<String, String?> = localRepo.observeLocalMedia().first()
+            val bucketByUri: Map<String, String?> = localRepo.freshMedia()
                 .associate { it.uri to it.bucketName }
             val before = pending.size
             pending = pending.filter { state ->
@@ -556,6 +562,7 @@ class UploadPendingUseCase @Inject constructor(
         if (pending.isEmpty()) {
             Log.d(UPLOAD_TAG, "No pending items to upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
+            PerfDiagnostics.mark("upload:end", 0)
             return@withLock Result(attempted = 0, successCount = 0)
         }
         Log.d(UPLOAD_TAG, "Starting upload of ${pending.size} pending item(s)")
@@ -600,18 +607,14 @@ class UploadPendingUseCase @Inject constructor(
         val finishedCount = AtomicInteger(0)
         val totalCount = pending.size
 
-        // Bounded-parallel upload: at most UPLOAD_PARALLELISM photos in flight at once. Matches
-        // the CDN-block parallelism inside PhotoUploadService so a single batch fully uses the
-        // pipe without over-subscribing it.
-        val uploadSemaphore = Semaphore(UPLOAD_PARALLELISM)
         // Album-cache mutations (read-check-create-publish) race when multiple uploads target
         // the same new album. Guard cache reads/writes + the DataStore persist with this mutex
         // so two parallel uploads of "Camera" photos don't both call createDriveAlbum.
         val albumCacheMutex = Mutex()
 
         // Storage-full is a fatal-for-batch signal: the OS won't accept more bytes for *anyone*.
-        // Set this flag from inside an async task; remaining tasks check it before doing CPU
-        // work so we don't pointlessly compute hashes for files that can't upload. AtomicBoolean
+        // Set from inside a running upload; the workers check it before starting the next row, so
+        // no hash is computed for a file that can't upload. AtomicBoolean
         // (not @Volatile var — @Volatile is a field-only annotation, not allowed on locals)
         // gives us safe cross-coroutine writes.
         val storageFullHit = AtomicBoolean(false)
@@ -621,56 +624,41 @@ class UploadPendingUseCase @Inject constructor(
         val successUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
         try {
-            coroutineScope {
-                val jobs = pending.map { state ->
-                    async {
-                        // Item boundary. Check the cooperative stop flag and the storage-full flag
-                        // BEFORE claiming/starting this item, so a stop keeps the remaining queued
-                        // items from ever beginning while an already-running upload finishes. This is
-                        // a plain boolean, never a cancellation; an in-flight uploadOne is untouched.
-                        // ensureActive() only guards genuine scope teardown (process death); a normal
-                        // stop leaves the scope alive so it never fires here.
-                        coroutineContext.ensureActive()
-                        if (stopRequested.get() || storageFullHit.get()) return@async
-
-                        uploadSemaphore.withPermit {
-                            // Re-check after acquiring the permit — earlier tasks may have set
-                            // storageFullHit / stopRequested while we were queued.
-                            coroutineContext.ensureActive()
-                            if (stopRequested.get() || storageFullHit.get()) return@withPermit
-
-                            uploadOne(
-                                userId = userId,
-                                state = state,
-                                totalCount = totalCount,
-                                manualRun = manualRun,
-                                albumTargetUris = albumTargetUris,
-                                albumOptInFolders = albumOptInFolders,
-                                stripOnUpload = stripOnUpload,
-                                compressOnUpload = compressOnUpload,
-                                compressTier = compressTier,
-                                videoCompressTier = videoCompressTier,
-                                mirrorStripToLocal = mirrorStripToLocal,
-                                mirrorCompressToLocal = mirrorCompressToLocal,
-                                compressVideosOnUpload = compressVideosOnUpload,
-                                renameToCaptureDate = renameToCaptureDate,
-                                deleteLocalAfterBackup = deleteLocalAfterBackup,
-                                stripConfig = stripConfig,
-                                existingAlbumsByName = existingAlbumsByName,
-                                albumCache = albumCache,
-                                albumCacheMutex = albumCacheMutex,
-                                successCount = successCount,
-                                successUris = successUris,
-                                finishedCount = finishedCount,
-                                onStorageFull = { storageFullHit.set(true) },
-                            )
-                        }
-                    }
-                }
-                // awaitAll surfaces the first thrown exception (and cancels the siblings).
-                // We swallow per-photo errors inside uploadOne so this only escapes for hard
-                // failures (e.g. coroutine cancellation), which we handle in the catch below.
-                jobs.awaitAll()
+            // At most UPLOAD_PARALLELISM photos in flight at once, matching the CDN-block parallelism
+            // inside PhotoUploadService so a single batch fully uses the pipe without over-subscribing
+            // it. The stop and storage-full flags are plain booleans read before each row is claimed,
+            // never a cancellation: a stop keeps the remaining rows from starting while an upload
+            // already running finishes.
+            runUploadWorkers(
+                items = pending,
+                workers = UPLOAD_PARALLELISM,
+                shouldStop = { stopRequested.get() || storageFullHit.get() },
+            ) { state ->
+                uploadOne(
+                    userId = userId,
+                    state = state,
+                    totalCount = totalCount,
+                    manualRun = manualRun,
+                    albumTargetUris = albumTargetUris,
+                    albumOptInFolders = albumOptInFolders,
+                    stripOnUpload = stripOnUpload,
+                    compressOnUpload = compressOnUpload,
+                    compressTier = compressTier,
+                    videoCompressTier = videoCompressTier,
+                    mirrorStripToLocal = mirrorStripToLocal,
+                    mirrorCompressToLocal = mirrorCompressToLocal,
+                    compressVideosOnUpload = compressVideosOnUpload,
+                    renameToCaptureDate = renameToCaptureDate,
+                    deleteLocalAfterBackup = deleteLocalAfterBackup,
+                    stripConfig = stripConfig,
+                    existingAlbumsByName = existingAlbumsByName,
+                    albumCache = albumCache,
+                    albumCacheMutex = albumCacheMutex,
+                    successCount = successCount,
+                    successUris = successUris,
+                    finishedCount = finishedCount,
+                    onStorageFull = { storageFullHit.set(true) },
+                )
             }
         } catch (e: CancellationException) {
             Log.d(UPLOAD_TAG, "Upload batch cancelled — ${successCount.get()}/$totalCount succeeded before stop")
@@ -704,13 +692,14 @@ class UploadPendingUseCase @Inject constructor(
         // so this is the only moment anything can say why the backup went quiet.
         val closingStatus = if (storageFullHit.get()) UploadStatus.StorageFull else UploadStatus.Idle
         _progress.tryEmit(UploadProgress("", "", closingStatus, totalCount, totalCount))
+        PerfDiagnostics.mark("upload:end", pending.size)
         Result(attempted = pending.size, successCount = finalSuccess)
     }
 
     /**
-     * Upload a single pending photo. Extracted from [invoke] so the parallel loop can call it
-     * from inside `async { semaphore.withPermit { ... } }` blocks. Per-photo errors are caught
-     * here so one failure doesn't tear down siblings via structured concurrency.
+     * Upload a single pending photo. Extracted from [invoke] so each upload worker (see
+     * [runUploadWorkers]) can call it once per row. Per-photo errors are caught here so one
+     * failure doesn't tear down the other workers via structured concurrency.
      *
      * Progress emissions use [finishedCount] (atomic running tally) rather than the photo's
      * position in the source list — with parallel uploads, photo at index 5 may finish before
@@ -819,8 +808,8 @@ class UploadPendingUseCase @Inject constructor(
             }
             // Once claimed, this item runs to completion. No stop/cancel check is placed between the
             // claim and the encrypt/upload below: interrupting an in-flight upload would tear down a
-            // native PGP call and crash the process. A user stop is honoured only at the item boundary
-            // in invoke() (before the claim), so a claimed item is never abandoned mid-pipeline. A row
+            // native PGP call and crash the process. A user stop is honoured only at the upload workers'
+            // item boundary (before the claim), so a claimed item is never abandoned mid-pipeline. A row
             // stranded UPLOADING by a genuine process death is recovered on the next pass.
             // Optional rename: derive cloud displayName from the source's capture timestamp
             // (MediaStore DATE_TAKEN). The on-device file keeps its own name unless "mirror to
@@ -1999,3 +1988,36 @@ internal fun videoCompressionParamsFor(
         tier.videoMaxShortEdgePx,
         tier.videoBitrateBps,
     )
+
+/**
+ * #123: runs [process] over [items] on [workers] coroutines, each taking the next item no worker has
+ * started. Items start in list order, at most [workers] run at once, and the batch holds [workers]
+ * coroutines however long [items] is.
+ *
+ * Before taking an item a worker checks for cancellation and asks [shouldStop]. A true [shouldStop]
+ * ends the batch at that boundary: no further item starts, and an item already running is left to
+ * finish. [process] contains its own per-item failures; anything that escapes it, a stray
+ * cancellation included, cancels the other workers and is rethrown to the caller.
+ */
+internal suspend fun <T> runUploadWorkers(
+    items: List<T>,
+    workers: Int,
+    shouldStop: () -> Boolean,
+    process: suspend (T) -> Unit,
+) {
+    require(workers > 0) { "workers must be positive: $workers" }
+    val next = AtomicInteger(0)
+    coroutineScope {
+        List(minOf(workers, items.size)) {
+            async {
+                while (true) {
+                    ensureActive()
+                    if (shouldStop()) break
+                    val index = next.getAndIncrement()
+                    if (index >= items.size) break
+                    process(items[index])
+                }
+            }
+        }.awaitAll()
+    }
+}

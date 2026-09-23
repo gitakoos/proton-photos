@@ -46,11 +46,31 @@ data class CloudPairRow(
     val cloudFileId: String,
 )
 
+/** Lean projection: the columns the gallery merge and the backup counts read of a row. The cloud
+ *  hash, the size and the sync timestamps stay in the table, so a whole-library read carries a
+ *  fraction of what the full entity list costs. */
+data class SyncStateLite(
+    val localUri: String,
+    val cloudFileId: String?,
+    val localHash: String,
+    val status: SyncStatus,
+    val queued: Boolean,
+)
+
 @Dao
 interface SyncStateDao {
 
+    /** Every column of every row [userId] holds, re-read in full on each write to the table. Legacy:
+     *  a reader that needs only the pairing, the status or the queue flag takes
+     *  [eu.akoos.photos.data.repository.SyncStateSnapshot], one lean read shared by the whole app. */
     @Query("SELECT * FROM sync_state WHERE userId = :userId")
     fun observeAll(userId: String): Flow<List<SyncStateEntity>>
+
+    /** Every row [userId] holds, as the [SyncStateLite] columns only. A one-shot read: the shared
+     *  [eu.akoos.photos.data.repository.SyncStateSnapshot] decides when it runs, so a burst of writes
+     *  costs one read instead of one per write. */
+    @Query("SELECT localUri, cloudFileId, localHash, status, queued FROM sync_state WHERE userId = :userId")
+    suspend fun getAllLite(userId: String): List<SyncStateLite>
 
     /** Lean stream of local content hashes for the duplicate finder: two columns, blank hashes
      *  filtered out in SQL, so a 50k library does not materialise the full SyncState list just to build

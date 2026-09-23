@@ -24,6 +24,10 @@ package eu.akoos.photos.data.db.entity
 
 import eu.akoos.photos.domain.entity.CloudPhoto
 
+/** Distinct values of one kind a [ListingValueInterner] keeps. An own stream holds one or two share
+ *  and volume ids and a few dozen mime types and tag combinations. */
+private const val LISTING_INTERNER_MAX_ENTRIES = 128
+
 /**
  * Display-only projection of [PhotoListingEntity] for the timeline feed.
  *
@@ -36,12 +40,12 @@ import eu.akoos.photos.domain.entity.CloudPhoto
  * per-linkId by the thumbnail decrypt scheduler when a cell actually needs it.
  *
  * thumbnailUrl is NOT part of this projection. A decrypt-completion writes it per-linkId, and Room's
- * table-level invalidation re-runs this query on every such write regardless. Dropping the column makes
- * the re-queried rows byte-identical to the last emission, so the distinctUntilChanged in
- * GetGalleryItemsUseCase drops it before the merge/group rebuild; carrying it would make each write a
- * distinct emission that forces a whole-timeline rebuild on every thumbnail landing during a sustained
- * scroll (the churn behind the large-library OOM). The decrypted URL reaches the cell through the
- * in-memory ThumbnailUrlStore instead, so [toDomain] leaves it null.
+ * table-level invalidation signals a re-read on every such write regardless. Dropping the column makes
+ * the re-read rows equal to the last read, so the shared timeline copy does not publish them again and
+ * the merge/group rebuild never runs for them; carrying it would make each write a distinct emission
+ * that forces a whole-timeline rebuild on every thumbnail landing during a sustained scroll (the churn
+ * behind the large-library OOM). The decrypted URL reaches the cell through the in-memory
+ * ThumbnailUrlStore instead, so [toDomain] leaves it null.
  */
 data class PhotoListingLite(
     val linkId: String,
@@ -58,22 +62,68 @@ data class PhotoListingLite(
     // feed so the timeline's video cells can show a duration pill without a per-cell lookup.
     val durationMs: Long?,
 ) {
-    fun toDomain() = CloudPhoto(
+    fun toDomain(): CloudPhoto = toDomain(interner = null)
+
+    /** The row as a [CloudPhoto], taking each repeated value from [interner] when one is given. */
+    internal fun toDomain(interner: ListingValueInterner?): CloudPhoto = CloudPhoto(
         linkId = linkId,
-        shareId = shareId,
-        volumeId = volumeId,
+        shareId = interner?.string(shareId) ?: shareId,
+        volumeId = interner?.string(volumeId) ?: volumeId,
         captureTime = captureTime,
         displayName = displayName,
-        mimeType = mimeType,
+        mimeType = interner?.string(mimeType) ?: mimeType,
         sizeBytes = sizeBytes,
         // Supplied by ThumbnailUrlStore at the cell, not this row (see the class doc).
         thumbnailUrl = null,
         revisionId = revisionId,
         contentHash = contentHash,
-        tags = if (tagsCsv.isEmpty()) emptySet() else tagsCsv.split(',').mapNotNull { it.toIntOrNull() }.toSet(),
+        tags = interner?.tags(tagsCsv) ?: parseTagsCsv(tagsCsv),
         durationMs = durationMs,
     )
 }
+
+/**
+ * [PhotoListingLite.toDomain] over a whole listing, in order, holding each repeated value once.
+ *
+ * The cursor hands every row its own copy of the share id, the volume id and the mime type, and
+ * every tagged row its own tag set, though a library has only a handful of each. The mapped list
+ * outlives the rows, so the copies are dropped here and all rows share one instance of each value.
+ */
+fun List<PhotoListingLite>.toCloudPhotos(): List<CloudPhoto> {
+    val interner = ListingValueInterner()
+    return map { it.toDomain(interner) }
+}
+
+/**
+ * One instance per distinct value of the listing columns that repeat from row to row, for a single
+ * mapping pass. Not thread-safe: a pass owns its interner.
+ *
+ * Bounded, so a column whose values turn out not to repeat can never grow it with the library: once
+ * [maxEntries] values of a kind are held, a new one is handed back as it came, unshared.
+ */
+internal class ListingValueInterner(private val maxEntries: Int = LISTING_INTERNER_MAX_ENTRIES) {
+    private val strings = HashMap<String, String>()
+    private val tagSets = HashMap<String, Set<Int>>()
+
+    fun string(value: String): String {
+        strings[value]?.let { return it }
+        if (strings.size < maxEntries) strings[value] = value
+        return value
+    }
+
+    /** The tag set [csv] names, parsed once per distinct CSV. */
+    fun tags(csv: String): Set<Int> {
+        if (csv.isEmpty()) return emptySet()
+        tagSets[csv]?.let { return it }
+        val parsed = parseTagsCsv(csv)
+        if (tagSets.size < maxEntries) tagSets[csv] = parsed
+        return parsed
+    }
+}
+
+/** The server tag ids a stored CSV names; an entry that is not a number is skipped. */
+private fun parseTagsCsv(csv: String): Set<Int> =
+    if (csv.isEmpty()) emptySet() else csv.split(',').mapNotNull { it.toIntOrNull() }.toSet()
 
 /** Two-column projection for [eu.akoos.photos.data.db.dao.PhotoListingDao.getThumbnailUrlSeed]: the
  *  startup prime of [eu.akoos.photos.data.repository.drive.ThumbnailUrlStore]. Kept separate from
