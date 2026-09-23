@@ -301,6 +301,13 @@ class PersonDetailViewModel @Inject constructor(
      */
     fun loadMergeSuggestion(personId: Long) {
         viewModelScope.launch {
+            // A candidate merged away since it was offered (from its own page, opened off the card) would
+            // keep a card up for a group that no longer exists until the lookup below settles; drop it now.
+            _mergeSuggestion.value?.let { held ->
+                if (dropsHeldSuggestion(personDao.personById(held.personId))) {
+                    _mergeSuggestion.compareAndSet(held, null)
+                }
+            }
             val userId = accountManager.getPrimaryUserId().first()
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             val name = personDao.personById(personId)?.displayName
@@ -654,3 +661,10 @@ class PersonDetailViewModel @Inject constructor(
  */
 internal fun looksForSuggestionOnNaming(wasNamed: Boolean?, isNamed: Boolean): Boolean =
     wasNamed == false && isNamed
+
+/**
+ * Whether the merge suggestion the page holds is dropped as the page looks again: once its candidate's
+ * row ([candidateRow]) is gone, the candidate was merged away, so the card would offer a group that no
+ * longer exists.
+ */
+internal fun dropsHeldSuggestion(candidateRow: PersonEntity?): Boolean = candidateRow == null

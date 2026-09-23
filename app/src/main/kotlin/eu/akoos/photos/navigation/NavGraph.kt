@@ -975,6 +975,20 @@ fun NavGraph(
                 onDismissSuggestion = { candidateId -> personVm.dismissMergeSuggestion(personId, candidateId) },
                 onLeaveSuggestion = { personVm.clearMergeSuggestion() },
                 onPreviewCandidate = { candidateId -> navController.navigate(Screen.PersonDetail.create(candidateId)) },
+                onMergedInto = { targetId ->
+                    // Only while this page is on top, so a late result never pops another screen. When the
+                    // page below is already the person the group joined (it was opened from that person's
+                    // merge suggestion), going back to it is enough.
+                    if (navController.currentBackStackEntry?.id == backStackEntry.id) {
+                        val revealedPersonId = navController.previousBackStackEntry
+                            ?.takeIf { it.destination.route == Screen.PersonDetail.route }
+                            ?.arguments?.getLong("personId")
+                        navController.popBackStack()
+                        if (eu.akoos.photos.presentation.person.opensMergedPerson(revealedPersonId, targetId)) {
+                            navController.navigate(Screen.PersonDetail.create(targetId))
+                        }
+                    }
+                },
                 onFindMore = { navController.navigate(Screen.FindMorePhotos.create(personId)) },
             )
         }

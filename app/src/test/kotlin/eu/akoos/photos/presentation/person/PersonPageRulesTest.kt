@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.person
 
+import eu.akoos.photos.data.db.entity.PersonEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -30,8 +31,9 @@ import org.junit.Test
 
 /**
  * Pins how the person page moves once its group is named or merged: where the name-or-merge sheet sends
- * it, when an emptied grid hands back to the caller (exactly once, and never under the open sheet), and
- * when a freshly named group looks for its merge suggestion.
+ * it, whether that person's page opens or is already the one below, when an emptied grid hands back to
+ * the caller (exactly once, and never under the open sheet), when a freshly named group looks for its
+ * merge suggestion, and when a held suggestion for a group merged away is dropped.
  */
 class PersonPageRulesTest {
 
@@ -56,6 +58,21 @@ class PersonPageRulesTest {
     @Test
     fun `an invalid result opens no page`() {
         assertNull(pageAfterGroupNamed(pagePersonId = 7L, resultPersonId = -1L))
+    }
+
+    @Test
+    fun `a group merged into the person on the page below goes back to that page`() {
+        assertFalse(opensMergedPerson(revealedPersonId = 3L, targetPersonId = 3L))
+    }
+
+    @Test
+    fun `a group merged into someone other than the person below opens their page`() {
+        assertTrue(opensMergedPerson(revealedPersonId = 3L, targetPersonId = 5L))
+    }
+
+    @Test
+    fun `a group whose page sits over a screen that is not a person opens the person it joined`() {
+        assertTrue(opensMergedPerson(revealedPersonId = null, targetPersonId = 3L))
     }
 
     @Test
@@ -94,5 +111,15 @@ class PersonPageRulesTest {
         assertFalse(looksForSuggestionOnNaming(wasNamed = true, isNamed = true))
         assertFalse(looksForSuggestionOnNaming(wasNamed = true, isNamed = false))
         assertFalse(looksForSuggestionOnNaming(wasNamed = false, isNamed = false))
+    }
+
+    @Test
+    fun `a held suggestion whose group was merged away is dropped`() {
+        assertTrue(dropsHeldSuggestion(candidateRow = null))
+    }
+
+    @Test
+    fun `a held suggestion whose group still exists stays until the next lookup`() {
+        assertFalse(dropsHeldSuggestion(candidateRow = PersonEntity(id = 5L, userId = "account")))
     }
 }

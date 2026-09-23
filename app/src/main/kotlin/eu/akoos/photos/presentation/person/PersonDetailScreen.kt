@@ -126,10 +126,12 @@ fun PersonDetailScreen(
     onAcceptSuggestion: (Long) -> Unit = {},
     onDismissSuggestion: (Long) -> Unit = {},
     onLeaveSuggestion: () -> Unit = {},
-    /** Opens another person's page: the suggested candidate's own grid, so the user can look past the
-     *  tiny face crop before deciding merge vs. different person, and the person an unnamed group was
-     *  merged into from here. */
+    /** Opens the suggested candidate's own grid, so the user can look past the tiny face crop before
+     *  deciding merge vs. different person. */
     onPreviewCandidate: (Long) -> Unit = {},
+    /** Leaves this page once its unnamed group was merged into the person with the given id, so that
+     *  person's page takes its place. */
+    onMergedInto: (Long) -> Unit = {},
     /** Opens the sweep that looks for more photos of this person among the ones no face was found on. */
     onFindMore: () -> Unit = {},
 ) {
@@ -622,12 +624,9 @@ fun PersonDetailScreen(
             onDismiss = { showNameOrMerge = false },
             onDone = { resultId ->
                 val mergedInto = pageAfterGroupNamed(groupId, resultId)
-                if (mergedInto != null) {
-                    if (!leaving) {
-                        leaving = true
-                        onBack()
-                    }
-                    onPreviewCandidate(mergedInto)
+                if (mergedInto != null && !leaving) {
+                    leaving = true
+                    onMergedInto(mergedInto)
                 }
             },
         )
@@ -864,3 +863,11 @@ internal fun leavesEmptiedPage(
  */
 internal fun pageAfterGroupNamed(pagePersonId: Long, resultPersonId: Long): Long? =
     resultPersonId.takeIf { it >= 0L && it != pagePersonId }
+
+/**
+ * Whether a group's page, left for the person it was merged into ([targetPersonId]), opens that person's
+ * page: not when the page it goes back to is theirs already ([revealedPersonId], null when that page is
+ * not a person's), as when the group was opened from that person's merge suggestion.
+ */
+internal fun opensMergedPerson(revealedPersonId: Long?, targetPersonId: Long): Boolean =
+    revealedPersonId != targetPersonId
