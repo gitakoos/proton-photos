@@ -661,7 +661,9 @@
     <string name="albums_empty_title">Brak albumów</string>
     <string name="albums_empty_subtitle">Albumy utworzone w Drive pojawią się tutaj</string>
     <string name="albums_empty_local">Brak folderów na tym urządzeniu</string>
+    <string name="cd_select_day">Zaznacz ten dzień</string>
     <string name="cd_select_month">Zaznacz ten miesiąc</string>
+    <string name="cd_select_year">Zaznacz ten rok</string>
     <string name="album_rename">Zmień nazwę albumu</string>
     <string name="albums_hide_album">Ukryj album</string>
     <string name="albums_reorder">Zmień kolejność albumów</string>
@@ -1322,6 +1324,10 @@
     <string name="albums_sort_name">Nazwa (A-Z)</string>
     <string name="albums_sort_activity">Ostatnia aktywność</string>
     <string name="albums_sort_count">Liczba zdjęć</string>
+    <string name="album_group_heading">Grupuj według</string>
+    <string name="album_group_day">Dzień</string>
+    <string name="album_group_month">Miesiąc</string>
+    <string name="album_group_year">Rok</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Informacje o pliku</string>

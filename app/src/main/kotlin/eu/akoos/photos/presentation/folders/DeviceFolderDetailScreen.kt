@@ -107,6 +107,7 @@ import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.anyMetadataEditable
+import eu.akoos.photos.presentation.common.photoDateSections
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
@@ -132,7 +133,6 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
-import eu.akoos.photos.presentation.util.monthYearFormat
 import eu.akoos.photos.util.copySensitiveText
 
 /**
@@ -213,6 +213,9 @@ fun DeviceFolderDetailScreen(
     // Which direction the drawer's sort entries tick. The ViewModel reads the same preference for
     // the order itself, so this only has to say which one is active.
     val sortMode by viewModel.sortMode.collectAsStateWithLifecycle()
+    // The span of dates each header gathers, which the drawer's grouping entries tick too. Taken from
+    // the ViewModel so a grid coming back from the viewer lays out under the headers it scrolled with.
+    val photoGrouping by viewModel.grouping.collectAsStateWithLifecycle()
 
     // Move the selection into another device folder, and rename this folder in place. Both are
     // logged-out, device-data actions; the picker's targets and the move consent ride the shared host.
@@ -433,11 +436,11 @@ fun DeviceFolderDetailScreen(
         // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
         // cell back off (otherwise a stationary long-press would select then immediately deselect).
         val tapGuard = remember { mutableStateOf(false) }
-        // Group by month like the cloud album. withIndex() keeps each item's original position so
-        // onPhotoClick still opens the right one and the drag-select keys stay aligned.
-        val photoGroups = remember(items) {
-            val fmt = monthYearFormat()
-            items.withIndex().groupBy { fmt.format(java.util.Date(it.value.captureTimeMs)) }
+        // Group under the date headers the folder's grouping picks, like the cloud album. Each item
+        // keeps its original position so onPhotoClick still opens the right one and the drag-select
+        // keys stay aligned.
+        val photoGroups = remember(items, photoGrouping) {
+            photoDateSections(items, photoGrouping) { it.captureTimeMs }
         }
         val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
             gridState = gridState,
@@ -448,7 +451,7 @@ fun DeviceFolderDetailScreen(
             tapGuard = tapGuard,
         )
         // Land back on the photo the viewer closed on. The hero header is the one slot ahead of the
-        // photos, and each month bucket carries its own header. The cells key a Synced photo by its
+        // photos, and each date section carries its own header. The cells key a Synced photo by its
         // local uri, but the viewer is handed the items themselves, so match on the gallery identity.
         val returnGroups = remember(photoGroups) { photoGroups.values.toList() }
         ReturnToViewerPhoto(
@@ -519,7 +522,7 @@ fun DeviceFolderDetailScreen(
                 }
             } else {
                 photoGroups.forEach { (label, entries) ->
-                    // Month section header — same styling as the cloud-album detail grid.
+                    // Date section header, same styling as the cloud-album detail grid.
                     item(span = { GridItemSpan(maxLineSpan) }, key = "hdr_$label") {
                         Row(
                             // Keep the label clear of the screen edge in seamless mode, where the
@@ -609,7 +612,7 @@ fun DeviceFolderDetailScreen(
         }
 
         // Fast-scroll scrubber over the photo grid — the same handle as the timeline. The scrubber
-        // groups by day, so the drag tooltip reads "d MMMM yyyy" even though the section headers are month.
+        // groups by day, so the drag tooltip reads "d MMMM yyyy" whatever span the section headers gather.
         if (items.isNotEmpty()) {
             TimelineScrubber(
                 gridState = gridState,
@@ -1139,6 +1142,7 @@ fun DeviceFolderDetailScreen(
             isHiddenCard = isHiddenCard,
             isSignedIn = isSignedIn,
             sortMode = sortMode,
+            grouping = photoGrouping,
             onDismiss = { showFolderOverflow = false },
             onBackUp = if (hasPhotos) ({ asMirror -> backUpFolder(asMirror) }) else null,
             onToggleMirrorAsAlbum = viewModel::toggleMirrorAsAlbum,
@@ -1155,6 +1159,7 @@ fun DeviceFolderDetailScreen(
             // current sort order.
             onSlideshow = if (hasPhotos) ({ onSlideshowClick(items) }) else null,
             onSortSelected = viewModel::setSortMode,
+            onGroupingSelected = viewModel::setGrouping,
             // Logged-out only; the row renders behind the same gate in the sheet.
             onRename = { showRenameSheet = true },
         )

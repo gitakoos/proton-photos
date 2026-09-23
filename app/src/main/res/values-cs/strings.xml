@@ -661,7 +661,9 @@
     <string name="albums_empty_title">Zatím žádná alba</string>
     <string name="albums_empty_subtitle">Alba vytvořená na Drive se zobrazí zde</string>
     <string name="albums_empty_local">Žádné složky v tomto zařízení</string>
+    <string name="cd_select_day">Vybrat tento den</string>
     <string name="cd_select_month">Vybrat tento měsíc</string>
+    <string name="cd_select_year">Vybrat tento rok</string>
     <string name="album_rename">Přejmenovat album</string>
     <string name="albums_hide_album">Skrýt album</string>
     <string name="albums_reorder">Změnit pořadí alb</string>
@@ -1322,6 +1324,10 @@
     <string name="albums_sort_name">Název (A-Z)</string>
     <string name="albums_sort_activity">Poslední aktivita</string>
     <string name="albums_sort_count">Počet fotek</string>
+    <string name="album_group_heading">Seskupit podle</string>
+    <string name="album_group_day">Den</string>
+    <string name="album_group_month">Měsíc</string>
+    <string name="album_group_year">Rok</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Informace o souboru</string>

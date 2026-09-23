@@ -951,7 +951,9 @@
     <string name="albums_empty_title">No albums yet</string>
     <string name="albums_empty_subtitle">Albums created in Drive will appear here</string>
     <string name="albums_empty_local">No folders on this device</string>
+    <string name="cd_select_day">Select this day</string>
     <string name="cd_select_month">Select this month</string>
+    <string name="cd_select_year">Select this year</string>
     <string name="album_rename">Rename album</string>
     <string name="albums_hide_album">Hide album</string>
     <string name="albums_reorder">Reorder albums</string>
@@ -1742,6 +1744,10 @@
     <string name="albums_sort_name">Name (A to Z)</string>
     <string name="albums_sort_activity">Last activity</string>
     <string name="albums_sort_count">Photo count</string>
+    <string name="album_group_heading">Group by</string>
+    <string name="album_group_day">Day</string>
+    <string name="album_group_month">Month</string>
+    <string name="album_group_year">Year</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">File Info</string>

@@ -420,7 +420,9 @@
     <string name="albums_empty_title">Aucun album</string>
     <string name="albums_empty_subtitle">Les albums créés dans Drive apparaîtront ici</string>
     <string name="albums_empty_local">Aucun dossier sur l\'appareil</string>
+    <string name="cd_select_day">Sélectionner ce jour</string>
     <string name="cd_select_month">Sélectionner ce mois</string>
+    <string name="cd_select_year">Sélectionner cette année</string>
     <string name="selection_photos_only">%d photos</string>
     <string name="selection_videos_only">%d vidéos</string>
     <string name="selection_mixed">%1$d photos, %2$d vidéos</string>
@@ -1097,6 +1099,10 @@
     <string name="albums_sort_name">Nom (A-Z)</string>
     <string name="albums_sort_activity">Dernière activité</string>
     <string name="albums_sort_count">Nombre de photos</string>
+    <string name="album_group_heading">Regrouper par</string>
+    <string name="album_group_day">Jour</string>
+    <string name="album_group_month">Mois</string>
+    <string name="album_group_year">Année</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Infos du fichier</string>

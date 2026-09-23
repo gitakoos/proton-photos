@@ -57,13 +57,15 @@ fun formatVideoTime(ms: Long, withTenths: Boolean = false): String {
 }
 
 /** "MMMM yyyy" bucket label for the timeline and album/folder month headers. Locale-aware so the
- *  month name reads in the reader's language. Construction only; each call site keeps its own
- *  instance because SimpleDateFormat is not thread-safe. */
-fun monthYearFormat(): SimpleDateFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+ *  month name reads in the reader's language; a caller passes [locale] only to pin it. Construction
+ *  only; each call site keeps its own instance because SimpleDateFormat is not thread-safe. */
+fun monthYearFormat(locale: Locale = Locale.getDefault()): SimpleDateFormat =
+    SimpleDateFormat("MMMM yyyy", locale)
 
 /** "d MMMM yyyy" day-bucket label for the day-grouped timeline and scrubber. Locale-aware like
- *  monthYearFormat; construction only, never a shared instance. */
-fun dayMonthYearFormat(): SimpleDateFormat = SimpleDateFormat("d MMMM yyyy", Locale.getDefault())
+ *  monthYearFormat, [locale] included; construction only, never a shared instance. */
+fun dayMonthYearFormat(locale: Locale = Locale.getDefault()): SimpleDateFormat =
+    SimpleDateFormat("d MMMM yyyy", locale)
 
 /** "yyyy-MM-dd" day-key parser and formatter. Locale is pinned to US so the digits stay Latin on
  *  any device, and the zone is the device default to match how the keys are built. Construction

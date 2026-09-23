@@ -33,8 +33,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Collections
@@ -58,7 +56,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.albums.AlbumPhotoGrouping
 import eu.akoos.photos.presentation.albums.AlbumPhotoSortMode
+import eu.akoos.photos.presentation.albums.AlbumViewOptions
 import eu.akoos.photos.presentation.common.ActionSheetRow
 import eu.akoos.photos.presentation.common.ActionSheetSectionHeading
 import eu.akoos.photos.presentation.theme.Bg2
@@ -71,19 +71,19 @@ import kotlinx.coroutines.launch
  * Sibling of the album's [eu.akoos.photos.presentation.albums.AlbumActionsSheet] and built to the
  * same recipe, but with its own parameter list: a folder has no sharing, no guest and no leave.
  *
- * Sections follow the app's action-sheet taxonomy: what runs on the folder's photos, then the
- * per-folder settings, then the sort. A folder has nothing irreversible to offer, so the fourth
- * group is absent here.
+ * The album's [AlbumViewOptions] chips lead here too, then the sections follow the app's action-sheet
+ * taxonomy: what runs on the folder's photos, then the per-folder settings. A folder has nothing
+ * irreversible to offer, so that last group is absent here.
  *
- * The first group holds the folder's two back-up outcomes, a one-time upload to the stream or an
+ * The actions group holds the folder's two back-up outcomes, a one-time upload to the stream or an
  * upload that also mirrors the folder as a Drive album, and the slideshow. The settings group
  * carries the per-folder preferences, each showing its current state as a trailing tick: the three
  * Settings otherwise owns alone, plus hiding the folder, which takes its card off the Albums grid and
- * moves its photos into the vault. Slideshow and the sort direction are the album actions a folder
- * can answer for itself, and they read the same rows and labels here as they do there.
+ * moves its photos into the vault. Slideshow, the sort direction and the grouping are the album
+ * actions a folder can answer for itself, and they read the same here as they do there.
  *
  * The rows that run on the folder's photos hang off their callback being non-null, so a folder with
- * nothing in it drops the whole first group and still offers every preference and the sort rather
+ * nothing in it drops the whole actions group and still offers the sort and every preference rather
  * than no drawer at all.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,12 +102,15 @@ internal fun DeviceFolderActionsSheet(
     /** False in a local-only session, which drops the rows that act on the Drive copy. */
     isSignedIn: Boolean = true,
     sortMode: AlbumPhotoSortMode,
+    grouping: AlbumPhotoGrouping = AlbumPhotoGrouping.Default,
     onDismiss: () -> Unit,
     onToggleMirrorAsAlbum: () -> Unit,
     onToggleExcludedFromBackup: () -> Unit,
     onToggleHiddenFromTimeline: () -> Unit,
     onToggleHiddenCard: () -> Unit,
     onSortSelected: (AlbumPhotoSortMode) -> Unit,
+    /** Null drops the grouping row. */
+    onGroupingSelected: ((AlbumPhotoGrouping) -> Unit)? = null,
     /** Heads the drawer with the folder's name where several are in reach; the folder's own screen
      *  already says which folder this is, so it leaves this null and keeps the generic heading. */
     folderName: String? = null,
@@ -161,13 +164,17 @@ internal fun DeviceFolderActionsSheet(
                 modifier = Modifier.padding(bottom = 16.dp),
             )
 
+            AlbumViewOptions(
+                sortMode = sortMode,
+                onSortSelected = onSortSelected,
+                grouping = grouping,
+                onGroupingSelected = onGroupingSelected,
+            )
+
             // Backing up needs a Proton account, so its two rows are offered only when signed in.
             val hasPhotoActions = (onBackUp != null && isSignedIn) || onSlideshow != null
             if (hasPhotoActions) {
-                ActionSheetSectionHeading(
-                    stringResource(R.string.action_sheet_actions_heading),
-                    first = true,
-                )
+                ActionSheetSectionHeading(stringResource(R.string.action_sheet_actions_heading))
                 if (onBackUp != null && isSignedIn) {
                     // The two modes differ in what happens after this upload, which their titles
                     // alone cannot say, so both carry a second line.
@@ -201,10 +208,7 @@ internal fun DeviceFolderActionsSheet(
                 }
             }
 
-            ActionSheetSectionHeading(
-                stringResource(R.string.action_sheet_settings_heading),
-                first = !hasPhotoActions,
-            )
+            ActionSheetSectionHeading(stringResource(R.string.action_sheet_settings_heading))
             // Each writes the same preference set its Settings picker does, so a change here and a
             // change there are the same change. The tick is the current state. Mirroring as an album
             // and excluding from back-up both act on the Drive copy, so they need a signed-in account.
@@ -252,25 +256,6 @@ internal fun DeviceFolderActionsSheet(
                 onClick = { close(onToggleHiddenCard) },
                 showCheck = isHiddenCard,
             )
-
-            ActionSheetSectionHeading(stringResource(R.string.albums_sort_heading))
-            AlbumPhotoSortMode.entries.forEachIndexed { index, mode ->
-                if (index > 0) Spacer(Modifier.height(8.dp))
-                ActionSheetRow(
-                    icon = when (mode) {
-                        AlbumPhotoSortMode.NewestFirst -> Icons.Default.ArrowDownward
-                        AlbumPhotoSortMode.OldestFirst -> Icons.Default.ArrowUpward
-                    },
-                    title = stringResource(
-                        when (mode) {
-                            AlbumPhotoSortMode.NewestFirst -> R.string.sort_newest_first
-                            AlbumPhotoSortMode.OldestFirst -> R.string.sort_oldest_first
-                        },
-                    ),
-                    onClick = { close { onSortSelected(mode) } },
-                    showCheck = mode == sortMode,
-                )
-            }
 
             Spacer(Modifier.height(16.dp))
         }

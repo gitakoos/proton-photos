@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.albums
 
 import android.app.Activity
 import android.content.Intent
+import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -110,6 +111,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -142,6 +144,7 @@ import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOnForCloudPhotos
 import eu.akoos.photos.presentation.common.offlineTurnsOn
+import eu.akoos.photos.presentation.common.photoDateSections
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.presentation.theme.Accent
@@ -156,7 +159,6 @@ import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.StatusSynced
-import eu.akoos.photos.presentation.util.monthYearFormat
 import eu.akoos.photos.util.copySensitiveText
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -497,15 +499,23 @@ fun AlbumDetailScreen(
     val pullRefreshState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
     val gridState = rememberLazyGridState()
     val showScrollTop by remember { derivedStateOf { gridState.firstVisibleItemIndex > 4 } }
-    // Group photos by month, on the same capture time the rest of the app groups that photo by: a
-    // member whose Drive captureTime is sub-floor reads its device twin's date. The twin comes from
-    // the map the ViewModel already holds, so the lambda only does a hash lookup per row.
-    // withIndex() preserves each photo's position so the viewer opens the right one.
-    val photoGroups = remember(state.photos, state.localItemByLinkId) {
-        val fmt = monthYearFormat()
-        state.photos.withIndex().groupBy {
-            val ms = AlbumPhotoItems.captureTimeMs(it.value, state.localItemByLinkId[it.value.linkId])
-            fmt.format(java.util.Date(ms))
+    // The span of dates each header gathers, one choice every album shares. Kept in saved state too:
+    // the grid restores its scroll position as an item index, so on the way back from the viewer it
+    // has to lay out under the headers it was saved with from the first frame, before the preference
+    // has loaded.
+    var photoGrouping by rememberSaveable { mutableStateOf(AlbumPhotoGrouping.Default) }
+    LaunchedEffect(Unit) {
+        shareCtx.settingsDataStore.data
+            .map { AlbumPhotoGrouping.fromOrdinal(it[SettingsKeys.ALBUM_PHOTO_GROUPING]) }
+            .collect { photoGrouping = it }
+    }
+    // Group photos under those headers, on the same capture time the rest of the app groups that
+    // photo by: a member whose Drive captureTime is sub-floor reads its device twin's date. The twin
+    // comes from the map the ViewModel already holds, so the lambda only does a hash lookup per row.
+    // Each photo keeps its position so the viewer opens the right one.
+    val photoGroups = remember(state.photos, state.localItemByLinkId, photoGrouping) {
+        photoDateSections(state.photos, photoGrouping) {
+            AlbumPhotoItems.captureTimeMs(it, state.localItemByLinkId[it.linkId])
         }
     }
     // Scrubber shares the timeline handle. The grid keys photos by raw linkId (see items() below),
@@ -520,8 +530,8 @@ fun AlbumDetailScreen(
     val showScrollDate by remember {
         shareCtx.settingsDataStore.data.map { it[SettingsKeys.SHOW_SCROLL_DATE] ?: false }
     }.collectAsState(initial = false)
-    // Which direction the overflow's sort entries tick. The ViewModel reads the same preference for
-    // the order itself, so this only has to say which one is active.
+    // Which sort chip the drawer marks. The ViewModel reads the same preference for the order itself,
+    // so this only has to say which one is active.
     val photoSortMode by remember {
         shareCtx.settingsDataStore.data.map { AlbumPhotoSortMode.fromOrdinal(it[SettingsKeys.ALBUM_PHOTO_SORT_MODE]) }
     }.collectAsState(initial = AlbumPhotoSortMode.Default)
@@ -553,7 +563,7 @@ fun AlbumDetailScreen(
             tapGuard = tapGuard,
         )
         // Land back on the photo the viewer closed on. The hero header is the one slot ahead of the
-        // photos, and each month bucket carries its own header. Photos open as Synced or CloudOnly,
+        // photos, and each date section carries its own header. Photos open as Synced or CloudOnly,
         // and both report the cloud linkId back.
         val returnGroups = remember(photoGroups) { photoGroups.values.toList() }
         ReturnToViewerPhoto(
@@ -689,7 +699,7 @@ fun AlbumDetailScreen(
                             ),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // Tri-state group selector (selecting only) — toggles every photo in the day.
+                            // Tri-state group selector (selecting only): toggles every photo in the section.
                             if (state.isSelectionMode) {
                                 val groupLinkIds = entries.map { it.value.linkId }
                                 val selectedInGroup = groupLinkIds.count { it in state.selectedPhotos }
@@ -712,7 +722,7 @@ fun AlbumDetailScreen(
                                 ) {
                                     when {
                                         allSelected -> Icon(
-                                            Icons.Default.Check, stringResource(R.string.cd_select_month),
+                                            Icons.Default.Check, stringResource(sectionSelectDescriptionRes(photoGrouping)),
                                             tint = Color.White, modifier = Modifier.size(14.dp),
                                         )
                                         partiallySelected -> Box(
@@ -781,8 +791,8 @@ fun AlbumDetailScreen(
         }
         }
 
-        // Fast-scroll scrubber over the photo grid — the same handle as the timeline. The scrubber
-        // groups by day, so the drag tooltip reads "d MMMM yyyy" even though the section headers are month.
+        // Fast-scroll scrubber over the photo grid, the same handle as the timeline. The scrubber
+        // groups by day, so the drag tooltip reads "d MMMM yyyy" whatever span the section headers gather.
         if (state.photos.isNotEmpty()) {
             TimelineScrubber(
                 gridState = gridState,
@@ -1259,6 +1269,7 @@ fun AlbumDetailScreen(
             copyBusy = copyBusy,
             copyFraction = copyFraction,
             sortMode = photoSortMode,
+            grouping = photoGrouping,
             isHiddenFromTimeline = state.isHiddenFromTimeline,
             onDismiss = { showAlbumOverflow = false },
             onAddPhotos = { addPhotos() },
@@ -1276,6 +1287,13 @@ fun AlbumDetailScreen(
                 scope.launch {
                     shareCtx.settingsDataStore.edit {
                         it[SettingsKeys.ALBUM_PHOTO_SORT_MODE] = mode.ordinal
+                    }
+                }
+            },
+            onGroupingSelected = { grouping ->
+                scope.launch {
+                    shareCtx.settingsDataStore.edit {
+                        it[SettingsKeys.ALBUM_PHOTO_GROUPING] = grouping.ordinal
                     }
                 }
             },
@@ -1486,4 +1504,13 @@ fun AlbumDetailScreen(
     androidx.compose.runtime.LaunchedEffect(state.hideAlbumDone) {
         if (state.hideAlbumDone) onBack()
     }
+}
+
+/** What a section header's select button is announced as, naming the span of dates [grouping]
+ *  gathers under that header. */
+@StringRes
+internal fun sectionSelectDescriptionRes(grouping: AlbumPhotoGrouping): Int = when (grouping) {
+    AlbumPhotoGrouping.Day -> R.string.cd_select_day
+    AlbumPhotoGrouping.Month -> R.string.cd_select_month
+    AlbumPhotoGrouping.Year -> R.string.cd_select_year
 }

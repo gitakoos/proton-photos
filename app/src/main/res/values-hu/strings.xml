@@ -443,7 +443,9 @@
     <string name="albums_empty_title">Még nincs album</string>
     <string name="albums_empty_subtitle">A Drive-on létrehozott albumok itt jelennek meg</string>
     <string name="albums_empty_local">Nincs mappa az eszközön</string>
+    <string name="cd_select_day">Nap kijelölése</string>
     <string name="cd_select_month">Hónap kijelölése</string>
+    <string name="cd_select_year">Év kijelölése</string>
     <string name="selection_photos_only">%d kép</string>
     <string name="selection_videos_only">%d videó</string>
     <string name="selection_mixed">%1$d kép, %2$d videó</string>
@@ -1120,6 +1122,10 @@
     <string name="albums_sort_name">Név (A-Z)</string>
     <string name="albums_sort_activity">Legutóbbi módosítás</string>
     <string name="albums_sort_count">Fotók száma</string>
+    <string name="album_group_heading">Csoportosítás</string>
+    <string name="album_group_day">Nap</string>
+    <string name="album_group_month">Hónap</string>
+    <string name="album_group_year">Év</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Fájl infó</string>

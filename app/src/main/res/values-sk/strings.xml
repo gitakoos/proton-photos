@@ -661,7 +661,9 @@
     <string name="albums_empty_title">Zatiaľ žiadne albumy</string>
     <string name="albums_empty_subtitle">Albumy vytvorené na Drive sa objavia tu</string>
     <string name="albums_empty_local">Žiadne priečinky v tomto zariadení</string>
+    <string name="cd_select_day">Vybrať tento deň</string>
     <string name="cd_select_month">Vybrať tento mesiac</string>
+    <string name="cd_select_year">Vybrať tento rok</string>
     <string name="album_rename">Premenovať album</string>
     <string name="albums_hide_album">Skryť album</string>
     <string name="albums_reorder">Zmeniť poradie albumov</string>
@@ -1322,6 +1324,10 @@
     <string name="albums_sort_name">Názov (A-Z)</string>
     <string name="albums_sort_activity">Posledná aktivita</string>
     <string name="albums_sort_count">Počet fotiek</string>
+    <string name="album_group_heading">Zoskupiť podľa</string>
+    <string name="album_group_day">Deň</string>
+    <string name="album_group_month">Mesiac</string>
+    <string name="album_group_year">Rok</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Informácie o súbore</string>

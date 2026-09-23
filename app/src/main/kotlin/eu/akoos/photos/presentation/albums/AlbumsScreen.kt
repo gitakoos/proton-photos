@@ -71,8 +71,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DragHandle
@@ -895,6 +893,7 @@ fun AlbumsScreen(
             album = album,
             sheetState = cloudAlbumSheetState,
             sortMode = state.albumPhotoSortMode,
+            grouping = state.albumPhotoGrouping,
             isHiddenFromTimeline = AlbumTimelineHide.isExcluded(state.timelineExcludedAlbumIds, album.linkId),
             onDismiss = { cloudAlbumSheetFor = null },
             onShare = { onAlbumShareClick(album) },
@@ -904,6 +903,7 @@ fun AlbumsScreen(
             onReorder = { reorderMode = true },
             onDelete = { albumToDelete = album },
             onSortSelected = viewModel::setAlbumPhotoSortMode,
+            onGroupingSelected = viewModel::setAlbumPhotoGrouping,
             onOpenAction = { action -> onAlbumActionClick(album, action) },
         )
     }
@@ -914,8 +914,8 @@ fun AlbumsScreen(
     // slideshow, which want the player too — hand the folder to its own screen with the action to
     // carry out on arrival. The hide stays here: it resolves the one bucket it acts on and reports
     // through the host's progress pill, so taking a card off this grid never leaves it. The rest are
-    // the per-folder preferences and the sort direction, each writing the same key the folder screen
-    // and Settings write.
+    // the per-folder preferences, the sort direction and the grouping, each writing the same key the
+    // folder screen and Settings write.
     deviceFolderSheetFor?.let { folder ->
         DeviceFolderActionsSheet(
             sheetState = deviceFolderSheetState,
@@ -929,6 +929,7 @@ fun AlbumsScreen(
             isHiddenCard = false,
             isSignedIn = isSignedIn,
             sortMode = state.folderPrefs.sortMode,
+            grouping = state.folderPrefs.grouping,
             onDismiss = { deviceFolderSheetFor = null },
             onBackUp = { asMirror ->
                 onDeviceFolderActionClick(
@@ -943,6 +944,7 @@ fun AlbumsScreen(
             onToggleHiddenFromTimeline = { viewModel.toggleFolderHiddenFromTimeline(folder.name) },
             onToggleHiddenCard = { onHideDeviceFolder(folder.name) },
             onSortSelected = viewModel::setDeviceFolderSortMode,
+            onGroupingSelected = viewModel::setDeviceFolderGrouping,
             // Held to a logged-out session inside the sheet, where there is no Drive album to rename.
             onRename = { deviceFolderRenameFor = folder },
         )
@@ -997,9 +999,10 @@ fun AlbumsScreen(
  * offers, so the shortest route to an album's actions is not the poorer one: add photos, share,
  * download all, slideshow, rename, hide, reorder, sort, delete.
  *
- * Sections follow the app's action-sheet taxonomy: what runs on the album's photos, then the album's
- * settings, then the sort, then what cannot be undone below a rule. The sort direction is one global
- * choice every album shares, so [sortMode] is the direction in force rather than this album's own.
+ * The album drawer's [AlbumViewOptions] chips lead, then the sections follow the app's action-sheet
+ * taxonomy: what runs on the album's photos, then the album's settings, then what cannot be undone
+ * below a rule. The sort direction and the grouping are each one global choice every album shares,
+ * so [sortMode] and [grouping] are the ones in force rather than this album's own.
  *
  * Who is looking decides several of them: share, download, rename and delete belong to the owner,
  * matching what the album's own drawer offers a guest, so a shared album shows what is still the
@@ -1026,6 +1029,7 @@ private fun CloudAlbumActionSheet(
     album: Album,
     sheetState: SheetState,
     sortMode: AlbumPhotoSortMode,
+    grouping: AlbumPhotoGrouping = AlbumPhotoGrouping.Default,
     /** True while this album's photos are kept out of the main feed. About the photos, which
      *  [onHide] is not: that one takes the album itself out of every list. */
     isHiddenFromTimeline: Boolean,
@@ -1037,6 +1041,8 @@ private fun CloudAlbumActionSheet(
     onReorder: () -> Unit,
     onDelete: () -> Unit,
     onSortSelected: (AlbumPhotoSortMode) -> Unit,
+    /** Null drops the grouping row. */
+    onGroupingSelected: ((AlbumPhotoGrouping) -> Unit)? = null,
     onOpenAction: (AlbumOpenAction) -> Unit,
 ) {
     val colors = AppColors.current
@@ -1079,15 +1085,19 @@ private fun CloudAlbumActionSheet(
                 modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
             )
 
+            AlbumViewOptions(
+                sortMode = sortMode,
+                onSortSelected = onSortSelected,
+                grouping = grouping,
+                onGroupingSelected = onGroupingSelected,
+            )
+
             // A guest's drawer on an album they can neither add to nor play holds nothing that runs
             // on the photos, and drops this group rather than heading an empty one.
             val hasPhotoActions =
                 album.canAddPhotos || !album.isSharedWithMe || album.photoCount > 0
             if (hasPhotoActions) {
-                ActionSheetSectionHeading(
-                    stringResource(R.string.action_sheet_actions_heading),
-                    first = true,
-                )
+                ActionSheetSectionHeading(stringResource(R.string.action_sheet_actions_heading))
                 if (album.canAddPhotos) {
                     ActionSheetRow(
                         icon = Icons.Default.Add,
@@ -1136,10 +1146,7 @@ private fun CloudAlbumActionSheet(
             }
 
             // Hide and reorder are on every card, so this group is never empty.
-            ActionSheetSectionHeading(
-                stringResource(R.string.action_sheet_settings_heading),
-                first = !hasPhotoActions,
-            )
+            ActionSheetSectionHeading(stringResource(R.string.action_sheet_settings_heading))
             if (!album.isSharedWithMe) {
                 ActionSheetRow(
                     icon = Icons.Default.Edit,
@@ -1169,25 +1176,6 @@ private fun CloudAlbumActionSheet(
                 title = stringResource(R.string.albums_reorder),
                 onClick = { close(onReorder) },
             )
-
-            ActionSheetSectionHeading(stringResource(R.string.albums_sort_heading))
-            AlbumPhotoSortMode.entries.forEachIndexed { index, mode ->
-                if (index > 0) Spacer(Modifier.height(8.dp))
-                ActionSheetRow(
-                    icon = when (mode) {
-                        AlbumPhotoSortMode.NewestFirst -> Icons.Default.ArrowDownward
-                        AlbumPhotoSortMode.OldestFirst -> Icons.Default.ArrowUpward
-                    },
-                    title = stringResource(
-                        when (mode) {
-                            AlbumPhotoSortMode.NewestFirst -> R.string.sort_newest_first
-                            AlbumPhotoSortMode.OldestFirst -> R.string.sort_oldest_first
-                        },
-                    ),
-                    onClick = { close { onSortSelected(mode) } },
-                    showCheck = mode == sortMode,
-                )
-            }
 
             if (!album.isSharedWithMe) {
                 // Deleting takes the album off Drive, so it keeps the rule above it and the red

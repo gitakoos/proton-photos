@@ -90,14 +90,15 @@ data class DeviceFolder(
  * on the bucket name, the same way the Settings pickers and the folder screen store them, so a
  * change made from the grid is the same change made anywhere else.
  *
- * Held as one value so the settings store's emissions can be de-duplicated across all four at once:
- * the store also emits on unrelated writes, and each of these lands in the same drawer.
+ * Held as one value so the settings store's emissions can be de-duplicated across all of them at
+ * once: the store also emits on unrelated writes, and each of these lands in the same drawer.
  */
 data class DeviceFolderPrefs(
     val mirroredAsAlbum: Set<String> = emptySet(),
     val excludedFromBackup: Set<String> = emptySet(),
     val hiddenFromTimeline: Set<String> = emptySet(),
     val sortMode: AlbumPhotoSortMode = AlbumPhotoSortMode.Default,
+    val grouping: AlbumPhotoGrouping = AlbumPhotoGrouping.Default,
 )
 
 data class AlbumsUiState(
@@ -124,6 +125,9 @@ data class AlbumsUiState(
     /** The direction every album lists its photos in. One global choice, so the album long-press
      *  drawer needs it here to tick the one in force without opening the album. */
     val albumPhotoSortMode: AlbumPhotoSortMode = AlbumPhotoSortMode.Default,
+    /** The span of dates every album's headers gather, here for the same reason as
+     *  [albumPhotoSortMode]. */
+    val albumPhotoGrouping: AlbumPhotoGrouping = AlbumPhotoGrouping.Default,
 ) {
     /** Cloud albums hidden client-side drop off the Albums grid. */
     val visibleCloudAlbums: List<Album> get() = albums.filter { it.linkId !in hiddenAlbumIds }
@@ -194,6 +198,7 @@ class AlbumsViewModel @Inject constructor(
     init {
         observeSortMode()
         observeAlbumPhotoSortMode()
+        observeAlbumPhotoGrouping()
         loadAlbums()
         observeDeviceFolders()
         // Re-fetch on share-state changes so the grid badge updates without a manual pull-to-refresh.
@@ -250,6 +255,18 @@ class AlbumsViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .catch { emit(AlbumPhotoSortMode.Default) }
                 .collect { mode -> _uiState.update { it.copy(albumPhotoSortMode = mode) } }
+        }
+    }
+
+    /** Track the span of dates albums head their photos with, so a card's drawer can mark the one in
+     *  force, the same way [observeAlbumPhotoSortMode] tracks the direction. */
+    private fun observeAlbumPhotoGrouping() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { AlbumPhotoGrouping.fromOrdinal(it[SettingsKeys.ALBUM_PHOTO_GROUPING]) }
+                .distinctUntilChanged()
+                .catch { emit(AlbumPhotoGrouping.Default) }
+                .collect { grouping -> _uiState.update { it.copy(albumPhotoGrouping = grouping) } }
         }
     }
 
@@ -315,6 +332,7 @@ class AlbumsViewModel @Inject constructor(
                         excludedFromBackup = prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet(),
                         hiddenFromTimeline = prefs[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet(),
                         sortMode = AlbumPhotoSortMode.fromOrdinal(prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE]),
+                        grouping = AlbumPhotoGrouping.fromOrdinal(prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING]),
                     )
                 }
                 .distinctUntilChanged()
@@ -402,11 +420,26 @@ class AlbumsViewModel @Inject constructor(
         }
     }
 
+    /** Persist the span of dates every device folder's headers gather. */
+    fun setDeviceFolderGrouping(grouping: AlbumPhotoGrouping) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING] = grouping.ordinal }
+        }
+    }
+
     /** Persist the direction every album lists its photos in, the same key the album's own screen
      *  writes, so a direction set from a card and one set inside an album are one choice. */
     fun setAlbumPhotoSortMode(mode: AlbumPhotoSortMode) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.ALBUM_PHOTO_SORT_MODE] = mode.ordinal }
+        }
+    }
+
+    /** Persist the span of dates every album's headers gather, the same key the album's own screen
+     *  writes, so a grouping set from a card and one set inside an album are one choice. */
+    fun setAlbumPhotoGrouping(grouping: AlbumPhotoGrouping) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.ALBUM_PHOTO_GROUPING] = grouping.ordinal }
         }
     }
 

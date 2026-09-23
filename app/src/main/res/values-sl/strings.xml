@@ -662,7 +662,9 @@
     <string name="albums_empty_title">Še ni albumov</string>
     <string name="albums_empty_subtitle">Albumi, ustvarjeni v Drive, se prikažejo tukaj</string>
     <string name="albums_empty_local">V tej napravi ni map</string>
+    <string name="cd_select_day">Izberi ta dan</string>
     <string name="cd_select_month">Izberi ta mesec</string>
+    <string name="cd_select_year">Izberi to leto</string>
     <string name="album_rename">Preimenuj album</string>
     <string name="albums_hide_album">Skrij album</string>
     <string name="albums_reorder">Prerazporedi albume</string>
@@ -1323,6 +1325,10 @@
     <string name="albums_sort_name">Ime (A-Z)</string>
     <string name="albums_sort_activity">Zadnja dejavnost</string>
     <string name="albums_sort_count">Število fotografij</string>
+    <string name="album_group_heading">Združi po</string>
+    <string name="album_group_day">Dan</string>
+    <string name="album_group_month">Mesec</string>
+    <string name="album_group_year">Leto</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Podatki o datoteki</string>

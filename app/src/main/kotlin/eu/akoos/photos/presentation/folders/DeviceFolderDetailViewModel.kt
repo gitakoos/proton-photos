@@ -64,6 +64,7 @@ import eu.akoos.photos.util.ProtonPhotosStorage
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.stripForShareOrOriginal
+import eu.akoos.photos.presentation.albums.AlbumPhotoGrouping
 import eu.akoos.photos.presentation.albums.AlbumPhotoSortMode
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.addToAlbumOutcome
@@ -270,6 +271,21 @@ class DeviceFolderDetailViewModel @Inject constructor(
     fun setSortMode(mode: AlbumPhotoSortMode) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE] = mode.ordinal }
+        }
+    }
+
+    /** The span of dates each header on this screen gathers. Held here rather than read by the
+     *  screen: back from the viewer, the grid restores its scroll as an item index, so from the first
+     *  frame the headers have to be the ones it was saved under. This value outlives that trip, where
+     *  a screen-level read would start again from the default. */
+    val grouping: StateFlow<AlbumPhotoGrouping> = context.settingsDataStore.data
+        .map { AlbumPhotoGrouping.fromOrdinal(it[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING]) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumPhotoGrouping.Default)
+
+    /** Persist a grouping. Every folder shares the one choice, the same way as [setSortMode]. */
+    fun setGrouping(grouping: AlbumPhotoGrouping) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING] = grouping.ordinal }
         }
     }
 
@@ -529,7 +545,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 // lookup per record for photos the screen does not list.
                 val showsVault = fromVault && vault.isFolderHidden
                 val vaulted = if (showsVault) vaultedItemsOf(vault.bucketName, vault) else emptyList()
-                // Ordered on captureTimeMs, the value the screen's month headers and the scrubber
+                // Ordered on captureTimeMs, the value the screen's date headers and the scrubber
                 // read. A synced photo's device DATE_TAKEN can differ from its Drive capture time —
                 // a downloaded file is dated at download — so ordering on the raw device date would
                 // file such a photo under a heading it sorts nowhere near.

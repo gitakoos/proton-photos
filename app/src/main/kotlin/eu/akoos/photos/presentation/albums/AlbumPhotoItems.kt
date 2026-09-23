@@ -31,7 +31,7 @@ import eu.akoos.photos.presentation.common.PhotoSortOrder
  * The direction an album — or a device folder, which offers the same choice — lists its photos in
  * (#85).
  *
- * Both values sort on the same effective capture time, so the month headers, the scrubber and the
+ * Both values sort on the same effective capture time, so the date headers, the scrubber and the
  * viewer-return index maths read one order and need no direction of their own.
  *
  * Persisted as an ordinal in [eu.akoos.photos.data.preferences.SettingsKeys.ALBUM_PHOTO_SORT_MODE]
@@ -57,8 +57,40 @@ enum class AlbumPhotoSortMode {
 }
 
 /**
+ * The span of capture dates each header inside an album gathers, a choice a device folder offers
+ * too.
+ *
+ * Only the headers change. The photos keep their [AlbumPhotoSortMode] order, which runs on the same
+ * capture time the headers are read from, so each section stays one run in either direction.
+ *
+ * Persisted as an ordinal in [eu.akoos.photos.data.preferences.SettingsKeys.ALBUM_PHOTO_GROUPING]
+ * and, for a folder, [eu.akoos.photos.data.preferences.SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING],
+ * the same way [AlbumPhotoSortMode] is stored, so these values must keep their positions.
+ */
+enum class AlbumPhotoGrouping {
+    /** One header per calendar month. */
+    Month,
+
+    /** One header per day. */
+    Day,
+
+    /** One header per year. */
+    Year;
+
+    companion object {
+        /** The headers albums and folders have always shown, so an install that never picks a
+         *  grouping sees no change. */
+        val Default = Month
+
+        /** Read back a persisted ordinal, tolerating an absent or out-of-range value. */
+        fun fromOrdinal(ordinal: Int?): AlbumPhotoGrouping =
+            ordinal?.let { entries.getOrNull(it) } ?: Default
+    }
+}
+
+/**
  * Turns an album member into the same [GalleryItem] every other surface builds for that photo, so the
- * album's month headers, order, scrubber, scroll pill and viewer read one capture time and one set of
+ * album's date headers, order, scrubber, scroll pill and viewer read one capture time and one set of
  * file facts rather than the raw Drive values.
  *
  * An album row is a bare [CloudPhoto]. [twin] is its device file as the merged library paired it,

@@ -95,6 +95,20 @@ object SettingsKeys {
      *  the whole preferences file on each change. */
     val DEVICE_FOLDER_PHOTO_SORT_MODE = intPreferencesKey("device_folder_photo_sort_mode")
 
+    /** Span of dates each header inside an album gathers, an AlbumPhotoGrouping ordinal
+     *  (0 = Month, 1 = Day, 2 = Year). Absent = Month, the headers albums have always shown. One
+     *  global choice every album shares: a per-album key would grow with the library and rewrite
+     *  the whole preferences file on each change. */
+    val ALBUM_PHOTO_GROUPING = intPreferencesKey("album_photo_grouping")
+
+    /** Span of dates each header inside a device folder gathers, an AlbumPhotoGrouping ordinal
+     *  (0 = Month, 1 = Day, 2 = Year). Absent = Month, the headers a folder has always shown. Its
+     *  own key rather than [ALBUM_PHOTO_GROUPING]: a folder and an album are browsed for different
+     *  reasons, so a grouping chosen in one has no claim on the other. One global choice every
+     *  folder shares, since a per-folder key would grow with the device's bucket list and rewrite
+     *  the whole preferences file on each change. */
+    val DEVICE_FOLDER_PHOTO_GROUPING = intPreferencesKey("device_folder_photo_grouping")
+
     /** The user's own Albums-grid arrangement, a '|'-separated list of album linkIds, read only
      *  when [ALBUMS_SORT_MODE] is Custom. Absent or empty = no arrangement yet, which Custom
      *  resolves as LastActivity. '|' matches [PENDING_ORPHAN_DELETES] and the widget's id lists,

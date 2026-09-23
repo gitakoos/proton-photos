@@ -34,8 +34,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
@@ -71,10 +69,12 @@ import kotlinx.coroutines.launch
 /**
  * Every album action as a drawer, so the hero header carries one control beside the count instead of
  * a row of pills. Follows the app's other action sheets (see PhotoShareSheet): a pill per row with a
- * leading glyph, a label, and a trailing tick on the active sort.
+ * leading glyph, a label, and a trailing tick on what is already in place.
  *
- * Sections follow the app's action-sheet taxonomy: what runs on the album's photos, then the album's
- * settings, then the sort, then what cannot be undone below a rule.
+ * How the photos are laid out leads, as the [AlbumViewOptions] chips under the title, so the sort and
+ * the grouping are in sight on opening rather than below every action. The sections then follow the
+ * app's action-sheet taxonomy: what runs on the album's photos, then the album's settings, then what
+ * cannot be undone below a rule.
  *
  * Which rows appear follows who is looking: [canAddPhotos] covers an owner and an editor on a shared
  * album, [isSharedWithMe] swaps download for save-to-library, drops rename and adds leave. Both hides
@@ -89,8 +89,8 @@ import kotlinx.coroutines.launch
 internal fun AlbumActionsSheet(
     sheetState: SheetState,
     isSharedWithMe: Boolean,
-    /** True once this album has sharing set up. Ticks the share row with the same mark the active
-     *  sort carries, so a share already in place is visible without opening it. */
+    /** True once this album has sharing set up. Ticks the share row, so a share already in place is
+     *  visible without opening it. */
     isShared: Boolean,
     canAddPhotos: Boolean,
     hasPhotos: Boolean,
@@ -99,6 +99,7 @@ internal fun AlbumActionsSheet(
     /** Determinate share of that work, or null before it can report a count. */
     copyFraction: Float?,
     sortMode: AlbumPhotoSortMode,
+    grouping: AlbumPhotoGrouping = AlbumPhotoGrouping.Default,
     /** True while this album's photos are kept out of the main feed. About the photos, which [onHide]
      *  is not: that one takes the album itself out of every list. */
     isHiddenFromTimeline: Boolean,
@@ -112,6 +113,8 @@ internal fun AlbumActionsSheet(
     onHide: () -> Unit,
     onSlideshow: () -> Unit,
     onSortSelected: (AlbumPhotoSortMode) -> Unit,
+    /** Null drops the grouping row. */
+    onGroupingSelected: ((AlbumPhotoGrouping) -> Unit)? = null,
     onLeaveAlbum: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -148,11 +151,15 @@ internal fun AlbumActionsSheet(
                 modifier = Modifier.padding(bottom = 16.dp),
             )
 
-            // Share and the download / save row are on every album, so this group is never empty.
-            ActionSheetSectionHeading(
-                stringResource(R.string.action_sheet_actions_heading),
-                first = true,
+            AlbumViewOptions(
+                sortMode = sortMode,
+                onSortSelected = onSortSelected,
+                grouping = grouping,
+                onGroupingSelected = onGroupingSelected,
             )
+
+            // Share and the download / save row are on every album, so this group is never empty.
+            ActionSheetSectionHeading(stringResource(R.string.action_sheet_actions_heading))
             if (canAddPhotos) {
                 ActionSheetRow(
                     icon = Icons.Default.Add,
@@ -235,25 +242,6 @@ internal fun AlbumActionsSheet(
                 title = stringResource(R.string.albums_hide_album),
                 onClick = { close(onHide) },
             )
-
-            ActionSheetSectionHeading(stringResource(R.string.albums_sort_heading))
-            AlbumPhotoSortMode.entries.forEachIndexed { index, mode ->
-                if (index > 0) Spacer(Modifier.height(8.dp))
-                ActionSheetRow(
-                    icon = when (mode) {
-                        AlbumPhotoSortMode.NewestFirst -> Icons.Default.ArrowDownward
-                        AlbumPhotoSortMode.OldestFirst -> Icons.Default.ArrowUpward
-                    },
-                    title = stringResource(
-                        when (mode) {
-                            AlbumPhotoSortMode.NewestFirst -> R.string.sort_newest_first
-                            AlbumPhotoSortMode.OldestFirst -> R.string.sort_oldest_first
-                        },
-                    ),
-                    onClick = { close { onSortSelected(mode) } },
-                    showCheck = mode == sortMode,
-                )
-            }
 
             if (isSharedWithMe) {
                 // Leaving drops the album out of the library, so it keeps the rule above it and the

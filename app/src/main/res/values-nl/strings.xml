@@ -503,7 +503,9 @@
     <string name="albums_empty_title">Nog geen albums</string>
     <string name="albums_empty_subtitle">Albums die in Drive zijn aangemaakt verschijnen hier</string>
     <string name="albums_empty_local">Geen mappen op dit apparaat</string>
+    <string name="cd_select_day">Deze dag selecteren</string>
     <string name="cd_select_month">Deze maand selecteren</string>
+    <string name="cd_select_year">Dit jaar selecteren</string>
     <string name="album_rename">Album hernoemen</string>
     <string name="albums_hide_album">Album verbergen</string>
     <string name="albums_reorder">Albums herschikken</string>
@@ -1113,6 +1115,10 @@
     <string name="albums_sort_name">Naam (A-Z)</string>
     <string name="albums_sort_activity">Laatste activiteit</string>
     <string name="albums_sort_count">Aantal foto\'s</string>
+    <string name="album_group_heading">Groeperen op</string>
+    <string name="album_group_day">Dag</string>
+    <string name="album_group_month">Maand</string>
+    <string name="album_group_year">Jaar</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Bestandsinfo</string>
