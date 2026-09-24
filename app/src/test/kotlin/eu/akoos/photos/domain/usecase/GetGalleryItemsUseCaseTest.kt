@@ -160,6 +160,17 @@ class GetGalleryItemsUseCaseTest {
     }
 
     @Test
+    fun `a link the cloud listing carries twice becomes one CloudOnly item`() {
+        // The grid keys a cloud item by its link and throws on a repeat.
+        val cloud = listOf(cloudPhoto("link1", captureTime = 5L), cloudPhoto("link2"), cloudPhoto("link1", captureTime = 4L))
+
+        val result = useCase.merge(emptyList(), cloud, emptyList())
+
+        assertEquals(listOf("link1", "link2"), result.map { it.stableId })
+        assertEquals(5L, (result.first() as GalleryItem.CloudOnly).cloud.captureTime)
+    }
+
+    @Test
     fun `cloud photo already matched is not duplicated as CloudOnly`() {
         val local = listOf(localItem("uri://1"))
         val cloud = listOf(cloudPhoto("link1"))

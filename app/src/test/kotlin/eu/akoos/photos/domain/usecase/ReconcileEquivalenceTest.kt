@@ -50,6 +50,7 @@ import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.repository.DeviceMediaScan
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -108,7 +109,8 @@ class ReconcileEquivalenceTest {
         val compress: Boolean = false,
     )
 
-    /** One scenario: what the device holds, the listing rows, the sync_state rows and the settings. */
+    /** One scenario: what the device holds, the listing rows, the sync_state rows and the settings.
+     *  [scanComplete] is whether the device scan saw the whole device. */
     private class Fixture(
         val name: String,
         val since: Long,
@@ -117,7 +119,10 @@ class ReconcileEquivalenceTest {
         val rows: List<SyncStateEntity>,
         val sha1: Map<String, String>,
         val settings: Settings,
-    )
+        val scanComplete: Boolean = true,
+    ) {
+        fun withIncompleteScan() = Fixture("$name, incomplete scan", since, device, listing, rows, sha1, settings, false)
+    }
 
     private class Outcome(
         val calls: List<String>,
@@ -163,6 +168,35 @@ class ReconcileEquivalenceTest {
         for (seed in 1..12) assertSamePass(randomFixture(seed))
     }
 
+    @Test
+    fun `an incomplete scan demotes nothing and drops no queued row under any setting`() = runTest(timeout = 120.seconds) {
+        // The rules fixture's vanished files (m/99 SYNCED, m/98 and m/97 queued) are demoted and dropped
+        // on a complete scan; a scan that missed part of the device must leave every one of them.
+        for ((i, settings) in variants.withIndex()) {
+            val reference = assertSamePass(rulesFixture("rules, settings #$i", settings).withIncompleteScan())
+            val calls = reference.calls.joinToString("\n")
+            assertTrue("settings #$i: no row may be demoted to CLOUD_ONLY", "|CLOUD_ONLY|" !in calls)
+            assertTrue("settings #$i: no queued row may be dropped", "deleteLocalOnly " !in calls)
+        }
+    }
+
+    @Test
+    fun `rows written after the scan began are left while older vanished rows are still handled`() = runTest(timeout = 60.seconds) {
+        val reference = assertSamePass(rulesFixture("rules, mid-pass rows", variants.first()))
+        val calls = reference.calls
+
+        // Older rows whose files are gone: demoted and dropped as before.
+        assertTrue(calls.any { it.startsWith("upsert ${userId.id} content://m/99|") && "|CLOUD_ONLY|" in it })
+        val dropped = calls.single { it.startsWith("deleteLocalOnly ") }
+        assertTrue("content://m/98" in dropped && "content://m/97" in dropped)
+
+        // A download recorded and a "back up now" queued while the pass ran: left for the next pass.
+        assertTrue(calls.none { it.startsWith("upsert ${userId.id} content://m/92|") })
+        assertTrue("content://m/91" !in dropped)
+        assertTrue(reference.table.any { it.startsWith("content://m/92|") && "|SYNCED|" in it })
+        assertTrue(reference.table.any { it.startsWith("content://m/91|") && "|LOCAL_ONLY|" in it })
+    }
+
     /** Runs both passes on [fixture] and fails on the first difference. Returns the reference run. */
     private suspend fun assertSamePass(fixture: Fixture): Outcome {
         val reference = runPass(fixture, production = false)
@@ -186,7 +220,7 @@ class ReconcileEquivalenceTest {
         seed(fixture.settings)
 
         val since = fixture.since
-        val device = FixtureDevice(fixture.device, fixture.sha1)
+        val device = FixtureDevice(fixture.device, fixture.sha1, fixture.scanComplete)
         val recording = RecordingSyncStateRepository(SyncStateRepositoryImpl(db.syncStateDao())) { stamp(it, since) }
         val cloud = mockk<DrivePhotoRepository>()
         // The reference reads the listing the way the timeline stream serves it: that query, as domain rows.
@@ -266,6 +300,7 @@ class ReconcileEquivalenceTest {
         queued: Boolean = false,
         source: String? = null,
         user: String = userId.id,
+        queuedAt: Long? = if (queued) 2_000L else null,
     ) = SyncStateEntity(
         localUri = uri,
         userId = user,
@@ -279,7 +314,7 @@ class ReconcileEquivalenceTest {
         sizeBytes = 1000L,
         queued = queued,
         queueSource = source,
-        queuedAt = if (queued) 2_000L else null,
+        queuedAt = queuedAt,
     )
 
     /** One device file, listing row or table row per rule of the pass, plus look-alikes that must
@@ -288,6 +323,8 @@ class ReconcileEquivalenceTest {
         val now = System.currentTimeMillis()
         val longAgo = now - 60 * 60_000L
         val justNow = now - 60_000L
+        // Written after either pass asks for its scan: a download recorded, a photo queued, mid-pass.
+        val midPass = now + 60 * 60_000L
         val device = listOf(
             deviceFile("content://m/1", "IMG_0001.jpg"),
             deviceFile("content://m/2", "IMG_0002.jpg"),
@@ -337,6 +374,7 @@ class ReconcileEquivalenceTest {
             listed("L25", "back.jpg"),
             listed("L27", "conflict.jpg", sec = BASE_SEC + 27, hash = "hmac-other27"),
             listed("L99", "gone-from-device.jpg"),
+            listed("L92", "fresh-download.jpg"),
             // Look-alikes the stream leaves out: an album-only row and another account's row.
             listed("Lalbum", "IMG_0004.jpg", sec = BASE_SEC + 4, hash = "hmac-s3", albumChild = true),
             listed("Lother", "IMG_0012.jpg", hash = "hmac-s2", user = otherUser),
@@ -370,6 +408,9 @@ class ReconcileEquivalenceTest {
             row("content://m/95", SyncStatus.LOCAL_ONLY, source = QueueSource.MANUAL),
             row("content://m/94", SyncStatus.HIDDEN, cloudId = "L94"),
             row("content://m/93", SyncStatus.SYNCED, cloudId = "L99", backedUpAtMs = 12_345L, lastSuccess = justNow),
+            // Rows whose file the scan cannot list because they were written after it began.
+            row("content://m/92", SyncStatus.SYNCED, cloudId = "L92", lastSuccess = midPass),
+            row("content://m/91", SyncStatus.LOCAL_ONLY, queued = true, source = QueueSource.MANUAL, queuedAt = midPass),
             row("content://b/1", SyncStatus.SYNCED, cloudId = "Lb1", user = otherUser),
         )
         val sha1 = mapOf("content://m/3" to "s3", "content://m/19" to "unknown", "content://m/24" to "s2")
@@ -418,7 +459,10 @@ class ReconcileEquivalenceTest {
             )
         }
         val sha1 = device.filter { random.nextInt(4) != 0 }.associate { it.uri to listOf("a", "b", "c", "z").random(random) }
-        return Fixture("random seed $seed", now, device, listing, rows, sha1, variants.random(random))
+        return Fixture(
+            "random seed $seed", now, device, listing, rows, sha1, variants.random(random),
+            scanComplete = random.nextInt(4) != 0,
+        )
     }
 
     // ─── recording ───────────────────────────────────────────────────────────
@@ -437,15 +481,17 @@ class ReconcileEquivalenceTest {
         entity.sizeBytes, entity.queued, entity.queueSource, stamp(entity.queuedAt, since),
     ).joinToString("|")
 
-    /** The device a fixture describes. Records every file whose hash the pass reads. */
+    /** The device a fixture describes, scanned whole or not as [complete] says. Records every file
+     *  whose hash the pass reads. */
     private class FixtureDevice(
         private val items: List<LocalMediaItem>,
         private val hashes: Map<String, String>,
+        private val complete: Boolean,
     ) : LocalMediaRepository {
         val sha1Reads = mutableListOf<String>()
 
         override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = flowOf(items)
-        override suspend fun freshMedia(): List<LocalMediaItem> = items
+        override suspend fun freshScan(): DeviceMediaScan = DeviceMediaScan(items, complete)
         override fun observeTrashedMedia(): Flow<List<LocalMediaItem>> = flowOf(emptyList())
         override fun hasMediaPermission(): Flow<Boolean> = flowOf(true)
         override suspend fun queryByUri(uri: String): LocalMediaItem? = items.firstOrNull { it.uri == uri }

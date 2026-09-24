@@ -28,18 +28,36 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
+
+/** One device folder as the folder pickers list it: its name, its newest item as the cover, and how
+ *  many items it holds. */
+internal data class DeviceBucket(val name: String, val coverUri: String?, val itemCount: Int)
+
+/**
+ * The folders [items] fall into, each in the place it first appears, for the folder pickers (backup
+ * folders, excluded folders, timeline folders). It walks the whole device list on every change, so the
+ * pickers run it off the main thread; it reads nothing but [items], which is what makes that safe.
+ */
+internal fun deviceBuckets(items: List<LocalMediaItem>): List<DeviceBucket> =
+    items.filter { it.bucketName != null }
+        .groupBy { it.bucketName!! }
+        .map { (name, group) -> DeviceBucket(name, group.maxByOrNull { it.dateTaken }?.uri, group.size) }
 
 @HiltViewModel
 class SyncFoldersViewModel @Inject constructor(
@@ -84,21 +102,20 @@ class SyncFoldersViewModel @Inject constructor(
             manualNames = initial[SettingsKeys.MANUAL_LOCAL_FOLDER_NAMES] ?: emptySet()
             mirroredNames = initial[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet()
 
-            localMediaRepo.observeLocalMedia().collectLatest { items ->
+            val buckets = localMediaRepo.observeLocalMedia()
+                .map { deviceBuckets(it) }
+                .flowOn(Dispatchers.Default)
+            buckets.collectLatest { found ->
                 // Buckets we actually find media in.
-                val populated = items
-                    .filter { it.bucketName != null }
-                    .groupBy { it.bucketName!! }
-                    .map { (name, groupItems) ->
-                        val sorted = groupItems.sortedByDescending { it.dateTaken }
-                        SyncFolder(
-                            name       = name,
-                            coverUri   = sorted.firstOrNull()?.uri,
-                            itemCount  = sorted.size,
-                            isSelected = selectedNames != null && name in selectedNames!!,
-                            isMirrored = name in mirroredNames,
-                        )
-                    }
+                val populated = found.map { bucket ->
+                    SyncFolder(
+                        name       = bucket.name,
+                        coverUri   = bucket.coverUri,
+                        itemCount  = bucket.itemCount,
+                        isSelected = selectedNames != null && bucket.name in selectedNames!!,
+                        isMirrored = bucket.name in mirroredNames,
+                    )
+                }
                 val populatedNames = populated.map { it.name }.toSet()
 
                 // Surface previously-selected folders that have no photos right now (deleted

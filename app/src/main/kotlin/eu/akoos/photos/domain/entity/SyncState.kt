@@ -40,8 +40,10 @@ data class SyncState(
      * so writing a SyncState back never disturbs an existing row's queue state; a brand-new row
      * inserts with the default false/null and is then stamped by markQueued.
      *
-     * queued = the row is meant to be backed up; queueSource = why (a [QueueSource] constant).
+     * queued = the row is meant to be backed up; queueSource = why (a [QueueSource] constant);
+     * queuedAt = when it was last queued, which reconcile reads to leave a row queued mid-pass alone.
      */
     val queued: Boolean = false,
     val queueSource: String? = null,
+    val queuedAt: Long? = null,
 )

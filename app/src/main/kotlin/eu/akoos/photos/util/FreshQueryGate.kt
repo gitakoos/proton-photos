@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.util
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
@@ -41,8 +42,8 @@ import kotlinx.coroutines.launch
  *
  * The read runs on [scope], not in a caller: a caller that is cancelled stops waiting while the
  * others still get their answer. A failed read throws to every caller that shared it, and the next
- * call starts a new read. Every successful read is also published on [results], in the order the
- * reads ran.
+ * call starts a new read. A read that runs out of memory also reaches [scope]'s handler, as it would
+ * anywhere else. Every successful read is also published on [results], in the order the reads ran.
  */
 internal class FreshQueryGate<T>(
     private val scope: CoroutineScope,
@@ -83,7 +84,15 @@ internal class FreshQueryGate<T>(
         scope.launch {
             // From here on the query can pass a change a newer caller reacts to, so no one joins it.
             synchronized(lock) { if (joinable === read) joinable = null }
-            val outcome = runCatching { query() }
+            val outcome = try {
+                Result.success(query())
+            } catch (e: Throwable) {
+                // Running out of memory is no failed read for a caller to retry past, and a cancelled
+                // read is not a failed one either: both end this coroutine as they are, and the
+                // completion handler below still hands them to every caller of the read.
+                if (e is VirtualMachineError || e is CancellationException) throw e
+                Result.failure(e)
+            }
             outcome.onSuccess { published.tryEmit(it) }
             finish(read, outcome)
         }.invokeOnCompletion { cause ->

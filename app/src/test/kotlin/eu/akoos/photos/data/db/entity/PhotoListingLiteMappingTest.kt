@@ -92,6 +92,20 @@ class PhotoListingLiteMappingTest {
     }
 
     @Test
+    fun `a link the rows carry twice is mapped once, from its first row`() {
+        // A read the table changed under can hand a row back twice, re-dated or not; the grid keys
+        // cloud items by link and throws on the repeat, so the mapping keeps the first and drops the rest.
+        val rows = fixture(40, Random(13))
+        val repeated = rows[10].copy(captureTime = rows[10].captureTime - 1)
+        val torn = rows.take(25) + repeated + rows[3] + rows.drop(25)
+
+        val mapped = torn.toCloudPhotos()
+
+        assertEquals(rows.map { referenceMapping(it) }, mapped)
+        assertEquals(mapped.size, mapped.map { it.linkId }.toSet().size)
+    }
+
+    @Test
     fun `a repeated value is one instance across the whole listing`() {
         val rows = fixture(2_000, Random(11))
         val first = rows.first()

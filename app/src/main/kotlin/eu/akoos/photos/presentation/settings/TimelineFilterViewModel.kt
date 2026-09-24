@@ -32,11 +32,14 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -138,19 +141,19 @@ class TimelineFilterViewModel @Inject constructor(
                 }
             }
 
-            localMediaRepo.observeLocalMedia().collectLatest { items ->
-                val populated = items
-                    .filter { it.bucketName != null }
-                    .groupBy { it.bucketName!! }
-                    .map { (name, groupItems) ->
-                        val sorted = groupItems.sortedByDescending { it.dateTaken }
-                        TimelineFolder(
-                            name       = name,
-                            coverUri   = sorted.firstOrNull()?.uri,
-                            itemCount  = sorted.size,
-                            isExcluded = name in excludedNames,
-                        )
-                    }
+            // The grouping walks the whole device list, so it runs off the main thread (see deviceBuckets).
+            val buckets = localMediaRepo.observeLocalMedia()
+                .map { deviceBuckets(it) }
+                .flowOn(Dispatchers.Default)
+            buckets.collectLatest { found ->
+                val populated = found.map { bucket ->
+                    TimelineFolder(
+                        name       = bucket.name,
+                        coverUri   = bucket.coverUri,
+                        itemCount  = bucket.itemCount,
+                        isExcluded = bucket.name in excludedNames,
+                    )
+                }
                 val populatedNames = populated.map { it.name }.toSet()
 
                 // Surface previously-hidden folders that have no photos right now (deleted

@@ -49,6 +49,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncProgress
+import eu.akoos.photos.domain.repository.DeviceMediaScan
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -107,7 +108,7 @@ class ReconcileSingleFlightTest {
     @Before
     fun setUp() {
         localRepo = mockk()
-        coEvery { localRepo.freshMedia() } coAnswers { scans.scan() }
+        coEvery { localRepo.freshScan() } coAnswers { DeviceMediaScan(scans.scan(), complete = true) }
         syncStateRepo = mockk(relaxed = true)
         every { syncStateRepo.observeAll(any()) } returns flowOf(emptyList())
 

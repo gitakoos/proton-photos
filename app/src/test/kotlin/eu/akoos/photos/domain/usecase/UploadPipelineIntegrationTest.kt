@@ -69,6 +69,7 @@ import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.repository.DeviceMediaScan
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.util.NetworkObserver
@@ -473,9 +474,12 @@ class UploadPipelineIntegrationTest {
     fun `reconcile drops a queued MANUAL row whose file was deleted and never re-queues it`() = runTest {
         seedBulkUploadGates(folder = "Camera")
         val gone = "content://media/gone-manual"
+        // Another photo stays on the device: a scan that finds nothing proves no file gone.
+        local.add(localItem("content://media/stays", bucket = "Camera"))
         local.add(localItem(gone, bucket = "Camera"))
         syncRepo.upsert(localOnlyRow(gone), userId)
-        syncRepo.markQueued(gone, QueueSource.MANUAL, System.currentTimeMillis())
+        // Queued before the pass begins; a row queued after its scan began is left for the next pass.
+        syncRepo.markQueued(gone, QueueSource.MANUAL, System.currentTimeMillis() - 60_000L)
         // The user deletes the file from the device.
         local.remove(gone)
 
@@ -528,6 +532,12 @@ private class FakeLocalMediaRepository : LocalMediaRepository {
     }
 
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = items.asStateFlow()
+
+    /** Every file the fake holds, as a scan that saw the whole device, which the repository reports
+     *  only for a scan that found something. */
+    override suspend fun freshScan(): DeviceMediaScan =
+        items.value.let { DeviceMediaScan(it, complete = it.isNotEmpty()) }
+
     override suspend fun queryByUri(uri: String): LocalMediaItem? = items.value.firstOrNull { it.uri == uri }
     override suspend fun queryByBucket(bucketName: String): List<LocalMediaItem> =
         items.value.filter { it.bucketName == bucketName }

@@ -323,8 +323,10 @@ class GetGalleryItemsUseCase @Inject constructor(
             }
         }
 
+        // Claimed as it is listed, so a link the listing carries twice still shows once: the grid keys
+        // a cloud item by its link and throws on a repeat.
         for (cloudPhoto in cloud) {
-            if (cloudPhoto.linkId !in usedCloudIds) {
+            if (usedCloudIds.add(cloudPhoto.linkId)) {
                 result += GalleryItem.CloudOnly(cloudPhoto)
             }
         }

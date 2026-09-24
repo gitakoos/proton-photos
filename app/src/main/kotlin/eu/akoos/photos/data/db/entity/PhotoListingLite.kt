@@ -83,15 +83,22 @@ data class PhotoListingLite(
 }
 
 /**
- * [PhotoListingLite.toDomain] over a whole listing, in order, holding each repeated value once.
+ * [PhotoListingLite.toDomain] over a whole listing, in order, holding each repeated value once and
+ * each link once.
  *
  * The cursor hands every row its own copy of the share id, the volume id and the mime type, and
  * every tagged row its own tag set, though a library has only a handful of each. The mapped list
  * outlives the rows, so the copies are dropped here and all rows share one instance of each value.
+ *
+ * A link the rows carry twice keeps its first row. Every reader keys the listing by link and the grid
+ * throws on a repeated key, and a read the table changed under can hand a row back twice.
  */
 fun List<PhotoListingLite>.toCloudPhotos(): List<CloudPhoto> {
     val interner = ListingValueInterner()
-    return map { it.toDomain(interner) }
+    val seen = HashSet<String>(size * 2)
+    val photos = ArrayList<CloudPhoto>(size)
+    for (row in this) if (seen.add(row.linkId)) photos += row.toDomain(interner)
+    return photos
 }
 
 /**

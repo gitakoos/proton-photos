@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.util
 
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -63,6 +64,7 @@ class SharedQuerySourceTest {
     private class FakeStore {
         var content = "v1"
         var failNextRead = false
+        var outOfMemoryNextRead = false
         var reads = 0
             private set
         var listeners = 0
@@ -101,6 +103,10 @@ class SharedQuerySourceTest {
             if (failNextRead) {
                 failNextRead = false
                 error("scan failed")
+            }
+            if (outOfMemoryNextRead) {
+                outOfMemoryNextRead = false
+                throw OutOfMemoryError("heap")
             }
             return seen
         }
@@ -335,6 +341,35 @@ class SharedQuerySourceTest {
 
         assertEquals("v1", first.await())
         assertEquals(2, store.reads)
+    }
+
+    @Test
+    fun `a read that runs out of memory is not retried`() = runTest {
+        // Another whole-library read would only run out again, on a loop with no end.
+        val uncaught = mutableListOf<Throwable>()
+        val scope = CoroutineScope(
+            StandardTestDispatcher(testScheduler) + SupervisorJob() + CoroutineExceptionHandler { _, e -> uncaught += e },
+        ).also { scopes += it }
+        val store = FakeStore()
+        store.outOfMemoryNextRead = true
+        val failures = mutableListOf<Throwable>()
+        val source = SharedQuerySource(
+            scope = scope,
+            listen = store::listen,
+            quietMs = QUIET_MS,
+            maxWaitMs = MAX_WAIT_MS,
+            stopTimeoutMs = STOP_MS,
+            now = { testScheduler.currentTime },
+            onReadFailure = { failures += it },
+        ) { store.read(testScheduler.currentTime) }
+
+        val job = launch { source.shared.collect { } }
+        advanceTimeBy(READ_MS + 10 * (retryBackoffMs(9) + QUIET_MS + READ_MS))
+
+        assertEquals("the read that ran out of memory must not run again", 1, store.reads)
+        assertTrue("it is no ordinary read failure", failures.isEmpty())
+        assertTrue(uncaught.isNotEmpty() && uncaught.all { it is OutOfMemoryError })
+        job.cancel()
     }
 
     @Test

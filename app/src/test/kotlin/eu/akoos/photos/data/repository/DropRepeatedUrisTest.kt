@@ -24,11 +24,14 @@ package eu.akoos.photos.data.repository
 
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * Pins the device scan's de-duplication: a row a shifting cursor window hands back twice is kept once,
- * in its first place, so no grid ever sees the same uri as two items.
+ * in its first place, so no grid ever sees the same uri as two items, and the scan learns that it
+ * dropped one, since the same shift left rows unread.
  */
 class DropRepeatedUrisTest {
 
@@ -50,11 +53,12 @@ class DropRepeatedUrisTest {
             item("content://media/external/images/media/1", 100),
             item("content://media/external/images/media/3", 300),
         )
-        list.dropRepeatedUris()
+        val dropped = list.dropRepeatedUris()
         assertEquals(
             listOf("media/3", "media/2", "media/1"),
             list.map { it.uri.substringAfter("external/images/") },
         )
+        assertTrue("a repeat marks the read as torn, so the scan must not count as complete", dropped)
     }
 
     @Test
@@ -63,17 +67,23 @@ class DropRepeatedUrisTest {
             item("content://media/external/images/media/7", 10),
             item("content://media/external/video/media/7", 10),
         )
-        list.dropRepeatedUris()
+        assertFalse(list.dropRepeatedUris())
         assertEquals(2, list.size)
     }
 
     @Test
     fun `a list without repeats is left as it is`() {
-        val list = mutableListOf(item("content://media/external/images/media/1", 1))
-        list.dropRepeatedUris()
-        assertEquals(1, list.size)
+        val list = mutableListOf(
+            item("content://media/external/images/media/2", 2),
+            item("content://media/external/images/media/1", 1),
+        )
+        assertFalse(list.dropRepeatedUris())
+        assertEquals(2, list.size)
+        val single = mutableListOf(item("content://media/external/images/media/1", 1))
+        assertFalse(single.dropRepeatedUris())
+        assertEquals(1, single.size)
         val empty = mutableListOf<LocalMediaItem>()
-        empty.dropRepeatedUris()
+        assertFalse(empty.dropRepeatedUris())
         assertEquals(0, empty.size)
     }
 }

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.util
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.channels.Channel
@@ -52,7 +53,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  *
  * A failed read is reported to [onReadFailure] and leaves the current value in place; it is retried
  * on its own after a growing pause, so a collector still waiting for a first value is not left
- * waiting on a change that may never come.
+ * waiting on a change that may never come. Running out of memory is not retried: it ends the source,
+ * which keeps the value it holds.
  *
  * [fresh] is for a one-shot reader that must act on what the store holds now, with the rules of
  * [FreshQueryGate]. It reads through the same gate as the source, so two reads never run at once,
@@ -88,6 +90,7 @@ internal class SharedQuerySource<T : Any>(
         val stopListening: (() -> Unit)? = try {
             listen { pending.trySend(Unit) }
         } catch (e: Throwable) {
+            if (e is VirtualMachineError) throw e
             ensureActive()
             onReadFailure(e)
             null
@@ -99,6 +102,9 @@ internal class SharedQuerySource<T : Any>(
                 gate.fresh()
                 failedReads = 0L
             } catch (e: Throwable) {
+                // Out of memory is no failure to retry: the next whole read would run out again, and
+                // again after that, for good. Cancellation ends the source as it ends anything else.
+                if (e is VirtualMachineError || e is CancellationException) throw e
                 ensureActive()
                 onReadFailure(e)
                 val pauseMs = retryBackoffMs(failedReads++)

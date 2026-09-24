@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.util
 
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -225,5 +226,21 @@ class FreshQueryGateTest {
 
         assertEquals("a failed read publishes nothing", listOf(1, 3), seen)
         watcher.cancel()
+    }
+
+    @Test
+    fun `a read that runs out of memory is not passed off as an ordinary failure`() = runTest {
+        // Wrapped as a failed read, the error would only reach callers that retry past failures; left
+        // to end the read as it is, it also reaches the scope's handler like any other uncaught error.
+        val uncaught = mutableListOf<Throwable>()
+        val scope = CoroutineScope(
+            StandardTestDispatcher(testScheduler) + SupervisorJob() + CoroutineExceptionHandler { _, e -> uncaught += e },
+        ).also { scopes += it }
+        val gate = FreshQueryGate<Int>(scope) { throw OutOfMemoryError("heap") }
+
+        val caller = async { runCatching { gate.fresh() } }
+
+        assertTrue("the caller still hears of it", caller.await().exceptionOrNull() is OutOfMemoryError)
+        assertTrue(uncaught.single() is OutOfMemoryError)
     }
 }

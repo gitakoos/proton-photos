@@ -131,8 +131,15 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
 
         // A scan begun after this pass: the demotions and the gone-file drop below act on what the
-        // device no longer holds, which a list kept from before could still show.
-        val allLocalItems = localRepo.freshMedia()
+        // device no longer holds, which a list kept from before could still show. Those steps also
+        // need the scan to have seen the whole device, and leave alone a row written since it was
+        // asked for; see [deviceFileGone]. The pairing itself works with whatever the scan found.
+        val scanStartMs = System.currentTimeMillis()
+        val scan = localRepo.freshScan()
+        val allLocalItems = scan.items
+        if (!scan.complete) {
+            Log.w(TAG, "device scan incomplete (${allLocalItems.size} items): gone-file steps skipped this pass")
+        }
         PerfDiagnostics.mark("reconcile:start", allLocalItems.size)
 
         val localItems = if (backupEverything) {
@@ -167,8 +174,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
         val recorded = pairAndRecord(
             userId, allLocalItems, localItems, initialListingComplete, stripOnUpload, compressOnUpload,
+            scan.complete, scanStartMs,
         )
-        clearQueue(userId, recorded.allLocalUris, recorded.inScopeUris)
+        clearQueue(userId, recorded.allLocalUris, recorded.inScopeUris, scan.complete, scanStartMs)
 
         // This pass paired against a complete cloud listing, so any still-LOCAL_ONLY row is genuinely
         // new and safe for the bulk upload to drain. Flip the gate UNCONDITIONALLY (even with zero
@@ -207,6 +215,8 @@ class ReconcileSyncStateUseCase @Inject constructor(
         initialListingComplete: Boolean,
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
+        scanComplete: Boolean,
+        scanStartMs: Long,
     ): Recorded {
         // Unpacked, so the snapshot and the cloud rows can go after their last use below (the partition
         // and the demotion loop) instead of living through every write.
@@ -256,8 +266,10 @@ class ReconcileSyncStateUseCase @Inject constructor(
                         syncStateRepo.clearQueuedForSynced(state.localUri)
                     }
                 // Local file removed from MediaStore → demote to CLOUD_ONLY so we stop telling the
-                // user the photo is "on this device" when it actually isn't.
-                state.localUri !in allLocalUris -> syncStateRepo.upsert(
+                // user the photo is "on this device" when it actually isn't. Only on a scan that saw
+                // the whole device, and only for a row that predates it: a download saved while this
+                // pass ran is recorded SYNCED, yet the scan, begun before it, could not list its file.
+                deviceFileGone(state, scanComplete, allLocalUris, scanStartMs) -> syncStateRepo.upsert(
                     state.copy(status = SyncStatus.CLOUD_ONLY),
                     userId,
                 )
@@ -510,7 +522,13 @@ class ReconcileSyncStateUseCase @Inject constructor(
      * The queue clean-up after the pairing writes. Each step reads the table again, so it acts on
      * the rows as the writes before it left them, this pass's own included.
      */
-    private suspend fun clearQueue(userId: UserId, allLocalUris: Set<String>, inScopeUris: Set<String>) {
+    private suspend fun clearQueue(
+        userId: UserId,
+        allLocalUris: Set<String>,
+        inScopeUris: Set<String>,
+        scanComplete: Boolean,
+        scanStartMs: Long,
+    ) {
         // A queued photo the user deleted from the device before it uploaded leaves an orphaned
         // LOCAL_ONLY row. The folder-scope cleanup below deliberately spares an explicit MANUAL /
         // ALBUM_ADD / EDITOR intent, and the stranded-intent recovery further down would re-queue such
@@ -518,9 +536,12 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // any QUEUED LOCAL_ONLY row whose file is gone from the WHOLE device (checked against
         // allLocalItems, every file MediaStore sees, NOT the folder-filtered inScopeUris, so an
         // out-of-folder photo that still exists is untouched), whatever queued it. deleteLocalOnlyByUris
-        // is status-guarded, so a row another pass just claimed to UPLOADING is left alone.
+        // is status-guarded, so a row another pass just claimed to UPLOADING is left alone. The delete
+        // takes an explicit intent with it, so it runs only on a scan that saw the whole device, and
+        // never on a row queued since the scan began (a "back up now" on a photo taken mid-pass).
         val goneQueued = syncStateRepo.observeAll(userId).first().filter {
-            it.status == SyncStatus.LOCAL_ONLY && it.queued && it.localUri !in allLocalUris
+            it.status == SyncStatus.LOCAL_ONLY && it.queued &&
+                deviceFileGone(it, scanComplete, allLocalUris, scanStartMs)
         }
         if (goneQueued.isNotEmpty()) {
             syncStateRepo.deleteLocalOnlyByUris(goneQueued.map { it.localUri })
@@ -618,6 +639,35 @@ internal fun repairTwinLinkId(
     claimedTwinLinkIds: Set<String>,
 ): String? = if (strong || hasLegacyNameMatch) null
     else nameDateTwinLinkId?.takeUnless { it in claimedTwinLinkIds }
+
+/**
+ * Whether [state] was written at or after [scanStartMs], the moment a pass asked for its device scan.
+ * The paths that save a new file and record it (a download, a "back up now", an editor save) stamp
+ * one of these times as they write, so a row stamped this late may name a file the scan could not
+ * have seen yet. At or after, not after: a write in the same millisecond is as unknown as a later one.
+ */
+internal fun writtenSinceScan(state: SyncState, scanStartMs: Long): Boolean =
+    state.lastSyncAttemptMs >= scanStartMs ||
+        (state.lastSyncSuccessMs ?: Long.MIN_VALUE) >= scanStartMs ||
+        (state.queuedAt ?: Long.MIN_VALUE) >= scanStartMs
+
+/**
+ * Whether reconcile may take [state]'s device file as gone, the one judgement behind its gone-file
+ * steps (the demotion to CLOUD_ONLY and the drop of a queued row). It needs a scan that saw the whole
+ * device ([scanComplete]) and found something ([deviceUris], every uri it returned, is not empty), no
+ * trace of the file in it, and a row that predates the scan ([writtenSinceScan]). Short of any of
+ * these the step leaves the row for a later pass to judge on a scan of its own.
+ */
+internal fun deviceFileGone(
+    state: SyncState,
+    scanComplete: Boolean,
+    deviceUris: Set<String>,
+    scanStartMs: Long,
+): Boolean =
+    scanComplete &&
+        deviceUris.isNotEmpty() &&
+        state.localUri !in deviceUris &&
+        !writtenSinceScan(state, scanStartMs)
 
 /**
  * Runs [block] for its callers one run at a time, and answers each caller with a run that began

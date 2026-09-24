@@ -23,9 +23,24 @@
 package eu.akoos.photos.domain.repository
 
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import eu.akoos.photos.domain.entity.LocalMediaItem
+
+/**
+ * One read of the device's photos and videos, and whether it saw all of them.
+ *
+ * [items] is whatever the read found, for a reader that shows or acts on what is there. [complete]
+ * says the read saw every file: both media grants held, each collection read to its end, no row
+ * handed back twice (the mark of a read a concurrent change tore, which also pushes rows off the
+ * end), and at least one file found, since an empty read is also what a storage volume not yet
+ * mounted answers. Only a complete read may stand for "a file it did not return is gone": a step
+ * that deletes, demotes or reaps on that absence skips itself otherwise, and the next complete read
+ * catches up.
+ */
+data class DeviceMediaScan(
+    val items: List<LocalMediaItem>,
+    val complete: Boolean,
+)
 
 interface LocalMediaRepository {
     /**
@@ -44,9 +59,16 @@ interface LocalMediaRepository {
      * backfill walk), where the list [observeLocalMedia] holds could miss a file that just arrived
      * or still carry one that just went. Calls that overlap share one scan, a scan never runs
      * alongside another, and the result also refreshes what [observeLocalMedia] collectors see.
-     * Throws when the scan fails.
+     * The list is what the scan found even when it could not see everything, so a reader that takes
+     * a file's absence for its deletion reads [freshScan] instead. Throws when the scan fails outright.
      */
-    suspend fun freshMedia(): List<LocalMediaItem> = observeLocalMedia().first()
+    suspend fun freshMedia(): List<LocalMediaItem> = freshScan().items
+
+    /**
+     * [freshMedia] together with whether the scan saw the whole device ([DeviceMediaScan.complete]):
+     * the read for every step that deletes, demotes or reaps because a file is missing from it.
+     */
+    suspend fun freshScan(): DeviceMediaScan
 
     fun observeTrashedMedia(): Flow<List<LocalMediaItem>>
 

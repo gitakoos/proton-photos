@@ -44,12 +44,12 @@ data class SyncStateEntity(
     val backedUpAtMs: Long?,
     val sizeBytes: Long,
     // Explicit upload-intent, set/cleared only through the SyncStateDao queue methods. queued/
-    // queueSource are surfaced onto the domain SyncState (read-only) so the upload processor can
-    // select on "LOCAL_ONLY AND queued"; queuedAt stays entity-only. Writing a SyncState back is
-    // still safe: the partial upsert's updateDomainColumns OMITS every queue column, so a round-trip
-    // never overwrites a live row's intent (a brand-new row inserts with these defaults then gets
-    // markQueued). queued = the row is meant to be backed up; queueSource = why (a QueueSource
-    // constant); queuedAt = when.
+    // queueSource/queuedAt are surfaced onto the domain SyncState (read-only) so the upload processor
+    // can select on "LOCAL_ONLY AND queued" and reconcile can tell a row queued mid-pass. Writing a
+    // SyncState back is still safe: the partial upsert's updateDomainColumns OMITS every queue
+    // column, so a round-trip never overwrites a live row's intent (a brand-new row inserts with
+    // these defaults then gets markQueued). queued = the row is meant to be backed up; queueSource =
+    // why (a QueueSource constant); queuedAt = when.
     val queued: Boolean = false,
     val queueSource: String? = null,
     val queuedAt: Long? = null,
@@ -66,10 +66,11 @@ data class SyncStateEntity(
         sizeBytes = sizeBytes,
         queued = queued,
         queueSource = queueSource,
+        queuedAt = queuedAt,
     )
 }
 
-// Maps the read-only queued/queueSource through as well, but note the DAO upsert's
+// Maps the read-only queued/queueSource/queuedAt through as well, but note the DAO upsert's
 // updateDomainColumns never writes them, so an existing row's queue state is untouched on a
 // round-trip; only insertIgnore's brand-new row uses the value (default false/null), which the
 // enqueue paths then set via markQueued.
@@ -86,4 +87,5 @@ fun SyncState.toEntity(userId: String) = SyncStateEntity(
     sizeBytes = sizeBytes,
     queued = queued,
     queueSource = queueSource,
+    queuedAt = queuedAt,
 )

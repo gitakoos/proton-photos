@@ -53,6 +53,7 @@ import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncProgress
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.repository.DeviceMediaScan
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -114,6 +115,10 @@ class ReconcileSyncStateUseCaseTest {
 
     @After
     fun tearDown() = appScope.cancel()
+
+    /** A device scan as the repository reports one that nothing kept from the whole device: complete
+     *  whenever it found something, since a scan that found nothing proves nothing. */
+    private fun completeScan(items: List<LocalMediaItem>) = DeviceMediaScan(items, complete = items.isNotEmpty())
 
     /** The listing rows a pass reads for [photos], in the order given. */
     private fun pairingRows(photos: List<CloudPhoto>) = photos.map {
@@ -178,7 +183,7 @@ class ReconcileSyncStateUseCaseTest {
 
     @Test
     fun `local items without matching cloud get LOCAL_ONLY status`() = runTest {
-        coEvery { localRepo.freshMedia() } returns listOf(localItem("uri://1"))
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("uri://1")))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
         coEvery { syncStateRepo.getByUri(any()) } returns null
@@ -197,7 +202,7 @@ class ReconcileSyncStateUseCaseTest {
     fun `local item matching cloud by name+size gets SYNCED status`() = runTest {
         val local = localItem("uri://1", name = "vacation.jpg", size = 2048L)
         val cloud = cloudPhoto("link1", name = "vacation.jpg", size = 2048L)
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
         coEvery { syncStateRepo.getByUri("uri://1") } returns null
@@ -218,7 +223,7 @@ class ReconcileSyncStateUseCaseTest {
     fun `previously synced item no longer in cloud is marked CLOUD_ONLY`() = runTest {
         val local = localItem("uri://1")
         val existingSync = syncState("uri://1", cloudId = "old-link-id", status = SyncStatus.SYNCED)
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         // Cloud no longer has "old-link-id"
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(existingSync))
@@ -247,7 +252,7 @@ class ReconcileSyncStateUseCaseTest {
         )
         val cloud = cloudPhoto("link1", name = "downloaded.jpg", size = 4096L)
         val existingSync = syncState(downloadedFile.uri, cloudId = "link1", status = SyncStatus.SYNCED)
-        coEvery { localRepo.freshMedia() } returns listOf(downloadedFile)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(downloadedFile))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(existingSync))
         coEvery { syncStateRepo.getByUri(any()) } returns existingSync
@@ -266,11 +271,12 @@ class ReconcileSyncStateUseCaseTest {
     @Test
     fun `SYNCED state IS demoted to CLOUD_ONLY when local file actually gone from device`() = runTest {
         // Sanity: the demote path still fires when the file truly disappeared (user deleted from
-        // gallery, "Free up space" ran, etc.). Pairs with the previous test.
+        // gallery, "Free up space" ran, etc.). Pairs with the previous test. The device still holds
+        // another photo: a scan that found nothing proves nothing.
         val ghostSync = syncState("content://media/external/images/media/99", cloudId = "linkGhost",
             status = SyncStatus.SYNCED)
         val cloud = cloudPhoto("linkGhost", name = "ghost.jpg")
-        coEvery { localRepo.freshMedia() } returns emptyList() // no local files at all
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("content://media/external/images/media/1")))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(ghostSync))
         coEvery { syncStateRepo.getByUri(any()) } returns null
@@ -285,9 +291,69 @@ class ReconcileSyncStateUseCaseTest {
         }
     }
 
+    // ─── gone-file steps only on a complete scan, only for rows older than it ────
+
+    /** A SYNCED row and a queued MANUAL row, both for files the scan does not return. */
+    private fun vanishedRows(lastSuccess: Long? = null, queuedAt: Long? = null) = listOf(
+        syncState("content://media/external/images/media/90", cloudId = "linkGone", status = SyncStatus.SYNCED)
+            .copy(lastSyncSuccessMs = lastSuccess),
+        syncState("content://media/external/images/media/91", cloudId = null, status = SyncStatus.LOCAL_ONLY,
+            queued = true, queueSource = eu.akoos.photos.domain.entity.QueueSource.MANUAL)
+            .copy(queuedAt = queuedAt),
+    )
+
+    @Test
+    fun `an incomplete scan demotes nothing and drops no queued row`() = runTest {
+        // One collection failed mid-walk, or the read was torn: the files it missed are still there,
+        // and a MANUAL intent dropped for one of them would never come back.
+        val seen = localItem("content://media/external/images/media/1")
+        coEvery { localRepo.freshScan() } returns DeviceMediaScan(listOf(seen), complete = false)
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloudPhoto("linkGone", name = "gone.jpg")))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(vanishedRows())
+
+        useCase(userId).toList()
+
+        coVerify(exactly = 0) { syncStateRepo.upsert(match { it.status == SyncStatus.CLOUD_ONLY }, userId) }
+        coVerify(exactly = 0) { syncStateRepo.deleteLocalOnlyByUris(any()) }
+        // What the scan did find is still paired and recorded.
+        coVerify { syncStateRepo.upsertAll(match { states -> states.any { it.localUri == seen.uri } }, userId) }
+    }
+
+    @Test
+    fun `the same rows on a complete scan are demoted and dropped`() = runTest {
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("content://media/external/images/media/1")))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloudPhoto("linkGone", name = "gone.jpg")))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(vanishedRows())
+
+        useCase(userId).toList()
+
+        coVerify {
+            syncStateRepo.upsert(
+                match { it.localUri == "content://media/external/images/media/90" && it.status == SyncStatus.CLOUD_ONLY },
+                userId,
+            )
+        }
+        coVerify { syncStateRepo.deleteLocalOnlyByUris(listOf("content://media/external/images/media/91")) }
+    }
+
+    @Test
+    fun `rows written after the scan began are left for the next pass`() = runTest {
+        // A download marked SYNCED, and a "back up now" queued, while this pass ran: the scan began
+        // before either file could be listed, so their absence from it says nothing.
+        val later = System.currentTimeMillis() + 60 * 60_000L
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("content://media/external/images/media/1")))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloudPhoto("linkGone", name = "gone.jpg")))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(vanishedRows(lastSuccess = later, queuedAt = later))
+
+        useCase(userId).toList()
+
+        coVerify(exactly = 0) { syncStateRepo.upsert(match { it.status == SyncStatus.CLOUD_ONLY }, userId) }
+        coVerify(exactly = 0) { syncStateRepo.deleteLocalOnlyByUris(any()) }
+    }
+
     @Test
     fun `reconcile emits progress events and finishes with running=false`() = runTest {
-        coEvery { localRepo.freshMedia() } returns emptyList()
+        coEvery { localRepo.freshScan() } returns completeScan(emptyList())
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
 
@@ -299,7 +365,7 @@ class ReconcileSyncStateUseCaseTest {
 
     @Test
     fun `reconcile reads cloud state from DB without triggering a network refresh`() = runTest {
-        coEvery { localRepo.freshMedia() } returns emptyList()
+        coEvery { localRepo.freshScan() } returns completeScan(emptyList())
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
 
@@ -317,19 +383,19 @@ class ReconcileSyncStateUseCaseTest {
     fun `the device list comes from a scan begun for this pass, never the held list`() = runTest {
         // The demotions and the gone-file drop act on what is missing from the device list, so a
         // held list that trails a change could demote a file that just arrived.
-        coEvery { localRepo.freshMedia() } returns listOf(localItem("uri://1"))
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("uri://1")))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
 
         useCase(userId).toList()
 
-        coVerify(exactly = 1) { localRepo.freshMedia() }
+        coVerify(exactly = 1) { localRepo.freshScan() }
         verify(exactly = 0) { localRepo.observeLocalMedia() }
     }
 
     @Test
     fun `the final progress carries the device and cloud totals`() = runTest {
-        coEvery { localRepo.freshMedia() } returns listOf(localItem("uri://1"), localItem("uri://2", name = "b.jpg"))
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("uri://1"), localItem("uri://2", name = "b.jpg")))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns
             pairingRows(listOf(cloudPhoto("link1", name = "x.jpg"), cloudPhoto("link2", name = "y.jpg"), cloudPhoto("link3", name = "z.jpg")))
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
@@ -343,7 +409,7 @@ class ReconcileSyncStateUseCaseTest {
     fun `a pass marks its start with the device count and its end with the rows it handled`() = runTest {
         // Two of the three device files sit in the selected Camera folder, so the loop handles two.
         val outside = localItem("uri://3", name = "c.jpg").copy(bucketName = "WhatsApp")
-        coEvery { localRepo.freshMedia() } returns listOf(localItem("uri://1"), localItem("uri://2", name = "b.jpg"), outside)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("uri://1"), localItem("uri://2", name = "b.jpg"), outside))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
 
@@ -368,7 +434,7 @@ class ReconcileSyncStateUseCaseTest {
         // uploads with the same bytes the one listed later is the twin the device file pairs to.
         val local = localItem("uri://1", name = "IMG.jpg", size = 2048L)
         val existing = syncState("uri://1", cloudId = null, status = SyncStatus.LOCAL_ONLY, localHash = "sha")
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(
             listOf(
                 cloudPhoto("link-first", name = "a.jpg", captureTime = 900L, contentHash = "HMAC"),
@@ -400,7 +466,7 @@ class ReconcileSyncStateUseCaseTest {
             sizeBytes = 4096L,
             bucketName = "Camera",
         )
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(
             listOf(
                 cloudPhoto("link-first", name = "IMG_0001.jpg", size = 1L, captureTime = 2L),
@@ -427,7 +493,7 @@ class ReconcileSyncStateUseCaseTest {
         val passScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
         val retrying = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope)
         val local = localItem("uri://1", name = "vacation.jpg", size = 2048L)
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } throws
             IllegalStateException("window refill") andThen pairingRows(listOf(cloudPhoto("link1", name = "vacation.jpg", size = 2048L)))
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
@@ -448,7 +514,7 @@ class ReconcileSyncStateUseCaseTest {
     fun `a listing read that keeps failing fails the pass after the last retry and writes nothing`() = runTest {
         val passScope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(testScheduler))
         val failing = ReconcileSyncStateUseCase(localRepo, cloudRepo, syncStateRepo, listingDao, context, passScope)
-        coEvery { localRepo.freshMedia() } returns listOf(localItem("uri://1"))
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("uri://1")))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } throws IllegalStateException("store gone")
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
 
@@ -471,7 +537,7 @@ class ReconcileSyncStateUseCaseTest {
         val local = localItem("uri://1", name = "local-name.jpg", size = 111L)
         val cloud = cloudPhoto("link-known", name = "totally-different.jpg", size = 999L)
         val existing = syncState("uri://1", cloudId = "link-known", status = SyncStatus.SYNCED)
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(existing))
         coEvery { syncStateRepo.getByUri(any()) } returns existing
@@ -498,7 +564,7 @@ class ReconcileSyncStateUseCaseTest {
         val local = localItem("uri://1", name = "IMG_local.jpg", size = 2048L)
         val cloud = cloudPhoto("link-hash", name = "renamed-on-cloud.jpg", size = 2048L, contentHash = "CLOUDHMAC")
         val existing = syncState("uri://1", cloudId = null, status = SyncStatus.LOCAL_ONLY, localHash = "deadbeefsha1")
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(existing))
         coEvery { syncStateRepo.getByUri(any()) } returns existing
@@ -525,7 +591,7 @@ class ReconcileSyncStateUseCaseTest {
         val local = localItem("uri://1", name = "shared.jpg", size = 2048L)
         val cloud = cloudPhoto("link-other", name = "shared.jpg", size = 2048L, contentHash = "OTHERHMAC", captureTime = 50L)
         val existing = syncState("uri://1", cloudId = null, status = SyncStatus.LOCAL_ONLY, localHash = "localsha1")
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(existing))
         coEvery { syncStateRepo.getByUri(any()) } returns existing
@@ -557,7 +623,7 @@ class ReconcileSyncStateUseCaseTest {
             bucketName = "Camera",
         )
         val cloud = cloudPhoto("link-nd", name = "vacation.jpg", size = 4096L, captureTime = 2L, contentHash = null)
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
         coEvery { syncStateRepo.getByUri(any()) } returns null
@@ -590,7 +656,7 @@ class ReconcileSyncStateUseCaseTest {
             bucketName = "Camera",
         )
         val cloud = cloudPhoto("link-hashed", name = "IMG_0001.jpg", size = 4096L, captureTime = 2L, contentHash = "HASHED")
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
         coEvery { syncStateRepo.getByUri(any()) } returns null
@@ -625,7 +691,7 @@ class ReconcileSyncStateUseCaseTest {
             bucketName = "Camera",
         )
         val cloud = cloudPhoto("link-strip", name = "stripped.jpg", size = 1L, captureTime = 2L, contentHash = "STRIPPEDHASH")
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
         coEvery { syncStateRepo.getByUri(any()) } returns null
@@ -661,7 +727,7 @@ class ReconcileSyncStateUseCaseTest {
             bucketName = "Camera",
         )
         val cloud = cloudPhoto("link-compress", name = "compressed.jpg", size = 2L, captureTime = 2L, contentHash = "COMPRESSEDHASH")
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
         coEvery { syncStateRepo.getByUri(any()) } returns null
@@ -696,7 +762,7 @@ class ReconcileSyncStateUseCaseTest {
         )
         val cloud = cloudPhoto("link-hashed", name = "IMG_0001.jpg", size = 4096L, captureTime = 2L, contentHash = "HASHED")
         val claimedByOther = syncState("uri://other", cloudId = "link-hashed", status = SyncStatus.SYNCED)
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(claimedByOther))
         coEvery { syncStateRepo.getByUri(any()) } returns null
@@ -720,7 +786,7 @@ class ReconcileSyncStateUseCaseTest {
         val local = localItem("uri://uploading")
         val cloud = cloudPhoto("link-x", name = "photo.jpg")
         val existing = syncState("uri://uploading", cloudId = null, status = SyncStatus.UPLOADING)
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(existing))
         coEvery { syncStateRepo.getByUri(any()) } returns existing
@@ -754,7 +820,7 @@ class ReconcileSyncStateUseCaseTest {
         )
         val orphanSync = syncState(orphan.uri, cloudId = null, status = SyncStatus.LOCAL_ONLY,
             queued = true, queueSource = eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER)
-        coEvery { localRepo.freshMedia() } returns listOf(orphan)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(orphan))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(orphanSync))
         coEvery { syncStateRepo.getByUri(any()) } returns orphanSync
@@ -769,7 +835,7 @@ class ReconcileSyncStateUseCaseTest {
     fun `a fresh in-scope LOCAL_ONLY row is stamped queued AUTO_FOLDER`() = runTest {
         // A brand-new unmatched in-scope local becomes LOCAL_ONLY and must be queued=AUTO_FOLDER so
         // the queue-gated upload selector picks it up.
-        coEvery { localRepo.freshMedia() } returns listOf(localItem("uri://fresh"))
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("uri://fresh")))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
         coEvery { syncStateRepo.getByUri(any()) } returns null
@@ -792,7 +858,7 @@ class ReconcileSyncStateUseCaseTest {
         val local = localItem("uri://manual")
         val manualSync = syncState("uri://manual", cloudId = null, status = SyncStatus.LOCAL_ONLY,
             queued = true, queueSource = eu.akoos.photos.domain.entity.QueueSource.MANUAL)
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(manualSync))
         coEvery { syncStateRepo.getByUri(any()) } returns manualSync
@@ -825,7 +891,7 @@ class ReconcileSyncStateUseCaseTest {
         )
         val manualSync = syncState(outOfScope.uri, cloudId = null, status = SyncStatus.LOCAL_ONLY,
             queued = true, queueSource = eu.akoos.photos.domain.entity.QueueSource.MANUAL)
-        coEvery { localRepo.freshMedia() } returns listOf(outOfScope)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(outOfScope))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(manualSync))
         coEvery { syncStateRepo.getByUri(any()) } returns manualSync
@@ -849,7 +915,7 @@ class ReconcileSyncStateUseCaseTest {
         )
         val nullSourceSync = syncState(outOfScope.uri, cloudId = null, status = SyncStatus.LOCAL_ONLY,
             queued = true, queueSource = null)
-        coEvery { localRepo.freshMedia() } returns listOf(outOfScope)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(outOfScope))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(nullSourceSync))
         coEvery { syncStateRepo.getByUri(any()) } returns nullSourceSync
@@ -874,7 +940,7 @@ class ReconcileSyncStateUseCaseTest {
         )
         val strandedSync = syncState(stranded.uri, cloudId = null, status = SyncStatus.LOCAL_ONLY,
             queued = false, queueSource = eu.akoos.photos.domain.entity.QueueSource.MANUAL)
-        coEvery { localRepo.freshMedia() } returns listOf(stranded)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(stranded))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(strandedSync))
         coEvery { syncStateRepo.getByUri(any()) } returns strandedSync
@@ -905,7 +971,7 @@ class ReconcileSyncStateUseCaseTest {
         )
         val idleSync = syncState(idle.uri, cloudId = null, status = SyncStatus.LOCAL_ONLY,
             queued = false, queueSource = null)
-        coEvery { localRepo.freshMedia() } returns listOf(idle)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(idle))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(idleSync))
         coEvery { syncStateRepo.getByUri(any()) } returns idleSync
@@ -935,7 +1001,7 @@ class ReconcileSyncStateUseCaseTest {
         // spent intent left over from the original backup.
         val deletedCloudSync = syncState(local.uri, cloudId = "link-del", status = SyncStatus.SYNCED,
             queued = false, queueSource = eu.akoos.photos.domain.entity.QueueSource.MANUAL)
-        coEvery { localRepo.freshMedia() } returns listOf(local)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
         // Cloud copy was deleted → the listing no longer contains "link-del".
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(deletedCloudSync))
@@ -960,7 +1026,7 @@ class ReconcileSyncStateUseCaseTest {
         val racing = localItem("uri://racing")
         val snapshot = syncState("uri://racing", cloudId = null, status = SyncStatus.LOCAL_ONLY,
             queued = false, queueSource = null)
-        coEvery { localRepo.freshMedia() } returns listOf(racing)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(racing))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(snapshot))
         coEvery { syncStateRepo.getByUri(any()) } returns snapshot
@@ -997,7 +1063,7 @@ class ReconcileSyncStateUseCaseTest {
         val pending = localItem("uri://pending")
         val snapshot = syncState("uri://pending", cloudId = null, status = SyncStatus.LOCAL_ONLY,
             queued = false, queueSource = null)
-        coEvery { localRepo.freshMedia() } returns listOf(pending)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(pending))
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(snapshot))
         coEvery { syncStateRepo.getByUri(any()) } returns snapshot

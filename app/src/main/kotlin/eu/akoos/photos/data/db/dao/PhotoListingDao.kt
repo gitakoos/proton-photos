@@ -26,6 +26,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
@@ -110,7 +111,12 @@ interface PhotoListingDao {
      *
      * The statement is [observeOwnStreamLite]'s character for character, so the rows come back in the
      * same order, ties on the capture time included.
+     *
+     * One transaction, so a listing larger than one cursor window is read from one snapshot. Outside
+     * one, each window refill runs the query again, and a write landing between two windows shifts
+     * the rows: one comes back twice, which the grid keys by link and throws on, and another is lost.
      */
+    @Transaction
     @Query(
         "SELECT linkId, shareId, volumeId, captureTime, displayName, mimeType, sizeBytes, revisionId, " +
             "contentHash, tagsCsv, durationMs FROM photo_listing WHERE userId = :userId AND " +
@@ -124,8 +130,10 @@ interface PhotoListingDao {
      *
      * The WHERE and ORDER BY must stay identical to [observeOwnStreamLite]'s. The pairing lookups keep
      * the last of the rows that share a key, so this order decides which twin a shared content hash or
-     * name resolves to.
+     * name resolves to. One transaction, for the reason [getOwnStreamLite] gives: a row the read skips
+     * is a cloud copy reconcile cannot see.
      */
+    @Transaction
     @Query(
         "SELECT linkId, contentHash, captureTime, displayName, sizeBytes FROM photo_listing " +
             "WHERE userId = :userId AND isChildOfAlbum = 0 ORDER BY captureTime DESC",

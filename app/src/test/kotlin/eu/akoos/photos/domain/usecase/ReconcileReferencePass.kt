@@ -45,8 +45,9 @@ private const val CLOUD_ABSENCE_GRACE_MS = 15 * 60 * 1000L
 
 /**
  * The reference for [ReconcileSyncStateUseCase]'s decisions and writes: the same pass, statement for
- * statement with the comments left out, reading its inputs whole (the observed device list, the
- * cloud listing as full [eu.akoos.photos.domain.entity.CloudPhoto]s) and running once per call.
+ * statement with the comments left out, reading its inputs whole (the device scan, the cloud listing
+ * as full [eu.akoos.photos.domain.entity.CloudPhoto]s) and running once per call. The gone-file rule
+ * is spelled out here rather than taken from the pass's own helper, so the two check each other.
  * [ReconcileEquivalenceTest] runs both on the same fixtures and compares every write.
  */
 internal class ReconcileReferencePass(
@@ -69,7 +70,18 @@ internal class ReconcileReferencePass(
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
         val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
 
-        val allLocalItems = localRepo.observeLocalMedia().first()
+        val scanStartMs = System.currentTimeMillis()
+        val scan = localRepo.freshScan()
+        val allLocalItems = scan.items
+        // A row's file is gone only on a complete scan that found something and not the file, and
+        // only for a row every stamp of which predates the scan.
+        fun goneFromDevice(state: SyncState, deviceUris: Set<String>): Boolean =
+            scan.complete &&
+                deviceUris.isNotEmpty() &&
+                state.localUri !in deviceUris &&
+                state.lastSyncAttemptMs < scanStartMs &&
+                state.lastSyncSuccessMs.let { it == null || it < scanStartMs } &&
+                state.queuedAt.let { it == null || it < scanStartMs }
 
         val localItems = if (backupEverything) {
             if (excludedFolders.isNotEmpty()) {
@@ -191,7 +203,7 @@ internal class ReconcileReferencePass(
                         syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
                         syncStateRepo.clearQueuedForSynced(state.localUri)
                     }
-                state.localUri !in localUriSet -> syncStateRepo.upsert(
+                goneFromDevice(state, localUriSet) -> syncStateRepo.upsert(
                     state.copy(status = SyncStatus.CLOUD_ONLY),
                     userId,
                 )
@@ -224,7 +236,7 @@ internal class ReconcileReferencePass(
 
         val allLocalUris = allLocalItems.mapTo(HashSet(allLocalItems.size)) { it.uri }
         val goneQueued = syncStateRepo.observeAll(userId).first().filter {
-            it.status == SyncStatus.LOCAL_ONLY && it.queued && it.localUri !in allLocalUris
+            it.status == SyncStatus.LOCAL_ONLY && it.queued && goneFromDevice(it, allLocalUris)
         }
         if (goneQueued.isNotEmpty()) {
             syncStateRepo.deleteLocalOnlyByUris(goneQueued.map { it.localUri })

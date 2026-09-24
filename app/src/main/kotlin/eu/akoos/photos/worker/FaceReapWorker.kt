@@ -76,15 +76,22 @@ class FaceReapWorker @AssistedInject constructor(
         val faceKeys = runCatching { faceDao.facePhotoKeysForUser(userKey) }.getOrNull().orEmpty()
         if (faceKeys.isEmpty()) return Result.success()
 
-        // Device keyspace (content:// URIs). A non-empty live set proves the MediaStore scan ran;
-        // an empty one means a revoked permission or a failed scan, which must NOT read as "every
-        // device photo is gone", so device faces stay untouched that pass.
+        // Device keyspace (content:// URIs). Only a scan that saw the whole device may stand for
+        // "these photos are gone" (see DeviceMediaScan.complete): a revoked grant, a collection that
+        // failed to read, or a read a concurrent change tore would otherwise reap the faces, named
+        // ones included, of every photo it missed. Short of that, device faces stay untouched this
+        // pass, and so they do when the scan found nothing at all.
         var liveDeviceUris = emptySet<String>()
         var deviceTrashUris = emptySet<String>()
         var deviceTrustworthy = false
         runCatching {
-            liveDeviceUris = localMediaRepo.freshMedia().map { it.uri }.toSet()
-            deviceTrashUris = localMediaRepo.observeTrashedMedia().first().map { it.uri }.toSet()
+            val scan = localMediaRepo.freshScan()
+            if (!scan.complete) {
+                Log.d(TAG, "device scan incomplete, skipping device reap")
+                return@runCatching
+            }
+            liveDeviceUris = scan.items.mapTo(HashSet(scan.items.size)) { it.uri }
+            deviceTrashUris = localMediaRepo.observeTrashedMedia().first().mapTo(HashSet()) { it.uri }
             deviceTrustworthy = liveDeviceUris.isNotEmpty()
         }
 

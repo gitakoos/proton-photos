@@ -192,6 +192,8 @@ class SyncStateSnapshot @Inject constructor(
                         gate.fresh()
                         failedReads = 0L
                     } catch (e: Throwable) {
+                        // Out of memory is no failure to retry: the next whole read would run out again.
+                        if (e is VirtualMachineError || e is kotlinx.coroutines.CancellationException) throw e
                         ensureActive()
                         onReadFailure(e)
                         val pauseMs = retryBackoffMs(failedReads++)
