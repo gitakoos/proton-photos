@@ -53,6 +53,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -83,6 +84,13 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.presentation.lock.AppLockManager
+import eu.akoos.photos.presentation.lock.AppLockSettings
+import eu.akoos.photos.presentation.lock.AppLockWizardWrite
+import eu.akoos.photos.presentation.lock.WIZARD_LOCK_TIMEOUT_SECONDS
+import eu.akoos.photos.presentation.lock.appLockWizardStart
+import eu.akoos.photos.presentation.lock.appLockWizardWrite
+import eu.akoos.photos.presentation.lock.showAppLockPrompt
 import eu.akoos.photos.presentation.onboarding.components.ProgressDots
 import eu.akoos.photos.presentation.onboarding.steps.AboutStep
 import eu.akoos.photos.presentation.onboarding.steps.AlbumMirrorStep
@@ -106,6 +114,7 @@ import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.AppColors
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -123,7 +132,11 @@ enum class BackupMode { Everything, ChooseLater, NothingForNow }
 class OnboardingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localMediaRepo: LocalMediaRepository,
+    private val appLockManager: AppLockManager,
 ) : ViewModel() {
+
+    /** Where the app lock step starts: the stored settings ([appLockWizardStart]). */
+    suspend fun appLockStart(): AppLockSettings = appLockWizardStart(appLockManager.settings.first())
 
     /**
      * Forces the device-folder list to re-query. The [folders] flow seeds an empty
@@ -234,6 +247,11 @@ class OnboardingViewModel @Inject constructor(
      * palette, and language are already persisted (live above) but we re-write them
      * here so a partial mid-wizard write paired with a process death still ends up
      * with the user's final selections after they re-walk the wizard.
+     *
+     * The app lock choice goes through the rule Settings applies, against the stored
+     * settings ([appLockWizardWrite]): one that weakens the lock waits for
+     * [reauthenticate] to report a successful authentication, and without one nothing is
+     * written and the wizard stays open, so Finish can ask again.
      */
     fun finishOnboarding(
         backupMode: BackupMode,
@@ -254,9 +272,12 @@ class OnboardingViewModel @Inject constructor(
         appLockTimeoutSeconds: Int,
         albumMirrorSelection: Set<String>,
         albumMirrorCustom: Set<String>,
+        reauthenticate: (onAuthenticated: () -> Unit) -> Unit,
         onAppliedLocale: () -> Unit,
     ) {
-        viewModelScope.launch {
+        val lockSeconds = appLockTimeoutSeconds.coerceAtLeast(0)
+
+        suspend fun commit(writeLock: Boolean) {
             context.settingsDataStore.edit { p ->
                 when (backupMode) {
                     BackupMode.Everything -> {
@@ -288,27 +309,43 @@ class OnboardingViewModel @Inject constructor(
                 p[SettingsKeys.THEME_MODE] = themeMode.storageKey
                 p[SettingsKeys.THEME_PALETTE] = palette.storageKey
                 p[SettingsKeys.LANGUAGE] = language
-                p[SettingsKeys.APP_LOCK_ENABLED] = appLockEnabled
-                p[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS] = appLockTimeoutSeconds
+                if (writeLock) {
+                    p[SettingsKeys.APP_LOCK_ENABLED] = appLockEnabled
+                    p[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS] = lockSeconds
+                }
                 // Album-mirror opt-in: persist the chosen folder names (the
                 // custom set is already a subset of the selection because every
                 // add-custom flow auto-checks the new row) and flip the
                 // migration flag so the first-run migration doesn't run
                 // afterwards and clobber the user's explicit pick. The
                 // albumMirrorCustom parameter at the call site is intentionally
-                // accepted but unused here — its values are already merged into
+                // accepted but unused here: its values are already merged into
                 // albumMirrorSelection by the step composable.
                 p[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = albumMirrorSelection
                 p[SettingsKeys.ALBUM_OPT_IN_MIGRATED] = true
                 p[SettingsKeys.ONBOARDING_COMPLETE] = true
             }
-            // Final defensive sync of the boot mirrors — both were already written by
+            // Final defensive sync of the boot mirrors. Both were already written by
             // the live setters above, but a user who skipped the Appearance step (back
             // button, system back, etc.) and let it submit defaults would otherwise
             // leave the boot store stale.
             ThemePrefsBoot.write(context, themeMode.storageKey)
             LanguagePrefsBoot.write(context, language)
             onAppliedLocale()
+        }
+
+        viewModelScope.launch {
+            val lockWrite = appLockWizardWrite(
+                current = appLockManager.settings.first(),
+                chosen = AppLockSettings(enabled = appLockEnabled, timeoutMs = lockSeconds * 1000L),
+            )
+            when (lockWrite) {
+                AppLockWizardWrite.Keep -> commit(writeLock = false)
+                AppLockWizardWrite.Write -> commit(writeLock = true)
+                AppLockWizardWrite.WriteAfterAuth -> reauthenticate {
+                    viewModelScope.launch { commit(writeLock = true) }
+                }
+            }
         }
     }
 }
@@ -347,7 +384,18 @@ fun OnboardingScreen(
     val palette by viewModel.palette.collectAsStateWithLifecycle()
     val language by viewModel.language.collectAsStateWithLifecycle()
     var appLockEnabled by rememberSaveable { mutableStateOf(false) }
-    var appLockTimeoutSeconds by rememberSaveable { mutableIntStateOf(300) }
+    var appLockTimeoutSeconds by rememberSaveable { mutableIntStateOf(WIZARD_LOCK_TIMEOUT_SECONDS) }
+    // The lock step starts from the stored settings, so walking through the wizard (a guest signing in
+    // reaches it too) keeps an enabled lock on. A choice made on the step before the read lands wins.
+    var appLockPrefilled by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (appLockPrefilled) return@LaunchedEffect
+        val start = runCatching { viewModel.appLockStart() }.getOrNull() ?: return@LaunchedEffect
+        if (appLockPrefilled) return@LaunchedEffect
+        appLockEnabled = start.enabled
+        appLockTimeoutSeconds = (start.timeoutMs / 1000L).toInt()
+        appLockPrefilled = true
+    }
 
     var notificationGranted by rememberSaveable { mutableStateOf(false) }
     var mediaGranted by rememberSaveable {
@@ -556,8 +604,14 @@ fun OnboardingScreen(
                         OnboardingStep.AppLock -> AppLockStep(
                             enabled = appLockEnabled,
                             timeoutSeconds = appLockTimeoutSeconds,
-                            onEnabledChange = { appLockEnabled = it },
-                            onTimeoutChange = { appLockTimeoutSeconds = it },
+                            onEnabledChange = {
+                                appLockEnabled = it
+                                appLockPrefilled = true
+                            },
+                            onTimeoutChange = {
+                                appLockTimeoutSeconds = it
+                                appLockPrefilled = true
+                            },
                         )
                         OnboardingStep.Notifications -> NotificationsStep(
                             granted = notificationGranted,
@@ -644,6 +698,10 @@ fun OnboardingScreen(
                                 appLockTimeoutSeconds = appLockTimeoutSeconds,
                                 albumMirrorSelection = albumMirrorSelection,
                                 albumMirrorCustom = albumMirrorCustom,
+                                // Weakening the lock asks for the app lock prompt first, as Settings does.
+                                reauthenticate = { onAuthenticated ->
+                                    showAppLockPrompt(context, onSuccess = onAuthenticated)
+                                },
                                 onAppliedLocale = onComplete,
                             )
                         }

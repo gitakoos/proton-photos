@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- The Drive SDK declares minSdk 29; the app stays minSdk 26. SdkGate keeps every SDK
+         call to Android 10+ at runtime, so its native code never runs below API 29. -->
+    <uses-sdk tools:overrideLibrary="me.proton.drive.sdk" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />

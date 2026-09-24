@@ -206,6 +206,8 @@ import eu.akoos.photos.presentation.common.DenseGridWarningDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.common.CloudMetadataSaveDrawer
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SecondaryButton
@@ -639,14 +641,28 @@ fun GalleryScreen(
         showNotificationRationale = false
     }
 
+    // A system permission dialog opens above the app lock, so a request that would show one waits for the
+    // unlock. Media access already granted answers at once without a dialog, and the first load waits on
+    // that answer, so that request goes out straight away.
+    val appLock = LocalAppLock.current
     LaunchedEffect(Unit) {
-        permissionLauncher.launch(mediaPermissions)
+        val mediaGranted = mediaPermissions.all {
+            androidx.core.content.ContextCompat.checkSelfPermission(context, it) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (mediaGranted) {
+            permissionLauncher.launch(mediaPermissions)
+        } else {
+            appLock.runWhenOpen { permissionLauncher.launch(mediaPermissions) }
+        }
         // Ask for the notification permission at most once per install. Re-launching on every return
         // to the gallery re-fired an instant denial (no dialog once the user has chosen), which
         // re-showed the "notifications off" snackbar on every tab switch or photo open.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && viewModel.shouldAskNotificationPermission()) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            viewModel.markNotificationPermissionAsked()
+            appLock.runWhenOpen {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                viewModel.markNotificationPermissionAsked()
+            }
         }
     }
 
@@ -677,7 +693,8 @@ fun GalleryScreen(
         if (state.permissionState == PermissionState.Granted) viewModel.refresh(force = false)
     }
     // One-shot MANAGE_MEDIA prompt on first cold-start with media access. Lets the editor
-    // overwrite the original photo directly. Tracked in DataStore so we don't ask again.
+    // overwrite the original photo directly. Tracked in DataStore so we don't ask again. The
+    // settings page opens above the app lock, so it waits for the unlock.
     LaunchedEffect(state.permissionState) {
         if (state.permissionState != PermissionState.Granted) return@LaunchedEffect
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@LaunchedEffect
@@ -686,10 +703,12 @@ fun GalleryScreen(
         }.getOrDefault(false)
         if (prompted) return@LaunchedEffect
         if (android.provider.MediaStore.canManageMedia(context)) return@LaunchedEffect
-        runCatching {
-            context.startActivity(
-                android.content.Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA)
-            )
+        appLock.runWhenOpen {
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA)
+                )
+            }
         }
         runCatching {
             context.settingsDataStore.edit { it[SettingsKeys.MANAGE_MEDIA_PROMPTED] = true }

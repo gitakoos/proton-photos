@@ -826,6 +826,26 @@ object SettingsKeys {
     val FACE_CLUSTER_PARAMS_VERSION_KEY = intPreferencesKey("face_cluster_params_version")
 
     /**
+     * This install's machine-learning sync id, a random UUID created the first time it is asked for.
+     * It names the install's own snapshot files in the Drive "ML data" folder
+     * ([eu.akoos.photos.data.mlsync.MlDriveNaming.fileName]), which is how every install of an account
+     * keeps its own pair and how another device tells them apart on restore. It belongs to the install
+     * rather than the account, so sign-out leaves it in place: a fresh id would strand the files
+     * already written as a second, stale device. Read and created through
+     * [eu.akoos.photos.data.mlsync.MlDriveStore.deviceId].
+     */
+    val ML_SYNC_DEVICE_ID = stringPreferencesKey("ml_sync_device_id")
+
+    /**
+     * A random id of this install, created once and kept across restarts and sign-outs, from which each
+     * account's Drive SDK client id is derived, so an upload draft the app left behind before a restart
+     * is recognised as its own instead of blocking the next attempt as another client's, while two
+     * accounts on one install never share an id. Never handed to the SDK as it is. Read and created
+     * through [eu.akoos.photos.data.sdk.SdkDriveClientProvider].
+     */
+    val DRIVE_SDK_CLIENT_UID = stringPreferencesKey("drive_sdk_client_uid")
+
+    /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +
      * [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator]; the production

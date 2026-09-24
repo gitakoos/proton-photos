@@ -161,6 +161,36 @@ internal fun shouldTombstoneOnNullSource(isLocalOnly: Boolean, loadTimedOut: Boo
     isLocalOnly || loadTimedOut
 
 /**
+ * The (device key, cloud key) pairs whose embedding has to follow a photo backed up after it was
+ * embedded: every Synced item whose device content URI still holds a row, paired with the linkId the
+ * item is keyed by now. A cloud key that already holds a row is not filtered out, unlike the face
+ * walk's pairing: [ImageEmbeddingDao.rekeyPhotos] keeps that row and drops the device one, so no
+ * device-keyed row is left behind. A guest lists no Synced item, so a guest never pairs anything.
+ * Pure so the walk's filter is unit-tested without a database.
+ */
+internal fun semanticRekeyPairs(
+    items: List<GalleryItem>,
+    embeddedKeys: Set<String>,
+): List<Pair<String, String>> =
+    items.asSequence()
+        .filterIsInstance<GalleryItem.Synced>()
+        .map { it.local.uri to it.cloud.linkId }
+        .filter { (oldKey, newKey) -> oldKey != newKey && oldKey in embeddedKeys }
+        .toList()
+
+/**
+ * Mirrors a landed backup re-key into the walk's skip set: each device key no longer holds a row and
+ * each cloud key does (moved there, or kept there), so the Synced photo reads as embedded and is not
+ * queued for a second embedding.
+ */
+internal fun MutableSet<String>.applyRekeyPairs(pairs: List<Pair<String, String>>) {
+    for ((oldKey, newKey) in pairs) {
+        remove(oldKey)
+        add(newKey)
+    }
+}
+
+/**
  * Walks the whole library once and stores one CLIP image embedding per photo, in the background, only
  * while the AI features and semantic search are both on.
  *
@@ -171,7 +201,9 @@ internal fun shouldTombstoneOnNullSource(isLocalOnly: Boolean, loadTimedOut: Boo
  * photos it has never looked at. A read error on one photo skips that photo and never aborts the walk.
  *
  * Photo identity is [GalleryItem.stableId] (a cloud linkId or a device content URI), stored on each
- * [ImageEmbeddingEntity.photoKey], so a search hit joins straight back to the timeline. The row's
+ * [ImageEmbeddingEntity.photoKey], so a search hit joins straight back to the timeline. A device photo
+ * embedded under its content URI and backed up since keeps its vector: the start of the next walk
+ * moves the row to the linkId its Synced item now carries, so the photo is not embedded twice. The row's
  * presence is the scan marker: a successful embed writes the real vector, a decode-unloadable photo
  * writes a zero-vector tombstone so it is not re-decoded every pass, and a photo that only failed
  * transiently (off Wi-Fi, out of budget, a slow download, or an inference wedge) writes nothing and
@@ -335,6 +367,10 @@ class SemanticIndexingScheduler @Inject constructor(
             }.getOrDefault(emptyList())
             val alreadyScanned = runCatching { imageEmbeddingDao.scannedKeysForUser(account).toHashSet() }
                 .getOrDefault(HashSet())
+            // A device photo backed up to Drive re-appears as Synced under its cloud linkId: its
+            // embedding follows it there before the pending set is taken, instead of the walk
+            // embedding the photo a second time.
+            rekeyBackedUpPhotos(account, items, alreadyScanned)
             val pending = items.filter { it.stableId !in alreadyScanned }
             val total = pending.size
             // Progress is cumulative across the auto-continue passes, not per pass: the total is the whole
@@ -563,6 +599,26 @@ class SemanticIndexingScheduler @Inject constructor(
     }
 
     private fun account(userId: UserId?): String = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+
+    /**
+     * Moves each backed-up photo's embedding from the device content URI it was embedded under to the
+     * linkId its Synced item now carries, then mirrors that into [embeddedKeys] so the pending set sees
+     * the photo as embedded. When the linkId already holds a row, that row is kept and the URI row is
+     * dropped. A zero-vector tombstone moves too, so a device file that would not decode is not fetched
+     * again from the cloud every pass once it is backed up. A failure is logged and never stops the
+     * walk; the next walk derives the pairs afresh from the table.
+     */
+    private suspend fun rekeyBackedUpPhotos(
+        account: String,
+        items: List<GalleryItem>,
+        embeddedKeys: MutableSet<String>,
+    ) {
+        val pairs = semanticRekeyPairs(items, embeddedKeys)
+        if (pairs.isEmpty()) return
+        runCatching { imageEmbeddingDao.rekeyPhotos(account, pairs) }
+            .onSuccess { embeddedKeys.applyRekeyPairs(pairs) }
+            .onFailure { Log.w(TAG, "embedding rekey on backup failed: ${it.message}") }
+    }
 
     /**
      * A bounded source bitmap for [item]. A device file (LocalOnly, or the local twin of a Synced pair)

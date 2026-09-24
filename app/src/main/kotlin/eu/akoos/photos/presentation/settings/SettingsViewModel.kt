@@ -36,8 +36,10 @@ import androidx.work.WorkManager
 import coil.imageLoader
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -80,6 +82,11 @@ import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceIndexingState
 import eu.akoos.photos.data.face.FaceModelManager
 import eu.akoos.photos.data.face.FaceModelPreparation
+import eu.akoos.photos.data.mlsync.FACE_WALK_IDLE_TIMEOUT_MS
+import eu.akoos.photos.data.mlsync.MlSyncFacePause
+import eu.akoos.photos.data.mlsync.MlSyncSignOut
+import eu.akoos.photos.data.mlsync.faceIndexingPausedByUser
+import eu.akoos.photos.data.mlsync.faceWalkResumes
 import eu.akoos.photos.data.ocr.OcrModelComponent
 import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.ocr.OcrModelOutcome
@@ -103,6 +110,8 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.presentation.lock.AppLockManager
+import eu.akoos.photos.presentation.lock.AppLockSettings
+import eu.akoos.photos.presentation.lock.appLockChangeNeedsAuth
 import eu.akoos.photos.service.ScreenshotOverlayService
 import eu.akoos.photos.domain.entity.UploadCompressionTier
 import kotlinx.coroutines.flow.combine
@@ -111,7 +120,6 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.model.PersonSummary
-import eu.akoos.photos.domain.usecase.ClusterFacesUseCase
 import eu.akoos.photos.domain.usecase.ExportFaceIndexUseCase
 import eu.akoos.photos.domain.usecase.FaceIndexImportOutcome
 import eu.akoos.photos.domain.usecase.ImportFaceIndexUseCase
@@ -129,6 +137,7 @@ import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.HealthBlockReason
 import eu.akoos.photos.util.heavyMlBlockReason
 import eu.akoos.photos.util.retryOnDbTear
+import eu.akoos.photos.widget.PhotoWidgetUpdateWorker
 import eu.akoos.photos.worker.FreeUpSpaceWorker
 import eu.akoos.photos.worker.SyncWorker
 import javax.inject.Inject
@@ -146,6 +155,16 @@ data class FaceIndexingUi(
     val blockReason: HealthBlockReason,
     val actionEnabled: Boolean,
 )
+
+/**
+ * Whether face scanning reads as paused, with the Resume action on the face card and "Paused" on the
+ * machine-learning page's face row: whenever the pause switch is on ([pauseSwitchOn]), whoever turned it on
+ * (the Pause button, the notification's Stop, or a restore from Drive), and whenever the scheduler reports its
+ * walk paused ([state]), however few photos are left. A walk that stopped at the switch reports 0 of 0 photos,
+ * which the bulk-scan controls alone never show, so a paused scan always has its way back here.
+ */
+internal fun faceScanPausedRow(pauseSwitchOn: Boolean, state: FaceIndexingState): Boolean =
+    pauseSwitchOn || state == FaceIndexingState.Paused
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -176,7 +195,6 @@ class SettingsViewModel @Inject constructor(
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
-    private val clusterFacesUseCase: ClusterFacesUseCase,
     private val exportFaceIndexUseCase: ExportFaceIndexUseCase,
     private val importFaceIndexUseCase: ImportFaceIndexUseCase,
     private val observePeopleUseCase: ObservePeopleUseCase,
@@ -186,6 +204,7 @@ class SettingsViewModel @Inject constructor(
     private val semanticIndexingScheduler: SemanticIndexingScheduler,
     private val modelDownloadState: ModelDownloadState,
     private val mlWalkGate: MlWalkGate,
+    private val mlSyncSignOut: MlSyncSignOut,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -297,6 +316,14 @@ class SettingsViewModel @Inject constructor(
             SharingStarted.WhileSubscribed(5_000L),
             FaceIndexingUi(FaceIndexingState.Idle, 0, 0, HealthBlockReason.NONE, actionEnabled = true),
         )
+
+    /** Whether the face scan's pause switch is on, read from the store itself: the scheduler reports Paused
+     *  only once a walk in this process has stopped at the switch ([faceScanPausedRow]). */
+    val faceIndexingPaused: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.FACE_INDEXING_PAUSED] == true }
+        .catch { emit(false) }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
 
     /** How many people the face clustering has grouped for the active account, or for the guest's
      *  local partition when signed out. Re-resolves on an account switch so the panel never carries
@@ -1602,6 +1629,18 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
+     * Resume the face scan from the face card's paused row, whoever paused it. Lifts the switch together with
+     * any hold a restore from Drive kept on it, then starts a walk for the signed-in account (the guest's local
+     * partition when signed out), even in a process where no walk has run yet that an unpause could restart.
+     */
+    fun resumeFaceIndexing() {
+        viewModelScope.launch {
+            MlSyncFacePause.lift(context)
+            faceIndexingScheduler.requestIndex(accountManager.getPrimaryUserId().first())
+        }
+    }
+
+    /**
      * Resume the face scan when the recognition screen opens, so a walk the OS killed (app swiped from
      * Recents) continues without waiting for a pull-to-refresh. Routes through the paused-respecting
      * [DrivePhotoRepository.backfillFaces] -> indexAll, which bails while the user's pause is set, so it
@@ -1757,8 +1796,16 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    /** Read a face index from [uri] and fold it into the account, then recluster so the imported faces
-     *  form people. Reports the counts, or a failure, through [faceTransferMsg]. */
+    /**
+     * Read a face index from [uri] and fold it into the account, then regroup so the imported faces form
+     * people. Reports the counts, or a failure, through [faceTransferMsg].
+     *
+     * The face walk is stood down around the import the way a restore from Drive does it: paused, as a hold
+     * ([MlSyncFacePause]) so a pause a killed import leaves never reads as the user's, then waited out, and
+     * the import itself runs inside the scheduler's import fence, so no pass re-detects the file's photos and
+     * writes over their faces and names. The regroup comes next, awaited, and the walk is handed back last,
+     * unless the user had paused it before the import ([faceWalkResumes]).
+     */
     fun importFaceIndex(uri: Uri) {
         viewModelScope.launch {
             _faceTransferInProgress.value = true
@@ -1767,40 +1814,43 @@ class SettingsViewModel @Inject constructor(
                     _faceTransferMsg.value = context.getString(R.string.settings_ai_transfer_failed)
                     return@launch
                 }
-                // Stand any in-flight walk down first, so it cannot re-detect and overwrite the faces we are
-                // about to import (which would wipe their name labels), mirroring rescan's order.
-                faceIndexingScheduler.reset()
-                val result = runCatching {
-                    context.contentResolver.openInputStream(uri)?.use { importFaceIndexUseCase(it) }
-                }.getOrNull()
-                when (result) {
-                    is FaceIndexImportOutcome.Success -> {
-                        clusterFacesUseCase(userId)
-                        _faceTransferMsg.value = context.getString(
-                            R.string.settings_ai_import_done, result.faces, result.people,
-                        )
-                        // Resume indexing: the imported photos are marked scanned, so the walk skips them and
-                        // only picks up anything new, reclustering at the end without disturbing the faces.
-                        faceIndexingScheduler.requestIndex(userId)
+                val pause = MlSyncFacePause.read(context)
+                val pausedByUser = faceIndexingPausedByUser(pause?.switchOn, pause?.held)
+                val held = MlSyncFacePause.hold(context)
+                try {
+                    if (held) faceIndexingScheduler.setPaused(true)
+                    withTimeoutOrNull(FACE_WALK_IDLE_TIMEOUT_MS) { faceIndexingScheduler.awaitIdle() }
+                    val result = faceIndexingScheduler.withImportFence {
+                        runCatching {
+                            context.contentResolver.openInputStream(uri)?.use { importFaceIndexUseCase(it) }
+                        }.getOrNull()
                     }
-                    is FaceIndexImportOutcome.ReattachScheduled -> {
-                        // A different model: the names are staged, and a fresh scan puts them back on this
-                        // device's own faces by where each one sat, so start indexing and say what will happen.
-                        _faceTransferMsg.value =
+                    // Forced and awaited, so the people are rebuilt before the walk comes back, even while the
+                    // user keeps it paused. A names-only import has no faces to group until the scan finds them.
+                    if (result is FaceIndexImportOutcome.Success) faceIndexingScheduler.regroupNow(userId)
+                    _faceTransferMsg.value = when (result) {
+                        is FaceIndexImportOutcome.Success ->
+                            context.getString(R.string.settings_ai_import_done, result.faces, result.people)
+                        // A different model: the names are staged, and the scan puts them back on this device's
+                        // own faces by where each one sat.
+                        is FaceIndexImportOutcome.ReattachScheduled ->
                             context.getString(R.string.settings_ai_import_reattach, result.people)
-                        faceIndexingScheduler.requestIndex(userId)
+                        // A wrong account is a mismatch the user can act on, unlike the generic failure an
+                        // unreadable or missing file (a null result) gets.
+                        FaceIndexImportOutcome.WrongAccount ->
+                            context.getString(R.string.settings_ai_import_wrong_account)
+                        else -> context.getString(R.string.settings_ai_transfer_failed)
                     }
-                    // A wrong account is a mismatch the user can act on, unlike the generic failure an
-                    // unreadable or missing file (a null result) gets.
-                    FaceIndexImportOutcome.WrongAccount -> {
-                        _faceTransferMsg.value = context.getString(R.string.settings_ai_import_wrong_account)
-                        // A refused import folded in no faces, so re-arm the walk the reset above stood
-                        // down; otherwise a rejected file leaves indexing idle.
-                        faceIndexingScheduler.requestIndex(userId)
-                    }
-                    else -> {
-                        _faceTransferMsg.value = context.getString(R.string.settings_ai_transfer_failed)
-                        faceIndexingScheduler.requestIndex(userId)
+                } finally {
+                    // Handed back however the import ended, a cancel included. The imported photos are marked
+                    // scanned, so the walk skips them and only picks up what is new.
+                    withContext(NonCancellable) {
+                        if (faceWalkResumes(held, pausedByUser)) {
+                            MlSyncFacePause.lift(context)
+                            if (accountManager.getPrimaryUserId().firstOrNull() == userId) {
+                                faceIndexingScheduler.requestIndex(userId)
+                            }
+                        }
                     }
                 }
             } finally {
@@ -1998,17 +2048,41 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun setAppLockEnabled(enabled: Boolean) {
-        viewModelScope.launch {
+    /**
+     * Turns the app lock on or off. Turning it off weakens the lock, so the change waits for
+     * [reauthenticate] to report a successful authentication and is dropped without one.
+     */
+    fun setAppLockEnabled(enabled: Boolean, reauthenticate: (onAuthenticated: () -> Unit) -> Unit) {
+        changeAppLock(reauthenticate, change = { it.copy(enabled = enabled) }) {
             appLockManager.setLockEnabled(enabled)
             _uiState.update { it.copy(appLockEnabled = enabled) }
         }
     }
 
-    fun setAppLockTimeoutSeconds(seconds: Int) {
-        viewModelScope.launch {
+    /** Sets the app lock timeout. A longer one weakens the lock and waits for [reauthenticate] the same way. */
+    fun setAppLockTimeoutSeconds(seconds: Int, reauthenticate: (onAuthenticated: () -> Unit) -> Unit) {
+        changeAppLock(reauthenticate, change = { it.copy(timeoutMs = seconds.coerceAtLeast(0) * 1000L) }) {
             appLockManager.setLockTimeoutSeconds(seconds)
             _uiState.update { it.copy(appLockTimeoutSeconds = seconds) }
+        }
+    }
+
+    /**
+     * Writes an app lock change, first through [reauthenticate] when [appLockChangeNeedsAuth] finds that it
+     * weakens the lock. The decision reads the stored settings rather than this screen's copy of them.
+     */
+    private fun changeAppLock(
+        reauthenticate: (onAuthenticated: () -> Unit) -> Unit,
+        change: (AppLockSettings) -> AppLockSettings,
+        write: suspend () -> Unit,
+    ) {
+        viewModelScope.launch {
+            val current = appLockManager.settings.first()
+            if (appLockChangeNeedsAuth(current, change(current))) {
+                reauthenticate { viewModelScope.launch { write() } }
+            } else {
+                write()
+            }
         }
     }
 
@@ -2080,6 +2154,14 @@ class SettingsViewModel @Inject constructor(
     fun signOut() {
         viewModelScope.launch {
             accountManager.getPrimaryUserId().firstOrNull()?.let { userId ->
+                // 0. Before anything else, and awaited: stop an ML sync save or restore. It calls into
+                //    this account's Drive client and writes its face data, and the account stays the
+                //    signed-in one until the very end below, so the run would not stop on its own before
+                //    the client is freed and the faces are wiped. Then cancel the widget updates, so none
+                //    draws this account's photo onto the home screen while the account is leaving; the
+                //    widgets get them back once the account is gone (PhotoWidgetSignOut).
+                runCatching { mlSyncSignOut.stopFor(userId) }
+                runCatching { PhotoWidgetUpdateWorker.cancelAll(context) }
                 // 1. Stop anything that could re-decrypt content back into the caches we are about
                 //    to wipe, and stop the persistent process-keeper service.
                 runCatching {
@@ -2096,20 +2178,15 @@ class SettingsViewModel @Inject constructor(
                 // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
                 //    thumbnail of the signed-out user stays readable, and drop the diagnostics
                 //    buffers, which are process-lifetime and would otherwise carry into a sign-in as
-                //    a different user. The offline blobs, the hidden vault and the key material are
-                //    wiped inside clearCacheForSignOut above so EVERY sign-out route (including a
-                //    server-side force-logout) covers them; MediaStore originals and the encrypted
-                //    in-flight upload spill are left alone.
+                //    a different user. The offline blobs, the hidden vault, the widgets' bitmaps and
+                //    the key material are wiped inside clearCacheForSignOut above so EVERY sign-out
+                //    route (including a server-side force-logout) covers them; MediaStore originals
+                //    and the encrypted in-flight upload spill are left alone.
                 runCatching {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         listOf("thumbnails", "fullres", "fullres-session", "editor", "video_editor", "motion")
                             .forEach { File(context.cacheDir, it).deleteRecursively() }
                         context.cacheDir.listFiles { f -> f.name.startsWith("album_dl_") }?.forEach { it.delete() }
-                        // Sign-out only: a widget's cached bitmap is a decrypted cloud photo, and the
-                        // CLOUD_* modes cannot re-fetch one without auth. Sweeping it on any other
-                        // cache-clear route would blank the launcher with nothing able to redraw it.
-                        context.cacheDir.listFiles { f -> f.name.startsWith("widget_") }?.forEach { it.delete() }
-                        eu.akoos.photos.widget.PhotoWidget.clearBitmapCache()
                         val loader = context.imageLoader
                         loader.memoryCache?.clear()
                         loader.diskCache?.clear()
@@ -2117,23 +2194,6 @@ class SettingsViewModel @Inject constructor(
                         eu.akoos.photos.util.PerfDiagnostics.clear()
                         eu.akoos.photos.util.ImportDiagnostics.clear()
                         File(context.filesDir, "diagnostics").deleteRecursively()
-                        // Drop the Glance state still pointing at the swept bitmaps so each widget
-                        // redraws its placeholder now rather than on its next natural tick.
-                        val glanceManager = androidx.glance.appwidget.GlanceAppWidgetManager(context)
-                        glanceManager.getGlanceIds(eu.akoos.photos.widget.PhotoWidget::class.java)
-                            .forEach { glanceId ->
-                                androidx.glance.appwidget.state.updateAppWidgetState(
-                                    context,
-                                    androidx.glance.state.PreferencesGlanceStateDefinition,
-                                    glanceId,
-                                ) { prefs ->
-                                    prefs.toMutablePreferences().also { mp ->
-                                        mp.remove(eu.akoos.photos.widget.PhotoWidgetKeys.CACHED_BITMAP_PATH)
-                                        mp.remove(eu.akoos.photos.widget.PhotoWidgetKeys.CURRENT_URI)
-                                    }
-                                }
-                                eu.akoos.photos.widget.PhotoWidget().update(context, glanceId)
-                            }
                     }
                 }
                 // 4. Clear account-tied DataStore state so a sign-in as a different user can't
@@ -2141,10 +2201,9 @@ class SettingsViewModel @Inject constructor(
                 //    ids, or favourite list. We keep UI preferences (theme, palette, language) and
                 //    machine-level flags (onboarding-complete, app-lock, update throttle).
                 runCatching { AccountScopedPreferences.clear(context, userId) }
-                // Reset the MainActivity-held lock timestamps BEFORE disableAccount triggers
-                // the route change. A re-login by a different user inherits a fresh
-                // sinceBackground window so the next resume can't fire the previous user's
-                // re-lock check.
+                // End the app lock's post-unlock grace in AppLockSession, which holds the lock
+                // timestamps, BEFORE disableAccount triggers the route change, so the stop and
+                // start of the sign-in flow is judged by the lock timeout alone.
                 appLockManager.notifyResetLockTimestamps()
                 accountManager.disableAccount(userId)
             }

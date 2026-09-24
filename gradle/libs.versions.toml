@@ -4,6 +4,7 @@ kotlin = "2.2.21"
 ksp = "2.2.21-2.0.5"
 hilt = "2.58"
 protonCore = "36.6.0"
+drive-sdk = "0.24.0"
 room = "2.7.1"
 lifecycle = "2.8.3"
 navigation = "2.8.4"
@@ -52,6 +53,7 @@ proton-plan = { module = "me.proton.core:plan", version.ref = "protonCore" }
 proton-presentation = { module = "me.proton.core:presentation", version.ref = "protonCore" }
 proton-presentation-compose = { module = "me.proton.core:presentation-compose", version.ref = "protonCore" }
 proton-feature-flag = { module = "me.proton.core:feature-flag", version.ref = "protonCore" }
+proton-drive-sdk = { module = "me.proton.drive:sdk", version.ref = "drive-sdk" }
 
 # Proton Core dagger/hilt modules (auto-install Hilt bindings)
 proton-network-dagger = { module = "me.proton.core:network-dagger", version.ref = "protonCore" }

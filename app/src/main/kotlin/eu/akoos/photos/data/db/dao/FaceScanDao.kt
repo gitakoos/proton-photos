@@ -42,6 +42,24 @@ interface FaceScanDao {
     @Query("SELECT photoKey FROM face_scan WHERE userId = :userId")
     suspend fun scannedKeysForUser(userId: String): List<String>
 
+    /** Which of [photoKeys] the account holds a scan marker for, so a face snapshot import can tell the
+     *  photos this device already scanned from the ones it has not. Chunked for the SQL host-variable
+     *  limit. */
+    suspend fun scannedKeysAmong(userId: String, photoKeys: Collection<String>): List<String> {
+        val out = ArrayList<String>()
+        photoKeys.toSet().forEachSqlChunk { out += scannedKeysAmongChunk(userId, it) }
+        return out
+    }
+
+    @Query("SELECT photoKey FROM face_scan WHERE userId = :userId AND photoKey IN (:photoKeys)")
+    suspend fun scannedKeysAmongChunk(userId: String, photoKeys: List<String>): List<String>
+
+    /** The account's next [limit] scan markers after [afterKey] in key order, so a face snapshot export
+     *  walks a library of any size a page at a time along the primary key. Start from an empty
+     *  [afterKey]. */
+    @Query("SELECT * FROM face_scan WHERE userId = :userId AND photoKey > :afterKey ORDER BY photoKey LIMIT :limit")
+    suspend fun markersAfter(userId: String, afterKey: String, limit: Int): List<FaceScanEntity>
+
     /** Whether one photo has already been scanned, so an on-demand pass can skip a photo the walk (or an
      *  earlier on-demand pass) already looked at. */
     @Query("SELECT EXISTS(SELECT 1 FROM face_scan WHERE userId = :userId AND photoKey = :photoKey)")

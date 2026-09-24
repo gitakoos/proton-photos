@@ -37,7 +37,8 @@ import java.util.Base64
  * Coverage for the portable face-index codec: the pure body serialiser, the encrypted v3 envelope, the
  * read routing that binds an index to its account and model, the refusal of the older unauthenticated v1
  * layout, and the v2 body still read with its absent removed bit and cover defaulted. The pure merge
- * decisions that keep a local removal or name from being undone on import are covered directly.
+ * decisions that keep a local removal or name from being undone on import are covered directly, as is
+ * the rule for which photo keys may leave the device.
  *
  * The real crypto (gopenpgp) is native and absent from a JVM unit test, so it is stood in by a trivial
  * reversible transform: encrypt = base64, decrypt-and-verify = its inverse wrapped as [FaceIndexDecrypt.Opened],
@@ -285,5 +286,16 @@ class FaceIndexCodecTest {
         val counting: (String) -> FaceIndexDecrypt = { decryptCalls++; decrypt(it) }
         assertEquals(FaceIndexRead.Unreadable, read(bytes, decryptWith = counting))
         assertEquals(0, decryptCalls)
+    }
+
+    @Test
+    fun `only a Drive link id is a portable face key`() {
+        assertTrue(isPortableFaceKey("Wz6kFGdwAQ0ey5lEcf5nNpVcqaBb9QZMMM4WIfrfXqjuK0fs3GqRiK5VHXZIBbcfSrnUjvdmRZl4Fw43ytsZoQ=="))
+        assertTrue(isPortableFaceKey("AbC-123_xyz=="))
+        assertFalse(isPortableFaceKey("content://media/external/images/media/1000012591"))
+        // A photo in the hidden area is keyed by its file path on this device: its faces and names stay here.
+        assertFalse(isPortableFaceKey("file:///data/user/0/eu.akoos.photos/files/hidden/IMG_0042.jpg"))
+        assertFalse(isPortableFaceKey("file:///data/user/0/eu.akoos.photos/files/hidden/IMG_0042.jpg#0"))
+        assertFalse(isPortableFaceKey(""))
     }
 }

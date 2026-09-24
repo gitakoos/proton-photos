@@ -151,6 +151,7 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
+import eu.akoos.photos.presentation.lock.showAppLockPrompt
 import eu.akoos.photos.util.HealthBlockReason
 import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.presentation.settings.components.ActionRow
@@ -1059,14 +1060,20 @@ fun AiSettingsScreen(
                 // Face recognition runs fully on-device, so it works without an account too; a guest's
                 // face and person rows go under a local partition. Like semantic search, its toggle and
                 // controls live on the dedicated sub-page reached through this row; the subtitle reflects
-                // the live scan state while a walk runs, and the feature description while it is off.
+                // the live scan state while a walk runs, and the feature description while it is off. A
+                // paused scan reads as paused whoever paused it, and the sub-page holds its Resume.
                 RowDivider()
                 val faceProgress by viewModel.faceIndexingProgress.collectAsStateWithLifecycle()
                 val faceGroupCount by viewModel.faceGroupCount.collectAsStateWithLifecycle()
+                val facePauseSwitch by viewModel.faceIndexingPaused.collectAsStateWithLifecycle()
                 NavRow(
                     label = stringResource(R.string.settings_ai_face_toggle),
                     description = if (state.faceEnabled) {
-                        faceRowSubtitle(faceProgress.state, faceGroupCount)
+                        faceRowSubtitle(
+                            faceProgress.state,
+                            faceGroupCount,
+                            paused = faceScanPausedRow(facePauseSwitch, faceProgress.state),
+                        )
                     } else {
                         stringResource(R.string.settings_ai_face_desc)
                     },
@@ -1118,20 +1125,24 @@ fun AiSettingsScreen(
             }
 
         }
+        // Save and Restore of the face and search data through the account's Drive, so another device of
+        // the account restores them instead of scanning again. The section hides itself for a guest, while
+        // the features are off, and on a device the Drive client does not run on.
+        MlDriveSyncSection(mlEnabled = state.aiFeaturesEnabled)
         Spacer(Modifier.height(20.dp))
     }
 }
 
-/** Subtitle for the Face recognition row: the live scan state while a walk runs or is paused,
- *  otherwise the count of groups found (or the feature description when none), so the row reads as a
- *  result when idle. */
+/** Subtitle for the Face recognition row: "Paused" whenever the scan is paused ([paused], see
+ *  [faceScanPausedRow]), the live scan state while a walk runs, otherwise the count of groups found (or the
+ *  feature description when none), so the row reads as a result when idle. */
 @Composable
-private fun faceRowSubtitle(state: FaceIndexingState, groupCount: Int): String = when (state) {
-    FaceIndexingState.Running, FaceIndexingState.WaitingModel ->
+private fun faceRowSubtitle(state: FaceIndexingState, groupCount: Int, paused: Boolean): String = when {
+    paused -> stringResource(R.string.settings_ai_indexing_paused)
+    state == FaceIndexingState.Running || state == FaceIndexingState.WaitingModel ->
         stringResource(R.string.settings_ai_indexing_running)
-    FaceIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
-    else -> if (groupCount == 0) stringResource(R.string.settings_ai_face_desc)
-        else stringResource(R.string.settings_ai_groups_found, groupCount)
+    groupCount == 0 -> stringResource(R.string.settings_ai_face_desc)
+    else -> stringResource(R.string.settings_ai_groups_found, groupCount)
 }
 
 /** Subtitle for the Semantic search row: the live scan state while a walk runs or is paused, otherwise
@@ -1188,6 +1199,7 @@ fun FaceRecognitionScreen(
         )
     }
     val faceUi by viewModel.faceIndexingUi.collectAsStateWithLifecycle()
+    val facePauseSwitch by viewModel.faceIndexingPaused.collectAsStateWithLifecycle()
     val faceMlActiveRail by viewModel.mlActiveRail.collectAsStateWithLifecycle()
     val faceGroups by viewModel.faceGroups.collectAsStateWithLifecycle()
     val faceCount by viewModel.faceCount.collectAsStateWithLifecycle()
@@ -1264,12 +1276,14 @@ fun FaceRecognitionScreen(
             Spacer(Modifier.height(20.dp))
             FaceStatusCard(
                 ui = faceUi,
+                paused = faceScanPausedRow(facePauseSwitch, faceUi.state),
                 groups = faceGroups,
                 faceCount = faceCount,
                 // Running state but the semantic walk holds the shared model gate = standing by behind it.
                 waitingForOther = faceMlActiveRail == eu.akoos.photos.util.MlRail.SEMANTIC &&
                     faceUi.state == FaceIndexingState.Running,
                 onSetPaused = viewModel::setFaceIndexingPaused,
+                onResume = viewModel::resumeFaceIndexing,
                 onOpenPerson = onOpenPerson,
             )
             Spacer(Modifier.height(20.dp))
@@ -1359,16 +1373,18 @@ fun FaceRecognitionScreen(
 /**
  * Status of the face scan: the groups found (named and not-yet-named) and the faces detected, a one-line
  * state label, a progress bar only while a walk is running or paused, a preview row of the groups where
- * a named person opens their page and a nameless group the name-or-merge sheet, and a pause / resume
- * control while a walk is live.
+ * a named person opens their page and a nameless group the name-or-merge sheet, a pause control while a
+ * bulk walk is live, and, whenever the scan is [paused] for any reason, the paused row with Resume.
  */
 @Composable
 private fun FaceStatusCard(
     ui: FaceIndexingUi,
+    paused: Boolean,
     groups: List<eu.akoos.photos.presentation.gallery.PersonUi>,
     faceCount: Int,
     waitingForOther: Boolean,
     onSetPaused: (Boolean) -> Unit,
+    onResume: () -> Unit,
     onOpenPerson: (Long) -> Unit,
 ) {
     val colors = AppColors.current
@@ -1396,15 +1412,17 @@ private fun FaceStatusCard(
     // A status line only appears for a bulk index (or while waiting for the model); an idle or finished
     // scan, and a small background residual, show just the people summary with no "not started" wording.
     // Standing by behind the semantic walk (they share one model gate) takes precedence over the plain
-    // running label, so a frozen count reads as the wait it is.
+    // running label, so a frozen count reads as the wait it is. A paused scan always says so, however few
+    // photos are left, as it does not continue until resumed.
     val stateLabel = when {
+        paused -> stringResource(R.string.settings_ai_indexing_paused)
         state == FaceIndexingState.WaitingModel -> stringResource(R.string.settings_ai_indexing_waiting)
         !faceBulkIndex -> null
         waitingForOther -> stringResource(R.string.settings_ai_indexing_waiting_other)
-        else -> healthLabel ?: when (state) {
-            FaceIndexingState.Running -> stringResource(R.string.settings_ai_indexing_running)
-            FaceIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
-            else -> null
+        else -> healthLabel ?: if (state == FaceIndexingState.Running) {
+            stringResource(R.string.settings_ai_indexing_running)
+        } else {
+            null
         }
     }
     val showBar = faceBulkIndex
@@ -1435,6 +1453,14 @@ private fun FaceStatusCard(
             if (stateLabel != null) {
                 Spacer(Modifier.height(4.dp))
                 Text(stateLabel, color = colors.fgMute, fontSize = 12.5.sp)
+            }
+            if (paused) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    stringResource(R.string.settings_ai_indexing_paused_desc),
+                    color = colors.fgMute,
+                    fontSize = 12.5.sp,
+                )
             }
 
             if (showBar) {
@@ -1477,31 +1503,29 @@ private fun FaceStatusCard(
             }
 
             // No manual start: indexing runs automatically and new photos are picked up on their own, so the
-            // only control is to pause a live bulk scan or resume a paused one. Idle, finished, a small
-            // background residual, and model-waiting show no button at all.
-            if (faceBulkIndex) {
-                when (state) {
-                    FaceIndexingState.Running -> {
-                        Spacer(Modifier.height(16.dp))
-                        PrimaryButton(
-                            label = stringResource(R.string.settings_ai_pause),
-                            icon = Icons.Default.Pause,
-                            onClick = { onSetPaused(true) },
-                            enabled = ui.actionEnabled,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    FaceIndexingState.Paused -> {
-                        Spacer(Modifier.height(16.dp))
-                        PrimaryButton(
-                            label = stringResource(R.string.settings_ai_resume),
-                            icon = Icons.Default.PlayArrow,
-                            onClick = { onSetPaused(false) },
-                            enabled = ui.actionEnabled,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    else -> {}
+            // only controls are Pause on a live bulk scan and Resume on a paused one. Resume shows whenever
+            // the scan is paused, whoever paused it and however little is left, and always lifts the pause:
+            // a health block only parks the resumed walk. Idle, finished, a small background residual, and
+            // model-waiting show no button at all.
+            when {
+                paused -> {
+                    Spacer(Modifier.height(16.dp))
+                    PrimaryButton(
+                        label = stringResource(R.string.settings_ai_resume),
+                        icon = Icons.Default.PlayArrow,
+                        onClick = onResume,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                faceBulkIndex && state == FaceIndexingState.Running -> {
+                    Spacer(Modifier.height(16.dp))
+                    PrimaryButton(
+                        label = stringResource(R.string.settings_ai_pause),
+                        icon = Icons.Default.Pause,
+                        onClick = { onSetPaused(true) },
+                        enabled = ui.actionEnabled,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
@@ -2422,11 +2446,15 @@ fun PrivacySecuritySettingsScreen(
         SectionLabel(stringResource(R.string.settings_security))
         Spacer(Modifier.height(8.dp))
         SettingsCard {
+            // Turning the lock off or lengthening its timeout asks for the app lock prompt first.
+            val context = LocalContext.current
             ToggleRow(
                 label = stringResource(R.string.settings_app_lock),
                 description = stringResource(R.string.settings_app_lock_desc),
                 checked = state.appLockEnabled,
-                onCheckedChange = { viewModel.setAppLockEnabled(it) },
+                onCheckedChange = { enabled ->
+                    viewModel.setAppLockEnabled(enabled) { showAppLockPrompt(context, onSuccess = it) }
+                },
             )
             if (state.appLockEnabled) {
                 RowDivider()
@@ -2434,7 +2462,9 @@ fun PrivacySecuritySettingsScreen(
                     label = stringResource(R.string.settings_app_lock_timeout),
                     description = stringResource(R.string.settings_app_lock_timeout_desc),
                     selectedSeconds = state.appLockTimeoutSeconds,
-                    onSelected = viewModel::setAppLockTimeoutSeconds,
+                    onSelected = { seconds ->
+                        viewModel.setAppLockTimeoutSeconds(seconds) { showAppLockPrompt(context, onSuccess = it) }
+                    },
                 )
             }
         }

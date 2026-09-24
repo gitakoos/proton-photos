@@ -25,10 +25,13 @@ package eu.akoos.photos
 import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.MotionEvent
 import android.widget.Toast
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -39,6 +42,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
@@ -54,10 +58,9 @@ import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
 import androidx.work.WorkManager
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.flow.distinctUntilChanged
+import java.util.Locale
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -94,8 +97,10 @@ import eu.akoos.photos.presentation.updater.UpdateOrchestrator
 import eu.akoos.photos.domain.usecase.ReconcileSyncStateUseCase
 import eu.akoos.photos.navigation.ExternalEditRequest
 import eu.akoos.photos.navigation.NavGraph
-import eu.akoos.photos.presentation.lock.AppLockManager
-import eu.akoos.photos.presentation.lock.AppLockScreen
+import eu.akoos.photos.presentation.lock.AppLockGate
+import eu.akoos.photos.presentation.lock.AppLockGateState
+import eu.akoos.photos.presentation.lock.AppLockSession
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
@@ -116,12 +121,34 @@ import javax.inject.Inject
  */
 internal fun isAcceptableExternalEditScheme(scheme: String?): Boolean = scheme == "content"
 
+/**
+ * True for an authority this app's own providers answer to: the package name itself or anything under
+ * it. A user prefix ("0@authority") is stripped the way the content resolver strips it, and a port is
+ * ignored, so neither form slips past.
+ */
+internal fun isOwnProviderAuthority(authority: String?, ownPackage: String): Boolean {
+    if (authority == null) return false
+    val host = authority.substringAfterLast('@').substringBefore(':').trim().lowercase(Locale.ROOT)
+    val pkg = ownPackage.lowercase(Locale.ROOT)
+    return host == pkg || host.startsWith("$pkg.")
+}
+
+/**
+ * The "Open with" / "Edit with" gate: a content:// URI served by another app. A URI of one of this
+ * app's own FileProviders is refused, since the app can read those itself, and a caller could use that
+ * to have it open a vault photo or the decrypted cache.
+ */
+internal fun isAcceptableExternalEditUri(scheme: String?, authority: String?, ownPackage: String): Boolean =
+    isAcceptableExternalEditScheme(scheme) &&
+        !authority.isNullOrBlank() &&
+        !isOwnProviderAuthority(authority, ownPackage)
+
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
 
     @Inject lateinit var authOrchestrator: AuthOrchestrator
     @Inject lateinit var workManager: WorkManager
-    @Inject lateinit var appLockManager: AppLockManager
+    @Inject lateinit var lockSession: AppLockSession
     @Inject lateinit var accountManager: AccountManager
     @Inject lateinit var driveRepo: DrivePhotoRepository
     @Inject lateinit var photoStreamService: PhotoStreamService
@@ -134,18 +161,12 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var installSessionEvents: InstallSessionEvents
     @Inject lateinit var newsRepository: NewsRepository
 
-    private var isLocked by mutableStateOf(false)
-    private var lockEnabled = false
+    /** The app lock over the whole screen; see [AppLockGate]. */
+    private val lockGate by lazy { AppLockGateState(lockSession) }
     /** Photo URI from a home-screen widget tap; NavGraph reads + clears it to route to the viewer. */
     private var widgetPhotoUri by mutableStateOf<String?>(null)
     /** Request from a system "Open with" / "Edit with" intent; NavGraph routes to the editor. */
     private var externalEditRequest by mutableStateOf<ExternalEditRequest?>(null)
-    /** Wall-clock of the last ON_STOP, compared against the configured timeout to decide re-lock. */
-    private var lastBackgroundMs = 0L
-    /** Last successful unlock. BiometricPrompt cycles the host through ON_STOP/ON_RESTART on
-     *  success, which would re-fire the lock guard; [unlockGraceMs] after this suppresses that. */
-    private var lastUnlockMs = 0L
-    private val unlockGraceMs = 2000L
 
     /** Foreground-resume silent refresh fires only after this long since the last successful sync. */
     // Short floor (not minutes) because the on-resume refresh is now a cheap newest-page poll for
@@ -263,61 +284,9 @@ class MainActivity : AppCompatActivity() {
             runCatching { driveRepo.refreshCloudPhotos(userId) }
         }
 
-        // Observe lock setting changes. distinctUntilChanged is essential: the DataStore flow
-        // re-emits on every preference write (e.g. LAST_SYNC_MS each sync), which would otherwise
-        // re-assert isLocked=true on every tick and pop the lock screen after the user unlocked.
-        // Tracking previousEnabled lets a real OFF→ON toggle re-lock while same-value emits don't.
-        var sawFirstEmission = false
-        var previousEnabled = false
-        lifecycleScope.launch {
-            appLockManager.isLockEnabled.distinctUntilChanged().collect { enabled ->
-                lockEnabled = enabled
-                if (!sawFirstEmission) {
-                    // Lock on the first emission of every fresh Activity create when the lock is on,
-                    // including an OS process-death restore (savedInstanceState != null). Rotation is
-                    // handled via configChanges (no recreate), so a recreate only happens on a real
-                    // cold / death start, where re-locking is exactly right. Guarding on
-                    // savedInstanceState == null instead would let a process-death restore reopen unlocked.
-                    if (enabled) isLocked = true
-                } else if (enabled && !previousEnabled) {
-                    isLocked = true
-                }
-                previousEnabled = enabled
-                sawFirstEmission = true
-            }
-        }
-
-        // Sign-out drops the previous session's timestamps so a re-login as another account can't
-        // inherit a sinceBackground window that fires the re-lock guard before its prefs settle.
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                appLockManager.resetLockTimestamps.collect {
-                    lastBackgroundMs = 0L
-                    lastUnlockMs = 0L
-                }
-            }
-        }
-        // Re-lock on foreground when backgrounded longer than the configured timeout. The timeout is
-        // suspend-read INSIDE the block, not cached in a field: a cached default of 0 raced the
-        // DataStore flow's first emission and turned "Lock after 5 min" into "Lock immediately".
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                val timeoutMs = appLockManager.lockTimeoutSeconds.first().toLong() * 1000L
-                val now = System.currentTimeMillis()
-                val sinceUnlock = now - lastUnlockMs
-                val sinceBackground = if (lastBackgroundMs == 0L) 0L else now - lastBackgroundMs
-                // Re-lock only if: lock on, actually backgrounded since last unlock, past the timeout,
-                // and outside the post-unlock biometric grace window.
-                if (lockEnabled
-                    && lastBackgroundMs != 0L
-                    && sinceBackground >= timeoutMs
-                    && sinceUnlock > unlockGraceMs
-                ) {
-                    isLocked = true
-                }
-                lastBackgroundMs = 0L
-            }
-        }
+        // The lock settings settle a cold start here, and every later change; returns from the background
+        // are decided in onStart.
+        lockGate.followSettings(this)
 
         setContent {
             // Theme mode lives in DataStore — re-collect so a change re-themes without a restart.
@@ -412,13 +381,13 @@ class MainActivity : AppCompatActivity() {
                     when {
                         forceUpdate -> ForceUpdateDialog()
                         else -> {
-                            // App lock is drawn as an OVERLAY over the nav graph, not as a branch that
-                            // replaces it. Gating NavGraph out of composition disposed its NavController
-                            // and back stack, so unlocking re-entered at the start destination and the
-                            // startup router popped to the gallery instead of returning where the user
-                            // was. AppLockScreen is opaque, FLAG_SECURE, and consumes all input, so it
-                            // fully covers the content (and the recents preview) with the route intact.
-                            Box(modifier = Modifier.fillMaxSize()) {
+                            // The lock gate keeps the nav graph composed under the lock rather than
+                            // swapping it out: out of composition it would lose its NavController and
+                            // back stack, and unlocking would land on the start destination instead of
+                            // where the user was. The lock shows in a window of its own above every
+                            // dialog and sheet, the content under it stays covered and inert, and back
+                            // leaves the app instead of reaching it.
+                            AppLockGate(state = lockGate, onLeave = { leaveWhileLocked() }) {
                                 NavGraph(
                                     onStartLogin = { authOrchestrator.startLoginWorkflow(null) },
                                     onCheckForUpdates = { runManualUpdateCheck() },
@@ -427,12 +396,9 @@ class MainActivity : AppCompatActivity() {
                                     externalEditRequest = externalEditRequest,
                                     onExternalEditConsumed = { externalEditRequest = null },
                                 )
-                                UpdaterHost()
-                                if (isLocked) AppLockScreen(onUnlocked = {
-                                    lastUnlockMs = System.currentTimeMillis()
-                                    isLocked = false
-                                })
                             }
+                            UpdaterHost(promptAllowed = !lockGate.isInert)
+                            if (lockGate.isInert) LockBackInterceptor()
                         }
                     }
                   }
@@ -445,9 +411,11 @@ class MainActivity : AppCompatActivity() {
      * Compose surface for the in-app updater dialog. Renders [UpdatePromptDialog] for whatever
      * [UpdateOrchestrator] phase is active. Lives in the host Activity, not a screen, so the
      * global prompt layers over whichever route is rendered when the silent check completes.
+     * The prompt is a window of its own and would open above the app lock, so it waits for the
+     * unlock ([promptAllowed]); the update itself carries on meanwhile.
      */
     @androidx.compose.runtime.Composable
-    private fun UpdaterHost() {
+    private fun UpdaterHost(promptAllowed: Boolean) {
         val current by updateOrchestrator.state.collectAsStateWithLifecycle()
         val scope = rememberCoroutineScope()
         // Back from the "Install unknown apps" permission screen — fire the install immediately if
@@ -460,18 +428,19 @@ class MainActivity : AppCompatActivity() {
             }
         }
         // Terminal result of a committed install session. A confirmation screen is launched from
-        // here (an Activity already has a task); a failed session drops to the legacy intent.
+        // here (an Activity already has a task); a failed session drops to the legacy intent. Either
+        // screen would open above the app lock, so it waits for the unlock.
         LaunchedEffect(Unit) {
             installSessionEvents.outcomes.collect { outcome ->
                 when (outcome) {
                     is InstallOutcome.PendingUserAction ->
-                        runCatching { startActivity(outcome.intent) }
-                    is InstallOutcome.Failed -> launchLegacyInstall()
+                        lockGate.runWhenOpen { runCatching { startActivity(outcome.intent) } }
+                    is InstallOutcome.Failed -> lockGate.runWhenOpen { launchLegacyInstall() }
                     else -> Unit
                 }
             }
         }
-        current?.let { state ->
+        current?.takeIf { promptAllowed }?.let { state ->
             UpdatePromptDialog(
                 state = state,
                 onUpdate = {
@@ -494,6 +463,35 @@ class MainActivity : AppCompatActivity() {
                 onDismiss = { updateOrchestrator.dismiss(scope) },
             )
         }
+    }
+
+    /**
+     * While the lock or its pending cover shows, back leaves the app instead of reaching a screen behind
+     * it. From API 33 an overlay-priority callback outranks every callback the screens register, before
+     * or after it; below that, [onBackPressed] sees the back key first.
+     */
+    @androidx.compose.runtime.Composable
+    private fun LockBackInterceptor() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            DisposableEffect(Unit) {
+                val callback = OnBackInvokedCallback { leaveWhileLocked() }
+                onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_OVERLAY,
+                    callback,
+                )
+                onDispose { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback) }
+            }
+        }
+    }
+
+    /** Sends the app to the background, or closes an instance another app opened in its own task. */
+    private fun leaveWhileLocked() {
+        if (isTaskRoot) moveTaskToBack(true) else finish()
+    }
+
+    @Suppress("OVERRIDE_DEPRECATION", "DEPRECATION")
+    override fun onBackPressed() {
+        if (lockGate.isInert) leaveWhileLocked() else super.onBackPressed()
     }
 
     /**
@@ -579,7 +577,7 @@ class MainActivity : AppCompatActivity() {
         val action = intent.action ?: return null
         if (action != Intent.ACTION_EDIT && action != Intent.ACTION_VIEW) return null
         val uri = intent.data ?: return null
-        if (!isAcceptableExternalEditScheme(uri.scheme)) return null
+        if (!isAcceptableExternalEditUri(uri.scheme, uri.authority, packageName)) return null
         // Prefer the intent's type; fall back to the ContentResolver (some apps omit it).
         val mimeType = intent.type
             ?: runCatching { contentResolver.getType(uri) }.getOrNull()
@@ -622,15 +620,27 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Synchronous, so the first frame after a return already carries the lock.
+        lockGate.onStart()
+    }
+
     override fun onStop() {
         super.onStop()
-        // Wall-clock (not elapsedRealtime) so a background clock change stays safe: forward locks,
-        // backward leaves unlocked. The re-lock check compares this against the configured timeout.
-        lastBackgroundMs = System.currentTimeMillis()
+        // A configuration change (dark mode, font scale, a split-screen resize) recreates this screen in the
+        // foreground, which is not leaving the app, so "Lock immediately" must not count it as one.
+        if (!isChangingConfigurations) lockGate.onStop()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        lockGate.onPause(this)
     }
 
     override fun onResume() {
         super.onResume()
+        lockGate.onResume()
         // Reconcile the delete-after-backup queue against MediaStore on open. Covers the offline
         // case where a queued file was deleted via the file manager (the worker's content trigger
         // needs network, but resume always runs): stale URIs are dropped to CLOUD_ONLY and the

@@ -72,7 +72,10 @@ import javax.inject.Inject
  * The walk legitimately parks while the device is a poor state for heavy work, which shows here as the
  * progress count standing still. The notification then reads a waiting line rather than a frozen count,
  * and if no progress lands within [GRACE_STOP_MS] the service stops itself and lets a later launch or
- * trigger resume, so a park never holds an idle foreground service forever.
+ * trigger resume, so a park never holds an idle foreground service forever. A walk that is not running at
+ * all has nothing to wait for: paused (by the user, or by a restore from Drive standing it down), finished,
+ * idle or without its model, it ends the service and its notification at once ([faceServiceHostsWalk]), and
+ * the scheduler starts the service again with the next large walk.
  */
 @AndroidEntryPoint
 class FaceIndexingService : Service() {
@@ -86,6 +89,13 @@ class FaceIndexingService : Service() {
      *  stack watchers or extra triggers on the same instance. */
     private var started = false
 
+    /** Held around every notification post and around [stopping]'s write, so no post from the watcher's
+     *  thread can land once the stop has begun and outlive the service as a plain ongoing notification. */
+    private val postLock = Any()
+
+    /** Set once the service is stopping; guarded by [postLock]. */
+    private var stopping = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -94,7 +104,8 @@ class FaceIndexingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Stop action: pause the walk so it stays off until the user resumes it, then drop the service.
+        // Stop action: pause the walk so it stays off until the user resumes it from the face recognition
+        // screen, then drop the service.
         if (intent?.action == ACTION_STOP) {
             scope.launch { runCatching { scheduler.setPaused(true) } }
             stopIndexingService()
@@ -155,17 +166,20 @@ class FaceIndexingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        synchronized(postLock) { stopping = true }
         scope.cancel()
+        // Whatever still carries this service's id goes with it.
+        runCatching { NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID) }
         // The foreground session ended, so the diagnostics runtime reads "off" until the next start.
         FaceDiagnostics.recordFgsStop()
     }
 
     /**
      * Poll the scheduler's progress and keep the notification honest: a moving count reads "N of M", a
-     * count that has stood still past [STALE_AFTER_MS] (a health park or a pause) reads the waiting line,
-     * and a walk that finished or was never running stops the service. Polling rather than collecting the
-     * flow, because a park emits nothing, yet the service still has to notice the stall to switch text and
-     * to stop itself after the grace window.
+     * count that has stood still past [STALE_AFTER_MS] (a health park) reads the waiting line, and a walk
+     * that is not running (paused, finished, idle, or waiting for its model) stops the service at once.
+     * Polling rather than collecting the flow, because a park emits nothing, yet the service still has to
+     * notice the stall to switch text and to stop itself after the grace window.
      */
     private fun observeProgress() {
         scope.launch {
@@ -174,7 +188,7 @@ class FaceIndexingService : Service() {
             var lastText: String? = null
             while (isActive) {
                 val p = scheduler.progress.value
-                if (p.state == FaceIndexingState.Done || p.state == FaceIndexingState.Idle) {
+                if (!faceServiceHostsWalk(p.state)) {
                     stopIndexingService()
                     return@launch
                 }
@@ -205,10 +219,12 @@ class FaceIndexingService : Service() {
 
     private fun startForegroundWith(p: FaceIndexingProgress) {
         val advancing = p.state == FaceIndexingState.Running && p.total > 0
-        val text = if (advancing) {
-            getString(R.string.face_index_service_progress, p.indexed, p.total)
-        } else {
-            getString(R.string.face_index_service_waiting)
+        // A walk that is not running gets no line at all: the watcher ends the service on its first look,
+        // and a paused walk is not waiting to continue.
+        val text = when {
+            advancing -> getString(R.string.face_index_service_progress, p.indexed, p.total)
+            faceServiceHostsWalk(p.state) -> getString(R.string.face_index_service_waiting)
+            else -> null
         }
         val notification = buildNotification(advancing, p.indexed, p.total, text)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -218,7 +234,7 @@ class FaceIndexingService : Service() {
         }
     }
 
-    private fun buildNotification(advancing: Boolean, indexed: Int, total: Int, text: String): Notification {
+    private fun buildNotification(advancing: Boolean, indexed: Int, total: Int, text: String?): Notification {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.face_index_service_title))
@@ -241,10 +257,14 @@ class FaceIndexingService : Service() {
     }
 
     private fun postNotification(notification: Notification) {
-        // Wrapped: a denied POST_NOTIFICATIONS grant must not crash the update, the notification being
-        // informational and the service best-effort.
-        @android.annotation.SuppressLint("MissingPermission")
-        runCatching { NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification) }
+        synchronized(postLock) {
+            // A stop has begun: a post now would outlive the service it describes.
+            if (stopping) return
+            // Wrapped: a denied POST_NOTIFICATIONS grant must not crash the update, the notification being
+            // informational and the service best-effort.
+            @android.annotation.SuppressLint("MissingPermission")
+            runCatching { NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification) }
+        }
     }
 
     private fun stopPendingIntent(): PendingIntent {
@@ -257,8 +277,15 @@ class FaceIndexingService : Service() {
         )
     }
 
+    /**
+     * Ends the service and its notification. Called from the main thread (the Stop action, the platform's
+     * timeout) as well as from the watcher's, so the stop first shuts [postNotification] out, and then also
+     * cancels the id, in case a post landed in between and some OEMs keep it past the foreground removal.
+     */
     private fun stopIndexingService() {
+        synchronized(postLock) { stopping = true }
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        runCatching { NotificationManagerCompat.from(this).cancel(NOTIFICATION_ID) }
         stopSelf()
     }
 
@@ -312,3 +339,11 @@ class FaceIndexingService : Service() {
         }
     }
 }
+
+/**
+ * Whether the foreground host stays up for a walk in [state]: only a running walk has anything to host, a
+ * health park included, as the scheduler reports it running. A paused walk does not continue on its own, so
+ * it never shows as waiting to continue; it ends the host and its notification like a finished, idle or
+ * model-less one. Pure so it is unit-tested without Android.
+ */
+internal fun faceServiceHostsWalk(state: FaceIndexingState): Boolean = state == FaceIndexingState.Running

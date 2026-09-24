@@ -108,6 +108,8 @@ import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.util.countryName
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -165,6 +167,9 @@ fun CustomMapScreen(
         if (granted) vm.startLocalBackfill()
     }
 
+    // A map restored under the app lock (a cold start after the process was reclaimed) asks here too, and
+    // the system dialog would open above the lock, so the request waits for the unlock.
+    val appLock = LocalAppLock.current
     LaunchedEffect(Unit) {
         // Cloud photos carry their GPS in the encrypted XAttr, so no permission is needed; start that
         // half immediately and unconditionally. The on-device EXIF half is gated on the grant below.
@@ -175,7 +180,7 @@ fun CustomMapScreen(
         if (alreadyGranted) {
             vm.startLocalBackfill()
         } else {
-            permissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+            appLock.runWhenOpen { permissionLauncher.launch(Manifest.permission.ACCESS_MEDIA_LOCATION) }
         }
     }
 

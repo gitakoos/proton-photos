@@ -85,6 +85,20 @@ data class UnclusteredFace(
 }
 
 /**
+ * One face reduced to what a face snapshot export plans with: its photo, the person it is grouped under,
+ * the name confirmed for it, whether it was removed, and the byte length of its embedding. The blob
+ * itself is left unread, so planning an export over a whole library never loads a recognition vector.
+ */
+data class FaceHead(
+    val id: String,
+    val photoKey: String,
+    val personId: Long?,
+    val manualName: String?,
+    val rejected: Boolean,
+    val embeddingBytes: Int,
+)
+
+/**
  * One face reduced to its photo, its stored box, its detection [score] and the person it is grouped
  * under ([personId], null while it waits to be clustered). The embedding blob is left out, so listing
  * the faces across a selection of photos never loads the recognition vectors.
@@ -332,6 +346,23 @@ interface FaceDao {
      *  merge step needs all the embeddings at once, so the pass loads them together. */
     @Query("SELECT * FROM face WHERE userId = :userId ORDER BY score DESC, id")
     suspend fun allFacesByScoreDesc(userId: String): List<FaceEntity>
+
+    /**
+     * The account's next [limit] faces after [afterId] in id order, whole rows, the face snapshot export's
+     * read: an id (`photoKey#index`) keeps each photo's faces together, and a page resumes from the last
+     * id seen, so every page is one walk along the primary key rather than a re-sort of the table the
+     * way an OFFSET page is. The unary plus keeps the planner off the userId index, which would sort
+     * every row of the account (blobs included) for each page. Start from an empty [afterId].
+     */
+    @Query("SELECT * FROM face WHERE +userId = :userId AND id > :afterId ORDER BY id LIMIT :limit")
+    suspend fun facesAfter(userId: String, afterId: String, limit: Int): List<FaceEntity>
+
+    /** [facesAfter] reduced to [FaceHead], the export's planning pass, with no embedding read. */
+    @Query(
+        "SELECT id, photoKey, personId, manualName, rejected, length(embedding) AS embeddingBytes " +
+            "FROM face WHERE +userId = :userId AND id > :afterId ORDER BY id LIMIT :limit",
+    )
+    suspend fun faceHeadsAfter(userId: String, afterId: String, limit: Int): List<FaceHead>
 
     /**
      * Places a whole cluster of faces into one person in as few statements as possible, the recluster

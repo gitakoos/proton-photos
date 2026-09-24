@@ -22,9 +22,8 @@
 
 package eu.akoos.photos.presentation.lock
 
-import android.app.KeyguardManager
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
+import android.view.Window
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -43,20 +42,21 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
-import androidx.core.content.ContextCompat
-import androidx.fragment.app.FragmentActivity
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.SecureScreenEffect
-import eu.akoos.photos.presentation.util.findFragmentActivity
+import eu.akoos.photos.presentation.util.findActivity
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.FgDim
@@ -64,26 +64,25 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 
+/**
+ * [unlockFocusRequester] is attached to the unlock button, so keyboard focus that the host keeps out of
+ * the content behind the lock can be handed to it.
+ */
 @Composable
-fun AppLockScreen(onUnlocked: () -> Unit) {
+fun AppLockScreen(onUnlocked: () -> Unit, unlockFocusRequester: FocusRequester? = null) {
     val context = LocalContext.current
 
-    SecureScreenEffect()
+    LockSecureFlagEffect()
 
     LaunchedEffect(Unit) {
-        context.findFragmentActivity()?.let { showBiometricPrompt(it, onSuccess = onUnlocked) }
+        showAppLockPrompt(context, onSuccess = onUnlocked)
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Bg0)
-            // Consume every gesture so the lock, drawn as an overlay over the nav graph, cannot leak a
-            // tap or scroll to the content behind it. The unlock button (a child) still gets its own
-            // clicks first, so this only swallows presses on the empty backdrop.
-            .pointerInput(Unit) {
-                awaitPointerEventScope { while (true) { awaitPointerEvent().changes.forEach { it.consume() } } }
-            },
+            .swallowPointerInput(),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -122,9 +121,8 @@ fun AppLockScreen(onUnlocked: () -> Unit) {
                 modifier = Modifier
                     .background(Accent.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                     .border(0.5.dp, Accent.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
-                    .clickable {
-                        context.findFragmentActivity()?.let { showBiometricPrompt(it, onSuccess = onUnlocked) }
-                    }
+                    .then(unlockFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+                    .clickable { showAppLockPrompt(context, onSuccess = onUnlocked) }
                     .padding(horizontal = 32.dp, vertical = 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -134,48 +132,56 @@ fun AppLockScreen(onUnlocked: () -> Unit) {
     }
 }
 
-internal fun showBiometricPrompt(
-    activity: FragmentActivity,
-    onSuccess: () -> Unit,
-) {
-    val manager = BiometricManager.from(activity)
-    val canAuth = manager.canAuthenticate(
-        BiometricManager.Authenticators.BIOMETRIC_STRONG or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL,
-    )
-    if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
-        // No usable authenticator right now. Only auto-open when the device has NO secure lock at
-        // all (there is nothing to authenticate against, and refusing would lock the user out of
-        // their own app permanently). If the device IS secured but biometrics/credential are merely
-        // unavailable or unenrolled at the moment, stay locked so the gate can't be bypassed; the
-        // user retries with the Unlock button.
-        val keyguard = activity.getSystemService(KeyguardManager::class.java)
-        if (keyguard?.isDeviceSecure != true) onSuccess()
-        return
-    }
-    val prompt = BiometricPrompt(
-        activity,
-        ContextCompat.getMainExecutor(activity),
-        object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                onSuccess()
-            }
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                // Stay locked — user can retry via Unlock button
-            }
-            override fun onAuthenticationFailed() {
-                // Stay locked — biometric didn't match
-            }
-        },
-    )
-    prompt.authenticate(
-        BiometricPrompt.PromptInfo.Builder()
-            .setTitle(activity.getString(R.string.app_name))
-            .setDescription(activity.getString(R.string.app_lock_authenticate_prompt))
-            .setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                    BiometricManager.Authenticators.DEVICE_CREDENTIAL,
-            )
-            .build(),
+/** Opaque cover with no prompt, for while it is not yet known whether the lock is on. */
+@Composable
+fun AppLockCover() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg0)
+            .swallowPointerInput(),
     )
 }
+
+/**
+ * Consumes every gesture so a cover drawn as an overlay over the nav graph cannot leak a tap or scroll
+ * to the content behind it. A child's own clicks (the unlock button) still run first, so this only
+ * swallows presses on the empty backdrop.
+ */
+private fun Modifier.swallowPointerInput(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope { while (true) { awaitPointerEvent().changes.forEach { it.consume() } } }
+}
+
+/** FLAG_SECURE while the lock shows, put back on exit the way the lock found it ([SecureFlagHold]). */
+@Composable
+private fun LockSecureFlagEffect() {
+    val activity = LocalContext.current.findActivity()
+    DisposableEffect(activity) {
+        val hold = activity?.window?.let { SecureFlagHold.acquire(it) }
+        onDispose { hold?.release() }
+    }
+}
+
+/**
+ * FLAG_SECURE held on a window and put back the way the hold found it: [release] clears the flag only when
+ * the hold set it itself ([ownsSecureFlag]). The shared [SecureScreenEffect] clears the flag outright, which
+ * would strip it from a vault screen still open under the lock.
+ */
+internal class SecureFlagHold private constructor(private val window: Window, private val owned: Boolean) {
+
+    fun release() {
+        if (owned) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+    }
+
+    companion object {
+        fun acquire(window: Window): SecureFlagHold {
+            val hold = SecureFlagHold(window, owned = ownsSecureFlag(window.attributes.flags))
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            return hold
+        }
+    }
+}
+
+/** Whether a hold that finds a window's [windowFlags] sets FLAG_SECURE itself, and so clears it again. */
+internal fun ownsSecureFlag(windowFlags: Int): Boolean =
+    (windowFlags and WindowManager.LayoutParams.FLAG_SECURE) == 0

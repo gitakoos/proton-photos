@@ -99,6 +99,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
+import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.memories.OnThisDayCarousel
 import eu.akoos.photos.presentation.memories.OnThisDayCard
 import eu.akoos.photos.presentation.theme.Accent
@@ -298,7 +299,10 @@ internal fun PhotoGrid(
             denseWarningShownThisSession = true
         }
     }
-    if (showDenseWarning) {
+    // A grid remembered at the densest level raises this on a cold start, under the app lock; its sheet
+    // would open above the lock, so it waits for the unlock.
+    val appLock = LocalAppLock.current
+    if (showDenseWarning && !appLock.isLocked) {
         DenseGridWarningDialog(
             onDismiss = { showDenseWarning = false },
             onPersist = { showDenseWarning = false; onDismissDenseGridWarning() },

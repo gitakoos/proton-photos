@@ -23,6 +23,9 @@
 package eu.akoos.photos.widget
 
 import android.content.Context
+import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.state.getAppWidgetState
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -101,6 +104,28 @@ class PhotoWidgetUpdateWorker(
             val wm = WorkManager.getInstance(context)
             wm.cancelUniqueWork(periodicTag(appWidgetId))
             wm.cancelUniqueWork(oneTimeTag(appWidgetId))
+        }
+
+        /**
+         * Cancel every widget's update, the one running included, at the start of a sign-out, so none draws
+         * the leaving account's photo. Every request carries this worker's class name as a tag.
+         * [rescheduleAll] brings the periodic updates back once the account is gone.
+         */
+        fun cancelAll(context: Context) {
+            WorkManager.getInstance(context).cancelAllWorkByTag(PhotoWidgetUpdateWorker::class.java.name)
+        }
+
+        /**
+         * Register again the periodic update of every placed widget the config screen set an interval for,
+         * at that interval. Harmless for one still registered, which [enqueueOrReplace] only updates.
+         */
+        suspend fun rescheduleAll(context: Context) {
+            val manager = GlanceAppWidgetManager(context)
+            for (glanceId in manager.getGlanceIds(PhotoWidget::class.java)) {
+                val state = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
+                val interval = state[PhotoWidgetKeys.INTERVAL_MINUTES] ?: continue
+                enqueueOrReplace(context, manager.getAppWidgetId(glanceId), interval)
+            }
         }
     }
 }

@@ -100,6 +100,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import eu.akoos.photos.presentation.util.findFragmentActivity
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -186,7 +188,10 @@ fun HiddenAlbumScreen(
 
     // Keyed on the authenticated flag so that when the screen re-locks on returning from
     // the background (ON_STOP cleared it), the prompt fires again automatically instead of
-    // leaving the user on a static lock screen.
+    // leaving the user on a static lock screen. A return that brings up the app lock asks
+    // for that one first: this prompt would open above the lock and race its own, so it
+    // waits for the unlock.
+    val appLock = LocalAppLock.current
     LaunchedEffect(state.isAuthenticated) {
         if (!state.isAuthenticated && !promptShown) {
             // LocaleOverride wraps LocalContext in a ContextWrapper, so a direct cast
@@ -197,12 +202,14 @@ fun HiddenAlbumScreen(
                 onBack()
                 return@LaunchedEffect
             }
-            promptShown = true
-            showBiometricPrompt(
-                activity = fragmentActivity,
-                onSuccess = { viewModel.onAuthenticationSuccess() },
-                onError = { onBack() },
-            )
+            appLock.runWhenOpen {
+                promptShown = true
+                showBiometricPrompt(
+                    activity = fragmentActivity,
+                    onSuccess = { viewModel.onAuthenticationSuccess() },
+                    onError = { onBack() },
+                )
+            }
         }
     }
 

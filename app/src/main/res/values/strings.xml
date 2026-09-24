@@ -569,6 +569,10 @@
     <string name="model_download_progress">%1$s of %2$s</string>
     <string name="model_download_preparing">Preparing…</string>
     <string name="model_download_stop">Stop</string>
+    <string name="ml_sync_channel_name">Face and search data</string>
+    <string name="ml_sync_channel_desc">Shows progress while face and search data is saved to Proton Drive or restored from it.</string>
+    <string name="ml_sync_save_title">Saving face and search data to Drive…</string>
+    <string name="ml_sync_restore_title">Restoring face and search data from Drive…</string>
 
     <!-- Delete bottom sheet -->
     <string name="delete_album_container_warning">This deletes the album but keeps your photos in Proton Drive.</string>
@@ -799,6 +803,7 @@
     <string name="settings_ai_indexing_paused_battery">Paused, battery low</string>
     <string name="settings_ai_indexing_paused_warm">Paused, phone is warm</string>
     <string name="settings_ai_indexing_paused_power_save">Paused, power saver is on</string>
+    <string name="settings_ai_indexing_paused_desc">Photos are not scanned for faces until you resume.</string>
     <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>
     <plurals name="settings_ai_indexing_people">
         <item quantity="one">%1$d person found</item>
@@ -820,6 +825,75 @@
     <string name="settings_ai_transfer_working">Working…</string>
     <string name="settings_ai_import_wrong_account">This face index belongs to a different account and cannot be opened here.</string>
     <string name="settings_ai_import_reattach">This index used a different model. Its %1$d names will return to your photos as they are scanned.</string>
+    <!-- Face and search data on Drive (machine learning settings) -->
+    <string name="settings_ml_drive_section">Face and search data on Drive</string>
+    <string name="settings_ml_drive_save">Save to Drive</string>
+    <string name="settings_ml_drive_save_desc">Keep an encrypted copy your other devices can restore</string>
+    <string name="settings_ml_drive_restore">Restore from Drive</string>
+    <string name="settings_ml_drive_restore_desc">Use data saved by one of your devices instead of scanning again</string>
+    <string name="settings_ml_drive_step_preparing">Preparing…</string>
+    <string name="settings_ml_drive_step_encrypting_faces">Encrypting face data…</string>
+    <string name="settings_ml_drive_step_encrypting_search">Encrypting search data…</string>
+    <string name="settings_ml_drive_step_uploading_faces">Uploading face data…</string>
+    <string name="settings_ml_drive_step_uploading_search">Uploading search data…</string>
+    <string name="settings_ml_drive_step_downloading_faces">Downloading face data…</string>
+    <string name="settings_ml_drive_step_downloading_search">Downloading search data…</string>
+    <string name="settings_ml_drive_step_importing_faces">Importing face data…</string>
+    <string name="settings_ml_drive_step_importing_search">Importing search data…</string>
+    <string name="settings_ml_drive_step_finishing">Finishing…</string>
+    <string name="settings_ml_drive_folder_title">Create a folder in your Drive?</string>
+    <string name="settings_ml_drive_folder_message">Saving creates the \"Photos for Proton/ML data\" folder in My files. The face and search data in it is end-to-end encrypted, like your photos, and counts toward your Drive storage.</string>
+    <string name="settings_ml_drive_folder_confirm">Create and save</string>
+    <string name="settings_ml_drive_restore_loading">Looking for saved data…</string>
+    <string name="settings_ml_drive_restore_pick">Choose the device to restore from.</string>
+    <string name="settings_ml_drive_restore_empty">Nothing is saved on Drive yet. Use \"Save to Drive\" on the device that has the data, then try again.</string>
+    <string name="settings_ml_drive_restore_list_failed">Could not reach your Drive. Try again later.</string>
+    <string name="settings_ml_drive_this_device">This device</string>
+    <string name="settings_ml_drive_another_device">Another device</string>
+    <string name="settings_ml_drive_holds_both">Face and search data</string>
+    <string name="settings_ml_drive_holds_faces">Face data</string>
+    <string name="settings_ml_drive_holds_search">Search data</string>
+    <string name="settings_ml_drive_saved_at">Saved %1$s</string>
+    <string name="settings_ml_drive_restore_confirm">Restore</string>
+    <string name="settings_ml_drive_mode_title">Merge or replace?</string>
+    <string name="settings_ml_drive_mode_message">This device already has face data. Choose how to restore.</string>
+    <string name="settings_ml_drive_mode_merge">Merge</string>
+    <string name="settings_ml_drive_mode_merge_desc">Keep this device\'s names and add the saved ones</string>
+    <string name="settings_ml_drive_mode_replace">Replace</string>
+    <string name="settings_ml_drive_mode_replace_desc">Use the saved faces and names for the photos in your Drive</string>
+    <string name="settings_ml_drive_saved">Saved to Drive</string>
+    <string name="settings_ml_drive_restored">Restored from Drive</string>
+    <string name="settings_ml_drive_saved_partly">Partly saved</string>
+    <string name="settings_ml_drive_restored_partly">Partly restored</string>
+    <string name="settings_ml_drive_save_failed">Could not save to Drive</string>
+    <string name="settings_ml_drive_restore_failed">Could not restore from Drive</string>
+    <string name="settings_ml_drive_nothing_title">Nothing to save yet</string>
+    <string name="settings_ml_drive_nothing_message">This device has no face or search data yet. Let face recognition or semantic search scan your photos first.</string>
+    <string name="settings_ml_drive_not_capable">Not available on this device</string>
+    <string name="settings_ml_drive_faces_not_saved">The face data could not be saved.</string>
+    <string name="settings_ml_drive_search_not_saved">The search data could not be saved.</string>
+    <string name="settings_ml_drive_faces_not_restored">The face data could not be restored.</string>
+    <string name="settings_ml_drive_search_not_restored">The search data could not be restored.</string>
+    <string name="settings_ml_drive_try_later">Try again later.</string>
+    <string name="settings_ml_drive_too_new">The data was saved by a newer version of the app. Update the app and try again.</string>
+    <string name="settings_ml_drive_wrong_account">This account can no longer open the data.</string>
+    <string name="settings_ml_drive_damaged">The saved copy is damaged. Save it again on the device it came from.</string>
+    <string name="settings_ml_drive_names_only">The saved faces came from a different face model, so only their names were restored. The names return to your photos as the library is scanned.</string>
+    <string name="settings_ml_drive_search_other_model">The saved search data came from a different search model, so this device prepares those photos for search itself.</string>
+    <plurals name="settings_ml_drive_count_faces">
+        <item quantity="one">%1$d face</item>
+        <item quantity="other">%1$d faces</item>
+    </plurals>
+    <plurals name="settings_ml_drive_count_people">
+        <item quantity="one">%1$d person</item>
+        <item quantity="other">%1$d people</item>
+    </plurals>
+    <plurals name="settings_ml_drive_count_search">
+        <item quantity="one">search data for %1$d photo</item>
+        <item quantity="other">search data for %1$d photos</item>
+    </plurals>
+    <string name="settings_ml_drive_list_two">%1$s and %2$s</string>
+    <string name="settings_ml_drive_list_three">%1$s, %2$s and %3$s</string>
     <string name="settings_ai_rescan_confirm_title">Rescan all photos?</string>
     <string name="settings_ai_rescan_confirm_msg">Every photo is scanned for faces again at higher detail, which finds smaller and more distant faces. Your names and corrections are kept and put back once the faces are re-detected.</string>
     <string name="settings_ai_clear">Clear face data</string>

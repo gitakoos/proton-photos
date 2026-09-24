@@ -24,6 +24,7 @@ package eu.akoos.photos.widget
 
 import android.appwidget.AppWidgetManager
 import android.content.Context
+import android.os.Bundle
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import kotlinx.coroutines.CoroutineScope
@@ -41,19 +42,37 @@ class PhotoWidgetReceiver : GlanceAppWidgetReceiver() {
         appWidgetManager: AppWidgetManager,
         appWidgetIds: IntArray,
     ) {
-        super.onUpdate(context, appWidgetManager, appWidgetIds)
+        // Exported for the launcher, so any app can send ids here. Only the ids the host binds to this
+        // provider are drawn or queued; a made-up id or another app's widget is dropped first.
+        val ownIds = WidgetIdGuard.ownIds(context, appWidgetIds)
+        super.onUpdate(context, appWidgetManager, ownIds)
         // Refresh each (re-)added widget now. The periodic refresh is registered at the user's
         // chosen interval by the config screen's save() and persists across reboot via WorkManager,
         // so we must NOT re-register it here: calling enqueueOrReplace on every system onUpdate
         // (e.g. after a reboot or host refresh) would reset the user's interval back to the default.
-        appWidgetIds.forEach { id ->
+        ownIds.forEach { id ->
             PhotoWidgetUpdateWorker.enqueueImmediate(context, id)
         }
     }
 
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle,
+    ) {
+        if (WidgetIdGuard.isOwn(context, appWidgetId)) {
+            super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        }
+    }
+
     override fun onDeleted(context: Context, appWidgetIds: IntArray) {
-        super.onDeleted(context, appWidgetIds)
-        appWidgetIds.forEach { id -> PhotoWidgetUpdateWorker.cancel(context, id) }
+        // A delete for an id the host still binds here did not come from the host, and acting on it
+        // would wipe a live widget's settings, so only ids the host has already let go of are cleaned.
+        val deletedIds = WidgetIdGuard.deletedIds(context, appWidgetIds)
+        super.onDeleted(context, deletedIds)
+        if (deletedIds.isEmpty()) return
+        deletedIds.forEach { id -> PhotoWidgetUpdateWorker.cancel(context, id) }
         // goAsync keeps the receiver alive for the off-main cleanup; the scope is
         // created and cancelled within this broadcast so it never outlives it. The Glance base
         // onDeleted may already have taken the broadcast async, in which case goAsync returns null,
@@ -62,7 +81,7 @@ class PhotoWidgetReceiver : GlanceAppWidgetReceiver() {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         scope.launch {
             try {
-                appWidgetIds.forEach { id -> PhotoWidgetUpdater.cleanup(context, id) }
+                deletedIds.forEach { id -> PhotoWidgetUpdater.cleanup(context, id) }
             } finally {
                 pending?.finish()
                 scope.cancel()

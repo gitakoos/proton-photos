@@ -109,6 +109,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val offlineStore: OfflineStorageManager,
     private val hiddenStore: HiddenStorageManager,
     private val transferCenter: eu.akoos.photos.data.transfer.TransferCenter,
+    private val sdkDriveClientProvider: eu.akoos.photos.data.sdk.SdkDriveClientProvider,
+    private val widgetSignOut: eu.akoos.photos.widget.PhotoWidgetSignOut,
+    private val mlSyncSignOut: eu.akoos.photos.data.mlsync.MlSyncSignOut,
 ) : DrivePhotoRepository {
 
     // Long-lived scope for fire-and-forget DAO lookups in the thumbnail request path.
@@ -474,7 +477,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         albumSharingService.acceptInvitation(userId, invitationId)
 
     override suspend fun clearCacheForSignOut(userId: UserId) {
-        // FIRST, and awaited: the full cloud walk runs on the app scope so it survives the screen
+        // FIRST, and awaited, on every sign-out route: an ML sync save or restore calls into this
+        // account's Drive SDK client and writes its face data, both of which go below. Its client is
+        // closed to new calls, the job cancelled, and its run waited for (bounded), so nothing calls
+        // into a freed client, re-creates one for the leaving account, or commits an import after the
+        // face wipe. A no-op when the Settings sign-out has stopped it already.
+        runCatching { mlSyncSignOut.stopFor(userId) }
+        // Then, and awaited: the full cloud walk runs on the app scope so it survives the screen
         // that started it, which also means it survives sign-out unless stopped here. Every wipe
         // below is undone by a walk still paginating past it — rows land back in photo_listing for
         // an account that is gone, decrypted with material wipeKeyCache is about to zero. Every
@@ -498,6 +507,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { personCoverDao.clearForUser(userId.id) }
         runCatching { personManualPhotoDao.clearForUser(userId.id) }
         runCatching { clusterSummaryDao.clearForUser(userId.id) }
+        // The plaintext an ML sync import or export passes through, left behind by a run killed part
+        // way, and the names still waiting to be put back on detected faces go with the face rows.
+        runCatching { mlSyncSignOut.wipePlaintext() }
+        // Close and drop this account's Drive SDK client so nothing reuses it after the session ends. It
+        // stays closed to new calls until the account signs in again, and a call still running closes it
+        // on its way out rather than having it freed underneath.
+        runCatching { sdkDriveClientProvider.remove(userId) }
         // Wipe all plaintext key material before the user's tokens disappear, so even if the
         // process keeps running afterwards a heap inspection can't pull keys from this Singleton.
         shareService.wipeKeyCache()
@@ -549,6 +565,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // left the previous account's readable bytes on disk for the next person to hold the phone.
         runCatching { downloadService.clearDecryptedCaches() }
         runCatching { transferCenter.clearHistory() }
+        // A placed widget's bitmap is a decrypted photo of this account drawn on the launcher, so it
+        // goes here, where a session the server ended is cleared as well as a Settings sign-out.
+        runCatching { widgetSignOut.clear(userId) }
     }
 
     override fun requestThumbnailDecrypt(userId: UserId, linkId: String) {

@@ -24,9 +24,15 @@ package eu.akoos.photos.data.db.dao
 
 import androidx.room.Dao
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.ImageEmbeddingEntity
 import kotlinx.coroutines.flow.Flow
+
+/** Pairs [ImageEmbeddingDao.rekeyPhotos] moves per transaction, so a large first backup is applied in
+ *  short bounded writes rather than one long transaction that holds the database's single writer
+ *  against every other write in the app. */
+private const val REKEY_BATCH_SIZE = 500
 
 /**
  * One photo's key paired with its packed embedding blob, the two columns the search ranks. Projected so
@@ -90,9 +96,91 @@ interface ImageEmbeddingDao {
     )
     suspend fun embeddingsPaged(userId: String, limit: Int, offset: Int): List<ImageEmbeddingRow>
 
+    /**
+     * One page of the account's photo keys whose row holds a [modelVersion] embedding of exactly
+     * [embeddingBytes] bytes, in photoKey order and strictly after [afterKey] ("" for the first page). A
+     * caller walks the whole index by passing the last key of each page back in. Seeking past a key
+     * rather than skipping an offset keeps the walk exact while the indexer writes: no row is read twice,
+     * and no row that stays in the table is skipped.
+     */
+    @Query(
+        "SELECT photoKey FROM image_embedding WHERE userId = :userId AND modelVersion = :modelVersion " +
+            "AND length(embedding) = :embeddingBytes AND photoKey > :afterKey ORDER BY photoKey LIMIT :limit",
+    )
+    suspend fun keysAfter(
+        userId: String,
+        modelVersion: Int,
+        embeddingBytes: Int,
+        afterKey: String,
+        limit: Int,
+    ): List<String>
+
+    /** The rows behind [keysAfter], key + blob, under the same filter, order and paging. */
+    @Query(
+        "SELECT photoKey, embedding FROM image_embedding WHERE userId = :userId AND modelVersion = :modelVersion " +
+            "AND length(embedding) = :embeddingBytes AND photoKey > :afterKey ORDER BY photoKey LIMIT :limit",
+    )
+    suspend fun embeddingsAfter(
+        userId: String,
+        modelVersion: Int,
+        embeddingBytes: Int,
+        afterKey: String,
+        limit: Int,
+    ): List<ImageEmbeddingRow>
+
     /** Drops one photo's embedding, the invalidation a removed or re-indexed photo needs. */
     @Query("DELETE FROM image_embedding WHERE userId = :userId AND photoKey = :photoKey")
     suspend fun deleteByPhotoKey(userId: String, photoKey: String)
+
+    /**
+     * Moves one photo's row from [oldKey] to [newKey] when [newKey] holds no row for the account yet.
+     * When it does, OR IGNORE skips the primary-key clash and leaves the [oldKey] row where it was.
+     * Returns how many rows moved (0 or 1). The building block of [rekeyPhotoBatch], which also drops
+     * a row this leaves behind; on its own it can leave both keys holding a row.
+     */
+    @Query("UPDATE OR IGNORE image_embedding SET photoKey = :newKey WHERE userId = :userId AND photoKey = :oldKey")
+    suspend fun moveRowIfKeyFree(userId: String, oldKey: String, newKey: String): Int
+
+    /**
+     * Re-keys one photo's embedding once the device photo is backed up: the row keyed by its device
+     * content URI ([oldKey]) moves to its Drive linkId ([newKey]), the key its Synced gallery item
+     * carries, so the photo is not embedded a second time under its cloud identity and no
+     * device-keyed row is left behind. When [newKey] already holds a row, that row is kept and the
+     * [oldKey] row is dropped, so exactly one row for the photo remains. Atomic. A self pair, or an
+     * [oldKey] with no row, changes nothing. Returns true only when the row moved.
+     */
+    suspend fun rekeyPhoto(userId: String, oldKey: String, newKey: String): Boolean =
+        rekeyPhotoBatch(userId, listOf(oldKey to newKey)) > 0
+
+    /**
+     * [rekeyPhoto] over a list of (oldKey, newKey) pairs, [REKEY_BATCH_SIZE] pairs per transaction.
+     * Each batch lands whole or not at all; a failing batch throws, leaving the batches before it
+     * applied and the ones after it untouched. Returns how many rows moved (a device-keyed row dropped
+     * in favour of an existing cloud-keyed one is not counted).
+     */
+    suspend fun rekeyPhotos(userId: String, pairs: List<Pair<String, String>>): Int {
+        var moved = 0
+        for (batch in pairs.chunked(REKEY_BATCH_SIZE)) moved += rekeyPhotoBatch(userId, batch)
+        return moved
+    }
+
+    /**
+     * One transaction of [rekeyPhotos]: for each pair in order, move the [Pair.first] row to the
+     * [Pair.second] key when that key is free, then drop whatever still sits under [Pair.first], which
+     * is only ever the row that lost to an existing one. A self pair is skipped, since its drop would
+     * delete the very row it names. Callers go through [rekeyPhotos] or [rekeyPhoto], which bound the
+     * list; returns how many rows moved.
+     */
+    @Transaction
+    suspend fun rekeyPhotoBatch(userId: String, pairs: List<Pair<String, String>>): Int {
+        var moved = 0
+        for ((oldKey, newKey) in pairs) {
+            if (oldKey == newKey) continue
+            moved += moveRowIfKeyFree(userId, oldKey, newKey)
+            deleteByPhotoKey(userId, oldKey)
+        }
+        return moved
+    }
 
     /** Removes every embedding for the account, for the sign-out wipe or a full rescan. */
     @Query("DELETE FROM image_embedding WHERE userId = :userId")

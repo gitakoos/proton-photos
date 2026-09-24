@@ -100,6 +100,8 @@ import eu.akoos.photos.presentation.gallery.localVideoUri
 import eu.akoos.photos.presentation.gallery.videoCloudPhoto
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
 import eu.akoos.photos.presentation.importer.ImportScreen
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.offline.OfflinePhotosScreen
 import eu.akoos.photos.presentation.people.PeopleScreen
 import eu.akoos.photos.presentation.people.ReviewSuggestionsScreen
@@ -376,6 +378,8 @@ fun NavGraph(
     // screen's hidden preview trigger, so either place can raise the dialog rendered here at the root.
     val thankYouVm: ThankYouViewModel = hiltViewModel()
     val thanksVisible by thankYouVm.visible.collectAsStateWithLifecycle()
+    // A dialog raised on its own opens above the app lock, so the thank-you waits for the unlock.
+    val appLock = LocalAppLock.current
     // Which map the entry points open: false (default) = the modern world map, true = the classic OSM map.
     val mapEntryCtx = LocalContext.current
     val mapStyleOsm by remember(mapEntryCtx) {
@@ -742,8 +746,9 @@ fun NavGraph(
                 if (thankYouVm.shouldShow()) {
                     // On the 2.5.0 update the thank-you leads: it shows first, and What's New (if still
                     // pending) opens when it is dismissed. showReal marks it seen at once, so it is a
-                    // single lifetime appearance. The whatsNewChecked latch keeps this to one run.
-                    thankYouVm.showReal(thenWhatsNew = whatsNewPending)
+                    // single lifetime appearance, raised only once the app lock is open so it is not
+                    // marked seen behind the lock. The whatsNewChecked latch keeps this to one run.
+                    appLock.runWhenOpen { thankYouVm.showReal(thenWhatsNew = whatsNewPending) }
                 } else if (whatsNewPending) {
                     navController.navigate(Screen.WhatsNew.route)
                 }
@@ -2063,8 +2068,9 @@ fun NavGraph(
         }
 
         // One-time 2.5.0 thank-you popup, rendered at the nav root so it sits over whatever route is on
-        // top (the gallery on update, or the About screen for the owner's hidden preview).
-        if (thanksVisible) {
+        // top (the gallery on update, or the About screen for the owner's hidden preview). Held back
+        // while the app lock shows, since its window would open above the lock's.
+        if (thanksVisible && !appLock.isLocked) {
             ThankYouDialog(
                 onDismiss = {
                     // Dismissing the thank-you opens What's New next when it is still pending (the

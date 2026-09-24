@@ -51,6 +51,13 @@
 -keep class com.proton.gopenpgp.** { *; }
 -dontwarn com.proton.gopenpgp.**
 
+# ── Proton Drive SDK (JNI-backed native binding) ──────────────────────────
+# Its internal Jni* classes carry native methods called from the .so, and its
+# entry points are reached only behind SdkGate, so R8 shrink must not drop or
+# rename them.
+-keep class me.proton.drive.sdk.** { *; }
+-dontwarn me.proton.drive.sdk.**
+
 # ── Hilt — generated code expects original class names ────────────────────
 -keep class * extends dagger.hilt.android.internal.managers.ViewComponentManager$ViewWithFragmentComponentManagerHolder
 -keep class * extends androidx.lifecycle.ViewModel { <init>(...); }

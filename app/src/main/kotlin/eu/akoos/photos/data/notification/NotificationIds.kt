@@ -86,6 +86,10 @@ object NotificationIds {
      *  recognition and photo search share it, one download at a time). */
     const val MODEL_DOWNLOAD = 4256
 
+    /** The ML sync worker's foreground progress notification, while face and search data is saved to or
+     *  restored from Proton Drive. */
+    const val ML_SYNC = 4257
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

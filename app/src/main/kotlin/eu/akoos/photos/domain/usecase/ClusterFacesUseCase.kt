@@ -46,6 +46,14 @@ import eu.akoos.photos.data.face.sidewaysFromEncoded
 import javax.inject.Inject
 
 /**
+ * What one full rebuild of the people did. [committed] is false when its write check refused the rewrite,
+ * so nothing was written. Otherwise [leftUngrouped] is how many of the faces it read (removed ones aside)
+ * it left without a person: those kept out of a named person they were marked as not being, and those
+ * whose stored vector could not be read.
+ */
+data class FaceRegroupOutcome(val committed: Boolean, val leftUngrouped: Int)
+
+/**
  * Rebuilds the account's people from scratch out of every stored face embedding, one quality-aware
  * pass with a merge step.
  *
@@ -61,6 +69,10 @@ import javax.inject.Inject
  *
  * The merge needs every embedding at once, so the pass loads them together; memory stays proportional
  * to the library's face count, comfortably within the app's heap for a personal library.
+ *
+ * Both writing passes take a `writeAllowed` check, asked inside their transaction before anything is
+ * written: the caller's fence against an import (or a sign-out) that began after the pass read the faces,
+ * so a grouping of the faces as they were never lands over what came after. A refused pass writes nothing.
  */
 class ClusterFacesUseCase @Inject constructor(
     private val faceDao: FaceDao,
@@ -71,10 +83,16 @@ class ClusterFacesUseCase @Inject constructor(
     private val clusterSummaryDao: ClusterSummaryDao,
     private val appDatabase: AppDatabase,
 ) {
-    suspend operator fun invoke(userId: UserId?) = withContext(Dispatchers.Default) {
+    suspend operator fun invoke(
+        userId: UserId?,
+        writeAllowed: () -> Boolean = { true },
+    ): FaceRegroupOutcome = withContext(Dispatchers.Default) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
 
         val faces = faceDao.allFacesByScoreDesc(account)
+        // Every face a grouping can place (the removed ones never can), so the faces this rebuild leaves
+        // without a person can be told apart from the ones indexed after it read the table.
+        val placeableFaces = faces.count { !it.rejected }
         // The names the user has given, read before the rebuild clears the person table, so a rename
         // survives the recluster a newly indexed photo triggers.
         val oldNameById = personDao.namedPeopleForUser(account)
@@ -169,9 +187,13 @@ class ClusterFacesUseCase @Inject constructor(
         // Face-clustering diagnostics for Settings > Share diagnostics: capture each rebuild's shape
         // (cluster count, named vs unnamed, how many kept a stable id vs got a fresh one), so an odd
         // merge or split is visible after the fact. Filled inside the rewrite, logged after it commits.
-        val createdClusters = ArrayList<Triple<Long, Int, String?>>()
+        // Each cluster is kept as its size and whether it is named, never its name or id: the copied
+        // diagnostics are often posted publicly.
+        val createdClusters = ArrayList<Pair<Int, Boolean>>()
         var keptIdCount = 0
         var otherBucketSize = 0
+        var placedFaces = 0
+        var committed = false
 
         // A face id to its embedding, so each final person's centroid summary can be built from its
         // members without a re-read. The values are the same arrays already held in samples, so this
@@ -187,6 +209,10 @@ class ClusterFacesUseCase @Inject constructor(
         // One transaction for the whole rewrite: the people Flow sees a single final list instead of
         // an empty-then-repopulate burst, so the People surfaces do not flicker.
         appDatabase.withTransaction {
+            // Asked here, inside the transaction, so nothing the caller fences against can commit between
+            // the check and the rewrite.
+            if (!writeAllowed()) return@withTransaction
+            committed = true
             // Drop the old grouping first: unlink every face and remove the people, so the pass builds
             // a fresh set rather than growing onto stale clusters. The centroid cache is cleared with
             // them, so it never outlives the grouping it summarises (an empty cache is a valid state:
@@ -232,6 +258,7 @@ class ClusterFacesUseCase @Inject constructor(
                     )
                     faceDao.assignPersonBatch(otherId, members)
                     otherBucketSize = members.size
+                    placedFaces += members.size
                     // The Unsorted bucket is summarised too, so the cached member total equals the count
                     // of grouped faces (the incremental pass's self-check). Its centroid is a grab-bag
                     // mean, so the incremental pass excludes this row from the people it matches against.
@@ -277,25 +304,32 @@ class ClusterFacesUseCase @Inject constructor(
                     ),
                 )
                 faceDao.assignPersonBatch(personId, kept)
+                placedFaces += kept.size
                 summaryRows.add(summaryFor(personId, account, kept, embeddingById, summaryNow))
-                createdClusters.add(Triple(personId, kept.size, name))
+                createdClusters.add(kept.size to (name != null))
                 if (reuseId != null) keptIdCount++
             }
             // Refill the centroid cache from the final people, so an incremental pass can place a newly
             // indexed face against them without re-reading every embedding.
             clusterSummaryDao.upsertAll(summaryRows)
         }
+        if (!committed) return@withContext FaceRegroupOutcome(committed = false, leftUngrouped = 0)
 
-        val namedCount = createdClusters.count { it.third != null }
+        // The faces this rebuild read but left without a person: those kept out of a named person they
+        // were marked as not being, and those whose vector could not be read. They stay ungrouped by
+        // design, so the caller measures new faces against this count rather than against zero.
+        val leftUngrouped = (placeableFaces - placedFaces).coerceAtLeast(0)
+        val namedCount = createdClusters.count { it.second }
         SyncDiagnostics.log(
             "faces: rebuilt ${createdClusters.size} clusters from ${ids.size} faces " +
                 "($namedCount named, ${createdClusters.size - namedCount} unnamed, " +
-                "$keptIdCount kept id, ${createdClusters.size - keptIdCount} new)",
+                "$keptIdCount kept id, ${createdClusters.size - keptIdCount} new, $leftUngrouped left ungrouped)",
         )
         if (otherBucketSize > 0) SyncDiagnostics.log("  unsorted bucket: $otherBucketSize faces")
-        createdClusters.sortedByDescending { it.second }.take(15).forEach { (id, size, name) ->
-            SyncDiagnostics.log("  cluster $id: $size faces" + (name?.let { " = $it" } ?: ""))
+        createdClusters.sortedByDescending { it.first }.take(15).forEach { (size, named) ->
+            SyncDiagnostics.log("  cluster: $size faces, " + if (named) "named" else "unnamed")
         }
+        FaceRegroupOutcome(committed = true, leftUngrouped = leftUngrouped)
     }
 
     /**
@@ -318,9 +352,13 @@ class ClusterFacesUseCase @Inject constructor(
      * full rebuild to form a new person from. So this never opens a cluster, bridges two people, or
      * disturbs an existing assignment. The Unsorted bucket is excluded from the people matched against, so
      * a fresh face is never absorbed into the grab-bag. Guest-safe via the [PhotoLocationEntity.LOCAL_USER]
-     * account sentinel.
+     * account sentinel. A placement its [writeAllowed] check refuses writes nothing and returns false, so
+     * the caller leaves the faces to a rebuild of the data as it now stands.
      */
-    suspend fun assignNewFaces(userId: UserId?): Boolean = withContext(Dispatchers.Default) {
+    suspend fun assignNewFaces(
+        userId: UserId?,
+        writeAllowed: () -> Boolean = { true },
+    ): Boolean = withContext(Dispatchers.Default) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
 
         // (1) No cache yet: nothing to match against, so a full build must seed it first.
@@ -458,7 +496,12 @@ class ClusterFacesUseCase @Inject constructor(
         // One transaction: the faces gain their person link (existing or newly minted) and every touched or
         // created summary is written together, so the cache stays in step with the assignments (its member
         // total keeps matching [assignedFaceCount], the incremental pass's self-check).
+        var placed = false
         appDatabase.withTransaction {
+            // Asked inside the transaction, as the full rebuild does, so the faces and people read above
+            // cannot be replaced between the check and the write.
+            if (!writeAllowed()) return@withTransaction
+            placed = true
             for ((personId, faceIds) in faceIdsByPerson) faceDao.assignPersonBatch(personId, faceIds)
             if (updatedSummaries.isNotEmpty()) clusterSummaryDao.upsertAll(updatedSummaries)
             for ((faceIds, centroid) in newClusters) {
@@ -478,6 +521,7 @@ class ClusterFacesUseCase @Inject constructor(
                 )
             }
         }
+        if (!placed) return@withContext false
         SyncDiagnostics.log(
             "faces: incremental placed ${faceIdsByPerson.sumOf { it.second.size }} onto " +
                 "${faceIdsByPerson.size} people and formed ${newClusters.size} new clusters " +

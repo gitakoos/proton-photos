@@ -33,6 +33,7 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import androidx.datastore.preferences.core.edit
+import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -75,6 +76,7 @@ import kotlinx.coroutines.sync.withPermit
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.crypto.DecryptPriority
 import eu.akoos.photos.crypto.DecryptPriorityContext
+import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.FaceScanDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
@@ -108,6 +110,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -156,37 +159,126 @@ internal fun shouldMarkScannedOnNullSource(isLocalOnly: Boolean, loadTimedOut: B
  * Whether a finished walk pass should group the account's waiting faces into people. It needs a walk
  * that is still permitted and at least one face not yet grouped ([ungrouped]), however many faces the
  * pass itself found, so faces already stored are grouped even when this pass loads nothing. A walk about
- * to stop groups at once; a continuing drain groups at most once per [minIntervalMs]. Pure so it is
- * unit-tested without Android.
+ * to stop groups at once; a continuing drain groups at most once per [minIntervalMs].
+ *
+ * Never while names wait to be put back on the re-detected library ([reattachPending]: a model change
+ * or a names-only import): the faces do not carry those names until the drained walk reattaches them,
+ * so a grouping before then would rebuild every named person unnamed. The drained walk reattaches first
+ * and groups after. Pure so it is unit-tested without Android.
  */
 internal fun shouldGroupAtPassEnd(
     active: Boolean,
     willContinue: Boolean,
+    reattachPending: Boolean,
     ungrouped: Int,
     msSinceLastGroup: Long,
     minIntervalMs: Long,
-): Boolean = active && ungrouped > 0 && (!willContinue || msSinceLastGroup >= minIntervalMs)
+): Boolean =
+    active && !reattachPending && ungrouped > 0 && (!willContinue || msSinceLastGroup >= minIntervalMs)
 
 /**
  * Whether the pass-end grouping follows its incremental placement with a full regroup: when the
  * incremental path could not handle the pass (no usable cache, a large backlog, a failure), or when a
  * [settled] walk (about to stop rather than continue) still holds faces the incremental path left
  * unplaced, so the full regroup groups them and routes the weak ones to Unsorted instead of leaving any
- * orphaned. A regroup that timed out or threw less than [failureBackoffMs] ago is not retried;
- * [msSinceLastFailedRegroup] is null when none has failed. Nor does one run before [cooledDown]
- * ([fullRegroupCooledDown]) allows it. Pure so it is unit-tested without Android.
+ * orphaned. Only for faces beyond what the last completed full regroup itself left ungrouped
+ * ([exceedsRegroupBaseline] over [ungroupedBaseline]). A regroup that timed out or threw less than
+ * [failureBackoffMs] ago is not retried; [msSinceLastFailedRegroup] is null when none has failed. Nor does
+ * one run before [cooledDown] ([fullRegroupCooledDown]) allows it. Pure so it is unit-tested without
+ * Android.
  */
 internal fun shouldRunFullRegroup(
     incrementalHandled: Boolean,
     settled: Boolean,
     ungroupedAfterIncremental: Int,
+    ungroupedBaseline: Int?,
     msSinceLastFailedRegroup: Long?,
     failureBackoffMs: Long,
     cooledDown: Boolean = true,
 ): Boolean =
     (!incrementalHandled || (settled && ungroupedAfterIncremental > 0)) &&
+        exceedsRegroupBaseline(ungroupedAfterIncremental, ungroupedBaseline) &&
         (msSinceLastFailedRegroup == null || msSinceLastFailedRegroup >= failureBackoffMs) &&
         cooledDown
+
+/**
+ * Whether the drained walk (the whole library scanned, and no reattach, parameter change or debug build
+ * calling for a regroup of its own) follows its incremental placement with a full regroup: only for faces
+ * waiting beyond what the last completed full regroup itself left ungrouped ([exceedsRegroupBaseline] over
+ * [ungroupedBaseline]), and under the same failure backoff and [cooledDown] the pass-end grouping obeys,
+ * so a gallery visit to a library whose leftovers never reach zero does not reload every stored embedding.
+ * Pure so it is unit-tested without Android.
+ */
+internal fun shouldRunDrainedRegroup(
+    ungroupedAfterIncremental: Int,
+    ungroupedBaseline: Int?,
+    msSinceLastFailedRegroup: Long?,
+    failureBackoffMs: Long,
+    cooledDown: Boolean,
+): Boolean =
+    ungroupedAfterIncremental > 0 &&
+        exceedsRegroupBaseline(ungroupedAfterIncremental, ungroupedBaseline) &&
+        (msSinceLastFailedRegroup == null || msSinceLastFailedRegroup >= failureBackoffMs) &&
+        cooledDown
+
+/**
+ * Whether more faces wait ungrouped ([ungrouped]) than the last completed full regroup left that way on
+ * purpose ([baseline]). A face kept out of a named person it was marked as not being stays ungrouped by
+ * design, so a count that rarely reaches zero would otherwise call for a full regroup again and again;
+ * only faces beyond the baseline are new ones to place. A null [baseline] (no regroup has completed since
+ * the process started or the faces were last replaced) holds nothing back. Pure so it is unit-tested
+ * without Android.
+ */
+internal fun exceedsRegroupBaseline(ungrouped: Int, baseline: Int?): Boolean =
+    baseline == null || ungrouped > baseline
+
+/**
+ * The baseline for [exceedsRegroupBaseline] once a grouping that stopped short of a full regroup has seen
+ * [ungrouped] faces waiting: never above that, so when faces the last regroup left ungrouped have since
+ * gone (a photo deleted, a face placed or removed), the next new face still reads as new. A null [baseline]
+ * stays null. Pure so it is unit-tested without Android.
+ */
+internal fun lowerRegroupBaseline(baseline: Int?, ungrouped: Int): Int? =
+    baseline?.let { minOf(it, ungrouped) }
+
+/**
+ * Keeps face data the indexer writes from landing over an import. Every scan (a walk pass, an on-demand
+ * scan, a find-more sweep) and every grouping takes a [token] before it reads the face data it will write
+ * back, and writes only while [allows] still holds for that token, asked inside the same database
+ * transaction as the write. An import runs between [enterImport] and [exitImport], which both move the
+ * generation, so work that began before the import ended writes nothing more; and since the database runs
+ * one write transaction at a time, a write that passed the check commits before the import's own
+ * transaction can begin. [invalidate] moves the generation alone, for a sign-out or a rescan that makes
+ * all work under way stale. Pure so it is unit-tested without Android.
+ */
+internal class FaceWriteFence {
+    private val generation = AtomicLong(0L)
+    private val importsInFlight = AtomicInteger(0)
+
+    /** The token a unit of work takes before it reads anything it will write back. */
+    fun token(): Long = generation.get()
+
+    /** Whether work holding [token] may still write: no import is running, and none has started or ended,
+     *  nor has the fence been invalidated, since the token was taken. */
+    fun allows(token: Long): Boolean = importsInFlight.get() == 0 && generation.get() == token
+
+    /** An import is about to write: every token taken so far stops allowing writes. */
+    fun enterImport() {
+        importsInFlight.incrementAndGet()
+        generation.incrementAndGet()
+    }
+
+    /** The import has committed or given up. Tokens taken while it ran stay refused; new ones allow. */
+    fun exitImport() {
+        generation.incrementAndGet()
+        importsInFlight.decrementAndGet()
+    }
+
+    /** Every token taken so far stops allowing writes. */
+    fun invalidate() {
+        generation.incrementAndGet()
+    }
+}
 
 /**
  * Whether enough time has passed since the last completed full regroup for the pass-end grouping to
@@ -260,6 +352,9 @@ class FaceIndexingScheduler @Inject constructor(
     private val rekeyPhotoFaces: eu.akoos.photos.domain.usecase.RekeyPhotoFacesUseCase,
     private val deviceHealth: DeviceHealthPolicy,
     private val mlWalkGate: eu.akoos.photos.util.MlWalkGate,
+    // Only for the fenced writes (a photo's faces with its scan marker, a batch of markers, a reattach), each
+    // one transaction that also asks [writeFence], so no import can commit between that check and the write.
+    private val appDatabase: AppDatabase,
 ) {
     /** Own scope so an unpause kick and the settings watcher outlive the caller that triggered them. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -291,6 +386,19 @@ class FaceIndexingScheduler @Inject constructor(
     /** One walk at a time: a second trigger (refresh, unpause) while one runs is a no-op instead of
      *  stacking a second full library walk and its item set in memory. */
     private val running = AtomicBoolean(false)
+
+    /** Mirrors [running] as a flow, so [awaitIdle] can suspend until the walk in flight has ended. */
+    private val walkRunning = MutableStateFlow(false)
+
+    /** Fences every face, scan-marker, reattach and grouping write this scheduler makes against an import
+     *  ([withImportFence]) and a sign-out or rescan ([reset]), so work that read the face data before
+     *  either never writes back over what came after. */
+    private val writeFence = FaceWriteFence()
+
+    /** Serialises every grouping (the pass-end and drained placement and regroup, a forced regroup, the
+     *  on-demand and sweep groupings), so two full regroups never hold every stored embedding at once and
+     *  an incremental placement never interleaves with a full rewrite. Never held across a scan. */
+    private val groupingLock = Mutex()
 
     /** Live mirror of the two gates, kept current by [watchSettings] so the per-photo check is a
      *  volatile read rather than a DataStore round trip per item. */
@@ -327,6 +435,13 @@ class FaceIndexingScheduler @Inject constructor(
      *  ran, so the pass-end grouping spaces full regroups by their cost ([fullRegroupCooledDown]). */
     @Volatile private var lastRegroupEndMs: Long? = null
     @Volatile private var lastRegroupDurationMs = 0L
+
+    /** How many faces the last completed full regroup left ungrouped on purpose, with the [writeFence]
+     *  token it read them under, so a later grouping regroups fully only for faces beyond it
+     *  ([exceedsRegroupBaseline]). In memory, so a new process starts without one. Read through
+     *  [currentRegroupBaseline], which drops it once an import, a sign-out or a rescan has moved the fence;
+     *  written under [groupingLock], and cleared by a model-version wipe. */
+    @Volatile private var regroupBaseline: RegroupBaseline? = null
 
     private val _progress = MutableStateFlow(FaceIndexingProgress(FaceIndexingState.Idle, 0, 0))
     val progress: StateFlow<FaceIndexingProgress> = _progress.asStateFlow()
@@ -387,6 +502,11 @@ class FaceIndexingScheduler @Inject constructor(
         // when it finishes, so a start requested during a winding-down pass is never lost (which is
         // what made a fresh start after import or reset appear to do nothing).
         if (!running.compareAndSet(false, true)) { restartRequested = true; return }
+        walkRunning.value = true
+        // Taken before this pass reads a face or a scan marker: once an import begins (or a sign-out or
+        // rescan resets the scheduler), everything this pass would still write is dropped, and the pass
+        // stops at its next photo.
+        val passToken = writeFence.token()
         stopRequested = false
         // Photos that actually got a source this walk. Zero means no progress (off Wi-Fi, or the
         // budget could load nothing more), so the tail does not re-kick and spin.
@@ -446,36 +566,60 @@ class FaceIndexingScheduler @Inject constructor(
             // pass instead, so changing the cluster threshold and relaunching re-groups the stored
             // embeddings with no re-embed; release keeps the new-faces-only guard.
             if (total == 0) {
-                // The library is fully re-detected, so any names a wipe or an import parked can now be
-                // put back on the faces before the groups form.
-                val reattached = reattachPendingLabels(userId)
                 val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-                // A clustering-parameter bump, a label reattach, or a debug build needs the global pass: it
-                // regroups the stored embeddings once with no re-embed, and the new params generation is
-                // recorded only after the pass actually completes (a failed one simply retries next walk).
-                val paramsOutdated =
-                    (prefs[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] ?: 0) != FACE_CLUSTER_PARAMS_VERSION
-                if (BuildConfig.DEBUG || reattached || paramsOutdated) {
-                    val grouped = cluster(userId, RegroupTrigger.DRAINED)
-                    if (paramsOutdated && grouped) {
-                        context.settingsDataStore.edit {
-                            it[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] = FACE_CLUSTER_PARAMS_VERSION
+                // "Fully scanned" holds only for the library as this pass read it. An import since then may
+                // have brought or replaced faces, so the reattach and the grouping wait for the walk the
+                // import's caller starts next rather than acting on a stale view.
+                if (writeFence.allows(passToken)) {
+                    // The library is fully re-detected, so any names a wipe or an import parked can now be
+                    // put back on the faces before the groups form.
+                    val reattached = reattachPendingLabels(userId, passToken)
+                    // A clustering-parameter bump, a label reattach, or a debug build needs the global pass:
+                    // it regroups the stored embeddings once with no re-embed, and the new params generation
+                    // is recorded only after the pass actually completes (a failed one simply retries next
+                    // walk).
+                    val paramsOutdated =
+                        (prefs[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] ?: 0) != FACE_CLUSTER_PARAMS_VERSION
+                    if (BuildConfig.DEBUG || reattached || paramsOutdated) {
+                        val grouped = cluster(userId, RegroupTrigger.DRAINED)
+                        if (paramsOutdated && grouped) {
+                            context.settingsDataStore.edit {
+                                it[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] = FACE_CLUSTER_PARAMS_VERSION
+                            }
+                        }
+                    } else {
+                        // Routine new photos: let the incremental pass attach them to existing people AND
+                        // form new clusters from the fresh faces, so the whole library is not regrouped just
+                        // to place a few. Only the weak faces it cannot confidently place are left over, and
+                        // those fall to a full regroup (which routes them to Unsorted) so none are orphaned,
+                        // once they outnumber what the last regroup left ungrouped on purpose and the
+                        // failure backoff and cooldown allow. Decided under the grouping lock, so a regroup
+                        // that just finished elsewhere counts.
+                        groupingLock.withLock {
+                            tryAssignNewFaces(userId)
+                            val leftover = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
+                            val decidedMs = SystemClock.elapsedRealtime()
+                            if (active() && shouldRunDrainedRegroup(
+                                    ungroupedAfterIncremental = leftover,
+                                    ungroupedBaseline = currentRegroupBaseline(userId),
+                                    msSinceLastFailedRegroup = lastFailedRegroupMs?.let { decidedMs - it },
+                                    failureBackoffMs = FULL_REGROUP_FAILURE_BACKOFF_MS,
+                                    cooledDown = regroupCooledDown(decidedMs),
+                                )
+                            ) {
+                                regroupLocked(userId, RegroupTrigger.DRAINED)
+                            } else {
+                                lowerBaselineTo(userId, leftover)
+                            }
                         }
                     }
-                } else {
-                    // Routine new photos: let the incremental pass attach them to existing people AND form
-                    // new clusters from the fresh faces, so the whole library is not regrouped just to place
-                    // a few. Only the weak faces it cannot confidently place are left over, and those fall to
-                    // a full regroup (which routes them to Unsorted) so none are orphaned.
-                    tryAssignNewFaces(userId)
-                    if (faceDao.unclusteredCount(account) > 0) cluster(userId, RegroupTrigger.DRAINED)
-                }
-                // Opt-in auto-merge: once the groups have settled, fold each named person's closest
-                // look-alike cluster in (the same matches the manual suggestion card would offer), so the
-                // user does not confirm them one by one. Best-effort; a failure never fails the walk.
-                if (autoMerge) {
-                    runCatching { autoMergePeople(account) }
-                        .onFailure { Log.w(TAG, "auto-merge failed: ${it.message}") }
+                    // Opt-in auto-merge: once the groups have settled, fold each named person's closest
+                    // look-alike cluster in (the same matches the manual suggestion card would offer), so
+                    // the user does not confirm them one by one. Best-effort; a failure never fails the walk.
+                    if (autoMerge) {
+                        runCatching { autoMergePeople(account) }
+                            .onFailure { Log.w(TAG, "auto-merge failed: ${it.message}") }
+                    }
                 }
                 pushLibraryCounts(userId)
                 _progress.value = FaceIndexingProgress(FaceIndexingState.Done, libraryTotal, libraryTotal)
@@ -510,16 +654,20 @@ class FaceIndexingScheduler @Inject constructor(
             val acceptedBlur: MutableList<Float>? = if (BuildConfig.DEBUG) ArrayList() else null
             val passStart = SystemClock.elapsedRealtime()
             val decryptBudget = AtomicInteger(MAX_COLD_DECRYPTS_PER_PASS)
-            // Photos this pass actually scanned (source loaded, detection ran), collected across the
-            // workers and persisted as skip markers once the walk finishes; a deferred photo is never
-            // added, so it stays pending for a later pass. Concurrent because the workers add in parallel.
+            // A photo whose source loaded is written with its faces and its skip marker together the moment
+            // its detection ends, and counted in [persistedThisPass]. [scannedKeys] collects the rest a pass
+            // records: the photos recorded scanned without a source (or whose faces failed to write), whose
+            // markers are persisted once the walk finishes; a deferred photo is never added, so it stays
+            // pending for a later pass. Concurrent because the workers add in parallel.
             val scannedKeys = ConcurrentHashMap.newKeySet<String>()
-            // Markers are also flushed mid-pass in chunks (not only at pass end), so a long single-pass
-            // drain that is killed keeps the photos it already scanned. [persistedThisPass] counts the keys
-            // already flushed-and-removed, so progress stays the running scanned total even though
-            // [scannedKeys] then holds only the not-yet-flushed remainder. One flush runs at a time.
+            // Those markers are also flushed mid-pass in chunks (not only at pass end), so a long single-pass
+            // drain that is killed keeps them. [persistedThisPass] also counts the keys already
+            // flushed-and-removed, so progress stays the running scanned total even though [scannedKeys]
+            // then holds only the not-yet-flushed remainder. One flush runs at a time.
             val persistedThisPass = AtomicInteger(0)
             val scanFlushing = AtomicBoolean(false)
+            // A pass keeps going only while the walk is permitted and nothing has fenced its writes off.
+            val passLive = { active() && writeFence.allows(passToken) }
             // Hold the shared model gate for the session-resident window, so this face pair and a
             // semantic walk's CLIP session are never both loaded at once (the large-heap OOM risk).
             // Released the moment the sessions are closed; the short user-facing scans stay ungated.
@@ -528,7 +676,7 @@ class FaceIndexingScheduler @Inject constructor(
                 coroutineScope {
                     repeat(WORKER_COUNT) { workerIndex ->
                         launch {
-                            while (active()) {
+                            while (passLive()) {
                                 // The face scan runs serialized on background threads, so it no longer
                                 // stands down for touch input: gate the walk on the physical/power tier
                                 // only, so watching the face screen never freezes the scan. It still
@@ -539,17 +687,17 @@ class FaceIndexingScheduler @Inject constructor(
                                 // names a physical/power reason (the interaction branch is reached only
                                 // once those gates pass), so the walk never records an interaction park.
                                 var verdict = deviceHealth.verdict()
-                                while (active() && !verdict.backgroundWorkAllowed) {
+                                while (passLive() && !verdict.backgroundWorkAllowed) {
                                     FaceDiagnostics.recordPark(verdict.reason)
                                     delay(HEALTH_PAUSE_POLL_MS)
                                     verdict = deviceHealth.verdict()
                                 }
-                                if (!active()) break
+                                if (!passLive()) break
                                 val i = cursor.getAndIncrement()
                                 if (i >= total) break
                                 val item = pending[i]
                                 try {
-                                    indexOne(item, userId, ml, decryptBudget, sourcesLoaded, scannedKeys, "w$workerIndex", facesThisPass, acceptedScores, droppedTooBlurry, acceptedBlur)
+                                    indexOne(item, userId, ml, passToken, decryptBudget, sourcesLoaded, scannedKeys, persistedThisPass, "w$workerIndex", facesThisPass, acceptedScores, droppedTooBlurry, acceptedBlur)
                                 } catch (e: kotlinx.coroutines.CancellationException) {
                                     throw e
                                 } catch (e: Throwable) {
@@ -573,11 +721,11 @@ class FaceIndexingScheduler @Inject constructor(
                                             "rate ${String.format(Locale.US, "%.1f", rate)}/s",
                                     )
                                 }
-                                // Persist scan markers mid-pass in chunks, so a long single-pass drain that
-                                // is killed keeps the photos it already scanned instead of restarting from
-                                // zero. One flush at a time; the other workers keep scanning meanwhile.
+                                // Persist the collected scan markers mid-pass in chunks, so a long single-pass
+                                // drain that is killed keeps them instead of restarting from zero. One flush at
+                                // a time; the other workers keep scanning meanwhile.
                                 if (scannedKeys.size >= SCAN_FLUSH_CHUNK && scanFlushing.compareAndSet(false, true)) {
-                                    try { flushScannedChunk(userId, scannedKeys, persistedThisPass) }
+                                    try { flushScannedChunk(userId, scannedKeys, persistedThisPass, passToken) }
                                     finally { scanFlushing.set(false) }
                                 }
                             }
@@ -595,52 +743,64 @@ class FaceIndexingScheduler @Inject constructor(
                 mlWalkGate.release(MlRail.FACE)
             }
 
-            // Persist this pass's scan markers in one batch, so the next run skips these photos whether
-            // or not they held a face. A stopped or paused pass still records what it did scan; the
-            // sign-out wipe clears the table separately.
+            // Persist this pass's remaining collected markers in one batch, so the next run skips these
+            // photos. A stopped or paused pass still records what it did scan; the sign-out wipe clears the
+            // table separately, and a pass an import or a sign-out has fenced off records nothing more.
             if (scannedKeys.isNotEmpty()) {
-                runCatching { faceScanDao.upsert(scannedKeys.map { FaceScanEntity(userId?.id ?: PhotoLocationEntity.LOCAL_USER, it) }) }
-                    .onFailure { Log.w(TAG, "scan marker flush failed: ${it.message}") }
+                try {
+                    storeScanMarkers(userId, scannedKeys.toList(), passToken)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    Log.w(TAG, "scan marker flush failed: ${e.message}")
+                }
             }
 
             // Group DURING the walk, not only when the whole library drains, whenever faces wait ungrouped
             // (however many this pass found), so a library whose remainder never drains still gets its
-            // people. Two triggers, both bounded (cluster() runs under a timeout): (1) the walk is about
+            // people. Two triggers, both bounded (a regroup runs under a timeout): (1) the walk is about
             // to stop rather than continue (off Wi-Fi, health-parked, nothing more to source this pass),
             // so group what is indexed instead of waiting for a drain that may never come; (2) a long
             // continuous drain crossed the refresh interval, so people appear and grow as the scan runs.
-            // Incremental placement runs first. A settled walk then regroups fully while faces are still
-            // unplaced, as the drained branch does, so the weak ones land in Unsorted instead of staying
-            // orphaned; a continuing drain regroups fully only when the incremental path cannot be used.
-            // A full regroup that timed out or threw is not retried from here until its backoff passes.
+            // Neither while names wait to be reattached (see [shouldGroupAtPassEnd]). Incremental
+            // placement runs first. A settled walk then regroups fully while faces are still unplaced, as
+            // the drained branch does, so the weak ones land in Unsorted instead of staying orphaned; a
+            // continuing drain regroups fully only when the incremental path cannot be used. Either only
+            // for faces beyond what the last full regroup left ungrouped on purpose, and a full regroup
+            // that timed out or threw is not retried from here until its backoff passes. Decided under
+            // the grouping lock, so a regroup that just finished elsewhere (a forced one after an import)
+            // counts and is not repeated.
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             val willContinue = restartRequested || (active() && sourcesLoaded.get() > 0)
             val nowMs = SystemClock.elapsedRealtime()
             if (shouldGroupAtPassEnd(
                     active = active(),
                     willContinue = willContinue,
+                    reattachPending = reattachFile.isFile,
                     ungrouped = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0),
                     msSinceLastGroup = nowMs - lastIncrementalClusterMs,
                     minIntervalMs = INCREMENTAL_CLUSTER_MIN_INTERVAL_MS,
                 )
             ) {
                 lastIncrementalClusterMs = nowMs
-                val handled = tryAssignNewFaces(userId)
-                if (shouldRunFullRegroup(
-                        incrementalHandled = handled,
-                        settled = !willContinue,
-                        ungroupedAfterIncremental = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0),
-                        msSinceLastFailedRegroup = lastFailedRegroupMs?.let { nowMs - it },
-                        failureBackoffMs = FULL_REGROUP_FAILURE_BACKOFF_MS,
-                        cooledDown = fullRegroupCooledDown(
-                            msSinceLastRegroup = lastRegroupEndMs?.let { nowMs - it },
-                            lastRegroupDurationMs = lastRegroupDurationMs,
-                            minIntervalMs = INCREMENTAL_CLUSTER_MIN_INTERVAL_MS,
-                            dutyFactor = FULL_REGROUP_DUTY_FACTOR,
-                        ),
-                    )
-                ) {
-                    cluster(userId, if (willContinue) RegroupTrigger.PASS_CONTINUING else RegroupTrigger.PASS_SETTLED)
+                groupingLock.withLock {
+                    val handled = tryAssignNewFaces(userId)
+                    val leftover = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
+                    val decidedMs = SystemClock.elapsedRealtime()
+                    if (active() && shouldRunFullRegroup(
+                            incrementalHandled = handled,
+                            settled = !willContinue,
+                            ungroupedAfterIncremental = leftover,
+                            ungroupedBaseline = currentRegroupBaseline(userId),
+                            msSinceLastFailedRegroup = lastFailedRegroupMs?.let { decidedMs - it },
+                            failureBackoffMs = FULL_REGROUP_FAILURE_BACKOFF_MS,
+                            cooledDown = regroupCooledDown(decidedMs),
+                        )
+                    ) {
+                        regroupLocked(userId, if (willContinue) RegroupTrigger.PASS_CONTINUING else RegroupTrigger.PASS_SETTLED)
+                    } else {
+                        lowerBaselineTo(userId, leftover)
+                    }
                 }
             }
             pushLibraryCounts(userId)
@@ -662,6 +822,7 @@ class FaceIndexingScheduler @Inject constructor(
             }
         } finally {
             running.set(false)
+            walkRunning.value = false
             // Auto-continue: a full-res walk only downloads a bounded batch per pass, so keep going
             // until the library is drained. A pending resume always re-kicks; otherwise re-kick only
             // while the walk is still permitted and made progress, which stops cleanly at Done, off
@@ -679,22 +840,110 @@ class FaceIndexingScheduler @Inject constructor(
      * foreground-service kill during a long single-pass drain keeps the photos already scanned rather than
      * restarting from zero. Snapshot then remove, so each marker is written once (idempotent upsert aside);
      * concurrent adds during the write land in the set and the next flush (or the pass-end flush) carries
-     * them. On a write failure the keys are kept so the pass-end flush retries them. [persistedThisPass]
-     * tracks the removed count so progress stays the running scanned total after the set shrinks.
+     * them. On a write failure the keys are kept so the pass-end flush retries them; keys the fence turned
+     * away ([fenceToken] stale) are dropped, their photos left pending for a later pass. [persistedThisPass]
+     * tracks the written count so progress stays the running scanned total after the set shrinks.
      */
     private suspend fun flushScannedChunk(
         userId: UserId?,
         scannedKeys: MutableSet<String>,
         persistedThisPass: AtomicInteger,
+        fenceToken: Long,
     ) {
         val snapshot = scannedKeys.toList()
         if (snapshot.isEmpty()) return
-        val ok = runCatching {
-            faceScanDao.upsert(snapshot.map { FaceScanEntity(userId?.id ?: PhotoLocationEntity.LOCAL_USER, it) })
-        }.onFailure { Log.w(TAG, "incremental scan flush failed: ${it.message}") }.isSuccess
-        if (ok) {
-            scannedKeys.removeAll(snapshot.toHashSet())
-            persistedThisPass.addAndGet(snapshot.size)
+        val written = try {
+            storeScanMarkers(userId, snapshot, fenceToken)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "incremental scan flush failed: ${e.message}")
+            return
+        }
+        scannedKeys.removeAll(snapshot.toHashSet())
+        if (written) persistedThisPass.addAndGet(snapshot.size)
+    }
+
+    /**
+     * Records [photoKeys] scanned for the account in one transaction, only while [fenceToken] still holds
+     * ([writeFence], asked inside the transaction). Returns whether it wrote; a database failure propagates.
+     */
+    private suspend fun storeScanMarkers(userId: UserId?, photoKeys: Collection<String>, fenceToken: Long): Boolean {
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        return appDatabase.withTransaction {
+            if (!writeFence.allows(fenceToken)) return@withTransaction false
+            faceScanDao.upsert(photoKeys.map { FaceScanEntity(account, it) })
+            true
+        }
+    }
+
+    /**
+     * Writes one scanned photo's faces ([faces], possibly none) and its scan marker together, in one
+     * transaction, only while [fenceToken] still holds ([writeFence], asked inside the transaction so no
+     * import can commit between the check and the write). Both land or neither does: a photo is never
+     * recorded scanned without its faces, nor are its faces left without the marker that keeps a later pass
+     * from detecting over them (and blanking any names an import has put on them since). Returns whether it
+     * wrote; a database failure propagates.
+     */
+    private suspend fun storePhotoScan(
+        userId: UserId?,
+        photoKey: String,
+        faces: List<FaceEntity>,
+        fenceToken: Long,
+    ): Boolean {
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        return appDatabase.withTransaction {
+            if (!writeFence.allows(fenceToken)) return@withTransaction false
+            if (faces.isNotEmpty()) faceDao.upsert(faces)
+            faceScanDao.upsert(listOf(FaceScanEntity(account, photoKey)))
+            true
+        }
+    }
+
+    /** The find-more sweep's [storePhotoScan]: one swept photo's faces and its hi-res mark, together and
+     *  behind the same fence. Returns whether it wrote; a database failure propagates. */
+    private suspend fun storeSweptPhoto(
+        userId: UserId?,
+        photoKey: String,
+        faces: List<FaceEntity>,
+        fenceToken: Long,
+    ): Boolean {
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        return appDatabase.withTransaction {
+            if (!writeFence.allows(fenceToken)) return@withTransaction false
+            if (faces.isNotEmpty()) faceDao.upsert(faces)
+            faceScanDao.markHiResScanned(account, listOf(photoKey))
+            true
+        }
+    }
+
+    /**
+     * Suspends until no walk pass is running. A pass stands down at its next per-photo check once the walk
+     * is paused or stopped, but first finishes the photos already in flight, and a full-resolution
+     * download can stretch that to a couple of minutes, so there is no timeout; the wait is cancellable.
+     * Pause ([setPaused]) first, or the next trigger simply starts another pass. The finished photos land
+     * before the caller moves on, and the walk's model sessions are closed by then. It does not keep a
+     * later write off anything: that is [withImportFence]'s job.
+     */
+    suspend fun awaitIdle() {
+        walkRunning.first { !it }
+    }
+
+    /**
+     * Runs [block], an import that writes face data (a face snapshot restore, a face index import), fenced
+     * against this scheduler: every scan and grouping that took its token before [block] returns writes
+     * nothing more, whatever it had in flight, so faces read before the import are never written back over
+     * it (a re-detected face would otherwise come back with no name, not removed and in no person). Wrap
+     * the importer call itself, after pausing the walk and [awaitIdle]; the import must write through the
+     * app database's own transactions, as the importers do. Afterwards group the imported faces
+     * ([regroupNow] or [requestRecluster]) and restart the walk if it was running.
+     */
+    suspend fun <T> withImportFence(block: suspend () -> T): T {
+        writeFence.enterImport()
+        try {
+            return block()
+        } finally {
+            writeFence.exitImport()
         }
     }
 
@@ -740,6 +989,13 @@ class FaceIndexingScheduler @Inject constructor(
     fun requestRecluster(userId: UserId?) { scope.launch { runCatching { cluster(userId, RegroupTrigger.REQUEST, force = true) } } }
 
     /**
+     * A full regroup now, forced like [requestRecluster] but awaited, for a caller that reports once the
+     * people are rebuilt (an import). Queued behind any grouping already running, like every other one.
+     * Returns whether a regroup completed.
+     */
+    suspend fun regroupNow(userId: UserId?): Boolean = cluster(userId, RegroupTrigger.REQUEST, force = true)
+
+    /**
      * Scan just the photo now on screen, so the viewer can offer a face to tag before the background
      * walk has reached it. A no-op when AI is off or the photo is already scanned, so a faceless photo
      * is only ever looked at once. Net-free: the photo would be scanned in the background regardless, so
@@ -748,6 +1004,9 @@ class FaceIndexingScheduler @Inject constructor(
      * the scan. Returns true when it scanned the photo (whether or not a face was found).
      */
     suspend fun indexPhotoOnDemand(item: GalleryItem, userId: UserId?, force: Boolean = false): Boolean {
+        // Taken before anything is read, as a walk pass takes its own: an import that begins meanwhile
+        // turns this scan's writes away (see [writeFence]).
+        val fenceToken = writeFence.token()
         val prefs = context.settingsDataStore.data.first()
         val enabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
         if (!enabled) return false
@@ -777,21 +1036,33 @@ class FaceIndexingScheduler @Inject constructor(
             },
             { FaceEmbedder(embFile, dispatcher = mlDispatcher) },
         )
-        val scanned = ConcurrentHashMap.newKeySet<String>()
-        try {
-            scanOnePhoto(item, userId, ml, AtomicInteger(2), AtomicInteger(0), scanned, worker = "ondemand", force = force)
+        // The photo's faces are written with its marker inside the scan; this collects only a marker the
+        // scan records without a source (an unreadable device file).
+        val markerOnly = ConcurrentHashMap.newKeySet<String>()
+        val recorded = try {
+            scanOnePhoto(item, userId, ml, fenceToken, AtomicInteger(2), AtomicInteger(0), markerOnly, worker = "ondemand", force = force)
         } finally {
             ml.close()
         }
-        if (scanned.isEmpty()) return false
-        runCatching { faceScanDao.upsert(scanned.map { FaceScanEntity(userId?.id ?: PhotoLocationEntity.LOCAL_USER, it) }) }
+        if (!recorded) return false
+        if (markerOnly.isNotEmpty()) {
+            try {
+                storeScanMarkers(userId, markerOnly, fenceToken)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Log.w(TAG, "on-demand scan marker failed: ${e.message}")
+            }
+        }
         // Give the fresh faces person ids so the viewer can show and tag them. The incremental path places
         // them against the cached people first (assign-to-existing, no rebuild); it runs regardless of the
-        // pause switch since it is plain DB work, matching the forced full rebuild it falls back to. That
-        // fallback stays forced, so it clusters even while background indexing is paused (the common state
-        // after the first scan); a plain call would no-op there and leave the freshly scanned faces with a
-        // null person id, so the viewer's grouped-faces read stays empty and the photo reads as "no faces".
-        if (!tryAssignNewFaces(userId)) cluster(userId, RegroupTrigger.ON_DEMAND, force = true)
+        // pause switch since it is plain DB work, matching the full rebuild it falls back to. That fallback
+        // runs even while background indexing is paused (the common state after the first scan), since
+        // leaving the freshly scanned faces with a null person id would keep the viewer's grouped-faces read
+        // empty and the photo would read as "no faces". Under the grouping lock, like every grouping.
+        groupingLock.withLock {
+            if (!tryAssignNewFaces(userId)) regroupLocked(userId, RegroupTrigger.ON_DEMAND)
+        }
         return true
     }
 
@@ -817,6 +1088,9 @@ class FaceIndexingScheduler @Inject constructor(
         centroid: FloatArray,
         matchThreshold: Float,
     ): Flow<FaceSweepEvent> = channelFlow {
+        // Taken before the candidate set is read: an import that begins meanwhile turns the sweep's
+        // remaining writes away (see [writeFence]).
+        val fenceToken = writeFence.token()
         val prefs = context.settingsDataStore.data.first()
         val enabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
         val detFile = if (enabled) (faceModelManager.prepare() as? FaceModelPreparation.Ready)?.file else null
@@ -944,19 +1218,24 @@ class FaceIndexingScheduler @Inject constructor(
                                     completed ?: (emptyList<FaceEntity>() to emptyList<FaceSweepEvent.Match>())
                                 }
                                 // Persist every detected face as a normal index row and drop this photo
-                                // from the faceless set, so it surfaces for the right person on its own
-                                // and a later sweep never looks at it again. Written after the lock so
-                                // the DB I/O never holds up another worker's inference.
-                                if (rows.isNotEmpty()) {
-                                    runCatching { faceDao.upsert(rows) }
-                                        .onFailure { Log.w(TAG, "sweep face upsert $photoKey failed: ${it.message}") }
-                                    newFaces.addAndGet(rows.size)
+                                // from the faceless set (marked hi-res swept whether or not a face was
+                                // found, so a truly faceless photo is never re-swept), so it surfaces for
+                                // the right person on its own and a later sweep never looks at it again.
+                                // Written after the lock so the DB I/O never holds up another worker's
+                                // inference, in one fenced transaction like the walk's. A photo whose write
+                                // did not land offers no match, since there is no stored face behind it.
+                                val stored = try {
+                                    storeSweptPhoto(userId, photoKey, rows, fenceToken)
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (e: Throwable) {
+                                    Log.w(TAG, "sweep write failed: ${e.message}")
+                                    false
                                 }
-                                // Mark hi-res swept whether or not a face was found, so a truly faceless
-                                // photo is recorded as looked-at and never re-swept.
-                                runCatching { faceScanDao.markHiResScanned(userId?.id ?: PhotoLocationEntity.LOCAL_USER, listOf(photoKey)) }
-                                    .onFailure { Log.w(TAG, "sweep mark $photoKey failed: ${it.message}") }
-                                matches.forEach { send(it) }
+                                if (stored) {
+                                    newFaces.addAndGet(rows.size)
+                                    matches.forEach { send(it) }
+                                }
                             }
                             send(FaceSweepEvent.Progress(done.incrementAndGet(), items.size))
                         }
@@ -976,11 +1255,13 @@ class FaceIndexingScheduler @Inject constructor(
 
     /**
      * Stop any running walk and drop the session's indexing state. Called on sign-out just before the
-     * face rows are wiped, so the walk is already standing down when the wipe lands and never writes a
-     * row for the account that is leaving.
+     * face rows are wiped, so the walk is already standing down when the wipe lands, and whatever a scan
+     * or a grouping still has in flight is fenced off ([writeFence]), so none of it writes a row for the
+     * account that is leaving (nor over a rescan's wipe).
      */
     suspend fun reset() {
         stopRequested = true
+        writeFence.invalidate()
         lastUserId = null
         lastFailedRegroupMs = null
         lastRegroupEndMs = null
@@ -1055,6 +1336,8 @@ class FaceIndexingScheduler @Inject constructor(
         val clearedScans = faceScanDao.clearAll()
         runCatching { notPersonDao.clearForUser(account) }
             .onFailure { Log.w(TAG, "not-person clear failed: ${it.message}") }
+        // The leftover count of the last regroup described faces that are gone now.
+        regroupBaseline = null
         // Marker last: only now is the wipe durably complete. The snapshot is left on disk for the
         // drained reattach to consume, so a crash after this still finds it waiting.
         context.settingsDataStore.edit { it[SettingsKeys.FACE_MODEL_VERSION_KEY] = FACE_MODEL_VERSION }
@@ -1123,35 +1406,43 @@ class FaceIndexingScheduler @Inject constructor(
      * restored under their names, the "not this person" marks rebind to the new faces the same way, and
      * the removed ("not a person") faces are re-rejected on whichever new face lands in their box. Runs
      * once the library is fully re-detected and just before clustering, so the names are in place and the
-     * exclusions are honoured when the groups form. The snapshot is cleared only after everything has been
-     * applied, so a crash part way through resumes from the still-pending snapshot on the next drain.
+     * exclusions are honoured when the groups form. Everything is applied in one transaction, and only
+     * while [fenceToken] (the drained pass's) still holds: an import since that pass read the library
+     * leaves the snapshot pending for the next drain rather than applied over the imported faces. The
+     * snapshot is cleared only once that transaction has committed, so a crash part way through resumes
+     * from the still-pending snapshot on the next drain.
      */
-    private suspend fun reattachPendingLabels(userId: UserId?): Boolean {
+    private suspend fun reattachPendingLabels(userId: UserId?, fenceToken: Long): Boolean {
         val data = FaceReattachSnapshot.read(reattachFile) ?: return false
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val localFaces = faceDao.allFacesByScoreDesc(account).map {
             ReattachFace(it.id, it.photoKey, it.left, it.top, it.right, it.bottom)
         }
         val labelled = matchReattachLabels(data.members, localFaces)
-        labelled.entries.groupBy({ it.value }, { it.key }).forEach { (name, ids) ->
-            faceDao.labelFacesByIds(ids, name)
-        }
-        if (data.manual.isNotEmpty()) {
-            personManualPhotoDao.add(data.manual.map { PersonManualPhotoEntity(account, it.name, it.photoKey) })
-        }
-        if (data.nots.isNotEmpty()) {
-            val marks = matchReattachLabels(data.nots, localFaces)
-            if (marks.isNotEmpty()) {
-                notPersonDao.add(marks.map { (faceId, name) -> NotPersonEntity(account, name, faceId) })
-            }
-        }
+        val marks = if (data.nots.isNotEmpty()) matchReattachLabels(data.nots, localFaces) else emptyMap()
         // Re-apply the removed faces by box overlap, at the same threshold the named-face reattach uses:
         // the detector swap changed the positional ids, so the removal follows the geometry onto the new
         // face and does not silently lapse.
-        if (data.rejected.isNotEmpty()) {
-            val toReject = matchRejectedByGeometry(data.rejected, localFaces, REATTACH_MIN_IOU)
-            if (toReject.isNotEmpty()) faceDao.rejectByIds(toReject)
+        val toReject = if (data.rejected.isNotEmpty()) {
+            matchRejectedByGeometry(data.rejected, localFaces, REATTACH_MIN_IOU)
+        } else {
+            emptyList()
         }
+        val applied = appDatabase.withTransaction {
+            if (!writeFence.allows(fenceToken)) return@withTransaction false
+            labelled.entries.groupBy({ it.value }, { it.key }).forEach { (name, ids) ->
+                faceDao.labelFacesByIds(ids, name)
+            }
+            if (data.manual.isNotEmpty()) {
+                personManualPhotoDao.add(data.manual.map { PersonManualPhotoEntity(account, it.name, it.photoKey) })
+            }
+            if (marks.isNotEmpty()) {
+                notPersonDao.add(marks.map { (faceId, name) -> NotPersonEntity(account, name, faceId) })
+            }
+            if (toReject.isNotEmpty()) faceDao.rejectByIds(toReject)
+            true
+        }
+        if (!applied) return false
         FaceReattachSnapshot.clear(reattachFile)
         if (BuildConfig.DEBUG) {
             Log.i(
@@ -1163,16 +1454,18 @@ class FaceIndexingScheduler @Inject constructor(
         return true
     }
 
-    /** Detect + embed every face in one photo and write a row per face. On a source that loaded and
-     *  detected without throwing, add the photo to [scannedKeys] so the pass's end persists it as
-     *  scanned, with faces or not, and a later run skips it. Bounded source in, recycled on the way out. */
+    /** Detect + embed every face in one photo and write them with its scan marker (see [scanOnePhoto]),
+     *  counting a written photo in [stored], so a later run skips it whether or not it held a face.
+     *  Bounded source in, recycled on the way out. */
     private suspend fun indexOne(
         item: GalleryItem,
         userId: UserId?,
         ml: FaceMl,
+        fenceToken: Long,
         decryptBudget: AtomicInteger,
         sourcesLoaded: AtomicInteger,
         scannedKeys: MutableSet<String>,
+        stored: AtomicInteger,
         worker: String,
         facesFound: AtomicInteger,
         acceptedScores: MutableList<Float>?,
@@ -1183,28 +1476,36 @@ class FaceIndexingScheduler @Inject constructor(
         // Background face indexing yields the process-global crypto gate to interactive decrypts; the
         // on-demand and faceless-sweep paths run scanOnePhoto/loadSource directly and stay foreground.
         withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
-            scanOnePhoto(item, userId, ml, decryptBudget, sourcesLoaded, scannedKeys, worker = worker, facesFound = facesFound, acceptedScores = acceptedScores, droppedTooBlurry = droppedTooBlurry, acceptedBlur = acceptedBlur)
+            scanOnePhoto(item, userId, ml, fenceToken, decryptBudget, sourcesLoaded, scannedKeys, worker = worker, stored = stored, facesFound = facesFound, acceptedScores = acceptedScores, droppedTooBlurry = droppedTooBlurry, acceptedBlur = acceptedBlur)
         }
     }
 
     /**
      * The per-photo scan itself, without the walk's active() gate, so an on-demand call can run it for
      * the photo on screen even while the background walk is paused or idle.
+     *
+     * A photo whose source loads is written right after its detection, its faces and its scan marker in
+     * one transaction behind [fenceToken] ([storePhotoScan]), and counted in [stored]. A photo recorded
+     * scanned without a source (or whose faces failed to write) goes to [scannedKeys] for the caller to
+     * persist. Returns true when the photo is recorded either way, false when it stays pending: no source
+     * this time, or the fence turned its write away.
      */
     private suspend fun scanOnePhoto(
         item: GalleryItem,
         userId: UserId?,
         ml: FaceMl,
+        fenceToken: Long,
         decryptBudget: AtomicInteger,
         sourcesLoaded: AtomicInteger,
         scannedKeys: MutableSet<String>,
         worker: String,
         force: Boolean = false,
+        stored: AtomicInteger? = null,
         facesFound: AtomicInteger? = null,
         acceptedScores: MutableList<Float>? = null,
         droppedTooBlurry: AtomicInteger? = null,
         acceptedBlur: MutableList<Float>? = null,
-    ) {
+    ): Boolean {
         val photoKey = item.stableId
         // Name the item this worker is on right now, so a scan that freezes is legible in the copied
         // diagnostics instead of a blind spot. Cleared on the way out, whichever branch returns.
@@ -1232,96 +1533,125 @@ class FaceIndexingScheduler @Inject constructor(
                 if (item is GalleryItem.LocalOnly) FaceDiagnostics.recordUnloadableLocal()
                 if (shouldMarkScannedOnNullSource(item is GalleryItem.LocalOnly, loadTimedOut.get())) {
                     scannedKeys.add(photoKey)
+                    return true
                 }
-                return
+                return false
             }
             sourcesLoaded.incrementAndGet()
-            // The source loaded and is about to be handed to detection, so mark the photo scanned now, before
-            // the ML block. If detect or embed then throws (an OOM on a crop, a bad frame), the photo is still
-            // recorded, so a poison photo is not re-decoded and retried on every later pass; a face-free photo
-            // is likewise marked once. A source that never loaded returned above and stays pending for a later pass.
-            scannedKeys.add(photoKey)
+            // The faces the detection accepts, built inside the bounded run and written below by this worker
+            // once the run is over and the ML lock is free, so the database write never holds up another
+            // photo's inference nor counts against the inference watchdog. Guarded by its own monitor: a run
+            // the watchdog abandons may still add to it after the worker has taken what was there.
+            val rows = ArrayList<FaceEntity>()
             // Bound the native inference like the video-frame decode is bounded: one wedged ONNX run must not
             // pin the shared lock and freeze every worker forever. On a timeout control returns here, mlLock
-            // releases, and the item (already marked scanned) is left as if it held no face so the walk moves
-            // on. The run cannot be cancelled once native, so on a timeout the wedged pair is ABANDONED (never
-            // closed) and the next item opens a fresh pair (see [FaceMl]); the snapshot below binds THIS run
-            // to the current pair so the abandon frees exactly it, and no later run shares a session with the
-            // leaked one. The detached block owns [source] and recycles it in its own finally, so a leaked
+            // releases, and the item keeps only the faces found before the timeout (usually none) so the walk
+            // moves on. The run cannot be cancelled once native, so on a timeout the wedged pair is ABANDONED
+            // (never closed) and the next item opens a fresh pair (see [FaceMl]); the snapshot below binds THIS
+            // run to the current pair so the abandon frees exactly it, and no later run shares a session with
+            // the leaked one. The detached block owns [source] and recycles it in its own finally, so a leaked
             // in-flight run keeps a valid bitmap rather than reading a recycled one.
             var inferMs = 0L
-            mlLock.withLock {
-                val inferStart = SystemClock.elapsedRealtime()
-                // Snapshot the current pair inside the lock: a timeout below abandons exactly these, and the
-                // next lock holder opens and reads the fresh pair.
-                val detector = ml.detector()
-                val embedder = ml.embedder()
-                val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher) {
-                    try {
-                        val faces = detector.detect(source)
-                        // Count every face the detector returned, before the blur / size gates drop any, so
-                        // a "0 people found" report separates no-faces-in-library from faces-but-no-cluster.
-                        FaceDiagnostics.recordFacesDetected(faces.size)
-                        for ((index, face) in faces.withIndex()) {
-                            val aligned = FaceAlignment.alignFace(source, face.landmarks)
-                            val blur = runCatching { alignedBlur(aligned) }.getOrNull()
-                            // Hard quality gate: drop an extremely blurred crop before it costs an embed or a
-                            // stored row, mirroring the detector's min-size gate. The floor stays conservative so
-                            // only unusable faces are lost while the accepted-blur log calibrates where to raise it.
-                            if (blur != null && blur < MIN_SHARPNESS) {
-                                if (!aligned.isRecycled) aligned.recycle()
-                                if (BuildConfig.DEBUG) droppedTooBlurry?.incrementAndGet()
-                                continue
+            var mlFailure: Throwable? = null
+            try {
+                mlLock.withLock {
+                    val inferStart = SystemClock.elapsedRealtime()
+                    // Snapshot the current pair inside the lock: a timeout below abandons exactly these, and the
+                    // next lock holder opens and reads the fresh pair.
+                    val detector = ml.detector()
+                    val embedder = ml.embedder()
+                    val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher) {
+                        try {
+                            val faces = detector.detect(source)
+                            // Count every face the detector returned, before the blur / size gates drop any,
+                            // so a "0 people found" report separates no-faces-in-library from
+                            // faces-but-no-cluster.
+                            FaceDiagnostics.recordFacesDetected(faces.size)
+                            for ((index, face) in faces.withIndex()) {
+                                val aligned = FaceAlignment.alignFace(source, face.landmarks)
+                                val blur = runCatching { alignedBlur(aligned) }.getOrNull()
+                                // Hard quality gate: drop an extremely blurred crop before it costs an embed or
+                                // a stored row, mirroring the detector's min-size gate. The floor stays
+                                // conservative so only unusable faces are lost while the accepted-blur log
+                                // calibrates where to raise it.
+                                if (blur != null && blur < MIN_SHARPNESS) {
+                                    if (!aligned.isRecycled) aligned.recycle()
+                                    if (BuildConfig.DEBUG) droppedTooBlurry?.incrementAndGet()
+                                    continue
+                                }
+                                val embedding = try {
+                                    embedder.embed(aligned)
+                                } finally {
+                                    if (!aligned.isRecycled) aligned.recycle()
+                                }
+                                // Store the box as a 0..1 fraction of the (EXIF-oriented) source, so a cover
+                                // crops correctly with no need for the photo's pixel dimensions later. A
+                                // cloud-only cover has no stored dimensions, so a pixel box could not be
+                                // normalised and the whole group photo showed instead of the one face.
+                                val sw = source.width.toFloat()
+                                val sh = source.height.toFloat()
+                                val entity = FaceEntity(
+                                    id = "$photoKey#$index",
+                                    userId = userId?.id ?: PhotoLocationEntity.LOCAL_USER,
+                                    photoKey = photoKey,
+                                    left = if (sw > 0f) (face.box.left / sw).coerceIn(0f, 1f) else 0f,
+                                    top = if (sh > 0f) (face.box.top / sh).coerceIn(0f, 1f) else 0f,
+                                    right = if (sw > 0f) (face.box.right / sw).coerceIn(0f, 1f) else 1f,
+                                    bottom = if (sh > 0f) (face.box.bottom / sh).coerceIn(0f, 1f) else 1f,
+                                    landmarks = encodeLandmarks(face.landmarks),
+                                    embedding = packEmbedding(embedding),
+                                    personId = null,
+                                    score = face.score,
+                                    blur = blur,
+                                )
+                                synchronized(rows) { rows.add(entity) }
+                                facesFound?.incrementAndGet()
+                                if (BuildConfig.DEBUG) {
+                                    acceptedScores?.add(face.score)
+                                    blur?.let { acceptedBlur?.add(it) }
+                                }
                             }
-                            val embedding = try {
-                                embedder.embed(aligned)
-                            } finally {
-                                if (!aligned.isRecycled) aligned.recycle()
-                            }
-                            // Store the box as a 0..1 fraction of the (EXIF-oriented) source, so a cover crops
-                            // correctly with no need for the photo's pixel dimensions later. A cloud-only cover
-                            // has no stored dimensions, so a pixel box could not be normalised and the whole
-                            // group photo showed instead of the one face.
-                            val sw = source.width.toFloat()
-                            val sh = source.height.toFloat()
-                            val entity = FaceEntity(
-                                id = "$photoKey#$index",
-                                userId = userId?.id ?: PhotoLocationEntity.LOCAL_USER,
-                                photoKey = photoKey,
-                                left = if (sw > 0f) (face.box.left / sw).coerceIn(0f, 1f) else 0f,
-                                top = if (sh > 0f) (face.box.top / sh).coerceIn(0f, 1f) else 0f,
-                                right = if (sw > 0f) (face.box.right / sw).coerceIn(0f, 1f) else 1f,
-                                bottom = if (sh > 0f) (face.box.bottom / sh).coerceIn(0f, 1f) else 1f,
-                                landmarks = encodeLandmarks(face.landmarks),
-                                embedding = packEmbedding(embedding),
-                                personId = null,
-                                score = face.score,
-                                blur = blur,
-                            )
-                            runCatching { faceDao.upsert(entity) }
-                                .onFailure { Log.w(TAG, "face upsert $photoKey#$index failed: ${it.message}") }
-                            facesFound?.incrementAndGet()
-                            if (BuildConfig.DEBUG) {
-                                acceptedScores?.add(face.score)
-                                blur?.let { acceptedBlur?.add(it) }
-                            }
+                            true
+                        } finally {
+                            // The detached run is the sole owner of [source]: it recycles here on a normal or
+                            // thrown finish, and on a timeout it keeps [source] until its wedged native call
+                            // returns, so the bitmap is never recycled out from under a live read. The worker
+                            // does not recycle it.
+                            if (!source.isRecycled) source.recycle()
                         }
-                        true
-                    } finally {
-                        // The detached run is the sole owner of [source]: it recycles here on a normal or thrown
-                        // finish, and on a timeout it keeps [source] until its wedged native call returns, so the
-                        // bitmap is never recycled out from under a live read. The worker does not recycle it.
-                        if (!source.isRecycled) source.recycle()
                     }
+                    if (completed == null) {
+                        FaceDiagnostics.recordWatchdogTimeout()
+                        // The detached run is still inside an uncancellable native call on this pair; abandon
+                        // it (never close a session with a run still using it) so the next item opens a fresh
+                        // pair.
+                        ml.abandon()
+                    }
+                    inferMs = SystemClock.elapsedRealtime() - inferStart
                 }
-                if (completed == null) {
-                    FaceDiagnostics.recordWatchdogTimeout()
-                    // The detached run is still inside an uncancellable native call on this pair; abandon it
-                    // (never close a session with a run still using it) so the next item opens a fresh pair.
-                    ml.abandon()
-                }
-                inferMs = SystemClock.elapsedRealtime() - inferStart
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                mlFailure = e
             }
+            // Record the photo even when its detection threw (an OOM on a crop, a bad frame), with whatever
+            // faces came before, so a poison photo is not re-decoded and retried on every later pass; a
+            // face-free photo is likewise recorded once. The faces and the marker land together, and not at
+            // all once an import or a sign-out has fenced this scan off: the photo then stays pending for a
+            // later pass, which reads the data as it is by then.
+            val found = synchronized(rows) { ArrayList(rows) }
+            val recorded = try {
+                storePhotoScan(userId, photoKey, found, fenceToken).also { if (it) stored?.incrementAndGet() }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // The faces could not be written: still record the photo scanned, as one with no face,
+                // rather than fetch and detect it again on every later pass.
+                Log.w(TAG, "face write failed: ${e.message}")
+                scannedKeys.add(photoKey)
+                true
+            }
+            mlFailure?.let { throw it }
             // Append this processed item to the diagnostics ring (newest-first) and fold it into the run
             // aggregates, so the next tester copy shows per-item load / infer / dl timings and the slowest
             // item rather than only a standing count.
@@ -1334,6 +1664,7 @@ class FaceIndexingScheduler @Inject constructor(
                 downloadMs = loadMetrics.downloadMs,
                 downloadedBytes = loadMetrics.downloadedBytes,
             )
+            return recorded
         } finally {
             FaceDiagnostics.clearInFlight(worker)
         }
@@ -1676,12 +2007,13 @@ class FaceIndexingScheduler @Inject constructor(
         return result
     }
 
-    /** A short, truncated, non-identifying pointer to [item] for the copied diagnostics, so a frozen
-     *  scan shows where it wedged without carrying a full key, path, or token. */
+    /** What kind of item [item] is, for the copied diagnostics' in-flight pointer and per-item lines: where
+     *  it lives and nothing that identifies it (no key, id, path or token, not even a fragment of one),
+     *  since testers often post those diagnostics publicly. */
     private fun inFlightLabel(item: GalleryItem): String = when (item) {
-        is GalleryItem.CloudOnly -> "cloud:" + item.cloud.linkId.take(8)
-        is GalleryItem.Synced -> "synced:" + item.cloud.linkId.take(8)
-        is GalleryItem.LocalOnly -> "local:" + item.local.uri.substringAfterLast('/').take(16)
+        is GalleryItem.CloudOnly -> "cloud"
+        is GalleryItem.Synced -> "synced"
+        is GalleryItem.LocalOnly -> "local"
     }
 
     /** Whether [item] is a video, for the diagnostics ring's img / vid tag. */
@@ -1707,32 +2039,53 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /**
-     * Try the incremental fast path: place only the newly indexed faces against the cached people,
-     * without a whole-library rebuild. Returns true when it handled the pass (so the caller skips the
-     * full rebuild), false when a full rebuild is needed (first run, a stale cache, a large backlog) or
-     * when it failed. A failure is swallowed and reported as "needs a full rebuild" so the caller falls
-     * back cleanly, exactly as [cluster] swallows-and-continues; cancellation still propagates.
+     * Try the incremental fast path, by a caller holding [groupingLock]: place only the newly indexed
+     * faces against the cached people, without a whole-library rebuild. Returns true when it handled the
+     * pass (so the caller skips the full rebuild), false when a full rebuild is needed (first run, a stale
+     * cache, a large backlog), when it failed, or when the fence turned its write away (an import or a
+     * sign-out since it read the faces). A failure is swallowed and reported as "needs a full rebuild" so
+     * the caller falls back cleanly, exactly as [regroupLocked] swallows-and-continues; cancellation still
+     * propagates.
      */
-    private suspend fun tryAssignNewFaces(userId: UserId?): Boolean =
-        try {
-            clusterFacesUseCase.assignNewFaces(userId)
+    private suspend fun tryAssignNewFaces(userId: UserId?): Boolean {
+        val fenceToken = writeFence.token()
+        return try {
+            clusterFacesUseCase.assignNewFaces(userId) { writeFence.allows(fenceToken) }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
             Log.w(TAG, "incremental assign failed, falling back to full cluster: ${e.message}")
             false
         }
+    }
 
     /**
      * Group every stored face into people while the walk is still permitted to run (a forced call runs
-     * regardless). A clustering failure is logged and swallowed so it never fails the walk; cancellation
-     * still propagates. A timeout or a failure stamps [lastFailedRegroupMs], so the pass-end grouping
-     * backs off. Returns true only when a grouping actually completed (not skipped, timed out, or
-     * failed), so the caller can record that a parameter generation was applied. Each run's [trigger] and
-     * outcome, and the library totals after it, go to the copied diagnostics.
+     * regardless), queued behind any grouping already running ([groupingLock]); see [regroupLocked].
      */
     private suspend fun cluster(userId: UserId?, trigger: RegroupTrigger, force: Boolean = false): Boolean {
         if (!force && !active()) return false
+        return groupingLock.withLock {
+            // Checked again once the lock is held: the walk may have been paused while this waited.
+            if (!force && !active()) false else regroupLocked(userId, trigger)
+        }
+    }
+
+    /**
+     * One full regroup, by a caller holding [groupingLock]. A clustering failure is logged and swallowed
+     * so it never fails the walk; cancellation still propagates. A timeout or a failure stamps
+     * [lastFailedRegroupMs], so the pass-end grouping backs off; a completed one records how many faces it
+     * left ungrouped as the new [regroupBaseline]. Its rewrite is fenced ([writeFence]) by a token taken
+     * before it reads the faces, so a regroup of the faces as they were before an import never lands after
+     * it. Returns true only when a grouping actually completed (not timed out, failed, or turned away), so
+     * the caller can record that a parameter generation was applied. Each run's [trigger] and outcome, and
+     * the library totals after it, go to the copied diagnostics.
+     */
+    private suspend fun regroupLocked(userId: UserId?, trigger: RegroupTrigger): Boolean {
+        val fenceToken = writeFence.token()
+        // An import is writing right now: a rebuild would read every stored embedding only to be turned
+        // away, so leave it to the grouping the import's caller runs once it is done.
+        if (!writeFence.allows(fenceToken)) return false
         FaceDiagnostics.recordRegroupStarted(trigger)
         val grouped = try {
             // Hard ceiling on a single clustering round. The clusterer is bounded and cancellable
@@ -1740,26 +2093,33 @@ class FaceIndexingScheduler @Inject constructor(
             // when it does, the in-transaction rebuild rolls back and the walk carries on rather than
             // hanging. withTimeoutOrNull absorbs its own timeout, so it never reads as a walk cancel.
             val startMs = SystemClock.elapsedRealtime()
-            val finished = withTimeoutOrNull(CLUSTER_TIMEOUT_MS) {
-                clusterFacesUseCase(userId)
-                true
+            val outcome = withTimeoutOrNull(CLUSTER_TIMEOUT_MS) {
+                clusterFacesUseCase(userId) { writeFence.allows(fenceToken) }
             }
-            if (finished == null) {
-                Log.w(TAG, "clustering timed out after ${CLUSTER_TIMEOUT_MS}ms, skipped this round")
-                lastFailedRegroupMs = SystemClock.elapsedRealtime()
-                FaceDiagnostics.recordRegroupTimedOut()
-                false
-            } else {
-                val endMs = SystemClock.elapsedRealtime()
-                lastRegroupDurationMs = endMs - startMs
-                lastRegroupEndMs = endMs
-                FaceDiagnostics.recordRegroupCompleted(durationMs = endMs - startMs, endMs = endMs)
-                if (BuildConfig.DEBUG) {
-                    // The debug threshold sweep reads per-account samples through the non-null diagnostic
-                    // path; a guest still clusters above, it just skips this measurement-only log.
-                    userId?.let { logClusterSweep(it) }
+            when {
+                outcome == null -> {
+                    Log.w(TAG, "clustering timed out after ${CLUSTER_TIMEOUT_MS}ms, skipped this round")
+                    lastFailedRegroupMs = SystemClock.elapsedRealtime()
+                    FaceDiagnostics.recordRegroupTimedOut()
+                    false
                 }
-                true
+                // Turned away by the fence: an import or a sign-out replaced the faces it read, so it wrote
+                // nothing. Not a failure, so no backoff; whoever moved the fence groups afterwards.
+                !outcome.committed -> false
+                else -> {
+                    val endMs = SystemClock.elapsedRealtime()
+                    lastRegroupDurationMs = endMs - startMs
+                    lastRegroupEndMs = endMs
+                    regroupBaseline = RegroupBaseline(accountOf(userId), outcome.leftUngrouped, fenceToken)
+                    FaceDiagnostics.recordRegroupCompleted(durationMs = endMs - startMs, endMs = endMs)
+                    if (BuildConfig.DEBUG) {
+                        // The debug threshold sweep reads per-account samples through the non-null
+                        // diagnostic path; a guest still clusters above, it just skips this
+                        // measurement-only log.
+                        userId?.let { logClusterSweep(it) }
+                    }
+                    true
+                }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -1772,6 +2132,33 @@ class FaceIndexingScheduler @Inject constructor(
         pushLibraryCounts(userId)
         return grouped
     }
+
+    /** The last completed regroup's leftover count for [userId]'s faces while the face data it measured is
+     *  still current (no import, sign-out or rescan has moved [writeFence] since), else null. */
+    private fun currentRegroupBaseline(userId: UserId?): Int? =
+        regroupBaseline
+            ?.takeIf { it.account == accountOf(userId) && writeFence.allows(it.fenceToken) }
+            ?.ungrouped
+
+    /** Lowers [userId]'s regroup baseline to [ungrouped] faces seen waiting by a grouping that stopped short
+     *  of a full regroup ([lowerRegroupBaseline]). Called under [groupingLock]. */
+    private fun lowerBaselineTo(userId: UserId?, ungrouped: Int) {
+        val current = regroupBaseline?.takeIf { it.account == accountOf(userId) } ?: return
+        val lowered = lowerRegroupBaseline(current.ungrouped, ungrouped) ?: return
+        if (lowered != current.ungrouped) regroupBaseline = RegroupBaseline(current.account, lowered, current.fenceToken)
+    }
+
+    /** The face-data partition [userId] owns: the account id, or the local partition for a guest. */
+    private fun accountOf(userId: UserId?): String = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+
+    /** Whether a full regroup may start at [nowMs] as far as the spacing after the last one goes
+     *  ([fullRegroupCooledDown]). */
+    private fun regroupCooledDown(nowMs: Long): Boolean = fullRegroupCooledDown(
+        msSinceLastRegroup = lastRegroupEndMs?.let { nowMs - it },
+        lastRegroupDurationMs = lastRegroupDurationMs,
+        minIntervalMs = INCREMENTAL_CLUSTER_MIN_INTERVAL_MS,
+        dutyFactor = FULL_REGROUP_DUTY_FACTOR,
+    )
 
     /**
      * Read the account's library totals into the copied diagnostics: stored faces, faces not yet grouped,
@@ -1982,6 +2369,11 @@ class FaceIndexingScheduler @Inject constructor(
         var downloadedBytes: Long = 0L
     }
 
+    /** How many of [account]'s faces a completed full regroup left ungrouped, and the [writeFence] token it
+     *  read them under, so the count is ignored for another account and once the face data it describes has
+     *  been replaced. */
+    private class RegroupBaseline(val account: String, val ungrouped: Int, val fenceToken: Long)
+
     private companion object {
         /** Worker pool size. Three keeps a few photos moving through the download / decode / ONNX
          *  pipeline at once while the ONNX sessions themselves stay serialised by [mlLock]. */
@@ -2011,7 +2403,7 @@ class FaceIndexingScheduler @Inject constructor(
          *  cadence, so a resume or a pause / sign-out both take effect within a second. */
         const val HEALTH_PAUSE_POLL_MS = 1_000L
 
-        /** Hard ceiling on one clustering round (see [cluster]). The clusterer is bounded and
+        /** Hard ceiling on one clustering round (see [regroupLocked]). The clusterer is bounded and
          *  cancellable, so this only trips in a pathological case; when it does the walk carries on
          *  rather than hanging. */
         const val CLUSTER_TIMEOUT_MS = 180_000L

@@ -27,7 +27,6 @@ import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -84,6 +83,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -94,15 +94,27 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalAlbum
 import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.selectPressScale
+import eu.akoos.photos.presentation.lock.AppLockGate
+import eu.akoos.photos.presentation.lock.AppLockGateState
+import eu.akoos.photos.presentation.lock.AppLockSession
 import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ProtonPhotosTheme
 import kotlinx.coroutines.flow.map
 import java.io.File
+import javax.inject.Inject
 
+/**
+ * The widget setup. It shows the photo library and every album, so it sits behind the app lock like the
+ * main screen, on the same unlock session; a FragmentActivity, since the unlock prompt needs one.
+ */
 @AndroidEntryPoint
-class PhotoWidgetConfigActivity : ComponentActivity() {
+class PhotoWidgetConfigActivity : FragmentActivity() {
+
+    @Inject lateinit var lockSession: AppLockSession
+
+    private val lockGate by lazy { AppLockGateState(lockSession) }
 
     private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
 
@@ -118,10 +130,15 @@ class PhotoWidgetConfigActivity : ComponentActivity() {
             ?.getInt(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
             ?: AppWidgetManager.INVALID_APPWIDGET_ID
 
-        if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+        // Exported for the launcher, so any app can start it with any id. Only an id the host binds to
+        // this app's own widget opens the picker. Checked before anything is drawn and before the
+        // ViewModel exists, since creating it starts reading the library.
+        if (!WidgetIdGuard.isOwn(this, appWidgetId)) {
             finish()
             return
         }
+
+        lockGate.followSettings(this)
 
         setContent {
             // Mirror MainActivity: respect the user's THEME_MODE + THEME_PALETTE so the
@@ -152,39 +169,69 @@ class PhotoWidgetConfigActivity : ComponentActivity() {
             val palette = ThemePalette.fromKey(paletteKey)
 
             ProtonPhotosTheme(darkTheme = useDark, palette = palette) {
-                val viewModel: PhotoWidgetConfigViewModel = hiltViewModel()
-                val state by viewModel.state.collectAsStateWithLifecycle()
-                val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
-
-                // Pre-fill the form from the widget's existing Glance state. Lets the
-                // user re-edit a placed widget instead of remove + re-add.
-                LaunchedEffect(appWidgetId) { viewModel.loadFor(appWidgetId) }
-
-                LaunchedEffect(state.saved) {
-                    if (state.saved) {
-                        setResult(
-                            Activity.RESULT_OK,
-                            Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId),
-                        )
-                        finish()
-                    }
+                // Back while locked cancels the setup. The picker is composed only once the gate has
+                // opened, so its ViewModel, and every source that reads the library, waits for the unlock.
+                AppLockGate(state = lockGate, onLeave = { finish() }, keepContentUnderLock = false) {
+                    WidgetPicker()
                 }
-
-                WidgetConfigScreen(
-                    state    = state,
-                    isSignedIn = isSignedIn,
-                    onMode   = viewModel::setMode,
-                    onInterval = viewModel::setInterval,
-                    onUris   = viewModel::setSelectedUris,
-                    onAlbum  = viewModel::setAlbum,
-                    onCloudSelection = viewModel::setSelectedLinkIds,
-                    onCloudAlbum = viewModel::setCloudAlbum,
-                    onRequestCloudThumb = viewModel::requestCloudThumbnailDecrypt,
-                    onSave   = { viewModel.save(appWidgetId) },
-                    onCancel = { finish() },
-                )
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        lockGate.onStart()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lockGate.onResume()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        lockGate.onPause(this)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // A rotation recreates this screen in the foreground, which is not leaving the app.
+        if (!isChangingConfigurations) lockGate.onStop()
+    }
+
+    @Composable
+    private fun WidgetPicker() {
+        val viewModel: PhotoWidgetConfigViewModel = hiltViewModel()
+        val state by viewModel.state.collectAsStateWithLifecycle()
+        val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
+
+        // Pre-fill the form from the widget's existing Glance state. Lets the
+        // user re-edit a placed widget instead of remove + re-add.
+        LaunchedEffect(appWidgetId) { viewModel.loadFor(appWidgetId) }
+
+        LaunchedEffect(state.saved) {
+            if (state.saved) {
+                setResult(
+                    Activity.RESULT_OK,
+                    Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId),
+                )
+                finish()
+            }
+        }
+
+        WidgetConfigScreen(
+            state    = state,
+            isSignedIn = isSignedIn,
+            onMode   = viewModel::setMode,
+            onInterval = viewModel::setInterval,
+            onUris   = viewModel::setSelectedUris,
+            onAlbum  = viewModel::setAlbum,
+            onCloudSelection = viewModel::setSelectedLinkIds,
+            onCloudAlbum = viewModel::setCloudAlbum,
+            onRequestCloudThumb = viewModel::requestCloudThumbnailDecrypt,
+            onSave   = { viewModel.save(appWidgetId) },
+            onCancel = { finish() },
+        )
     }
 }
 

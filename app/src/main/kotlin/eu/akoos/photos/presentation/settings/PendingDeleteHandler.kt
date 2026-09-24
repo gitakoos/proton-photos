@@ -35,7 +35,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
@@ -50,6 +49,8 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -70,6 +71,8 @@ import javax.inject.Inject
  * Mounted once at the top of the NavGraph so the handler is alive for the entire
  * authenticated session. It is intentionally side effect only: the handler renders
  * no UI of its own, only the OS dialog when the queue stabilizes with items in it.
+ * The dialog opens above the app lock, and "Allow" trashes the photos, so it waits
+ * until the lock is open; the queue keeps meanwhile.
  */
 @HiltViewModel
 class PendingDeleteViewModel @Inject constructor(
@@ -109,7 +112,7 @@ fun PendingDeleteHandler(
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
 
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val appLock = LocalAppLock.current
     val pending by viewModel.pendingUris.collectAsStateWithLifecycle()
     // Snapshot of the batch we last handed to the OS dialog. Held so the
     // ActivityResult callback knows which URIs to mark CLOUD_ONLY without racing the
@@ -146,14 +149,15 @@ fun PendingDeleteHandler(
         // popping a dialog after every file. The LaunchedEffect re launches on size
         // change, which cancels this delay — meaning each new item resets the timer.
         delay(3_000L)
-        val snapshot = viewModel.pendingUris.value
-        if (snapshot.isEmpty()) return@LaunchedEffect
-        val uris: List<Uri> = snapshot.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
-        if (uris.isEmpty()) return@LaunchedEffect
-        inFlight = true
-        lastBatch = snapshot
-        lastPromptedSize = snapshot.size
-        scope.launch {
+        // The batch is read once the lock is open, and launched in the same turn as that check.
+        appLock.runWhenOpen {
+            val snapshot = viewModel.pendingUris.value
+            if (snapshot.isEmpty()) return@runWhenOpen
+            val uris: List<Uri> = snapshot.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
+            if (uris.isEmpty()) return@runWhenOpen
+            inFlight = true
+            lastBatch = snapshot
+            lastPromptedSize = snapshot.size
             runCatching {
                 val pi = MediaStore.createTrashRequest(context.contentResolver, uris, true)
                 launcher.launch(IntentSenderRequest.Builder(pi.intentSender).build())

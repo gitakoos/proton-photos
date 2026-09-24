@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug-only: registers the CLIP magic-search spike trigger. Never part of a release build. -->
+<!-- Debug-only: registers the CLIP magic-search spike trigger. Never part of a release build.
+     DUMP keeps the trigger to adb shell, which holds that permission; an ordinary app cannot. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <receiver
             android:name="eu.akoos.photos.mlspike.ClipSpikeReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="eu.akoos.photos.CLIP_SPIKE" />
             </intent-filter>

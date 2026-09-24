@@ -148,6 +148,7 @@ ksp {
 
 dependencies {
     // Proton Core
+    implementation(libs.proton.drive.sdk)
     implementation(libs.proton.auth)
     implementation(libs.proton.auth.presentation)
     implementation(libs.proton.account)

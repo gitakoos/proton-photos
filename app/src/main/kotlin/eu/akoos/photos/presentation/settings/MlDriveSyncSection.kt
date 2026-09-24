@@ -1,0 +1,459 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package eu.akoos.photos.presentation.settings
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Merge
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.R
+import eu.akoos.photos.data.mlsync.FaceSnapshotMode
+import eu.akoos.photos.data.mlsync.MlSyncState
+import eu.akoos.photos.presentation.common.ActionSheetRow
+import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ConfirmSheet
+import eu.akoos.photos.presentation.common.PrimaryButton
+import eu.akoos.photos.presentation.common.SecondaryButton
+import eu.akoos.photos.presentation.settings.components.ActionRow
+import eu.akoos.photos.presentation.settings.components.RowDivider
+import eu.akoos.photos.presentation.settings.components.SectionLabel
+import eu.akoos.photos.presentation.settings.components.SettingsCard
+import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.theme.SheetBg
+import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.presentation.util.formatBytes
+import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * The "Face and search data on Drive" section of the machine-learning settings, under the feature rows.
+ *
+ * Save uploads this device's face and search data, sealed to the account, into My files / Photos for
+ * Proton / ML data; the first save finds no such folder and only asks before creating it, with no job run
+ * and nothing reported as failed until the user agrees. Restore lists what every device of the account
+ * saved there, one set per device, and imports the set the user picks, asking Merge or Replace when the set
+ * brings face data to a device that already holds some. A running job shows its step and a bar with
+ * Cancel above the two actions; a finished one says what it did until closed.
+ *
+ * Account-only, as the data lives in the account's Drive and is sealed to its key: the section is absent
+ * for a guest, while machine learning is off, and on a device the Drive client does not run on.
+ */
+@Composable
+internal fun MlDriveSyncSection(
+    mlEnabled: Boolean,
+    viewModel: MlDriveSyncViewModel = hiltViewModel(),
+) {
+    val access by viewModel.access.collectAsStateWithLifecycle()
+    val jobState by viewModel.syncState.collectAsStateWithLifecycle()
+    val restoreSheet by viewModel.restoreSheet.collectAsStateWithLifecycle()
+    val starting by viewModel.starting.collectAsStateWithLifecycle()
+    val preparingSave by viewModel.preparingSave.collectAsStateWithLifecycle()
+    val folderPrompt by viewModel.folderPrompt.collectAsStateWithLifecycle()
+    val syncState = mlSyncShownState(jobState, preparingSave)
+    val mode = mlDriveCardMode(mlEnabled, access.signedIn, access.driveAvailable, syncState)
+    if (mode == MlDriveCardMode.HIDDEN) return
+
+    Spacer(Modifier.height(20.dp))
+    SectionLabel(stringResource(R.string.settings_ml_drive_section))
+    Spacer(Modifier.height(8.dp))
+    SettingsCard {
+        val running = syncState as? MlSyncState.Running
+        if (running != null) {
+            MlSyncProgressBlock(running = running, onCancel = viewModel::cancel)
+            RowDivider()
+        }
+        // Held back while a job runs or a tap is on its way, so a second job never queues behind the first.
+        val actionsEnabled = mode == MlDriveCardMode.ACTIONS && !starting
+        ActionRow(
+            label = stringResource(R.string.settings_ml_drive_save),
+            description = stringResource(R.string.settings_ml_drive_save_desc),
+            icon = Icons.Default.CloudUpload,
+            onClick = viewModel::save,
+            enabled = actionsEnabled,
+        )
+        RowDivider()
+        ActionRow(
+            label = stringResource(R.string.settings_ml_drive_restore),
+            description = stringResource(R.string.settings_ml_drive_restore_desc),
+            icon = Icons.Default.CloudDownload,
+            onClick = viewModel::openRestore,
+            enabled = actionsEnabled,
+        )
+    }
+
+    when (val sheet = restoreSheet) {
+        MlRestoreSheet.Hidden -> Unit
+        is MlRestoreSheet.ChooseMode -> MlRestoreModeSheet(
+            onChoose = viewModel::restoreWith,
+            onClose = viewModel::closeRestore,
+        )
+        else -> MlRestorePickerSheet(
+            sheet = sheet,
+            onSelect = viewModel::selectRestoreDevice,
+            onRestore = viewModel::restoreSelected,
+            onClose = viewModel::closeRestore,
+        )
+    }
+
+    mlSyncSheet(folderPrompt, syncState)?.let { notice ->
+        MlSyncOutcomeSheet(
+            notice = notice,
+            onCreateFolder = viewModel::confirmCreateFolder,
+            onDeclineFolder = viewModel::dismissFolderPrompt,
+            onDismiss = viewModel::dismissResult,
+        )
+    }
+}
+
+/** A running job: what it does, the bar, the step it is on, and Cancel. */
+@Composable
+private fun MlSyncProgressBlock(running: MlSyncState.Running, onCancel: () -> Unit) {
+    val colors = AppColors.current
+    val fraction = mlSyncProgressFraction(running.progress)
+    val step = mlSyncStepLabel(running.progress)
+    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+        Text(
+            stringResource(mlSyncHeadline(running.operation)),
+            color = colors.fgPrimary,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(12.dp))
+        if (fraction != null) {
+            val shown by animateFloatAsState(fraction, label = "ml_drive_progress")
+            LinearProgressIndicator(
+                progress = { shown },
+                modifier = Modifier.fillMaxWidth(),
+                color = colors.accent,
+                trackColor = colors.trackBg,
+            )
+        } else {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                color = colors.accent,
+                trackColor = colors.trackBg,
+            )
+        }
+        if (step != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(stringResource(step), color = colors.fgMute, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(14.dp))
+        SecondaryButton(
+            label = stringResource(R.string.cancel),
+            onClick = onCancel,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * The restore sheet while it lists the saved sets and while the user picks one. One sheet holds every stage,
+ * so the list replaces the spinner in place instead of a second sheet sliding up.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MlRestorePickerSheet(
+    sheet: MlRestoreSheet,
+    onSelect: (String) -> Unit,
+    onRestore: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val colors = AppColors.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    // Slide the sheet away before the action lands, as the app's other action sheets do.
+    fun close(action: () -> Unit) {
+        scope.launch { sheetState.hide() }.invokeOnCompletion { action() }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onClose,
+        sheetState = sheetState,
+        containerColor = SheetBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        // Height-capped and scrolling, so a long list on a short screen never pushes the buttons off it.
+        val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.8f).dp
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = maxSheetHeight)
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                stringResource(R.string.settings_ml_drive_restore),
+                color = colors.fgPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            when (sheet) {
+                is MlRestoreSheet.Pick -> {
+                    Text(
+                        stringResource(R.string.settings_ml_drive_restore_pick),
+                        color = colors.fgDim,
+                        fontSize = 14.sp,
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        sheet.devices.forEach { device ->
+                            val isSelected = device.deviceId == sheet.selectedId
+                            ActionSheetRow(
+                                icon = if (device.name == MlDeviceName.ThisDevice) {
+                                    Icons.Default.PhoneAndroid
+                                } else {
+                                    Icons.Default.Devices
+                                },
+                                title = deviceName(device.name),
+                                subtitle = deviceSummary(device),
+                                onClick = { onSelect(device.deviceId) },
+                                showCheck = isSelected,
+                                modifier = Modifier.semantics { selected = isSelected },
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        SecondaryButton(
+                            label = stringResource(R.string.cancel),
+                            onClick = { close(onClose) },
+                            modifier = Modifier.weight(1f),
+                        )
+                        PrimaryButton(
+                            label = stringResource(R.string.settings_ml_drive_restore_confirm),
+                            onClick = { close(onRestore) },
+                            modifier = Modifier.weight(1f),
+                            enabled = sheet.selectedId != null,
+                        )
+                    }
+                }
+                MlRestoreSheet.Empty, MlRestoreSheet.Failed -> {
+                    Text(
+                        stringResource(
+                            if (sheet == MlRestoreSheet.Empty) {
+                                R.string.settings_ml_drive_restore_empty
+                            } else {
+                                R.string.settings_ml_drive_restore_list_failed
+                            },
+                        ),
+                        color = colors.fgDim,
+                        fontSize = 14.sp,
+                    )
+                    SecondaryButton(
+                        label = stringResource(R.string.close),
+                        onClick = { close(onClose) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                else -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = colors.accent,
+                    )
+                    Text(
+                        stringResource(R.string.settings_ml_drive_restore_loading),
+                        color = colors.fgDim,
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Merge or Replace, asked when a restore brings face data to a device that already holds some. Merge first. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MlRestoreModeSheet(
+    onChoose: (FaceSnapshotMode) -> Unit,
+    onClose: () -> Unit,
+) {
+    val colors = AppColors.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    fun close(action: () -> Unit) {
+        scope.launch { sheetState.hide() }.invokeOnCompletion { action() }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onClose,
+        sheetState = sheetState,
+        containerColor = SheetBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                stringResource(R.string.settings_ml_drive_mode_title),
+                color = colors.fgPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                stringResource(R.string.settings_ml_drive_mode_message),
+                color = colors.fgDim,
+                fontSize = 14.sp,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ActionSheetRow(
+                    icon = Icons.Default.Merge,
+                    title = stringResource(R.string.settings_ml_drive_mode_merge),
+                    subtitle = stringResource(R.string.settings_ml_drive_mode_merge_desc),
+                    onClick = { close { onChoose(FaceSnapshotMode.Merge) } },
+                )
+                // Red, as it overwrites the names this device holds for its Drive photos.
+                ActionSheetRow(
+                    icon = Icons.Default.SwapHoriz,
+                    title = stringResource(R.string.settings_ml_drive_mode_replace),
+                    subtitle = stringResource(R.string.settings_ml_drive_mode_replace_desc),
+                    onClick = { close { onChoose(FaceSnapshotMode.Replace) } },
+                    destructive = true,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The folder consent a first save stops at, or what a finished job did, until the user closes it. Closing
+ * either way hands the result back to the controller, so it is not shown twice.
+ */
+@Composable
+private fun MlSyncOutcomeSheet(
+    notice: MlSyncNotice,
+    onCreateFolder: () -> Unit,
+    onDeclineFolder: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    when (notice) {
+        MlSyncNotice.AskToCreateFolder -> ConfirmSheet(
+            title = stringResource(R.string.settings_ml_drive_folder_title),
+            message = stringResource(R.string.settings_ml_drive_folder_message),
+            confirmLabel = stringResource(R.string.settings_ml_drive_folder_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = onCreateFolder,
+            onDismiss = onDeclineFolder,
+        )
+        is MlSyncNotice.Message -> ConfirmDialog(
+            title = stringResource(notice.title),
+            message = noticeText(notice),
+            confirmLabel = stringResource(R.string.err_dismiss_ok),
+            dismissLabel = null,
+            onConfirm = onDismiss,
+            onDismiss = onDismiss,
+        )
+    }
+}
+
+/**
+ * The body of a finished job's message: the counts as one list ("12 faces, 3 people and search data for
+ * 40 photos"), then the sentences that explain the rest. Null when there is neither.
+ */
+@Composable
+private fun noticeText(notice: MlSyncNotice.Message): String? {
+    val locale = appLocale()
+    val parts = notice.counts.map { pluralStringResource(it.plural, it.count, it.count) }
+    val counts = when (parts.size) {
+        0 -> null
+        1 -> parts[0]
+        2 -> stringResource(R.string.settings_ml_drive_list_two, parts[0], parts[1])
+        else -> stringResource(R.string.settings_ml_drive_list_three, parts[0], parts[1], parts[2])
+    }?.replaceFirstChar { if (it.isLowerCase()) it.titlecase(locale) else it.toString() }
+    val sentences = notice.lines.map { stringResource(it) }.joinToString(" ").ifBlank { null }
+    return listOfNotNull(counts, sentences).joinToString("\n\n").ifBlank { null }
+}
+
+@Composable
+private fun deviceName(name: MlDeviceName): String = when (name) {
+    MlDeviceName.ThisDevice -> stringResource(R.string.settings_ml_drive_this_device)
+    MlDeviceName.Another -> stringResource(R.string.settings_ml_drive_another_device)
+    is MlDeviceName.Labeled -> name.label
+}
+
+/** What a set holds and its size, then when it was saved, in the app language. */
+@Composable
+private fun deviceSummary(device: MlRemoteDevice): String {
+    val locale = appLocale()
+    val savedAt = remember(device.savedAtMs, locale) { formatSavedAt(device.savedAtMs, locale) }
+    val contents = stringResource(mlRemoteDeviceContents(device))
+    return "$contents · ${formatBytes(device.sizeBytes)}\n" +
+        stringResource(R.string.settings_ml_drive_saved_at, savedAt)
+}
+
+/** The server's save time, to the minute, in the locale's own order, as the photo details show a date. */
+private fun formatSavedAt(ms: Long, locale: Locale): String =
+    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale).format(Date(ms))

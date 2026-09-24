@@ -22,17 +22,20 @@
 
 package eu.akoos.photos.data.face
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * Pins the pure rules that decide when a finished walk pass groups the account's faces into people, and
  * when that grouping goes on to a full regroup. Grouping follows the faces still waiting, not the ones a
- * single pass found, so a library whose scan never drains still gets its people. A settled walk mirrors
- * the drained branch (a full regroup for whatever the incremental path left unplaced), a full regroup
- * that recently timed out or threw is held back until its backoff passes, and full regroups are spaced by
- * what the last one cost.
+ * single pass found, so a library whose scan never drains still gets its people, but never while names
+ * wait to be reattached. A settled walk mirrors the drained branch (a full regroup for whatever the
+ * incremental path left unplaced), both regroup only for faces beyond what the last regroup left
+ * ungrouped on purpose, a full regroup that recently timed out or threw is held back until its backoff
+ * passes, and full regroups are spaced by what the last one cost.
  */
 class FaceGroupingPolicyTest {
 
@@ -136,14 +139,82 @@ class FaceGroupingPolicyTest {
         assertTrue(cooled(sinceLast = 360_000L, lastDuration = 40_000L))
     }
 
+    @Test
+    fun names_waiting_to_be_reattached_hold_every_pass_end_grouping() {
+        // The faces carry no names until the drained walk reattaches them, so grouping them earlier would
+        // rebuild every named person unnamed, whether the walk settles or goes on.
+        assertFalse(group(willContinue = false, ungrouped = 12, reattachPending = true))
+        assertFalse(group(willContinue = true, ungrouped = 12, sinceLastGroup = INTERVAL * 10, reattachPending = true))
+        assertTrue(group(willContinue = false, ungrouped = 12, reattachPending = false))
+    }
+
+    @Test
+    fun a_full_regroup_waits_for_faces_beyond_what_the_last_one_left_ungrouped() {
+        // Three faces kept out of a named person stay ungrouped by design: they alone never call for
+        // another full regroup, a fourth waiting face does.
+        assertFalse(regroup(handled = true, settled = true, leftover = 3, baseline = 3))
+        assertFalse(regroup(handled = true, settled = true, leftover = 2, baseline = 3))
+        assertTrue(regroup(handled = true, settled = true, leftover = 4, baseline = 3))
+        // The same holds when the incremental path could not run: with nothing new waiting, the whole
+        // library is not reloaded.
+        assertFalse(regroup(handled = false, settled = false, leftover = 3, baseline = 3))
+        assertTrue(regroup(handled = false, settled = false, leftover = 4, baseline = 3))
+    }
+
+    @Test
+    fun a_full_regroup_beyond_the_baseline_still_obeys_the_backoff_and_the_cooldown() {
+        assertFalse(regroup(handled = true, settled = true, leftover = 9, baseline = 3, sinceFailure = BACKOFF - 1))
+        assertFalse(regroup(handled = true, settled = true, leftover = 9, baseline = 3, cooledDown = false))
+    }
+
+    @Test
+    fun no_baseline_holds_nothing_back() {
+        // Before any regroup has completed (a fresh process, or faces just replaced by an import).
+        assertTrue(exceedsRegroupBaseline(ungrouped = 1, baseline = null))
+        assertTrue(exceedsRegroupBaseline(ungrouped = 0, baseline = null))
+        assertTrue(regroup(handled = true, settled = true, leftover = 1, baseline = null))
+    }
+
+    @Test
+    fun a_drained_walk_regroups_only_for_new_unplaced_faces() {
+        assertFalse(drained(leftover = 0, baseline = null))
+        assertTrue(drained(leftover = 3, baseline = null))
+        // The leftovers the last regroup kept out on purpose: every gallery visit would otherwise reload
+        // every stored embedding.
+        assertFalse(drained(leftover = 3, baseline = 3))
+        assertTrue(drained(leftover = 4, baseline = 3))
+        assertFalse(drained(leftover = 0, baseline = 0))
+    }
+
+    @Test
+    fun a_drained_regroup_obeys_the_backoff_and_the_cooldown() {
+        assertFalse(drained(leftover = 4, baseline = 3, sinceFailure = 0L))
+        assertFalse(drained(leftover = 4, baseline = 3, sinceFailure = BACKOFF - 1))
+        assertTrue(drained(leftover = 4, baseline = 3, sinceFailure = BACKOFF))
+        assertFalse(drained(leftover = 4, baseline = 3, cooledDown = false))
+        assertFalse(drained(leftover = 4, baseline = null, cooledDown = false))
+    }
+
+    @Test
+    fun the_baseline_only_ever_comes_down_between_regroups() {
+        // Faces the last regroup left ungrouped have gone (deleted, placed, removed): the next new face
+        // must still read as new.
+        assertEquals(2, lowerRegroupBaseline(baseline = 5, ungrouped = 2))
+        assertEquals(5, lowerRegroupBaseline(baseline = 5, ungrouped = 7))
+        assertEquals(5, lowerRegroupBaseline(baseline = 5, ungrouped = 5))
+        assertNull(lowerRegroupBaseline(baseline = null, ungrouped = 2))
+    }
+
     private fun group(
         active: Boolean = true,
         willContinue: Boolean,
         ungrouped: Int,
         sinceLastGroup: Long = 0L,
+        reattachPending: Boolean = false,
     ): Boolean = shouldGroupAtPassEnd(
         active = active,
         willContinue = willContinue,
+        reattachPending = reattachPending,
         ungrouped = ungrouped,
         msSinceLastGroup = sinceLastGroup,
         minIntervalMs = INTERVAL,
@@ -155,10 +226,25 @@ class FaceGroupingPolicyTest {
         leftover: Int,
         sinceFailure: Long? = null,
         cooledDown: Boolean = true,
+        baseline: Int? = null,
     ): Boolean = shouldRunFullRegroup(
         incrementalHandled = handled,
         settled = settled,
         ungroupedAfterIncremental = leftover,
+        ungroupedBaseline = baseline,
+        msSinceLastFailedRegroup = sinceFailure,
+        failureBackoffMs = BACKOFF,
+        cooledDown = cooledDown,
+    )
+
+    private fun drained(
+        leftover: Int,
+        baseline: Int?,
+        sinceFailure: Long? = null,
+        cooledDown: Boolean = true,
+    ): Boolean = shouldRunDrainedRegroup(
+        ungroupedAfterIncremental = leftover,
+        ungroupedBaseline = baseline,
         msSinceLastFailedRegroup = sinceFailure,
         failureBackoffMs = BACKOFF,
         cooledDown = cooledDown,

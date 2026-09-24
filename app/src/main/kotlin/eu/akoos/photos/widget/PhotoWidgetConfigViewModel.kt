@@ -32,23 +32,39 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.db.dao.SyncStateDao
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.PhotoPickerRow
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.domain.entity.LocalAlbum
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -103,6 +119,9 @@ class PhotoWidgetConfigViewModel @Inject constructor(
     private val localMediaRepo: LocalMediaRepository,
     private val photoListingDao: PhotoListingDao,
     private val cloudAlbumDao: CloudAlbumDao,
+    private val albumPhotoMembershipDao: AlbumPhotoMembershipDao,
+    private val syncStateDao: SyncStateDao,
+    private val syncStateSnapshot: SyncStateSnapshot,
     private val driveRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
 ) : ViewModel() {
@@ -120,6 +139,51 @@ class PhotoWidgetConfigViewModel @Inject constructor(
     /** Tracks whether [loadFor] has already populated state from Glance, so we don't
      *  overwrite the user's in-progress edits when the screen recomposes. */
     private var hydrated = false
+
+    /**
+     * What the picker must never offer, re-read whenever a hide or a reveal lands. Null until the first
+     * read, and no list is filled before it, so nothing is drawn while it is unknown. A failing read is
+     * retried rather than skipped: the picker stays empty sooner than show a photo it cannot vouch for.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val hidden: StateFlow<WidgetHiddenSets?> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId -> observeHiddenSets(userId) }
+        .retryOnDbTear("WidgetConfigVM")
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /**
+     * Device photos whose Drive copy is hidden, from the sync rows that pair the two. Read only while
+     * an account is signed in and something is hidden: a guest has no Drive copies to pair.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val hiddenTwins: Flow<Set<String>> = accountManager.getPrimaryUserId()
+        .flatMapLatest { userId ->
+            if (userId == null) {
+                flowOf(emptySet())
+            } else {
+                hidden.filterNotNull()
+                    .map { it.cloudIds }
+                    .distinctUntilChanged()
+                    .flatMapLatest { hiddenCloudIds ->
+                        if (hiddenCloudIds.isEmpty()) {
+                            flowOf(emptySet())
+                        } else {
+                            syncStateSnapshot.observe(userId).map { snapshot ->
+                                hiddenTwinUris(
+                                    snapshot.rows.asSequence().map { it.localUri to it.cloudFileId },
+                                    hiddenCloudIds,
+                                )
+                            }
+                        }
+                    }
+            }
+        }
+        // A pass over the whole library's sync rows, kept off the main thread.
+        .flowOn(Dispatchers.Default)
+
+    /** The device uris the last device-list emission left out, so a pick published afterwards is
+     *  filtered against them too. */
+    private var lastHiddenDeviceUris: Set<String> = emptySet()
 
     init {
         observeAlbums()
@@ -164,7 +228,8 @@ class PhotoWidgetConfigViewModel @Inject constructor(
             val interval = WidgetInterval.entries.firstOrNull { it.minutes == intervalMin }
                 ?: WidgetInterval.ONE_HOUR
 
-            _state.update {
+            // A pick saved before its photo, album or folder was hidden is dropped on the way in.
+            publish {
                 it.copy(
                     mode = mode,
                     interval = interval,
@@ -186,14 +251,18 @@ class PhotoWidgetConfigViewModel @Inject constructor(
      * decrypt through [requestCloudThumbnailDecrypt], which hydrates that one row's crypto material by
      * link id. Newest-first is the query's own ORDER BY, so no second sorted copy of the library. The
      * widget worker handles the lazy decrypt on its own when the widget cycles to a
-     * not-yet-materialised entry.
+     * not-yet-materialised entry. A hidden photo is never offered, and the spinner stays up until
+     * the hidden records have been read.
      */
     private fun observeCloudPhotos() {
         viewModelScope.launch {
             val userId: UserId = accountManager.getPrimaryUserId().first() ?: return@launch
             // Own stream only — photos from shared-with-me albums must not be offered as
             // widget content.
-            photoListingDao.observeOwnStreamPickerRows(userId.id)
+            combine(
+                photoListingDao.observeOwnStreamPickerRows(userId.id),
+                hidden.filterNotNull(),
+            ) { rows, hiddenSets -> visiblePickerRows(rows, hiddenSets) }
                 // A read that lands mid-write can throw a transient CursorWindow error, so
                 // re-subscribe rather than let it reach the collector. Capped, because a read that
                 // keeps failing is not a torn window and no number of retries will fix it.
@@ -202,14 +271,14 @@ class PhotoWidgetConfigViewModel @Inject constructor(
                 // and says what went wrong, where a swallowed one leaves the picker loading forever.
                 .catch { e ->
                     Log.e("WidgetConfigVM", "widget photo stream gave up", e)
-                    _state.update {
+                    publish {
                         it.copy(isLoadingCloud = false, cloudError = sanitizeErrorMessage(e.message))
                     }
                 }
                 .collectLatest { rows ->
                     // Clear the loading flag on the first (and every) emission so the picker
                     // leaves its spinner state once real data (even an empty list) has arrived.
-                    _state.update { it.copy(cloudPhotos = rows, isLoadingCloud = false, cloudError = null) }
+                    publish { it.copy(cloudPhotos = rows, isLoadingCloud = false, cloudError = null) }
                 }
         }
     }
@@ -217,15 +286,50 @@ class PhotoWidgetConfigViewModel @Inject constructor(
     /**
      * Stream the cached cloud-album list into [WidgetConfigUiState.cloudAlbums] for the
      * follow-an-album ([WidgetMode.CLOUD_ALBUM]) picker. DB-backed, so a cold cache shows
-     * nothing until [warmCloudAlbums] refreshes it from the network.
+     * nothing until [warmCloudAlbums] refreshes it from the network. A hidden album is never
+     * offered, nor a hidden photo drawn as a cover.
      */
     private fun observeCloudAlbums() {
         viewModelScope.launch {
-            cloudAlbumDao.observeOwned().collectLatest { albums ->
-                _state.update { it.copy(cloudAlbums = albums) }
+            combine(cloudAlbumDao.observeOwned(), hidden.filterNotNull()) { albums, hiddenSets ->
+                visibleCloudAlbums(albums, hiddenSets)
             }
+                .retryOnDbTear("WidgetConfigVM")
+                .collectLatest { albums -> publish { it.copy(cloudAlbums = albums) } }
         }
     }
+
+    /**
+     * The hidden records [hidden] holds, read from the same sources the gallery's hide filters read:
+     * the hidden-photo, hidden-album and hidden-folder settings, the hidden albums' membership rows,
+     * and the vault's sync rows. [userId] keys those rows, the local partition when no one is signed
+     * in, so a guest's picker works on the device alone.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observeHiddenSets(userId: UserId?): Flow<WidgetHiddenSets> {
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        val prefs = context.settingsDataStore.data
+        val albumMembers = prefs
+            .map { it[SettingsKeys.HIDDEN_ALBUM_IDS].orEmpty() }
+            .distinctUntilChanged()
+            .flatMapLatest { albumIds ->
+                if (albumIds.isEmpty()) flowOf(emptySet())
+                else albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(albumIds).map { it.toSet() }
+            }
+        // Every hide and reveal rewrites the vault's records in settings, so a settings change is when
+        // the vault's rows are read again. The read is indexed down to the vault's handful of rows.
+        val withVaultedRows = prefs.mapLatest { p ->
+            p to syncStateDao.getVaulted(account).mapNotNull { it.cloudFileId }
+        }
+        return combine(withVaultedRows, albumMembers) { (p, vaultedRowCloudIds), members ->
+            widgetHiddenSets(p, members, vaultedRowCloudIds)
+        }.distinctUntilChanged()
+    }
+
+    /** Every state change that can carry a pick goes through here, so the picks are filtered against
+     *  the latest hidden records whichever of the two arrived last. */
+    private fun publish(transform: (WidgetConfigUiState) -> WidgetConfigUiState) =
+        _state.update { transform(it).withoutHidden(hidden.value, lastHiddenDeviceUris) }
 
     /**
      * Best-effort network refresh so a cold DB populates the cloud-album picker. Non-blocking
@@ -253,11 +357,19 @@ class PhotoWidgetConfigViewModel @Inject constructor(
      * Single MediaStore collection feeding both the album picker ([WidgetMode.ALBUM]) and the
      * device-photo grid ([WidgetMode.SELECTED]). Sharing one collector avoids a second identical
      * observeLocalMedia() subscription. Device photos are filtered to images and sorted
-     * newest-first for the in-app selectable grid.
+     * newest-first for the in-app selectable grid. A photo in a hidden folder, or one whose Drive
+     * copy is hidden, is left out of both, so a hidden folder never lists at all.
      */
     private fun observeAlbums() {
         viewModelScope.launch {
-            localMediaRepo.observeLocalMedia().collectLatest { items ->
+            combine(
+                localMediaRepo.observeLocalMedia(),
+                hidden.filterNotNull(),
+                hiddenTwins,
+            ) { items, hiddenSets, twinUris ->
+                items to hiddenDeviceUris(items, hiddenSets.folderNames, twinUris)
+            }.collectLatest { (allItems, hiddenUris) ->
+                val items = if (hiddenUris.isEmpty()) allItems else allItems.filterNot { it.uri in hiddenUris }
                 val albums = items
                     .filter { it.bucketName != null }
                     .groupBy { it.bucketName!! }
@@ -274,7 +386,8 @@ class PhotoWidgetConfigViewModel @Inject constructor(
                 val devicePhotos = items
                     .filter { it.mimeType.startsWith("image/") }
                     .sortedByDescending { it.dateTaken }
-                _state.update { it.copy(albums = albums, devicePhotos = devicePhotos) }
+                lastHiddenDeviceUris = hiddenUris
+                publish { it.copy(albums = albums, devicePhotos = devicePhotos) }
             }
         }
     }
@@ -298,7 +411,7 @@ class PhotoWidgetConfigViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isSaving = true) }
             try {
-                val s       = _state.value
+                val s       = _state.value.withoutHidden(hidden.value, lastHiddenDeviceUris)
                 val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
 
                 // Write all config into Glance PreferencesGlanceStateDefinition

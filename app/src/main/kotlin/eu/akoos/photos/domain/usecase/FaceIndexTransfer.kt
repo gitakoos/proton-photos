@@ -32,7 +32,6 @@ import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.FaceScanDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
-import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.FaceScanEntity
@@ -43,6 +42,13 @@ import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachData
 import eu.akoos.photos.data.face.FaceReattachSnapshot
 import eu.akoos.photos.data.face.ReattachManual
+import eu.akoos.photos.data.mlsync.FaceSnapshotExporter
+import eu.akoos.photos.data.mlsync.FaceSnapshotImportResult
+import eu.akoos.photos.data.mlsync.FaceSnapshotImporter
+import eu.akoos.photos.data.mlsync.FaceSnapshotMode
+import eu.akoos.photos.data.mlsync.MlSnapshotEnvelope
+import eu.akoos.photos.data.mlsync.defaultRestoreMode
+import eu.akoos.photos.data.mlsync.restoreNeedsChoice
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import kotlinx.coroutines.Dispatchers
@@ -50,9 +56,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
@@ -83,9 +87,10 @@ internal const val FACE_INDEX_VERSION_V3 = 3
 internal const val MAX_FACE_INDEX_CIPHER_BYTES = 512 * 1024 * 1024
 
 /** A face is portable only if its photo is addressed by a Proton Drive link id, which is the same on
- *  every device signed into the account. A device `content://` MediaStore uri means nothing on another
- *  phone, so those faces are left out of a transfer. */
-internal fun isPortableFaceKey(photoKey: String): Boolean = !photoKey.startsWith("content://")
+ *  every device signed into the account and carries no URI scheme: the search snapshot's rule. A device
+ *  key, a `content://` MediaStore uri or a `file://` path in the hidden area, names a photo that never
+ *  left this phone, so those faces, and the names on them, are left out of a transfer. */
+internal fun isPortableFaceKey(photoKey: String): Boolean = photoKey.isNotEmpty() && "://" !in photoKey
 
 /** A short, non-reversible tag of the account, written into the file so an import can bind the index
  *  to the account it was produced on (whose link ids match this library). */
@@ -375,83 +380,63 @@ sealed interface FaceIndexImportOutcome {
 }
 
 /**
- * Writes the account's portable face index to [output] as an encrypted v3 file: a short plaintext
- * header (magic, version, a non-reversible account tag and the embedding model identity) wraps a body
- * that only the same Proton account's address key can open. The body holds every face whose photo is a
- * cloud link (embedding, box, landmarks, score, blur, and whether the user removed it), plus each named
- * person's member faces, manual photo attachments, "not this person" marks and chosen cover photo.
+ * Writes the account's portable face index to [output] as a sealed face snapshot, the format
+ * [FaceSnapshotExporter] streams: every face on a cloud photo with its embedding, box, landmarks, scores
+ * and removed bit, the named people and confirmed names, manual photos, "not this person" marks, chosen
+ * covers, and the scan marker of every cloud photo already scanned, encrypted and signed to the account.
  * Device-only faces are skipped. The heavy detection and embedding work is what this preserves, so
  * another device on the same account can reuse it without recomputing; clustering is re-derived cheaply
- * on import.
+ * on import, which still reads the older v3 file as well.
  *
- * The embeddings are biometric-adjacent, so the body is encrypted to the account and the file is only
- * ever produced on the user's explicit request and handed to the user to store; nothing here uploads it.
+ * The embeddings are biometric-adjacent, so the file is sealed to the account and only ever produced on
+ * the user's explicit request and handed to the user to store; nothing here uploads it.
  */
 class ExportFaceIndexUseCase @Inject constructor(
     private val accountManager: AccountManager,
-    private val cryptoHelper: DriveCryptoHelper,
-    private val faceDao: FaceDao,
-    private val personDao: PersonDao,
-    private val personManualPhotoDao: PersonManualPhotoDao,
-    private val notPersonDao: NotPersonDao,
-    private val personCoverDao: PersonCoverDao,
+    private val faceSnapshotExporter: FaceSnapshotExporter,
 ) {
     /** Number of faces written, or -1 when signed out. */
     suspend operator fun invoke(output: OutputStream): Int = withContext(Dispatchers.IO) {
         val userId = accountManager.getPrimaryUserId().first() ?: return@withContext -1
-        val account = userId.id
-        val faces = faceDao.allFacesByScoreDesc(account).filter { isPortableFaceKey(it.photoKey) }
-        val portableIds = faces.mapTo(HashSet()) { it.id }
-        val named = personDao.namedPeopleForUser(account).filter { !it.displayName.isNullOrBlank() }
-        val notByName = notPersonDao.allForUser(account).groupBy({ it.personName }, { it.faceId })
-        val coverByName = personCoverDao.allForUser(account).associate { it.personName to it.photoKey }
-
-        val parsedFaces = faces.map { f ->
-            ParsedFace(
-                id = f.id, photoKey = f.photoKey,
-                left = f.left, top = f.top, right = f.right, bottom = f.bottom,
-                landmarks = f.landmarks, score = f.score, blur = f.blur, embedding = f.embedding,
-                rejected = f.rejected,
-            )
-        }
-        val parsedPeople = named.map { person ->
-            val name = person.displayName!!
-            val members = faceDao.faceIdsForPerson(account, person.id).filter { it in portableIds }
-            val manual = personManualPhotoDao.photoKeysForNameList(account, name).filter { isPortableFaceKey(it) }
-            val nots = (notByName[name] ?: emptyList()).filter { it in portableIds }
-            val cover = coverByName[name]?.takeIf { isPortableFaceKey(it) }
-            ParsedPerson(name, members, manual, nots, cover)
-        }
-
-        val bodyBytes = ByteArrayOutputStream().use { buffer ->
-            DataOutputStream(buffer).use { writeBody(it, parsedFaces, parsedPeople, FACE_INDEX_VERSION_V3) }
-            buffer.toByteArray()
-        }
-
-        val key = cryptoHelper.getAddressSigningKey(userId)
-        DataOutputStream(BufferedOutputStream(output)).use { out ->
-            writeFaceIndexEnvelope(
-                out = out,
-                version = FACE_INDEX_VERSION_V3,
-                accountTag = accountTag(account),
-                modelFile = FaceModelAssets.EMBED_MODEL.fileName,
-                modelSha = FaceModelAssets.EMBED_MODEL.sha256,
-                bodyBytes = bodyBytes,
-            ) { plain ->
-                cryptoHelper.encryptAndSignDataToPgpMessage(plain, key.publicKeyArmored, key.unlockedKeyBytes)
-            }
-            out.flush()
-        }
-        faces.size
+        faceSnapshotExporter.export(userId, output).faces
     }
+}
+
+/** Whether [source] begins with a sealed snapshot's clear-text magic. The stream is rewound either way. */
+internal fun startsWithSnapshotEnvelope(source: BufferedInputStream): Boolean {
+    val magic = MlSnapshotEnvelope.MAGIC.toByteArray(Charsets.US_ASCII)
+    source.mark(magic.size)
+    val head = ByteArray(magic.size)
+    var read = 0
+    while (read < head.size) {
+        val n = source.read(head, read, head.size - read)
+        if (n < 0) break
+        read += n
+    }
+    source.reset()
+    return read == head.size && head.contentEquals(magic)
+}
+
+/** A sealed snapshot import's result, as the v3 import reports its own. */
+internal fun FaceSnapshotImportResult.toFaceIndexImportOutcome(): FaceIndexImportOutcome = when (this) {
+    is FaceSnapshotImportResult.Imported -> FaceIndexImportOutcome.Success(faces + facesUpdated, people)
+    is FaceSnapshotImportResult.NamesStaged -> FaceIndexImportOutcome.ReattachScheduled(people)
+    FaceSnapshotImportResult.WrongAccount -> FaceIndexImportOutcome.WrongAccount
+    FaceSnapshotImportResult.UnsupportedVersion, FaceSnapshotImportResult.Unreadable -> FaceIndexImportOutcome.Unreadable
 }
 
 /**
  * Reads a face index written by [ExportFaceIndexUseCase] from [input] and folds it into the current
- * account. The encrypted v2/v3 forms are accepted and the older plaintext v1 form is refused, and each
- * is bound to this account: an index whose tag or key belongs to a different account is refused before any row
- * is touched, and an encrypted body that is not validly signed by the account is refused as unreadable
- * (see [FaceIndexImportOutcome]). On a same-model read the faces are upserted (the deterministic id
+ * account. A sealed face snapshot, the current export, goes to [FaceSnapshotImporter] under [mode]; with
+ * no mode given it replaces only on a fresh device and merges otherwise ([defaultRestoreMode]), so an
+ * import that cannot ask never discards faces, curation or waiting names made here (see
+ * [restoreNeedsChoice]).
+ *
+ * Any other file is read as the older v3 face index. The encrypted v2/v3 forms are accepted and the
+ * older plaintext v1 form is refused, and each is bound to this account: an index whose tag or key
+ * belongs to a different account is refused before any row is touched, and an encrypted body that is
+ * not validly signed by the account is refused as unreadable (see [FaceIndexImportOutcome]). On a
+ * same-model read the faces are upserted (the deterministic id
  * dedups a photo already scanned here), carrying each face's removed bit, each named person's members
  * are re-confirmed under its name, and manual attachments, rejections and chosen covers are restored; a
  * face this device has already confirmed as a different person keeps its own name rather than being
@@ -471,11 +456,20 @@ class ImportFaceIndexUseCase @Inject constructor(
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
     private val appDatabase: AppDatabase,
+    private val faceSnapshotImporter: FaceSnapshotImporter,
 ) {
-    suspend operator fun invoke(input: InputStream): FaceIndexImportOutcome = withContext(Dispatchers.IO) {
+    suspend operator fun invoke(
+        input: InputStream,
+        mode: FaceSnapshotMode? = null,
+    ): FaceIndexImportOutcome = withContext(Dispatchers.IO) {
         val userId = accountManager.getPrimaryUserId().first()
             ?: return@withContext FaceIndexImportOutcome.Unreadable
         val account = userId.id
+        val source = BufferedInputStream(input)
+        if (startsWithSnapshotEnvelope(source)) {
+            val chosen = mode ?: defaultRestoreMode(faceSnapshotImporter.needsModeChoice(userId))
+            return@withContext faceSnapshotImporter.import(userId, source, chosen).toFaceIndexImportOutcome()
+        }
 
         // The address key is needed only to open the encrypted body; unlock it up front and tolerate a
         // failure, so a file whose key cannot be obtained falls through to the same "not this account"
@@ -507,7 +501,7 @@ class ImportFaceIndexUseCase @Inject constructor(
             }
         }
 
-        DataInputStream(BufferedInputStream(input)).use { inp ->
+        DataInputStream(source).use { inp ->
             when (val read = readFaceIndex(
                 inp = inp,
                 localAccountTag = accountTag(account),
