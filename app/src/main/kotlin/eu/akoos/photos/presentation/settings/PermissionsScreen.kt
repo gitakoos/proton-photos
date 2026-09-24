@@ -83,6 +83,7 @@ import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.StatusSynced
+import eu.akoos.photos.util.MediaPermissions
 
 private val cardShape = RoundedCornerShape(12.dp)
 
@@ -155,7 +156,7 @@ fun PermissionsScreen(onBack: () -> Unit) {
                         granted = mediaGranted,
                     ) {
                         if (mediaGranted) openAppDetails(context)
-                        else mediaLauncher.launch(mediaPermissionList())
+                        else mediaLauncher.launch(MediaPermissions.requestSet(Build.VERSION.SDK_INT))
                     }
                 }
                 // Photo location (ACCESS_MEDIA_LOCATION) — API 29+.
@@ -307,21 +308,9 @@ private fun PermissionRow(
 // ── Grant-state checks ───────────────────────────────────────────────────────
 
 private fun hasMediaPermission(context: android.content.Context): Boolean =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        mediaPermissionList().all {
-            ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        }
-    } else {
-        ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
+    MediaPermissions.readSet(Build.VERSION.SDK_INT).all {
+        ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
-
-/** The media read permissions appropriate for the running OS. */
-private fun mediaPermissionList(): Array<String> =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
-    else
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
 
 private fun hasMediaLocation(context: android.content.Context): Boolean =
     Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||

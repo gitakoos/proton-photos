@@ -112,6 +112,7 @@ import eu.akoos.photos.presentation.onboarding.steps.WelcomeStep
 import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.util.MediaPermissions
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -414,13 +415,7 @@ fun OnboardingScreen(
         )
     }
 
-    val mediaPermissions = remember {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
-        } else {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
-    }
+    val mediaPermissions = remember { MediaPermissions.requestSet(Build.VERSION.SDK_INT) }
 
     val showManageMedia = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val showNotifications = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
@@ -469,12 +464,13 @@ fun OnboardingScreen(
     val mediaLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
     ) { result ->
-        mediaGranted = result.values.all { it }
+        val readResult = MediaPermissions.readResults(result, Build.VERSION.SDK_INT)
+        mediaGranted = readResult.values.all { it }
         // Re-query device folders now that access is granted: an existing-media
         // permission grant fires no content-change notification, so the folder
         // picker's flow needs an explicit poke or it stays on its pre-grant empty
         // snapshot until an app restart.
-        if (result.values.any { it }) viewModel.onMediaPermissionChanged()
+        if (readResult.values.any { it }) viewModel.onMediaPermissionChanged()
         scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
     }
     val manageMediaLauncher = rememberLauncherForActivityResult(
@@ -737,13 +733,7 @@ private enum class OnboardingStep {
     AlbumMirrorOptIn, Privacy, MirrorOptIn, AppLock, Notifications, ManageMedia, Done,
 }
 
-private fun hasMediaPermission(context: Context): Boolean {
-    val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        listOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
-    } else {
-        listOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
-    return perms.all {
+private fun hasMediaPermission(context: Context): Boolean =
+    MediaPermissions.readSet(Build.VERSION.SDK_INT).all {
         ContextCompat.checkSelfPermission(context, it) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
-}

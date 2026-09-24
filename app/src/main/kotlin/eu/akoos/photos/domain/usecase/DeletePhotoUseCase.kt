@@ -157,8 +157,9 @@ class DeletePhotoUseCase @Inject constructor(
         // Pre-R: direct delete (no system trash support). Asymmetry note vs the R+ path: the cloud
         // delete above has already run, so a local delete that fails here would leave the cloud copy
         // trashed while the device copy survives. Pre-R local deletes of the app's own media
-        // effectively never fail (the storage permission is granted at install), so this is kept
-        // best-effort rather than reordered, which would risk the far more common R+ flow.
+        // effectively never fail (on Android 9 and older the write permission comes with the
+        // media-access request), so this is kept best-effort rather than reordered, which would
+        // risk the far more common R+ flow.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && localUriStrings.isNotEmpty()) {
             for (uri in localUriStrings.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }) {
                 runCatching { context.contentResolver.delete(uri, null, null) }

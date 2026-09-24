@@ -120,6 +120,8 @@ import eu.akoos.photos.presentation.gallery.TimelineGrouping
 import eu.akoos.photos.presentation.gallery.TimelineScrubber
 import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import kotlinx.coroutines.flow.map
@@ -271,10 +273,17 @@ fun DeviceFolderDetailScreen(
     }
     val shareCtx = androidx.compose.ui.platform.LocalContext.current
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
-    // The VM builds the system-share intent off the UI thread; the screen launches the chooser.
+    val appLock = LocalAppLock.current
+    // The VM builds the system-share intent off the UI thread; the screen launches the chooser. The
+    // intent can land under the app lock, and the chooser would open above the lock, so it waits for
+    // the unlock.
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
-            shareCtx.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle))
+            appLock.runWhenOpen {
+                runCatching {
+                    shareCtx.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle))
+                }
+            }
         }
     }
 

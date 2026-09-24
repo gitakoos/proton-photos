@@ -151,6 +151,7 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
+import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.showAppLockPrompt
 import eu.akoos.photos.util.HealthBlockReason
 import eu.akoos.photos.util.sanitizeErrorMessage
@@ -1178,9 +1179,11 @@ fun FaceRecognitionScreen(
     }
     // After a successful export, offer to send the file on through the system share sheet (another app or
     // a nearby device), so the file the user just saved can be passed to another phone without digging it
-    // out first. Declining just keeps the saved file.
+    // out first. Declining just keeps the saved file. The export can finish under the app lock, and the
+    // offer's sheet would open above the lock, so it waits for the unlock.
     val exportedUri by viewModel.faceExportedUri.collectAsStateWithLifecycle()
-    exportedUri?.let { uri ->
+    val appLock = LocalAppLock.current
+    exportedUri?.takeIf { !appLock.isLocked }?.let { uri ->
         ConfirmSheet(
             title = stringResource(R.string.settings_ai_export_share_title),
             message = stringResource(R.string.settings_ai_export_share_msg),

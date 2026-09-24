@@ -116,6 +116,8 @@ import eu.akoos.photos.presentation.gallery.PhotoCell
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.ErrorColor
@@ -200,11 +202,16 @@ fun LocationPhotosContent(
         mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
     }
 
-    // The VM builds the system-share intent off the UI thread; the screen launches the chooser.
+    // The VM builds the system-share intent off the UI thread; the screen launches the chooser. It can
+    // arrive under the app lock, once cloud originals finish downloading, and the chooser would open above
+    // the lock, so it waits for the unlock.
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    val appLock = LocalAppLock.current
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
-            runCatching { context.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle)) }
+            appLock.runWhenOpen {
+                runCatching { context.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle)) }
+            }
         }
     }
     // Offline-batch result - the pins apply optimistically, this only reports the outcome.

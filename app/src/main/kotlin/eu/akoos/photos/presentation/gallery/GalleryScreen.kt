@@ -214,6 +214,7 @@ import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.message
 import eu.akoos.photos.presentation.common.shareOutcome
+import eu.akoos.photos.util.MediaPermissions
 import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.util.copySensitiveText
 import eu.akoos.photos.presentation.albums.AlbumsScreen
@@ -576,17 +577,15 @@ fun GalleryScreen(
         if (memoryLinkIds.isNotEmpty()) viewModel.requestThumbnailsVisible(memoryLinkIds)
     }
 
-    val mediaPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
-    else
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    val mediaPermissions = MediaPermissions.requestSet(Build.VERSION.SDK_INT)
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        val granted = results.values.any { it }
+        val readResults = MediaPermissions.readResults(results, Build.VERSION.SDK_INT)
+        val granted = readResults.values.any { it }
         val permanentlyDenied = !granted && context is android.app.Activity &&
-            results.keys.none { ActivityCompat.shouldShowRequestPermissionRationale(context, it) }
+            readResults.keys.none { ActivityCompat.shouldShowRequestPermissionRationale(context, it) }
         viewModel.onPermissionResult(granted, permanentlyDenied)
     }
 
@@ -643,10 +642,12 @@ fun GalleryScreen(
 
     // A system permission dialog opens above the app lock, so a request that would show one waits for the
     // unlock. Media access already granted answers at once without a dialog, and the first load waits on
-    // that answer, so that request goes out straight away.
+    // that answer, so that request goes out straight away. Granted is judged by the read permissions: the
+    // write permission the request adds on Android 9 and older shares their group, so it comes without a
+    // dialog too.
     val appLock = LocalAppLock.current
     LaunchedEffect(Unit) {
-        val mediaGranted = mediaPermissions.all {
+        val mediaGranted = MediaPermissions.readSet(Build.VERSION.SDK_INT).all {
             androidx.core.content.ContextCompat.checkSelfPermission(context, it) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         }
@@ -923,12 +924,16 @@ fun GalleryScreen(
     var showShareCloudWarning by remember { mutableStateOf(false) }
     var showBackUpConfirm by remember { mutableStateOf(false) }
     // Hand the VM-built ACTION_SEND_MULTIPLE intent to the system chooser. One-shot collect;
-    // the share pill spinner is driven by multiShareState above, not by this flow.
+    // the share pill spinner is driven by multiShareState above, not by this flow. The intent can
+    // arrive under the app lock, once cloud originals finish downloading, and the chooser would open
+    // above the lock, so it waits for the unlock.
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
-            runCatching {
-                context.startActivity(Intent.createChooser(intent, shareChooserTitle))
+            appLock.runWhenOpen {
+                runCatching {
+                    context.startActivity(Intent.createChooser(intent, shareChooserTitle))
+                }
             }
         }
     }

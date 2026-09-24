@@ -518,7 +518,13 @@ class ImportFaceIndexUseCase @Inject constructor(
                     // walk has drained. Covers are keyed by name and independent of the model, so they are
                     // written now and take effect once the names reattach.
                     val parsed = read.parsed
-                    FaceReattachSnapshot.write(reattachFile(), buildReattachData(parsed))
+                    val staged = buildReattachData(parsed)
+                    // Names still waiting here (a model change's, a rescan's or an earlier import's) are
+                    // merged with the file's, never written over, and win where both speak for one face, as
+                    // this device's own names win over the file's in the same-model import below.
+                    FaceReattachSnapshot.update(reattachFile()) { waiting ->
+                        waiting?.let { FaceReattachSnapshot.merge(under = staged, over = it) } ?: staged
+                    }
                     val covers = coverRows(account, parsed)
                     if (covers.isNotEmpty()) {
                         appDatabase.withTransaction { covers.forEach { personCoverDao.set(it) } }

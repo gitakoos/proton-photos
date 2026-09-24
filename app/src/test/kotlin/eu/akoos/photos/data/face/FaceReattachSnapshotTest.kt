@@ -24,16 +24,29 @@ package eu.akoos.photos.data.face
 
 import eu.akoos.photos.domain.usecase.ReattachLabel
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.io.File
+import java.io.UTFDataFormatException
 
 /**
  * Coverage for the reattach snapshot: the pure migration-step decision that keeps an interrupted wipe
- * from destroying a pending snapshot, and the file round-trip that carries the removed-face boxes across
- * the format bump. Plain JVM, only a scratch file for the round-trip.
+ * from destroying a pending snapshot, the file round-trip that carries the removed-face boxes across
+ * the format bump, the merge that lets new names join the ones still waiting without dropping any, and
+ * the write that lands whole or not at all, with a file that cannot be read told apart from no file.
+ * Plain JVM, only scratch files.
  */
 class FaceReattachSnapshotTest {
+
+    @get:Rule
+    val tmp = TemporaryFolder()
 
     @Test
     fun `faces present with no pending snapshot captures a fresh one`() {
@@ -71,5 +84,244 @@ class FaceReattachSnapshotTest {
     fun `a missing file reads back as null`() {
         val file = File.createTempFile("reattach", ".bin").apply { delete() }
         assertNull(FaceReattachSnapshot.read(file))
+        assertEquals(ReattachLoad.Absent, FaceReattachSnapshot.load(file))
+    }
+
+    @Test
+    fun `a merge keeps every name, mark, removal and manual photo either side carries`() {
+        val merged = FaceReattachSnapshot.merge(under = OLD, over = NEW)
+        assertEquals(NEW.members + OLD.members, merged.members)
+        assertEquals(NEW.manual + OLD.manual, merged.manual)
+        assertEquals(NEW.nots + OLD.nots, merged.nots)
+        assertEquals(NEW.rejected + OLD.rejected, merged.rejected)
+    }
+
+    @Test
+    fun `a rescan that captures nothing keeps every name still waiting`() {
+        // Waiting names sit in the snapshot, not on the faces, until the drained walk reattaches them, so a
+        // capture taken meanwhile can come back empty; merged in, it must not cost a single one.
+        assertEquals(OLD, FaceReattachSnapshot.merge(under = OLD, over = data()))
+    }
+
+    @Test
+    fun `on the same face the newer name wins and the older one goes`() {
+        val merged = FaceReattachSnapshot.merge(
+            under = data(members = listOf(label("p1", 0.1f, "Ann"))),
+            over = data(members = listOf(label("p1", 0.1f, "Bea"))),
+        )
+        assertEquals(listOf(label("p1", 0.1f, "Bea")), merged.members)
+    }
+
+    @Test
+    fun `a newer removal replaces a waiting name, and a newer name a waiting removal`() {
+        val removed = FaceReattachSnapshot.merge(
+            under = data(members = listOf(label("p1", 0.1f, "Ann"))),
+            over = data(rejected = listOf(box("p1", 0.1f))),
+        )
+        assertTrue(removed.members.isEmpty())
+        assertEquals(listOf(box("p1", 0.1f)), removed.rejected)
+
+        val named = FaceReattachSnapshot.merge(
+            under = data(rejected = listOf(box("p1", 0.1f))),
+            over = data(members = listOf(label("p1", 0.1f, "Ann"))),
+        )
+        assertEquals(listOf(label("p1", 0.1f, "Ann")), named.members)
+        assertTrue(named.rejected.isEmpty())
+    }
+
+    @Test
+    fun `a face at another box is another face, so both names wait with the newer first`() {
+        // The key is the exact box: one another detector drew a little apart is left to the reattach's own
+        // overlap matching, where the entry listed first wins a tie.
+        val merged = FaceReattachSnapshot.merge(
+            under = data(members = listOf(label("p1", 0.10f, "Ann"))),
+            over = data(members = listOf(label("p1", 0.11f, "Bea"))),
+        )
+        assertEquals(listOf(label("p1", 0.11f, "Bea"), label("p1", 0.10f, "Ann")), merged.members)
+    }
+
+    @Test
+    fun `not this person marks add up but never contradict the name that wins`() {
+        val merged = FaceReattachSnapshot.merge(
+            under = data(
+                members = listOf(label("p2", 0.1f, "Cid")),
+                nots = listOf(label("p1", 0.1f, "Ann"), label("p1", 0.1f, "Dee"), label("p3", 0.1f, "Eve")),
+            ),
+            over = data(
+                members = listOf(label("p1", 0.1f, "Ann")),
+                nots = listOf(label("p2", 0.1f, "Cid"), label("p3", 0.1f, "Eve")),
+            ),
+        )
+        // The face now named Ann drops only its "not Ann" mark; the face now marked "not Cid" drops the
+        // name Cid; the repeated "not Eve" is kept once.
+        assertEquals(listOf(label("p1", 0.1f, "Ann")), merged.members)
+        assertEquals(
+            listOf(label("p2", 0.1f, "Cid"), label("p3", 0.1f, "Eve"), label("p1", 0.1f, "Dee")),
+            merged.nots,
+        )
+    }
+
+    @Test
+    fun `manual photos add up once each`() {
+        val merged = FaceReattachSnapshot.merge(
+            under = data(manual = listOf(ReattachManual("Ann", "p1"), ReattachManual("Bob", "p1"))),
+            over = data(manual = listOf(ReattachManual("Ann", "p1"), ReattachManual("Ann", "p2"))),
+        )
+        assertEquals(
+            listOf(ReattachManual("Ann", "p1"), ReattachManual("Ann", "p2"), ReattachManual("Bob", "p1")),
+            merged.manual,
+        )
+    }
+
+    @Test
+    fun `entries repeated on one side collapse to the first`() {
+        val merged = FaceReattachSnapshot.merge(
+            under = data(),
+            over = data(
+                members = listOf(label("p1", 0.1f, "Ann"), label("p1", 0.1f, "Bea")),
+                rejected = listOf(box("p2", 0.1f), box("p2", 0.1f)),
+            ),
+        )
+        assertEquals(listOf(label("p1", 0.1f, "Ann")), merged.members)
+        assertEquals(listOf(box("p2", 0.1f)), merged.rejected)
+    }
+
+    @Test
+    fun `a write replaces the snapshot whole and leaves no temp file behind`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        FaceReattachSnapshot.write(file, NEW)
+        assertEquals(ReattachLoad.Loaded(NEW), FaceReattachSnapshot.load(file))
+        assertEquals(listOf(file.name), tmp.root.list()!!.toList())
+    }
+
+    @Test
+    fun `a crash between the temp write and the rename leaves the old snapshot intact`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        // The new bytes are on disk beside it, and the rename never happens.
+        val staged = FaceReattachSnapshot.stage(file, NEW)
+        assertTrue(staged.isFile)
+        assertEquals(ReattachLoad.Loaded(OLD), FaceReattachSnapshot.load(file))
+        // The next write goes through over the leftover.
+        FaceReattachSnapshot.write(file, NEW)
+        assertEquals(ReattachLoad.Loaded(NEW), FaceReattachSnapshot.load(file))
+        assertFalse(staged.exists())
+    }
+
+    @Test
+    fun `a write that fails part way leaves the old snapshot intact`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        // A name past the format's string limit throws in the middle of the write.
+        val tooLong = data(members = listOf(label("p1", 0.1f, "x".repeat(70_000))))
+        assertThrows(UTFDataFormatException::class.java) { FaceReattachSnapshot.write(file, tooLong) }
+        assertEquals(ReattachLoad.Loaded(OLD), FaceReattachSnapshot.load(file))
+        assertEquals(listOf(file.name), tmp.root.list()!!.toList())
+    }
+
+    @Test
+    fun `a snapshot cut short reads as unreadable, never as nothing waiting`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        val bytes = file.readBytes()
+        file.writeBytes(bytes.copyOf(bytes.size / 2))
+        assertEquals(ReattachLoad.Unreadable, FaceReattachSnapshot.load(file))
+        assertNull(FaceReattachSnapshot.read(file))
+    }
+
+    @Test
+    fun `a file that is no snapshot, or claims an impossible length, reads as unreadable`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        file.writeBytes(byteArrayOf(0x13, 0x37, 0x00, 0x42))
+        assertEquals(ReattachLoad.Unreadable, FaceReattachSnapshot.load(file))
+        // A valid header whose first list claims more entries than the file could hold.
+        val header = ByteArrayOutputStream().also { buffer ->
+            DataOutputStream(buffer).use {
+                it.writeUTF("PPFACERE")
+                it.writeInt(2)
+                it.writeInt(Int.MAX_VALUE)
+            }
+        }
+        file.writeBytes(header.toByteArray())
+        assertEquals(ReattachLoad.Unreadable, FaceReattachSnapshot.load(file))
+    }
+
+    @Test
+    fun `an unreadable snapshot is discarded and a readable one never is`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        assertFalse(FaceReattachSnapshot.discardIfUnreadable(file))
+        assertEquals(ReattachLoad.Loaded(OLD), FaceReattachSnapshot.load(file))
+
+        file.writeBytes(file.readBytes().copyOf(10))
+        assertTrue(FaceReattachSnapshot.discardIfUnreadable(file))
+        assertEquals(ReattachLoad.Absent, FaceReattachSnapshot.load(file))
+        assertFalse(FaceReattachSnapshot.discardIfUnreadable(file))
+    }
+
+    @Test
+    fun `an update merges into the waiting names and removes the file once nothing is left`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.update(file) { waiting ->
+            assertNull(waiting)
+            OLD
+        }
+        FaceReattachSnapshot.update(file) { waiting -> FaceReattachSnapshot.merge(under = waiting!!, over = NEW) }
+        assertEquals(ReattachLoad.Loaded(FaceReattachSnapshot.merge(OLD, NEW)), FaceReattachSnapshot.load(file))
+
+        FaceReattachSnapshot.update(file) { data() }
+        assertFalse(file.exists())
+    }
+
+    @Test
+    fun `an update over an unreadable file starts from nothing`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        file.writeBytes(byteArrayOf(1, 2, 3))
+        FaceReattachSnapshot.update(file) { waiting ->
+            assertNull(waiting)
+            NEW
+        }
+        assertEquals(ReattachLoad.Loaded(NEW), FaceReattachSnapshot.load(file))
+    }
+
+    @Test
+    fun `a consumed snapshot is cleared only while it still holds what was consumed`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        // Names merged in after the reattach read the file wait for the next one.
+        FaceReattachSnapshot.update(file) { waiting -> FaceReattachSnapshot.merge(under = waiting!!, over = NEW) }
+        assertFalse(FaceReattachSnapshot.clearIfUnchanged(file, OLD))
+        assertTrue(file.isFile)
+
+        assertTrue(FaceReattachSnapshot.clearIfUnchanged(file, FaceReattachSnapshot.merge(OLD, NEW)))
+        assertFalse(file.exists())
+    }
+
+    private fun label(photoKey: String, at: Float, name: String) =
+        ReattachLabel("$photoKey#0", photoKey, at, at, at + 0.2f, at + 0.2f, name)
+
+    private fun box(photoKey: String, at: Float) = ReattachBox(photoKey, at, at, at + 0.2f, at + 0.2f)
+
+    private fun data(
+        members: List<ReattachLabel> = emptyList(),
+        manual: List<ReattachManual> = emptyList(),
+        nots: List<ReattachLabel> = emptyList(),
+        rejected: List<ReattachBox> = emptyList(),
+    ) = FaceReattachData(members, manual, nots, rejected)
+
+    private companion object {
+        val OLD = FaceReattachData(
+            members = listOf(ReattachLabel("p1#0", "p1", 0.10f, 0.10f, 0.30f, 0.30f, "Ann")),
+            manual = listOf(ReattachManual("Ann", "p9")),
+            nots = listOf(ReattachLabel("p2#1", "p2", 0.40f, 0.40f, 0.60f, 0.60f, "Bob")),
+            rejected = listOf(ReattachBox("p3", 0.50f, 0.50f, 0.70f, 0.70f)),
+        )
+        val NEW = FaceReattachData(
+            members = listOf(ReattachLabel("p4#0", "p4", 0.20f, 0.20f, 0.40f, 0.40f, "Cid")),
+            manual = listOf(ReattachManual("Cid", "p8")),
+            nots = listOf(ReattachLabel("p5#0", "p5", 0.10f, 0.10f, 0.30f, 0.30f, "Dee")),
+            rejected = listOf(ReattachBox("p6", 0.10f, 0.10f, 0.30f, 0.30f)),
+        )
     }
 }

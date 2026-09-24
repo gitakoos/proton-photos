@@ -23,9 +23,19 @@
 package eu.akoos.photos.data.face
 
 import eu.akoos.photos.domain.usecase.ReattachLabel
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.EOFException
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileNotFoundException
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.UTFDataFormatException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /** A photo attached to a person by name rather than by a detected face, carried across a rebuild. */
 data class ReattachManual(val name: String, val photoKey: String)
@@ -53,7 +63,22 @@ data class FaceReattachData(
     val manual: List<ReattachManual>,
     val nots: List<ReattachLabel>,
     val rejected: List<ReattachBox> = emptyList(),
-)
+) {
+    /** Whether it carries nothing to put back. */
+    fun isEmpty(): Boolean = members.isEmpty() && manual.isEmpty() && nots.isEmpty() && rejected.isEmpty()
+}
+
+/** What [FaceReattachSnapshot.load] found on disk. */
+sealed interface ReattachLoad {
+    /** No snapshot: no names wait. */
+    data object Absent : ReattachLoad
+
+    /** A file whose content does not parse (cut short, damaged, or in a format this build does not read),
+     *  so nothing in it can ever come back. */
+    data object Unreadable : ReattachLoad
+
+    data class Loaded(val data: FaceReattachData) : ReattachLoad
+}
 
 /** What a model-version migration should do with the reattach snapshot. */
 enum class ReattachMigrationStep { Capture, Resume, Skip }
@@ -80,8 +105,12 @@ fun reattachMigrationStep(faceTableEmpty: Boolean, snapshotPresent: Boolean): Re
  * A single small file, written just before a face wipe (or by an import) and consumed once the library
  * has been re-detected, holding the model-independent curation the wipe would otherwise lose. It carries
  * no embedding, only where each named or removed face sat, so it stays valid no matter which recognition
- * model rebuilds the vectors. A corrupt or absent file reads back as null, so a failed write can never
- * wedge the walk, only skip a reattach.
+ * model rebuilds the vectors.
+ *
+ * A write lands whole or not at all ([write]), so a reader only ever meets a complete snapshot. A file
+ * that still does not parse (cut short, or damaged on disk) reads as [ReattachLoad.Unreadable], which the
+ * drained walk discards rather than leave it holding every grouping back. Every change goes through one
+ * lock, so a read-merge-write ([update]) never drops names another writer added meanwhile.
  */
 object FaceReattachSnapshot {
 
@@ -90,43 +119,171 @@ object FaceReattachSnapshot {
     private const val VERSION = 2
     private const val MIN_READABLE_VERSION = 1
     const val FILE_NAME = "pending_reattach.bin"
+    private const val TEMP_SUFFIX = ".tmp"
 
     fun file(dir: File): File = File(dir, FILE_NAME)
 
+    /**
+     * [under] and [over] as one snapshot: everything either carries, each entry once. A face is keyed by
+     * its photo and its exact box. Where both speak for the same face, [over]'s word stands: its name or
+     * its removal replaces [under]'s, a "not this person" mark in [under] for the very name [over] gives
+     * the face is dropped, and so is a name in [under] that [over] marks the face as not being. The other
+     * marks and the photos attached by hand simply add up. [over]'s entries come first, so where two still
+     * compete for one re-detected face at the reattach (boxes another detector drew a little apart), a tie
+     * there goes to [over] as well. Pure so it is unit tested directly.
+     */
+    fun merge(under: FaceReattachData, over: FaceReattachData): FaceReattachData {
+        val overFaces = HashSet<FaceKey>()
+        over.members.mapTo(overFaces) { it.faceKey() }
+        over.rejected.mapTo(overFaces) { it.faceKey() }
+        val overNames = over.members.mapTo(HashSet()) { it.faceKey() to it.name }
+        val overNots = over.nots.mapTo(HashSet()) { it.faceKey() to it.name }
+        return FaceReattachData(
+            members = (over.members + under.members.filter {
+                it.faceKey() !in overFaces && (it.faceKey() to it.name) !in overNots
+            }).distinctBy { it.faceKey() },
+            manual = (over.manual + under.manual).distinct(),
+            nots = (over.nots + under.nots.filter { (it.faceKey() to it.name) !in overNames })
+                .distinctBy { it.faceKey() to it.name },
+            rejected = (over.rejected + under.rejected.filter { it.faceKey() !in overFaces })
+                .distinctBy { it.faceKey() },
+        )
+    }
+
+    /**
+     * Writes [data] as the snapshot. It lands whole or not at all: the bytes go to a file beside [file],
+     * are flushed to storage, and only then renamed over it, so a crash or a failed write leaves the
+     * previous snapshot as it was.
+     */
+    @Synchronized
     fun write(file: File, data: FaceReattachData) {
-        file.parentFile?.mkdirs()
-        DataOutputStream(file.outputStream().buffered()).use { out ->
-            out.writeUTF(MAGIC)
-            out.writeInt(VERSION)
-            writeLabels(out, data.members)
-            out.writeInt(data.manual.size)
-            for (m in data.manual) {
-                out.writeUTF(m.name)
-                out.writeUTF(m.photoKey)
-            }
-            writeLabels(out, data.nots)
-            writeBoxes(out, data.rejected)
+        val temp = stage(file, data)
+        try {
+            Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        } catch (e: Throwable) {
+            temp.delete()
+            throw e
         }
     }
 
-    fun read(file: File): FaceReattachData? {
-        if (!file.isFile) return null
-        return runCatching {
-            DataInputStream(file.inputStream().buffered()).use { inp ->
-                if (inp.readUTF() != MAGIC) return null
-                val version = inp.readInt()
-                if (version < MIN_READABLE_VERSION || version > VERSION) return null
-                val members = readLabels(inp)
-                val manual = List(inp.readInt()) { ReattachManual(inp.readUTF(), inp.readUTF()) }
-                val nots = readLabels(inp)
-                val rejected = if (version >= 2) readBoxes(inp) else emptyList()
-                FaceReattachData(members, manual, nots, rejected)
+    /** The first half of [write]: [data] written in full to the file beside [file] and flushed to storage,
+     *  [file] itself untouched. Returns that file. */
+    internal fun stage(file: File, data: FaceReattachData): File {
+        val temp = tempFor(file)
+        temp.parentFile?.mkdirs()
+        try {
+            FileOutputStream(temp).use { stream ->
+                val out = DataOutputStream(BufferedOutputStream(stream))
+                writeData(out, data)
+                out.flush()
+                stream.fd.sync()
             }
-        }.getOrNull()
+        } catch (e: Throwable) {
+            temp.delete()
+            throw e
+        }
+        return temp
     }
 
+    /** The snapshot, or null when there is none or it cannot be read. */
+    fun read(file: File): FaceReattachData? =
+        (runCatching { load(file) }.getOrNull() as? ReattachLoad.Loaded)?.data
+
+    /**
+     * What is on disk: [ReattachLoad.Absent], [ReattachLoad.Unreadable] for a file whose content does not
+     * parse, or the data. A file that cannot be opened for any other reason throws, so a snapshot that
+     * merely failed to open is never taken for one that is gone or broken.
+     */
+    @Synchronized
+    fun load(file: File): ReattachLoad {
+        if (!file.isFile) return ReattachLoad.Absent
+        val stream = try {
+            FileInputStream(file)
+        } catch (e: FileNotFoundException) {
+            return ReattachLoad.Absent
+        }
+        return DataInputStream(BufferedInputStream(stream)).use { inp ->
+            try {
+                ReattachLoad.Loaded(readData(inp, file.length()))
+            } catch (e: EOFException) {
+                ReattachLoad.Unreadable
+            } catch (e: UTFDataFormatException) {
+                ReattachLoad.Unreadable
+            } catch (e: MalformedSnapshotException) {
+                ReattachLoad.Unreadable
+            }
+        }
+    }
+
+    /**
+     * Replaces the snapshot with [transform] of it, the read and the write one step against every other
+     * change made here. [transform] gets the waiting data, or null when there is none or it cannot be
+     * read; a null or empty result removes the file. Throws, writing nothing, when the file cannot be
+     * opened.
+     */
+    @Synchronized
+    fun update(file: File, transform: (FaceReattachData?) -> FaceReattachData?) {
+        val next = transform((load(file) as? ReattachLoad.Loaded)?.data)
+        if (next == null || next.isEmpty()) clear(file) else write(file, next)
+    }
+
+    /** Deletes [file] when it is there but its content cannot be read, and says whether it did. */
+    @Synchronized
+    fun discardIfUnreadable(file: File): Boolean {
+        if (load(file) != ReattachLoad.Unreadable) return false
+        clear(file)
+        return true
+    }
+
+    /** Deletes [file] only while it still holds exactly [consumed], so names written in after [consumed]
+     *  was read wait for the next reattach instead of going with it. Says whether it deleted. */
+    @Synchronized
+    fun clearIfUnchanged(file: File, consumed: FaceReattachData): Boolean {
+        val current = runCatching { load(file) }.getOrNull()
+        if (current !is ReattachLoad.Loaded || current.data != consumed) return false
+        clear(file)
+        return true
+    }
+
+    /** Deletes the snapshot and any temp file a write cut short left beside it. */
+    @Synchronized
     fun clear(file: File) {
         runCatching { file.delete() }
+        runCatching { tempFor(file).delete() }
+    }
+
+    private fun tempFor(file: File): File = File(file.absoluteFile.parentFile, file.name + TEMP_SUFFIX)
+
+    private fun writeData(out: DataOutputStream, data: FaceReattachData) {
+        out.writeUTF(MAGIC)
+        out.writeInt(VERSION)
+        writeLabels(out, data.members)
+        out.writeInt(data.manual.size)
+        for (m in data.manual) {
+            out.writeUTF(m.name)
+            out.writeUTF(m.photoKey)
+        }
+        writeLabels(out, data.nots)
+        writeBoxes(out, data.rejected)
+    }
+
+    private fun readData(inp: DataInputStream, fileLength: Long): FaceReattachData {
+        if (inp.readUTF() != MAGIC) throw MalformedSnapshotException()
+        val version = inp.readInt()
+        if (version < MIN_READABLE_VERSION || version > VERSION) throw MalformedSnapshotException()
+        val members = readLabels(inp, fileLength)
+        val manual = List(readCount(inp, fileLength)) { ReattachManual(inp.readUTF(), inp.readUTF()) }
+        val nots = readLabels(inp, fileLength)
+        val rejected = if (version >= 2) readBoxes(inp, fileLength) else emptyList()
+        return FaceReattachData(members, manual, nots, rejected)
+    }
+
+    /** A list length as written, refused when negative or beyond what the file could hold, so a damaged
+     *  length never turns into a huge allocation. */
+    private fun readCount(inp: DataInputStream, fileLength: Long): Int {
+        val count = inp.readInt()
+        if (count < 0 || count > fileLength) throw MalformedSnapshotException()
+        return count
     }
 
     private fun writeLabels(out: DataOutputStream, labels: List<ReattachLabel>) {
@@ -139,15 +296,16 @@ object FaceReattachSnapshot {
         }
     }
 
-    private fun readLabels(inp: DataInputStream): List<ReattachLabel> = List(inp.readInt()) {
-        ReattachLabel(
-            faceId = inp.readUTF(),
-            photoKey = inp.readUTF(),
-            left = inp.readFloat(), top = inp.readFloat(),
-            right = inp.readFloat(), bottom = inp.readFloat(),
-            name = inp.readUTF(),
-        )
-    }
+    private fun readLabels(inp: DataInputStream, fileLength: Long): List<ReattachLabel> =
+        List(readCount(inp, fileLength)) {
+            ReattachLabel(
+                faceId = inp.readUTF(),
+                photoKey = inp.readUTF(),
+                left = inp.readFloat(), top = inp.readFloat(),
+                right = inp.readFloat(), bottom = inp.readFloat(),
+                name = inp.readUTF(),
+            )
+        }
 
     private fun writeBoxes(out: DataOutputStream, boxes: List<ReattachBox>) {
         out.writeInt(boxes.size)
@@ -157,11 +315,28 @@ object FaceReattachSnapshot {
         }
     }
 
-    private fun readBoxes(inp: DataInputStream): List<ReattachBox> = List(inp.readInt()) {
-        ReattachBox(
-            photoKey = inp.readUTF(),
-            left = inp.readFloat(), top = inp.readFloat(),
-            right = inp.readFloat(), bottom = inp.readFloat(),
-        )
-    }
+    private fun readBoxes(inp: DataInputStream, fileLength: Long): List<ReattachBox> =
+        List(readCount(inp, fileLength)) {
+            ReattachBox(
+                photoKey = inp.readUTF(),
+                left = inp.readFloat(), top = inp.readFloat(),
+                right = inp.readFloat(), bottom = inp.readFloat(),
+            )
+        }
+
+    /** A face as [merge] keys it: its photo and its exact box. */
+    private data class FaceKey(
+        val photoKey: String,
+        val left: Float,
+        val top: Float,
+        val right: Float,
+        val bottom: Float,
+    )
+
+    private fun ReattachLabel.faceKey() = FaceKey(photoKey, left, top, right, bottom)
+
+    private fun ReattachBox.faceKey() = FaceKey(photoKey, left, top, right, bottom)
+
+    /** The file is there but is not a snapshot this build can read. */
+    private class MalformedSnapshotException : IOException("not a readable reattach snapshot")
 }

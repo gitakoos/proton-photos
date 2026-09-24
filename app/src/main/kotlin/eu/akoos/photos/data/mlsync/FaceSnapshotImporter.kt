@@ -286,19 +286,21 @@ class FaceSnapshotImporter @Inject constructor(
 
     /**
      * Adds [staged] to the names waiting for the reattach path, never over them: a snapshot still on disk
-     * holds curation an earlier wipe or import has not put back yet. On Replace the waiting names of cloud
-     * photos give way to the snapshot's and its labels go first; on Merge the waiting ones go first.
+     * holds curation an earlier wipe or import has not put back yet. The two are merged
+     * ([FaceReattachSnapshot.merge]): on Replace the waiting names of cloud photos give way to the
+     * snapshot's, which win where both speak for one face; on Merge the waiting ones win, as this device's
+     * own curation does wherever a Merge lands ([mergeFaceCuration]).
      */
     private fun stageForReattach(staged: FaceReattachData, mode: FaceSnapshotMode) {
-        if (staged.members.isEmpty() && staged.nots.isEmpty() && staged.rejected.isEmpty()) return
-        val file = reattachFile
-        val pending = FaceReattachSnapshot.read(file)?.let { if (mode == FaceSnapshotMode.Replace) withoutCloudPhotos(it) else it }
-        val combined = when {
-            pending == null -> staged
-            mode == FaceSnapshotMode.Replace -> concat(staged, pending)
-            else -> concat(pending, staged)
+        if (staged.isEmpty()) return
+        FaceReattachSnapshot.update(reattachFile) { waiting ->
+            when {
+                waiting == null -> staged
+                mode == FaceSnapshotMode.Replace ->
+                    FaceReattachSnapshot.merge(under = withoutCloudPhotos(waiting), over = staged)
+                else -> FaceReattachSnapshot.merge(under = staged, over = waiting)
+            }
         }
-        FaceReattachSnapshot.write(file, combined)
     }
 
     /**
@@ -308,14 +310,7 @@ class FaceSnapshotImporter @Inject constructor(
      */
     private fun dropPendingCloudLabels() {
         runCatching {
-            val file = reattachFile
-            val pending = FaceReattachSnapshot.read(file) ?: return
-            val kept = withoutCloudPhotos(pending)
-            if (kept.members.isEmpty() && kept.manual.isEmpty() && kept.nots.isEmpty() && kept.rejected.isEmpty()) {
-                FaceReattachSnapshot.clear(file)
-            } else {
-                FaceReattachSnapshot.write(file, kept)
-            }
+            FaceReattachSnapshot.update(reattachFile) { waiting -> waiting?.let { withoutCloudPhotos(it) } }
         }.onFailure { Log.w(TAG, "pending reattach trim failed: ${it.javaClass.simpleName}") }
     }
 
@@ -324,13 +319,6 @@ class FaceSnapshotImporter @Inject constructor(
         manual = data.manual.filterNot { isPortableFaceKey(it.photoKey) },
         nots = data.nots.filterNot { isPortableFaceKey(it.photoKey) },
         rejected = data.rejected.filterNot { isPortableFaceKey(it.photoKey) },
-    )
-
-    private fun concat(first: FaceReattachData, second: FaceReattachData) = FaceReattachData(
-        members = first.members + second.members,
-        manual = first.manual + second.manual,
-        nots = first.nots + second.nots,
-        rejected = first.rejected + second.rejected,
     )
 
     /**

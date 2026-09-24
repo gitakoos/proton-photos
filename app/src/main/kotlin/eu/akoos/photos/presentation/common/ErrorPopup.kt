@@ -60,6 +60,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ErrorColor
 
@@ -98,6 +99,11 @@ fun ErrorPopup(
     onAction: (() -> Unit)? = null,
     dismissLabel: String? = null,
 ) {
+    // The sheet is a window of its own, so one raised while the app lock shows would open above it. It
+    // waits instead: nothing is composed while locked, the caller keeps its error, and the sheet shows on
+    // the unlock.
+    val appLock = LocalAppLock.current
+    if (appLock.isLocked) return
     val colors = AppColors.current
     val resolvedDismissLabel = dismissLabel ?: stringResource(R.string.err_dismiss_ok)
     val clipboard = LocalClipboardManager.current
@@ -116,7 +122,9 @@ fun ErrorPopup(
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        // Reported once the sheet has animated away, even when the lock takes it down mid-animation, so
+        // one that arrives while locked is dropped and the error shows again on the unlock.
+        onDismissRequest = { if (!appLock.isLocked) onDismiss() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),

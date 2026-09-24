@@ -264,6 +264,29 @@ internal fun faceCoverSaveStep(state: HideFacesState, hasCovers: Boolean, waited
         HideFacesState.Idle -> if (waited && !hasCovers) FaceCoverSaveStep.Abort else FaceCoverSaveStep.Proceed
     }
 
+/** What the Hide-faces panel's status line shows. */
+internal sealed interface HideFacesStatus {
+    data object Busy : HideFacesStatus
+    data class Failed(val message: String) : HideFacesStatus
+    data class Covered(val count: Int) : HideFacesStatus
+    data object NoFaces : HideFacesStatus
+    data object None : HideFacesStatus
+}
+
+/**
+ * The Hide-faces status line for [state] while the edit carries [liveCovers] covers. The count shown is
+ * the live one, never [HideFacesState.Ready.faceCount]: Undo, Redo and Reset change the covers without
+ * touching [state], which [faceCoverSaveStep] reads. So "no faces" shows only for a detection that found
+ * none while the edit has no covers. Pure so the rule is verified in a test.
+ */
+internal fun hideFacesStatus(state: HideFacesState, liveCovers: Int): HideFacesStatus = when {
+    state is HideFacesState.Detecting -> HideFacesStatus.Busy
+    state is HideFacesState.Failed -> HideFacesStatus.Failed(state.message)
+    liveCovers > 0 -> HideFacesStatus.Covered(liveCovers)
+    state is HideFacesState.Ready && state.faceCount == 0 -> HideFacesStatus.NoFaces
+    else -> HideFacesStatus.None
+}
+
 data class EditorUiState(
     val source: EditorSource? = null,
     val originalBitmap: Bitmap? = null,

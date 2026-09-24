@@ -1745,29 +1745,21 @@ private fun HideFacesPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
             )
         }
 
-        // Status line: spinner while a detect is in flight, then the face count, the not-found note, or
-        // an inline failure message.
-        when (hf) {
-            is HideFacesState.Detecting ->
+        // Status line: spinner while a detect is in flight, then the count of covers the edit carries,
+        // the not-found note, or an inline failure message.
+        when (val status = hideFacesStatus(hf, state.adjustments.faceCovers.size)) {
+            HideFacesStatus.Busy ->
                 CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-            is HideFacesState.Ready ->
+            is HideFacesStatus.Covered ->
                 Text(
-                    if (hf.faceCount > 0)
-                        pluralStringResource(R.plurals.editor_hide_faces_count, hf.faceCount, hf.faceCount)
-                    else stringResource(R.string.editor_hide_faces_none),
+                    pluralStringResource(R.plurals.editor_hide_faces_count, status.count, status.count),
                     color = FgMute, fontSize = 12.sp,
                 )
-            is HideFacesState.Failed ->
-                Text(hf.message, color = Color(0xFFFF3B30), fontSize = 12.sp)
-            else ->
-                if (hasCovers) Text(
-                    pluralStringResource(
-                        R.plurals.editor_hide_faces_count,
-                        state.adjustments.faceCovers.size,
-                        state.adjustments.faceCovers.size,
-                    ),
-                    color = FgMute, fontSize = 12.sp,
-                )
+            HideFacesStatus.NoFaces ->
+                Text(stringResource(R.string.editor_hide_faces_none), color = FgMute, fontSize = 12.sp)
+            is HideFacesStatus.Failed ->
+                Text(status.message, color = Color(0xFFFF3B30), fontSize = 12.sp)
+            HideFacesStatus.None -> Unit
         }
 
         Row(

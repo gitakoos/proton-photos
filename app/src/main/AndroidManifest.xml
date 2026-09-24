@@ -12,6 +12,10 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Android 9 and older need it for every write to shared storage. Requested together with the
+         read permission (same group, one dialog), never from Android 10 on. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
     <!-- Lets the map view read un-redacted EXIF GPS from on-device photos (Android 10+). -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <uses-permission android:name="android.permission.MANAGE_MEDIA" />

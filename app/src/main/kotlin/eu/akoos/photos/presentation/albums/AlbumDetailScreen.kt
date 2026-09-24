@@ -151,6 +151,8 @@ import eu.akoos.photos.presentation.common.favoriteTurnsOnForCloudPhotos
 import eu.akoos.photos.presentation.common.offlineTurnsOn
 import eu.akoos.photos.presentation.common.photoDateSections
 import eu.akoos.photos.presentation.common.rememberGroupingPinchModifier
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.presentation.theme.Accent
@@ -281,12 +283,16 @@ fun AlbumDetailScreen(
         }
     }
 
-    // Hand the VM-built share intent to the system chooser.
+    // Hand the VM-built share intent to the system chooser. It can arrive under the app lock, once cloud
+    // originals finish downloading, and the chooser would open above the lock, so it waits for the unlock.
     val shareCtx = LocalContext.current
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    val appLock = LocalAppLock.current
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
-            runCatching { shareCtx.startActivity(Intent.createChooser(intent, shareChooserTitle)) }
+            appLock.runWhenOpen {
+                runCatching { shareCtx.startActivity(Intent.createChooser(intent, shareChooserTitle)) }
+            }
         }
     }
 

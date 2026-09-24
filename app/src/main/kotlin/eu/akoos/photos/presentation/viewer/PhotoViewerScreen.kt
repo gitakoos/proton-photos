@@ -122,6 +122,8 @@ import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.common.SecureScreenEffect
 import eu.akoos.photos.presentation.common.UndoAction
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -557,6 +559,7 @@ fun PhotoViewerScreen(
     val coverUpdatedMessage = stringResource(R.string.album_cover_updated)
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
     val shareContext = LocalContext.current
+    val appLock = LocalAppLock.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     LaunchedEffect(Unit) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
@@ -576,9 +579,13 @@ fun PhotoViewerScreen(
                 }
             }
             // In the STARTED block so a backgrounded viewer doesn't pop the chooser over another screen.
+            // A share that lands under the app lock waits for the unlock, as the chooser would open
+            // above the lock.
             launch {
                 viewModel.shareIntent.collect { intent ->
-                    shareContext.startActivity(Intent.createChooser(intent, shareChooserTitle))
+                    appLock.runWhenOpen {
+                        shareContext.startActivity(Intent.createChooser(intent, shareChooserTitle))
+                    }
                 }
             }
         }

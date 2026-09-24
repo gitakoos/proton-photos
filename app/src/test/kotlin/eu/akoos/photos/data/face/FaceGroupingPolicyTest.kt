@@ -32,10 +32,11 @@ import org.junit.Test
  * Pins the pure rules that decide when a finished walk pass groups the account's faces into people, and
  * when that grouping goes on to a full regroup. Grouping follows the faces still waiting, not the ones a
  * single pass found, so a library whose scan never drains still gets its people, but never while names
- * wait to be reattached. A settled walk mirrors the drained branch (a full regroup for whatever the
- * incremental path left unplaced), both regroup only for faces beyond what the last regroup left
- * ungrouped on purpose, a full regroup that recently timed out or threw is held back until its backoff
- * passes, and full regroups are spaced by what the last one cost.
+ * wait to be reattached, and a forced regroup skips only the walk's own gate, never that one. A settled
+ * walk mirrors the drained branch (a full regroup for whatever the incremental path left unplaced), both
+ * regroup only for faces beyond what the last regroup left ungrouped on purpose, a full regroup that
+ * recently timed out or threw is held back until its backoff passes, and full regroups are spaced by what
+ * the last one cost.
  */
 class FaceGroupingPolicyTest {
 
@@ -146,6 +147,25 @@ class FaceGroupingPolicyTest {
         assertFalse(group(willContinue = false, ungrouped = 12, reattachPending = true))
         assertFalse(group(willContinue = true, ungrouped = 12, sinceLastGroup = INTERVAL * 10, reattachPending = true))
         assertTrue(group(willContinue = false, ungrouped = 12, reattachPending = false))
+    }
+
+    @Test
+    fun names_waiting_to_be_reattached_hold_every_regroup_forced_or_not() {
+        // A forced regroup (a user naming or merging, an import handing its faces back, the viewer's scan)
+        // skips the walk's own gate but not this one: the faces do not carry the names yet, and what the
+        // user confirms meanwhile is stored for the regroup the drained walk runs once they are back.
+        assertFalse(regroupAllowed(force = true, active = true, reattachPending = true))
+        assertFalse(regroupAllowed(force = true, active = false, reattachPending = true))
+        assertFalse(regroupAllowed(force = false, active = true, reattachPending = true))
+        assertFalse(regroupAllowed(force = false, active = false, reattachPending = true))
+    }
+
+    @Test
+    fun a_forced_regroup_runs_while_the_walk_is_paused_and_any_other_needs_a_permitted_walk() {
+        assertTrue(regroupAllowed(force = true, active = false, reattachPending = false))
+        assertTrue(regroupAllowed(force = true, active = true, reattachPending = false))
+        assertTrue(regroupAllowed(force = false, active = true, reattachPending = false))
+        assertFalse(regroupAllowed(force = false, active = false, reattachPending = false))
     }
 
     @Test
