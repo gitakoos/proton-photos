@@ -110,6 +110,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -159,8 +160,31 @@ import eu.akoos.photos.presentation.theme.PillBorder
 /** Height of the reorder-mode bar, also the grid's extra top inset while that mode is on. */
 private val ReorderBarHeight = 52.dp
 
-/** Grid index the cloud albums start at: the pinned Memories cell is the one item{} emitted ahead of them. */
-private const val CloudSegmentStart = 1
+/**
+ * Whether the pinned Collection card leads the grid: switched on in the Albums filter sheet, and no
+ * search under way, since search results are albums only.
+ */
+internal fun albumsCollectionCardShown(showCollection: Boolean, searching: Boolean): Boolean =
+    showCollection && !searching
+
+/**
+ * Grid index the cloud albums start at: 1 while the Collection card is the one item{} emitted ahead
+ * of them, 0 while that card is off the grid.
+ */
+internal fun albumsCloudSegmentStart(showCollection: Boolean, searching: Boolean): Int =
+    if (albumsCollectionCardShown(showCollection, searching)) 1 else 0
+
+/**
+ * Index into the cloud-album list of the grid cell at [gridIndex], or null for a cell that is not a
+ * cloud card.
+ *
+ * One range check carries the whole rule. The cloud cards start at [segmentStart], with the
+ * Collection card, when shown, laid out ahead of them and the device folders behind them, so
+ * subtracting that start puts both outside `0 until` [cloudCount]: neither can be displaced, and
+ * neither can be dropped onto.
+ */
+internal fun cloudSlotAt(gridIndex: Int, segmentStart: Int, cloudCount: Int): Int? =
+    (gridIndex - segmentStart).takeIf { it in 0 until cloudCount }
 
 /** The laid-out cell at [gridIndex], or null once it has scrolled out of the viewport. */
 private fun LazyGridState.cellAt(gridIndex: Int): LazyGridItemInfo? =
@@ -168,20 +192,15 @@ private fun LazyGridState.cellAt(gridIndex: Int): LazyGridItemInfo? =
 
 /**
  * Index into the cloud-album list of the cell holding [point], or null for anything that is not a
- * cloud card.
- *
- * One range check carries the whole rule. The Memories cell is laid out ahead of the segment and
- * the device folders behind it, so subtracting the segment's start puts both outside `0 until`
- * [cloudCount] — neither can be displaced, and neither can be dropped onto. A point in the gap
- * between two cards belongs to no cell at all and reads as "no target", which is what leaves an
- * arrangement untouched when a drag ends between slots.
+ * cloud card, by [cloudSlotAt]. A point in the gap between two cards belongs to no cell at all and
+ * reads as "no target", which is what leaves an arrangement untouched when a drag ends between slots.
  */
-private fun LazyGridState.cloudIndexAt(point: Offset, cloudCount: Int): Int? {
+private fun LazyGridState.cloudIndexAt(point: Offset, segmentStart: Int, cloudCount: Int): Int? {
     val cell = layoutInfo.visibleItemsInfo.firstOrNull {
         point.x >= it.offset.x && point.x < it.offset.x + it.size.width &&
             point.y >= it.offset.y && point.y < it.offset.y + it.size.height
     } ?: return null
-    return (cell.index - CloudSegmentStart).takeIf { it in 0 until cloudCount }
+    return cloudSlotAt(cell.index, segmentStart, cloudCount)
 }
 
 /** How deep from each edge of the grid's content window a held card starts pulling the grid along,
@@ -271,6 +290,8 @@ fun AlbumsScreen(
     onReorderModeChange: (Boolean) -> Unit = {},
     /** How many album/folder covers sit per row (from the Albums filter sheet). Default 2. */
     columns: Int = 2,
+    /** Whether the pinned Collection card leads the grid (the Albums filter sheet's switch). Default on. */
+    showCollection: Boolean = true,
     viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -409,6 +430,11 @@ fun AlbumsScreen(
     // matching album keeps its sorted slot; the fold is accent-insensitive, the rule search uses.
     val foldedQuery = SearchFilter.fold(query.trim())
     val searching = foldedQuery.isNotEmpty()
+    val collectionCardShown = albumsCollectionCardShown(showCollection, searching)
+    // Where the cloud cards begin in the grid. Read through state, since the drag handlers outlive
+    // the composition that built them: an arrangement opened from a search result is built on a grid
+    // without the Collection card, and opening it clears that search, which brings the card back.
+    val cloudSegmentStart by rememberUpdatedState(albumsCloudSegmentStart(showCollection, searching))
     val albums = if (searching) {
         orderedAlbums.filter { SearchFilter.fold(it.name).contains(foldedQuery) }
     } else {
@@ -425,6 +451,9 @@ fun AlbumsScreen(
     // arrange mode up so the header can hide the search entry while it is on. Seed the arrangement
     // from the unfiltered list so a query active at entry can never drop cards from it.
     LaunchedEffect(searching) { if (searching) reorderMode = false }
+    // The Collection switch moves every cloud card one cell along, so a flip from the filter sheet
+    // ends an arrangement in progress rather than resuming it on a grid that shifted behind the sheet.
+    LaunchedEffect(showCollection) { reorderMode = false }
     LaunchedEffect(reorderMode) {
         onReorderModeChange(reorderMode)
         arrangedIds = if (reorderMode) state.visibleCloudAlbums.map { it.linkId } else emptyList()
@@ -452,16 +481,16 @@ fun AlbumsScreen(
      */
     fun settleDrag(albumId: String) {
         val from = arrangedIds.indexOf(albumId)
-        val cell = (if (from >= 0) gridState.cellAt(CloudSegmentStart + from) else null) ?: return
+        val cell = (if (from >= 0) gridState.cellAt(cloudSegmentStart + from) else null) ?: return
         // The card's own centre picks the target, so how far it has to travel to take a slot does
         // not depend on where inside it the finger landed.
         val centre = dragPosition + Offset(cell.size.width / 2f, cell.size.height / 2f)
-        val to = gridState.cloudIndexAt(centre, arrangedIds.size)
+        val to = gridState.cloudIndexAt(centre, cloudSegmentStart, arrangedIds.size)
         // A move lands the card on the slot its target holds right now, so the lift is measured from
         // that slot rather than the one being left.
         var slot = cell.offset
         if (to != null && to != from) {
-            gridState.cellAt(CloudSegmentStart + to)?.let { slot = it.offset }
+            gridState.cellAt(cloudSegmentStart + to)?.let { slot = it.offset }
             arrangedIds = moveInArrangement(arrangedIds, from, to)
         }
         dragOffset = dragPosition - Offset(slot.x.toFloat(), slot.y.toFloat())
@@ -592,9 +621,10 @@ fun AlbumsScreen(
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        // Search results are albums only, so the pinned Memories card steps aside
-                        // while a query is present.
-                        if (!searching) {
+                        // Search results are albums only, so the pinned Collection card steps aside
+                        // while a query is present, and it stays off the grid while its switch in
+                        // the filter sheet is off.
+                        if (collectionCardShown) {
                             item {
                                 MemoriesPinnedCard(onClick = onMemoriesClick)
                             }
@@ -652,13 +682,14 @@ fun AlbumsScreen(
                                             // touch slop.
                                             //
                                             // These handlers outlive the composition that built them,
-                                            // so they read arrangedIds rather than albums or the
-                                            // item's index: only state stays current in here.
+                                            // so they read arrangedIds and cloudSegmentStart rather
+                                            // than albums or the item's index: only state stays
+                                            // current in here.
                                             if (!reorderMode) Modifier else Modifier.pointerInput(album.linkId) {
                                                 detectDragGesturesAfterLongPress(
                                                     onDragStart = { grip ->
                                                         val from = arrangedIds.indexOf(album.linkId)
-                                                        val cell = if (from >= 0) gridState.cellAt(CloudSegmentStart + from) else null
+                                                        val cell = if (from >= 0) gridState.cellAt(cloudSegmentStart + from) else null
                                                         if (cell != null) {
                                                             draggedAlbumId = album.linkId
                                                             dragPosition = Offset(cell.offset.x.toFloat(), cell.offset.y.toFloat())
@@ -1232,9 +1263,9 @@ private fun CloudAlbumCard(
 }
 
 /**
- * First cell in the album grid. Mirrors [UnifiedAlbumCard]'s shape, corner radius and title
- * typography, but with a neutral cover holding a single centred Collections glyph — a normal
- * album card labelled "Memories" that opens the Memories screen.
+ * First cell in the album grid while [albumsCollectionCardShown] holds. Mirrors [UnifiedAlbumCard]'s
+ * shape, corner radius and title typography, but with a neutral cover holding a single centred
+ * Collections glyph: a normal album card labelled "Collection" that opens the Collection screen.
  */
 @Composable
 private fun MemoriesPinnedCard(onClick: () -> Unit) {

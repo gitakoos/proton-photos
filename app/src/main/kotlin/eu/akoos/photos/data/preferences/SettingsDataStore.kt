@@ -81,6 +81,12 @@ object SettingsKeys {
      *  install that never picks a mode keeps the grid it already had. */
     val ALBUMS_SORT_MODE = intPreferencesKey("albums_sort_mode")
 
+    /** When false, the Albums grid drops the pinned Collection card from its first cell; the people,
+     *  places and On this day behind it stay reachable from Search. Absent = true (shown). A view
+     *  preference of the phone rather than of the account, like [ALBUM_GRID_COLUMNS]: it holds in a
+     *  guest session and survives a sign-out. */
+    val ALBUMS_SHOW_COLLECTION = booleanPreferencesKey("albums_show_collection")
+
     /** Direction the photos inside an album are listed in, an AlbumPhotoSortMode ordinal
      *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order albums have always
      *  opened on. One global choice every album shares: a per-album key would grow with the

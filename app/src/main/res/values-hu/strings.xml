@@ -1120,6 +1120,8 @@
     <string name="albums_filter_default_heading">Alapértelmezett megnyitáskor</string>
     <string name="albums_filter_remember_last">Utoljára használt szűrő megjegyzése</string>
     <string name="albums_filter_remember_last_summary">Az albumok az utoljára kiválasztott szűrővel nyílnak meg</string>
+    <string name="albums_show_collection">Gyűjtemény megjelenítése</string>
+    <string name="albums_show_collection_summary">Az emberek, a helyek és az „Ezen a napon” továbbra is elérhetők a keresésben</string>
     <string name="albums_sort_heading">Rendezés</string>
     <string name="albums_cover_size_heading">Borító mérete</string>
     <string name="albums_sort_custom">Egyéni</string>

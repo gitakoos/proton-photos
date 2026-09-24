@@ -1097,6 +1097,8 @@
     <string name="albums_filter_default_heading">Standard beim Öffnen</string>
     <string name="albums_filter_remember_last">Zuletzt verwendeten Filter merken</string>
     <string name="albums_filter_remember_last_summary">Alben mit dem zuletzt gewählten Filter öffnen</string>
+    <string name="albums_show_collection">Sammlung anzeigen</string>
+    <string name="albums_show_collection_summary">Personen, Orte und „An diesem Tag“ bleiben in der Suche</string>
     <string name="albums_sort_heading">Sortieren nach</string>
     <string name="albums_cover_size_heading">Covergröße</string>
     <string name="albums_sort_custom">Benutzerdefiniert</string>

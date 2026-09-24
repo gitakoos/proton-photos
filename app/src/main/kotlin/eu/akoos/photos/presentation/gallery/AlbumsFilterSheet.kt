@@ -28,8 +28,11 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
@@ -39,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,17 +59,21 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 /** Bottom sheet for the Albums-tab view filter and grid order. Sets an optional default applied on
  *  open plus a remember-last toggle; the active All/Cloud/Local narrowing is cycled from the rail
  *  pill. While remember-last is on the default row is greyed and inert, since the last-used value
- *  takes over. A sort pick lands on the grid behind the sheet, which observes the stored order. */
+ *  takes over. A switch under the remember-last toggle takes the pinned Collection card off the grid;
+ *  the people, places and On this day behind that card stay in Search. A sort pick lands on the grid
+ *  behind the sheet, which observes the stored order. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsFilterSheet(
     sheetState: SheetState,
     default: AlbumDisplayFilter,
     rememberLast: Boolean,
+    showCollection: Boolean,
     sortMode: AlbumSortMode,
     columns: Int,
     onDefaultChange: (AlbumDisplayFilter) -> Unit,
     onRememberLastChange: (Boolean) -> Unit,
+    onShowCollectionChange: (Boolean) -> Unit,
     onSortModeChange: (AlbumSortMode) -> Unit,
     onColumnsChange: (Int) -> Unit,
     onDismiss: () -> Unit,
@@ -76,9 +84,13 @@ fun AlbumsFilterSheet(
         containerColor = SheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),
     ) {
+        // Height-capped + scroll so a short device or a landscape screen never clips the last row.
+        val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.8f).dp
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = maxSheetHeight)
+                .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 36.dp),
@@ -130,6 +142,13 @@ fun AlbumsFilterSheet(
                 description = stringResource(R.string.albums_filter_remember_last_summary),
                 checked = rememberLast,
                 onCheckedChange = onRememberLastChange,
+            )
+
+            ToggleRow(
+                label = stringResource(R.string.albums_show_collection),
+                description = stringResource(R.string.albums_show_collection_summary),
+                checked = showCollection,
+                onCheckedChange = onShowCollectionChange,
             )
 
             HorizontalDivider(color = Line2)

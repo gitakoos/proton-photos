@@ -1110,6 +1110,8 @@
     <string name="albums_filter_default_heading">Predeterminado al abrir</string>
     <string name="albums_filter_remember_last">Recordar el último filtro usado</string>
     <string name="albums_filter_remember_last_summary">Abrir los álbumes con el filtro seleccionado por última vez</string>
+    <string name="albums_show_collection">Mostrar la colección</string>
+    <string name="albums_show_collection_summary">Las personas, los lugares y «En este día» siguen disponibles en la búsqueda</string>
     <string name="albums_sort_heading">Ordenar por</string>
     <string name="albums_cover_size_heading">Tamaño de portada</string>
     <string name="albums_sort_custom">Personalizado</string>

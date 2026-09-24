@@ -1322,6 +1322,8 @@
     <string name="albums_filter_default_heading">Domyślnie przy otwieraniu</string>
     <string name="albums_filter_remember_last">Zapamiętaj ostatnio użyty filtr</string>
     <string name="albums_filter_remember_last_summary">Otwieraj albumy z ostatnio wybranym filtrem</string>
+    <string name="albums_show_collection">Pokazuj Kolekcję</string>
+    <string name="albums_show_collection_summary">Osoby, miejsca i „Tego dnia” pozostają dostępne w wyszukiwaniu</string>
     <string name="albums_sort_heading">Sortuj według</string>
     <string name="albums_cover_size_heading">Rozmiar okładki</string>
     <string name="albums_sort_custom">Własna kolejność</string>

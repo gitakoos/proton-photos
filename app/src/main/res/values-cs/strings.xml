@@ -1322,6 +1322,8 @@
     <string name="albums_filter_default_heading">Výchozí při otevření</string>
     <string name="albums_filter_remember_last">Zapamatovat naposledy použitý filtr</string>
     <string name="albums_filter_remember_last_summary">Otevírat alba s naposledy vybraným filtrem</string>
+    <string name="albums_show_collection">Zobrazovat Sbírku</string>
+    <string name="albums_show_collection_summary">Lidé, místa a „V tento den“ zůstávají v hledání</string>
     <string name="albums_sort_heading">Řadit podle</string>
     <string name="albums_cover_size_heading">Velikost obálky</string>
     <string name="albums_sort_custom">Vlastní</string>

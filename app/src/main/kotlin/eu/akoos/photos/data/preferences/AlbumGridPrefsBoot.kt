@@ -25,17 +25,20 @@ package eu.akoos.photos.data.preferences
 import android.content.Context
 
 /**
- * Synchronous mirror of `SettingsKeys.ALBUM_GRID_COLUMNS` backed by SharedPreferences, so the Albums
- * tab renders at the right cover-size column count on the very first frame. Without it the grid opens
- * from the DataStore collector's `initial` (2), then jumps to the stored 3/4 once the async read
- * lands, and the cards' `animateItem` animates that jump into a reshuffle every time the tab is
- * recomposed (returning from an album). Canonical store stays DataStore; [rememberAlbumColumns]
- * refreshes this mirror as the value changes. Mirrors [SeamlessGridPrefsBoot].
+ * Synchronous mirror of `SettingsKeys.ALBUM_GRID_COLUMNS` and `SettingsKeys.ALBUMS_SHOW_COLLECTION`
+ * backed by SharedPreferences, so the Albums tab renders at the right cover-size column count, with or
+ * without its Collection card, on the very first frame. Without it the grid opens from the DataStore
+ * collectors' `initial` values (2 columns, card shown), then jumps to the stored ones once the async
+ * read lands, and the cards' `animateItem` animates that jump into a reshuffle every time the tab is
+ * recomposed (returning from an album). Canonical store stays DataStore; [rememberAlbumColumns] and
+ * [rememberAlbumsShowCollection] refresh this mirror as the values change. Mirrors
+ * [SeamlessGridPrefsBoot].
  */
 object AlbumGridPrefsBoot {
-    // Reuses the same boot-prefs file as the seamless mirror; the key keeps the two apart.
+    // Reuses the same boot-prefs file as the seamless mirror; the keys keep them apart.
     private const val PREFS_NAME = "grid_layout_boot"
     private const val KEY_ALBUM_COLUMNS = "album_grid_columns"
+    private const val KEY_SHOW_COLLECTION = "albums_show_collection"
 
     /** Returns the cached album-cover column count, or 2 (the roomy default) if never written. */
     fun read(context: Context): Int =
@@ -45,5 +48,16 @@ object AlbumGridPrefsBoot {
     fun write(context: Context, columns: Int) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit().putInt(KEY_ALBUM_COLUMNS, columns).apply()
+    }
+
+    /** Returns the cached Collection-card switch, or true (the card shown) if never written. */
+    fun readShowCollection(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_SHOW_COLLECTION, true)
+
+    /** Mirrors the canonical DataStore value of the Collection-card switch into the boot cache. Safe on
+     *  any thread. */
+    fun writeShowCollection(context: Context, shown: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_SHOW_COLLECTION, shown).apply()
     }
 }

@@ -487,6 +487,9 @@ fun GalleryScreen(
     // boot mirror so returning to the tab opens at the stored size on the first frame instead of
     // flashing 2 columns and letting the cover cards' animateItem reshuffle into the real layout.
     val albumColumns = rememberAlbumColumns()
+    // Whether the Albums grid leads with the pinned Collection card (default on), seeded from the same
+    // boot mirror so a return to the tab with the card switched off never flashes it in.
+    val albumsShowCollection = rememberAlbumsShowCollection()
     // Re-resolve the filter each time the pager reaches the Albums page: last-used when remembering,
     // otherwise the configured default. Leaving and returning therefore resets to the default
     // (remember-last off) or restores the last pick (remember-last on), rather than holding whatever
@@ -1216,6 +1219,7 @@ fun GalleryScreen(
                 topPadding = headerHeightDp,
                 gridState = albumsGridState,
                 columns = albumColumns,
+                showCollection = albumsShowCollection,
                 onAlbumClick = onAlbumClick,
                 onAlbumShareClick = onAlbumShareClick,
                 onAlbumActionClick = onAlbumActionClick,
@@ -1588,6 +1592,7 @@ fun GalleryScreen(
             sheetState = albumsFilterSheetState,
             default = albumDisplayFilterAt(albumsFilterPrefs?.defaultOrdinal ?: 0),
             rememberLast = albumsFilterPrefs?.rememberLast == true,
+            showCollection = albumsShowCollection,
             sortMode = albumsSortMode,
             columns = albumColumns,
             onDefaultChange = { picked ->
@@ -1605,6 +1610,11 @@ fun GalleryScreen(
             onRememberLastChange = { value ->
                 tabScope.launch {
                     context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] = value }
+                }
+            },
+            onShowCollectionChange = { value ->
+                tabScope.launch {
+                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_SHOW_COLLECTION] = value }
                 }
             },
             onSortModeChange = { picked ->

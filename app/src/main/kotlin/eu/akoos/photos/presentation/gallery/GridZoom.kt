@@ -139,6 +139,25 @@ fun rememberAlbumColumns(): Int {
 }
 
 /**
+ * Live Collection-card switch for the Albums tab, set from the Albums filter sheet. Seeded
+ * synchronously from [AlbumGridPrefsBoot] like [rememberAlbumColumns], so a return to the tab with the
+ * card switched off never shows it for a frame and then slides every cover one cell back. DataStore
+ * stays canonical; the collector refreshes the mirror as the value changes. Default true.
+ */
+@Composable
+fun rememberAlbumsShowCollection(): Boolean {
+    val context = LocalContext.current
+    val initial = remember { AlbumGridPrefsBoot.readShowCollection(context) }
+    val shown by remember {
+        context.settingsDataStore.data
+            .map { it[SettingsKeys.ALBUMS_SHOW_COLLECTION] ?: true }
+            .distinctUntilChanged()
+            .onEach { AlbumGridPrefsBoot.writeShowCollection(context, it) }
+    }.collectAsStateWithLifecycle(initialValue = initial)
+    return shown
+}
+
+/**
  * Reusable two-finger pinch-to-zoom for a photo grid. Mirrors the timeline's inline detector: it
  * activates only once a second finger goes down (so single-finger drags fall through to the grid's
  * own scroll), and commits exactly one [onStep] in either direction each time the finger distance

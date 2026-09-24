@@ -1113,6 +1113,8 @@
     <string name="albums_filter_default_heading">Standaard bij openen</string>
     <string name="albums_filter_remember_last">Laatst gebruikte filter onthouden</string>
     <string name="albums_filter_remember_last_summary">Albums openen met het laatst gekozen filter</string>
+    <string name="albums_show_collection">Collectie tonen</string>
+    <string name="albums_show_collection_summary">Personen, plaatsen en \"Op deze dag\" blijven beschikbaar via Zoeken</string>
     <string name="albums_sort_heading">Sorteren op</string>
     <string name="albums_cover_size_heading">Omslaggrootte</string>
     <string name="albums_sort_custom">Aangepast</string>

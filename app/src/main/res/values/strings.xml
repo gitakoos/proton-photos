@@ -1812,6 +1812,8 @@
     <string name="albums_filter_default_heading">Default when opening</string>
     <string name="albums_filter_remember_last">Remember last-used filter</string>
     <string name="albums_filter_remember_last_summary">Open albums with the filter you last selected</string>
+    <string name="albums_show_collection">Show Collection</string>
+    <string name="albums_show_collection_summary">People, places and On this day stay in Search</string>
     <string name="albums_sort_heading">Sort by</string>
     <string name="albums_cover_size_heading">Cover size</string>
     <string name="albums_sort_custom">Custom</string>

@@ -1323,6 +1323,8 @@
     <string name="albums_filter_default_heading">Privzeto ob odpiranju</string>
     <string name="albums_filter_remember_last">Zapomni si nazadnje uporabljeni filter</string>
     <string name="albums_filter_remember_last_summary">Albume odpiraj z nazadnje izbranim filtrom</string>
+    <string name="albums_show_collection">Prikaži Zbirko</string>
+    <string name="albums_show_collection_summary">Osebe, kraji in „Na ta dan“ ostanejo na voljo v iskanju</string>
     <string name="albums_sort_heading">Razvrsti po</string>
     <string name="albums_cover_size_heading">Velikost naslovnice</string>
     <string name="albums_sort_custom">Po meri</string>
