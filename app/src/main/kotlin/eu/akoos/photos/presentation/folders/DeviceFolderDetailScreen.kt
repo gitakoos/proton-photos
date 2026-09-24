@@ -849,13 +849,15 @@ fun DeviceFolderDetailScreen(
                 )
             }
             // Delete selected - same sheet + system trash dialog as the gallery, with the option
-            // to also remove the Drive copy of any backed-up photos.
+            // to also remove the Drive copy of any backed-up photos. Held off while a delete or a
+            // hide runs, as the Hide row is. It does not spin: a hide raises isDeleting too.
             if (selectedDeviceItems.isNotEmpty()) {
                 add(
                     SelectionAction(
                         icon = Icons.Default.DeleteOutline,
                         label = stringResource(R.string.sel_label_delete),
                         tint = ErrorColor,
+                        enabled = !isDeleting,
                         onClick = { showDeleteSheet = true },
                         slot = PrimarySlot.Delete,
                     )

@@ -88,6 +88,19 @@ sealed class MultiStripState {
     data class Failed(val message: String) : MultiStripState()
 }
 
+/** Progress of a share batch. [Working] counts the photos resolved so far, cloud originals
+ *  downloading one by one, so the Share button can ring while it takes no further taps. How the
+ *  batch ended is reported through the chooser and [GalleryItemSelectionController.actionFailure]. */
+sealed class SelectionShareState {
+    data object Idle : SelectionShareState()
+    data class Working(val done: Int, val total: Int) : SelectionShareState()
+}
+
+/** Whether a share press starts a batch: only over a non-empty selection and while no batch runs,
+ *  so a second tap during the downloads cannot start a second job and raise a second chooser. */
+internal fun shareStarts(selectedCount: Int, state: SelectionShareState): Boolean =
+    selectedCount > 0 && state is SelectionShareState.Idle
+
 /**
  * The multi-select action set shared by every [GalleryItem]-keyed grid (the timeline and search).
  * Owns the selection plus share / add-to-album / back-up / download / offline / hide / delete / strip,
@@ -224,15 +237,20 @@ class GalleryItemSelectionController @AssistedInject constructor(
     }
 
     // ── Share ───────────────────────────────────────────────────────────────────────────────────
+    private val _shareState = MutableStateFlow<SelectionShareState>(SelectionShareState.Idle)
+    val shareState: StateFlow<SelectionShareState> = _shareState.asStateFlow()
+
     fun shareSelected() {
         val items = selection.value.toList()
-        if (items.isEmpty()) return
+        if (!shareStarts(items.size, _shareState.value)) return
+        // Claimed before the launch, so a tap landing before the coroutine first runs finds it taken.
+        _shareState.value = SelectionShareState.Working(0, items.size)
         scope.launch {
             val userId = accountManager.getPrimaryUserId().first()
             // Null when strip-on-share is off, so each resolved URI passes through untouched below.
             val stripConfig = currentShareStripConfig(context)
             val uris = ArrayList<Uri>(items.size)
-            for (item in items) {
+            for ((index, item) in items.withIndex()) {
                 runCatching {
                     val resolved = when (item) {
                         is GalleryItem.LocalOnly -> Uri.parse(item.local.uri)
@@ -251,6 +269,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
                     stripForShareOrOriginal(context, resolved, mime, name, stripConfig)
                 }.onSuccess { uris.add(it) }
                     .onFailure { Log.w(TAG, "share resolve failed: ${it.message}") }
+                _shareState.value = SelectionShareState.Working(index + 1, items.size)
             }
             if (uris.isNotEmpty()) {
                 val mime = ShareIntentBuilder.shareableMime(items)
@@ -260,6 +279,10 @@ class GalleryItemSelectionController @AssistedInject constructor(
             shareOutcome(shared = uris.size, failed = items.size - uris.size).message()
                 ?.let { _actionFailure.tryEmit(it.resolve(context)) }
             selection.clear()
+        }.invokeOnCompletion {
+            // The button is guarded on this state, so it is released however the batch ends: done,
+            // thrown or cancelled. Otherwise Share would stay dead for the rest of the session.
+            _shareState.value = SelectionShareState.Idle
         }
     }
 

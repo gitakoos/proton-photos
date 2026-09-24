@@ -100,6 +100,7 @@ import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.common.SelectionShareState
 import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.anyCloudOnly
 import eu.akoos.photos.presentation.common.anyLocalOnly
@@ -160,6 +161,7 @@ fun LocationPhotosContent(
     val favoriteIds by viewModel.favoriteIds.collectAsStateWithLifecycle()
     val offlinePinIds by viewModel.offlinePinIds.collectAsStateWithLifecycle()
     val favoriteState by viewModel.favoriteState.collectAsStateWithLifecycle()
+    val shareState by viewModel.sel.shareState.collectAsStateWithLifecycle()
 
     val isSelectionMode = selectedItems.isNotEmpty()
 
@@ -525,11 +527,16 @@ fun LocationPhotosContent(
         val offlinePinsSelection = remember(selectedItems, offlinePinIds) {
             offlineTurnsOn(offlinePinnableLinkIds(selectedItems), offlinePinIds)
         }
+        val sharing = shareState as? SelectionShareState.Working
         val locationSelectionActions = buildList {
+            // Rings while cloud originals download for the chooser and takes no second tap meanwhile.
             add(
                 SelectionAction(
                     icon = Icons.Default.Share,
                     label = stringResource(R.string.sel_label_share),
+                    working = sharing != null,
+                    progress = sharing?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
+                    enabled = sharing == null,
                     onClick = { viewModel.shareSelected() },
                     slot = PrimarySlot.Share,
                 )

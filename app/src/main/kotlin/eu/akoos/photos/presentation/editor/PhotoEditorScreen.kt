@@ -423,7 +423,9 @@ fun PhotoEditorScreen(
 
     Column(Modifier.fillMaxSize().background(Bg0).statusBarsPadding()) {
         TopBar(
-            isSaving = state.isSaving,
+            // Busy while a Hide-faces detection runs too, so a save cannot start before the covers land
+            // (the save itself also waits for one it finds in flight).
+            isSaving = state.isSaving || state.hideFacesState is HideFacesState.Detecting,
             canUndo = canUndo,
             canRedo = canRedo,
             onBack = confirmedOnBack,
@@ -541,7 +543,7 @@ fun PhotoEditorScreen(
                     bitmap = state.previewBitmap!!,
                     redactActive = activeTool == Tool.Redact,
                     brushDp = state.redactBrushDp,
-                    committedStrokeCount = state.adjustments.redactStrokes.size,
+                    bakedStrokes = state.previewRedactStrokes,
                     drawStrokes = state.adjustments.drawStrokes,
                     textItems = state.adjustments.textItems,
                     onStrokeFinished = { stroke -> vm.addRedactStroke(stroke) },
@@ -1016,18 +1018,18 @@ private fun ImageWithRedactOverlay(
     bitmap: Bitmap,
     redactActive: Boolean,
     brushDp: Float,
-    committedStrokeCount: Int,
+    bakedStrokes: List<RedactionStroke>,
     drawStrokes: List<DrawStroke>,
     textItems: List<TextItem>,
     onStrokeFinished: (RedactionStroke) -> Unit,
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
     var currentStrokeCanvas by remember { mutableStateOf<List<Offset>>(emptyList()) }
-    // Keep the in-progress stroke drawn until its committed copy has baked into the bitmap (the stroke
-    // count grows), so the mark never blinks out in the gap while the re-render is still in flight. The
-    // drag guard stops a fast next stroke being wiped by the previous one's bake landing mid-draw.
+    // Keep the in-progress stroke drawn until a preview baking it lands (the strokes baked into the
+    // bitmap change), so the mark never blinks out in the gap while the re-render is still in flight.
+    // The drag guard stops a fast next stroke being wiped by the previous one's bake landing mid-draw.
     var isDragging by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(committedStrokeCount) {
+    androidx.compose.runtime.LaunchedEffect(bakedStrokes) {
         if (!isDragging) currentStrokeCanvas = emptyList()
     }
     val density = LocalDensity.current

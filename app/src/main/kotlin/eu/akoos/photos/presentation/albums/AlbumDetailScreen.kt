@@ -35,6 +35,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.triStateToggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -119,6 +120,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -720,12 +725,24 @@ fun AlbumDetailScreen(
                                 val selectedInGroup = groupLinkIds.count { it in state.selectedPhotos }
                                 val allSelected = groupLinkIds.isNotEmpty() && selectedInGroup == groupLinkIds.size
                                 val partiallySelected = selectedInGroup > 0 && !allSelected
+                                // Named for its span in every state, and announced as a checkbox that is
+                                // checked, partly checked or not, so the state is heard as well as seen.
+                                val selectLabel = stringResource(sectionSelectDescriptionRes(shownGrouping))
                                 Box(
                                     modifier = Modifier
                                         .padding(end = 12.dp)
                                         .size(22.dp)
                                         .clip(CircleShape)
-                                        .clickable { viewModel.toggleGroupSelection(groupLinkIds) }
+                                        .triStateToggleable(
+                                            state = when {
+                                                allSelected -> ToggleableState.On
+                                                partiallySelected -> ToggleableState.Indeterminate
+                                                else -> ToggleableState.Off
+                                            },
+                                            role = Role.Checkbox,
+                                            onClick = { viewModel.toggleGroupSelection(groupLinkIds) },
+                                        )
+                                        .semantics { contentDescription = selectLabel }
                                         .then(
                                             if (allSelected || partiallySelected)
                                                 Modifier.background(appColors.accent, CircleShape)
@@ -737,7 +754,7 @@ fun AlbumDetailScreen(
                                 ) {
                                     when {
                                         allSelected -> Icon(
-                                            Icons.Default.Check, stringResource(sectionSelectDescriptionRes(photoGrouping)),
+                                            Icons.Default.Check, contentDescription = null,
                                             tint = Color.White, modifier = Modifier.size(14.dp),
                                         )
                                         partiallySelected -> Box(
@@ -1057,7 +1074,9 @@ fun AlbumDetailScreen(
                         label = stringResource(R.string.sel_label_delete),
                         tint = ErrorColor,
                         enabled = !state.isDeletingPhotos,
-                        working = state.isDeletingPhotos,
+                        // The busy flag also covers a move, a hide and a remove; only a delete spins
+                        // here. busyOp outlives the delete, so the flag bounds it.
+                        working = state.isDeletingPhotos && state.busyOp == AlbumBusyOp.Deleting,
                         onClick = { showDeleteConfirm = true },
                         slot = PrimarySlot.Delete,
                     )

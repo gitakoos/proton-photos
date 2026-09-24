@@ -320,6 +320,15 @@ internal fun selectAllNeedsConfirm(selectAllCount: Int?): Boolean =
 /** Whether a window [screenHeightDp] tall takes the compact drawer. */
 internal fun isCompactDrawer(screenHeightDp: Int): Boolean = screenHeightDp < COMPACT_HEIGHT_DP
 
+/**
+ * Whether a drawer control acts on a tap. A drawer on its way out ([opened] false) still draws the
+ * selection that has just ended, and a tap there would act on nothing or leave a sheet raised for
+ * it, so none of its controls act. The fixed buttons also stop once they have faded away under the
+ * open list ([shownAlpha] 0).
+ */
+internal fun drawerTakesTaps(opened: Boolean, shownAlpha: Float = 1f): Boolean =
+    opened && shownAlpha > 0f
+
 /** Whether the Select all label fits beside the count at full length, all in pixels. When it does
  *  not, the control shows a glyph instead, so the count is never cut short for it. */
 internal fun selectAllFitsAsText(available: Int, countWidth: Int, labelWidth: Int, gap: Int): Boolean =
@@ -458,8 +467,8 @@ fun SelectionDrawer(
 /**
  * The drawer surface itself, always rendered from an already-resolved (and possibly frozen)
  * selection. [opened] re-seats the drawer at rest each time it comes back and keeps a closing
- * drawer's Select all from acting; it is deliberately not consulted for anything else, so a closing
- * drawer holds its geometry as well as its content.
+ * drawer from acting: its Select all, buttons and rows take no tap ([drawerTakesTaps]). It changes
+ * nothing that is drawn, so a closing drawer holds its geometry as well as its content.
  */
 @Composable
 private fun SelectionDrawerBody(
@@ -518,9 +527,10 @@ private fun SelectionDrawerBody(
     val fraction = openFraction(reveal.value, travelPx)
     val expanded = reveal.value > travelPx / 2f
     // The buttons fade over the first half of the opening, as the list's rows for the same actions
-    // arrive, and take no tap once they are gone.
+    // arrive, and take no tap once they are gone, nor while the drawer is closing.
     val primaryAlpha = (1f - fraction * 2f).coerceIn(0f, 1f)
-    val primaryLive = primaryAlpha > 0f
+    val primaryLive = drawerTakesTaps(opened, primaryAlpha)
+    val rowsLive = drawerTakesTaps(opened)
     val dragState = rememberDraggableState { delta ->
         scope.launch { reveal.snapTo((reveal.value - delta).coerceIn(0f, travelPx)) }
     }
@@ -786,11 +796,12 @@ private fun SelectionDrawerBody(
             ) {
                 listed.forEach { action ->
                     // Pinned to the row height the expanded travel was computed from, so the open
-                    // detent still lands on the end of the list.
+                    // detent still lands on the end of the list. A closing drawer's rows keep their
+                    // look but not their action.
                     ActionSheetRow(
                         icon = action.icon,
                         title = action.shownLabel(),
-                        onClick = action.onClick,
+                        onClick = if (rowsLive) action.onClick else ({}),
                         modifier = Modifier.height(ACTION_ROW_HEIGHT),
                         enabled = action.enabled,
                         tint = action.tint,
@@ -903,7 +914,8 @@ private fun SelectAllPill(label: String, style: TextStyle, onClick: () -> Unit) 
 /**
  * The fixed buttons under the selected photos: [actions] in slot order, then More when [onMore] is
  * set. The buttons share the row's width equally up to [PRIMARY_BUTTON_MAX_WIDTH] each and stay
- * centred beyond it. [live] turns their taps off while the row fades out.
+ * centred beyond it. [live] turns their taps off once the row has faded out and while the drawer
+ * closes.
  */
 @Composable
 private fun PrimaryActionRow(

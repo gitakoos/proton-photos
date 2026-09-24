@@ -33,9 +33,9 @@ import org.junit.Test
 /**
  * Pins the rules the selection drawer lays itself out by: which actions become the fixed buttons and
  * in what order, where they stand in the open list, when More shows, when Select all asks first, when
- * its label gives way to a glyph, how far the drawer travels as its button row folds away, and how
- * tall the resting bar is, which a grid reserves before the drawer lays out. No Android, no Compose
- * runtime: plain JVM assertions.
+ * its label gives way to a glyph, how far the drawer travels as its button row folds away, how tall
+ * the resting bar is, which a grid reserves before the drawer lays out, and when its controls take a
+ * tap. No Android, no Compose runtime: plain JVM assertions.
  */
 class SelectionDrawerRulesTest {
 
@@ -221,5 +221,21 @@ class SelectionDrawerRulesTest {
         assertEquals(0.5f, openFraction(50f, 100f), 0f)
         assertEquals(1f, openFraction(150f, 100f), 0f)
         assertEquals(0f, openFraction(10f, 0f), 0f)
+    }
+
+    @Test
+    fun `a closing drawer takes no tap on its buttons or rows`() {
+        // Its rows and fully shown buttons still draw the selection that just ended.
+        assertFalse(drawerTakesTaps(opened = false))
+        assertFalse(drawerTakesTaps(opened = false, shownAlpha = 1f))
+        assertFalse(drawerTakesTaps(opened = false, shownAlpha = 0.4f))
+    }
+
+    @Test
+    fun `an open drawer's buttons take taps until they have faded away under the list`() {
+        assertTrue(drawerTakesTaps(opened = true))
+        assertTrue(drawerTakesTaps(opened = true, shownAlpha = 1f))
+        assertTrue(drawerTakesTaps(opened = true, shownAlpha = 0.01f))
+        assertFalse(drawerTakesTaps(opened = true, shownAlpha = 0f))
     }
 }

@@ -132,6 +132,7 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.common.SelectionShareState
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.anyCloudOnly
@@ -220,6 +221,7 @@ fun SearchScreen(
     val favoriteIds by vm.favoriteIds.collectAsStateWithLifecycle()
     val offlinePinIds by vm.offlinePinIds.collectAsStateWithLifecycle()
     val favoriteState by vm.favoriteState.collectAsStateWithLifecycle()
+    val shareState by vm.sel.shareState.collectAsStateWithLifecycle()
     val isSignedIn by vm.isSignedIn.collectAsStateWithLifecycle()
     val faceEnabled by vm.faceEnabled.collectAsStateWithLifecycle()
 
@@ -772,11 +774,16 @@ fun SearchScreen(
         val offlinePinsSelection = remember(selectedItems, offlinePinIds) {
             offlineTurnsOn(offlinePinnableLinkIds(selectedItems), offlinePinIds)
         }
+        val sharing = shareState as? SelectionShareState.Working
         val searchSelectionActions = buildList {
+            // Rings while cloud originals download for the chooser and takes no second tap meanwhile.
             add(
                 SelectionAction(
                     icon = Icons.Default.Share,
                     label = stringResource(R.string.sel_label_share),
+                    working = sharing != null,
+                    progress = sharing?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
+                    enabled = sharing == null,
                     onClick = { vm.shareSelected() },
                     slot = PrimarySlot.Share,
                 )
