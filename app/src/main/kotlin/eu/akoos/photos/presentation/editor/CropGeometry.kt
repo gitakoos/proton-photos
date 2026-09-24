@@ -404,3 +404,73 @@ private fun resizeLockedVertical(
     val left = (centerX - wi / 2).coerceIn(0, (boundsW - wi).coerceAtLeast(0))
     return CropBox(left, top, left + wi, top + hi)
 }
+
+/**
+ * The crop frame during a two-finger pinch, in bitmap-pixel space: the photo stays still and the
+ * frame resizes as if all four edges were dragged at once.
+ *
+ * Every input is measured from when the pinch began, so rounding never piles up: [start] is the
+ * frame then, ([focusX], [focusY]) the point between the fingers then, [scale] their spread since
+ * (above 1 grows the frame) and ([panX], [panY]) how far that point has moved. The focus keeps its
+ * relative place in the frame, taken from the nearest border point when it lies outside, and the
+ * pan then carries the frame along.
+ *
+ * The frame keeps [ratio], or [start]'s own shape when that is null as under Free. Its size holds
+ * [minPx] on both axes through the ratio and stops at the largest box of that shape the photo holds,
+ * so the last step only slides it back inside. A scale that is not a finite number counts as 1.
+ */
+internal fun scaleCropAbout(
+    start: CropBox,
+    focusX: Float,
+    focusY: Float,
+    scale: Float,
+    panX: Float,
+    panY: Float,
+    ratio: Float?,
+    boundsW: Int,
+    boundsH: Int,
+    minPx: Int,
+): CropBox {
+    if (boundsW <= 0 || boundsH <= 0) return CropBox(0, 0, 0, 0)
+    val keep = ratio?.takeIf { it.isFinite() && it > 0f }
+        ?: (start.width.toFloat() / start.height).takeIf { it.isFinite() && it > 0f }
+        ?: 1f
+    val s = if (scale.isFinite()) scale else 1f
+
+    val largestW = centeredCrop(boundsW, boundsH, keep).width.toFloat()
+    val w = clampSize(start.width * s, max(minPx.toFloat(), minPx * keep), largestW)
+    // The height follows the ROUNDED width, which keeps the ratio within half a pixel of height.
+    val wi = w.roundToInt().coerceIn(1, boundsW)
+    val hi = (wi / keep).roundToInt().coerceIn(1, boundsH)
+
+    val u = fractionAlong(focusX, start.left, start.width)
+    val v = fractionAlong(focusY, start.top, start.height)
+    val dx = if (panX.isFinite()) panX else 0f
+    val dy = if (panY.isFinite()) panY else 0f
+    val left = start.left + u * start.width + dx - u * wi
+    val top = start.top + v * start.height + dy - v * hi
+    return slideInsideBounds(left, top, wi, hi, boundsW, boundsH)
+}
+
+/** Where [point] sits along a span as a fraction in 0..1, or its middle when that is undefined. */
+private fun fractionAlong(point: Float, from: Int, span: Int): Float {
+    val t = (point - from) / span
+    return if (t.isFinite()) t.coerceIn(0f, 1f) else 0.5f
+}
+
+/**
+ * A [width] x [height] frame placed at ([left], [top]) and slid back onto the [boundsW] x [boundsH]
+ * photo where it overhangs. Only the position moves; the frame must already fit.
+ */
+private fun slideInsideBounds(
+    left: Float,
+    top: Float,
+    width: Int,
+    height: Int,
+    boundsW: Int,
+    boundsH: Int,
+): CropBox {
+    val l = left.coerceIn(0f, (boundsW - width).coerceAtLeast(0).toFloat()).roundToInt()
+    val t = top.coerceIn(0f, (boundsH - height).coerceAtLeast(0).toFloat()).roundToInt()
+    return CropBox(l, t, l + width, t + height)
+}

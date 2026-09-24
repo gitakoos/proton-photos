@@ -288,15 +288,22 @@ fun PhotoEditorScreen(
     // Seed pendingCropRect whenever the user enters the Crop tool, and clear it when
     // they leave. Full-image bounds come from the DISPLAYED crop bitmap (rotation already
     // baked in, so width/height match the rect's display space). adjustedBitmapNoCrop may
-    // not be ready yet — handled by the LaunchedEffect re-running on it.
+    // not be ready yet, which the LaunchedEffect covers by re-running on its size.
+    // While the tool is open the rect also follows the committed crop, so an Undo or Redo shows
+    // on screen. settledCropRect is the rect last seeded, or last committed by the overlay, and
+    // only a rect still showing it is re-seeded: a frame the overlay is moving, or one a chip has
+    // just set, is never pulled back to a committed crop that has not caught up with it yet.
     val cropDisplayBitmap = state.adjustedBitmapNoCrop ?: state.originalBitmap
-    androidx.compose.runtime.LaunchedEffect(activeTool, cropDisplayBitmap) {
+    val committedCrop = state.adjustments.cropRect
+    var settledCropRect by remember { mutableStateOf<android.graphics.Rect?>(null) }
+    androidx.compose.runtime.LaunchedEffect(
+        activeTool, committedCrop, cropDisplayBitmap?.width, cropDisplayBitmap?.height,
+    ) {
         if (activeTool == Tool.Crop) {
-            val disp = cropDisplayBitmap
-            if (disp != null && pendingCropRect == null) {
-                pendingCropRect = state.adjustments.cropRect
-                    ?: android.graphics.Rect(0, 0, disp.width, disp.height)
-            }
+            val disp = cropDisplayBitmap ?: return@LaunchedEffect
+            val seed = committedCrop ?: android.graphics.Rect(0, 0, disp.width, disp.height)
+            if (pendingCropRect == null || pendingCropRect == settledCropRect) pendingCropRect = seed
+            settledCropRect = seed
         } else {
             pendingCropRect = null
         }
@@ -500,6 +507,7 @@ fun PhotoEditorScreen(
                         val disp = cropDisplayBitmap
                         val full = disp != null && it.left == 0 && it.top == 0 &&
                             it.right == disp.width && it.bottom == disp.height
+                        settledCropRect = it
                         vm.applyCrop(if (full) null else it)
                     },
                 )

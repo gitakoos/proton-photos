@@ -455,6 +455,208 @@ class CropGeometryTest {
         }
     }
 
+    // ---- a two-finger pinch resizes the frame ----
+
+    /** A pinch about the frame's centre unless a focus is given, on the 4000x3000 photo by default. */
+    private fun pinch(
+        start: CropBox,
+        scale: Float,
+        focusX: Float = (start.left + start.right) / 2f,
+        focusY: Float = (start.top + start.bottom) / 2f,
+        panX: Float = 0f,
+        panY: Float = 0f,
+        ratio: Float? = null,
+        photoW: Int = boundsW,
+        photoH: Int = boundsH,
+    ): CropBox = scaleCropAbout(start, focusX, focusY, scale, panX, panY, ratio, photoW, photoH, minPx)
+
+    @Test
+    fun a_pinch_that_has_not_moved_leaves_the_frame_alone() {
+        val start = CropBox(1000, 750, 3000, 2250)
+        assertEquals(start, pinch(start, 1f, focusX = 1234f, focusY = 987f, ratio = 4f / 3f))
+        // Free keeps the frame's own odd shape rather than snapping it to a preset.
+        val odd = CropBox(123, 456, 1357, 1111)
+        assertEquals(odd, pinch(odd, 1f, focusX = 700f, focusY = 800f))
+    }
+
+    @Test
+    fun pinching_in_about_the_centre_halves_the_frame_in_place() {
+        val start = CropBox(1000, 750, 3000, 2250)
+        assertEquals(CropBox(1500, 1125, 2500, 1875), pinch(start, 0.5f, ratio = 4f / 3f))
+    }
+
+    @Test
+    fun pinching_out_about_the_centre_doubles_the_frame_in_place() {
+        val start = CropBox(1200, 1050, 2800, 1950)
+        assertEquals(CropBox(400, 600, 3600, 2400), pinch(start, 2f, ratio = 16f / 9f))
+    }
+
+    @Test
+    fun pinching_out_stops_at_the_largest_frame_of_that_shape_the_photo_holds() {
+        val start = CropBox(1200, 1050, 2800, 1950)
+        // 16:9 inside 4000x3000 tops out at the full width.
+        assertEquals(CropBox(0, 375, 4000, 2625), pinch(start, 3f, ratio = 16f / 9f))
+        assertEquals(CropBox(0, 375, 4000, 2625), pinch(start, 50f, ratio = 16f / 9f))
+    }
+
+    @Test
+    fun the_point_between_the_fingers_keeps_its_place_in_the_frame() {
+        val start = CropBox(1000, 1000, 2000, 1750)
+        // A quarter of the way across and a fifth of the way down.
+        val fx = 1250f
+        val fy = 1150f
+        for (scale in listOf(0.5f, 0.8f, 1.6f, 2.4f)) {
+            val out = pinch(start, scale, fx, fy, ratio = 4f / 3f)
+            assertEquals("across, scale $scale: $out", 0.25f, (fx - out.left) / out.width, 1f / out.width)
+            assertEquals("down, scale $scale: $out", 0.2f, (fy - out.top) / out.height, 1f / out.height)
+        }
+    }
+
+    @Test
+    fun a_focus_outside_the_frame_acts_from_the_nearest_point_on_its_border() {
+        // Fingers to the right of the frame: its right edge holds while the frame shrinks.
+        val start = CropBox(1000, 1000, 2000, 1750)
+        val out = pinch(start, 0.5f, focusX = 3500f, focusY = 1375f, ratio = 4f / 3f)
+        assertEquals(2000, out.right)
+        assertEquals(500, out.width)
+    }
+
+    @Test
+    fun the_pan_carries_the_frame_along_with_the_fingers() {
+        val start = CropBox(1000, 1000, 2200, 1900)
+        assertEquals(CropBox(1300, 800, 2500, 1700), pinch(start, 1f, panX = 300f, panY = -200f, ratio = 4f / 3f))
+        // Scaled about the fingers first, then moved by the whole pan.
+        assertEquals(CropBox(1300, 1225, 1900, 1675), pinch(start, 0.5f, ratio = 4f / 3f))
+        assertEquals(
+            CropBox(1600, 1025, 2200, 1475),
+            pinch(start, 0.5f, panX = 300f, panY = -200f, ratio = 4f / 3f),
+        )
+    }
+
+    @Test
+    fun a_locked_shape_and_free_both_keep_their_ratio_through_a_pinch() {
+        val scales = listOf(0.05f, 0.3f, 0.77f, 1.3f, 1.9f, 3f)
+        val locked = CropBox(1200, 1050, 2800, 1950)
+        for (scale in scales) {
+            assertRatio(16f / 9f, pinch(locked, scale, 1500f, 1200f, ratio = 16f / 9f))
+        }
+        // Free holds whatever shape the frame had when the fingers came down.
+        val odd = CropBox(321, 654, 1555, 1309)
+        for (scale in scales) {
+            assertRatio(odd.width.toFloat() / odd.height, pinch(odd, scale, 900f, 1000f))
+        }
+    }
+
+    @Test
+    fun pinching_in_stops_at_the_minimum_without_leaving_a_sliver() {
+        val start = CropBox(1200, 1050, 2800, 1950)
+        for (ratio in listOf(1f, 4f / 3f, 3f / 4f, 16f / 9f, 9f / 16f, null)) {
+            for (scale in listOf(0.001f, 0f, -3f)) {
+                val out = pinch(start, scale, ratio = ratio)
+                val where = "ratio=$ratio scale=$scale -> $out"
+                assertTrue("$where width", out.width >= minPx)
+                assertTrue("$where height", out.height >= minPx)
+                // The short side rests on the minimum, so the frame is as small as allowed.
+                assertEquals(where, minPx, minOf(out.width, out.height))
+            }
+        }
+    }
+
+    @Test
+    fun a_pan_past_the_edge_slides_the_frame_back_onto_the_photo() {
+        val start = CropBox(1000, 1000, 2000, 1750)
+        val out = pinch(start, 1f, panX = 99999f, panY = -99999f, ratio = 4f / 3f)
+        assertEquals(CropBox(3000, 0, 4000, 750), out)
+    }
+
+    @Test
+    fun a_frame_grown_past_the_edge_slides_back_without_shrinking() {
+        val corner = CropBox(3000, 2250, 4000, 3000)
+        assertEquals(CropBox(2000, 1500, 4000, 3000), pinch(corner, 2f, ratio = 4f / 3f))
+    }
+
+    @Test
+    fun a_photo_smaller_than_twice_the_minimum_still_gets_a_frame_inside_it() {
+        for ((photoW, photoH) in listOf(50 to 40, 20 to 20, 1 to 1)) {
+            val start = CropBox(0, 0, photoW, photoH)
+            for (ratio in listOf(1f, 4f / 3f, 3f / 4f, 16f / 9f, 9f / 16f, null)) {
+                for (scale in listOf(0f, 0.3f, 1f, 4f)) {
+                    for ((px, py) in listOf(0f to 0f, 30f to -30f, -999f to 999f)) {
+                        val out = pinch(start, scale, 10f, 35f, px, py, ratio, photoW, photoH)
+                        val where = "${photoW}x$photoH ratio=$ratio scale=$scale pan=$px,$py -> $out"
+                        assertTrue("$where left", out.left >= 0)
+                        assertTrue("$where top", out.top >= 0)
+                        assertTrue("$where right", out.right <= photoW)
+                        assertTrue("$where bottom", out.bottom <= photoH)
+                        assertTrue("$where width", out.width > 0)
+                        assertTrue("$where height", out.height > 0)
+                    }
+                }
+            }
+        }
+        // Where the photo has room the minimum holds; where it has not, the photo wins.
+        val small = CropBox(0, 0, 50, 40)
+        assertEquals(CropBox(9, 4, 41, 36), pinch(small, 0f, ratio = 1f, photoW = 50, photoH = 40))
+        assertEquals(CropBox(0, 6, 50, 34), pinch(small, 0f, ratio = 16f / 9f, photoW = 50, photoH = 40))
+    }
+
+    @Test
+    fun a_scale_that_is_not_a_finite_number_counts_as_no_scale() {
+        val start = CropBox(1000, 750, 3000, 2250)
+        val panned = pinch(start, 1f, panX = 120f, panY = 80f, ratio = 4f / 3f)
+        for (scale in listOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY)) {
+            assertEquals("$scale", start, pinch(start, scale, ratio = 4f / 3f))
+            assertEquals("$scale with a pan", panned, pinch(start, scale, panX = 120f, panY = 80f, ratio = 4f / 3f))
+        }
+    }
+
+    @Test
+    fun a_focus_or_pan_that_is_not_a_finite_number_is_ignored() {
+        val start = CropBox(1000, 750, 3000, 2250)
+        val out = pinch(start, 1f, Float.NaN, Float.POSITIVE_INFINITY, Float.NaN, Float.NEGATIVE_INFINITY, 4f / 3f)
+        assertEquals(start, out)
+    }
+
+    @Test
+    fun every_pinch_stays_on_the_photo_at_or_above_the_minimum_and_on_ratio() {
+        val ratios = listOf(1f, 4f / 3f, 3f / 4f, 16f / 9f, 9f / 16f, boundsW.toFloat() / boundsH, null)
+        val starts = listOf(
+            CropBox(0, 0, boundsW, boundsH),
+            CropBox(1000, 800, 3000, 2200),
+            CropBox(3800, 2800, 4000, 3000),
+            CropBox(0, 0, 60, 45),
+        )
+        val scales = listOf(0f, 0.01f, 0.4f, 0.93f, 1f, 1.07f, 2.5f, 40f)
+        val pans = listOf(0f to 0f, 250f to -180f, -99999f to 99999f, 99999f to -99999f)
+        for (ratio in ratios) {
+            for (start in starts) {
+                val expected = ratio ?: (start.width.toFloat() / start.height)
+                // The centre, a corner, and a point well off the frame.
+                val foci = listOf(
+                    (start.left + start.right) / 2f to (start.top + start.bottom) / 2f,
+                    start.left.toFloat() to start.bottom.toFloat(),
+                    -500f to 3500f,
+                )
+                for (scale in scales) {
+                    for ((fx, fy) in foci) {
+                        for ((px, py) in pans) {
+                            val out = pinch(start, scale, fx, fy, px, py, ratio)
+                            val where = "ratio=$ratio start=$start scale=$scale focus=$fx,$fy pan=$px,$py -> $out"
+                            assertTrue("$where left", out.left >= 0)
+                            assertTrue("$where top", out.top >= 0)
+                            assertTrue("$where right", out.right <= boundsW)
+                            assertTrue("$where bottom", out.bottom <= boundsH)
+                            assertTrue("$where width", out.width >= minPx)
+                            assertTrue("$where height", out.height >= minPx)
+                            val tolerance = expected / out.height + 0.001f
+                            assertEquals(where, expected, out.width.toFloat() / out.height, tolerance)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- which handle a touch grabs ----
 
     /** A round slop keeps the two reaches readable: 100px outward, 75px inward. */

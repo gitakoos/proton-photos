@@ -30,7 +30,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,6 +57,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,6 +83,7 @@ import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.pillShape
 import eu.akoos.photos.util.FitBox
+import eu.akoos.photos.util.ImageFit
 import eu.akoos.photos.util.fitImageInBox
 import kotlin.math.min
 
@@ -300,12 +305,49 @@ internal fun DrawScope.drawCropMarkers(left: Float, top: Float, right: Float, bo
     for ((a, b) in segments) drawLine(Color.White, a, b, strokeWidth = stroke)
 }
 
+/** What a touch on the photo crop overlay is doing so far. */
+internal enum class CropGestureMode { Undecided, Drag, Pinch }
+
+/**
+ * The crop overlay's gesture after one more pointer event. A lone finger becomes a handle drag once
+ * it is more than [slopPx] from where it went down. A second finger makes the gesture a pinch,
+ * whether it lands before that or in the middle of a drag, and the pinch holds until every finger is
+ * up, so lifting one of two fingers never hands the frame back to a handle.
+ */
+internal fun nextCropGestureMode(
+    mode: CropGestureMode,
+    fingersDown: Int,
+    travelledPx: Float,
+    slopPx: Float,
+): CropGestureMode = when {
+    mode == CropGestureMode.Pinch || fingersDown >= 2 -> CropGestureMode.Pinch
+    mode == CropGestureMode.Undecided && fingersDown == 1 && travelledPx > slopPx -> CropGestureMode.Drag
+    else -> mode
+}
+
+/**
+ * Where a pinch scales the crop frame about: the point between [fingers] (the overlay's screen
+ * pixels), mapped to bitmap pixels through the letterbox [fit] the photo is drawn with.
+ */
+internal fun cropPinchFocus(fingers: List<Offset>, fit: ImageFit): Offset {
+    if (fingers.isEmpty()) return Offset.Unspecified
+    var x = 0f
+    var y = 0f
+    for (p in fingers) {
+        x += p.x
+        y += p.y
+    }
+    return Offset(fit.toImageX(x / fingers.size), fit.toImageY(y / fingers.size))
+}
+
 /**
  * Interactive crop overlay rendered on top of the FULL uncropped original. Shows a
  * dark semi-transparent mask outside [cropRect], corner brackets and side markers, and
  * accepts pointer input for:
  *   - dragging a corner or a side to resize the rect (clamped to bitmap bounds, min size 32 px)
  *   - dragging inside the rect to translate it (clamped to bitmap bounds)
+ *   - pinching with two fingers to resize the whole rect about the point between them while the
+ *     photo stays still; see [scaleCropAbout]
  * A non-null [lockedRatio] holds the rect's shape through every resize; see [resizeCrop].
  * All math is in bitmap-pixel coordinates; the on-screen scale is recomputed from the
  * [Image]'s fit-rect each composition.
@@ -322,18 +364,25 @@ internal fun CropPreview(
     // The grab area is deliberately larger than the drawn marker; see the slop constant.
     val touchSlopPx = with(LocalDensity.current) { CROP_HANDLE_TOUCH_SLOP_DP.dp.toPx() }
     val minCropPx = 32f // bitmap-space minimum crop size — prevents zero-area rects
+    // The gesture loop reads only the size: the bitmap object is replaced on every re-render, and
+    // one captured there would stay in memory for as long as the loop runs.
+    val bitmapW = bitmap.width
+    val bitmapH = bitmap.height
 
     // The pointerInput gesture loop below outlives recomposition: a plain capture
     // of the rect would freeze its FIRST value inside the closure, so every new
     // touch would measure handles against the original rect and snap the crop
     // back. rememberUpdatedState keeps the loop reading the freshest rect.
-    val rectState = androidx.compose.runtime.rememberUpdatedState(
-        cropRect ?: android.graphics.Rect(0, 0, bitmap.width, bitmap.height),
+    val rectState = rememberUpdatedState(
+        cropRect ?: android.graphics.Rect(0, 0, bitmapW, bitmapH),
     )
     val rect = rectState.value
     // Same reason as the rect: the lock changes when a chip is tapped, and the gesture loop
     // must read the current one rather than the one that was set when it started.
-    val lockState = androidx.compose.runtime.rememberUpdatedState(lockedRatio)
+    val lockState = rememberUpdatedState(lockedRatio)
+    // And the callbacks: the commit one reads the display bitmap, which a re-render replaces.
+    val onChangedState = rememberUpdatedState(onCropRectChanged)
+    val onCommitState = rememberUpdatedState(onCropRectCommit)
 
     Box(
         modifier = Modifier
@@ -356,6 +405,7 @@ internal fun CropPreview(
                     containerSize.height.toFloat().coerceAtLeast(1f),
                 )
             }
+            val fitState = rememberUpdatedState(fit)
             // Convert canvas-space pixel deltas to bitmap-space.
             val accentColor = Accent
             val screenRect = fit.toScreen(
@@ -379,73 +429,138 @@ internal fun CropPreview(
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(bitmap, fit) {
-                        // Track which handle is grabbed so a fast move past another corner
-                        // doesn't snap to it mid-drag. An inside grab translates the rect; we
-                        // remember the finger's bitmap-space offset from the rect's top-left so
-                        // the translation stays anchored to the finger instead of jumping the
-                        // corner under it. Mirrors the video editor's crop mechanics.
-                        var grabbedHandle: CropHandle? = null
-                        var insideOffsetX = 0
-                        var insideOffsetY = 0
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                val rect = rectState.value
-                                grabbedHandle = pickCropHandle(
-                                    box = rect.toCropBox(),
-                                    scale = fit.scale,
-                                    offsetX = fit.offsetX,
-                                    offsetY = fit.offsetY,
-                                    pointX = offset.x,
-                                    pointY = offset.y,
-                                    touchSlopPx = touchSlopPx,
-                                )
-                                if (grabbedHandle == CropHandle.Inside) {
-                                    val bx = fit.toImageX(offset.x)
-                                        .coerceIn(0f, bitmap.width.toFloat()).toInt()
-                                    val by = fit.toImageY(offset.y)
-                                        .coerceIn(0f, bitmap.height.toFloat()).toInt()
-                                    insideOffsetX = bx - rect.left
-                                    insideOffsetY = by - rect.top
+                    // Keyed on the size alone: the bitmap is a new object after every re-render, a
+                    // crop commit included, and restarting on it would drop a drag halfway through.
+                    // Everything else the loop needs comes through the updated-state holders above.
+                    .pointerInput(bitmapW, bitmapH) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val dragSlopPx = viewConfiguration.touchSlop
+                            val grabSlopPx = CROP_HANDLE_TOUCH_SLOP_DP.dp.toPx()
+                            var mode = CropGestureMode.Undecided
+                            // A drag keeps the handle it picked where it crossed the slop, so a fast
+                            // move past another corner doesn't snap to it; null (a touch clear of the
+                            // rect) moves nothing. An inside grab remembers the finger's bitmap-space
+                            // offset from the rect's top-left so the translation stays anchored to the
+                            // finger instead of jumping the corner under it. Mirrors the video
+                            // editor's crop mechanics.
+                            var handle: CropHandle? = null
+                            var insideOffsetX = 0
+                            var insideOffsetY = 0
+                            // The frame when this gesture took hold of it, and the last one it pushed.
+                            var startFrame: CropBox? = null
+                            var frame: CropBox? = null
+                            // A pinch measures from its base: the frame and the point between the
+                            // fingers (bitmap pixels) at that moment, and the spread and midpoint
+                            // travel since.
+                            var pinchFrom = CropBox(0, 0, 0, 0)
+                            var focus = Offset.Zero
+                            var zoom = 1f
+                            var pan = Offset.Zero
+                            do {
+                                val event = awaitPointerEvent()
+                                val f = fitState.value
+                                val pressed = event.changes.filter { it.pressed }
+                                val finger = event.changes.firstOrNull { it.id == down.id }
+                                val travelled = finger?.let { (it.position - down.position).getDistance() } ?: 0f
+                                val next = nextCropGestureMode(mode, pressed.size, travelled, dragSlopPx)
+                                if (next == CropGestureMode.Pinch) {
+                                    val box = if (mode == CropGestureMode.Pinch) {
+                                        // Both count only the fingers down on either side of this
+                                        // event, so a finger landing or lifting adds no step.
+                                        val step = event.calculateZoom()
+                                        if (step.isFinite() && step > 0f) zoom *= step
+                                        pan += event.calculatePan() / f.scale
+                                        scaleCropAbout(
+                                            start = pinchFrom,
+                                            focusX = focus.x,
+                                            focusY = focus.y,
+                                            scale = zoom,
+                                            panX = pan.x,
+                                            panY = pan.y,
+                                            ratio = lockState.value,
+                                            boundsW = bitmapW,
+                                            boundsH = bitmapH,
+                                            minPx = minCropPx.toInt(),
+                                        )
+                                    } else {
+                                        frame ?: rectState.value.toCropBox()
+                                    }
+                                    if (startFrame == null) startFrame = box
+                                    if (box != frame) onChangedState.value(box.toRect())
+                                    frame = box
+                                    // Re-based on the fingers now down whenever one lands or lifts, so
+                                    // the frame never jumps and scales about the point between them.
+                                    val fingersChanged = event.changes.any { it.pressed != it.previousPressed }
+                                    if (pressed.isNotEmpty() && (mode != CropGestureMode.Pinch || fingersChanged)) {
+                                        pinchFrom = box
+                                        focus = cropPinchFocus(pressed.map { it.position }, f)
+                                        zoom = 1f
+                                        pan = Offset.Zero
+                                    }
+                                    pressed.forEach { it.consume() }
+                                } else if (next == CropGestureMode.Drag && finger != null && finger.pressed) {
+                                    // Absolute bitmap-space position rather than accumulated deltas,
+                                    // which keeps the grabbed corner pinned under the finger even on
+                                    // fast drags.
+                                    val bx = f.toImageX(finger.position.x)
+                                        .coerceIn(0f, bitmapW.toFloat()).toInt()
+                                    val by = f.toImageY(finger.position.y)
+                                        .coerceIn(0f, bitmapH.toFloat()).toInt()
+                                    val starting = mode == CropGestureMode.Undecided
+                                    if (starting) {
+                                        val current = rectState.value.toCropBox()
+                                        handle = pickCropHandle(
+                                            box = current,
+                                            scale = f.scale,
+                                            offsetX = f.offsetX,
+                                            offsetY = f.offsetY,
+                                            pointX = finger.position.x,
+                                            pointY = finger.position.y,
+                                            touchSlopPx = grabSlopPx,
+                                        )
+                                        if (handle != null) {
+                                            startFrame = current
+                                            frame = current
+                                        }
+                                        if (handle == CropHandle.Inside) {
+                                            insideOffsetX = bx - current.left
+                                            insideOffsetY = by - current.top
+                                        }
+                                    }
+                                    val h = handle
+                                    val box = frame
+                                    if (h != null && box != null &&
+                                        (starting || finger.position != finger.previousPosition)
+                                    ) {
+                                        val resized = resizeCrop(
+                                            box = box,
+                                            handle = h,
+                                            bx = bx,
+                                            by = by,
+                                            ratio = lockState.value,
+                                            boundsW = bitmapW,
+                                            boundsH = bitmapH,
+                                            minPx = minCropPx.toInt(),
+                                            insideOffsetX = insideOffsetX,
+                                            insideOffsetY = insideOffsetY,
+                                        )
+                                        frame = resized
+                                        onChangedState.value(resized.toRect())
+                                        finger.consume()
+                                    }
                                 }
-                            },
-                            onDrag = { change, _ ->
-                                val h = grabbedHandle ?: return@detectDragGestures
-                                val rect = rectState.value
-                                change.consume()
-                                // Work in absolute bitmap-space from the finger position
-                                // rather than accumulating deltas — keeps the grabbed corner
-                                // pinned under the finger even on fast drags.
-                                val bx = fit.toImageX(change.position.x)
-                                    .coerceIn(0f, bitmap.width.toFloat()).toInt()
-                                val by = fit.toImageY(change.position.y)
-                                    .coerceIn(0f, bitmap.height.toFloat()).toInt()
-                                val r = resizeCrop(
-                                    box = rect.toCropBox(),
-                                    handle = h,
-                                    bx = bx,
-                                    by = by,
-                                    ratio = lockState.value,
-                                    boundsW = bitmap.width,
-                                    boundsH = bitmap.height,
-                                    minPx = minCropPx.toInt(),
-                                    insideOffsetX = insideOffsetX,
-                                    insideOffsetY = insideOffsetY,
-                                ).toRect()
-                                onCropRectChanged(r)
-                            },
-                            // Commit the freshest rect on release so the crop applies without
-                            // an Apply tap. Only when a handle was actually grabbed — a stray
-                            // tap outside the rect must not re-commit and spawn an undo entry.
-                            onDragEnd = {
-                                if (grabbedHandle != null) onCropRectCommit(rectState.value)
-                                grabbedHandle = null
-                            },
-                            onDragCancel = {
-                                if (grabbedHandle != null) onCropRectCommit(rectState.value)
-                                grabbedHandle = null
-                            },
-                        )
+                                mode = next
+                            } while (pressed.isNotEmpty())
+                            // One commit per gesture, so the crop applies without an Apply tap and
+                            // adds a single undo entry. A drag that grabbed a handle commits, a pinch
+                            // only when it moved the frame, and a touch that took hold of nothing
+                            // commits nothing.
+                            val last = frame
+                            if (last != null && (handle != null || last != startFrame)) {
+                                onCommitState.value(last.toRect())
+                            }
+                        }
                     },
             ) {
                 val leftPx = screenRect.left
