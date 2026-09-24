@@ -2118,6 +2118,10 @@
     <string name="editor_tool_color">Farba</string>
     <string name="editor_tool_draw">Kresliť</string>
     <string name="editor_tool_text">Text</string>
+    <string name="editor_tool_frame">Rámček</string>
+    <string name="editor_frame_none">Žiadny</string>
+    <string name="editor_frame_polaroid">Polaroid</string>
+    <string name="editor_frame_hint">Stiahnutím prstov zmeňte veľkosť fotky, ťahaním ju presuňte</string>
     <string name="video_editor_frame_failed">Snímku sa nepodarilo uložiť</string>
     <string name="video_editor_split">Rozdeliť</string>
     <string name="video_editor_remove_section">Odstrániť úsek</string>

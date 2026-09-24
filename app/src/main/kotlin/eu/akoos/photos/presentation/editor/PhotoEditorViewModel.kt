@@ -52,6 +52,7 @@ import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -77,6 +78,7 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
+import eu.akoos.photos.presentation.common.drawBlurredCover
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.MotionPhotoUtil
@@ -184,7 +186,8 @@ data class EditorAdjustments(
     val temperature: Int = 0,
     /** Green (+) / magenta (-) — shifts G up (or down). */
     val tone: Int = 0,
-    /** Radial edge shading: positive darkens the corners, negative lightens them. Drawn on the framed image. */
+    /** Radial edge shading: positive darkens the corners, negative lightens them. Drawn on the cropped
+     *  photo, inside any [frame]. */
     val vignette: Int = 0,
     /** Faded / matte look: positive lifts the black point and eases contrast, negative deepens it (punch). */
     val fade: Int = 0,
@@ -213,8 +216,8 @@ data class EditorAdjustments(
     val redactStrokes: List<RedactionStroke> = emptyList(),
     /** Oriented ellipses covering detected faces, composited alongside the redaction step. Coordinates
      *  are pixels of the ORIGINAL image (the unrotated, uncropped source the detection ran on), so they
-     *  stay valid through any later turn, flip, straighten, keystone or crop: the render carries each
-     *  one through that same geometry ([originalToRenderTransform]) in the preview and the save alike. */
+     *  stay valid through any later turn, flip, straighten, keystone, crop or frame: the render carries
+     *  each one through that same geometry ([originalToRenderTransform]) in the preview and the save alike. */
     val faceCovers: List<OvalSpec> = emptyList(),
     /** How the face covers obscure their area: a block mosaic or a heavy blur. */
     val faceCoverStyle: FaceCoverStyle = FaceCoverStyle.Pixelate,
@@ -231,6 +234,10 @@ data class EditorAdjustments(
     val drawStrokes: List<DrawStroke> = emptyList(),
     /** Text overlays (normalised), drawn last. */
     val textItems: List<TextItem> = emptyList(),
+    /** The frame around the photo: a canvas of its ratio, filled with a colour or a blur of the photo, with
+     *  the photo shrunk and placed on it ([FrameSpec]). Drawn after the vignette, so the redaction, face
+     *  covers, pen strokes and text land on the framed canvas. null = no frame. */
+    val frame: FrameSpec? = null,
 )
 
 /**
@@ -429,6 +436,27 @@ internal fun copyDefaultFormat(mimeType: String, displayName: String): Bitmap.Co
     }
 }
 
+/**
+ * [src] shrunk to [width] x [height] with its colours averaged rather than sampled. One filtered scale reads only
+ * the few pixels around each point it lands on, so a large reduction keeps whichever colours those happen to be,
+ * and a copy of another size would keep others. This scales once to [width] x [height] times the largest power of
+ * two, up to 8, that fits in [src] within 1024 pixels, then halves, each halving merging exactly four pixels into
+ * one. Hands back [src] itself when it already has that size and cannot change, as [Bitmap.createScaledBitmap] does.
+ */
+internal fun shrinkAveraged(src: Bitmap, width: Int, height: Int): Bitmap {
+    val long = maxOf(width, height)
+    var m = 1
+    while (m < 8 && width * m * 2 <= src.width && height * m * 2 <= src.height && long * m * 2 <= 1024) m *= 2
+    var out = Bitmap.createScaledBitmap(src, width * m, height * m, true)
+    while (m > 1) {
+        m /= 2
+        val next = Bitmap.createScaledBitmap(out, width * m, height * m, true)
+        if (out !== src && out !== next) out.recycle()
+        out = next
+    }
+    return out
+}
+
 @HiltViewModel
 class PhotoEditorViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -547,6 +575,33 @@ class PhotoEditorViewModel @Inject constructor(
      *  still the latest, so an older render (a slider release) can't land after and overwrite a newer one
      *  (a chip reset) once they race on the Default dispatcher. Bumped on the main thread only. */
     @Volatile private var renderGen = 0L
+
+    /** A frame gesture's tick for the preview: the edit to draw and the render token it was made under. */
+    private class LiveFrame(val adjustments: EditorAdjustments, val gen: Long)
+
+    /**
+     * The frame gesture's previews, one render at a time and always of the newest tick. A render is CPU work
+     * that a cancel cannot stop once it runs, so starting a job per tick, as the sliders do, would let a quick
+     * pinch start renders faster than they finish, each on a thread and a canvas of its own, and let one land
+     * after a newer one. The conflated channel holds only the tick not yet drawn, so a busy renderer goes
+     * straight to the latest; a tick from before a newer full render (a later token) is dropped.
+     */
+    private val liveFrames = Channel<LiveFrame>(Channel.CONFLATED)
+
+    init {
+        viewModelScope.launch(Dispatchers.Default) {
+            for (tick in liveFrames) {
+                val orig = _state.value.originalBitmap ?: continue
+                if (tick.gen != renderGen) continue
+                val preview = fastPreview(orig, tick.adjustments)
+                if (tick.gen == renderGen) {
+                    _state.update {
+                        it.copy(previewBitmap = preview, previewRedactStrokes = tick.adjustments.redactStrokes)
+                    }
+                }
+            }
+        }
+    }
 
     /** Build (or return cached) downsampled source for fast previews. Max edge 720px → ~5 ms/tick. */
     private fun ensureSmallSource(src: Bitmap): Bitmap {
@@ -927,6 +982,27 @@ class PhotoEditorViewModel @Inject constructor(
     fun selectFilter(filter: FilterPreset) = updateAdjustments { it.copy(filter = filter) }
     fun applyCrop(rect: Rect?) = updateAdjustments { it.copy(cropRect = rect) }
 
+    /** Puts [spec] around the photo as its frame, or takes the frame off with null: one undo entry and a
+     *  full render, for a shape or fill pick. */
+    fun setFrame(spec: FrameSpec?) = updateAdjustments { it.copy(frame = spec) }
+
+    /** One tick of a pinch or drag moving the photo in its frame: commits [spec] at once and renders it on the
+     *  fast path through [liveFrames], and [finalizeAdjustments] folds the whole gesture into one undo entry
+     *  when it ends. */
+    fun setFrameLive(spec: FrameSpec) {
+        if (_state.value.originalBitmap == null) return
+        val previous = _state.value.adjustments
+        if (sliderUndoSnapshot == null) {
+            sliderUndoSnapshot = previous
+            // A full render still in flight, the last gesture's or a chip's, would land over this gesture's
+            // live frames and put the photo back where it was; a new token drops it.
+            ++renderGen
+        }
+        val next = previous.copy(frame = spec)
+        _state.update { it.copy(adjustments = next) }
+        liveFrames.trySend(LiveFrame(next, renderGen))
+    }
+
     fun addRedactStroke(stroke: RedactionStroke) = updateAdjustments {
         it.copy(redactStrokes = it.redactStrokes + stroke)
     }
@@ -948,9 +1024,9 @@ class PhotoEditorViewModel @Inject constructor(
      * The detect runs on a copy of the ORIGINAL (unrotated, uncropped) source whose long edge is capped
      * so a large source never inflates ARGB_8888 past the heap, then each resulting oval is scaled UP to
      * original-image pixels and kept there. The render carries the covers through whatever turn, flip,
-     * straighten, keystone or crop the edit has (step 4b), before or after this runs, so the preview and
-     * the full-res save both put them on the faces. Committed through [updateAdjustments], so it is one
-     * undo entry and one re-render.
+     * straighten, keystone, crop or frame the edit has (step 4b), before or after this runs, so the
+     * preview and the full-res save both put them on the faces. Committed through [updateAdjustments], so
+     * it is one undo entry and one re-render.
      */
     fun detectFaces() {
         val orig = _state.value.originalBitmap ?: return
@@ -1364,19 +1440,22 @@ class PhotoEditorViewModel @Inject constructor(
         _state.update { it.copy(adjustments = newAdj) }
         sliderRenderJob?.cancel()
         sliderRenderJob = viewModelScope.launch(Dispatchers.Default) {
-            // Smooth small-source render, with the crop scaled down to match, so a live slider stays fast
-            // even after a crop. Redact strokes and face covers force the full-res path (their geometry is
-            // in full-res coordinates and the small source would drift it); that case is rare.
-            val newPreview = if (newAdj.redactStrokes.isEmpty() && newAdj.faceCovers.isEmpty()) {
-                val small = ensureSmallSource(orig)
-                val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
-                applyAdjustments(small, scaleCropForSmall(forPreview(newAdj), sc))
-            } else {
-                applyAdjustments(orig, forPreview(newAdj))
-            }
+            val newPreview = fastPreview(orig, newAdj)
             _state.update { it.copy(previewBitmap = newPreview, previewRedactStrokes = newAdj.redactStrokes) }
         }
     }
+
+    /** The preview a live control draws for [adj]: a smooth small-source render, with the crop scaled down
+     *  to match, so it stays fast even after a crop. Redact strokes and face covers force the full-res path
+     *  (their geometry is in full-res coordinates and the small source would drift it); that case is rare. */
+    private fun fastPreview(orig: Bitmap, adj: EditorAdjustments): Bitmap =
+        if (adj.redactStrokes.isEmpty() && adj.faceCovers.isEmpty()) {
+            val small = ensureSmallSource(orig)
+            val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
+            applyAdjustments(small, scaleCropForSmall(forPreview(adj), sc))
+        } else {
+            applyAdjustments(orig, forPreview(adj))
+        }
 
     /** Source dimensions after [adj]'s rotation (swapped on 90°/270°) — the display space the crop rect lives in. */
     private fun displayWidth(source: Bitmap, adj: EditorAdjustments): Int =
@@ -1443,6 +1522,72 @@ class PhotoEditorViewModel @Inject constructor(
         )
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.shader = shader }
         canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+    }
+
+    /**
+     * Step 3d: a [layout]-sized canvas that [fill] covers, with [picture] drawn into its photo box through
+     * [placement], the matrix the face covers follow onto the canvas. A blurred fill is [frameBackdrop]
+     * scaled to cover the whole canvas under a [FRAME_BLUR_SCRIM], so the sharp photo stands out on it; when
+     * the edit covers faces, [backdropCovers] is where each original point lands on [picture], and the
+     * backdrop carries the covers too.
+     */
+    private fun applyFrame(
+        picture: Bitmap,
+        layout: FrameCanvas,
+        fill: FrameFill,
+        placement: PlaneTransform,
+        backdropCovers: PlaneTransform?,
+        adj: EditorAdjustments,
+        recycleIntermediates: Boolean,
+    ): Bitmap {
+        val out = Bitmap.createBitmap(layout.width, layout.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        when (fill) {
+            is FrameFill.Solid -> canvas.drawColor(fill.argb)
+            FrameFill.Blur -> {
+                val backdrop = frameBackdrop(picture, layout, backdropCovers, adj, recycleIntermediates)
+                drawBlurredCover(
+                    canvas, paint, backdrop, 0f, 0f, layout.width.toFloat(), layout.height.toFloat(),
+                    workingLongSide = maxOf(backdrop.width, backdrop.height).toFloat(),
+                )
+                canvas.drawColor(FRAME_BLUR_SCRIM)
+                if (recycleIntermediates && !backdrop.isRecycled) backdrop.recycle()
+            }
+        }
+        canvas.drawBitmap(picture, Matrix().apply { setValues(placement.values()) }, paint)
+        return out
+    }
+
+    /**
+     * The small copy of [picture] a blurred fill is drawn from: [frameBlurSize] for [layout], shrunk with its
+     * colours averaged, then softened by [softenArgb] until no detail is left to compete with the photo. The
+     * size follows the frame's shape rather than its pixels, so the fast preview and the full-res save blur
+     * the same share of the frame. With [covers], where each original point lands on [picture], the edit's
+     * face covers go on before it softens.
+     */
+    private fun frameBackdrop(
+        picture: Bitmap,
+        layout: FrameCanvas,
+        covers: PlaneTransform?,
+        adj: EditorAdjustments,
+        recycleIntermediates: Boolean,
+    ): Bitmap {
+        val (w, h) = frameBlurSize(picture.width, picture.height, layout.width, layout.height)
+        val small = shrinkAveraged(picture, w, h)
+        val covered = if (covers == null) small else applyFaceCovers(
+            small, adj.faceCovers,
+            covers.then(PlaneTransform.scale(w.toDouble() / picture.width, h.toDouble() / picture.height)),
+            adj.faceCoverStyle, adj.faceCoverStrength, recycleIntermediates,
+        )
+        val pixels = IntArray(w * h)
+        covered.getPixels(pixels, 0, w, 0, 0, w, h)
+        // shrinkAveraged hands back [picture] itself when there is nothing to shrink.
+        if (covered !== small && !covered.isRecycled) covered.recycle()
+        if (small !== picture && !small.isRecycled) small.recycle()
+        return Bitmap.createBitmap(
+            softenArgb(pixels, w, h, FRAME_BLUR_RADIUS, FRAME_BLUR_PASSES), w, h, Bitmap.Config.ARGB_8888,
+        )
     }
 
     /**
@@ -1738,7 +1883,7 @@ class PhotoEditorViewModel @Inject constructor(
         recycle(rotated, geo)
 
         // 2. crop, clamped against the geometry bitmap's dimensions (display space). The origin it cuts
-        //    at is kept for step 4b, which carries the face covers through this same crop.
+        //    at is kept for the face covers, which are carried through this same crop.
         var cropLeft = 0
         var cropTop = 0
         val cropped = adj.cropRect?.let {
@@ -1773,7 +1918,8 @@ class PhotoEditorViewModel @Inject constructor(
         val toned = applyPixelEffects(colored, adj)
         recycle(colored, toned)
 
-        // 3c. vignette: radial edge shading on the framed image, before redaction so marks stay on top.
+        // 3c. vignette: radial edge shading on the cropped photo, inside any frame, before redaction so
+        //     marks stay on top.
         val vignetted = if (adj.vignette == 0) toned else {
             val out = Bitmap.createBitmap(toned.width, toned.height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(out)
@@ -1783,33 +1929,63 @@ class PhotoEditorViewModel @Inject constructor(
         }
         recycle(toned, vignetted)
 
-        // 4. redaction strokes cover the final visible content
-        val redacted = if (adj.redactStrokes.isEmpty()) vignetted
-            else applyRedactStrokes(vignetted, adj.redactStrokes, recycleIntermediates)
-        recycle(vignetted, redacted)
+        // Where a point of the original lands in this render once [placement] has put the picture on a
+        // frame's canvas. Face covers are kept in original-image pixels (where the detection found them),
+        // so this carries each through the very rotate / flip, straighten / keystone and crop the pixels
+        // took in steps 1 to 2. [source] is the original here: covers force the full-res render path.
+        fun coversToRender(placement: PlaneTransform) = originalToRenderTransform(
+            sourceWidth = source.width,
+            sourceHeight = source.height,
+            rotationDegrees = adj.rotationDegrees,
+            flipHorizontal = adj.flipHorizontal,
+            flipVertical = adj.flipVertical,
+            straighten = adj.straighten,
+            perspectiveV = adj.perspectiveV,
+            perspectiveH = adj.perspectiveH,
+            cropLeft = cropLeft,
+            cropTop = cropTop,
+            framePlacement = placement,
+        )
 
-        // 4b. face covers: oriented ellipses over detected faces. They are kept in original-image pixels
-        //     (where the detection found them), so each is carried through the very rotate / flip,
-        //     straighten / keystone and crop the pixels took in steps 1 to 2 and lands on its face, in
-        //     the preview and the full-res save alike. [source] is the original here: covers force the
-        //     full-res render path.
-        val faceCovered = if (adj.faceCovers.isEmpty()) redacted else {
-            val toRender = originalToRenderTransform(
-                sourceWidth = source.width,
-                sourceHeight = source.height,
-                rotationDegrees = adj.rotationDegrees,
-                flipHorizontal = adj.flipHorizontal,
-                flipVertical = adj.flipVertical,
-                straighten = adj.straighten,
-                perspectiveV = adj.perspectiveV,
-                perspectiveH = adj.perspectiveH,
-                cropLeft = cropLeft,
-                cropTop = cropTop,
-            )
-            applyFaceCovers(
-                redacted, adj.faceCovers, toRender, adj.faceCoverStyle, adj.faceCoverStrength, recycleIntermediates,
-            )
-        }
+        // 3d. frame: the picture so far shrinks onto a canvas of the frame's ratio, a colour or a blur of
+        //     itself filling the rest, and every later step draws on that canvas. frameCanvas lays it out
+        //     from fractions for this render's own size, so the small preview and the full-res save frame
+        //     alike, and holds the canvas's long side to FRAME_MAX_LONG_SIDE.
+        val frameSpec = adj.frame
+        val frameLayout = frameSpec?.let { frameCanvas(vignetted.width, vignetted.height, it) }
+        val framePlacement = frameLayout?.let { frameTransform(vignetted.width, vignetted.height, it.photo) }
+            ?: PlaneTransform.IDENTITY
+        val framed = if (frameSpec == null || frameLayout == null) vignetted else applyFrame(
+            picture = vignetted,
+            layout = frameLayout,
+            fill = frameSpec.fill,
+            placement = framePlacement,
+            // A blurred fill shows the picture again around the photo, so the faces the edit covers are
+            // covered there too.
+            backdropCovers = if (frameSpec.fill == FrameFill.Blur && adj.faceCovers.isNotEmpty()) {
+                coversToRender(PlaneTransform.IDENTITY)
+            } else {
+                null
+            },
+            adj = adj,
+            recycleIntermediates = recycleIntermediates,
+        )
+        recycle(vignetted, framed)
+
+        // 4. redaction strokes cover the final visible content. Their points are pixels of the displayed
+        //    image: the frame's canvas, when there is one.
+        val redacted = if (adj.redactStrokes.isEmpty()) framed
+            else applyRedactStrokes(framed, adj.redactStrokes, recycleIntermediates)
+        recycle(framed, redacted)
+
+        // 4b. face covers: oriented ellipses over detected faces, each drawn through [coversToRender] with
+        //     the frame's placement, so it lands on its face in the preview and the full-res save alike. A
+        //     frame holds them to its photo box.
+        val faceCovered = if (adj.faceCovers.isEmpty()) redacted else applyFaceCovers(
+            redacted, adj.faceCovers, coversToRender(framePlacement), adj.faceCoverStyle, adj.faceCoverStrength,
+            recycleIntermediates,
+            clip = frameLayout?.photo?.let { RectF(it.left, it.top, it.right, it.bottom) },
+        )
         recycle(redacted, faceCovered)
 
         // 5. pen strokes (normalised geometry, any resolution)
@@ -1916,6 +2092,8 @@ class PhotoEditorViewModel @Inject constructor(
      * [FaceCoverStyle.Pixelate] mosaics each face on its own bounded region with hard blocks sized to the
      * face, so memory stays small regardless of the image size. [FaceCoverStyle.Blur] builds one soft
      * downscale of the whole render and shows it only through the combined ovals. Strength drives both.
+     * [clip], a frame's photo box, stops a cover that reaches past the photo's edge at that edge, so it
+     * never spills onto the border around the photo.
      */
     private fun applyFaceCovers(
         src: Bitmap,
@@ -1924,12 +2102,14 @@ class PhotoEditorViewModel @Inject constructor(
         style: FaceCoverStyle,
         strength: Float,
         recycleIntermediates: Boolean = false,
+        clip: RectF? = null,
     ): Bitmap {
         if (covers.isEmpty()) return src
         val w = src.width
         val h = src.height
         val out = src.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(out)
+        clip?.let { canvas.clipRect(it) }
 
         val s = strength.coerceIn(0f, 1f)
         val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK }
@@ -2162,8 +2342,24 @@ class PhotoEditorViewModel @Inject constructor(
             // save). Off-screen, so intermediates are safe to recycle. Then apply the export size choice.
             // adjustments is the committed edit, never the preview's: a face cover or stroke whose
             // preview render is still in flight is already in it, so the save carries it.
-            val rendered = applyAdjustments(orig, adjustments, recycleIntermediates = true)
-            val bitmap = if (maxDim != null) downscaleToMax(rendered, maxDim) else rendered
+            // A frame renders a canvas larger than the photo, so this can run out of memory where the photo
+            // alone would not; the save then fails on the low-memory message instead of crashing the app.
+            val bitmap = try {
+                val rendered = applyAdjustments(orig, adjustments, recycleIntermediates = true)
+                if (maxDim != null) downscaleToMax(rendered, maxDim) else rendered
+            } catch (oom: OutOfMemoryError) {
+                // Free the image cache FIRST so the error path itself has headroom to run.
+                context.imageLoader.memoryCache?.clear()
+                eu.akoos.photos.util.PerfDiagnostics.recordOom("editor-save")
+                _state.update { it.copy(
+                    isSaving = false,
+                    saveResult = SaveResult.Failed(
+                        context.getString(R.string.editor_error_low_memory),
+                        asDialog = true,
+                    ),
+                ) }
+                return@launch
+            }
             // One timestamp shared by the device save AND the cloud upload so they get the same filename;
             // reconcile's byNameAndDate then pairs them as Synced without a download. Only the FILENAME
             // stamp uses the edit instant; the saved DATE is the original capture time (below).

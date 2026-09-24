@@ -2037,6 +2037,10 @@
     <string name="editor_tool_color">Kleur</string>
     <string name="editor_tool_draw">Tekenen</string>
     <string name="editor_tool_text">Tekst</string>
+    <string name="editor_tool_frame">Kader</string>
+    <string name="editor_frame_none">Geen</string>
+    <string name="editor_frame_polaroid">Polaroid</string>
+    <string name="editor_frame_hint">Knijp om het formaat van de foto te wijzigen, sleep om te verplaatsen</string>
 
     <!-- Video editor -->
     <string name="video_editor_frame_failed">Kon het frame niet opslaan</string>

@@ -2047,6 +2047,10 @@
     <string name="editor_tool_color">Color</string>
     <string name="editor_tool_draw">Dibujar</string>
     <string name="editor_tool_text">Texto</string>
+    <string name="editor_tool_frame">Marco</string>
+    <string name="editor_frame_none">Ninguno</string>
+    <string name="editor_frame_polaroid">Polaroid</string>
+    <string name="editor_frame_hint">Pellizca para redimensionar la foto, arrastra para moverla</string>
     <string name="video_editor_frame_failed">No se pudo guardar el fotograma</string>
     <string name="video_editor_split">Dividir</string>
     <string name="video_editor_remove_section">Quitar sección</string>

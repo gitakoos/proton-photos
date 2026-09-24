@@ -36,6 +36,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.drawBlurredCover
 import eu.akoos.photos.util.ProtonPhotosStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -581,43 +582,6 @@ class CollageViewModel @Inject constructor(
         val saved = runCatching { saveToMediaStore(out, name) }.isSuccess
         out.recycle()
         saved
-    }
-
-    /** Fills the cell with a heavily blurred copy of the photo (a downscale then upscale, a cheap blur
-     *  that needs no API-31 RenderEffect), so a zoomed-out photo sits on its own frosted backdrop. */
-    private fun drawBlurredCover(
-        canvas: android.graphics.Canvas,
-        paint: Paint,
-        bmp: Bitmap,
-        left: Float,
-        top: Float,
-        cellW: Float,
-        cellH: Float,
-    ) {
-        val iw = bmp.width.toFloat()
-        val ih = bmp.height.toFloat()
-        if (iw <= 0f || ih <= 0f) return
-        // Downscale to a working size relative to the DESTINATION (not the source), then upscale to
-        // cover. This keeps recognisable soft shapes instead of the pixelated smear a fixed 1/24 source
-        // downscale produced (which read as a blurred thumbnail), and holds a steady blur strength no
-        // matter the source or output resolution.
-        val targetLong = (maxOf(cellW, cellH) / 10f).coerceIn(96f, 320f)
-        val srcScale = (targetLong / maxOf(iw, ih)).coerceAtMost(1f)
-        val tw = (iw * srcScale).roundToInt().coerceAtLeast(2)
-        val th = (ih * srcScale).roundToInt().coerceAtLeast(2)
-        val tiny = runCatching { Bitmap.createScaledBitmap(bmp, tw, th, true) }.getOrNull() ?: return
-        val cover = maxOf(cellW / iw, cellH / ih)
-        val drawW = iw * cover
-        val drawH = ih * cover
-        val matrix = Matrix().apply {
-            setScale(drawW / tw, drawH / th)
-            postTranslate(left + cellW / 2f - drawW / 2f, top + cellH / 2f - drawH / 2f)
-        }
-        canvas.save()
-        canvas.clipRect(left, top, left + cellW, top + cellH)
-        canvas.drawBitmap(tiny, matrix, paint)
-        canvas.restore()
-        tiny.recycle()
     }
 
     /** Draw a freeform photo whole (never cropped): its long side is [t].scale of the canvas width,

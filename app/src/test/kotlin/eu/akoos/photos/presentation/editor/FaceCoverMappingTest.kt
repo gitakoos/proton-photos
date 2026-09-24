@@ -35,11 +35,11 @@ import kotlin.math.sin
 
 /**
  * Pins where a face cover lands. Covers are found on the original, unrotated and uncropped photo, and
- * the render then turns, mirrors, straightens, keystones and crops the pixels; a cover drawn anywhere but
- * on the pixels its face moved to leaves that face uncovered in the saved photo. These tests check the
- * mapping against plain pixel indexing (where a quarter turn or a flip stores each pixel), the documented
- * straighten and keystone geometry, and the crop origin, and that the region a cover is drawn in holds
- * the whole carried-over oval.
+ * the render then turns, mirrors, straightens, keystones, crops and frames the pixels; a cover drawn
+ * anywhere but on the pixels its face moved to leaves that face uncovered in the saved photo. These tests
+ * check the mapping against plain pixel indexing (where a quarter turn or a flip stores each pixel), the
+ * documented straighten and keystone geometry, the crop origin and the frame's photo box, and that the
+ * region a cover is drawn in holds the whole carried-over oval.
  */
 class FaceCoverMappingTest {
 
@@ -64,8 +64,9 @@ class FaceCoverMappingTest {
         perspectiveH: Int = 0,
         cropLeft: Int = 0,
         cropTop: Int = 0,
+        framePlacement: PlaneTransform = PlaneTransform.IDENTITY,
     ): PlaneTransform = originalToRenderTransform(
-        w, h, rotation, flipH, flipV, straighten, perspectiveV, perspectiveH, cropLeft, cropTop,
+        w, h, rotation, flipH, flipV, straighten, perspectiveV, perspectiveH, cropLeft, cropTop, framePlacement,
     )
 
     /**
@@ -306,6 +307,31 @@ class FaceCoverMappingTest {
             val warped = warp.at(turned.x, turned.y)
             assertPoint("($x, $y)", warped.x - 25.0, warped.y - 60.0, t.at(x, y), 1e-6)
         }
+    }
+
+    @Test
+    fun `a frame carries every point into the photo box the picture is drawn in`() {
+        // A quarter turn makes the 640 x 480 photo 480 x 640, and the crop keeps 400 x 300 of that from
+        // (40, 30). Half size in a 9:16 frame, against the right edge and halfway from the centre to the
+        // top: a 200 x 150 box on a 400 x 711 canvas.
+        val cropW = 400
+        val cropH = 300
+        val box = frameCanvas(
+            cropW, cropH, FrameSpec(FrameRatio.NineSixteen, scale = 0.5f, offsetX = 1f, offsetY = -0.5f),
+        ).photo
+        val t = chain(
+            640, 480, rotation = 90, cropLeft = 40, cropTop = 30,
+            framePlacement = frameTransform(cropW, cropH, box),
+        )
+        // The turn stores (x, y) at (480 - y, x) and the crop origin comes off, so these three original
+        // points are the crop's top-left corner, its bottom-right corner and its centre.
+        assertPoint("top-left", box.left.toDouble(), box.top.toDouble(), t.at(30.0, 440.0), 1e-3)
+        assertPoint("bottom-right", box.right.toDouble(), box.bottom.toDouble(), t.at(330.0, 40.0), 1e-3)
+        assertPoint(
+            "centre", (box.left + box.right) / 2.0, (box.top + box.bottom) / 2.0, t.at(180.0, 240.0), 1e-3,
+        )
+        // The box keeps the picture's shape at half its size, so a face and its mosaic blocks halve too.
+        assertEquals(30f, coverSpanInRender(OvalSpec(180f, 240f, 30f, 45f, 20f), t), 1e-3f)
     }
 
     @Test

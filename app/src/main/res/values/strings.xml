@@ -242,6 +242,11 @@
     <string name="editor_text_delete">Delete</string>
     <string name="editor_text_hint">Add text, then drag it to move and pinch to resize</string>
     <string name="editor_text_resize_hint">Drag to move, pinch to resize</string>
+    <!-- Frame tab. Blur reuses collage_bg_blur and Original reuses editor_filter_original; Polaroid is a name. -->
+    <string name="editor_tool_frame">Frame</string>
+    <string name="editor_frame_none">None</string>
+    <string name="editor_frame_polaroid">Polaroid</string>
+    <string name="editor_frame_hint">Pinch to resize the photo, drag to move it</string>
     <!-- Filter preset labels under the Filter tab. -->
     <string name="editor_filter_original">Original</string>
     <string name="editor_filter_bw">B&amp;W</string>

@@ -232,11 +232,23 @@ internal fun geometryTransform(
 }
 
 /**
+ * The render's frame step: the whole [imageWidth] x [imageHeight] picture drawn into [photo] on the
+ * frame's canvas, the scale and shift Canvas.drawBitmap applies to a bitmap drawn into that rectangle. The
+ * pixel step and the face-cover mapping both use this one matrix.
+ */
+internal fun frameTransform(imageWidth: Int, imageHeight: Int, photo: FrameRect): PlaneTransform =
+    PlaneTransform.scale(
+        photo.width.toDouble() / imageWidth.coerceAtLeast(1),
+        photo.height.toDouble() / imageHeight.coerceAtLeast(1),
+    ).then(PlaneTransform.translate(photo.left.toDouble(), photo.top.toDouble()))
+
+/**
  * Where a point of the ORIGINAL image lands in the rendered photo: through the rotate + flip step, the
- * straighten + keystone warp, then the crop, the chain the render moves the pixels through. Face covers
- * stay in original-image pixels (where they were detected), so drawing each through this puts it on its
- * face however the photo was turned, mirrored, straightened or cropped. [cropLeft] / [cropTop] are the
- * origin the render actually cut the crop at, zero when it did not crop.
+ * straighten + keystone warp, the crop, then onto a frame's canvas, the chain the render moves the pixels
+ * through. Face covers stay in original-image pixels (where they were detected), so drawing each through
+ * this puts it on its face however the photo was turned, mirrored, straightened, cropped or framed.
+ * [cropLeft] / [cropTop] are the origin the render actually cut the crop at, zero when it did not crop,
+ * and [framePlacement] is the [frameTransform] the frame step drew the picture with, identity with no frame.
  */
 internal fun originalToRenderTransform(
     sourceWidth: Int,
@@ -249,12 +261,15 @@ internal fun originalToRenderTransform(
     perspectiveH: Int,
     cropLeft: Int,
     cropTop: Int,
+    framePlacement: PlaneTransform = PlaneTransform.IDENTITY,
 ): PlaneTransform {
     val turn = rotateFlipTransform(sourceWidth, sourceHeight, rotationDegrees, flipHorizontal, flipVertical)
     val (turnedWidth, turnedHeight) = rotatedSize(sourceWidth, sourceHeight, rotationDegrees)
     val warp = geometryTransform(turnedWidth, turnedHeight, straighten, perspectiveV, perspectiveH)
         ?: PlaneTransform.IDENTITY
-    return turn.then(warp).then(PlaneTransform.translate(-cropLeft.toDouble(), -cropTop.toDouble()))
+    return turn.then(warp)
+        .then(PlaneTransform.translate(-cropLeft.toDouble(), -cropTop.toDouble()))
+        .then(framePlacement)
 }
 
 /**
