@@ -145,6 +145,7 @@ import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOnForCloudPhotos
 import eu.akoos.photos.presentation.common.offlineTurnsOn
 import eu.akoos.photos.presentation.common.photoDateSections
+import eu.akoos.photos.presentation.common.rememberGroupingPinchModifier
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.presentation.theme.Accent
@@ -504,17 +505,21 @@ fun AlbumDetailScreen(
     // has to lay out under the headers it was saved with from the first frame, before the preference
     // has loaded.
     var photoGrouping by rememberSaveable { mutableStateOf(AlbumPhotoGrouping.Default) }
+    // A pinch on the grid regroups for this visit only, until a drawer pick replaces it. Saved state
+    // for the same reason; a fresh open starts from the saved choice.
+    var visitGrouping by rememberSaveable { mutableStateOf<AlbumPhotoGrouping?>(null) }
+    val shownGrouping = visitGrouping ?: photoGrouping
     LaunchedEffect(Unit) {
         shareCtx.settingsDataStore.data
             .map { AlbumPhotoGrouping.fromOrdinal(it[SettingsKeys.ALBUM_PHOTO_GROUPING]) }
             .collect { photoGrouping = it }
     }
-    // Group photos under those headers, on the same capture time the rest of the app groups that
+    // Group photos under the headers shown, on the same capture time the rest of the app groups that
     // photo by: a member whose Drive captureTime is sub-floor reads its device twin's date. The twin
     // comes from the map the ViewModel already holds, so the lambda only does a hash lookup per row.
     // Each photo keeps its position so the viewer opens the right one.
-    val photoGroups = remember(state.photos, state.localItemByLinkId, photoGrouping) {
-        photoDateSections(state.photos, photoGrouping) {
+    val photoGroups = remember(state.photos, state.localItemByLinkId, shownGrouping) {
+        photoDateSections(state.photos, shownGrouping) {
             AlbumPhotoItems.captureTimeMs(it, state.localItemByLinkId[it.linkId])
         }
     }
@@ -573,6 +578,16 @@ fun AlbumDetailScreen(
             leadingSlots = 1,
             keyOf = { it.value.linkId },
         )
+        // Two fingers step the headers between Year, Month and Day for this visit. Chained after
+        // drag-select, as on the timeline.
+        val groupingPinch = rememberGroupingPinchModifier(
+            gridState = gridState,
+            grouping = shownGrouping,
+            onGroupingChange = { visitGrouping = it },
+            groups = returnGroups,
+            leadingSlots = 1,
+            keyOf = { it.value.linkId },
+        )
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
             state = gridState,
@@ -586,7 +601,7 @@ fun AlbumDetailScreen(
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            modifier = Modifier.fillMaxSize().then(dragSelectModifier),
+            modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(groupingPinch),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 val headerVideoCount = state.photos.count { it.mimeType.startsWith("video/") }
@@ -1291,6 +1306,7 @@ fun AlbumDetailScreen(
                 }
             },
             onGroupingSelected = { grouping ->
+                visitGrouping = grouping
                 scope.launch {
                     shareCtx.settingsDataStore.edit {
                         it[SettingsKeys.ALBUM_PHOTO_GROUPING] = grouping.ordinal

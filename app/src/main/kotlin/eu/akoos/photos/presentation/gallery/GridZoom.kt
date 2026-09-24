@@ -48,7 +48,8 @@ import kotlin.math.max
 /**
  * Shared zoom ladder for the photo grid. The timeline pinch-zooms through [LEVELS] (a column
  * count + date grouping per step); the album / device-folder / hidden grids use a fixed column
- * count from the grid-layout preference. One source of truth so GalleryGrid (pinch),
+ * count from the grid-layout preference, and a pinch on the album and device-folder grids steps
+ * their date headers only, keeping that count. One source of truth so GalleryGrid (pinch),
  * GalleryViewModel (opening level + persistence) and the grid-layout settings page all agree.
  */
 object GridZoom {
@@ -81,8 +82,9 @@ object GridZoom {
 }
 
 /**
- * Live fixed-default column count for the album / device-folder / hidden grids. These grids have
- * no pinch zoom, so they always follow the grid-layout default rather than a remembered level.
+ * Live fixed-default column count for the album / device-folder / hidden grids. They always follow
+ * the grid-layout default rather than a remembered level: a pinch on the album and device-folder
+ * grids steps their date headers only and keeps this column count.
  */
 @Composable
 fun rememberDefaultGridColumns(): Int {

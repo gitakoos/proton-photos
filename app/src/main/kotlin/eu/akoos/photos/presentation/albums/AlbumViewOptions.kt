@@ -41,7 +41,9 @@ import eu.akoos.photos.presentation.gallery.FilterChip
  * title, so its first heading carries no gap of its own.
  *
  * A pick applies in place and leaves the drawer up, as the filter sheets' chips do, so both choices
- * can be made in one visit. The grouping row shows only where [onGroupingSelected] is given.
+ * can be made in one visit. The grouping row shows only where [onGroupingSelected] is given. Its
+ * marked chip is the saved grouping, which a pinch on the grid can leave for the rest of a visit, so
+ * a tap on the marked chip is passed on as well, for the screen to bring the grid back to it.
  */
 @Composable
 internal fun AlbumViewOptions(
@@ -70,18 +72,20 @@ internal fun AlbumViewOptions(
                 ),
                 current = grouping,
                 onSelected = onGroupingSelected,
+                reselectable = true,
             )
         }
     }
 }
 
 /** One choice as chips that wrap rather than clip, since a translated label can overrun a narrow
- *  screen. The chip already in force takes no action on a second tap. */
+ *  screen. The chip already in force takes no action on a second tap unless [reselectable]. */
 @Composable
 private fun <T> ChoiceChipRow(
     options: List<Pair<T, String>>,
     current: T,
     onSelected: (T) -> Unit,
+    reselectable: Boolean = false,
 ) {
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -92,7 +96,7 @@ private fun <T> ChoiceChipRow(
             FilterChip(
                 label = label,
                 selected = isCurrent,
-                onClick = { if (!isCurrent) onSelected(option) },
+                onClick = { if (reselectable || !isCurrent) onSelected(option) },
                 modifier = Modifier.semantics { selected = isCurrent },
             )
         }

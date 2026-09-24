@@ -80,6 +80,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -94,6 +95,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.albums.AlbumPhotoGrouping
 import eu.akoos.photos.presentation.albums.AlbumRenameInput
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.EditFieldSheet
@@ -108,6 +110,7 @@ import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.anyMetadataEditable
 import eu.akoos.photos.presentation.common.photoDateSections
+import eu.akoos.photos.presentation.common.rememberGroupingPinchModifier
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
@@ -213,9 +216,12 @@ fun DeviceFolderDetailScreen(
     // Which direction the drawer's sort entries tick. The ViewModel reads the same preference for
     // the order itself, so this only has to say which one is active.
     val sortMode by viewModel.sortMode.collectAsStateWithLifecycle()
-    // The span of dates each header gathers, which the drawer's grouping entries tick too. Taken from
-    // the ViewModel so a grid coming back from the viewer lays out under the headers it scrolled with.
-    val photoGrouping by viewModel.grouping.collectAsStateWithLifecycle()
+    // The span of dates each header gathers. The drawer's grouping entries tick and save the
+    // ViewModel's copy; a pinch on the grid overrides it until the folder is left. Both outlive the
+    // trip to the viewer, so a grid coming back lays out under the headers it scrolled with.
+    val savedGrouping by viewModel.grouping.collectAsStateWithLifecycle()
+    var visitGrouping by rememberSaveable { mutableStateOf<AlbumPhotoGrouping?>(null) }
+    val photoGrouping = visitGrouping ?: savedGrouping
 
     // Move the selection into another device folder, and rename this folder in place. Both are
     // logged-out, device-data actions; the picker's targets and the move consent ride the shared host.
@@ -461,6 +467,16 @@ fun DeviceFolderDetailScreen(
             leadingSlots = 1,
             keyOf = { it.value.stableId },
         )
+        // Pinching steps the date headers for this visit. It finds a photo under the key its cell is
+        // emitted with, the one drag-select sweeps, rather than the gallery identity above.
+        val pinchModifier = rememberGroupingPinchModifier(
+            gridState = gridState,
+            grouping = photoGrouping,
+            onGroupingChange = { visitGrouping = it },
+            groups = returnGroups,
+            leadingSlots = 1,
+            keyOf = { selectableKeys[it.index] },
+        )
         LazyVerticalGrid(
             columns = GridCells.Fixed(cols),
             state = gridState,
@@ -474,7 +490,7 @@ fun DeviceFolderDetailScreen(
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            modifier = Modifier.fillMaxSize().then(dragSelectModifier),
+            modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(pinchModifier),
         ) {
             // Hero header — cover, folder name and count, like the cloud-album detail page.
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -1142,7 +1158,7 @@ fun DeviceFolderDetailScreen(
             isHiddenCard = isHiddenCard,
             isSignedIn = isSignedIn,
             sortMode = sortMode,
-            grouping = photoGrouping,
+            grouping = savedGrouping,
             onDismiss = { showFolderOverflow = false },
             onBackUp = if (hasPhotos) ({ asMirror -> backUpFolder(asMirror) }) else null,
             onToggleMirrorAsAlbum = viewModel::toggleMirrorAsAlbum,
@@ -1159,7 +1175,11 @@ fun DeviceFolderDetailScreen(
             // current sort order.
             onSlideshow = if (hasPhotos) ({ onSlideshowClick(items) }) else null,
             onSortSelected = viewModel::setSortMode,
-            onGroupingSelected = viewModel::setGrouping,
+            // Saved and shown at once, so a tap on the marked chip also undoes a pinch.
+            onGroupingSelected = { grouping ->
+                viewModel.setGrouping(grouping)
+                visitGrouping = grouping
+            },
             // Logged-out only; the row renders behind the same gate in the sheet.
             onRename = { showRenameSheet = true },
         )

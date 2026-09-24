@@ -89,6 +89,24 @@ enum class AlbumPhotoGrouping {
 }
 
 /**
+ * The steps a pinch on an album or device-folder grid moves its headers through, widest span first
+ * as on the timeline: spreading the fingers steps towards [AlbumPhotoGrouping.Day], pinching them
+ * together towards [AlbumPhotoGrouping.Year].
+ *
+ * Its own list, because the enum order is the persisted one and does not run from wide to fine.
+ */
+object AlbumGroupingLadder {
+
+    val levels: List<AlbumPhotoGrouping> =
+        listOf(AlbumPhotoGrouping.Year, AlbumPhotoGrouping.Month, AlbumPhotoGrouping.Day)
+
+    fun levelOf(grouping: AlbumPhotoGrouping): Int = levels.indexOf(grouping)
+
+    /** The grouping at [level], a step past either end staying on that end. */
+    fun atLevel(level: Int): AlbumPhotoGrouping = levels[level.coerceIn(0, levels.lastIndex)]
+}
+
+/**
  * Turns an album member into the same [GalleryItem] every other surface builds for that photo, so the
  * album's date headers, order, scrubber, scroll pill and viewer read one capture time and one set of
  * file facts rather than the raw Drive values.

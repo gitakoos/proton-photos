@@ -27,6 +27,7 @@ import eu.akoos.photos.presentation.util.dayMonthYearFormat
 import eu.akoos.photos.presentation.util.monthYearFormat
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -44,8 +45,10 @@ import java.util.TimeZone
  * Month is what both screens have always shown, so it has to read exactly as the grouping they run
  * today, labels and order alike. Every grouping keeps each photo's position in the list, since the
  * viewer opens on it, and keeps each section of a sorted list in one run whichever way the list is
- * sorted. The locale and zone are fixed so the labels read the same on any machine. Plain JVM
- * assertions, no Android.
+ * sorted. The sections are gathered on a per-photo date key and one label per key, which must come
+ * out exactly as formatting every photo and gathering on the label would: same labels, same order,
+ * same positions, across zones, locales and their calendars. The locale and zone are fixed so the
+ * labels read the same on any machine. Plain JVM assertions, no Android.
  */
 class PhotoDateSectionsTest {
 
@@ -238,5 +241,124 @@ class PhotoDateSectionsTest {
         for (grouping in AlbumPhotoGrouping.entries) {
             assertEquals(grouping, AlbumPhotoGrouping.fromOrdinal(grouping.ordinal))
         }
+    }
+
+    // ── One label per key, exactly as one label per photo ──────────────────────────────────────
+
+    /** The reference: every photo formatted on its own, sections gathered on the label. */
+    private fun formattedPerPhoto(
+        items: List<Long>,
+        grouping: AlbumPhotoGrouping,
+        locale: Locale,
+        zone: TimeZone,
+    ): Map<String, List<IndexedValue<Long>>> {
+        val fmt = when (grouping) {
+            AlbumPhotoGrouping.Month -> monthYearFormat(locale)
+            AlbumPhotoGrouping.Day -> dayMonthYearFormat(locale)
+            AlbumPhotoGrouping.Year -> SimpleDateFormat("yyyy", locale)
+        }
+        fmt.timeZone = zone
+        return items.withIndex().groupBy { fmt.format(Date(it.value)) }
+    }
+
+    private fun assertSameAsFormattedPerPhoto(
+        items: List<Long>,
+        grouping: AlbumPhotoGrouping,
+        locale: Locale,
+        zone: TimeZone,
+    ) {
+        val expected = formattedPerPhoto(items, grouping, locale, zone)
+        val actual = photoDateSections(items, grouping, locale, zone) { it }
+        val where = "$grouping ${locale.toLanguageTag()} ${zone.id}"
+        assertEquals(where, expected.keys.toList(), actual.keys.toList())
+        assertEquals(where, expected, actual)
+    }
+
+    /** Capture times that sit on the edges a key could get wrong: every 29 minutes through a year
+     *  change, both daylight-saving changes, a leap day and a Japanese era change, a millisecond
+     *  either side of midnight, no capture time at all, before 1970, and a seeded spread over two
+     *  centuries, in the order made. */
+    private fun edgeTimes(): List<Long> {
+        val times = ArrayList<Long>()
+        val windows = listOf(
+            at(2025, 12, 30) to at(2026, 1, 2),
+            at(2026, 3, 27) to at(2026, 3, 31),
+            at(2026, 10, 23) to at(2026, 10, 27),
+            at(2024, 2, 27) to at(2024, 3, 2),
+            at(2019, 4, 29) to at(2019, 5, 3),
+        )
+        for ((start, end) in windows) {
+            var t = start
+            while (t < end) {
+                times += t
+                t += 29 * 60_000L
+            }
+        }
+        val midnight = at(2026, 5, 1, hour = 0)
+        times += listOf(midnight - 1, midnight, 0L, -1L, at(1969, 12, 31, hour = 23), at(1900, 1, 1))
+        val random = java.util.Random(7)
+        val from = at(1900, 1, 1)
+        val span = at(2100, 1, 1) - from
+        repeat(400) { times += from + (random.nextDouble() * span).toLong() }
+        return times
+    }
+
+    @Test
+    fun `keyed sections read exactly as formatting every photo, in every order, zone and locale`() {
+        val made = edgeTimes()
+        val orders = listOf(made, made.sortedDescending(), made.sorted())
+        val zones = listOf(
+            "UTC", "Europe/Budapest", "America/Sao_Paulo", "Asia/Kolkata", "Pacific/Chatham",
+            "America/St_Johns",
+        ).map { TimeZone.getTimeZone(it) }
+        // English and German month names, Hungarian's year-first order, the Thai locale's Buddhist
+        // calendar and a Japanese imperial one, whose years count from each era.
+        val locales = listOf(
+            Locale.UK,
+            Locale.GERMANY,
+            Locale.forLanguageTag("hu-HU"),
+            Locale.forLanguageTag("th-TH"),
+            Locale.forLanguageTag("ja-JP-u-ca-japanese"),
+        )
+        for (grouping in AlbumPhotoGrouping.entries) {
+            for (zone in zones) {
+                for (locale in locales) {
+                    for (items in orders) assertSameAsFormattedPerPhoto(items, grouping, locale, zone)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a large library groups exactly as formatting every photo, newest or oldest first`() {
+        // Twenty thousand photos, one every five hours and a bit, so runs of one day, month and year
+        // follow each other the way a big folder's do.
+        val oldestFirst = List(20_000) { at(2015, 1, 1) + it * 18_061_000L }
+        val budapest = TimeZone.getTimeZone("Europe/Budapest")
+        for (grouping in AlbumPhotoGrouping.entries) {
+            for (items in listOf(oldestFirst, oldestFirst.reversed())) {
+                assertSameAsFormattedPerPhoto(items, grouping, Locale.UK, budapest)
+            }
+        }
+    }
+
+    @Test
+    fun `a key holds exactly the span its grouping gathers`() {
+        fun key(grouping: AlbumPhotoGrouping, year: Int, month: Int, day: Int, era: Int = 1) =
+            photoDateKey(grouping, era = era, year = year, month = month, day = day)
+
+        // A year is one key whatever the month and day.
+        assertEquals(key(AlbumPhotoGrouping.Year, 2026, 0, 1), key(AlbumPhotoGrouping.Year, 2026, 11, 31))
+        assertNotEquals(key(AlbumPhotoGrouping.Year, 2025, 11, 31), key(AlbumPhotoGrouping.Year, 2026, 0, 1))
+        // A month is one key whatever the day, and the next month is another.
+        assertEquals(key(AlbumPhotoGrouping.Month, 2026, 2, 1), key(AlbumPhotoGrouping.Month, 2026, 2, 31))
+        assertNotEquals(key(AlbumPhotoGrouping.Month, 2026, 2, 31), key(AlbumPhotoGrouping.Month, 2026, 3, 1))
+        assertNotEquals(key(AlbumPhotoGrouping.Month, 2025, 11, 1), key(AlbumPhotoGrouping.Month, 2026, 11, 1))
+        // Every day is its own key, across a month end and a year end too.
+        assertNotEquals(key(AlbumPhotoGrouping.Day, 2026, 2, 5), key(AlbumPhotoGrouping.Day, 2026, 2, 6))
+        assertNotEquals(key(AlbumPhotoGrouping.Day, 2026, 0, 31), key(AlbumPhotoGrouping.Day, 2026, 1, 1))
+        assertNotEquals(key(AlbumPhotoGrouping.Day, 2025, 11, 31), key(AlbumPhotoGrouping.Day, 2026, 0, 1))
+        // The same year of two eras is two keys.
+        assertNotEquals(key(AlbumPhotoGrouping.Year, 5, 0, 1, era = 0), key(AlbumPhotoGrouping.Year, 5, 0, 1, era = 1))
     }
 }
