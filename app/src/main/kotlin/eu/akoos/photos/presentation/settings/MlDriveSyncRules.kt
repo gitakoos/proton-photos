@@ -186,12 +186,12 @@ internal data class MlRemoteDevice(
 internal fun remoteDevices(snapshots: List<MlRemoteSnapshot>): List<MlRemoteDevice> =
     snapshots.groupBy { it.deviceId }
         .map { (deviceId, files) ->
-            val newestFirst = files.sortedByDescending { it.serverModifiedAtMs }
+            val newestFirst = files.sortedByDescending { it.savedAtMs }
             MlRemoteDevice(
                 deviceId = deviceId,
                 name = deviceName(newestFirst),
                 kinds = newestFirst.mapTo(mutableSetOf()) { it.kind },
-                savedAtMs = newestFirst.first().serverModifiedAtMs,
+                savedAtMs = newestFirst.first().savedAtMs,
                 sizeBytes = newestFirst.sumOf { it.sizeBytes.coerceAtLeast(0L) },
                 files = newestFirst,
             )

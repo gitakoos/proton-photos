@@ -288,6 +288,9 @@ internal class MlSyncTally(private val operation: MlSyncOperation, filesTotal: I
 /**
  * One snapshot in the Drive ML data folder, as the restore list shows it: its [kind], the install that wrote
  * it ([deviceId], [isThisDevice]), when the server stored it and its size, and the revision a restore reads.
+ * [savedAtMs] is when the saving install wrote it, by its own clock, and the time the list shows: the
+ * revision time the Drive SDK reports runs early by the device's offset from UTC, so it only stands in
+ * for a file uploaded without a modification time.
  * [deviceLabel] is this device's label on its own snapshots and null on another install's, whose label sits
  * inside the sealed snapshot and is not known before a download.
  */
@@ -299,6 +302,7 @@ data class MlRemoteSnapshot(
     val serverModifiedAtMs: Long,
     val sizeBytes: Long,
     val revisionUid: String,
+    val savedAtMs: Long = serverModifiedAtMs,
 )
 
 /** The restore list's entries for [picks], [MlDriveNaming.selectForImport]'s choice, in its order. */
@@ -316,5 +320,6 @@ internal fun remoteSnapshots(
         serverModifiedAtMs = pick.file.serverModifiedAtMs,
         sizeBytes = pick.file.sizeBytes,
         revisionUid = pick.file.activeRevisionUid,
+        savedAtMs = pick.file.claimedModifiedAtMs ?: pick.file.serverModifiedAtMs,
     )
 }

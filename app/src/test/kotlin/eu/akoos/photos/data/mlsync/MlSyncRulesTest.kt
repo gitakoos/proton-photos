@@ -357,11 +357,31 @@ class MlSyncRulesTest {
         val entries = remoteSnapshots(listOf(pick(FACES, other), pick(SEARCH, own)), own, "Model X")
         assertEquals(
             listOf(
-                MlRemoteSnapshot(FACES, other, isThisDevice = false, deviceLabel = null, 42L, 2_048L, "rev-$other-FACES"),
-                MlRemoteSnapshot(SEARCH, own, isThisDevice = true, deviceLabel = "Model X", 42L, 2_048L, "rev-$own-SEARCH"),
+                MlRemoteSnapshot(FACES, other, isThisDevice = false, deviceLabel = null, 42L, 2_048L, "rev-$other-FACES", savedAtMs = 40L),
+                MlRemoteSnapshot(SEARCH, own, isThisDevice = true, deviceLabel = "Model X", 42L, 2_048L, "rev-$own-SEARCH", savedAtMs = 40L),
             ),
             entries,
         )
+    }
+
+    @Test
+    fun `the listing shows the saving install's own time and falls back to the server time without one`() {
+        val device = "0f8b2c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e"
+        fun pick(claimed: Long?) = MlDriveImport(
+            FACES,
+            device,
+            MlDriveFile(
+                nodeUid = "node",
+                name = MlDriveNaming.fileName(FACES, device),
+                sizeBytes = 2_048L,
+                activeRevisionUid = "rev",
+                serverModifiedAtMs = 1_000L,
+                serverCreatedAtMs = 1L,
+                claimedModifiedAtMs = claimed,
+            ),
+        )
+        assertEquals(8_200_000L, remoteSnapshots(listOf(pick(8_200_000L)), device, "Model X").single().savedAtMs)
+        assertEquals(1_000L, remoteSnapshots(listOf(pick(null)), device, "Model X").single().savedAtMs)
     }
 
     // ---- Facade state ------------------------------------------------------------------------------------

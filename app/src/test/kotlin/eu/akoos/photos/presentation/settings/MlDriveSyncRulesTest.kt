@@ -62,6 +62,7 @@ class MlDriveSyncRulesTest {
         size: Long = 100L,
         thisDevice: Boolean = false,
         label: String? = null,
+        savedAt: Long = time,
     ) = MlRemoteSnapshot(
         kind = kind,
         deviceId = device,
@@ -70,6 +71,7 @@ class MlDriveSyncRulesTest {
         serverModifiedAtMs = time,
         sizeBytes = size,
         revisionUid = "$device-${kind.prefix}-$time",
+        savedAtMs = savedAt,
     )
 
     private fun progress(phase: MlSyncPhase, kind: MlDriveFileKind?, done: Int = 0, total: Int = 2) =
@@ -234,6 +236,18 @@ class MlDriveSyncRulesTest {
         assertEquals(listOf("new", "old"), devices.map { it.deviceId })
         assertEquals(listOf(900L, 150L), devices.map { it.savedAtMs })
         assertEquals(listOf("new-search-900", "new-faces-880"), devices[0].files.map { it.revisionUid })
+    }
+
+    @Test
+    fun `a set shows and orders by its own saved time, not the server time`() {
+        val devices = remoteDevices(
+            listOf(
+                snapshot(FACES, "a", time = 100L, savedAt = 7_300L),
+                snapshot(FACES, "b", time = 900L, savedAt = 200L),
+            ),
+        )
+        assertEquals(listOf("a", "b"), devices.map { it.deviceId })
+        assertEquals(7_300L, devices[0].savedAtMs)
     }
 
     @Test

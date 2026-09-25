@@ -56,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
@@ -82,7 +83,7 @@ import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.presentation.util.formatBytes
 import kotlinx.coroutines.launch
-import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
@@ -448,12 +449,18 @@ private fun deviceName(name: MlDeviceName): String = when (name) {
 @Composable
 private fun deviceSummary(device: MlRemoteDevice): String {
     val locale = appLocale()
-    val savedAt = remember(device.savedAtMs, locale) { formatSavedAt(device.savedAtMs, locale) }
+    val is24Hour = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
+    val savedAt = remember(device.savedAtMs, locale, is24Hour) { formatSavedAt(device.savedAtMs, locale, is24Hour) }
     val contents = stringResource(mlRemoteDeviceContents(device))
     return "$contents · ${formatBytes(device.sizeBytes)}\n" +
         stringResource(R.string.settings_ml_drive_saved_at, savedAt)
 }
 
-/** The server's save time, to the minute, in the locale's own order, as the photo details show a date. */
-private fun formatSavedAt(ms: Long, locale: Locale): String =
-    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale).format(Date(ms))
+/**
+ * When the set was saved, to the minute, in the locale's own date order and on a 12 or 24 hour clock: the
+ * phone's own setting when the user picked one, otherwise the app language's usual clock.
+ */
+private fun formatSavedAt(ms: Long, locale: Locale, is24Hour: Boolean): String {
+    val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, if (is24Hour) "yMMMdHm" else "yMMMdhma")
+    return SimpleDateFormat(pattern, locale).format(Date(ms))
+}
