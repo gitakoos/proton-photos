@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.mlsync
 
 import android.content.Context
+import android.database.sqlite.SQLiteFullException
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -63,8 +64,9 @@ abstract class SearchSnapshotTestDatabase : RoomDatabase() {
  * in-memory database, through the real snapshot format and envelope and a fake OpenPGP: vectors come back
  * at half precision and tombstones as tombstones, only link-id rows of this build's model travel, Merge
  * and Replace meet the local rows as specified, and every refusal (another model or width, a damaged,
- * foreign or unrelated file, a snapshot malformed at its very end) leaves the restoring index untouched.
- * The export's two passes are also raced against the indexer.
+ * foreign or unrelated file, a snapshot cut short or malformed anywhere inside) leaves the restoring index
+ * untouched. Rows land a chunk per transaction: a failure part-way keeps the chunks before it, and importing
+ * again completes the index. The export's two passes are also raced against the indexer.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -81,15 +83,16 @@ class SearchSnapshotRoundTripTest {
 
     @Before
     fun setUp() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        fun database() = Room.inMemoryDatabaseBuilder(context, SearchSnapshotTestDatabase::class.java)
+        phoneA = newPhone()
+        phoneB = newPhone()
+        scratchDir = temp.newFolder("scratch")
+    }
+
+    private fun newPhone(): SearchSnapshotTestDatabase =
+        Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), SearchSnapshotTestDatabase::class.java)
             .allowMainThreadQueries()
             .setQueryExecutor { it.run() }
             .build()
-        phoneA = database()
-        phoneB = database()
-        scratchDir = temp.newFolder("scratch")
-    }
 
     @After
     fun tearDown() {
@@ -157,14 +160,17 @@ class SearchSnapshotRoundTripTest {
         return result to output.toByteArray()
     }
 
-    /** Restores [snapshot] on phone B, in batches small enough that a failure lands after some are written. */
+    /** Restores [snapshot] on [phone], in chunks small enough that a few rows already fill several. */
     private suspend fun importSnapshot(
         snapshot: ByteArray,
         mode: SearchImportMode = SearchImportMode.Replace,
         expectedDeviceId: String? = null,
+        phone: SearchSnapshotTestDatabase = phoneB,
+        embeddings: ImageEmbeddingDao = phone.imageEmbeddingDao(),
+        chunkSize: Int = 2,
         keys: (refreshAddresses: Boolean) -> EnvelopeOpenKeys = { openKeys(ALICE) },
     ): SearchSnapshotImportResult {
-        val engine = SearchSnapshotImportEngine(phoneB, phoneB.imageEmbeddingDao(), crypto, scratchDir, keyPageSize = 2, batchSize = 2)
+        val engine = SearchSnapshotImportEngine(phone, embeddings, crypto, scratchDir, keyPageSize = 2, chunkSize = chunkSize)
         return engine.run(
             ACCOUNT,
             mode,
@@ -205,6 +211,17 @@ class SearchSnapshotRoundTripTest {
     }
 
     private fun failed(reason: SearchImportFailure) = SearchSnapshotImportResult.Failed(reason)
+
+    /** Phone B's DAO, noting in [chunks] the size of every chunk an import writes. */
+    private fun chunkRecorder(chunks: MutableList<Int>): ImageEmbeddingDao {
+        val dao = phoneB.imageEmbeddingDao()
+        return object : ImageEmbeddingDao by dao {
+            override suspend fun upsert(rows: List<ImageEmbeddingEntity>) {
+                chunks += rows.size
+                dao.upsert(rows)
+            }
+        }
+    }
 
     @Test
     fun `vectors and tombstones survive the round trip and only portable current rows travel`() = runTest {
@@ -317,18 +334,106 @@ class SearchSnapshotRoundTripTest {
     }
 
     @Test
-    fun `a snapshot found malformed at its end rolls back the rows already written`() = runTest {
+    fun `a snapshot cut short or malformed anywhere writes nothing`() = runTest {
         phoneB.put("link-9", vector(109))
         val before = phoneB.contents()
-        val complete = plaintext((1..5).associate { "link-$it" to vector(it) })
-        // The envelope verifies, but the snapshot inside lacks its end marker. The reader only finds that
-        // out after the last record, by which point two batches of rows are written in the transaction.
-        val truncated = seal(complete.copyOf(complete.size - 1))
+        val complete = plaintext((1..6).associate { "link-$it" to vector(it) })
+        // Where the fifth of the six records starts: the last two records and the end marker follow it.
+        val fifth = complete.size - 1 - 2 * VECTOR_RECORD_BYTES
+        // Each envelope verifies, but the snapshot inside ends partway through its fourth record, carries a
+        // key record in the fifth one's place, or lacks its end marker. Written as it is read, each would
+        // have committed chunks of the rows before its fault.
+        val faulty = listOf(
+            complete.copyOf(fifth - VECTOR_RECORD_BYTES / 2),
+            complete.copyOf().also { it[fifth] = MlSnapshotFormat.TAG_KEY.toByte() },
+            complete.copyOf(complete.size - 1),
+        )
+        val chunks = mutableListOf<Int>()
 
-        assertEquals(failed(SearchImportFailure.DAMAGED), importSnapshot(truncated))
+        for (snapshot in faulty) {
+            val result = importSnapshot(seal(snapshot), embeddings = chunkRecorder(chunks))
+            assertEquals(failed(SearchImportFailure.DAMAGED), result)
+        }
+
+        assertEquals("not one chunk was written", emptyList<Int>(), chunks)
         assertEquals(before, phoneB.contents())
-        // With the marker in place the same rows import, so the refusal above is the missing marker alone.
-        assertEquals(SearchSnapshotImportResult.Imported(imported = 5, kept = 0), importSnapshot(seal(complete)))
+        // Whole, the same rows import, so each refusal above is its fault alone.
+        assertEquals(
+            SearchSnapshotImportResult.Imported(imported = 6, kept = 0),
+            importSnapshot(seal(complete), embeddings = chunkRecorder(chunks)),
+        )
+        assertEquals(listOf(2, 2, 2), chunks)
+    }
+
+    @Test
+    fun `a snapshot of several chunks round-trips a chunk at a time`() = runTest {
+        val count = 2 * SEARCH_IMPORT_CHUNK_SIZE + 1
+        val index = (1..count).map { ImageEmbeddingEntity(ACCOUNT, "link-$it", vector(it), SEMANTIC_MODEL_VERSION, 1_000L) }
+        phoneA.imageEmbeddingDao().upsert(index)
+        val chunks = mutableListOf<Int>()
+
+        val (exported, sealed) = exportSnapshot()
+        val result = importSnapshot(sealed, embeddings = chunkRecorder(chunks), chunkSize = SEARCH_IMPORT_CHUNK_SIZE)
+
+        assertEquals(SearchSnapshotExportResult.Exported(embeddings = count, tombstones = 0), exported)
+        assertEquals(SearchSnapshotImportResult.Imported(imported = count, kept = 0), result)
+        assertEquals(listOf(SEARCH_IMPORT_CHUNK_SIZE, SEARCH_IMPORT_CHUNK_SIZE, 1), chunks)
+        val restored = phoneB.rows()
+        assertEquals(count, restored.size)
+        for (seed in 1..count) {
+            assertArrayEquals("link-$seed", halfRounded(seed), unpack(restored.getValue("link-$seed")), 0f)
+        }
+    }
+
+    @Test
+    fun `a failure part-way keeps the chunks already written and importing again completes the index`() = runTest {
+        // This phone's own rows: a vector the snapshot's replaces, a vector its tombstone never replaces,
+        // and a photo the snapshot lacks.
+        suspend fun holdOwnRows(phone: SearchSnapshotTestDatabase) {
+            phone.put("link-1", vector(101))
+            phone.put("link-4", vector(104))
+            phone.put("link-9", vector(109))
+        }
+        holdOwnRows(phoneB)
+        val saved = (1..8).associate { "link-$it" to if (it == 3 || it == 4) tombstone else vector(it) }
+        val snapshot = seal(plaintext(saved))
+        val dao = phoneB.imageEmbeddingDao()
+        var chunks = 0
+        val fillsUp = object : ImageEmbeddingDao by dao {
+            override suspend fun upsert(rows: List<ImageEmbeddingEntity>) {
+                // Storage runs out halfway through the third chunk.
+                if (++chunks == 3) {
+                    dao.upsert(rows.take(1))
+                    throw SQLiteFullException("database or disk is full")
+                }
+                dao.upsert(rows)
+            }
+        }
+
+        assertEquals(failed(SearchImportFailure.NO_SPACE), importSnapshot(snapshot, embeddings = fillsUp))
+
+        val afterFailure = phoneB.rows()
+        assertEquals(
+            "the first two chunks stay and the third is rolled back whole",
+            setOf("link-1", "link-2", "link-3", "link-4", "link-5", "link-9"),
+            afterFailure.keys,
+        )
+        assertArrayEquals(halfRounded(1), unpack(afterFailure.getValue("link-1")), 0f)
+        assertArrayEquals(tombstone, afterFailure["link-3"])
+        assertArrayEquals(vector(104), afterFailure["link-4"])
+        // Imported again: the rows the failed run wrote count as this phone's own, the tombstone among them.
+        assertEquals(SearchSnapshotImportResult.Imported(imported = 6, kept = 2), importSnapshot(snapshot))
+        val uninterrupted = newPhone()
+        try {
+            holdOwnRows(uninterrupted)
+            assertEquals(
+                SearchSnapshotImportResult.Imported(imported = 7, kept = 1),
+                importSnapshot(snapshot, phone = uninterrupted),
+            )
+            assertEquals("the index an uninterrupted import leaves", uninterrupted.contents(), phoneB.contents())
+        } finally {
+            uninterrupted.close()
+        }
     }
 
     @Test
@@ -513,6 +618,9 @@ class SearchSnapshotRoundTripTest {
         /** The largest error rounding to half precision leaves on a component in -1..1: half a unit in the
          *  last place of 0.5..1. */
         const val HALF_PRECISION = 1f / 4096
+
+        /** Bytes of a SEARCH_EMBEDDING record that carries a vector: tag, key reference, flags and halves. */
+        const val VECTOR_RECORD_BYTES = 1 + 4 + 1 + SEARCH_EMBEDDING_DIM * 2
 
         val AUTHOR = SearchSnapshotAuthor("0f8fad5b-d9cb-469f-a165-70867728950e", "Test phone")
     }

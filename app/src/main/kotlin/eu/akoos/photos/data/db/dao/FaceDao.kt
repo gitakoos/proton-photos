@@ -114,6 +114,22 @@ data class FaceOnPhoto(
     val score: Float,
 )
 
+/**
+ * One face reduced to its stored box and its curation: the person it is grouped under ([personId]), the
+ * name confirmed for it ([manualName]) and whether it was removed ([rejected]). The embedding blob is left
+ * out, so pairing two face sets of one photo never loads a recognition vector.
+ */
+data class CuratedFace(
+    val id: String,
+    val personId: Long?,
+    val boxLeft: Float,
+    val boxTop: Float,
+    val boxRight: Float,
+    val boxBottom: Float,
+    val rejected: Boolean,
+    val manualName: String?,
+)
+
 @Dao
 interface FaceDao {
 
@@ -439,6 +455,19 @@ interface FaceDao {
      *  so its faces (id is `photoKey#index`) reuse the cloud identity instead of a duplicate re-scan. */
     @Query("UPDATE face SET id = :newKey || substr(id, length(:oldKey) + 1), photoKey = :newKey WHERE userId = :userId AND photoKey = :oldKey")
     suspend fun rekeyPhoto(userId: String, oldKey: String, newKey: String)
+
+    /** Every face on one photo, removed ones included, with its box and curation, so a backup re-key can
+     *  pair the device copy's faces with the cloud copy's when both were scanned. */
+    @Query(
+        "SELECT id, personId, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, `bottom` AS boxBottom, " +
+            "rejected, manualName FROM face WHERE userId = :userId AND photoKey = :photoKey ORDER BY id",
+    )
+    suspend fun curatedFacesOnPhoto(userId: String, photoKey: String): List<CuratedFace>
+
+    /** Moves one face to [newId] on [photoKey], its person, confirmation and removal kept, so a backup
+     *  re-key can bring a device face the cloud copy lacks under the cloud key. */
+    @Query("UPDATE face SET id = :newId, photoKey = :photoKey WHERE userId = :userId AND id = :oldId")
+    suspend fun moveFace(userId: String, oldId: String, newId: String, photoKey: String)
 
     /** Removes every face for every account, the recognition-model re-index wipe: a model change
      *  invalidates all stored embeddings regardless of which account produced them. Returns the row

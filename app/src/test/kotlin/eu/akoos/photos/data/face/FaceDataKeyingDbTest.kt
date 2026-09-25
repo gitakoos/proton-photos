@@ -74,7 +74,7 @@ class FaceDataKeyingDbTest {
         )
         rekey = RekeyPhotoFacesUseCase(
             db.faceDao(), db.faceScanDao(), db.personCoverDao(),
-            db.personManualPhotoDao(), db.notPersonDao(), db,
+            db.personManualPhotoDao(), db.notPersonDao(), db.personDao(), db.clusterSummaryDao(), db,
         )
     }
 
@@ -146,14 +146,41 @@ class FaceDataKeyingDbTest {
     }
 
     @Test
-    fun `backup re-key is a no-op when the cloud copy was already scanned`() = runTest {
+    fun `backup re-key merges into the cloud copy when it was already scanned`() = runTest {
         seedPerson("acct", 7L, "Bob", "content://media/2")
+        // The cloud copy holds its own face at the same place, scanned (a restored snapshot).
+        db.faceDao().upsert(
+            FaceEntity(
+                id = "linkB#0", userId = "acct", photoKey = "linkB",
+                left = 0f, top = 0f, right = 1f, bottom = 1f, landmarks = "",
+                embedding = ByteArray(0), personId = 7L, score = 0.8f, manualName = "Bob",
+            ),
+        )
         db.faceScanDao().upsert(listOf(FaceScanEntity("acct", "linkB")))
 
-        val moved = rekey.invoke("acct", "content://media/2", "linkB")
+        val merged = rekey.invoke("acct", "content://media/2", "linkB")
+
+        assertTrue(merged)
+        // One face is left for the photo, the cloud one, and nothing stays on the device key.
+        val faces = db.faceDao().observeFacesForUser("acct").first()
+        assertEquals(listOf("linkB#0"), faces.map { it.id })
+        assertEquals(7L, faces.single().personId)
+        assertEquals(listOf("linkB"), db.faceScanDao().scannedKeysForUser("acct"))
+        // The device face's "not Bob" mark never lands on a face confirmed as Bob.
+        assertTrue(db.notPersonDao().allForUser("acct").isEmpty())
+        assertEquals("linkB", db.personManualPhotoDao().allForUser("acct").single().photoKey)
+        assertEquals("linkB", db.personCoverDao().photoKeyForName("acct", "Bob"))
+        assertEquals("one photo, counted once", 1, db.personDao().personById(7L)!!.faceCount)
+    }
+
+    @Test
+    fun `backup re-key writes nothing when the fence refuses`() = runTest {
+        seedPerson("acct", 7L, "Bob", "content://media/2")
+
+        val moved = rekey.invoke("acct", "content://media/2", "linkB") { false }
 
         assertFalse(moved)
-        // The device face is left untouched (no collision onto the cloud copy).
-        assertEquals("content://media/2#0", db.faceDao().observeFacesForUser("acct").first().single { it.photoKey == "content://media/2" }.id)
+        assertEquals("content://media/2#0", db.faceDao().observeFacesForUser("acct").first().single().id)
+        assertEquals(listOf("content://media/2"), db.faceScanDao().scannedKeysForUser("acct"))
     }
 }

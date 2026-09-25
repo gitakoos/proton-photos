@@ -1903,6 +1903,7 @@
     <string name="settings_ml_drive_too_new">I dati sono stati salvati da una versione più recente dell\'app. Aggiorna l\'app e riprova.</string>
     <string name="settings_ml_drive_wrong_account">Questo account non può più aprire i dati.</string>
     <string name="settings_ml_drive_damaged">La copia salvata è danneggiata. Salvala di nuovo sul dispositivo da cui proviene.</string>
+    <string name="settings_ml_restore_no_space">Spazio libero insufficiente per ripristinare questi dati. Libera un po\' di spazio e riprova.</string>
     <string name="settings_ml_drive_names_only">I volti salvati provengono da un altro modello dei volti, quindi sono stati ripristinati solo i loro nomi. I nomi torneranno sulle tue foto man mano che la libreria viene analizzata.</string>
     <string name="settings_ml_drive_search_other_model">I dati di ricerca salvati provengono da un altro modello di ricerca, quindi questo dispositivo prepara da sé quelle foto per la ricerca.</string>
     <plurals name="settings_ml_drive_count_faces">

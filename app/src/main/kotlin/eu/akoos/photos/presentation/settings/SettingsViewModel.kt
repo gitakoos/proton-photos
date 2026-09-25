@@ -87,6 +87,7 @@ import eu.akoos.photos.data.mlsync.MlSyncFacePause
 import eu.akoos.photos.data.mlsync.MlSyncSignOut
 import eu.akoos.photos.data.mlsync.faceIndexingPausedByUser
 import eu.akoos.photos.data.mlsync.faceWalkResumes
+import eu.akoos.photos.data.mlsync.isStorageFull
 import eu.akoos.photos.data.ocr.OcrModelComponent
 import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.ocr.OcrModelOutcome
@@ -1823,7 +1824,7 @@ class SettingsViewModel @Inject constructor(
                     val result = faceIndexingScheduler.withImportFence {
                         runCatching {
                             context.contentResolver.openInputStream(uri)?.use { importFaceIndexUseCase(it) }
-                        }.getOrNull()
+                        }.getOrElse { if (isStorageFull(it)) FaceIndexImportOutcome.NotEnoughSpace else null }
                     }
                     // Forced and awaited, so the people are rebuilt before the walk comes back, even while the
                     // user keeps it paused. A names-only import has no faces to group until the scan finds them.
@@ -1839,6 +1840,8 @@ class SettingsViewModel @Inject constructor(
                         // unreadable or missing file (a null result) gets.
                         FaceIndexImportOutcome.WrongAccount ->
                             context.getString(R.string.settings_ai_import_wrong_account)
+                        FaceIndexImportOutcome.NotEnoughSpace ->
+                            context.getString(R.string.settings_ml_restore_no_space)
                         else -> context.getString(R.string.settings_ai_transfer_failed)
                     }
                 } finally {

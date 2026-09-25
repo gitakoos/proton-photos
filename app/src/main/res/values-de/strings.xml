@@ -1868,6 +1868,7 @@
     <string name="settings_ml_drive_too_new">Die Daten wurden mit einer neueren Version der App gespeichert. Aktualisiere die App und versuche es erneut.</string>
     <string name="settings_ml_drive_wrong_account">Dieses Konto kann die Daten nicht mehr öffnen.</string>
     <string name="settings_ml_drive_damaged">Die gespeicherte Kopie ist beschädigt. Speichere sie auf dem Gerät, von dem sie stammt, erneut.</string>
+    <string name="settings_ml_restore_no_space">Nicht genug freier Speicherplatz, um diese Daten wiederherzustellen. Gib etwas Platz frei und versuche es erneut.</string>
     <string name="settings_ml_drive_names_only">Die gespeicherten Gesichter stammen von einem anderen Gesichtsmodell, daher wurden nur ihre Namen wiederhergestellt. Die Namen kehren zu deinen Fotos zurück, sobald die Bibliothek gescannt wird.</string>
     <string name="settings_ml_drive_search_other_model">Die gespeicherten Suchdaten stammen von einem anderen Suchmodell, daher bereitet dieses Gerät diese Fotos selbst für die Suche vor.</string>
     <plurals name="settings_ml_drive_count_faces">

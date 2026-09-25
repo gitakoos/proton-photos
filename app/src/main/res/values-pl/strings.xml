@@ -1954,6 +1954,7 @@
     <string name="settings_ml_drive_too_new">Dane zapisała nowsza wersja aplikacji. Zaktualizuj aplikację i spróbuj ponownie.</string>
     <string name="settings_ml_drive_wrong_account">To konto nie może już otworzyć tych danych.</string>
     <string name="settings_ml_drive_damaged">Zapisana kopia jest uszkodzona. Zapisz ją ponownie na urządzeniu, z którego pochodzi.</string>
+    <string name="settings_ml_restore_no_space">Za mało wolnego miejsca, aby przywrócić te dane. Zwolnij trochę miejsca i spróbuj ponownie.</string>
     <string name="settings_ml_drive_names_only">Zapisane twarze pochodzą z innego modelu twarzy, więc przywrócono tylko ich imiona. Imiona wrócą do Twoich zdjęć w miarę skanowania biblioteki.</string>
     <string name="settings_ml_drive_search_other_model">Zapisane dane wyszukiwania pochodzą z innego modelu wyszukiwania, więc to urządzenie samo przygotuje te zdjęcia do wyszukiwania.</string>
     <plurals name="settings_ml_drive_count_faces">

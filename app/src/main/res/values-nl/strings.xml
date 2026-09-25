@@ -1895,6 +1895,7 @@
     <string name="settings_ml_drive_too_new">De gegevens zijn opgeslagen door een nieuwere versie van de app. Werk de app bij en probeer het opnieuw.</string>
     <string name="settings_ml_drive_wrong_account">Dit account kan de gegevens niet meer openen.</string>
     <string name="settings_ml_drive_damaged">De opgeslagen kopie is beschadigd. Sla de gegevens opnieuw op vanaf het apparaat waar ze vandaan komen.</string>
+    <string name="settings_ml_restore_no_space">Niet genoeg vrije ruimte om deze gegevens te herstellen. Maak wat ruimte vrij en probeer het opnieuw.</string>
     <string name="settings_ml_drive_names_only">De opgeslagen gezichten komen van een ander gezichtsmodel, dus alleen hun namen zijn hersteld. De namen keren terug naar je foto\'s zodra de bibliotheek wordt gescand.</string>
     <string name="settings_ml_drive_search_other_model">De opgeslagen zoekgegevens komen van een ander zoekmodel, dus dit apparaat maakt die foto\'s zelf doorzoekbaar.</string>
     <plurals name="settings_ml_drive_count_faces">

@@ -557,13 +557,16 @@ class FaceIndexingScheduler @Inject constructor(
                 .getOrDefault(HashSet())
             // A device photo backed up to Drive re-appears under its cloud linkId. If its device copy
             // was already scanned, move its faces to the cloud key instead of re-scanning a duplicate
-            // set, and treat the cloud key as scanned so the walk skips it. Account only (a guest has
+            // set, or merge them into the cloud key's own when that copy was scanned too (a restored
+            // face snapshot), and treat the cloud key as scanned so the walk skips it. Each photo is one
+            // transaction behind this pass's fence token, like the scan writes. Account only (a guest has
             // no cloud copy).
             userId?.let { acct ->
                 val syncedPairs = items.filterIsInstance<GalleryItem.Synced>().map { it.local.uri to it.cloud.linkId }
                 eu.akoos.photos.domain.usecase.backupRekeyPairs(syncedPairs, alreadyScanned).forEach { (oldKey, newKey) ->
-                    runCatching { if (rekeyPhotoFaces.invoke(acct.id, oldKey, newKey)) alreadyScanned.add(newKey) }
-                        .onFailure { Log.w(TAG, "face rekey on backup failed: ${it.message}") }
+                    runCatching {
+                        if (rekeyPhotoFaces.invoke(acct.id, oldKey, newKey) { writeFence.allows(passToken) }) alreadyScanned.add(newKey)
+                    }.onFailure { Log.w(TAG, "face rekey on backup failed: ${it.message}") }
                 }
             }
             val pending = items.filter { it.stableId !in alreadyScanned }

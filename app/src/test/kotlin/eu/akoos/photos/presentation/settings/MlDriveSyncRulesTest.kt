@@ -521,6 +521,33 @@ class MlDriveSyncRulesTest {
     }
 
     @Test
+    fun `a restore that ran out of storage says so and lists what it imported before`() {
+        val partly = message(
+            outcome(
+                RESTORE,
+                MlSyncResult.NO_SPACE,
+                faces = MlSyncPartStatus.DONE,
+                search = MlSyncPartStatus.NO_SPACE,
+                counts = MlSyncCounts(faces = 5, people = 1, filesDone = 1, filesTotal = 2),
+            ),
+        )
+        assertEquals(R.string.settings_ml_drive_restored_partly, partly.title)
+        assertEquals(2, partly.counts.size)
+        assertEquals(
+            listOf(R.string.settings_ml_drive_search_not_restored, R.string.settings_ml_restore_no_space),
+            partly.lines,
+        )
+
+        val nothing = message(outcome(RESTORE, MlSyncResult.NO_SPACE, faces = MlSyncPartStatus.NO_SPACE))
+        assertEquals(R.string.settings_ml_drive_restore_failed, nothing.title)
+        assertTrue(nothing.counts.isEmpty())
+        assertEquals(
+            listOf(R.string.settings_ml_drive_faces_not_restored, R.string.settings_ml_restore_no_space),
+            nothing.lines,
+        )
+    }
+
+    @Test
     fun `any other failure asks to try again later`() {
         for (result in listOf(MlSyncResult.FAILED, MlSyncResult.INVALID_REQUEST, MlSyncResult.NOT_SIGNED_IN)) {
             val save = message(outcome(SAVE, result, faces = MlSyncPartStatus.FAILED, failure = "IOException"))

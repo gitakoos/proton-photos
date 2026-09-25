@@ -23,9 +23,9 @@
 package eu.akoos.photos.data.mlsync
 
 import android.content.Context
-import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.FaceHead
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
@@ -54,6 +54,12 @@ private const val FACE_PAGE = 256
 /** Rows per page of the export's planning reads, which carry no embedding. */
 private const val HEAD_PAGE = 2000
 
+/** Passes an export makes before it gives up on a face index that keeps changing under it. */
+private const val EXPORT_ATTEMPTS = 3
+
+/** Planned faces a plan makes room for before it first grows. */
+private const val PLANNED_FACES_INITIAL = 256
+
 private const val FACE_EMBEDDING_BYTES = FACE_EMBEDDING_DIM * Float.SIZE_BYTES
 
 /** What an export wrote: the counts a caller reports, and the plaintext size before sealing. */
@@ -74,6 +80,9 @@ internal data class FaceSnapshotOrigin(
     val createdAtMillis: Long,
 )
 
+/** The face index changed under every one of an export's attempts, so nothing was sealed. */
+class FaceIndexChangedException : IllegalStateException("the face index kept changing while it was read")
+
 /**
  * Writes an account's face index as a sealed FACES snapshot ([MlSnapshotFormat] inside
  * [MlSnapshotEnvelope]), the file a Settings export saves and the Drive copy another device restores.
@@ -87,18 +96,37 @@ internal data class FaceSnapshotOrigin(
  * the clustering parameters the people were grouped under, as stored with the index here.
  *
  * Nothing is held whole in memory: the faces are read a page at a time and streamed out, and only the
- * photo keys and names the format's tables need are kept. The plaintext goes to an app-private scratch
- * file, deleted once sealed. Both read passes run in one database transaction, so the counts the header
- * declares up front are exactly the rows that follow; a write the indexer makes meanwhile waits for them.
+ * photo keys and names the format's tables need are kept, plus a key reference and an index for each
+ * planned face and a key reference for each planned scan marker. The plaintext goes to an app-private
+ * scratch file, deleted once sealed.
+ *
+ * No transaction spans the two read passes, so the indexer and every other writer carry on while an export
+ * runs. The header declares its counts before the first record, so the second pass writes exactly the rows
+ * the first one planned and leaves out any added since. A planned face or marker that is gone by then, a
+ * face whose person or confirmed name the planned name table does not hold, or a named person whose name
+ * changed (a rename, merge or removal in between) abandons the pass, and the export starts over from a
+ * fresh plan, up to [EXPORT_ATTEMPTS] times before it throws [FaceIndexChangedException].
+ *
+ * The app builds it from [AppDatabase]; a test hands in its own [FaceDao] to change the index between
+ * the passes.
  */
-class FaceSnapshotExporter @Inject constructor(
-    @ApplicationContext private val context: Context,
+class FaceSnapshotExporter internal constructor(
+    private val context: Context,
     private val appDatabase: AppDatabase,
     private val sealing: FaceSnapshotSealing,
+    private val faceDao: FaceDao,
 ) {
 
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        appDatabase: AppDatabase,
+        sealing: FaceSnapshotSealing,
+    ) : this(context, appDatabase, sealing, appDatabase.faceDao())
+
     /** Seals [userId]'s face snapshot into [output], which is flushed and left open. Blocking work runs
-     *  on the IO dispatcher. */
+     *  on the IO dispatcher. An index that changes under every attempt throws [FaceIndexChangedException]
+     *  before anything reaches [output]. */
     suspend fun export(userId: UserId, output: OutputStream): FaceSnapshotExport = withContext(Dispatchers.IO) {
         val prefs = context.settingsDataStore.data.first()
         val origin = FaceSnapshotOrigin(
@@ -113,9 +141,7 @@ class FaceSnapshotExporter @Inject constructor(
         sealing.sealKeys(userId).use { keys ->
             val plaintext = FaceSnapshotScratch.newFile(context)
             try {
-                val written = BufferedOutputStream(FileOutputStream(plaintext)).use { out ->
-                    writePlaintext(userId, out, origin)
-                }
+                val written = writeWithRetries(userId, plaintext, origin)
                 FileInputStream(plaintext).use { MlSnapshotEnvelope.seal(it, output, sealing.crypto, keys) }
                 output.flush()
                 written.copy(plaintextBytes = plaintext.length())
@@ -125,31 +151,61 @@ class FaceSnapshotExporter @Inject constructor(
         }
     }
 
-    /** Streams the plaintext snapshot of [userId]'s face index into [output], which is flushed and left
-     *  open. A null [userId] reads the guest partition. */
+    /** Writes [userId]'s plaintext snapshot into [file], each attempt over what the one before it left. */
+    private suspend fun writeWithRetries(userId: UserId, file: File, origin: FaceSnapshotOrigin): FaceSnapshotExport {
+        repeat(EXPORT_ATTEMPTS) {
+            BufferedOutputStream(FileOutputStream(file)).use { writePlaintext(userId, it, origin) }?.let { return it }
+        }
+        throw FaceIndexChangedException()
+    }
+
+    /**
+     * One attempt: plans the snapshot of [userId]'s face index and streams it into [output], which is
+     * flushed and left open. Null when the index changed between the passes in a way the plan cannot carry,
+     * with [output] left holding an unfinished stream to discard. A null [userId] reads the guest partition.
+     */
     internal suspend fun writePlaintext(
         userId: UserId?,
         output: OutputStream,
         origin: FaceSnapshotOrigin,
-    ): FaceSnapshotExport = appDatabase.withTransaction {
+    ): FaceSnapshotExport? {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val plan = plan(account)
         val writer = MlSnapshotWriter(output, plan.header(origin))
         for (key in plan.keys) writer.write(MlSnapshotRecord.PhotoKey(key))
         for (name in plan.names) writer.write(MlSnapshotRecord.Person(name))
-        forEachFace(account) { face -> plan.faceRecord(face)?.let(writer::write) }
+        var facesWritten = 0
+        val groupedNames = HashSet<String>()
+        forEachFace(account) { face ->
+            val record = plan.faceRecord(face) ?: return@forEachFace
+            // Detected since the plan, or met while a planned face before it is missing: left out either way.
+            if (!plan.faces.isAt(facesWritten, record.photoKey, record.faceIndex)) return@forEachFace
+            // A rename, merge or removal since the plan gave it a name the name table does not hold.
+            if (!plan.holdsNames(record)) return null
+            writer.write(record)
+            record.personName?.let(groupedNames::add)
+            facesWritten++
+        }
+        if (facesWritten < plan.faces.size) return null
         for (row in plan.manualPhotos) writer.write(MlSnapshotRecord.ManualPhoto(row.personName, row.photoKey))
         for (mark in plan.notPersons) writer.write(MlSnapshotRecord.NotPerson(mark.personName, mark.photoKey, mark.faceIndex))
         for (row in plan.covers) writer.write(MlSnapshotRecord.Cover(row.personName, row.photoKey))
+        var markersWritten = 0
         forEachMarker(account) { photoKey, hiRes ->
-            writer.write(MlSnapshotRecord.ScanMarker(photoKey, hiRes))
+            if (markersWritten < plan.markers.size && photoKey == plan.markers[markersWritten]) {
+                writer.write(MlSnapshotRecord.ScanMarker(photoKey, hiRes))
+                markersWritten++
+            }
         }
+        if (markersWritten < plan.markers.size) return null
+        // A person renamed or named since the plan would leave its grouped faces under the plan's name.
+        if (namedPeople(account) != plan.nameByPersonId) return null
         writer.finish()
-        FaceSnapshotExport(
-            faces = plan.faceCount,
-            people = plan.groupedNames,
+        return FaceSnapshotExport(
+            faces = facesWritten,
+            people = groupedNames.size,
             photos = plan.keys.size,
-            scanMarkers = plan.markerCount,
+            scanMarkers = markersWritten,
             plaintextBytes = 0L,
         )
     }
@@ -157,13 +213,11 @@ class FaceSnapshotExporter @Inject constructor(
     /**
      * The first pass: every row the snapshot will hold is picked and counted without reading a single
      * embedding, and the photo keys and names the records use are gathered for the tables that lead the
-     * stream. The second pass in [writePlaintext] applies the very same tests to the whole rows.
+     * stream. The second pass in [writePlaintext] applies the very same tests to the whole rows, and meets
+     * the planned faces and markers in the same key order.
      */
     private suspend fun plan(account: String): ExportPlan {
-        val nameByPersonId = HashMap<Long, String>()
-        for (person in appDatabase.personDao().namedPeopleForUser(account)) {
-            snapshotName(person.displayName)?.let { nameByPersonId[person.id] = it }
-        }
+        val nameByPersonId = namedPeople(account)
         val manualPhotos = appDatabase.personManualPhotoDao().allForUser(account)
             .filter { snapshotName(it.personName) != null && carriesPhotoKey(it.photoKey) }
         val covers = appDatabase.personCoverDao().allForUser(account)
@@ -175,50 +229,53 @@ class FaceSnapshotExporter @Inject constructor(
         }
         val markedFaceIds = marks.mapTo(HashSet()) { it.faceId }
 
-        val keys = HashSet<String>()
+        // Each key maps to its own string, so a planned face or marker refers to the one copy the table holds.
+        val keys = HashMap<String, String>()
+        fun addKey(photoKey: String): String = keys.getOrPut(photoKey) { photoKey }
         val names = HashSet<String>()
-        val groupedNames = HashSet<String>()
+        val faces = PlannedFaces()
         val exportedMarkedFaces = HashSet<String>()
-        var faceCount = 0
         forEachFaceHead(account) { head ->
             if (!exportsFace(head.id, head.photoKey, head.embeddingBytes)) return@forEachFaceHead
-            faceCount++
-            keys += head.photoKey
-            groupedName(head.personId, head.rejected, nameByPersonId)?.let {
-                names += it
-                groupedNames += it
-            }
+            val faceIndex = faceIndexIn(head.id, head.photoKey) ?: return@forEachFaceHead
+            faces.add(addKey(head.photoKey), faceIndex)
+            groupedName(head.personId, head.rejected, nameByPersonId)?.let(names::add)
             snapshotName(head.manualName)?.let(names::add)
             if (head.id in markedFaceIds) exportedMarkedFaces += head.id
         }
         // A mark travels with the face it names, the way the v3 export kept only the marks of the faces it
         // carried; a mark on a face no longer detected would only bind to whatever face takes its index.
         val notPersons = marks.filter { it.faceId in exportedMarkedFaces }
-        for (row in manualPhotos) { keys += row.photoKey; names += row.personName }
-        for (mark in notPersons) { keys += mark.photoKey; names += mark.personName }
-        for (row in covers) { keys += row.photoKey; names += row.personName }
-        var markerCount = 0
-        forEachMarker(account) { photoKey, _ ->
-            markerCount++
-            keys += photoKey
-        }
+        for (row in manualPhotos) { addKey(row.photoKey); names += row.personName }
+        for (mark in notPersons) { addKey(mark.photoKey); names += mark.personName }
+        for (row in covers) { addKey(row.photoKey); names += row.personName }
+        val markers = ArrayList<String>()
+        forEachMarker(account) { photoKey, _ -> markers += addKey(photoKey) }
         return ExportPlan(
             nameByPersonId = nameByPersonId,
-            keys = keys,
-            names = names.sorted(),
-            groupedNames = groupedNames.size,
-            faceCount = faceCount,
+            keys = keys.keys,
+            nameSet = names,
+            faces = faces,
             manualPhotos = manualPhotos,
             notPersons = notPersons,
             covers = covers,
-            markerCount = markerCount,
+            markers = markers,
         )
+    }
+
+    /** Every named person's id with the name a snapshot carries for them, what a face's person resolves to. */
+    private suspend fun namedPeople(account: String): Map<Long, String> {
+        val nameByPersonId = HashMap<Long, String>()
+        for (person in appDatabase.personDao().namedPeopleForUser(account)) {
+            snapshotName(person.displayName)?.let { nameByPersonId[person.id] = it }
+        }
+        return nameByPersonId
     }
 
     private suspend inline fun forEachFaceHead(account: String, action: (FaceHead) -> Unit) {
         var after = ""
         while (true) {
-            val page = appDatabase.faceDao().faceHeadsAfter(account, after, HEAD_PAGE)
+            val page = faceDao.faceHeadsAfter(account, after, HEAD_PAGE)
             page.forEach(action)
             if (page.size < HEAD_PAGE) return
             after = page.last().id
@@ -228,7 +285,7 @@ class FaceSnapshotExporter @Inject constructor(
     private suspend inline fun forEachFace(account: String, action: (FaceEntity) -> Unit) {
         var after = ""
         while (true) {
-            val page = appDatabase.faceDao().facesAfter(account, after, FACE_PAGE)
+            val page = faceDao.facesAfter(account, after, FACE_PAGE)
             page.forEach(action)
             if (page.size < FACE_PAGE) return
             after = page.last().id
@@ -250,17 +307,45 @@ class FaceSnapshotExporter @Inject constructor(
 
     private class ExportedMark(val personName: String, val photoKey: String, val faceIndex: Int, val faceId: String)
 
+    /**
+     * The faces a plan picked, in the order the face walk meets them, each as its photo key (the key table's
+     * own string) and its detection index, so the write pass tells a planned face from one detected since
+     * without holding a face id apiece.
+     */
+    private class PlannedFaces {
+        private var photoKeys = arrayOfNulls<String>(PLANNED_FACES_INITIAL)
+        private var indexes = IntArray(PLANNED_FACES_INITIAL)
+
+        var size = 0
+            private set
+
+        fun add(photoKey: String, faceIndex: Int) {
+            if (size == indexes.size) {
+                photoKeys = photoKeys.copyOf(size * 2)
+                indexes = indexes.copyOf(size * 2)
+            }
+            photoKeys[size] = photoKey
+            indexes[size] = faceIndex
+            size++
+        }
+
+        /** Whether the planned face at [position] is face [faceIndex] of [photoKey]. */
+        fun isAt(position: Int, photoKey: String, faceIndex: Int): Boolean =
+            position < size && indexes[position] == faceIndex && photoKeys[position] == photoKey
+    }
+
     private class ExportPlan(
         val nameByPersonId: Map<Long, String>,
-        val keys: Set<String>,
-        val names: List<String>,
-        val groupedNames: Int,
-        val faceCount: Int,
+        val keys: Collection<String>,
+        private val nameSet: Set<String>,
+        val faces: PlannedFaces,
         val manualPhotos: List<PersonManualPhotoEntity>,
         val notPersons: List<ExportedMark>,
         val covers: List<PersonCoverEntity>,
-        val markerCount: Int,
+        val markers: List<String>,
     ) {
+        val names: List<String> = nameSet.sorted()
+
         fun header(origin: FaceSnapshotOrigin) = MlSnapshotHeader.Faces(
             deviceId = origin.device.id,
             deviceLabel = origin.device.label,
@@ -271,11 +356,11 @@ class FaceSnapshotExporter @Inject constructor(
             embeddingDim = FACE_EMBEDDING_DIM,
             keyCount = keys.size,
             personCount = names.size,
-            faceCount = faceCount,
+            faceCount = faces.size,
             manualPhotoCount = manualPhotos.size,
             notPersonCount = notPersons.size,
             coverCount = covers.size,
-            scanMarkerCount = markerCount,
+            scanMarkerCount = markers.size,
         )
 
         /** [face] as its snapshot record, or null for a face the plan left out. */
@@ -297,6 +382,10 @@ class FaceSnapshotExporter @Inject constructor(
                 embedding = face.embedding,
             )
         }
+
+        /** Whether every name [face] carries is one the name table lists. */
+        fun holdsNames(face: MlSnapshotRecord.Face): Boolean =
+            face.personName.let { it == null || it in nameSet } && face.confirmedName.let { it == null || it in nameSet }
     }
 
     private companion object {

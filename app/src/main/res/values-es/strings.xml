@@ -1904,6 +1904,7 @@
     <string name="settings_ml_drive_too_new">Los datos se guardaron con una versión más reciente de la app. Actualiza la app y vuelve a intentarlo.</string>
     <string name="settings_ml_drive_wrong_account">Esta cuenta ya no puede abrir los datos.</string>
     <string name="settings_ml_drive_damaged">La copia guardada está dañada. Vuelve a guardarla en el dispositivo del que procede.</string>
+    <string name="settings_ml_restore_no_space">No hay suficiente espacio libre para restaurar estos datos. Libera algo de espacio e inténtalo de nuevo.</string>
     <string name="settings_ml_drive_names_only">Las caras guardadas proceden de otro modelo de caras, así que solo se restauraron sus nombres. Los nombres volverán a tus fotos a medida que se analice la biblioteca.</string>
     <string name="settings_ml_drive_search_other_model">Los datos de búsqueda guardados proceden de otro modelo de búsqueda, así que este dispositivo prepara esas fotos para la búsqueda por sí mismo.</string>
     <plurals name="settings_ml_drive_count_faces">

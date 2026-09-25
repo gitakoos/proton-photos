@@ -377,6 +377,9 @@ sealed interface FaceIndexImportOutcome {
 
     /** Not a face index, an unsupported newer version, or a body that would not decrypt or parse. */
     data object Unreadable : FaceIndexImportOutcome
+
+    /** Storage is too full to import the file; nothing was written. */
+    data object NotEnoughSpace : FaceIndexImportOutcome
 }
 
 /**
@@ -423,6 +426,7 @@ internal fun FaceSnapshotImportResult.toFaceIndexImportOutcome(): FaceIndexImpor
     is FaceSnapshotImportResult.NamesStaged -> FaceIndexImportOutcome.ReattachScheduled(people)
     FaceSnapshotImportResult.WrongAccount -> FaceIndexImportOutcome.WrongAccount
     FaceSnapshotImportResult.UnsupportedVersion, FaceSnapshotImportResult.Unreadable -> FaceIndexImportOutcome.Unreadable
+    FaceSnapshotImportResult.NotEnoughSpace -> FaceIndexImportOutcome.NotEnoughSpace
 }
 
 /**

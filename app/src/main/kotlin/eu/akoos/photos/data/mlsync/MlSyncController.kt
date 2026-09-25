@@ -182,8 +182,9 @@ class MlSyncController @Inject constructor(
     }
 
     /**
-     * Stops the job. An import in progress rolls back, and a restore hands the indexing walks back; a restore
-     * retry cancelled before WorkManager ran it has its face pause handed back here ([handBackAfterCancel]).
+     * Stops the job. A face import in progress rolls back, a search import keeps the chunks it has committed
+     * (restoring again completes it), and a restore hands the indexing walks back; a restore retry cancelled
+     * before WorkManager ran it has its face pause handed back here ([handBackAfterCancel]).
      */
     fun cancel() {
         workManager.cancelUniqueWork(MlSyncWorker.UNIQUE_WORK_NAME)

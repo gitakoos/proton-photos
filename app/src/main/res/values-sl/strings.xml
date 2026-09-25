@@ -1961,6 +1961,7 @@
     <string name="settings_ml_drive_too_new">Podatke je shranila novejša različica aplikacije. Posodobite aplikacijo in poskusite znova.</string>
     <string name="settings_ml_drive_wrong_account">Ta račun podatkov ne more več odpreti.</string>
     <string name="settings_ml_drive_damaged">Shranjena kopija je poškodovana. Znova jo shranite v napravi, iz katere izvira.</string>
+    <string name="settings_ml_restore_no_space">Za obnovo teh podatkov ni dovolj prostora. Sprostite nekaj prostora in poskusite znova.</string>
     <string name="settings_ml_drive_names_only">Shranjeni obrazi izvirajo iz drugega modela obrazov, zato so bila obnovljena le njihova imena. Imena se bodo vrnila na vaše fotografije, ko bo knjižnica pregledana.</string>
     <string name="settings_ml_drive_search_other_model">Shranjeni podatki o iskanju izvirajo iz drugega modela iskanja, zato ta naprava sama pripravi te fotografije za iskanje.</string>
     <plurals name="settings_ml_drive_count_faces">

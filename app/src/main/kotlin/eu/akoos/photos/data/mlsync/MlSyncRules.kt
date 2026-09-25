@@ -218,6 +218,7 @@ internal fun FaceSnapshotImportResult.partStatus(): MlSyncPartStatus = when (thi
     FaceSnapshotImportResult.WrongAccount -> MlSyncPartStatus.WRONG_ACCOUNT
     FaceSnapshotImportResult.UnsupportedVersion -> MlSyncPartStatus.TOO_NEW
     FaceSnapshotImportResult.Unreadable -> MlSyncPartStatus.DAMAGED
+    FaceSnapshotImportResult.NotEnoughSpace -> MlSyncPartStatus.NO_SPACE
 }
 
 /** The file status a search snapshot import ended in. */
@@ -228,6 +229,7 @@ internal fun SearchSnapshotImportResult.partStatus(): MlSyncPartStatus = when (t
         SearchImportFailure.WRONG_ACCOUNT -> MlSyncPartStatus.WRONG_ACCOUNT
         SearchImportFailure.TOO_NEW -> MlSyncPartStatus.TOO_NEW
         SearchImportFailure.DAMAGED, SearchImportFailure.NOT_A_SEARCH_SNAPSHOT -> MlSyncPartStatus.DAMAGED
+        SearchImportFailure.NO_SPACE -> MlSyncPartStatus.NO_SPACE
         SearchImportFailure.NO_ACCOUNT, SearchImportFailure.ERROR -> MlSyncPartStatus.FAILED
     }
 }

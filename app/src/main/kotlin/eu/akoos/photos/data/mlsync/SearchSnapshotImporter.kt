@@ -25,7 +25,6 @@ package eu.akoos.photos.data.mlsync
 import android.content.Context
 import android.util.Log
 import androidx.room.RoomDatabase
-import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
@@ -43,8 +42,11 @@ import javax.inject.Inject
 
 private const val TAG = "SearchSnapshot"
 
-/** Rows written per upsert inside the import's transaction. */
-internal const val SEARCH_IMPORT_BATCH_SIZE = 256
+/**
+ * Rows an import writes per transaction: the write-ahead log grows by one chunk before it can be
+ * checkpointed, not by a whole snapshot, and a failure part-way keeps the chunks before it.
+ */
+internal const val SEARCH_IMPORT_CHUNK_SIZE = 2_000
 
 /** How a snapshot's embeddings meet the ones this device already holds. */
 enum class SearchImportMode {
@@ -55,7 +57,12 @@ enum class SearchImportMode {
     Merge,
 }
 
-/** Why a search snapshot import failed. In every case the index is exactly as it was before. */
+/**
+ * Why a search snapshot import failed. The snapshot is opened, judged and read through to its end marker
+ * before the first row is written, so a failure up to there leaves the index exactly as it was. A failure
+ * while the rows are written, such as storage running out, keeps the chunks committed before it, every row
+ * of them valid on its own, and importing the snapshot again completes the index.
+ */
 enum class SearchImportFailure {
     /** No signed-in account, so there is no key to open the snapshot with. */
     NO_ACCOUNT,
@@ -72,6 +79,12 @@ enum class SearchImportFailure {
     /** Written by a newer build, in a version this one does not read. */
     TOO_NEW,
 
+    /**
+     * Storage is too full: before the first row, when the free space the import needs is not there, or
+     * while the rows were written.
+     */
+    NO_SPACE,
+
     /** Storage, the database or the account's keys failed. */
     ERROR,
 }
@@ -87,7 +100,7 @@ sealed interface SearchSnapshotImportResult {
      */
     data class SkippedModelMismatch(val modelId: String, val embeddingDim: Int) : SearchSnapshotImportResult
 
-    /** Nothing was imported. */
+    /** Nothing was imported, or, after a failure while the rows were written, only the chunks committed before it. */
     data class Failed(val reason: SearchImportFailure) : SearchSnapshotImportResult
 }
 
@@ -119,9 +132,12 @@ internal fun isCompatibleSearchSnapshot(
  * device's semantic search index, so the photos it covers are searchable without being embedded here.
  *
  * The envelope is opened into a scratch file in the app cache, deleted afterwards, and nothing is read
- * from it unless it verified. A snapshot from another embedding space is skipped whole. The rows are
- * written in one database transaction that commits only after the reader passed the snapshot's end
- * marker, so a failure at any point leaves the index as it was.
+ * from it unless it verified. A snapshot from another embedding space is skipped whole. The plaintext is
+ * read through to its end marker before the first row is written, so a malformed one changes nothing, and
+ * its rows then go in chunks of [SEARCH_IMPORT_CHUNK_SIZE], each its own transaction. Every row stands on
+ * its own, so a failure part-way keeps the chunks already committed, and importing again completes the index.
+ * The free space the rows need on the database's volume ([SEARCH_IMPORT_SPACE_FACTOR]) is checked before the
+ * first one, and storage running full reads as [SearchImportFailure.NO_SPACE].
  */
 class SearchSnapshotImporter @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -134,12 +150,15 @@ class SearchSnapshotImporter @Inject constructor(
      * returns a fresh stream from the start of the snapshot on every call, since a snapshot none of the
      * cached keys opens is read once more after the account's addresses are refetched. A snapshot whose
      * header names another install than [expectedDeviceId], the one its Drive name carries, is refused as
-     * [SearchImportFailure.DAMAGED]. Runs on the IO dispatcher.
+     * [SearchImportFailure.DAMAGED]. [releaseSnapshot] runs once the snapshot has opened and verified,
+     * before the first row, when it is not read again: a caller can delete the file behind it, leaving that
+     * space to the import. Runs on the IO dispatcher.
      */
     suspend fun importFrom(
         userId: UserId?,
         mode: SearchImportMode,
         expectedDeviceId: String? = null,
+        releaseSnapshot: () -> Unit = {},
         openSnapshot: () -> InputStream,
     ): SearchSnapshotImportResult {
         if (userId == null) return SearchSnapshotImportResult.Failed(SearchImportFailure.NO_ACCOUNT)
@@ -148,6 +167,7 @@ class SearchSnapshotImporter @Inject constructor(
             embeddings = imageEmbeddingDao,
             crypto = envelopeCrypto,
             scratchDir = searchScratchDir(context.cacheDir),
+            freeBytes = { databaseFreeBytes(context, appDatabase) },
         )
         return engine.run(
             account = searchIndexAccount(userId),
@@ -155,13 +175,15 @@ class SearchSnapshotImporter @Inject constructor(
             openKeys = { refresh -> envelopeCrypto.openKeys(userId, refreshAddresses = refresh) },
             openSnapshot = openSnapshot,
             expectedDeviceId = expectedDeviceId,
+            releaseSnapshot = releaseSnapshot,
         )
     }
 }
 
 /**
- * The import itself, apart from where the account's keys come from, so it runs against a fake envelope
- * crypto and an in-memory database in tests.
+ * The import itself, apart from where the account's keys and the free space are read, so it runs against
+ * a fake envelope crypto and an in-memory database in tests. [freeBytes] reads the free space on the
+ * database's volume, null when unknown.
  */
 internal class SearchSnapshotImportEngine(
     private val database: RoomDatabase,
@@ -171,12 +193,14 @@ internal class SearchSnapshotImportEngine(
     private val modelId: String = SEARCH_MODEL_ID,
     private val embeddingDim: Int = SEARCH_EMBEDDING_DIM,
     private val keyPageSize: Int = SEARCH_KEY_PAGE_SIZE,
-    private val batchSize: Int = SEARCH_IMPORT_BATCH_SIZE,
+    private val chunkSize: Int = SEARCH_IMPORT_CHUNK_SIZE,
+    private val freeBytes: () -> Long? = { null },
 ) {
     /**
      * Imports the snapshot into [account]'s index. [openKeys] hands out the keys to open it with, freshly
      * fetched from the server when its argument is true. [expectedDeviceId], when given, is the install the
-     * snapshot has to be from ([snapshotFromExpectedDevice]).
+     * snapshot has to be from ([snapshotFromExpectedDevice]). [releaseSnapshot] runs once the snapshot has
+     * opened and verified, as [SearchSnapshotImporter.importFrom] describes.
      */
     suspend fun run(
         account: String,
@@ -185,13 +209,16 @@ internal class SearchSnapshotImportEngine(
         openSnapshot: () -> InputStream,
         importedAtMillis: Long = System.currentTimeMillis(),
         expectedDeviceId: String? = null,
+        releaseSnapshot: () -> Unit = {},
     ): SearchSnapshotImportResult = withContext(Dispatchers.IO) {
         var plaintext: File? = null
         try {
             val scratch = newSearchScratchFile(scratchDir, "search-import-").also { plaintext = it }
             when (openInto(scratch, openKeys, openSnapshot)) {
-                is EnvelopeOpenResult.Opened ->
-                    FileInputStream(scratch).use { apply(account, mode, it, importedAtMillis, expectedDeviceId) }
+                is EnvelopeOpenResult.Opened -> {
+                    releaseSnapshot()
+                    apply(account, mode, scratch, importedAtMillis, expectedDeviceId)
+                }
                 EnvelopeOpenResult.WrongKey -> failed(SearchImportFailure.WRONG_ACCOUNT)
                 EnvelopeOpenResult.Corrupt -> failed(SearchImportFailure.DAMAGED)
                 EnvelopeOpenResult.NotAnEnvelope -> failed(SearchImportFailure.NOT_A_SEARCH_SNAPSHOT)
@@ -204,8 +231,13 @@ internal class SearchSnapshotImportEngine(
         } catch (e: MlSnapshotFormatException) {
             failed(SearchImportFailure.DAMAGED)
         } catch (e: Exception) {
-            Log.w(TAG, "search snapshot import failed: ${e.javaClass.simpleName}")
-            failed(SearchImportFailure.ERROR)
+            if (isStorageFull(e)) {
+                Log.w(TAG, "search snapshot import stopped: storage full")
+                failed(SearchImportFailure.NO_SPACE)
+            } else {
+                Log.w(TAG, "search snapshot import failed: ${e.javaClass.simpleName}")
+                failed(SearchImportFailure.ERROR)
+            }
         } finally {
             plaintext?.delete()
         }
@@ -233,56 +265,88 @@ internal class SearchSnapshotImportEngine(
         }
 
     /**
-     * Writes the verified plaintext's rows. The header is judged before a transaction opens; the rows go
-     * in batches inside one transaction that commits only once the reader has passed the end marker, so a
-     * snapshot found malformed anywhere rolls every row back.
+     * Imports the verified plaintext in [plaintext]: surveyed whole first, then measured against the free
+     * space, then its rows written.
      */
     private suspend fun apply(
         account: String,
         mode: SearchImportMode,
-        plaintext: InputStream,
+        plaintext: File,
         importedAtMillis: Long,
         expectedDeviceId: String?,
     ): SearchSnapshotImportResult {
-        val reader = MlSnapshotReader(plaintext)
-        val header = reader.header as? MlSnapshotHeader.Search
-            ?: return failed(SearchImportFailure.NOT_A_SEARCH_SNAPSHOT)
-        if (!snapshotFromExpectedDevice(header.deviceId, expectedDeviceId)) {
-            Log.w(TAG, "search snapshot refused: another install wrote it")
-            return failed(SearchImportFailure.DAMAGED)
+        survey(plaintext, expectedDeviceId)?.let { return it }
+        if (!importFits(plaintext.length(), SEARCH_IMPORT_SPACE_FACTOR, freeBytes())) {
+            Log.w(TAG, "search snapshot refused: not enough free space")
+            return failed(SearchImportFailure.NO_SPACE)
         }
-        if (!isCompatibleSearchSnapshot(header, modelId, embeddingDim)) {
-            return SearchSnapshotImportResult.SkippedModelMismatch(header.searchModelId, header.embeddingDim)
-        }
-        return database.withTransaction {
-            // A row of an older model or a wrong width is stale and counts as not embedded, so it is replaced.
-            val embeddedHere = embeddings.currentSearchKeys(account, keyPageSize)
-            var imported = 0
-            var kept = 0
-            val batch = ArrayList<ImageEmbeddingEntity>(batchSize)
-            for (record in reader) {
-                if (record !is MlSnapshotRecord.SearchEmbedding || !isPortableSearchKey(record.photoKey)) continue
-                if (!shouldImportSearchEmbedding(mode, record.photoKey in embeddedHere, record.isTombstone)) {
-                    kept++
-                    continue
-                }
-                batch += ImageEmbeddingEntity(
-                    userId = account,
-                    photoKey = record.photoKey,
-                    embedding = record.embedding,
-                    modelVersion = SEMANTIC_MODEL_VERSION,
-                    indexedAt = importedAtMillis,
-                )
-                embeddedHere += record.photoKey
-                imported++
-                if (batch.size == batchSize) {
-                    embeddings.upsert(batch)
-                    batch.clear()
-                }
+        return FileInputStream(plaintext).use { write(account, mode, MlSnapshotReader(it), importedAtMillis) }
+    }
+
+    /**
+     * Judges the header, then reads every record through to the end marker, so a snapshot cut short or
+     * malformed anywhere throws [MlSnapshotFormatException] before a row is written. Returns the outcome
+     * that ends the import here, or null when its rows are to be written.
+     */
+    private fun survey(plaintext: File, expectedDeviceId: String?): SearchSnapshotImportResult? {
+        FileInputStream(plaintext).use { input ->
+            val reader = MlSnapshotReader(input)
+            val header = reader.header as? MlSnapshotHeader.Search
+                ?: return failed(SearchImportFailure.NOT_A_SEARCH_SNAPSHOT)
+            if (!snapshotFromExpectedDevice(header.deviceId, expectedDeviceId)) {
+                Log.w(TAG, "search snapshot refused: another install wrote it")
+                return failed(SearchImportFailure.DAMAGED)
             }
-            if (batch.isNotEmpty()) embeddings.upsert(batch)
-            SearchSnapshotImportResult.Imported(imported, kept)
+            if (!isCompatibleSearchSnapshot(header, modelId, embeddingDim)) {
+                return SearchSnapshotImportResult.SkippedModelMismatch(header.searchModelId, header.embeddingDim)
+            }
+            while (reader.hasNext()) reader.next()
         }
+        return null
+    }
+
+    /**
+     * Writes the surveyed snapshot's rows in chunks of [chunkSize], each its own transaction. Every row
+     * stands on its own: a failure keeps the chunks committed before it, and a rerun, which finds their
+     * rows embedded here, leaves the index as one uninterrupted import would.
+     */
+    private suspend fun write(
+        account: String,
+        mode: SearchImportMode,
+        reader: MlSnapshotReader,
+        importedAtMillis: Long,
+    ): SearchSnapshotImportResult {
+        // A row of an older model or a wrong width is stale and counts as not embedded, so it is replaced.
+        val embeddedHere = embeddings.currentSearchKeys(account, keyPageSize)
+        var imported = 0
+        var kept = 0
+        val chunk = ArrayList<ImageEmbeddingEntity>(chunkSize)
+        for (record in reader) {
+            if (record !is MlSnapshotRecord.SearchEmbedding || !isPortableSearchKey(record.photoKey)) continue
+            if (!shouldImportSearchEmbedding(mode, record.photoKey in embeddedHere, record.isTombstone)) {
+                kept++
+                continue
+            }
+            chunk += ImageEmbeddingEntity(
+                userId = account,
+                photoKey = record.photoKey,
+                embedding = record.embedding,
+                modelVersion = SEMANTIC_MODEL_VERSION,
+                indexedAt = importedAtMillis,
+            )
+            embeddedHere += record.photoKey
+            imported++
+            if (chunk.size == chunkSize) writeChunk(chunk)
+        }
+        writeChunk(chunk)
+        return SearchSnapshotImportResult.Imported(imported, kept)
+    }
+
+    /** Writes [chunk] in one transaction, so it lands whole or not at all, and empties it. */
+    private suspend fun writeChunk(chunk: MutableList<ImageEmbeddingEntity>) {
+        if (chunk.isEmpty()) return
+        database.withStorageAwareTransaction { embeddings.upsert(chunk) }
+        chunk.clear()
     }
 
     private fun failed(reason: SearchImportFailure) = SearchSnapshotImportResult.Failed(reason)

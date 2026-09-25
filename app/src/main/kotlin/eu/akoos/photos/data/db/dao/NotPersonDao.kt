@@ -95,4 +95,20 @@ interface NotPersonDao {
             "AND substr(faceId, length(:oldKey) + 1, 1) = '#'"
     )
     suspend fun rekeyPhoto(userId: String, oldKey: String, newKey: String)
+
+    /** The account's not-a-person marks on one photo's faces (faceId is `photoKey#index`), so a backup
+     *  re-key that merges two face sets can carry them onto the faces that stay. */
+    @Query(
+        "SELECT * FROM not_person WHERE userId = :userId AND substr(faceId, 1, length(:photoKey)) = :photoKey " +
+            "AND substr(faceId, length(:photoKey) + 1, 1) = '#'"
+    )
+    suspend fun marksForPhoto(userId: String, photoKey: String): List<NotPersonEntity>
+
+    /** Drops the account's not-a-person marks on one photo's faces, once a backup re-key has carried them
+     *  onto the faces that stay. */
+    @Query(
+        "DELETE FROM not_person WHERE userId = :userId AND substr(faceId, 1, length(:photoKey)) = :photoKey " +
+            "AND substr(faceId, length(:photoKey) + 1, 1) = '#'"
+    )
+    suspend fun deleteForPhoto(userId: String, photoKey: String)
 }

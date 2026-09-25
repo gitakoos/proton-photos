@@ -263,6 +263,17 @@ internal fun mlSyncNotice(outcome: MlSyncOutcome): MlSyncNotice {
             lines = listOf(R.string.settings_ml_drive_nothing_message),
         )
         MlSyncResult.NOT_CAPABLE -> MlSyncNotice.Message(title = R.string.settings_ml_drive_not_capable)
+        // Only a restore ends this way, at the file that did not fit; the files before it stay imported.
+        MlSyncResult.NO_SPACE -> MlSyncNotice.Message(
+            title = if (outcome.counts.filesDone > 0) {
+                R.string.settings_ml_drive_restored_partly
+            } else {
+                R.string.settings_ml_drive_restore_failed
+            },
+            counts = mlSyncCountParts(outcome),
+            lines = failedParts(outcome, restore = true) + R.string.settings_ml_restore_no_space +
+                restoreNotes(outcome, restore = true),
+        )
         // Only a save ends this way: it found no folder and had no agreement to create one.
         MlSyncResult.FOLDER_MISSING -> if (restore) failed(outcome, restore) else MlSyncNotice.AskToCreateFolder
         MlSyncResult.NOT_SIGNED_IN,
@@ -297,14 +308,15 @@ private fun failedParts(outcome: MlSyncOutcome, restore: Boolean): List<Int> = b
 }
 
 /**
- * Why a job failed, where a file's status says something the user can act on or should know: data from a
- * newer app, data this account cannot open, or a damaged copy. Anything else, the network included, reads
- * as a plain "try again later".
+ * Why a job failed, where a file's status says something the user can act on or should know: storage too
+ * full, data from a newer app, data this account cannot open, or a damaged copy. Anything else, the network
+ * included, reads as a plain "try again later".
  */
 @StringRes
 private fun failureReason(outcome: MlSyncOutcome): Int {
     val failed = listOfNotNull(outcome.faces, outcome.search).filter { it.failed }
     return when {
+        MlSyncPartStatus.NO_SPACE in failed -> R.string.settings_ml_restore_no_space
         MlSyncPartStatus.TOO_NEW in failed -> R.string.settings_ml_drive_too_new
         MlSyncPartStatus.WRONG_ACCOUNT in failed -> R.string.settings_ml_drive_wrong_account
         MlSyncPartStatus.DAMAGED in failed -> R.string.settings_ml_drive_damaged

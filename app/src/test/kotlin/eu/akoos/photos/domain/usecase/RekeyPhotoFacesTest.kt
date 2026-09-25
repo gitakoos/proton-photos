@@ -45,9 +45,9 @@ class RekeyPhotoFacesTest {
     }
 
     @Test
-    fun `skips when the cloud copy is already scanned`() {
-        // The cloud copy already has its own faces; re-keying would collide.
-        assertEquals(emptyList<Pair<String, String>>(), backupRekeyPairs(listOf(devA to cloudA), scannedKeys = setOf(devA, cloudA)))
+    fun `keeps the pair when the cloud copy is already scanned, so the two sets merge`() {
+        // A restored face snapshot scanned the cloud copy; skipping would leave the device set beside it.
+        assertEquals(listOf(devA to cloudA), backupRekeyPairs(listOf(devA to cloudA), scannedKeys = setOf(devA, cloudA)))
     }
 
     @Test
@@ -60,5 +60,7 @@ class RekeyPhotoFacesTest {
         val pairs = listOf(devA to cloudA, devB to cloudB)
         // devA scanned + cloudA fresh -> move; devB not scanned -> skip.
         assertEquals(listOf(devA to cloudA), backupRekeyPairs(pairs, scannedKeys = setOf(devA)))
+        // devB scanned + cloudB scanned -> merge.
+        assertEquals(pairs, backupRekeyPairs(pairs, scannedKeys = setOf(devA, devB, cloudB)))
     }
 }

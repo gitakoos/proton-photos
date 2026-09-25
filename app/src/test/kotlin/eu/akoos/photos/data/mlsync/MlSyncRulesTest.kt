@@ -33,6 +33,7 @@ import eu.akoos.photos.data.mlsync.MlSyncPartStatus.EMPTY
 import eu.akoos.photos.data.mlsync.MlSyncPartStatus.FAILED
 import eu.akoos.photos.data.mlsync.MlSyncPartStatus.MODEL_MISMATCH
 import eu.akoos.photos.data.mlsync.MlSyncPartStatus.NAMES_ONLY
+import eu.akoos.photos.data.mlsync.MlSyncPartStatus.NO_SPACE
 import eu.akoos.photos.data.mlsync.MlSyncPartStatus.TOO_NEW
 import eu.akoos.photos.data.mlsync.MlSyncPartStatus.WRONG_ACCOUNT
 import org.junit.Assert.assertEquals
@@ -226,6 +227,7 @@ class MlSyncRulesTest {
         assertEquals(WRONG_ACCOUNT, FaceSnapshotImportResult.WrongAccount.partStatus())
         assertEquals(TOO_NEW, FaceSnapshotImportResult.UnsupportedVersion.partStatus())
         assertEquals(DAMAGED, FaceSnapshotImportResult.Unreadable.partStatus())
+        assertEquals(NO_SPACE, FaceSnapshotImportResult.NotEnoughSpace.partStatus())
         assertEquals(DONE, SearchSnapshotImportResult.Imported(imported = 3, kept = 1).partStatus())
         assertEquals(MODEL_MISMATCH, SearchSnapshotImportResult.SkippedModelMismatch("other", 768).partStatus())
         val expected = mapOf(
@@ -233,6 +235,7 @@ class MlSyncRulesTest {
             SearchImportFailure.TOO_NEW to TOO_NEW,
             SearchImportFailure.DAMAGED to DAMAGED,
             SearchImportFailure.NOT_A_SEARCH_SNAPSHOT to DAMAGED,
+            SearchImportFailure.NO_SPACE to NO_SPACE,
             SearchImportFailure.NO_ACCOUNT to FAILED,
             SearchImportFailure.ERROR to FAILED,
         )

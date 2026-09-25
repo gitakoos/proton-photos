@@ -93,6 +93,12 @@ sealed interface FaceSnapshotImportResult {
 
     /** Not a sealed face snapshot, one cut short, altered or malformed, or not the file it was picked as. */
     data object Unreadable : FaceSnapshotImportResult
+
+    /**
+     * Storage is too full for the import: the free space it needs was not there before it began, or ran
+     * out while it wrote and the transaction rolled back. Nothing changed.
+     */
+    data object NotEnoughSpace : FaceSnapshotImportResult
 }
 
 /**
@@ -103,19 +109,31 @@ sealed interface FaceSnapshotImportResult {
  * plaintext is read once to the end to refuse a malformed one before anything is written, and then
  * streamed into the database by [FaceSnapshotApplier] inside a single transaction, so the import becomes
  * visible whole once the reader has reached the end marker, and any failure leaves the database as it
- * was. The scratch file is deleted either way.
+ * was. The scratch file is deleted either way. A full import first checks the free space it needs on the
+ * database's volume ([FACE_IMPORT_SPACE_FACTOR]), and storage running full in the transaction reads as
+ * [FaceSnapshotImportResult.NotEnoughSpace].
  *
  * A snapshot of this device's face pipeline and model imports faces, names, curation and scan markers
  * (a face-free photo's too, so it is not scanned here again); one of another pipeline or model imports
  * only its names and curation, through the reattach path a model change uses. Clustering is left to the
  * caller, as after the v3 import; a snapshot grouped under other clustering parameters also asks the
  * indexer for a regroup.
+ *
+ * The app builds it from [AppDatabase]; a test hands in its own reading of the free space.
  */
-class FaceSnapshotImporter @Inject constructor(
-    @ApplicationContext private val context: Context,
+class FaceSnapshotImporter internal constructor(
+    private val context: Context,
     private val appDatabase: AppDatabase,
     private val sealing: FaceSnapshotSealing,
+    private val freeBytes: () -> Long?,
 ) {
+
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        appDatabase: AppDatabase,
+        sealing: FaceSnapshotSealing,
+    ) : this(context, appDatabase, sealing, { databaseFreeBytes(context, appDatabase) })
 
     /**
      * Whether a restore into [userId]'s face data has to ask Merge or Replace ([restoreNeedsChoice]): it
@@ -164,19 +182,25 @@ class FaceSnapshotImporter @Inject constructor(
      * first, as the Settings import does, so a walk already under way cannot detect a photo the snapshot
      * brings all over again and write over its faces and names. [expectedDeviceId] is the install the file
      * was picked as, from its Drive name; a snapshot another install wrote is refused before anything is
-     * written ([snapshotFromExpectedDevice]). Null for a file picked from storage.
+     * written ([snapshotFromExpectedDevice]). Null for a file picked from storage. [releaseInput] runs once
+     * the envelope has opened and verified, before anything is written: [input] is read to its end by then,
+     * so a caller can close it and delete the file behind it, leaving that space to the import.
      */
     suspend fun import(
         userId: UserId,
         input: InputStream,
         mode: FaceSnapshotMode,
         expectedDeviceId: String? = null,
+        releaseInput: () -> Unit = {},
     ): FaceSnapshotImportResult =
         withContext(Dispatchers.IO) {
             val plaintext = FaceSnapshotScratch.newFile(context)
             try {
                 when (val opened = open(userId, input, plaintext)) {
-                    is EnvelopeOpenResult.Opened -> importPlaintext(userId, plaintext, mode, expectedDeviceId)
+                    is EnvelopeOpenResult.Opened -> {
+                        releaseInput()
+                        importPlaintext(userId, plaintext, mode, expectedDeviceId)
+                    }
                     EnvelopeOpenResult.WrongKey -> FaceSnapshotImportResult.WrongAccount
                     is EnvelopeOpenResult.UnsupportedVersion -> FaceSnapshotImportResult.UnsupportedVersion
                     EnvelopeOpenResult.NotAnEnvelope, EnvelopeOpenResult.Corrupt -> {
@@ -185,8 +209,13 @@ class FaceSnapshotImporter @Inject constructor(
                     }
                 }
             } catch (e: IOException) {
-                Log.w(TAG, "snapshot read failed: ${e.javaClass.simpleName}")
-                FaceSnapshotImportResult.Unreadable
+                if (isStorageFull(e)) {
+                    Log.w(TAG, "snapshot not opened: storage full")
+                    FaceSnapshotImportResult.NotEnoughSpace
+                } else {
+                    Log.w(TAG, "snapshot read failed: ${e.javaClass.simpleName}")
+                    FaceSnapshotImportResult.Unreadable
+                }
             } finally {
                 plaintext.delete()
             }
@@ -229,7 +258,8 @@ class FaceSnapshotImporter @Inject constructor(
 
     /**
      * Imports the verified plaintext snapshot in [plaintext] into [userId]'s face data under [mode], unless
-     * it names another install than [expectedDeviceId]. A null [userId] writes the guest partition.
+     * it names another install than [expectedDeviceId] or a full import would not fit in the free space. A
+     * null [userId] writes the guest partition.
      */
     internal suspend fun importPlaintext(
         userId: UserId?,
@@ -251,15 +281,25 @@ class FaceSnapshotImporter @Inject constructor(
         }
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val fit = faceSnapshotFit(survey.header)
+        // A names-only import writes no vectors, so only a full one is measured against the free space.
+        if (fit == FaceSnapshotFit.Full && !importFits(plaintext.length(), FACE_IMPORT_SPACE_FACTOR, freeBytes())) {
+            Log.w(TAG, "snapshot refused: not enough free space")
+            return FaceSnapshotImportResult.NotEnoughSpace
+        }
         val applied = try {
-            appDatabase.withTransaction {
+            appDatabase.withStorageAwareTransaction {
                 val applier = FaceSnapshotApplier(appDatabase, account, mode, fit, survey)
                 val result = FileInputStream(plaintext).use { applier.run(MlSnapshotReader(it)) }
                 // Inside the transaction, so a failure to stage the names rolls the rows back with it.
                 if (fit == FaceSnapshotFit.NamesOnly) stageForReattach(result.staged, mode)
                 result
             }
-        } catch (e: IOException) {
+        } catch (e: Exception) {
+            if (isStorageFull(e)) {
+                Log.w(TAG, "snapshot import rolled back: storage full")
+                return FaceSnapshotImportResult.NotEnoughSpace
+            }
+            if (e !is IOException) throw e
             Log.w(TAG, "snapshot import rolled back: ${e.javaClass.simpleName}")
             return FaceSnapshotImportResult.Unreadable
         }

@@ -65,6 +65,11 @@ interface FaceScanDao {
     @Query("SELECT EXISTS(SELECT 1 FROM face_scan WHERE userId = :userId AND photoKey = :photoKey)")
     suspend fun isScanned(userId: String, photoKey: String): Boolean
 
+    /** One marker's hi-res swept flag, or null when the photo holds no marker, so a backup re-key that
+     *  folds two markers into one keeps the flag. */
+    @Query("SELECT hiResScanned FROM face_scan WHERE userId = :userId AND photoKey = :photoKey")
+    suspend fun hiResScanned(userId: String, photoKey: String): Boolean?
+
     /** Whether this owner has scanned anything yet: the cheap guard for the guest-adopt migration. */
     @Query("SELECT EXISTS(SELECT 1 FROM face_scan WHERE userId = :userId)")
     suspend fun hasAnyForUser(userId: String): Boolean

@@ -1867,6 +1867,7 @@
     <string name="settings_ml_drive_too_new">Az adatokat az alkalmazás egy újabb verziója mentette. Frissítsd az alkalmazást, és próbáld újra.</string>
     <string name="settings_ml_drive_wrong_account">Ez a fiók már nem tudja megnyitni az adatokat.</string>
     <string name="settings_ml_drive_damaged">A mentett másolat sérült. Mentsd újra azon az eszközön, amelyikről származik.</string>
+    <string name="settings_ml_restore_no_space">Nincs elég szabad hely az adatok visszaállításához. Szabadíts fel helyet, és próbáld újra.</string>
     <string name="settings_ml_drive_names_only">A mentett arcok egy másik arcmodellel készültek, ezért csak a nevek kerültek vissza. A nevek a könyvtár átvizsgálása közben visszakerülnek a fotóidra.</string>
     <string name="settings_ml_drive_search_other_model">A mentett keresési adatok egy másik keresési modellel készültek, ezért ez az eszköz maga készíti elő a fotókat a kereséshez.</string>
     <plurals name="settings_ml_drive_count_faces">

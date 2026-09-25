@@ -72,6 +72,7 @@ import eu.akoos.photos.data.mlsync.SearchSnapshotExporter
 import eu.akoos.photos.data.mlsync.SearchSnapshotImportResult
 import eu.akoos.photos.data.mlsync.SearchSnapshotImporter
 import eu.akoos.photos.data.mlsync.faceWalkResumes
+import eu.akoos.photos.data.mlsync.isStorageFull
 import eu.akoos.photos.data.mlsync.mlSyncRunAllowed
 import eu.akoos.photos.data.mlsync.partStatus
 import eu.akoos.photos.data.mlsync.planRestore
@@ -124,7 +125,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * is done, the imported faces regrouped first, so neither walk writes over an import or holds its model beside
  * one. The face pause is taken as a hold ([MlSyncFacePause]), and every run lets go of a hold still left when
  * it ends, so no run leaves the face walk paused for good. Each file must be the install's its Drive name says,
- * or its import is refused.
+ * or its import is refused. A download is deleted as soon as it has opened and verified, before its import
+ * writes, and an import that finds storage too full ends the run as [MlSyncResult.NO_SPACE].
  *
  * A sign-out stops the run before anything else ([MlSyncSignOut]): the job is cancelled, rolling back an
  * import still in its transaction, and the sign-out waits for the run to end. A run that finds its account
@@ -426,7 +428,7 @@ class MlSyncWorker @AssistedInject constructor(
                 }
             }
             report(MlSyncProgress(MlSyncPhase.IMPORTING, kind, index, total))
-            try {
+            val status = try {
                 when (kind) {
                     MlDriveFileKind.FACES -> importFaces(userId, step, file, tally, walks)
                     MlDriveFileKind.SEARCH -> importSearch(userId, step, file, tally, walks)
@@ -436,21 +438,24 @@ class MlSyncWorker @AssistedInject constructor(
             } catch (e: Exception) {
                 // The importers roll their transaction back on a failure, so the data here is as it was.
                 Log.w(TAG, "${kind.prefix} import failed: ${className(e)}")
-                tally.record(kind, MlSyncPartStatus.FAILED, className(e))
+                (if (isStorageFull(e)) MlSyncPartStatus.NO_SPACE else MlSyncPartStatus.FAILED)
+                    .also { tally.record(kind, it, className(e)) }
             }
-            return null
+            // Full storage would fail every later file and a retry alike, so the run ends here.
+            return if (status == MlSyncPartStatus.NO_SPACE) MlSyncResult.NO_SPACE else null
         } finally {
             file.delete()
         }
     }
 
+    /** Imports the face file [file] of [step] and returns the status it ended in. */
     private suspend fun importFaces(
         userId: UserId,
         step: MlRestoreStep,
         file: File,
         tally: MlSyncTally,
         walks: WalkStandDown,
-    ) {
+    ): MlSyncPartStatus {
         walks.standDownFaces()
         val mode = if (step.replace) FaceSnapshotMode.Replace else FaceSnapshotMode.Merge
         walks.faceImportStarted = true
@@ -458,10 +463,15 @@ class MlSyncWorker @AssistedInject constructor(
         // one a stand-down that could not be written left running, writes nothing over the imported faces.
         val result = faceIndexingScheduler.withImportFence {
             FileInputStream(file).use { input ->
-                faceImporter.import(userId, input, mode, expectedDeviceId = step.file.deviceId)
+                // Opened and verified, the download is spent: deleted before the import writes, freeing its space.
+                faceImporter.import(userId, input, mode, expectedDeviceId = step.file.deviceId) {
+                    runCatching { input.close() }
+                    file.delete()
+                }
             }
         }
-        tally.record(MlDriveFileKind.FACES, result.partStatus())
+        val status = result.partStatus()
+        tally.record(MlDriveFileKind.FACES, status)
         when (result) {
             is FaceSnapshotImportResult.Imported -> {
                 walks.facesImported = true
@@ -475,28 +485,39 @@ class MlSyncWorker @AssistedInject constructor(
                 tally.count(faces = result.facesUpdated, people = result.people)
             FaceSnapshotImportResult.WrongAccount,
             FaceSnapshotImportResult.UnsupportedVersion,
-            FaceSnapshotImportResult.Unreadable -> Unit
+            FaceSnapshotImportResult.Unreadable,
+            FaceSnapshotImportResult.NotEnoughSpace -> Unit
         }
+        return status
     }
 
+    /** Imports the search file [file] of [step] and returns the status it ended in. */
     private suspend fun importSearch(
         userId: UserId,
         step: MlRestoreStep,
         file: File,
         tally: MlSyncTally,
         walks: WalkStandDown,
-    ) {
+    ): MlSyncPartStatus {
         walks.pauseSemantic()
         val mode = if (step.replace) SearchImportMode.Replace else SearchImportMode.Merge
-        // The importer opens the file afresh for its second try with refreshed address keys.
-        val result = searchImporter.importFrom(userId, mode, expectedDeviceId = step.file.deviceId) {
+        // The importer opens the file afresh for its second try with refreshed address keys. Opened and
+        // verified, the download is spent: deleted before the first row is written, to free its space.
+        val result = searchImporter.importFrom(
+            userId,
+            mode,
+            expectedDeviceId = step.file.deviceId,
+            releaseSnapshot = { file.delete() },
+        ) {
             FileInputStream(file)
         }
         val failure = (result as? SearchSnapshotImportResult.Failed)?.reason?.name
-        tally.record(MlDriveFileKind.SEARCH, result.partStatus(), failure)
+        val status = result.partStatus()
+        tally.record(MlDriveFileKind.SEARCH, status, failure)
         if (result is SearchSnapshotImportResult.Imported) {
             tally.count(searchEmbeddings = result.imported, searchKept = result.kept)
         }
+        return status
     }
 
     /**

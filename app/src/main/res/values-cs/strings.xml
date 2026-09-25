@@ -1962,6 +1962,7 @@
     <string name="settings_ml_drive_too_new">Data uložila novější verze aplikace. Aktualizujte aplikaci a zkuste to znovu.</string>
     <string name="settings_ml_drive_wrong_account">Tento účet už data nemůže otevřít.</string>
     <string name="settings_ml_drive_damaged">Uložená kopie je poškozená. Uložte ji znovu na zařízení, ze kterého pochází.</string>
+    <string name="settings_ml_restore_no_space">Pro obnovení těchto dat není dost volného místa. Uvolněte trochu místa a zkuste to znovu.</string>
     <string name="settings_ml_drive_names_only">Uložené obličeje pocházejí z jiného modelu obličejů, proto se obnovila jen jejich jména. Jména se k vašim fotkám vrátí během prohledávání knihovny.</string>
     <string name="settings_ml_drive_search_other_model">Uložená data vyhledávání pocházejí z jiného modelu vyhledávání, proto si toto zařízení připraví fotky pro vyhledávání samo.</string>
     <plurals name="settings_ml_drive_count_faces">

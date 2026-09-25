@@ -80,4 +80,24 @@ interface PersonManualPhotoDao {
     /** Follows a manually assigned photo to its new key when a device photo is backed up to Drive. */
     @Query("UPDATE person_manual_photo SET photoKey = :newKey WHERE userId = :userId AND photoKey = :oldKey")
     suspend fun rekeyPhoto(userId: String, oldKey: String, newKey: String)
+
+    /**
+     * Follows a manually attached photo to its new key like [rekeyPhoto], for a cloud key that may already
+     * be attached to some of the same names: OR IGNORE keeps that existing row instead of failing on the
+     * duplicate, and the [oldKey] row it leaves behind is dropped, so nothing stays on the old key.
+     */
+    suspend fun mergePhoto(userId: String, oldKey: String, newKey: String) {
+        movePhotoIfFree(userId, oldKey, newKey)
+        deleteForPhoto(userId, oldKey)
+    }
+
+    @Query("UPDATE OR IGNORE person_manual_photo SET photoKey = :newKey WHERE userId = :userId AND photoKey = :oldKey")
+    suspend fun movePhotoIfFree(userId: String, oldKey: String, newKey: String)
+
+    /** The names [photoKey] is manually attached to for the account. */
+    @Query("SELECT personName FROM person_manual_photo WHERE userId = :userId AND photoKey = :photoKey")
+    suspend fun namesForPhoto(userId: String, photoKey: String): List<String>
+
+    @Query("DELETE FROM person_manual_photo WHERE userId = :userId AND photoKey = :photoKey")
+    suspend fun deleteForPhoto(userId: String, photoKey: String)
 }

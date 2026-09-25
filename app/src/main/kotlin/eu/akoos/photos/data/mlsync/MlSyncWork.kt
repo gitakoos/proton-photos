@@ -90,6 +90,9 @@ enum class MlSyncPartStatus {
     /** Save: the file kept changing under the upload, the retry included. */
     CONFLICT,
 
+    /** Restore: storage is too full for the import, before it began or while it wrote. */
+    NO_SPACE,
+
     /** Storage, the network, the account's keys or the database failed. */
     FAILED,
     ;
@@ -126,6 +129,10 @@ enum class MlSyncResult {
 
     /** The request could not be read: an unknown operation, no account, or no file to restore. */
     INVALID_REQUEST,
+
+    /** Restore: storage is too full for an import. The run ends at that file, as every later one and a
+     *  retry would meet the same; the files imported before it stay. */
+    NO_SPACE,
 
     /** Nothing finished. */
     FAILED,

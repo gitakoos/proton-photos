@@ -27,6 +27,7 @@ import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.util.flatMapSqlChunks
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -74,6 +75,14 @@ interface PersonDao {
     /** Sets only a person's cover face, for a user's explicit cover pick. */
     @Query("UPDATE person SET coverFaceId = :coverFaceId WHERE id = :id")
     suspend fun updateCover(id: Long, coverFaceId: String)
+
+    /** The account's people whose cover is one of [faceIds], so a backup re-key can move each cover off a
+     *  face it merges away or renames. Chunked for the SQL host-variable limit. */
+    suspend fun peopleCoveredBy(userId: String, faceIds: Collection<String>): List<PersonEntity> =
+        faceIds.flatMapSqlChunks { peopleCoveredByChunk(userId, it) }
+
+    @Query("SELECT * FROM person WHERE userId = :userId AND coverFaceId IN (:faceIds)")
+    suspend fun peopleCoveredByChunk(userId: String, faceIds: List<String>): List<PersonEntity>
 
     /** Drops people that ended up with no faces, so an emptied cluster leaves no tile behind. */
     @Query("DELETE FROM person WHERE userId = :userId AND faceCount = 0")

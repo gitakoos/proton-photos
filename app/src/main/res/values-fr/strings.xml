@@ -1873,6 +1873,7 @@
     <string name="settings_ml_drive_too_new">Les données ont été enregistrées par une version plus récente de l\'app. Mettez l\'app à jour et réessayez.</string>
     <string name="settings_ml_drive_wrong_account">Ce compte ne peut plus ouvrir ces données.</string>
     <string name="settings_ml_drive_damaged">La copie enregistrée est endommagée. Enregistrez-la à nouveau depuis l\'appareil d\'origine.</string>
+    <string name="settings_ml_restore_no_space">Pas assez d\'espace libre pour restaurer ces données. Libérez de la place puis réessayez.</string>
     <string name="settings_ml_drive_names_only">Les visages enregistrés proviennent d\'un autre modèle de visages, seuls leurs noms ont donc été restaurés. Les noms reviendront sur vos photos au fur et à mesure de l\'analyse de la bibliothèque.</string>
     <string name="settings_ml_drive_search_other_model">Les données de recherche enregistrées proviennent d\'un autre modèle de recherche, cet appareil prépare donc lui-même ces photos pour la recherche.</string>
     <plurals name="settings_ml_drive_count_faces">

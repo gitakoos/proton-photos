@@ -883,6 +883,7 @@
     <string name="settings_ml_drive_too_new">The data was saved by a newer version of the app. Update the app and try again.</string>
     <string name="settings_ml_drive_wrong_account">This account can no longer open the data.</string>
     <string name="settings_ml_drive_damaged">The saved copy is damaged. Save it again on the device it came from.</string>
+    <string name="settings_ml_restore_no_space">Not enough free space to restore this data. Free up some space and try again.</string>
     <string name="settings_ml_drive_names_only">The saved faces came from a different face model, so only their names were restored. The names return to your photos as the library is scanned.</string>
     <string name="settings_ml_drive_search_other_model">The saved search data came from a different search model, so this device prepares those photos for search itself.</string>
     <plurals name="settings_ml_drive_count_faces">
