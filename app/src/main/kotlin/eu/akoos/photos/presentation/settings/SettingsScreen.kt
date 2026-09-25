@@ -77,7 +77,6 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -143,7 +142,6 @@ import eu.akoos.photos.presentation.people.rememberGroupSubject
 import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ConfirmSheet
-import eu.akoos.photos.util.ShareIntentBuilder
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.common.FloatingHeaderScrim
@@ -151,7 +149,6 @@ import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
-import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.showAppLockPrompt
 import eu.akoos.photos.util.HealthBlockReason
 import eu.akoos.photos.util.sanitizeErrorMessage
@@ -1168,39 +1165,6 @@ fun FaceRecognitionScreen(
     onOpenExcluded: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val transferMsg by viewModel.faceTransferMsg.collectAsStateWithLifecycle()
-    val transferInProgress by viewModel.faceTransferInProgress.collectAsStateWithLifecycle()
-    val transferCtx = LocalContext.current
-    LaunchedEffect(transferMsg) {
-        transferMsg?.let {
-            Toast.makeText(transferCtx, it, Toast.LENGTH_LONG).show()
-            viewModel.clearFaceTransferMsg()
-        }
-    }
-    // After a successful export, offer to send the file on through the system share sheet (another app or
-    // a nearby device), so the file the user just saved can be passed to another phone without digging it
-    // out first. Declining just keeps the saved file. The export can finish under the app lock, and the
-    // offer's sheet would open above the lock, so it waits for the unlock.
-    val exportedUri by viewModel.faceExportedUri.collectAsStateWithLifecycle()
-    val appLock = LocalAppLock.current
-    exportedUri?.takeIf { !appLock.isLocked }?.let { uri ->
-        ConfirmSheet(
-            title = stringResource(R.string.settings_ai_export_share_title),
-            message = stringResource(R.string.settings_ai_export_share_msg),
-            confirmLabel = stringResource(R.string.share_action),
-            dismissLabel = stringResource(R.string.person_merge_suggest_later),
-            onConfirm = {
-                viewModel.clearFaceExportedUri()
-                runCatching {
-                    val send = ShareIntentBuilder.buildSendIntent(transferCtx, listOf(uri), "application/octet-stream")
-                    transferCtx.startActivity(
-                        Intent.createChooser(send, transferCtx.getString(R.string.share_chooser_title)),
-                    )
-                }
-            },
-            onDismiss = { viewModel.clearFaceExportedUri() },
-        )
-    }
     val faceUi by viewModel.faceIndexingUi.collectAsStateWithLifecycle()
     val facePauseSwitch by viewModel.faceIndexingPaused.collectAsStateWithLifecycle()
     val faceMlActiveRail by viewModel.mlActiveRail.collectAsStateWithLifecycle()
@@ -1313,17 +1277,6 @@ fun FaceRecognitionScreen(
                 onRescan = viewModel::rescanFaces,
                 onClear = viewModel::clearFaceIndex,
             )
-            // The encrypted export and import seal the face index to the account's own key, so they need
-            // an account; a guest has no key to seal to. Hidden without one, while the rest of the screen
-            // (the on-device scan, people and maintenance) runs for a guest just as it does signed in.
-            if (state.isSignedIn) {
-                Spacer(Modifier.height(20.dp))
-                FaceTransferCard(
-                    inProgress = transferInProgress,
-                    onExport = viewModel::exportFaceIndex,
-                    onImport = viewModel::importFaceIndex,
-                )
-            }
         }
 
         // The face model drawers. Download is the consent raised when the feature is switched on with no
@@ -1593,69 +1546,6 @@ private fun FaceMaintenanceCard(
             onConfirm = { showClearConfirm = false; onClear() },
             onDismiss = { showClearConfirm = false },
             destructive = true,
-        )
-    }
-}
-
-/**
- * Transfer the portable face index. Export warns that the file holds biometric fingerprints; import
- * explains it folds a saved file into this device and regroups, keeping the current faces.
- */
-@Composable
-private fun FaceTransferCard(
-    inProgress: Boolean,
-    onExport: (android.net.Uri) -> Unit,
-    onImport: (android.net.Uri) -> Unit,
-) {
-    var showExportWarn by remember { mutableStateOf(false) }
-    var showImportConfirm by remember { mutableStateOf(false) }
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream"),
-    ) { uri -> uri?.let(onExport) }
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri -> uri?.let(onImport) }
-
-    SectionLabel(stringResource(R.string.settings_face_transfer))
-    Spacer(Modifier.height(8.dp))
-    SettingsCard {
-        ActionRow(
-            label = stringResource(R.string.settings_ai_export),
-            description = if (inProgress) stringResource(R.string.settings_ai_transfer_working)
-                else stringResource(R.string.settings_face_export_desc),
-            icon = Icons.Default.Upload,
-            onClick = { showExportWarn = true },
-            enabled = !inProgress,
-        )
-        RowDivider()
-        ActionRow(
-            label = stringResource(R.string.settings_ai_import),
-            description = if (inProgress) stringResource(R.string.settings_ai_transfer_working)
-                else stringResource(R.string.settings_face_import_desc),
-            icon = Icons.Default.Download,
-            onClick = { showImportConfirm = true },
-            enabled = !inProgress,
-        )
-    }
-
-    if (showExportWarn) {
-        ConfirmDialog(
-            title = stringResource(R.string.settings_ai_export_warn_title),
-            message = stringResource(R.string.settings_ai_export_warn_msg),
-            confirmLabel = stringResource(R.string.settings_ai_export),
-            dismissLabel = stringResource(R.string.cancel),
-            onConfirm = { showExportWarn = false; exportLauncher.launch("photosforproton-faces.ppfi") },
-            onDismiss = { showExportWarn = false },
-        )
-    }
-    if (showImportConfirm) {
-        ConfirmDialog(
-            title = stringResource(R.string.settings_ai_import_confirm_title),
-            message = stringResource(R.string.settings_ai_import_confirm_msg),
-            confirmLabel = stringResource(R.string.settings_ai_import),
-            dismissLabel = stringResource(R.string.cancel),
-            onConfirm = { showImportConfirm = false; importLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
-            onDismiss = { showImportConfirm = false },
         )
     }
 }

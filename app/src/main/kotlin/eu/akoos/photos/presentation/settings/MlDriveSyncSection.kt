@@ -22,7 +22,15 @@
 
 package eu.akoos.photos.presentation.settings
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,8 +42,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Devices
@@ -44,6 +54,8 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -54,6 +66,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +81,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.data.mlsync.FaceSnapshotMode
+import eu.akoos.photos.data.mlsync.MlDriveFileKind
 import eu.akoos.photos.data.mlsync.MlSyncState
 import eu.akoos.photos.presentation.common.ActionSheetRow
 import eu.akoos.photos.presentation.common.ConfirmDialog
@@ -78,7 +92,13 @@ import eu.akoos.photos.presentation.settings.components.ActionRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.settings.components.SettingsCard
+import eu.akoos.photos.presentation.settings.components.ToggleRow
+import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.theme.FgMute
+import eu.akoos.photos.presentation.theme.FgPrimary
+import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.presentation.util.formatBytes
@@ -152,6 +172,7 @@ internal fun MlDriveSyncSection(
         else -> MlRestorePickerSheet(
             sheet = sheet,
             onSelect = viewModel::selectRestoreDevice,
+            onToggleKind = viewModel::toggleRestoreKind,
             onRestore = viewModel::restoreSelected,
             onClose = viewModel::closeRestore,
         )
@@ -218,6 +239,7 @@ private fun MlSyncProgressBlock(running: MlSyncState.Running, onCancel: () -> Un
 private fun MlRestorePickerSheet(
     sheet: MlRestoreSheet,
     onSelect: (String) -> Unit,
+    onToggleKind: (MlDriveFileKind) -> Unit,
     onRestore: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -261,18 +283,12 @@ private fun MlRestorePickerSheet(
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         sheet.devices.forEach { device ->
-                            val isSelected = device.deviceId == sheet.selectedId
-                            ActionSheetRow(
-                                icon = if (device.name == MlDeviceName.ThisDevice) {
-                                    Icons.Default.PhoneAndroid
-                                } else {
-                                    Icons.Default.Devices
-                                },
-                                title = deviceName(device.name),
-                                subtitle = deviceSummary(device),
-                                onClick = { onSelect(device.deviceId) },
-                                showCheck = isSelected,
-                                modifier = Modifier.semantics { selected = isSelected },
+                            MlRestoreSetCard(
+                                device = device,
+                                picked = device.deviceId == sheet.selectedId,
+                                ticked = sheet.kinds,
+                                onPick = { onSelect(device.deviceId) },
+                                onToggle = onToggleKind,
                             )
                         }
                     }
@@ -289,7 +305,7 @@ private fun MlRestorePickerSheet(
                             label = stringResource(R.string.settings_ml_drive_restore_confirm),
                             onClick = { close(onRestore) },
                             modifier = Modifier.weight(1f),
-                            enabled = sheet.selectedId != null,
+                            enabled = sheet.selectedId != null && sheet.kinds.isNotEmpty(),
                         )
                     }
                 }
@@ -324,6 +340,79 @@ private fun MlRestorePickerSheet(
                         stringResource(R.string.settings_ml_drive_restore_loading),
                         color = colors.fgDim,
                         fontSize = 14.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One saved set in the restore list, drawn as the sheet's action cards are. Picking a set that holds both
+ * kinds of data opens its card downwards onto a switch per kind, both on, so one of the two can stay behind.
+ */
+@Composable
+private fun MlRestoreSetCard(
+    device: MlRemoteDevice,
+    picked: Boolean,
+    ticked: Set<MlDriveFileKind>,
+    onPick: () -> Unit,
+    onToggle: (MlDriveFileKind) -> Unit,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    val kinds = restorableKinds(device)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(PillBg, shape)
+            .border(0.5.dp, PillBorder, shape),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onPick)
+                .semantics { selected = picked }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(
+                if (device.name == MlDeviceName.ThisDevice) Icons.Default.PhoneAndroid else Icons.Default.Devices,
+                contentDescription = null,
+                tint = Accent,
+                modifier = Modifier.size(22.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(deviceName(device.name), color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(deviceSummary(device), color = FgMute, fontSize = 12.sp)
+            }
+            if (picked) {
+                Icon(Icons.Default.Check, contentDescription = null, tint = Accent, modifier = Modifier.size(18.dp))
+            }
+        }
+        AnimatedVisibility(
+            visible = picked && kinds.size > 1,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            Column {
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    thickness = 0.5.dp,
+                    color = PillBorder,
+                )
+                kinds.forEach { kind ->
+                    ToggleRow(
+                        label = stringResource(
+                            if (kind == MlDriveFileKind.FACES) {
+                                R.string.settings_ml_drive_holds_faces
+                            } else {
+                                R.string.settings_ml_drive_holds_search
+                            },
+                        ),
+                        checked = kind in ticked,
+                        onCheckedChange = { onToggle(kind) },
                     )
                 }
             }

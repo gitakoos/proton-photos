@@ -212,6 +212,21 @@ internal fun mlRemoteDeviceContents(device: MlRemoteDevice): Int = when {
     else -> R.string.settings_ml_drive_holds_search
 }
 
+/** The kinds of data a picked set offers to restore, faces first. A choice is offered only when it holds both. */
+internal fun restorableKinds(device: MlRemoteDevice): List<MlDriveFileKind> =
+    listOf(MlDriveFileKind.FACES, MlDriveFileKind.SEARCH).filter { it in device.kinds }
+
+/** [pick]'s ticked kinds with [kind] flipped, limited to what the picked set holds. */
+internal fun toggledRestoreKinds(pick: MlRestoreSheet.Pick, kind: MlDriveFileKind): Set<MlDriveFileKind> {
+    val held = pick.devices.firstOrNull { it.deviceId == pick.selectedId }?.kinds ?: return pick.kinds
+    if (kind !in held) return pick.kinds
+    return if (kind in pick.kinds) pick.kinds - kind else pick.kinds + kind
+}
+
+/** The files a restore of [device] reads with [kinds] ticked, newest first as the set lists them. */
+internal fun filesToRestore(device: MlRemoteDevice, kinds: Set<MlDriveFileKind>): List<MlRemoteSnapshot> =
+    device.files.filter { it.kind in kinds }
+
 /** The set the restore list opens with picked: the only one there is, else none, so the user chooses. */
 internal fun initialRestorePick(devices: List<MlRemoteDevice>): String? = devices.singleOrNull()?.deviceId
 

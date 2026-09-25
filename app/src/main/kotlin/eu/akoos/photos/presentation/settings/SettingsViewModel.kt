@@ -25,7 +25,6 @@
 package eu.akoos.photos.presentation.settings
 
 import android.content.Context
-import android.net.Uri
 import android.os.Environment
 import android.os.StatFs
 import androidx.appcompat.app.AppCompatDelegate
@@ -36,10 +35,8 @@ import androidx.work.WorkManager
 import coil.imageLoader
 import java.io.File
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -82,12 +79,8 @@ import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceIndexingState
 import eu.akoos.photos.data.face.FaceModelManager
 import eu.akoos.photos.data.face.FaceModelPreparation
-import eu.akoos.photos.data.mlsync.FACE_WALK_IDLE_TIMEOUT_MS
 import eu.akoos.photos.data.mlsync.MlSyncFacePause
 import eu.akoos.photos.data.mlsync.MlSyncSignOut
-import eu.akoos.photos.data.mlsync.faceIndexingPausedByUser
-import eu.akoos.photos.data.mlsync.faceWalkResumes
-import eu.akoos.photos.data.mlsync.isStorageFull
 import eu.akoos.photos.data.ocr.OcrModelComponent
 import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.ocr.OcrModelOutcome
@@ -121,9 +114,6 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.model.PersonSummary
-import eu.akoos.photos.domain.usecase.ExportFaceIndexUseCase
-import eu.akoos.photos.domain.usecase.FaceIndexImportOutcome
-import eu.akoos.photos.domain.usecase.ImportFaceIndexUseCase
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
@@ -196,8 +186,6 @@ class SettingsViewModel @Inject constructor(
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
-    private val exportFaceIndexUseCase: ExportFaceIndexUseCase,
-    private val importFaceIndexUseCase: ImportFaceIndexUseCase,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val newsRepository: NewsRepository,
@@ -1753,112 +1741,6 @@ class SettingsViewModel @Inject constructor(
     fun clearSemantic() {
         viewModelScope.launch {
             semanticIndexingScheduler.reset(accountManager.getPrimaryUserId().first())
-        }
-    }
-
-    private val _faceTransferMsg = MutableStateFlow<String?>(null)
-    val faceTransferMsg: StateFlow<String?> = _faceTransferMsg.asStateFlow()
-
-    fun clearFaceTransferMsg() { _faceTransferMsg.value = null }
-
-    /** The document a successful export was just written to, surfaced so the screen can offer to send it
-     *  on through the system share sheet (another app or a nearby device) right after the save. Null
-     *  until an export succeeds; cleared once the share prompt is answered. */
-    private val _faceExportedUri = MutableStateFlow<Uri?>(null)
-    val faceExportedUri: StateFlow<Uri?> = _faceExportedUri.asStateFlow()
-
-    fun clearFaceExportedUri() { _faceExportedUri.value = null }
-
-    /** True while an export or import runs, so the transfer rows read as busy and cannot be tapped
-     *  again mid-run. */
-    private val _faceTransferInProgress = MutableStateFlow(false)
-    val faceTransferInProgress: StateFlow<Boolean> = _faceTransferInProgress.asStateFlow()
-
-    /** Write the account's portable face index to [uri] (a document the user just chose). Reports the
-     *  face count, or a failure, through [faceTransferMsg]. */
-    fun exportFaceIndex(uri: Uri) {
-        viewModelScope.launch {
-            _faceTransferInProgress.value = true
-            try {
-                val count = runCatching {
-                    context.contentResolver.openOutputStream(uri)?.use { exportFaceIndexUseCase(it) } ?: -1
-                }.getOrElse { -1 }
-                _faceTransferMsg.value = when {
-                    count > 0 -> context.getString(R.string.settings_ai_export_done, count)
-                    count == 0 -> context.getString(R.string.settings_ai_export_empty)
-                    else -> context.getString(R.string.settings_ai_transfer_failed)
-                }
-                // A real file landed: offer to send it on (another app / nearby device) via the system
-                // share sheet, so the user does not have to hunt for it to Quick Share it.
-                if (count > 0) _faceExportedUri.value = uri
-            } finally {
-                _faceTransferInProgress.value = false
-            }
-        }
-    }
-
-    /**
-     * Read a face index from [uri] and fold it into the account, then regroup so the imported faces form
-     * people. Reports the counts, or a failure, through [faceTransferMsg].
-     *
-     * The face walk is stood down around the import the way a restore from Drive does it: paused, as a hold
-     * ([MlSyncFacePause]) so a pause a killed import leaves never reads as the user's, then waited out, and
-     * the import itself runs inside the scheduler's import fence, so no pass re-detects the file's photos and
-     * writes over their faces and names. The regroup comes next, awaited, and the walk is handed back last,
-     * unless the user had paused it before the import ([faceWalkResumes]).
-     */
-    fun importFaceIndex(uri: Uri) {
-        viewModelScope.launch {
-            _faceTransferInProgress.value = true
-            try {
-                val userId = accountManager.getPrimaryUserId().firstOrNull() ?: run {
-                    _faceTransferMsg.value = context.getString(R.string.settings_ai_transfer_failed)
-                    return@launch
-                }
-                val pause = MlSyncFacePause.read(context)
-                val pausedByUser = faceIndexingPausedByUser(pause?.switchOn, pause?.held)
-                val held = MlSyncFacePause.hold(context)
-                try {
-                    if (held) faceIndexingScheduler.setPaused(true)
-                    withTimeoutOrNull(FACE_WALK_IDLE_TIMEOUT_MS) { faceIndexingScheduler.awaitIdle() }
-                    val result = faceIndexingScheduler.withImportFence {
-                        runCatching {
-                            context.contentResolver.openInputStream(uri)?.use { importFaceIndexUseCase(it) }
-                        }.getOrElse { if (isStorageFull(it)) FaceIndexImportOutcome.NotEnoughSpace else null }
-                    }
-                    // Forced and awaited, so the people are rebuilt before the walk comes back, even while the
-                    // user keeps it paused. A names-only import has no faces to group until the scan finds them.
-                    if (result is FaceIndexImportOutcome.Success) faceIndexingScheduler.regroupNow(userId)
-                    _faceTransferMsg.value = when (result) {
-                        is FaceIndexImportOutcome.Success ->
-                            context.getString(R.string.settings_ai_import_done, result.faces, result.people)
-                        // A different model: the names are staged, and the scan puts them back on this device's
-                        // own faces by where each one sat.
-                        is FaceIndexImportOutcome.ReattachScheduled ->
-                            context.getString(R.string.settings_ai_import_reattach, result.people)
-                        // A wrong account is a mismatch the user can act on, unlike the generic failure an
-                        // unreadable or missing file (a null result) gets.
-                        FaceIndexImportOutcome.WrongAccount ->
-                            context.getString(R.string.settings_ai_import_wrong_account)
-                        FaceIndexImportOutcome.NotEnoughSpace ->
-                            context.getString(R.string.settings_ml_restore_no_space)
-                        else -> context.getString(R.string.settings_ai_transfer_failed)
-                    }
-                } finally {
-                    // Handed back however the import ended, a cancel included. The imported photos are marked
-                    // scanned, so the walk skips them and only picks up what is new.
-                    withContext(NonCancellable) {
-                        if (faceWalkResumes(held, pausedByUser)) {
-                            MlSyncFacePause.lift(context)
-                            if (accountManager.getPrimaryUserId().firstOrNull() == userId) {
-                                faceIndexingScheduler.requestIndex(userId)
-                            }
-                        }
-                    }
-                }
-            } finally {
-                _faceTransferInProgress.value = false
-            }
         }
     }
 

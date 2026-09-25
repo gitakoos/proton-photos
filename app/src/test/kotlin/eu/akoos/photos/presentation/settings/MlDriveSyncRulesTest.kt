@@ -239,6 +239,33 @@ class MlDriveSyncRulesTest {
     }
 
     @Test
+    fun `a set holding both kinds offers both, faces first, and one kind offers no choice`() {
+        val both = remoteDevices(listOf(snapshot(SEARCH, "d", time = 2L), snapshot(FACES, "d", time = 1L))).single()
+        assertEquals(listOf(FACES, SEARCH), restorableKinds(both))
+        val searchOnly = remoteDevices(listOf(snapshot(SEARCH, "s", time = 2L))).single()
+        assertEquals(listOf(SEARCH), restorableKinds(searchOnly))
+    }
+
+    @Test
+    fun `unticking a kind leaves its file out of the restore`() {
+        val device = remoteDevices(listOf(snapshot(SEARCH, "d", time = 2L), snapshot(FACES, "d", time = 1L))).single()
+        val pick = MlRestoreSheet.Pick(listOf(device), "d", device.kinds)
+        val facesOnly = toggledRestoreKinds(pick, SEARCH)
+        assertEquals(setOf(FACES), facesOnly)
+        assertEquals(listOf(FACES), filesToRestore(device, facesOnly).map { it.kind })
+        assertEquals(setOf(FACES, SEARCH), toggledRestoreKinds(pick.copy(kinds = facesOnly), SEARCH))
+        assertTrue(filesToRestore(device, emptySet()).isEmpty())
+    }
+
+    @Test
+    fun `a kind the picked set does not hold cannot be ticked`() {
+        val device = remoteDevices(listOf(snapshot(FACES, "d", time = 1L))).single()
+        val pick = MlRestoreSheet.Pick(listOf(device), "d", device.kinds)
+        assertEquals(setOf(FACES), toggledRestoreKinds(pick, SEARCH))
+        assertEquals(emptySet<MlDriveFileKind>(), toggledRestoreKinds(pick.copy(selectedId = null, kinds = emptySet()), FACES))
+    }
+
+    @Test
     fun `a set shows and orders by its own saved time, not the server time`() {
         val devices = remoteDevices(
             listOf(

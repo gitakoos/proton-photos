@@ -27,7 +27,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.akoos.photos.data.mlsync.FaceSnapshotMode
+import eu.akoos.photos.data.mlsync.MlDriveFileKind
 import eu.akoos.photos.data.mlsync.MlDriveResult
+import eu.akoos.photos.data.mlsync.MlRemoteSnapshot
 import eu.akoos.photos.data.mlsync.MlSyncController
 import eu.akoos.photos.data.mlsync.MlSyncStart
 import eu.akoos.photos.data.mlsync.MlSyncState
@@ -56,8 +58,12 @@ internal sealed interface MlRestoreSheet {
     /** The ML data folder is being listed. */
     data object Loading : MlRestoreSheet
 
-    /** The saved sets, one per device, and the one picked so far. */
-    data class Pick(val devices: List<MlRemoteDevice>, val selectedId: String?) : MlRestoreSheet
+    /** The saved sets, one per device, the one picked so far, and which of its kinds of data stay ticked. */
+    data class Pick(
+        val devices: List<MlRemoteDevice>,
+        val selectedId: String?,
+        val kinds: Set<MlDriveFileKind> = emptySet(),
+    ) : MlRestoreSheet
 
     /** Nothing is saved yet. */
     data object Empty : MlRestoreSheet
@@ -65,8 +71,8 @@ internal sealed interface MlRestoreSheet {
     /** The listing failed. */
     data object Failed : MlRestoreSheet
 
-    /** This device already holds face data, so the user chooses how [device]'s set joins it, Merge first. */
-    data class ChooseMode(val device: MlRemoteDevice) : MlRestoreSheet
+    /** This device already holds face data, so the user chooses how the picked [files] join it, Merge first. */
+    data class ChooseMode(val files: List<MlRemoteSnapshot>) : MlRestoreSheet
 }
 
 /**
@@ -173,11 +179,20 @@ class MlDriveSyncViewModel @Inject constructor(
 
     fun selectRestoreDevice(deviceId: String) {
         _restoreSheet.update { sheet ->
-            if (sheet is MlRestoreSheet.Pick && sheet.devices.any { it.deviceId == deviceId }) {
-                sheet.copy(selectedId = deviceId)
+            val device = (sheet as? MlRestoreSheet.Pick)?.devices?.firstOrNull { it.deviceId == deviceId }
+            if (sheet is MlRestoreSheet.Pick && device != null) {
+                // A newly picked set starts with all its kinds ticked; picking the same one again keeps the ticks.
+                if (sheet.selectedId == deviceId) sheet else sheet.copy(selectedId = deviceId, kinds = device.kinds)
             } else {
                 sheet
             }
+        }
+    }
+
+    /** Ticks or unticks [kind] of the picked set's data. */
+    fun toggleRestoreKind(kind: MlDriveFileKind) {
+        _restoreSheet.update { sheet ->
+            if (sheet is MlRestoreSheet.Pick) sheet.copy(kinds = toggledRestoreKinds(sheet, kind)) else sheet
         }
     }
 
@@ -189,14 +204,17 @@ class MlDriveSyncViewModel @Inject constructor(
         val pick = _restoreSheet.value as? MlRestoreSheet.Pick
         _restoreSheet.value = MlRestoreSheet.Hidden
         val device = pick?.devices?.firstOrNull { it.deviceId == pick.selectedId } ?: return
+        val files = filesToRestore(device, pick.kinds)
+        if (files.isEmpty()) return
+        val withFaces = files.any { it.kind == MlDriveFileKind.FACES }
         launchStart {
             val userId = currentUser() ?: return@launchStart
-            val needsChoice = device.hasFaceData && needsModeChoice(userId)
-            val mode = restoreModeWithoutAsking(device.hasFaceData, needsChoice)
+            val needsChoice = withFaces && needsModeChoice(userId)
+            val mode = restoreModeWithoutAsking(withFaces, needsChoice)
             if (mode == null) {
-                _restoreSheet.value = MlRestoreSheet.ChooseMode(device)
+                _restoreSheet.value = MlRestoreSheet.ChooseMode(files)
             } else {
-                controller.restore(userId, device.files, mode)
+                controller.restore(userId, files, mode)
             }
         }
     }
@@ -205,10 +223,10 @@ class MlDriveSyncViewModel @Inject constructor(
     fun restoreWith(mode: FaceSnapshotMode) {
         val choice = _restoreSheet.value as? MlRestoreSheet.ChooseMode
         _restoreSheet.value = MlRestoreSheet.Hidden
-        val device = choice?.device ?: return
+        val files = choice?.files ?: return
         launchStart {
             val userId = currentUser() ?: return@launchStart
-            controller.restore(userId, device.files, mode)
+            controller.restore(userId, files, mode)
         }
     }
 
@@ -225,7 +243,9 @@ class MlDriveSyncViewModel @Inject constructor(
                 if (devices.isEmpty()) {
                     MlRestoreSheet.Empty
                 } else {
-                    MlRestoreSheet.Pick(devices, initialRestorePick(devices))
+                    val initial = initialRestorePick(devices)
+                    val initialKinds = devices.firstOrNull { it.deviceId == initial }?.kinds.orEmpty()
+                    MlRestoreSheet.Pick(devices, initial, initialKinds)
                 }
             }
             MlDriveResult.FolderMissing -> MlRestoreSheet.Empty
