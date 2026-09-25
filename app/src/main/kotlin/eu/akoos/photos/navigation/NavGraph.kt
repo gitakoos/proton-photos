@@ -1909,6 +1909,18 @@ fun NavGraph(
                     navController.navigate(Screen.MetadataEditor.route)
                 },
                 onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
+                onOpenAlbum = { album ->
+                    selectedAlbum = album
+                    albumOpenedToShare = false
+                    albumOpenAction = null
+                    navController.navigate(Screen.AlbumDetail.route)
+                },
+                onOpenDeviceFolder = { bucketName ->
+                    selectedDeviceFolder = bucketName
+                    deviceFolderOpenAction = null
+                    deviceFolderFromVault = false
+                    navController.navigate(Screen.DeviceFolderDetail.route)
+                },
             )
         }
 

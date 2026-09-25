@@ -126,6 +126,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
+import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.IconBubble
@@ -165,6 +166,8 @@ import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
+import eu.akoos.photos.presentation.search.components.AlbumSuggestionRow
+import eu.akoos.photos.presentation.search.components.AlbumsRow
 import eu.akoos.photos.presentation.search.components.CalendarPreviewCard
 import eu.akoos.photos.presentation.search.components.OfflinePreviewCard
 import eu.akoos.photos.presentation.search.components.PeoplePreviewCard
@@ -197,11 +200,17 @@ fun SearchScreen(
     onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
     /** Opens a matched person's page from the name suggestion row. */
     onOpenPerson: (Long) -> Unit = {},
+    /** Opens one of the user's own cloud albums, from the Albums row or the album name matches. */
+    onOpenAlbum: (Album) -> Unit = {},
+    /** Opens a device folder by its bucket name, from the same two places. */
+    onOpenDeviceFolder: (bucketName: String) -> Unit = {},
     vm: SearchViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
     val query by vm.query.collectAsStateWithLifecycle()
     val peopleSuggestions by vm.peopleSuggestions.collectAsStateWithLifecycle()
+    val albumRow by vm.albumRow.collectAsStateWithLifecycle()
+    val albumSuggestions by vm.albumSuggestions.collectAsStateWithLifecycle()
     val results by vm.results.collectAsStateWithLifecycle()
     val semanticSearching by vm.semanticSearching.collectAsStateWithLifecycle()
     val semanticSearchEnabled by vm.semanticSearchEnabled.collectAsStateWithLifecycle()
@@ -230,6 +239,16 @@ fun SearchScreen(
     val isSelectionMode = selectedItems.isNotEmpty()
     // In selection mode the back button cancels the selection instead of leaving the screen.
     BackHandler(enabled = isSelectionMode) { vm.clearSelection() }
+
+    // The name matches the floating header lists above the results.
+    val showPeopleSuggestions = query.isNotBlank() && peopleSuggestions.isNotEmpty()
+    val showAlbumSuggestions = query.isNotBlank() && albumSuggestions.isNotEmpty()
+    val openAlbum: (SearchAlbum) -> Unit = { entry ->
+        when (entry) {
+            is SearchAlbum.Cloud -> onOpenAlbum(entry.album)
+            is SearchAlbum.Folder -> onOpenDeviceFolder(entry.folder.name)
+        }
+    }
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -464,6 +483,15 @@ fun SearchScreen(
                         )
                     }
                 }
+                // The user's own albums and the device folders, as the Albums tab lays them out.
+                if (albumRow.isNotEmpty()) {
+                    item(key = "albums_section") {
+                        AlbumsRow(
+                            entries = albumRow,
+                            onOpen = openAlbum,
+                        )
+                    }
+                }
                 if (onThisDay.isNotEmpty()) {
                     item(key = "on_this_day_section") {
                         OnThisDayRow(
@@ -535,15 +563,19 @@ fun SearchScreen(
             // that the matches then pop into once the model returns.
             SemanticSearchSkeletonGrid(topPadding = headerPad)
         } else if (results.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize().padding(top = headerPad),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.search_empty_no_results),
-                    color = colors.fgMute,
-                    fontSize = 14.sp,
-                )
+            // A name that matched people or albums but no photo still found something: the header
+            // lists them, so the line stays away.
+            if (!showPeopleSuggestions && !showAlbumSuggestions) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(top = headerPad),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.search_empty_no_results),
+                        color = colors.fgMute,
+                        fontSize = 14.sp,
+                    )
+                }
             }
         } else {
             Box(modifier = Modifier.fillMaxSize()) {
@@ -753,9 +785,14 @@ fun SearchScreen(
 
             // People whose name matches the query, above the results so a name search reaches a
             // person even when no photo filename matches the text.
-            if (query.isNotBlank() && peopleSuggestions.isNotEmpty()) {
+            if (showPeopleSuggestions) {
                 Spacer(modifier = Modifier.height(8.dp))
                 PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = onOpenPerson)
+            }
+            // Albums and device folders whose name matches, right after the people for the same reason.
+            if (showAlbumSuggestions) {
+                if (!showPeopleSuggestions) Spacer(modifier = Modifier.height(8.dp))
+                AlbumSuggestionRow(entries = albumSuggestions, onOpen = openAlbum)
             }
 
             // Breathing room below the header so the content clears the category bar instead of
