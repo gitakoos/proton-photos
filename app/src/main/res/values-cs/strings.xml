@@ -767,6 +767,12 @@
     <string name="albums_create_album">Vytvořit album</string>
     <string name="albums_create_album_hint">Název alba</string>
     <string name="albums_no_photos">V tomto albu nejsou žádné fotky</string>
+    <plurals name="albums_photos_uploading">
+        <item quantity="one">Nahrává se %1$d fotka</item>
+        <item quantity="few">Nahrávají se %1$d fotky</item>
+        <item quantity="many">Nahrává se %1$d fotky</item>
+        <item quantity="other">Nahrává se %1$d fotek</item>
+    </plurals>
     <string name="albums_download_all">Stáhnout vše</string>
     <!-- Background album-download notification. -->
     <string name="album_download_channel_name">Stahování alb</string>
@@ -1215,6 +1221,17 @@
     <string name="device_folder_hide_card">Skrýt složku</string>
     <string name="device_folder_hide_card_sub">Odebere složku z Alb a přesune její fotky do Skrytých fotek, pryč z galerie zařízení, takže je ostatní aplikace přestanou zobrazovat. Případné kopie na Proton Drive zůstanou přesně takové, jaké jsou.</string>
     <string name="device_folder_unhide">Zrušit skrytí složky</string>
+    <string name="device_folder_delete">Smazat složku</string>
+    <string name="device_folder_delete_confirm_title">Smazat tuto složku?</string>
+    <plurals name="device_folder_delete_confirm_body">
+        <item quantity="one">Z tohoto zařízení se smaže %1$d fotka nebo video ze složky \"%2$s\".</item>
+        <item quantity="few">Z tohoto zařízení se smažou všechny %1$d fotky a videa ze složky \"%2$s\".</item>
+        <item quantity="many">Z tohoto zařízení se smaže %1$d fotky a videa ze složky \"%2$s\".</item>
+        <item quantity="other">Z tohoto zařízení se smaže všech %1$d fotek a videí ze složky \"%2$s\".</item>
+    </plurals>
+    <string name="device_folder_delete_no_trash">Tato verze Androidu nemá koš, takže smazání z tohoto zařízení je trvalé.</string>
+    <string name="device_folder_delete_everywhere">Smazat všude</string>
+    <string name="device_folder_delete_everywhere_desc">Přesune také kopie na Proton Drive do koše na Drive</string>
     <string name="sync_folders_add_dialog_title">Přidat složku</string>
     <string name="sync_folders_add_row_title">Přidat složku podle názvu</string>
     <string name="sync_folders_add_dialog_name_hint">Název složky</string>
@@ -1324,12 +1341,21 @@
     <string name="albums_filter_remember_last_summary">Otevírat alba s naposledy vybraným filtrem</string>
     <string name="albums_show_collection">Zobrazovat Sbírku</string>
     <string name="albums_show_collection_summary">Lidé, místa a „V tento den“ zůstávají v hledání</string>
+    <string name="albums_filter_excluded">Vyloučené</string>
+    <string name="albums_excluded_empty">Žádná vyloučená alba ani složky</string>
+    <string name="albums_exclude_from_albums">Vyloučit z Alb</string>
+    <string name="albums_show_in_albums">Zobrazit v Albech</string>
     <string name="albums_sort_heading">Řadit podle</string>
     <string name="albums_cover_size_heading">Velikost obálky</string>
     <string name="albums_sort_custom">Vlastní</string>
     <string name="albums_sort_name">Název (A-Z)</string>
     <string name="albums_sort_activity">Poslední aktivita</string>
     <string name="albums_sort_count">Počet fotek</string>
+    <string name="albums_view_heading">Zobrazení</string>
+    <string name="albums_view_grid">Mřížka</string>
+    <string name="albums_view_list">Seznam</string>
+    <string name="albums_more_settings">Další nastavení</string>
+    <string name="album_options">Možnosti alba</string>
     <string name="album_group_heading">Seskupit podle</string>
     <string name="album_group_day">Den</string>
     <string name="album_group_month">Měsíc</string>
@@ -1601,6 +1627,12 @@
     <string name="album_remove_confirm_body">Toto odebere z alba pouze výběr. Vaše fotky zůstanou na časové ose.</string>
     <string name="action_remove">Odebrat</string>
     <string name="gallery_add_to_album_queued">Fotky se přidají po dokončení nahrávání</string>
+    <plurals name="gallery_add_to_album_some_queued">
+        <item quantity="one">Přidáno do alba. Ještě %1$d fotka se přidá po dokončení nahrávání</item>
+        <item quantity="few">Přidáno do alba. Ještě %1$d fotky se přidají po dokončení nahrávání</item>
+        <item quantity="many">Přidáno do alba. Ještě %1$d fotky se přidá po dokončení nahrávání</item>
+        <item quantity="other">Přidáno do alba. Ještě %1$d fotek se přidá po dokončení nahrávání</item>
+    </plurals>
     <string name="share_role_can_view_desc">Může prohlížet album a jeho fotky.</string>
     <string name="share_role_can_edit_desc">Může přidávat a odebírat fotky.</string>
     <string name="sel_label_back_up">Zálohovat</string>
@@ -1988,6 +2020,7 @@
     <string name="duplicates_leave_title">Zahodit výběr?</string>
     <string name="duplicates_leave_message">Máte vybráno %1$d položek. Pokud nyní odejdete, výběr se zruší.</string>
     <string name="duplicates_leave_confirm">Odejít</string>
+    <string name="duplicates_select_all_but_first">Vybrat všechny kromě první</string>
     <string name="metadata_editor_date_mode_filename">Z názvu souboru</string>
     <string name="metadata_editor_filename_hint">Nastaví datum každé fotky podle data zapsaného v jejím názvu souboru.</string>
     <string name="metadata_editor_filename_apply">Opravit data</string>

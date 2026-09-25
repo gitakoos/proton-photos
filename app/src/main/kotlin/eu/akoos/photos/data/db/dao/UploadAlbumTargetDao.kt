@@ -26,6 +26,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import kotlinx.coroutines.flow.Flow
 import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
 
 @Dao
@@ -57,4 +58,17 @@ interface UploadAlbumTargetDao {
     /** Every queued (photo, album) pair — the drain's source of truth. */
     @Query("SELECT * FROM upload_album_target")
     suspend fun getAll(): List<UploadAlbumTargetEntity>
+
+    /**
+     * Live count of the photos [userId] still has on their way into [albumLinkId]: queued pairs whose
+     * device file keeps a row the upload pass will upload or join. A pair left behind by a vaulted or
+     * vanished file, or by a row that is no longer queued and has no cloud copy, never counts, since
+     * nothing would ever upload or join it. Re-emits as each pair is dropped on its join.
+     */
+    @Query(
+        "SELECT COUNT(*) FROM upload_album_target t INNER JOIN sync_state s ON s.localUri = t.localUri " +
+            "WHERE t.albumLinkId = :albumLinkId AND s.userId = :userId AND s.status != 'HIDDEN' " +
+            "AND (s.queued = 1 OR s.status != 'LOCAL_ONLY' OR s.cloudFileId IS NOT NULL)"
+    )
+    fun observePendingCount(albumLinkId: String, userId: String): Flow<Int>
 }

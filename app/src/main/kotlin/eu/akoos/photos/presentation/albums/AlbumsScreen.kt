@@ -77,6 +77,8 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.GridOff
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.HideImage
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
@@ -138,9 +140,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import eu.akoos.photos.domain.entity.Album
+import eu.akoos.photos.domain.usecase.AlbumSortMode
+import eu.akoos.photos.domain.usecase.mergeArrangement
 import eu.akoos.photos.domain.usecase.moveInArrangement
 import eu.akoos.photos.presentation.folders.DeviceFolderActionsSheet
 import eu.akoos.photos.presentation.folders.DeviceFolderOpenAction
+import eu.akoos.photos.presentation.gallery.AlbumDisplayFilter
+import eu.akoos.photos.presentation.gallery.AlbumsViewMode
 import eu.akoos.photos.presentation.search.SearchFilter
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -157,22 +163,52 @@ import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 
-/** Height of the reorder-mode bar, also the grid's extra top inset while that mode is on. */
+/** Height of the reorder-mode bar, also the grid's or the list's extra top inset while that mode is on. */
 private val ReorderBarHeight = 52.dp
 
 /**
- * Whether the pinned Collection card leads the grid: switched on in the Albums filter sheet, and no
- * search under way, since search results are albums only.
+ * Whether the pinned Collection card leads the grid: switched on from the Albums settings page, no
+ * search under way, since search results are albums only, and a normal view rather than the
+ * Excluded one, which lists only what was taken off the grid.
  */
-internal fun albumsCollectionCardShown(showCollection: Boolean, searching: Boolean): Boolean =
-    showCollection && !searching
+internal fun albumsCollectionCardShown(
+    showCollection: Boolean,
+    searching: Boolean,
+    filter: AlbumDisplayFilter = AlbumDisplayFilter.All,
+): Boolean = showCollection && !searching && filter != AlbumDisplayFilter.Excluded
 
 /**
  * Grid index the cloud albums start at: 1 while the Collection card is the one item{} emitted ahead
  * of them, 0 while that card is off the grid.
  */
-internal fun albumsCloudSegmentStart(showCollection: Boolean, searching: Boolean): Int =
-    if (albumsCollectionCardShown(showCollection, searching)) 1 else 0
+internal fun albumsCloudSegmentStart(
+    showCollection: Boolean,
+    searching: Boolean,
+    filter: AlbumDisplayFilter = AlbumDisplayFilter.All,
+): Int = if (albumsCollectionCardShown(showCollection, searching, filter)) 1 else 0
+
+/**
+ * Whether the album long-press sheet offers to arrange the albums. Arranging moves the cards the
+ * normal views show, in the grid and the list alike, so only the Excluded view leaves it out.
+ */
+internal fun albumsArrangeOffered(filter: AlbumDisplayFilter): Boolean =
+    filter != AlbumDisplayFilter.Excluded
+
+/**
+ * How far a held card moves for a finger movement of [drag]: all of it in the grid, the vertical part
+ * alone in the list. A list row has nowhere to go sideways, and held to its column its centre never
+ * leaves the rows a drop target is looked up among.
+ */
+internal fun arrangeDragStep(drag: Offset, viewMode: AlbumsViewMode): Offset =
+    if (viewMode == AlbumsViewMode.List) Offset(0f, drag.y) else drag
+
+/**
+ * Whether a new sort order sends the Albums page back to the top: [current] is the order the list is
+ * sorted by now, [seen] the one the page last acted on. A null [seen] is a first sighting rather than
+ * a change, so a page composing again keeps the place it restored.
+ */
+internal fun albumsSortChangeScrollsToTop(seen: AlbumSortMode?, current: AlbumSortMode): Boolean =
+    seen != null && seen != current
 
 /**
  * Index into the cloud-album list of the grid cell at [gridIndex], or null for a cell that is not a
@@ -226,6 +262,17 @@ private const val WobbleLegMillis = 380
 /** Upper bound of the per-card jitter added to that leg. */
 private const val WobbleLegJitterMillis = 90
 
+/** How a card or row the arrangement displaces moves into its new slot. The held one is placed by the
+ *  finger instead: the grid animating it into its new slot as well would pull it out from under the
+ *  finger after every swap. */
+private val ArrangeSlotSpring = spring(
+    stiffness = Spring.StiffnessMediumLow,
+    visibilityThreshold = IntOffset.VisibilityThreshold,
+)
+
+/** Surface of a list row while it is held, so the rows it passes over do not show through it. */
+private val LiftedRowShape = RoundedCornerShape(14.dp)
+
 /**
  * Tilt for one card being arranged, or a flat 0 while [active] is false.
  *
@@ -277,6 +324,9 @@ fun AlbumsScreen(
     /** Takes a device folder's card off this grid and moves its photos into the vault, where the user
      *  pressed. The host runs it and shows its progress, so hiding a folder goes nowhere. */
     onHideDeviceFolder: (bucketName: String) -> Unit = {},
+    /** Deletes a device folder with everything it holds on the device, from where the user pressed.
+     *  The host reads the folder, asks first and runs the delete, so the user stays on the grid. */
+    onDeleteDeviceFolder: (bucketName: String) -> Unit = {},
     onMemoriesClick: () -> Unit = {},
     /** Increments each time the Albums-tab header "New album" pill is tapped; opens the create
      *  dialog. The in-grid New album row opens it directly, so 0 (no external trigger) is fine. */
@@ -288,10 +338,12 @@ fun AlbumsScreen(
     query: String = "",
     /** Reports arrange mode to the host so the header can hide the search entry while it is on. */
     onReorderModeChange: (Boolean) -> Unit = {},
-    /** How many album/folder covers sit per row (from the Albums filter sheet). Default 2. */
+    /** How many album/folder covers sit per row (from the Albums settings page). Default 2. */
     columns: Int = 2,
-    /** Whether the pinned Collection card leads the grid (the Albums filter sheet's switch). Default on. */
+    /** Whether the pinned Collection card leads the grid (the Albums settings page's switch). Default on. */
     showCollection: Boolean = true,
+    /** Cover cards in a grid, or one row per album (the Albums filter sheet's view choice). */
+    viewMode: AlbumsViewMode = AlbumsViewMode.Default,
     viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -342,6 +394,22 @@ fun AlbumsScreen(
         lastSeenFilter = displayFilter
         reorderMode = false
         gridState.scrollToItem(0)
+    }
+    // A new sort order re-deals the list around whichever album sits at the top, as much a jump as a
+    // filter change, so it goes back to the top too, in the grid and the list alike, and ends an
+    // arrangement, whose order the new one replaces. Keyed on the order the list is sorted by, which
+    // arrives together with the sorted list, so the scroll lands on the new order's first row. Saved
+    // with the page for the same reason as the filter. An arrangement's own save switches the order
+    // to Custom and marks that as seen first, so arranging never jumps the grid.
+    var lastSeenSort by rememberSaveable { mutableStateOf<AlbumSortMode?>(null) }
+    LaunchedEffect(state.albumSortMode) {
+        val current = state.albumSortMode ?: return@LaunchedEffect
+        val changed = albumsSortChangeScrollsToTop(lastSeenSort, current)
+        lastSeenSort = current
+        if (changed) {
+            reorderMode = false
+            gridState.scrollToItem(0)
+        }
     }
     // Scrolling the grid drops the search keyboard, so the results can be browsed with it out of the way.
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -430,11 +498,13 @@ fun AlbumsScreen(
     // matching album keeps its sorted slot; the fold is accent-insensitive, the rule search uses.
     val foldedQuery = SearchFilter.fold(query.trim())
     val searching = foldedQuery.isNotEmpty()
-    val collectionCardShown = albumsCollectionCardShown(showCollection, searching)
+    val collectionCardShown = albumsCollectionCardShown(showCollection, searching, displayFilter)
     // Where the cloud cards begin in the grid. Read through state, since the drag handlers outlive
     // the composition that built them: an arrangement opened from a search result is built on a grid
     // without the Collection card, and opening it clears that search, which brings the card back.
-    val cloudSegmentStart by rememberUpdatedState(albumsCloudSegmentStart(showCollection, searching))
+    val cloudSegmentStart by rememberUpdatedState(
+        albumsCloudSegmentStart(showCollection, searching, displayFilter),
+    )
     val albums = if (searching) {
         orderedAlbums.filter { SearchFilter.fold(it.name).contains(foldedQuery) }
     } else {
@@ -447,27 +517,44 @@ fun AlbumsScreen(
     } else {
         state.visibleDeviceFolders
     }
+    // What the active filter lays out, with the albums and folders taken off the grid left out of
+    // every normal view and shown alone in the Excluded one.
+    val gridContent = AlbumsGridExclusion.gridContent(displayFilter, albums, deviceFolders, state.excludedFromGrid)
     // Search and arrange cannot share the rail: a query exits arrange mode, and the effect reports
     // arrange mode up so the header can hide the search entry while it is on. Seed the arrangement
-    // from the unfiltered list so a query active at entry can never drop cards from it.
+    // from the unfiltered list so a query active at entry can never drop cards from it, narrowed to
+    // the cloud cards the view lays out, since the drag maps every cell to a slot in it.
     LaunchedEffect(searching) { if (searching) reorderMode = false }
-    // The Collection switch moves every cloud card one cell along, so a flip from the filter sheet
-    // ends an arrangement in progress rather than resuming it on a grid that shifted behind the sheet.
+    // The Collection switch moves every cloud card one cell along, so a flip ends an arrangement in
+    // progress rather than resuming it on a grid that shifted while it was out of sight.
     LaunchedEffect(showCollection) { reorderMode = false }
+    // The list is the same grid at one column, so an arrangement carries across a switch between the
+    // two: neither its order nor the slots it maps cells to depends on the cells' shape.
+    val listView = viewMode == AlbumsViewMode.List
     LaunchedEffect(reorderMode) {
         onReorderModeChange(reorderMode)
-        arrangedIds = if (reorderMode) state.visibleCloudAlbums.map { it.linkId } else emptyList()
+        arrangedIds = if (reorderMode) {
+            AlbumsGridExclusion.cloudCards(displayFilter, state.visibleCloudAlbums, state.excludedFromGrid)
+                .map { it.linkId }
+        } else {
+            emptyList()
+        }
     }
 
     /**
-     * Store the arrangement as the grid is showing it. Cloud albums the grid cannot see — the ones
-     * hidden client-side — keep a slot at the end, because the stored order replaces the previous
-     * one outright and a save that only knew the visible cards would drop theirs every time.
+     * Store the arrangement as the grid is showing it. Cloud albums the grid cannot see, the ones
+     * hidden client-side and the ones taken off the grid, keep their slots by [mergeArrangement],
+     * because the stored order replaces the previous one outright and a save that only knew the
+     * visible cards would drop theirs every time.
+     *
+     * The save also switches the sort to Custom. That switch is marked as seen before it lands, so
+     * the sort-change effect does not take it for a new order and jump the grid being arranged.
      */
     fun saveArrangement() {
         val shown = arrangedIds
         if (shown.isEmpty()) return
-        viewModel.saveAlbumArrangement(shown + state.albums.map { it.linkId }.filterNot { it in shown })
+        lastSeenSort = AlbumSortMode.Custom
+        viewModel.saveAlbumArrangement(mergeArrangement(state.albums.map { it.linkId }, shown))
     }
 
     /**
@@ -499,8 +586,8 @@ fun AlbumsScreen(
     val density = LocalDensity.current
     // Pull the grid along while a held card sits near an edge, so an arrangement is not confined to
     // the screenful the card was picked up in. One loop covers the whole drag and idles outside the
-    // bands: the other cards are wobbling, so frames are being produced regardless and an idle turn
-    // buys nothing back by unsubscribing from them.
+    // bands: a hold is short, and in the grid the other cards are wobbling, so frames are being
+    // produced regardless and an idle turn buys nothing back by unsubscribing from them.
     LaunchedEffect(draggedAlbumId) {
         val albumId = draggedAlbumId ?: return@LaunchedEffect
         val maxSpeed = with(density) { EdgeScrollMaxSpeed.toPx() }
@@ -535,6 +622,69 @@ fun AlbumsScreen(
         }
     }
 
+    /**
+     * The arrange gesture of one cloud card or row: press and hold to pick it up, then drag, the
+     * finger moving it by [arrangeDragStep] for the layout on screen.
+     *
+     * Press and hold, so a plain swipe is left to the grid: a gesture that claims every
+     * touch-and-move leaves a library taller than the screen with no way to scroll while arranging,
+     * stranding every album below the fold. Nothing else is waiting on the hold, since the mode has
+     * already taken the clicks off these cells, and the wait consumes nothing, so the grid still takes
+     * over the moment the finger passes touch slop.
+     *
+     * These handlers outlive the composition that built them, so they read arrangedIds and
+     * cloudSegmentStart rather than albums or the item's index: only state stays current in here.
+     */
+    fun arrangeGesture(albumId: String): Modifier =
+        if (!reorderMode) Modifier else Modifier.pointerInput(albumId, viewMode) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = { grip ->
+                    val from = arrangedIds.indexOf(albumId)
+                    val cell = if (from >= 0) gridState.cellAt(cloudSegmentStart + from) else null
+                    if (cell != null) {
+                        draggedAlbumId = albumId
+                        dragPosition = Offset(cell.offset.x.toFloat(), cell.offset.y.toFloat())
+                        dragGrip = grip
+                        dragOffset = Offset.Zero
+                    }
+                },
+                onDragEnd = {
+                    if (draggedAlbumId == albumId) {
+                        draggedAlbumId = null
+                        dragOffset = Offset.Zero
+                        saveArrangement()
+                    }
+                },
+                onDragCancel = {
+                    // The reorder lands as the pointer moves, so a cancelled gesture has already
+                    // changed what the user sees. Saving matches the screen; skipping it left the
+                    // card in its new slot until the next repaint quietly put it back.
+                    //
+                    // Guarded like onDragEnd: this also fires when the card simply leaves the grid,
+                    // and scrolling while arranging is expected. Unguarded it saved for a card nobody
+                    // dragged, which switches the album sort to Custom behind the user's back.
+                    if (draggedAlbumId == albumId) {
+                        draggedAlbumId = null
+                        dragOffset = Offset.Zero
+                        saveArrangement()
+                    }
+                },
+            ) { change, drag ->
+                change.consume()
+                if (draggedAlbumId != albumId) return@detectDragGesturesAfterLongPress
+                dragPosition += arrangeDragStep(drag, viewMode)
+                settleDrag(albumId)
+            }
+        }
+
+    // The list lays out one full-width row per cell, each padding its own content, so it takes no side
+    // margins, and 8dp less on top, which is the row's own inset: the first cover starts where the
+    // grid's first card does. The skeleton shares it, so the rows land where their placeholders stood.
+    fun listPadding(extraTop: Dp = 0.dp) = PaddingValues(top = topPadding + 4.dp + extraTop, bottom = 120.dp)
+    // The reorder bar floats over the content, so while it is up the first card or row is pushed clear
+    // of it instead of starting underneath it.
+    val reorderInset = if (reorderMode) ReorderBarHeight else 0.dp
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -555,27 +705,30 @@ fun AlbumsScreen(
                     // real content reflows visibly (placeholders shift to new positions when
                     // the cards arrive).
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(columns),
-                        contentPadding = PaddingValues(
+                        columns = GridCells.Fixed(if (listView) 1 else columns),
+                        contentPadding = if (listView) listPadding() else PaddingValues(
                             top = topPadding + 12.dp,
                             start = 20.dp,
                             end = 20.dp,
                             bottom = 120.dp,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(if (listView) 0.dp else 20.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         items(6) {
-                            eu.akoos.photos.presentation.common.ShimmerAlbumCard()
+                            if (listView) {
+                                ShimmerAlbumRow()
+                            } else {
+                                eu.akoos.photos.presentation.common.ShimmerAlbumCard()
+                            }
                         }
                     }
 
                 // Nothing to show for the active filter and query → centred empty state. While a
                 // query is present this is a search miss, so it carries the search-specific line
                 // instead of the "no albums yet" copy.
-                !(displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local && albums.isNotEmpty()) &&
-                    !(displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Cloud && deviceFolders.isNotEmpty()) ->
+                gridContent.isEmpty ->
                     Column(
                         modifier = Modifier
                             .align(Alignment.Center)
@@ -589,13 +742,19 @@ fun AlbumsScreen(
                             )
                         } else {
                             // Device-only filter has no Drive albums, where the cloud-worded copy
-                            // would be wrong, so a device-folder line shows instead.
-                            val localOnly = displayFilter == eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local
+                            // would be wrong, so a device-folder line shows instead. The Excluded
+                            // view only says that nothing is off the grid.
                             Text(
-                                stringResource(if (localOnly) R.string.albums_empty_local else R.string.albums_empty_title),
+                                stringResource(
+                                    when (displayFilter) {
+                                        AlbumDisplayFilter.All, AlbumDisplayFilter.Cloud -> R.string.albums_empty_title
+                                        AlbumDisplayFilter.Local -> R.string.albums_empty_local
+                                        AlbumDisplayFilter.Excluded -> R.string.albums_excluded_empty
+                                    },
+                                ),
                                 color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                             )
-                            if (!localOnly) {
+                            if (displayFilter == AlbumDisplayFilter.All || displayFilter == AlbumDisplayFilter.Cloud) {
                                 Spacer(Modifier.height(6.dp))
                                 Text(stringResource(R.string.albums_empty_subtitle), color = FgDim, fontSize = 14.sp)
                             }
@@ -603,35 +762,63 @@ fun AlbumsScreen(
                     }
 
                 // Common stream: cloud albums + device folders in one flat grid, narrowed by the
-                // Albums-tab toggle pill (All / Cloud / Local). No section headers — the pill is
-                // the only grouping control now.
+                // Albums-tab toggle pill (All / Cloud / Local / Excluded) through [gridContent]. No
+                // section headers: the pill is the only grouping control.
                 else ->
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(columns),
+                        columns = GridCells.Fixed(if (listView) 1 else columns),
                         state = gridState,
-                        contentPadding = PaddingValues(
-                            // The reorder bar floats over the grid, so the first row is pushed
-                            // clear of it instead of starting underneath it.
-                            top = topPadding + 12.dp + if (reorderMode) ReorderBarHeight else 0.dp,
+                        contentPadding = if (listView) listPadding(reorderInset) else PaddingValues(
+                            top = topPadding + 12.dp + reorderInset,
                             start = 20.dp,
                             end = 20.dp,
                             bottom = 120.dp,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(if (listView) 0.dp else 20.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         // Search results are albums only, so the pinned Collection card steps aside
-                        // while a query is present, and it stays off the grid while its switch in
-                        // the filter sheet is off.
+                        // while a query is present, and it stays off the grid while its switch on
+                        // the Albums settings page is off or the Excluded view is up.
                         if (collectionCardShown) {
                             item {
-                                MemoriesPinnedCard(onClick = onMemoriesClick)
+                                if (listView) {
+                                    MemoriesPinnedRow(onClick = onMemoriesClick)
+                                } else {
+                                    MemoriesPinnedCard(onClick = onMemoriesClick)
+                                }
                             }
                         }
-                        if (displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local) {
+                        // A row has room for its own options button, which opens the sheet a long
+                        // press opens. Arranging picks a row up and moves it as it does a card, held
+                        // to the one column. The rows do not sway, since a full-width row tilting
+                        // would cross its neighbours; a drag handle marks them instead. Same keys as
+                        // the cards, so switching keeps the scroll place.
+                        if (displayFilter != AlbumDisplayFilter.Local && listView) {
                             items(
-                                albums,
+                                gridContent.cloudAlbums,
+                                key = { "cloud_${it.linkId}" },
+                            ) { album ->
+                                val dragged = album.linkId == draggedAlbumId
+                                CloudAlbumRow(
+                                    album = album,
+                                    resolveCoverGif = viewModel::resolveCoverGif,
+                                    arranging = reorderMode,
+                                    onClick = { onAlbumClick(album) },
+                                    onOptionsClick = { cloudAlbumSheetFor = album },
+                                    modifier = Modifier
+                                        .animateItem(placementSpec = if (dragged) null else ArrangeSlotSpring)
+                                        .zIndex(if (dragged) 1f else 0f)
+                                        .graphicsLayer { translationY = if (dragged) dragOffset.y else 0f }
+                                        .then(if (dragged) Modifier.background(Bg2, LiftedRowShape) else Modifier)
+                                        .then(arrangeGesture(album.linkId)),
+                                )
+                            }
+                        }
+                        if (displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local && !listView) {
+                            items(
+                                gridContent.cloudAlbums,
                                 key = { "cloud_${it.linkId}" },
                             ) { album ->
                                 val dragged = album.linkId == draggedAlbumId
@@ -653,15 +840,7 @@ fun AlbumsScreen(
                                     onClick     = { onAlbumClick(album) },
                                     onLongClick = { cloudAlbumSheetFor = album },
                                     modifier = Modifier
-                                        .animateItem(
-                                            // The dragged card is placed by the finger, so letting
-                                            // the grid animate it into its new slot as well would
-                                            // pull it out from under the finger after every swap.
-                                            placementSpec = if (dragged) null else spring(
-                                                stiffness = Spring.StiffnessMediumLow,
-                                                visibilityThreshold = IntOffset.VisibilityThreshold,
-                                            ),
-                                        )
+                                        .animateItem(placementSpec = if (dragged) null else ArrangeSlotSpring)
                                         .zIndex(if (dragged) 1f else 0f)
                                         // Read inside the layer block, so a frame of sway costs a
                                         // redraw of this card rather than a recomposition.
@@ -670,85 +849,40 @@ fun AlbumsScreen(
                                             translationY = if (dragged) dragOffset.y else 0f
                                             rotationZ = wobble.value
                                         }
-                                        .then(
-                                            // Press and hold to pick a card up, so a plain swipe is
-                                            // left to the grid: a gesture that claims every
-                                            // touch-and-move leaves a library taller than the screen
-                                            // with no way to scroll while arranging, stranding every
-                                            // album below the fold. Nothing else is waiting on the
-                                            // hold — the mode has already taken combinedClickable off
-                                            // these cards — and the wait consumes nothing, so the
-                                            // grid still takes over the moment the finger passes
-                                            // touch slop.
-                                            //
-                                            // These handlers outlive the composition that built them,
-                                            // so they read arrangedIds and cloudSegmentStart rather
-                                            // than albums or the item's index: only state stays
-                                            // current in here.
-                                            if (!reorderMode) Modifier else Modifier.pointerInput(album.linkId) {
-                                                detectDragGesturesAfterLongPress(
-                                                    onDragStart = { grip ->
-                                                        val from = arrangedIds.indexOf(album.linkId)
-                                                        val cell = if (from >= 0) gridState.cellAt(cloudSegmentStart + from) else null
-                                                        if (cell != null) {
-                                                            draggedAlbumId = album.linkId
-                                                            dragPosition = Offset(cell.offset.x.toFloat(), cell.offset.y.toFloat())
-                                                            dragGrip = grip
-                                                            dragOffset = Offset.Zero
-                                                        }
-                                                    },
-                                                    onDragEnd = {
-                                                        if (draggedAlbumId == album.linkId) {
-                                                            draggedAlbumId = null
-                                                            dragOffset = Offset.Zero
-                                                            saveArrangement()
-                                                        }
-                                                    },
-                                                    onDragCancel = {
-                                                        // The reorder lands as the pointer moves, so a
-                                                        // cancelled gesture has already changed what the
-                                                        // user sees. Saving matches the screen; skipping
-                                                        // it left the card in its new slot until the next
-                                                        // repaint quietly put it back.
-                                                        //
-                                                        // Guarded like onDragEnd: this also fires when the
-                                                        // card simply leaves the grid, and scrolling while
-                                                        // arranging is expected. Unguarded it saved for a
-                                                        // card nobody dragged, which switches the album
-                                                        // sort to Custom behind the user's back.
-                                                        if (draggedAlbumId == album.linkId) {
-                                                            draggedAlbumId = null
-                                                            dragOffset = Offset.Zero
-                                                            saveArrangement()
-                                                        }
-                                                    },
-                                                ) { change, drag ->
-                                                    change.consume()
-                                                    if (draggedAlbumId != album.linkId) return@detectDragGesturesAfterLongPress
-                                                    dragPosition += drag
-                                                    settleDrag(album.linkId)
-                                                }
-                                            }
-                                        ),
+                                        .then(arrangeGesture(album.linkId)),
                                 )
                             }
                         }
                         if (displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Cloud) {
                             items(
-                                deviceFolders,
+                                gridContent.deviceFolders,
                                 key = { "devfolder_${it.name}" },
                             ) { folder ->
-                                UnifiedAlbumCard(
-                                    coverModel = folder.coverUri?.let(Uri::parse),
-                                    coverIsGif = folder.coverIsGif,
-                                    title = folder.name,
-                                    metaText = pluralStringResource(
-                                        R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
-                                    ),
-                                    isDeviceFolder = true,
-                                    onClick = { onDeviceFolderClick(folder.name) },
-                                    onLongClick = { deviceFolderSheetFor = folder },
+                                val metaText = pluralStringResource(
+                                    R.plurals.count_photos_plural, folder.itemCount, folder.itemCount,
                                 )
+                                if (listView) {
+                                    UnifiedAlbumRow(
+                                        coverModel = folder.coverUri?.let(Uri::parse),
+                                        coverIsGif = folder.coverIsGif,
+                                        title = folder.name,
+                                        metaText = metaText,
+                                        isDeviceFolder = true,
+                                        onClick = { onDeviceFolderClick(folder.name) },
+                                        onLongClick = { deviceFolderSheetFor = folder },
+                                        onOptionsClick = { deviceFolderSheetFor = folder },
+                                    )
+                                } else {
+                                    UnifiedAlbumCard(
+                                        coverModel = folder.coverUri?.let(Uri::parse),
+                                        coverIsGif = folder.coverIsGif,
+                                        title = folder.name,
+                                        metaText = metaText,
+                                        isDeviceFolder = true,
+                                        onClick = { onDeviceFolderClick(folder.name) },
+                                        onLongClick = { deviceFolderSheetFor = folder },
+                                    )
+                                }
                             }
                         }
                     }
@@ -920,18 +1054,22 @@ fun AlbumsScreen(
     // renameCloudAlbum via the action-flow helper. The three rows that run on the album's members
     // hand it over with an intent instead, for the album screen to carry out on arrival.
     cloudAlbumSheetFor?.let { album ->
+        val excludedFromGrid = AlbumsGridExclusion.isAlbumExcluded(state.excludedFromGrid, album.linkId)
         CloudAlbumActionSheet(
             album = album,
             sheetState = cloudAlbumSheetState,
             sortMode = state.albumPhotoSortMode,
             grouping = state.albumPhotoGrouping,
             isHiddenFromTimeline = AlbumTimelineHide.isExcluded(state.timelineExcludedAlbumIds, album.linkId),
+            isExcludedFromGrid = excludedFromGrid,
             onDismiss = { cloudAlbumSheetFor = null },
             onShare = { onAlbumShareClick(album) },
             onRename = { cloudAlbumRenameFor = album },
             onToggleHiddenFromTimeline = { viewModel.toggleAlbumHiddenFromTimeline(album.linkId) },
             onHide = { viewModel.hideAlbum(album.linkId) },
-            onReorder = { reorderMode = true },
+            onToggleExcludedFromGrid = { viewModel.setAlbumExcludedFromGrid(album.linkId, exclude = !excludedFromGrid) },
+            // Arranging works on the cards the normal views show, so the Excluded view leaves it out.
+            onReorder = if (albumsArrangeOffered(displayFilter)) ({ reorderMode = true }) else null,
             onDelete = { albumToDelete = album },
             onSortSelected = viewModel::setAlbumPhotoSortMode,
             onGroupingSelected = viewModel::setAlbumPhotoGrouping,
@@ -944,10 +1082,12 @@ fun AlbumsScreen(
     // bucket, not a photo list, so the rows that need the whole folder in hand — the back-up and the
     // slideshow, which want the player too — hand the folder to its own screen with the action to
     // carry out on arrival. The hide stays here: it resolves the one bucket it acts on and reports
-    // through the host's progress pill, so taking a card off this grid never leaves it. The rest are
-    // the per-folder preferences, the sort direction and the grouping, each writing the same key the
-    // folder screen and Settings write.
+    // through the host's progress pill, so taking a card off this grid never leaves it. The delete
+    // stays here for the same reason: the host reads the bucket, asks, and runs it through the
+    // selection delete's own path. The rest are the per-folder preferences, the sort direction and
+    // the grouping, each writing the same key the folder screen and Settings write.
     deviceFolderSheetFor?.let { folder ->
+        val excludedFromGrid = AlbumsGridExclusion.isFolderExcluded(state.excludedFromGrid, folder.name)
         DeviceFolderActionsSheet(
             sheetState = deviceFolderSheetState,
             folderName = folder.name,
@@ -978,6 +1118,9 @@ fun AlbumsScreen(
             onGroupingSelected = viewModel::setDeviceFolderGrouping,
             // Held to a logged-out session inside the sheet, where there is no Drive album to rename.
             onRename = { deviceFolderRenameFor = folder },
+            isExcludedFromGrid = excludedFromGrid,
+            onToggleExcludedFromGrid = { viewModel.setFolderExcludedFromGrid(folder.name, exclude = !excludedFromGrid) },
+            onDeleteFolder = { onDeleteDeviceFolder(folder.name) },
         )
     }
 
@@ -1028,7 +1171,7 @@ fun AlbumsScreen(
 /**
  * Bottom sheet that opens on long-press of a cloud album card. It offers what the album's own drawer
  * offers, so the shortest route to an album's actions is not the poorer one: add photos, share,
- * download all, slideshow, rename, hide, reorder, sort, delete.
+ * download all, slideshow, rename, hide, exclude, reorder, sort, delete.
  *
  * The album drawer's [AlbumViewOptions] chips lead, then the sections follow the app's action-sheet
  * taxonomy: what runs on the album's photos, then the album's settings, then what cannot be undone
@@ -1041,7 +1184,8 @@ fun AlbumsScreen(
  * album takes the card out of their own grid and touches neither Drive nor the owner. Keeping the
  * album's photos out of the main feed is the weaker choice beside it, on its own id set: the card
  * stays on the grid and the photos stay in search, on the map, in the calendar and in every picker,
- * so it carries a tick and reverses on a second tap. Adding follows
+ * so it carries a tick and reverses on a second tap. Lighter still is excluding the album from the
+ * grid: only the card goes, into the Excluded view, where the same row puts it back. Adding follows
  * the album's write grant rather than ownership, which is what lets an editor contribute. Reorder is
  * the odd one out: it acts on the grid rather than on this album, and is here because the press that
  * opens this sheet is the same press a rearrangement starts from.
@@ -1064,12 +1208,17 @@ private fun CloudAlbumActionSheet(
     /** True while this album's photos are kept out of the main feed. About the photos, which
      *  [onHide] is not: that one takes the album itself out of every list. */
     isHiddenFromTimeline: Boolean,
+    /** True while the album's card is off the grid, which turns [onToggleExcludedFromGrid]'s row into
+     *  its way back. */
+    isExcludedFromGrid: Boolean,
     onDismiss: () -> Unit,
     onShare: () -> Unit,
     onRename: () -> Unit,
     onToggleHiddenFromTimeline: () -> Unit,
     onHide: () -> Unit,
-    onReorder: () -> Unit,
+    onToggleExcludedFromGrid: () -> Unit,
+    /** Null drops the reorder row. */
+    onReorder: (() -> Unit)?,
     onDelete: () -> Unit,
     onSortSelected: (AlbumPhotoSortMode) -> Unit,
     /** Null drops the grouping row. */
@@ -1176,7 +1325,7 @@ private fun CloudAlbumActionSheet(
                 }
             }
 
-            // Hide and reorder are on every card, so this group is never empty.
+            // Hide and exclude are on every card, so this group is never empty.
             ActionSheetSectionHeading(stringResource(R.string.action_sheet_settings_heading))
             if (!album.isSharedWithMe) {
                 ActionSheetRow(
@@ -1203,10 +1352,20 @@ private fun CloudAlbumActionSheet(
             )
             Spacer(Modifier.height(8.dp))
             ActionSheetRow(
-                icon = Icons.Default.DragHandle,
-                title = stringResource(R.string.albums_reorder),
-                onClick = { close(onReorder) },
+                icon = if (isExcludedFromGrid) Icons.Default.GridOn else Icons.Default.GridOff,
+                title = stringResource(
+                    if (isExcludedFromGrid) R.string.albums_show_in_albums else R.string.albums_exclude_from_albums,
+                ),
+                onClick = { close(onToggleExcludedFromGrid) },
             )
+            if (onReorder != null) {
+                Spacer(Modifier.height(8.dp))
+                ActionSheetRow(
+                    icon = Icons.Default.DragHandle,
+                    title = stringResource(R.string.albums_reorder),
+                    onClick = { close(onReorder) },
+                )
+            }
 
             if (!album.isSharedWithMe) {
                 // Deleting takes the album off Drive, so it keeps the rule above it and the red
@@ -1262,6 +1421,32 @@ private fun CloudAlbumCard(
     )
 }
 
+/** [CloudAlbumCard] as a list row. The options button and a long press both open the album's sheet,
+ *  except while [arranging], when the row is the arrangement's to move. */
+@Composable
+private fun CloudAlbumRow(
+    album: Album,
+    onClick: () -> Unit,
+    onOptionsClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    arranging: Boolean = false,
+    resolveCoverGif: suspend (String) -> String? = { null },
+) {
+    val coverModel = rememberCoverGifModel(album.coverLinkId, album.coverThumbnailUrl, resolveCoverGif)
+    UnifiedAlbumRow(
+        coverModel     = coverModel,
+        title          = album.name,
+        metaText       = pluralStringResource(R.plurals.count_items_plural, album.photoCount, album.photoCount),
+        shareBadge     = shareBadgeOf(album),
+        cloudBadge     = AlbumCloudBadge.Cloud,
+        arranging      = arranging,
+        onClick        = onClick,
+        onLongClick    = onOptionsClick,
+        onOptionsClick = onOptionsClick,
+        modifier       = modifier,
+    )
+}
+
 /**
  * First cell in the album grid while [albumsCollectionCardShown] holds. Mirrors [UnifiedAlbumCard]'s
  * shape, corner radius and title typography, but with a neutral cover holding a single centred
@@ -1299,4 +1484,15 @@ private fun MemoriesPinnedCard(onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/** [MemoriesPinnedCard] as the first row of the album list, its glyph standing in for a cover. */
+@Composable
+private fun MemoriesPinnedRow(onClick: () -> Unit) {
+    UnifiedAlbumRow(
+        coverModel = null,
+        glyph = Icons.Outlined.Collections,
+        title = stringResource(R.string.memories_title),
+        onClick = onClick,
+    )
 }

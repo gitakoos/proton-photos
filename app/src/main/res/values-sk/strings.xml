@@ -767,6 +767,12 @@
     <string name="albums_create_album">Vytvoriť album</string>
     <string name="albums_create_album_hint">Názov albumu</string>
     <string name="albums_no_photos">V tomto albume nie sú žiadne fotky</string>
+    <plurals name="albums_photos_uploading">
+        <item quantity="one">Nahráva sa %1$d fotka</item>
+        <item quantity="few">Nahrávajú sa %1$d fotky</item>
+        <item quantity="many">Nahráva sa %1$d fotky</item>
+        <item quantity="other">Nahráva sa %1$d fotiek</item>
+    </plurals>
     <string name="albums_download_all">Stiahnuť všetko</string>
     <!-- Background album-download notification. -->
     <string name="album_download_channel_name">Sťahovanie albumov</string>
@@ -1215,6 +1221,17 @@
     <string name="device_folder_hide_card">Skryť priečinok</string>
     <string name="device_folder_hide_card_sub">Odoberie priečinok z Albumov a presunie jeho fotky do Skrytých fotiek, preč z galérie zariadenia, takže ich ostatné aplikácie prestanú zobrazovať. Kópie na Proton Drive zostanú presne také, aké sú.</string>
     <string name="device_folder_unhide">Zobraziť priečinok</string>
+    <string name="device_folder_delete">Odstrániť priečinok</string>
+    <string name="device_folder_delete_confirm_title">Odstrániť tento priečinok?</string>
+    <plurals name="device_folder_delete_confirm_body">
+        <item quantity="one">Z tohto zariadenia sa odstráni %1$d fotka alebo video z priečinka \"%2$s\".</item>
+        <item quantity="few">Z tohto zariadenia sa odstránia všetky %1$d fotky a videá z priečinka \"%2$s\".</item>
+        <item quantity="many">Z tohto zariadenia sa odstráni %1$d fotky a videá z priečinka \"%2$s\".</item>
+        <item quantity="other">Z tohto zariadenia sa odstráni všetkých %1$d fotiek a videí z priečinka \"%2$s\".</item>
+    </plurals>
+    <string name="device_folder_delete_no_trash">Táto verzia Androidu nemá kôš, takže odstránenie z tohto zariadenia je trvalé.</string>
+    <string name="device_folder_delete_everywhere">Odstrániť všade</string>
+    <string name="device_folder_delete_everywhere_desc">Presunie aj kópie na Proton Drive do koša Drive</string>
     <string name="sync_folders_add_dialog_title">Pridať priečinok</string>
     <string name="sync_folders_add_row_title">Pridať priečinok podľa názvu</string>
     <string name="sync_folders_add_dialog_name_hint">Názov priečinka</string>
@@ -1324,12 +1341,21 @@
     <string name="albums_filter_remember_last_summary">Otvárať albumy s naposledy vybraným filtrom</string>
     <string name="albums_show_collection">Zobrazovať Kolekciu</string>
     <string name="albums_show_collection_summary">Ľudia, miesta a „V tento deň“ zostávajú vo vyhľadávaní</string>
+    <string name="albums_filter_excluded">Vylúčené</string>
+    <string name="albums_excluded_empty">Žiadne vylúčené albumy ani priečinky</string>
+    <string name="albums_exclude_from_albums">Vylúčiť z Albumov</string>
+    <string name="albums_show_in_albums">Zobraziť v Albumoch</string>
     <string name="albums_sort_heading">Zoradiť podľa</string>
     <string name="albums_cover_size_heading">Veľkosť obalu</string>
     <string name="albums_sort_custom">Vlastné</string>
     <string name="albums_sort_name">Názov (A-Z)</string>
     <string name="albums_sort_activity">Posledná aktivita</string>
     <string name="albums_sort_count">Počet fotiek</string>
+    <string name="albums_view_heading">Zobrazenie</string>
+    <string name="albums_view_grid">Mriežka</string>
+    <string name="albums_view_list">Zoznam</string>
+    <string name="albums_more_settings">Ďalšie nastavenia</string>
+    <string name="album_options">Možnosti albumu</string>
     <string name="album_group_heading">Zoskupiť podľa</string>
     <string name="album_group_day">Deň</string>
     <string name="album_group_month">Mesiac</string>
@@ -1603,6 +1629,12 @@
     <string name="album_remove_confirm_body">Toto odstráni z albumu iba výber. Vaše fotky zostanú na časovej osi.</string>
     <string name="action_remove">Odstrániť</string>
     <string name="gallery_add_to_album_queued">Fotky sa pridajú po dokončení nahrávania</string>
+    <plurals name="gallery_add_to_album_some_queued">
+        <item quantity="one">Pridané do albumu. Ešte %1$d fotka sa pridá po dokončení nahrávania</item>
+        <item quantity="few">Pridané do albumu. Ešte %1$d fotky sa pridajú po dokončení nahrávania</item>
+        <item quantity="many">Pridané do albumu. Ešte %1$d fotky sa pridá po dokončení nahrávania</item>
+        <item quantity="other">Pridané do albumu. Ešte %1$d fotiek sa pridá po dokončení nahrávania</item>
+    </plurals>
     <string name="share_role_can_view_desc">Môže prezerať album a jeho fotky.</string>
     <string name="share_role_can_edit_desc">Môže pridávať a odstraňovať fotky.</string>
     <string name="sel_label_back_up">Zálohovať</string>
@@ -1990,6 +2022,7 @@
     <string name="duplicates_leave_title">Zrušiť výber?</string>
     <string name="duplicates_leave_message">Máte vybraných %1$d položiek. Ak teraz odídete, výber sa vymaže.</string>
     <string name="duplicates_leave_confirm">Odísť</string>
+    <string name="duplicates_select_all_but_first">Vybrať všetky okrem prvej</string>
     <string name="metadata_editor_date_mode_filename">Z názvu súboru</string>
     <string name="metadata_editor_filename_hint">Nastaví dátum každej fotky podľa dátumu zapísaného v jej názve súboru.</string>
     <string name="metadata_editor_filename_apply">Opraviť dátumy</string>

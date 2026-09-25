@@ -564,6 +564,11 @@
     <string name="albums_create_album">Crea album</string>
     <string name="albums_create_album_hint">Nome dell\'album</string>
     <string name="albums_no_photos">Nessuna foto in questo album</string>
+    <plurals name="albums_photos_uploading">
+        <item quantity="one">%1$d foto in caricamento</item>
+        <item quantity="many">%1$d foto in caricamento</item>
+        <item quantity="other">%1$d foto in caricamento</item>
+    </plurals>
     <string name="albums_download_all">Scarica tutto</string>
     <string name="album_download_channel_name">Download di album</string>
     <string name="album_download_channel_desc">Mostra l\'avanzamento del download di un album in background.</string>
@@ -1052,6 +1057,16 @@
     <string name="device_folder_hide_card">Nascondi cartella</string>
     <string name="device_folder_hide_card_sub">Toglie la cartella da Album e sposta le sue foto in Foto nascoste, fuori dalla galleria del dispositivo, così le altre app smettono di mostrarle. Le copie su Proton Drive restano esattamente come sono.</string>
     <string name="device_folder_unhide">Mostra cartella</string>
+    <string name="device_folder_delete">Elimina cartella</string>
+    <string name="device_folder_delete_confirm_title">Eliminare questa cartella?</string>
+    <plurals name="device_folder_delete_confirm_body">
+        <item quantity="one">%1$d foto o video di \"%2$s\" verrà eliminato da questo dispositivo.</item>
+        <item quantity="many">Tutti i %1$d elementi di \"%2$s\", tra foto e video, verranno eliminati da questo dispositivo.</item>
+        <item quantity="other">Tutti i %1$d elementi di \"%2$s\", tra foto e video, verranno eliminati da questo dispositivo.</item>
+    </plurals>
+    <string name="device_folder_delete_no_trash">Questa versione di Android non ha un cestino, quindi l\'eliminazione da questo dispositivo è definitiva.</string>
+    <string name="device_folder_delete_everywhere">Elimina ovunque</string>
+    <string name="device_folder_delete_everywhere_desc">Sposta anche le copie su Proton Drive nel cestino di Drive</string>
     <string name="sync_folders_add_dialog_title">Aggiungi cartella</string>
     <string name="sync_folders_add_row_title">Aggiungi cartella per nome</string>
     <string name="sync_folders_add_dialog_name_hint">Nome cartella</string>
@@ -1112,12 +1127,21 @@
     <string name="albums_filter_remember_last_summary">Apri gli album con l\'ultimo filtro selezionato</string>
     <string name="albums_show_collection">Mostra la raccolta</string>
     <string name="albums_show_collection_summary">Le persone, i luoghi e «In questo giorno» restano disponibili nella ricerca</string>
+    <string name="albums_filter_excluded">Esclusi</string>
+    <string name="albums_excluded_empty">Non ci sono album o cartelle esclusi</string>
+    <string name="albums_exclude_from_albums">Escludi da Album</string>
+    <string name="albums_show_in_albums">Mostra in Album</string>
     <string name="albums_sort_heading">Ordina per</string>
     <string name="albums_cover_size_heading">Dimensione copertina</string>
     <string name="albums_sort_custom">Personalizzato</string>
     <string name="albums_sort_name">Nome (A-Z)</string>
     <string name="albums_sort_activity">Ultima attività</string>
     <string name="albums_sort_count">Numero di foto</string>
+    <string name="albums_view_heading">Visualizzazione</string>
+    <string name="albums_view_grid">Griglia</string>
+    <string name="albums_view_list">Elenco</string>
+    <string name="albums_more_settings">Altre impostazioni</string>
+    <string name="album_options">Opzioni album</string>
     <string name="album_group_heading">Raggruppa per</string>
     <string name="album_group_day">Giorno</string>
     <string name="album_group_month">Mese</string>
@@ -1549,6 +1573,11 @@
     <string name="album_remove_confirm_body">Questo rimuove solo la selezione dall\'album. Le tue foto restano nella tua cronologia.</string>
     <string name="action_remove">Rimuovi</string>
     <string name="gallery_add_to_album_queued">Le foto verranno aggiunte al termine del caricamento</string>
+    <plurals name="gallery_add_to_album_some_queued">
+        <item quantity="one">Aggiunto all\'album. %1$d foto in più verrà aggiunta al termine del caricamento</item>
+        <item quantity="many">Aggiunto all\'album. %1$d foto in più verranno aggiunte al termine del caricamento</item>
+        <item quantity="other">Aggiunto all\'album. %1$d foto in più verranno aggiunte al termine del caricamento</item>
+    </plurals>
     <string name="share_role_can_view_desc">Può vedere l\'album e le sue foto.</string>
     <string name="share_role_can_edit_desc">Può aggiungere e rimuovere foto.</string>
     <string name="sel_label_back_up">Salva</string>
@@ -1924,6 +1953,7 @@
     <string name="duplicates_leave_title">Annullare la selezione?</string>
     <string name="duplicates_leave_message">Hai selezionato %1$d elementi. Se esci ora, la selezione andrà persa.</string>
     <string name="duplicates_leave_confirm">Esci</string>
+    <string name="duplicates_select_all_but_first">Seleziona tutte tranne la prima</string>
     <string name="metadata_editor_date_mode_filename">Dal nome file</string>
     <string name="metadata_editor_filename_hint">Imposta la data di ogni foto in base alla data scritta nel nome del file.</string>
     <string name="metadata_editor_filename_apply">Correggi le date</string>

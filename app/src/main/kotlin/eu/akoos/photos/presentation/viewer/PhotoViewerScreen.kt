@@ -1005,6 +1005,17 @@ fun PhotoViewerScreen(
         }
     }
 
+    // A playing video takes the chrome down on its own a moment after it starts, as a tap would.
+    val viewerTouches = rememberViewerTouches()
+    VideoChromeAutoHide(
+        chromeVisible = showChrome,
+        videoPlaying = isVideoPlaying,
+        slideshowRunning = isPlaying,
+        settledPage = pagerState.settledPage,
+        touches = viewerTouches,
+        onHide = { showOverlays = false },
+    )
+
     // Tick: every 4 seconds, advance to the next page. Loops back to 0 from the end.
     // For VIDEOS we hold the advance until either the clip ends (player flips out of
     // playing state on its own) or the player hasn't started playing within the first
@@ -1223,6 +1234,8 @@ fun PhotoViewerScreen(
             .fillMaxSize()
             .background(Bg0)
             .onSizeChanged { containerSize = it }
+            // Sees every press and lift first and consumes none, for the video chrome's auto-hide.
+            .observeTouches(viewerTouches)
             .pointerInput("viewer-taps") {
                 // Hand-rolled tap, double tap and long press. The down is read even if a lower node
                 // consumed it (so the first press on a freshly landed page is not lost), and a tap

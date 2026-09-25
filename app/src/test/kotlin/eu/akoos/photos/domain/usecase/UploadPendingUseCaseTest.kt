@@ -161,6 +161,7 @@ class UploadPendingUseCaseTest {
             mockk(relaxed = true), uploadAlbumTargetDao, mockk(relaxed = true), mockk(relaxed = true),
             UploadStructuralStripper(context), context,
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined + kotlinx.coroutines.CoroutineExceptionHandler { _, _ -> }),
+            eu.akoos.photos.util.AlbumListEventBus(),
         )
     }
 

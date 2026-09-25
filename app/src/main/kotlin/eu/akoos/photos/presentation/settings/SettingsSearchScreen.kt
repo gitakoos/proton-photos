@@ -221,6 +221,11 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         listOf("timeline", "layout", "grid", "categories", "idővonal"),
         Screen.TimelineFilter.route,
     ),
+    SettingsSearchEntry(
+        R.string.gallery_tab_albums, R.string.settings_appearance,
+        listOf("albums", "cover size", "columns", "collection", "default filter", "albumok", "borító"),
+        Screen.AlbumsSettings.route,
+    ),
 
     // ── Help & about ───────────────────────────────────────────────────────────
     SettingsSearchEntry(

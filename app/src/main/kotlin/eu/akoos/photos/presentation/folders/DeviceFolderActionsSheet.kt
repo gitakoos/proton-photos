@@ -36,12 +36,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Collections
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOff
+import androidx.compose.material.icons.filled.GridOff
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
@@ -64,6 +68,7 @@ import eu.akoos.photos.presentation.common.ActionSheetSectionHeading
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgPrimary
+import eu.akoos.photos.presentation.theme.Line2
 import kotlinx.coroutines.launch
 
 /**
@@ -72,15 +77,17 @@ import kotlinx.coroutines.launch
  * same recipe, but with its own parameter list: a folder has no sharing, no guest and no leave.
  *
  * The album's [AlbumViewOptions] chips lead here too, then the sections follow the app's action-sheet
- * taxonomy: what runs on the folder's photos, then the per-folder settings. A folder has nothing
- * irreversible to offer, so that last group is absent here.
+ * taxonomy: what runs on the folder's photos, then the per-folder settings, then, below a rule and in
+ * red, deleting the folder with everything it holds on the device.
  *
  * The actions group holds the folder's two back-up outcomes, a one-time upload to the stream or an
  * upload that also mirrors the folder as a Drive album, and the slideshow. The settings group
  * carries the per-folder preferences, each showing its current state as a trailing tick: the three
  * Settings otherwise owns alone, plus hiding the folder, which takes its card off the Albums grid and
- * moves its photos into the vault. Slideshow, the sort direction and the grouping are the album
- * actions a folder can answer for itself, and they read the same here as they do there.
+ * moves its photos into the vault. Opened from that grid, it also offers the much lighter exclusion,
+ * which takes the card off the grid and touches nothing else. Slideshow, the sort direction and the
+ * grouping are the album actions a folder can answer for itself, and they read the same here as they
+ * do there.
  *
  * The rows that run on the folder's photos hang off their callback being non-null, so a folder with
  * nothing in it drops the whole actions group and still offers the sort and every preference rather
@@ -127,6 +134,16 @@ internal fun DeviceFolderActionsSheet(
      *  instead. A folder rename relocates its photos into a new DCIM directory, a scoped-storage move
      *  that needs Android 10+, so the row is also held to that floor. Null hides it. */
     onRename: (() -> Unit)? = null,
+    /** True while the folder's card is off the Albums grid, which turns the row below into its way
+     *  back. */
+    isExcludedFromGrid: Boolean = false,
+    /** Takes the folder's card off the Albums grid, or puts it back. Grid only: no file moves and
+     *  nothing else about the folder changes. Null drops the row, which only the grid offers. */
+    onToggleExcludedFromGrid: (() -> Unit)? = null,
+    /** Deletes the folder with everything it holds on the device, once the confirmation it opens is
+     *  answered. Null drops the row: the vault's side of a folder has no device file to delete, and an
+     *  empty folder has nothing in it. */
+    onDeleteFolder: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     // Slide the drawer away before the action lands, so a snackbar or system dialog never opens
@@ -256,6 +273,28 @@ internal fun DeviceFolderActionsSheet(
                 onClick = { close(onToggleHiddenCard) },
                 showCheck = isHiddenCard,
             )
+            if (onToggleExcludedFromGrid != null) {
+                Spacer(Modifier.height(8.dp))
+                ActionSheetRow(
+                    icon = if (isExcludedFromGrid) Icons.Default.GridOn else Icons.Default.GridOff,
+                    title = stringResource(
+                        if (isExcludedFromGrid) R.string.albums_show_in_albums else R.string.albums_exclude_from_albums,
+                    ),
+                    onClick = { close(onToggleExcludedFromGrid) },
+                )
+            }
+
+            if (onDeleteFolder != null) {
+                // Deleting takes every photo here off the device, so it keeps the rule above it and the
+                // red treatment the album's delete carries.
+                HorizontalDivider(color = Line2, modifier = Modifier.padding(vertical = 16.dp))
+                ActionSheetRow(
+                    icon = Icons.Default.DeleteOutline,
+                    title = stringResource(R.string.device_folder_delete),
+                    onClick = { close(onDeleteFolder) },
+                    destructive = true,
+                )
+            }
 
             Spacer(Modifier.height(16.dp))
         }

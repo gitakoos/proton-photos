@@ -97,8 +97,10 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.albums.AlbumPhotoGrouping
 import eu.akoos.photos.presentation.albums.AlbumRenameInput
+import eu.akoos.photos.presentation.common.AddToAlbumMessage
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.EditFieldSheet
+import eu.akoos.photos.presentation.common.addToAlbumMessage
 import eu.akoos.photos.presentation.common.HideConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.PrimarySlot
@@ -293,12 +295,21 @@ fun DeviceFolderDetailScreen(
     val addToAlbumSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // The picker's own "New album" row, which names an album and then adds the selection to it.
     var showCreateAlbumInline by remember { mutableStateOf(false) }
-    // What an album add landed on, said the same way whichever row started it. A run that reaches
-    // neither an album nor the upload queue says so rather than claiming an add that never happened.
+    // What an album add landed on, said the same way whichever row started it. A photo that still has
+    // to upload is only queued, so it is never reported as added, and a run that reaches neither an
+    // album nor the upload queue says so rather than claiming an add that never happened.
     val addedToAlbumMsg = stringResource(R.string.device_folder_added_to_album)
+    val queuedForAlbumMsg = stringResource(R.string.gallery_add_to_album_queued)
     val nothingToAddMsg = stringResource(R.string.album_picker_empty)
     fun showAddToAlbumOutcome(joined: Int, queued: Int, error: String?) {
-        val msg = error ?: if (joined > 0 || queued > 0) addedToAlbumMsg else nothingToAddMsg
+        val msg = error ?: when (val outcome = addToAlbumMessage(joined, queued)) {
+            AddToAlbumMessage.Added -> addedToAlbumMsg
+            is AddToAlbumMessage.AddedAndUploading -> folderCtx.resources.getQuantityString(
+                R.plurals.gallery_add_to_album_some_queued, outcome.uploading, outcome.uploading,
+            )
+            is AddToAlbumMessage.Uploading -> queuedForAlbumMsg
+            AddToAlbumMessage.NothingAdded -> nothingToAddMsg
+        }
         scope.launch { snackbarHostState.showSnackbar(msg) }
     }
     // Unified share drawer + manage-link sheet for the selection (Send to app / Public link).
@@ -1193,7 +1204,27 @@ fun DeviceFolderDetailScreen(
             },
             // Logged-out only; the row renders behind the same gate in the sheet.
             onRename = { showRenameSheet = true },
+            // The device side only: the vault's side of a folder has no device file to delete.
+            onDeleteFolder = if (!fromVault && hasPhotos) viewModel::requestDeleteFolder else null,
         )
+    }
+
+    // Deleting the whole folder asks first, on the photos a device read finds in it, then runs through
+    // the selection delete's own path: the same blocking sheet, system trash dialog and failure report.
+    val folderDeleteRequest by viewModel.folderDeleteRequest.collectAsStateWithLifecycle()
+    folderDeleteRequest?.let { request ->
+        DeviceFolderDeleteSheet(
+            request = request,
+            isSignedIn = isSignedIn,
+            onDelete = viewModel::confirmDeleteFolder,
+            onDismiss = viewModel::dismissDeleteFolderRequest,
+        )
+    }
+    // Once the folder is deleted there is nothing left here to show, so the screen leaves, as an
+    // album's own screen does once the album is hidden.
+    val folderDeleted by viewModel.folderDeleted.collectAsStateWithLifecycle()
+    LaunchedEffect(folderDeleted) {
+        if (folderDeleted) onBack()
     }
 
     // Rename this folder in place: the same field the Albums grid's device-folder rename uses,

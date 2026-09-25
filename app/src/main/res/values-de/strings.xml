@@ -560,6 +560,10 @@
     <string name="albums_create_album">Album erstellen</string>
     <string name="albums_create_album_hint">Albumname</string>
     <string name="albums_no_photos">Keine Fotos in diesem Album</string>
+    <plurals name="albums_photos_uploading">
+        <item quantity="one">%1$d Foto wird hochgeladen</item>
+        <item quantity="other">%1$d Fotos werden hochgeladen</item>
+    </plurals>
     <string name="albums_download_all">Alles herunterladen</string>
     <string name="album_download_channel_name">Album-Downloads</string>
     <string name="album_download_channel_desc">Zeigt den Fortschritt beim Herunterladen eines Albums im Hintergrund.</string>
@@ -1039,6 +1043,15 @@
     <string name="device_folder_hide_card">Ordner ausblenden</string>
     <string name="device_folder_hide_card_sub">Nimmt den Ordner aus Alben und verschiebt seine Fotos nach „Versteckte Fotos“, aus der Galerie des Geräts heraus, sodass andere Apps sie nicht mehr anzeigen. Vorhandene Proton Drive-Kopien bleiben genau so, wie sie sind.</string>
     <string name="device_folder_unhide">Ordner einblenden</string>
+    <string name="device_folder_delete">Ordner löschen</string>
+    <string name="device_folder_delete_confirm_title">Diesen Ordner löschen?</string>
+    <plurals name="device_folder_delete_confirm_body">
+        <item quantity="one">%1$d Foto oder Video in \"%2$s\" wird von diesem Gerät gelöscht.</item>
+        <item quantity="other">Alle %1$d Fotos und Videos in \"%2$s\" werden von diesem Gerät gelöscht.</item>
+    </plurals>
+    <string name="device_folder_delete_no_trash">Diese Android-Version hat keinen Papierkorb, daher ist das Löschen von diesem Gerät dauerhaft.</string>
+    <string name="device_folder_delete_everywhere">Überall löschen</string>
+    <string name="device_folder_delete_everywhere_desc">Verschiebt auch die Proton Drive-Kopien in den Drive-Papierkorb</string>
     <string name="sync_folders_add_dialog_title">Ordner hinzufügen</string>
     <string name="sync_folders_add_row_title">Ordner per Name hinzufügen</string>
     <string name="sync_folders_add_dialog_name_hint">Ordnername</string>
@@ -1099,12 +1112,21 @@
     <string name="albums_filter_remember_last_summary">Alben mit dem zuletzt gewählten Filter öffnen</string>
     <string name="albums_show_collection">Sammlung anzeigen</string>
     <string name="albums_show_collection_summary">Personen, Orte und „An diesem Tag“ bleiben in der Suche</string>
+    <string name="albums_filter_excluded">Ausgeschlossen</string>
+    <string name="albums_excluded_empty">Keine ausgeschlossenen Alben oder Ordner</string>
+    <string name="albums_exclude_from_albums">Aus Alben ausschließen</string>
+    <string name="albums_show_in_albums">In Alben anzeigen</string>
     <string name="albums_sort_heading">Sortieren nach</string>
     <string name="albums_cover_size_heading">Covergröße</string>
     <string name="albums_sort_custom">Benutzerdefiniert</string>
     <string name="albums_sort_name">Name (A-Z)</string>
     <string name="albums_sort_activity">Letzte Aktivität</string>
     <string name="albums_sort_count">Anzahl der Fotos</string>
+    <string name="albums_view_heading">Ansicht</string>
+    <string name="albums_view_grid">Raster</string>
+    <string name="albums_view_list">Liste</string>
+    <string name="albums_more_settings">Weitere Einstellungen</string>
+    <string name="album_options">Albumoptionen</string>
     <string name="album_group_heading">Gruppieren nach</string>
     <string name="album_group_day">Tag</string>
     <string name="album_group_month">Monat</string>
@@ -1519,6 +1541,10 @@
     <string name="album_remove_confirm_body">Das entfernt nur die Auswahl aus dem Album. Deine Fotos bleiben in deiner Chronik.</string>
     <string name="action_remove">Entfernen</string>
     <string name="gallery_add_to_album_queued">Fotos werden hinzugefügt, sobald der Upload abgeschlossen ist</string>
+    <plurals name="gallery_add_to_album_some_queued">
+        <item quantity="one">Zum Album hinzugefügt. %1$d weiteres Foto folgt, sobald der Upload abgeschlossen ist</item>
+        <item quantity="other">Zum Album hinzugefügt. %1$d weitere Fotos folgen, sobald der Upload abgeschlossen ist</item>
+    </plurals>
     <string name="share_role_can_view_desc">Kann das Album und seine Fotos ansehen.</string>
     <string name="share_role_can_edit_desc">Kann Fotos hinzufügen und entfernen.</string>
     <string name="sel_label_back_up">Sichern</string>
@@ -1892,6 +1918,7 @@
     <string name="duplicates_leave_title">Auswahl verwerfen?</string>
     <string name="duplicates_leave_message">Du hast %1$d ausgewählt. Wenn du jetzt gehst, geht deine Auswahl verloren.</string>
     <string name="duplicates_leave_confirm">Verlassen</string>
+    <string name="duplicates_select_all_but_first">Alle außer der ersten auswählen</string>
     <string name="metadata_editor_date_mode_filename">Aus Dateiname</string>
     <string name="metadata_editor_filename_hint">Setzt das Datum jedes Fotos anhand des im Dateinamen enthaltenen Datums.</string>
     <string name="metadata_editor_filename_apply">Daten korrigieren</string>

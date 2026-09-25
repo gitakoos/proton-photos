@@ -138,6 +138,7 @@ import eu.akoos.photos.presentation.settings.TimelineLayoutScreen
 import eu.akoos.photos.presentation.settings.TimelineCategoriesScreen
 import eu.akoos.photos.presentation.settings.TimelineAlbumsScreen
 import eu.akoos.photos.presentation.settings.TimelineDeviceFoldersScreen
+import eu.akoos.photos.presentation.settings.AlbumsSettingsScreen
 import eu.akoos.photos.presentation.settings.BackupProcessingScreen
 import eu.akoos.photos.presentation.settings.SyncSettingsScreen
 import eu.akoos.photos.presentation.map.MAP_FOCUS_LAT_ARG
@@ -226,6 +227,9 @@ sealed class Screen(val route: String) {
     data object TimelineCategories : Screen("timeline_categories")
     data object TimelineAlbums : Screen("timeline_albums")
     data object TimelineDeviceFolders : Screen("timeline_device_folders")
+
+    /** The Albums tab's settings page, from the tab's filter sheet and from Appearance. */
+    data object AlbumsSettings : Screen("albums_settings")
     data object Search : Screen("search")
 
     /** The classic map. Entry points navigate to the plain route; the destination registers [PATTERN],
@@ -800,6 +804,7 @@ fun NavGraph(
                 onCalendarClick = { navController.navigate(Screen.Calendar.route) },
                 onMemoriesClick = { navController.navigate(Screen.Memories.route) },
                 onOpenTimelineFilter = { navController.navigate(Screen.TimelineFilter.route) },
+                onOpenAlbumsSettings = { navController.navigate(Screen.AlbumsSettings.route) },
                 onEditMetadata = { selection ->
                     // A timeline selection is the user's own library, never an album someone shared
                     // with them, so the editor's own per-item rules decide what is writable.
@@ -1546,6 +1551,7 @@ fun NavGraph(
                 onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
+                onAlbumsSettingsClick = { navController.navigate(Screen.AlbumsSettings.route) },
             )
         }
 
@@ -1806,6 +1812,10 @@ fun NavGraph(
 
         composable(Screen.TimelineDeviceFolders.route) {
             TimelineDeviceFoldersScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.AlbumsSettings.route) {
+            AlbumsSettingsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.NotificationSettings.route) {

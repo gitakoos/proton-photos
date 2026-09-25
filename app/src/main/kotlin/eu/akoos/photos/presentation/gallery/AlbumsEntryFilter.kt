@@ -38,9 +38,13 @@ internal data class AlbumsEntryFilterState(
     val settled: Boolean,
 )
 
-/** The filter at [ordinal], clamped into the enum so a stray stored value still names a real filter. */
+/**
+ * The filter at [ordinal], clamped into the ones the tab may open on, so a stray stored value still
+ * names a real filter. The Excluded view sits past that range: it is only ever picked by hand, never
+ * stored as the default or the last pick.
+ */
 internal fun albumDisplayFilterAt(ordinal: Int): AlbumDisplayFilter =
-    AlbumDisplayFilter.entries[ordinal.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)]
+    AlbumDisplayFilter.entries[ordinal.coerceIn(0, AlbumDisplayFilter.Local.ordinal)]
 
 /** The filter an arrival on the Albums page opens on: the last pick while remember-last is on, otherwise
  *  the configured default. */
@@ -66,4 +70,24 @@ internal fun nextAlbumsEntryFilterState(
     current.settled -> current
     prefs == null -> current
     else -> AlbumsEntryFilterState(resolveAlbumsEntryFilter(prefs), settled = true)
+}
+
+/**
+ * The Albums filter once the stored settings arrive, given [seenDefault], the default the gallery last
+ * saw. A new default is picked on the Albums settings page, away from the tab, and shows on the tab at
+ * once as a settled pick rather than waiting for the next arrival, so the pick never reads as ignored.
+ * Anything else keeps [current]: the first delivery ([seenDefault] null) is a sighting rather than a
+ * change, and with remember-last on the last pick owns the tab, so a default has nothing to show.
+ */
+internal fun afterAlbumsDefaultChange(
+    current: AlbumsEntryFilterState,
+    seenDefault: AlbumDisplayFilter?,
+    prefs: AlbumsFilterPrefs,
+): AlbumsEntryFilterState {
+    val default = albumDisplayFilterAt(prefs.defaultOrdinal)
+    return if (seenDefault == null || seenDefault == default || prefs.rememberLast) {
+        current
+    } else {
+        AlbumsEntryFilterState(default, settled = true)
+    }
 }

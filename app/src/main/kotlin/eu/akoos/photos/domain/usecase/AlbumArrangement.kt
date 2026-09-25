@@ -38,3 +38,22 @@ fun moveInArrangement(order: List<String>, from: Int, to: Int): List<String> {
     if (from == to || from !in order.indices || to !in order.indices) return order
     return order.toMutableList().apply { add(to, removeAt(from)) }
 }
+
+/**
+ * The whole order to store once an arrangement lands: [order] is every album, in the order the grid
+ * was built from, and [arranged] is the ones the grid showed, in the order the user left them.
+ *
+ * The grid holds only part of [order]: a hidden album and one taken off the grid are not on it, and
+ * the stored order replaces the previous one outright. So every album [arranged] does not hold keeps
+ * its slot, and the slots the arranged albums held take them in their new order, which means
+ * arranging never moves or drops an album the user could not see. An arranged album [order] does not
+ * know trails at the end.
+ */
+fun mergeArrangement(order: List<String>, arranged: List<String>): List<String> {
+    val full = order.distinct()
+    val moved = arranged.distinct()
+    val known = full.toSet()
+    val moving = moved.toSet()
+    val next = moved.filter { it in known }.iterator()
+    return full.map { if (it in moving) next.next() else it } + moved.filterNot { it in known }
+}

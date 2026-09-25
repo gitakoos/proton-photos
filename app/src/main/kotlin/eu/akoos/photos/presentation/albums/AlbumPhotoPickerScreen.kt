@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -177,6 +178,8 @@ fun AlbumPhotoPickerScreen(
     // Status bar + the floating back-pill + the type-filter row, so the grid's first row and the
     // scrubber track start cleanly below both.
     val headerTopInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 100.dp
+    // The "Add" bar floats above the navigation bar, so the grid's last row clears both.
+    val navBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     // Drop photos already in this album, and photos hidden on this device, so the picker only
     // offers addable new ones. A hidden photo re-added to an album would un-hide it.
@@ -319,7 +322,7 @@ fun AlbumPhotoPickerScreen(
                 start = if (seamless) 0.dp else 20.dp,
                 end = if (seamless) 0.dp else 20.dp,
                 top = headerTopInset,
-                bottom = 96.dp,
+                bottom = 96.dp + navBottomInset,
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),

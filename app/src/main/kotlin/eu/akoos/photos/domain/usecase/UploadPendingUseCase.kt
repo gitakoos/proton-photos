@@ -110,6 +110,13 @@ private val videoTranscodeGate = Semaphore(1)
 private const val UPLOAD_PARALLELISM = 3
 
 /**
+ * Least gap between two album-changed signals sent for queued photos joining their albums. Each
+ * signal reloads the album list from the server, so a batch landing a photo every second or two
+ * shares one reload per gap instead of paying one per photo.
+ */
+private const val ALBUM_JOIN_SIGNAL_GAP_MS = 5_000L
+
+/**
  * Per-file upload event surfaced to UI (Settings sync progress).
  *
  * Status transitions per file: `Queued` → `Encrypting` → `Uploading` → (`Done` | `Failed`).
@@ -165,8 +172,15 @@ class UploadPendingUseCase @Inject constructor(
     private val structuralStripper: UploadStructuralStripper,
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
+    private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
 ) {
     private val mutex = Mutex()
+
+    /** Set from an album-changed signal until [ALBUM_JOIN_SIGNAL_GAP_MS] has passed (see [signalAlbumJoin]). */
+    private val albumJoinSignalBusy = AtomicBoolean(false)
+
+    /** A queued photo joined its album while [albumJoinSignalBusy] held, so one more signal is owed. */
+    private val albumJoinSignalOwed = AtomicBoolean(false)
 
     /** Crash-consistent backup of the bytes a mirror overwrite is about to replace. Lives in
      *  filesDir (never cacheDir), so a process killed mid-truncate is recovered on the next launch
@@ -364,12 +378,7 @@ class UploadPendingUseCase @Inject constructor(
         // add still lands even when backup is otherwise idle.
         for (target in uploadAlbumTargetDao.getAll()) {
             val cloudId = syncStateRepo.getByUri(target.localUri)?.cloudFileId ?: continue
-            runCatching { cloudRepo.addPhotosToAlbum(userId, target.albumLinkId, listOf(cloudId)) }
-                .onSuccess {
-                    uploadAlbumTargetDao.deleteTarget(target.localUri, target.albumLinkId)
-                    Log.d(UPLOAD_TAG, "Drained pending add: $cloudId → album ${target.albumLinkId}")
-                }
-                .onFailure { e -> Log.w(UPLOAD_TAG, "Pending-add drain failed for ${target.localUri}: ${e.message}") }
+            joinQueuedAlbum(userId, target.localUri, target.albumLinkId, cloudId)
         }
 
         // One snapshot of every SyncState row, read once up front so the explicit-action bypass
@@ -1471,17 +1480,8 @@ class UploadPendingUseCase @Inject constructor(
             // User-queued album-adds for this freshly-uploaded photo, read from the target table (the
             // single source of truth). These are album linkIds directly (the user picked an existing
             // album for a local-only photo), so skip the bucket-name resolve/create the mirror loop
-            // above does. Best-effort like the mirror: each pair is dropped only on a successful add,
-            // and a failure leaves that pair for the next-pass drain so an album membership is never
-            // lost. A manual "back up now" has no target rows, so this loop is simply empty for it.
-            for (albumLinkId in uploadAlbumTargetDao.getTargetsFor(state.localUri)) {
-                runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudId)) }
-                    .onSuccess {
-                        uploadAlbumTargetDao.deleteTarget(state.localUri, albumLinkId)
-                        Log.d(UPLOAD_TAG, "Added $cloudId to queued album $albumLinkId")
-                    }
-                    .onFailure { e -> Log.w(UPLOAD_TAG, "Queued album-add failed for $albumLinkId: ${e.message}") }
-            }
+            // above does. A manual "back up now" has no target rows, so this finds nothing for it.
+            joinQueuedAlbums(userId, state.localUri, cloudId)
         } catch (e: CancellationException) {
             // A user cancel (or an OS stop) can land mid-upload while this row is claimed UPLOADING
             // by the #69 fix. Release the claim back to LOCAL_ONLY first, otherwise the row stays
@@ -1539,6 +1539,70 @@ class UploadPendingUseCase @Inject constructor(
             strippedFile?.delete()
             compressedFile?.delete()
             tsFloorFile?.delete()
+        }
+    }
+
+    /**
+     * Joins a freshly uploaded photo, queued as [localUri] and now [cloudId] on Drive, to every album
+     * it was queued for. Each pair is settled on its own by [joinQueuedAlbum], so one album refusing
+     * the photo leaves its other albums unaffected.
+     */
+    private suspend fun joinQueuedAlbums(userId: UserId, localUri: String, cloudId: String) {
+        for (albumLinkId in uploadAlbumTargetDao.getTargetsFor(localUri)) {
+            joinQueuedAlbum(userId, localUri, albumLinkId, cloudId)
+        }
+    }
+
+    /**
+     * Adds [cloudId] to [albumLinkId] for the photo queued as [localUri], and drops the queued pair
+     * only once the album holds it. The add reports a photo it could not send, or one the server
+     * refused, in its result rather than by throwing, so the join is read from that result; short of
+     * it the pair stays for the next pass's drain and the membership is never lost. A refused add can
+     * also be one that landed on an earlier try whose reply never arrived, so the album's own children
+     * settle that case instead of a retry on every pass. A landed join goes out through [signalAlbumJoin].
+     */
+    private suspend fun joinQueuedAlbum(userId: UserId, localUri: String, albumLinkId: String, cloudId: String) {
+        val added = runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudId)) }
+            .onFailure { if (it is CancellationException) throw it }
+        val joined = cloudId in added.getOrNull()?.succeededLinkIds.orEmpty() ||
+            (added.isSuccess && albumHoldsPhoto(userId, albumLinkId, cloudId))
+        if (!joined) {
+            val reason = added.exceptionOrNull()?.let { eu.akoos.photos.util.describeUploadFailure(it) }
+                ?: "not accepted"
+            Log.w(UPLOAD_TAG, "Queued album-add for $albumLinkId did not land: $reason")
+            eu.akoos.photos.util.SyncDiagnostics.log(
+                "upload ${eu.akoos.photos.util.uploadLogRef(localUri)} album join deferred: $reason",
+            )
+            return
+        }
+        uploadAlbumTargetDao.deleteTarget(localUri, albumLinkId)
+        signalAlbumJoin()
+        Log.d(UPLOAD_TAG, "Added $cloudId to queued album $albumLinkId")
+    }
+
+    /** Whether [albumLinkId] already lists [cloudId] among its photos. A listing that fails reads as
+     *  false, which keeps the pair queued. */
+    private suspend fun albumHoldsPhoto(userId: UserId, albumLinkId: String, cloudId: String): Boolean =
+        runCatching { cloudRepo.loadAlbumChildren(userId, albumLinkId).any { it.linkId == cloudId } }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrDefault(false)
+
+    /**
+     * Tells the album grid and an open album that a queued photo joined its album, so they reload it.
+     * Each reload fetches the album list from the server, so the first join signals at once and every
+     * join inside the [ALBUM_JOIN_SIGNAL_GAP_MS] after it shares one more signal when the gap ends,
+     * instead of a batch paying one reload per photo.
+     */
+    private fun signalAlbumJoin() {
+        if (!albumJoinSignalBusy.compareAndSet(false, true)) {
+            albumJoinSignalOwed.set(true)
+            return
+        }
+        albumListEvents.notifyChanged()
+        appScope.launch {
+            kotlinx.coroutines.delay(ALBUM_JOIN_SIGNAL_GAP_MS)
+            albumJoinSignalBusy.set(false)
+            if (albumJoinSignalOwed.getAndSet(false)) signalAlbumJoin()
         }
     }
 

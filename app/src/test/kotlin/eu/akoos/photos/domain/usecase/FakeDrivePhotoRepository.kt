@@ -50,7 +50,10 @@ import java.io.File
  *    and returns it.
  *  - [deleteFiles] removes matching linkIds from the list.
  *  - [addPhotosToAlbum] records membership into [albumMembership]; [failAddPhotosOnce] flips it to throw
- *    exactly once (the transient-failure scenarios).
+ *    exactly once (the transient-failure scenarios), and [rejectAddPhotosOnce] to report every photo as
+ *    failed in its result exactly once, the way the real add reports an unsent or refused photo;
+ *    [loseAddReplyOnce] records the membership yet reports it failed. [loadAlbumChildren] lists the
+ *    recorded membership.
  *  - [getAlbumIdsByPhoto] returns the seeded [albumIdsByPhoto] map.
  *  - [downloadFullResPhoto] returns a throwaway temp file carrying [downloadBytes].
  *  - [callLog] records the order of upload / add / delete calls so ordering invariants can be asserted.
@@ -80,6 +83,15 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     /** When non-null, the next [addPhotosToAlbum] call throws this exact throwable, then clears it.
      *  Same purpose as [uploadErrorOnce] for the album re-add path. */
     var addPhotosErrorOnce: Throwable? = null
+
+    /** When true, the next [addPhotosToAlbum] call returns every photo as failed without adding any,
+     *  then resets itself. Models a request that never reached the server or a refused entry, which
+     *  the real add reports in its result rather than by throwing. */
+    var rejectAddPhotosOnce = false
+
+    /** When true, the next [addPhotosToAlbum] call records the membership but still returns every
+     *  photo as failed, then resets itself. Models an add that landed while its reply was lost. */
+    var loseAddReplyOnce = false
 
     /** When true, the next [uploadFile] call throws a [kotlinx.coroutines.CancellationException] before
      *  recording anything, then resets itself. Models the user cancelling a replace mid-upload so a
@@ -167,7 +179,21 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
             failAddPhotosOnce = false
             error("simulated transient album-add failure")
         }
+        if (rejectAddPhotosOnce) {
+            rejectAddPhotosOnce = false
+            return DrivePhotoRepository.AddPhotosToAlbumResult(
+                succeededLinkIds = emptyList(),
+                failedLinkIds = photoLinkIds,
+            )
+        }
         albumMembership.getOrPut(albumLinkId) { mutableListOf() }.addAll(photoLinkIds)
+        if (loseAddReplyOnce) {
+            loseAddReplyOnce = false
+            return DrivePhotoRepository.AddPhotosToAlbumResult(
+                succeededLinkIds = emptyList(),
+                failedLinkIds = photoLinkIds,
+            )
+        }
         return DrivePhotoRepository.AddPhotosToAlbumResult(
             succeededLinkIds = photoLinkIds,
             failedLinkIds = emptyList(),
@@ -221,7 +247,8 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun prefetchSharedAlbumsMembership(userId: UserId, albums: List<Album>) {}
     override suspend fun prefetchSharedAlbumCovers(userId: UserId, albums: List<Album>) {}
     override suspend fun getAlbumMemberships(userId: UserId): Map<String, String> = emptyMap()
-    override suspend fun loadAlbumChildren(userId: UserId, albumLinkId: String): List<AlbumChild> = emptyList()
+    override suspend fun loadAlbumChildren(userId: UserId, albumLinkId: String): List<AlbumChild> =
+        albumMembers(albumLinkId).map { AlbumChild(linkId = it, captureTime = null, addedTime = null) }
     override suspend fun loadAlbumPhotos(
         userId: UserId,
         albumLinkId: String,

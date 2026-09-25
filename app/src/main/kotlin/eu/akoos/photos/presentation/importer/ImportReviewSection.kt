@@ -108,7 +108,9 @@ import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.selectionDrawerRestingHeight
 import eu.akoos.photos.presentation.gallery.PhotoCell
+import eu.akoos.photos.presentation.gallery.gridBottomPadding
 import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.viewer.MetaRow
@@ -243,7 +245,12 @@ fun ImportReviewSection(
                 top = contentTopPad,
                 end = 12.dp,
                 // Clear the bottom bar (confirm button + discard row) so the last thumbnails stay reachable.
-                bottom = 150.dp + navBottom,
+                // The selection drawer that replaces it slots no action, so it rests without the button row.
+                bottom = gridBottomPadding(
+                    base = 150.dp + navBottom,
+                    selecting = selectionMode,
+                    drawerHeight = selectionDrawerRestingHeight(withPrimaryRow = false),
+                ),
             ),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),

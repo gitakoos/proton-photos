@@ -68,7 +68,7 @@ internal fun GalleryHeader(
     /** Logged-out only: opens the "New folder" picker from the Albums-tab pill in the same spot. */
     onNewLocalFolder: () -> Unit = {},
     albumFilter: AlbumDisplayFilter = AlbumDisplayFilter.All,
-    /** Cycles the Albums-tab narrowing (All to Cloud to Local) from the pill label. */
+    /** Cycles the Albums-tab narrowing (All to Cloud to Local to Excluded) from the pill label. */
     onAlbumFilterSelected: (AlbumDisplayFilter) -> Unit = {},
     /** Opens the Albums-tab view-filter sheet from its filter icon. */
     onOpenAlbumsFilterSheet: () -> Unit = {},

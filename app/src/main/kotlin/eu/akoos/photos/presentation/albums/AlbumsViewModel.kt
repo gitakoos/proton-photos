@@ -110,6 +110,9 @@ data class AlbumsUiState(
      *  flag, for the same reason [folderPrefs] is: the grid shows every album at once and the drawer
      *  asks about whichever card was held. */
     val timelineExcludedAlbumIds: Set<String> = emptySet(),
+    /** The albums and folders taken off the grid, as stored entries. Read through
+     *  [AlbumsGridExclusion], which also decides what each view filter lays out. */
+    val excludedFromGrid: Set<String> = emptySet(),
     val error: String? = null,
     val isCreatingAlbum: Boolean = false,
     val createAlbumError: String? = null,
@@ -128,6 +131,9 @@ data class AlbumsUiState(
     /** The span of dates every album's headers gather, here for the same reason as
      *  [albumPhotoSortMode]. */
     val albumPhotoGrouping: AlbumPhotoGrouping = AlbumPhotoGrouping.Default,
+    /** The order [albums] is sorted by, published with the list it ordered so the grid sees a new
+     *  order and its effect together. Null until the store delivers it. */
+    val albumSortMode: AlbumSortMode? = null,
 ) {
     /** Cloud albums hidden client-side drop off the Albums grid. */
     val visibleCloudAlbums: List<Album> get() = albums.filter { it.linkId !in hiddenAlbumIds }
@@ -201,6 +207,7 @@ class AlbumsViewModel @Inject constructor(
         observeAlbumPhotoGrouping()
         loadAlbums()
         observeDeviceFolders()
+        observeExcludedFromGrid()
         // Re-fetch on share-state changes so the grid badge updates without a manual pull-to-refresh.
         viewModelScope.launch {
             albumListEvents.changes.collect { loadAlbums() }
@@ -238,7 +245,7 @@ class AlbumsViewModel @Inject constructor(
                 .collect { (mode, order) ->
                     sortMode.value = mode
                     customOrder.value = order
-                    _uiState.update { it.copy(albums = applySort(it.albums)) }
+                    _uiState.update { it.copy(albums = applySort(it.albums), albumSortMode = mode) }
                 }
         }
     }
@@ -375,6 +382,41 @@ class AlbumsViewModel @Inject constructor(
                         })
                     }
                 }
+        }
+    }
+
+    /** Track the albums and folders taken off the grid. distinctUntilChanged keeps writes to unrelated
+     *  settings, which the store also emits on, from re-publishing the set. */
+    private fun observeExcludedFromGrid() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { it[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet() }
+                .distinctUntilChanged()
+                .catch { emit(emptySet()) }
+                .collect { excluded -> _uiState.update { it.copy(excludedFromGrid = excluded) } }
+        }
+    }
+
+    /** Take the cloud album [albumLinkId] off the grid, or put it back when [exclude] is false. Grid
+     *  only: the album, its photos and every other list stay exactly as they are. */
+    fun setAlbumExcludedFromGrid(albumLinkId: String, exclude: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] = AlbumsGridExclusion.withAlbum(
+                    prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet(), albumLinkId, exclude,
+                )
+            }
+        }
+    }
+
+    /** [setAlbumExcludedFromGrid] for the device folder [folderName]. No file moves. */
+    fun setFolderExcludedFromGrid(folderName: String, exclude: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] = AlbumsGridExclusion.withFolder(
+                    prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet(), folderName, exclude,
+                )
+            }
         }
     }
 

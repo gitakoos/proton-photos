@@ -30,7 +30,8 @@ import org.junit.Test
 /**
  * Pins the decision every "add to album" surface (the timeline selection controller, location detail,
  * device folders) reads its result wording from, so a full success stays quiet, a partial or full
- * reject is always surfaced, and a thrown error can never read as a silent success.
+ * reject is always surfaced, and a thrown error can never read as a silent success. The message pick
+ * keeps a photo that is only queued to upload from ever reading as added.
  *
  * No Android, no Context, no Robolectric: plain JVM assertions over the counts.
  */
@@ -65,5 +66,25 @@ class AddToAlbumOutcomeTest {
         assertEquals(0, outcome.added)
         assertEquals(7, outcome.failed)
         assertTrue(outcome.isPartialOrFullFailure)
+    }
+
+    @Test
+    fun `photos that all joined now read as added`() {
+        assertEquals(AddToAlbumMessage.Added, addToAlbumMessage(joined = 4, queued = 0))
+    }
+
+    @Test
+    fun `a mix of joined and queued photos names the ones still uploading`() {
+        assertEquals(AddToAlbumMessage.AddedAndUploading(uploading = 3), addToAlbumMessage(joined = 2, queued = 3))
+    }
+
+    @Test
+    fun `photos that were only queued never read as added`() {
+        assertEquals(AddToAlbumMessage.Uploading(uploading = 5), addToAlbumMessage(joined = 0, queued = 5))
+    }
+
+    @Test
+    fun `nothing joined and nothing queued reads as nothing added`() {
+        assertEquals(AddToAlbumMessage.NothingAdded, addToAlbumMessage(joined = 0, queued = 0))
     }
 }

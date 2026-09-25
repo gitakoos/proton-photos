@@ -23,12 +23,14 @@
 package eu.akoos.photos.presentation.gallery
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
  * Pins the filter the Albums tab shows on arrival, the rule [nextAlbumsEntryFilterState] answers for
  * the gallery's page effect: resolve once the stored settings are in, keep a settled filter, and
- * resolve again only after the page was left.
+ * resolve again only after the page was left. Beside it, [afterAlbumsDefaultChange]: a default picked
+ * on the Albums settings page shows on the tab at once.
  *
  * Each step is one run of that effect, fed the page the pager is on and the settings snapshot (null
  * until the store delivers). Plain JVM assertions, no Compose and no Android.
@@ -71,6 +73,29 @@ class AlbumsEntryFilterTest {
             all,
             resolveAlbumsEntryFilter(AlbumsFilterPrefs(defaultOrdinal = 2, rememberLast = true, lastOrdinal = -3)),
         )
+    }
+
+    @Test
+    fun `no stored value opens the tab on the Excluded view`() {
+        // The Excluded view is picked by hand only, so neither the default nor the last pick can
+        // resolve to it, whatever the store holds.
+        for (ordinal in -2..AlbumDisplayFilter.entries.size + 2) {
+            assertNotEquals("ordinal $ordinal", AlbumDisplayFilter.Excluded, albumDisplayFilterAt(ordinal))
+            for (rememberLast in listOf(true, false)) {
+                assertNotEquals(
+                    "ordinal $ordinal rememberLast $rememberLast",
+                    AlbumDisplayFilter.Excluded,
+                    resolveAlbumsEntryFilter(AlbumsFilterPrefs(ordinal, rememberLast, ordinal)),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `the Excluded view stays up when a pushed screen pops`() {
+        // An excluded album opened from that view comes back to it, like any other pick.
+        val picked = AlbumsEntryFilterState(AlbumDisplayFilter.Excluded, settled = true)
+        assertEquals(picked, picked.step(onAlbumsPage = true, prefs = prefs(default = cloud)))
     }
 
     @Test
@@ -137,5 +162,54 @@ class AlbumsEntryFilterTest {
         // With remember-last off the settings resolve to the default, which must not replace the pick.
         assertEquals(picked, picked.step(onAlbumsPage = true, prefs = prefs(default = all, last = cloud)))
         assertEquals(picked, picked.step(onAlbumsPage = true, prefs = prefs(default = local)))
+    }
+
+    @Test
+    fun `a default picked on the settings page shows on return`() {
+        // The gallery comes back from the page on the filter it showed, settled, and sees a new default.
+        val restored = AlbumsEntryFilterState(all, settled = true)
+        assertEquals(
+            AlbumsEntryFilterState(local, settled = true),
+            afterAlbumsDefaultChange(restored, seenDefault = all, prefs = prefs(default = local)),
+        )
+        // Unsettled too: the default shows now rather than on the next arrival.
+        assertEquals(
+            AlbumsEntryFilterState(cloud, settled = true),
+            afterAlbumsDefaultChange(restored.copy(settled = false), seenDefault = all, prefs = prefs(default = cloud)),
+        )
+    }
+
+    @Test
+    fun `the first delivery of the settings is no change of default`() {
+        // Nothing seen yet: the entry rule decides, the default does not barge in over a pick.
+        val picked = AlbumsEntryFilterState(cloud, settled = true)
+        assertEquals(picked, afterAlbumsDefaultChange(picked, seenDefault = null, prefs = prefs(default = local)))
+        val fresh = AlbumsEntryFilterState(all, settled = false)
+        assertEquals(fresh, afterAlbumsDefaultChange(fresh, seenDefault = null, prefs = prefs(default = local)))
+    }
+
+    @Test
+    fun `an unchanged default leaves a pick alone`() {
+        // The store also emits when the last pick is stored, which must not reset the pick to the default.
+        val picked = AlbumsEntryFilterState(cloud, settled = true)
+        assertEquals(picked, afterAlbumsDefaultChange(picked, seenDefault = all, prefs = prefs(default = all, last = cloud)))
+        // A stray stored ordinal that clamps to the default already seen is no change either.
+        assertEquals(
+            picked,
+            afterAlbumsDefaultChange(
+                picked,
+                seenDefault = local,
+                prefs = AlbumsFilterPrefs(defaultOrdinal = 9, rememberLast = false, lastOrdinal = 0),
+            ),
+        )
+    }
+
+    @Test
+    fun `with remember-last on a new default has nothing to show`() {
+        val onScreen = AlbumsEntryFilterState(cloud, settled = true)
+        assertEquals(
+            onScreen,
+            afterAlbumsDefaultChange(onScreen, seenDefault = all, prefs = prefs(default = local, rememberLast = true, last = cloud)),
+        )
     }
 }

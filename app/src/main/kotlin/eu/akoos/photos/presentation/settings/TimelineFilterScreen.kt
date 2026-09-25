@@ -371,9 +371,10 @@ fun TimelineDeviceFoldersScreen(
     }
 }
 
-/** Selectable pill used by the default-columns row, matching the Appearance theme pills. */
+/** Selectable pill used by the default-columns row, matching the Appearance theme pills. The Albums
+ *  settings page lays its pick-one rows out with it too. */
 @Composable
-private fun TimelinePill(
+internal fun TimelinePill(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,

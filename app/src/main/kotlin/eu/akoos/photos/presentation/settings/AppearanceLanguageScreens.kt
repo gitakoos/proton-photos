@@ -65,8 +65,8 @@ import eu.akoos.photos.presentation.theme.paletteAccent
 
 /**
  * Appearance hub — menu rows to the theme/palette and language sub-pages, plus the photo
- * timeline page. Kept thin so each concern lives on its own focused page instead of one
- * long mixed scroll.
+ * timeline page and the Albums tab's page. Kept thin so each concern lives on its own focused
+ * page instead of one long mixed scroll.
  */
 @Composable
 fun AppearanceSettingsScreen(
@@ -74,6 +74,7 @@ fun AppearanceSettingsScreen(
     onThemeClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
+    onAlbumsSettingsClick: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
         SettingsCard {
@@ -92,6 +93,13 @@ fun AppearanceSettingsScreen(
             NavRow(
                 label = stringResource(R.string.settings_timeline),
                 onClick = onTimelineFilterClick,
+            )
+            RowDivider()
+            // The Albums tab's page: cover size, the filter it opens on and the Collection card, the
+            // same page the tab's filter sheet opens.
+            NavRow(
+                label = stringResource(R.string.gallery_tab_albums),
+                onClick = onAlbumsSettingsClick,
             )
         }
     }

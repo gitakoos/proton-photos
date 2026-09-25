@@ -27,13 +27,15 @@ import org.junit.Assert.assertSame
 import org.junit.Test
 
 /**
- * Coverage for [moveInArrangement], the one rule behind dragging a card around the Albums grid.
+ * Coverage for [moveInArrangement], the one rule behind dragging a card around the Albums grid, and
+ * for [mergeArrangement], which stores what the drag produced.
  *
  * Two things are worth pinning down. The album has to land on the index the drag asked for in both
  * directions, because the finger picks the target cell and anything else puts the card somewhere it
  * was not dropped. And a drag that ends nowhere useful — over the Memories cell, a device folder, or
  * the gap between two cards — has to leave the arrangement exactly as it was, since the result of
- * this call is what gets persisted as the user's order.
+ * this call is what gets persisted as the user's order. The save then has to keep every album the
+ * grid was not showing, hidden or taken off the grid, in the slot it held.
  *
  * No Android, no Compose: plain JVM assertions on values.
  */
@@ -117,5 +119,74 @@ class AlbumArrangementTest {
         val source = order.toMutableList()
         moveInArrangement(source, 0, 3)
         assertEquals(listOf("a", "b", "c", "d"), source)
+    }
+
+    // ── storing an arrangement ───────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `an album off the grid keeps its slot while the rest are rearranged`() {
+        // x is excluded, so the grid shows a, b, c and the user drags c to the front.
+        val full = listOf("a", "x", "b", "c")
+        val arranged = moveInArrangement(listOf("a", "b", "c"), 2, 0)
+        assertEquals(listOf("c", "x", "a", "b"), mergeArrangement(full, arranged))
+    }
+
+    @Test
+    fun `albums off the grid at either end stay there`() {
+        val full = listOf("x", "a", "b", "y")
+        assertEquals(listOf("x", "b", "a", "y"), mergeArrangement(full, listOf("b", "a")))
+    }
+
+    @Test
+    fun `with every album on the grid the arrangement is stored as it is`() {
+        assertEquals(listOf("d", "c", "b", "a"), mergeArrangement(order, order.reversed()))
+    }
+
+    @Test
+    fun `saving again keeps the album off the grid where the first save left it`() {
+        val full = listOf("a", "x", "b", "c")
+        val first = mergeArrangement(full, listOf("b", "a", "c"))
+        assertEquals(listOf("b", "x", "a", "c"), first)
+        // The next save starts from the order the first one stored.
+        assertEquals(listOf("c", "x", "b", "a"), mergeArrangement(first, listOf("c", "b", "a")))
+    }
+
+    @Test
+    fun `no save drops or duplicates an album`() {
+        val full = listOf("a", "x", "b", "y", "c")
+        val shown = listOf("a", "b", "c")
+        for (from in shown.indices) {
+            for (to in shown.indices) {
+                val stored = mergeArrangement(full, moveInArrangement(shown, from, to))
+                assertEquals("$from to $to must be a permutation", full.sorted(), stored.sorted())
+                assertEquals("$from to $to must leave x where it was", 1, stored.indexOf("x"))
+                assertEquals("$from to $to must leave y where it was", 3, stored.indexOf("y"))
+            }
+        }
+    }
+
+    @Test
+    fun `an arranged album the order does not know yet trails at the end`() {
+        assertEquals(listOf("b", "x", "a", "new"), mergeArrangement(listOf("a", "x", "b"), listOf("b", "new", "a")))
+    }
+
+    @Test
+    fun `an album the arrangement does not hold keeps its slot`() {
+        // An album that arrived mid-arrangement is unknown to it and stays where the order has it.
+        assertEquals(listOf("b", "a", "late"), mergeArrangement(listOf("a", "b", "late"), listOf("b", "a")))
+    }
+
+    @Test
+    fun `repeated ids are stored once`() {
+        assertEquals(listOf("b", "x", "a"), mergeArrangement(listOf("a", "x", "a", "b"), listOf("b", "a", "b")))
+    }
+
+    @Test
+    fun `the lists handed to a save are never modified`() {
+        val full = mutableListOf("a", "x", "b")
+        val arranged = mutableListOf("b", "a")
+        mergeArrangement(full, arranged)
+        assertEquals(listOf("a", "x", "b"), full)
+        assertEquals(listOf("b", "a"), arranged)
     }
 }

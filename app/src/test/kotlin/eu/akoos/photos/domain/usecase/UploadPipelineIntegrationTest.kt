@@ -31,6 +31,7 @@ import androidx.work.Configuration
 import androidx.work.WorkManager
 import io.mockk.coEvery
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancel
@@ -72,6 +73,7 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DeviceMediaScan
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.util.AlbumListEventBus
 import eu.akoos.photos.util.NetworkObserver
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -107,6 +109,7 @@ class UploadPipelineIntegrationTest {
     private lateinit var cloud: FakeDrivePhotoRepository
     private lateinit var local: FakeLocalMediaRepository
     private lateinit var networkObserver: NetworkObserver
+    private lateinit var albumEvents: AlbumListEventBus
     private lateinit var context: Context
 
     private lateinit var uploadUseCase: UploadPendingUseCase
@@ -157,6 +160,8 @@ class UploadPipelineIntegrationTest {
 
         networkObserver = mockk(relaxed = true)
         coEvery { networkObserver.currentlyOnWifi() } returns true
+        // Relaxed so the album-changed signal a join sends can be counted with verify.
+        albumEvents = mockk(relaxed = true)
 
         uploadUseCase = UploadPendingUseCase(
             syncStateRepo = syncRepo,
@@ -171,6 +176,7 @@ class UploadPipelineIntegrationTest {
             structuralStripper = UploadStructuralStripper(context),
             context = context,
             appScope = appScope,
+            albumListEvents = albumEvents,
         )
         reconcileUseCase = ReconcileSyncStateUseCase(local, cloud, syncRepo, fakeCloudListing(), context, appScope)
         forceUploadUseCase = ForceUploadLocalUrisUseCase(context, syncRepo, cloud, targetDao)
@@ -377,6 +383,8 @@ class UploadPipelineIntegrationTest {
         assertEquals(SyncStatus.SYNCED, row(uri)!!.status)
         // The target row is removed once the add succeeds.
         assertTrue("target must be cleared after a successful add", targetDao.getTargetsFor(uri).isEmpty())
+        // The join tells an open album and the album grid to reload.
+        verify(exactly = 1) { albumEvents.notifyChanged() }
     }
 
     // ── Scenario 5: album-add, add fails then retries ───────────────────────────────
@@ -407,6 +415,60 @@ class UploadPipelineIntegrationTest {
         val cloudId = cloud.photos.value.single().linkId
         assertEquals(listOf(cloudId), cloud.albumMembers(albumLinkId))
         assertTrue("target must be cleared after the retry lands", targetDao.getTargetsFor(uri).isEmpty())
+    }
+
+    // ── Scenario 5b: album-add, the add returns without the photo ──────────────────
+
+    @Test
+    fun `an album-add that comes back without the photo keeps the target row and lands on the next pass`() = runTest {
+        val uri = "content://media/a3"
+        val albumLinkId = "album-refused"
+        local.add(localItem(uri))
+
+        // The add returns instead of throwing but lists the photo as failed, which is how a request
+        // that never reached the server comes back. That is not a join.
+        cloud.rejectAddPhotosOnce = true
+        forceUploadUseCase.queueForAlbum(userId, albumLinkId, listOf(uri))
+        uploadUseCase(userId)
+
+        assertEquals(SyncStatus.SYNCED, row(uri)!!.status)
+        assertTrue("a refused add must not read as joined", cloud.albumMembers(albumLinkId).isEmpty())
+        assertEquals(
+            "a refused add must leave the target queued for the next drain",
+            listOf(albumLinkId),
+            targetDao.getTargetsFor(uri),
+        )
+        verify(exactly = 0) { albumEvents.notifyChanged() }
+
+        // The next pass's drain joins the album, drops the pair and signals the album screens.
+        uploadUseCase(userId)
+        val cloudId = cloud.photos.value.single().linkId
+        assertEquals(listOf(cloudId), cloud.albumMembers(albumLinkId))
+        assertTrue("target must be cleared once the photo joins", targetDao.getTargetsFor(uri).isEmpty())
+        verify(exactly = 1) { albumEvents.notifyChanged() }
+    }
+
+    // ── Scenario 5c: album-add that landed but lost its reply ──────────────────────
+
+    @Test
+    fun `an album-add that landed without its reply is found in the album and not sent again`() = runTest {
+        val uri = "content://media/a4"
+        val albumLinkId = "album-lost-reply"
+        local.add(localItem(uri))
+
+        // The server took the add but the reply reports the photo as failed.
+        cloud.loseAddReplyOnce = true
+        forceUploadUseCase.queueForAlbum(userId, albumLinkId, listOf(uri))
+        uploadUseCase(userId)
+
+        val cloudId = cloud.photos.value.single().linkId
+        assertEquals(listOf(cloudId), cloud.albumMembers(albumLinkId))
+        assertTrue("an add the album already holds must clear its target", targetDao.getTargetsFor(uri).isEmpty())
+        verify(exactly = 1) { albumEvents.notifyChanged() }
+
+        // Nothing is left to drain, so a later pass never sends the add again.
+        uploadUseCase(userId)
+        assertEquals(1, cloud.callLog.count { it == "ADD:$albumLinkId" })
     }
 
     // ── Scenario 6: out-of-scope de-queue vs explicit ───────────────────────────────

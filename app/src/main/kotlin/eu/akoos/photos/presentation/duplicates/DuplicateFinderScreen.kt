@@ -34,6 +34,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -66,6 +67,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -204,16 +206,28 @@ fun DuplicateFinderScreen(
             state.similarDeviceGroups.isNotEmpty() || state.similarCloudGroups.isNotEmpty() ||
             state.scanningSimilar
 
+        // The groups the list shows under BOTH filters (sync status and match type). Select all but the
+        // first and the shared delete bar act on exactly these, so neither reaches a hidden group.
+        val listedGroups = (if (showExact) deviceGroups + cloudGroups else emptyList()) +
+            (if (showSim) similarDeviceGroups + similarCloudGroups else emptyList())
+
         // Every VISIBLE group the user has ticked copies in, as (group, removeIds). Aggregating from the
         // visible lists (not by iterating groupSelections, which keeps stale entries for groups the
         // current filter hides) is what stops the shared delete bar from touching a hidden group.
-        val batchSelections = (deviceGroups + cloudGroups + similarDeviceGroups + similarCloudGroups)
+        val batchSelections = listedGroups
             .mapNotNull { g ->
                 val remove = groupSelections[duplicateGroupKey(g)].orEmpty()
                 if (remove.isEmpty()) null else g to remove
             }
         // The ticked copies across every visible group, flattened for the shared selection drawer.
         val selectedItems = batchSelections.flatMap { (g, remove) -> g.items.filter { it.stableId in remove } }
+        // Ticks every copy but the first of each listed group, identical and similar alike. It REPLACES
+        // those groups' selections instead of adding to them: a first copy ticked by hand plus the rest
+        // would be the whole group.
+        val selectAllButFirstListed: () -> Unit = { groupSelections.putAll(selectAllButFirst(listedGroups)) }
+        // The most the rule can tick; once the selection holds that many, every group is down to one
+        // unticked copy and the drawer's Select all has nothing left to add.
+        val maxRemovable = listedGroups.sumOf { it.items.size - 1 }
         var showBatchConfirm by remember { mutableStateOf(false) }
         // A selection lives only on this screen, so leaving the overview would silently drop the ticked
         // copies. Guard both exits (system back and the header arrow) whenever anything is ticked. The
@@ -362,20 +376,44 @@ fun DuplicateFinderScreen(
         )
 
         // Floating pill header (matches Search / Map). The trailing filter bubble opens the sync-status
-        // and match-type sheet; it carries the accent outline when a non-default filter is active.
+        // and match-type sheet; it carries the accent outline when a non-default filter is active. While
+        // any group is listed, the bubble before it ticks every copy but the first of each group.
         val filtersActive = scope != DupScope.ALL || filter != DupFilter.ALL
+        val showSelectAllButFirst = listedGroups.isNotEmpty()
         FloatingHeader(
             title = stringResource(R.string.duplicates_title),
             onBack = confirmedOnBack,
             trailing = {
-                IconBubble(
-                    icon = Icons.Default.FilterList,
-                    contentDescription = stringResource(R.string.filter_title),
-                    onClick = { showFilterSheet = true },
-                    background = if (filtersActive) Accent.copy(alpha = 0.15f) else PillBg,
-                    borderColor = if (filtersActive) Accent else PillBorder,
-                    tint = if (filtersActive) Accent else FgPrimary,
-                )
+                // The title is measured first, so a long one on a narrow phone can leave less than two
+                // full bubbles of room. Both then shrink evenly and stay round, rather than the last
+                // one being squashed.
+                BoxWithConstraints(modifier = Modifier.height(40.dp), contentAlignment = Alignment.Center) {
+                    val bubbleGap = 8.dp
+                    val bubbles = if (showSelectAllButFirst) 2 else 1
+                    val diameter = ((maxWidth - bubbleGap * (bubbles - 1)) / bubbles).coerceIn(0.dp, 40.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(bubbleGap),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (showSelectAllButFirst) {
+                            IconBubble(
+                                icon = Icons.Default.SelectAll,
+                                contentDescription = stringResource(R.string.duplicates_select_all_but_first),
+                                onClick = selectAllButFirstListed,
+                                diameter = diameter,
+                            )
+                        }
+                        IconBubble(
+                            icon = Icons.Default.FilterList,
+                            contentDescription = stringResource(R.string.filter_title),
+                            onClick = { showFilterSheet = true },
+                            diameter = diameter,
+                            background = if (filtersActive) Accent.copy(alpha = 0.15f) else PillBg,
+                            borderColor = if (filtersActive) Accent else PillBorder,
+                            tint = if (filtersActive) Accent else FgPrimary,
+                        )
+                    }
+                }
             },
         )
 
@@ -395,6 +433,9 @@ fun DuplicateFinderScreen(
             ),
             onDismiss = { groupSelections.clear() },
             modifier = Modifier.align(Alignment.BottomCenter),
+            // Select all runs the header button's rule. No count is handed in, so it selects at once
+            // exactly as that button does; the delete below keeps its own confirmation.
+            onSelectAll = if (selectedItems.size < maxRemovable) selectAllButFirstListed else null,
         )
         if (showBatchConfirm) {
             // A backed-up (Synced) copy carries its device file with it, so the message says so, exactly
@@ -497,15 +538,17 @@ private enum class DupScope { ALL, DEVICE, CLOUD }
 
 /**
  * Tick or untick [id] for removal. Unticking always succeeds; ticking is refused when it would cover
- * every copy in [allIds], so the returned set is always a STRICT subset of the group. That single
- * guard is what keeps [keepIdsForRemoval] non-empty, and with it a group can never be wiped out.
+ * every copy in [allIds], so the returned set is always a STRICT subset of the group. This guard, with
+ * [selectAllButFirst] never ticking a group's first copy, is what keeps [keepIdsForRemoval] non-empty,
+ * and with it a group can never be wiped out.
  */
 internal fun toggleDuplicateRemoval(current: Set<String>, id: String, allIds: Set<String>): Set<String> =
     if (id in current) current - id
     else (current + id).takeIf { it.size < allIds.size } ?: current
 
 /** The copies to KEEP, i.e. the ones left unticked. This complement is what the view model's delete
- *  contract takes; it refuses an empty keep set, which [toggleDuplicateRemoval] can never produce. */
+ *  contract takes; it refuses an empty keep set, which neither [toggleDuplicateRemoval] nor
+ *  [selectAllButFirst] can produce. */
 internal fun keepIdsForRemoval(allIds: Set<String>, removeIds: Set<String>): Set<String> = allIds - removeIds
 
 /** Stable key for a group's hoisted removal selection: its member ids joined in order. Membership
@@ -513,6 +556,18 @@ internal fun keepIdsForRemoval(allIds: Set<String>, removeIds: Set<String>): Set
  *  empty rather than carrying a stale tick for a copy it no longer holds. */
 internal fun duplicateGroupKey(group: DuplicateGroup): String =
     group.items.joinToString("|") { it.stableId }
+
+/**
+ * The removal selection that ticks every copy of each of [groups] except its first, the copy its card
+ * shows first, keyed by [duplicateGroupKey] like the hoisted selections. Nothing ranks the copies: the
+ * first one is the keeper and is never ticked, so no group is ever fully selected and a group of one
+ * ticks nothing.
+ */
+internal fun selectAllButFirst(groups: List<DuplicateGroup>): Map<String, Set<String>> =
+    groups.associate { group ->
+        val ids = group.items.map { it.stableId }
+        duplicateGroupKey(group) to (ids.toSet() - ids.take(1).toSet())
+    }
 
 /** Device bytes reclaimed by deleting [items], matching the regular delete confirmation: a device or
  *  synced copy frees its device file, and a cloud-only copy counts as zero, since deleting it moves the
@@ -604,10 +659,11 @@ private fun ScanningRow() {
  * One duplicate group. The multi-copy "remove" selection is hoisted to the screen and handed in as
  * [selected] / [onSelectionChange], so the full-screen review overlay edits the very same set. It
  * starts EMPTY: a copy is only ever queued for deletion because it was picked by hand, here or in the
- * review. The action below can then only ever delete a STRICT subset of the group, never all of it,
- * because it sends the view model the complement (the keepers) and stays disabled while nothing is
- * ticked. The selection's key follows the group's membership, so pruning a deleted copy re-seeds it and
- * the removal set can never name a copy the group no longer holds.
+ * review, or by the header's select all but the first, which leaves the first copy unticked. The
+ * action below can then only ever delete a STRICT subset of the group, never all of it, because it
+ * sends the view model the complement (the keepers) and stays disabled while nothing is ticked. The
+ * selection's key follows the group's membership, so pruning a deleted copy re-seeds it and the
+ * removal set can never name a copy the group no longer holds.
  */
 @Composable
 private fun DuplicateGroupCard(

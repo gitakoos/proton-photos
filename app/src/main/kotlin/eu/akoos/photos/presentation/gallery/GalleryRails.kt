@@ -305,9 +305,7 @@ private fun AlbumsRailPills(
     val defaultFilterOrdinal by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0 }
     }.collectAsState(initial = 0)
-    val defaultFilter = AlbumDisplayFilter.entries[
-        defaultFilterOrdinal.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)
-    ]
+    val defaultFilter = albumDisplayFilterAt(defaultFilterOrdinal)
     val hiddenLabel = stringResource(R.string.gallery_filter_hidden)
     val newAlbumLabel = stringResource(R.string.albums_new_album)
     val newFolderLabel = stringResource(R.string.new_folder)
@@ -317,15 +315,17 @@ private fun AlbumsRailPills(
         // Room at the end so a pill never slides under the collapsed search icon.
         contentPadding = PaddingValues(end = 46.dp),
     ) {
-        // All / Cloud / Local view filter. Tapping the label cycles All to Cloud to Local; the
-        // filter icon after the separator opens the sheet (default + remember-last). Highlighted
-        // when off the configured default, so a filter sitting at its default reads as unfiltered.
+        // All / Cloud / Local / Excluded view filter. Tapping the label cycles through them in that
+        // order; the filter icon after the separator opens the sheet (view, sort, more settings).
+        // Highlighted when off the configured default, so a filter sitting at its default reads as
+        // unfiltered.
         item(key = "album_filter") {
             val active = selectedFilter != defaultFilter
             val label = when (selectedFilter) {
                 AlbumDisplayFilter.All -> stringResource(R.string.albums_filter_all)
                 AlbumDisplayFilter.Cloud -> stringResource(R.string.albums_filter_cloud)
                 AlbumDisplayFilter.Local -> stringResource(R.string.albums_filter_local)
+                AlbumDisplayFilter.Excluded -> stringResource(R.string.albums_filter_excluded)
             }
             Row(
                 modifier = Modifier
@@ -352,7 +352,7 @@ private fun AlbumsRailPills(
                     Text(label, color = if (active) FgPrimary else FgDim, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
                 // Hairline separator + filter button, mirroring the timeline All pill. Opens the
-                // sheet where the default filter and the remember-last toggle are set.
+                // sheet for the view and the sort, and from it the Albums settings page.
                 Box(
                     modifier = Modifier
                         .height(18.dp)
@@ -1382,8 +1382,10 @@ private fun DockTab(
 enum class SharedFilter { SharedWithMe, SharedByMe }
 
 /** Albums-tab view filter. All shows cloud albums + device folders in one common stream; Cloud
- *  and Local narrow to one kind. Picked from the filter sheet opened by [AlbumsFilterRail]. */
-enum class AlbumDisplayFilter { All, Cloud, Local }
+ *  and Local narrow to one kind. Excluded shows only the albums and folders taken off the grid, each
+ *  with a way back, so it is never a default or a remembered pick. Cycled from the pill on
+ *  [AlbumsFilterRail]. Stored as an ordinal, so the values keep their positions. */
+enum class AlbumDisplayFilter { All, Cloud, Local, Excluded }
 
 @Composable
 internal fun SharedFilterRail(

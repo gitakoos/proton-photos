@@ -31,16 +31,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ViewList
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
@@ -49,33 +53,36 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.usecase.AlbumSortMode
-import eu.akoos.photos.presentation.settings.components.ToggleRow
-import eu.akoos.photos.presentation.theme.Bg2
-import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 
-/** Bottom sheet for the Albums-tab view filter and grid order. Sets an optional default applied on
- *  open plus a remember-last toggle; the active All/Cloud/Local narrowing is cycled from the rail
- *  pill. While remember-last is on the default row is greyed and inert, since the last-used value
- *  takes over. A switch under the remember-last toggle takes the pinned Collection card off the grid;
- *  the people, places and On this day behind that card stay in Search. A sort pick lands on the grid
- *  behind the sheet, which observes the stored order. */
+/** One row of the Albums filter sheet. */
+internal enum class AlbumsSheetRow { View, Sort, MoreSettings }
+
+/**
+ * The rows the Albums filter sheet lays out, top to bottom, the same in either layout: the view and
+ * the sort, since both reshape the tab behind the sheet at once, then the More settings row into the
+ * Albums settings page, which holds the rest
+ * ([eu.akoos.photos.presentation.settings.albumsSettingsRows]).
+ */
+internal fun albumsSheetRows(): List<AlbumsSheetRow> =
+    listOf(AlbumsSheetRow.View, AlbumsSheetRow.Sort, AlbumsSheetRow.MoreSettings)
+
+/** Bottom sheet for the Albums tab's layout and order, in the order [albumsSheetRows] gives: the
+ *  grid-or-list choice and the sort, then a More settings row that closes the sheet and opens the
+ *  Albums settings page through [onOpenMoreSettings], the way the timeline drawer opens its own page.
+ *  The active All/Cloud/Local/Excluded narrowing is cycled from the rail pill. Each pick lands on the
+ *  tab behind the sheet, which observes the stored values. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsFilterSheet(
     sheetState: SheetState,
-    default: AlbumDisplayFilter,
-    rememberLast: Boolean,
-    showCollection: Boolean,
+    viewMode: AlbumsViewMode,
     sortMode: AlbumSortMode,
-    columns: Int,
-    onDefaultChange: (AlbumDisplayFilter) -> Unit,
-    onRememberLastChange: (Boolean) -> Unit,
-    onShowCollectionChange: (Boolean) -> Unit,
+    onViewModeChange: (AlbumsViewMode) -> Unit,
     onSortModeChange: (AlbumSortMode) -> Unit,
-    onColumnsChange: (Int) -> Unit,
+    onOpenMoreSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
@@ -103,111 +110,73 @@ fun AlbumsFilterSheet(
                 fontWeight = FontWeight.SemiBold,
             )
 
-            // Cover size first: it is the most visible thing this sheet controls.
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    text = stringResource(R.string.albums_cover_size_heading),
-                    color = FgMute,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.6.sp,
-                )
-                AlbumColumnsChipRow(selected = columns, onSelected = onColumnsChange)
-            }
+            albumsSheetRows().forEach { row ->
+                key(row) {
+                    when (row) {
+                        AlbumsSheetRow.View ->
+                            AlbumsSheetSection(stringResource(R.string.albums_view_heading)) {
+                                AlbumViewChipRow(selected = viewMode, onSelected = onViewModeChange)
+                            }
 
-            HorizontalDivider(color = Line2)
+                        AlbumsSheetRow.Sort ->
+                            AlbumsSheetSection(stringResource(R.string.albums_sort_heading)) {
+                                AlbumSortChipRow(selected = sortMode, onSelected = onSortModeChange)
+                            }
 
-            // Default section: greyed and non-interactive while remember-last owns the value.
-            val defaultAlpha = if (rememberLast) 0.38f else 1f
-            Column(
-                modifier = Modifier.alpha(defaultAlpha),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.albums_filter_default_heading),
-                    color = FgMute,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.6.sp,
-                )
-                AlbumFilterChipRow(
-                    selected = default,
-                    onSelected = onDefaultChange,
-                    enabled = !rememberLast,
-                )
-            }
-
-            ToggleRow(
-                label = stringResource(R.string.albums_filter_remember_last),
-                description = stringResource(R.string.albums_filter_remember_last_summary),
-                checked = rememberLast,
-                onCheckedChange = onRememberLastChange,
-            )
-
-            ToggleRow(
-                label = stringResource(R.string.albums_show_collection),
-                description = stringResource(R.string.albums_show_collection_summary),
-                checked = showCollection,
-                onCheckedChange = onShowCollectionChange,
-            )
-
-            HorizontalDivider(color = Line2)
-
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    text = stringResource(R.string.albums_sort_heading),
-                    color = FgMute,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.6.sp,
-                )
-                AlbumSortChipRow(selected = sortMode, onSelected = onSortModeChange)
+                        AlbumsSheetRow.MoreSettings ->
+                            SheetSettingsPageRow(
+                                label = stringResource(R.string.albums_more_settings),
+                                onClick = {
+                                    onDismiss()
+                                    onOpenMoreSettings()
+                                },
+                            )
+                    }
+                }
             }
         }
     }
 }
 
-/** Chips for how many album covers sit per row: more columns = smaller covers. The labels are the
- *  counts themselves, so nothing here needs translating. */
+/** A small muted heading over the control it names. */
 @Composable
-private fun AlbumColumnsChipRow(
-    selected: Int,
-    onSelected: (Int) -> Unit,
+private fun AlbumsSheetSection(
+    heading: String,
+    content: @Composable () -> Unit,
 ) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text(
+            text = heading,
+            color = FgMute,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 0.6.sp,
+        )
+        content()
+    }
+}
+
+/** Grid and List chips for the [AlbumsViewMode], sharing the sheet's width between them. */
+@Composable
+private fun AlbumViewChipRow(
+    selected: AlbumsViewMode,
+    onSelected: (AlbumsViewMode) -> Unit,
+) {
+    val options = listOf(
+        Triple(AlbumsViewMode.Grid, stringResource(R.string.albums_view_grid), Icons.Default.GridView),
+        Triple(AlbumsViewMode.List, stringResource(R.string.albums_view_list), Icons.AutoMirrored.Filled.ViewList),
+    )
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        listOf(2, 3, 4).forEach { cols ->
-            FilterChip(
-                label = cols.toString(),
-                selected = selected == cols,
-                onClick = { onSelected(cols) },
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
-
-/** Row of three selectable chips mapping the [AlbumDisplayFilter] values to their labels. When
- *  [enabled] is false the chips still render for context but ignore taps. */
-@Composable
-private fun AlbumFilterChipRow(
-    selected: AlbumDisplayFilter,
-    onSelected: (AlbumDisplayFilter) -> Unit,
-    enabled: Boolean = true,
-) {
-    val options = listOf(
-        AlbumDisplayFilter.All to stringResource(R.string.albums_filter_all),
-        AlbumDisplayFilter.Cloud to stringResource(R.string.albums_filter_cloud),
-        AlbumDisplayFilter.Local to stringResource(R.string.albums_filter_local),
-    )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEach { (filter, label) ->
+        options.forEach { (mode, label, icon) ->
             FilterChip(
                 label = label,
-                selected = selected == filter,
-                onClick = { if (enabled) onSelected(filter) },
+                selected = selected == mode,
+                onClick = { onSelected(mode) },
+                leadingIcon = { tint -> Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp)) },
+                modifier = Modifier.weight(1f),
             )
         }
     }

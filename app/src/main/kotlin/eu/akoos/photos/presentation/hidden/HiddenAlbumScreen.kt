@@ -81,6 +81,8 @@ import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.selectPressScale
+import eu.akoos.photos.presentation.common.selectionDrawerRestingHeight
+import eu.akoos.photos.presentation.gallery.gridBottomPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -290,6 +292,12 @@ fun HiddenAlbumScreen(
             // clears the header.
             val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             val contentTopPad = floatingHeaderContentTopPadding()
+            // The vault's drawer slots no action, so it rests without the button row.
+            val gridBottomPad = gridBottomPadding(
+                base = 100.dp + navBottom,
+                selecting = state.isSelectionMode,
+                drawerHeight = selectionDrawerRestingHeight(withPrimaryRow = false),
+            )
             val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
             val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
             // Held above the branch so the selection drawer can watch the same scroll the photo
@@ -304,7 +312,7 @@ fun HiddenAlbumScreen(
                         start = if (seamless) 0.dp else 8.dp,
                         top = contentTopPad,
                         end = if (seamless) 0.dp else 8.dp,
-                        bottom = 100.dp + navBottom,
+                        bottom = gridBottomPad,
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
@@ -411,7 +419,7 @@ fun HiddenAlbumScreen(
                             start = if (seamless) 0.dp else 8.dp,
                             top = contentTopPad,
                             end = if (seamless) 0.dp else 8.dp,
-                            bottom = 100.dp + navBottom,
+                            bottom = gridBottomPad,
                         ),
                         horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                         verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),

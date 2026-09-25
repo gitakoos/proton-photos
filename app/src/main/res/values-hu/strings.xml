@@ -583,6 +583,10 @@
     <string name="albums_create_album">Album létrehozása</string>
     <string name="albums_create_album_hint">Album neve</string>
     <string name="albums_no_photos">Nincs fotó ebben az albumban</string>
+    <plurals name="albums_photos_uploading">
+        <item quantity="one">%1$d fotó feltöltődik</item>
+        <item quantity="other">%1$d fotó feltöltődik</item>
+    </plurals>
     <string name="albums_download_all">Összes letöltése</string>
     <string name="album_download_channel_name">Album letöltések</string>
     <string name="album_download_channel_desc">A háttérben futó albumletöltés állapotát mutatja.</string>
@@ -1062,6 +1066,15 @@
     <string name="device_folder_hide_card">Mappa elrejtése</string>
     <string name="device_folder_hide_card_sub">Kiveszi a mappát az Albumok közül, a fotóit pedig átteszi a Rejtett fotók közé, ki az eszköz galériájából, így más alkalmazások többé nem mutatják őket. A Proton Drive-on lévő másolatok pontosan úgy maradnak, ahogy vannak.</string>
     <string name="device_folder_unhide">Mappa felfedése</string>
+    <string name="device_folder_delete">Mappa törlése</string>
+    <string name="device_folder_delete_confirm_title">Törlöd ezt a mappát?</string>
+    <plurals name="device_folder_delete_confirm_body">
+        <item quantity="one">A mappa (\"%2$s\") %1$d fotója vagy videója törlődik erről az eszközről.</item>
+        <item quantity="other">A mappa (\"%2$s\") %1$d fotója és videója mind törlődik erről az eszközről.</item>
+    </plurals>
+    <string name="device_folder_delete_no_trash">Az Android ezen verziójában nincs kuka, így a törlés erről az eszközről végleges.</string>
+    <string name="device_folder_delete_everywhere">Törlés mindenhol</string>
+    <string name="device_folder_delete_everywhere_desc">A Proton Drive-on lévő másolatokat is a Drive kukájába helyezi</string>
     <string name="sync_folders_add_dialog_title">Mappa hozzáadása</string>
     <string name="sync_folders_add_row_title">Mappa hozzáadása név szerint</string>
     <string name="sync_folders_add_dialog_name_hint">Mappa neve</string>
@@ -1122,12 +1135,21 @@
     <string name="albums_filter_remember_last_summary">Az albumok az utoljára kiválasztott szűrővel nyílnak meg</string>
     <string name="albums_show_collection">Gyűjtemény megjelenítése</string>
     <string name="albums_show_collection_summary">Az emberek, a helyek és az „Ezen a napon” továbbra is elérhetők a keresésben</string>
+    <string name="albums_filter_excluded">Kizárt</string>
+    <string name="albums_excluded_empty">Nincs kizárt album vagy mappa</string>
+    <string name="albums_exclude_from_albums">Kizárás az Albumokból</string>
+    <string name="albums_show_in_albums">Megjelenítés az Albumokban</string>
     <string name="albums_sort_heading">Rendezés</string>
     <string name="albums_cover_size_heading">Borító mérete</string>
     <string name="albums_sort_custom">Egyéni</string>
     <string name="albums_sort_name">Név (A-Z)</string>
     <string name="albums_sort_activity">Legutóbbi módosítás</string>
     <string name="albums_sort_count">Fotók száma</string>
+    <string name="albums_view_heading">Nézet</string>
+    <string name="albums_view_grid">Rács</string>
+    <string name="albums_view_list">Lista</string>
+    <string name="albums_more_settings">További beállítások</string>
+    <string name="album_options">Albumműveletek</string>
     <string name="album_group_heading">Csoportosítás</string>
     <string name="album_group_day">Nap</string>
     <string name="album_group_month">Hónap</string>
@@ -1518,6 +1540,10 @@
     <string name="album_remove_confirm_body">Ez csak a kijelölést távolítja el az albumból. A fotóid az idővonaladon maradnak.</string>
     <string name="action_remove">Eltávolítás</string>
     <string name="gallery_add_to_album_queued">A fotók a feltöltés befejezése után kerülnek hozzáadásra</string>
+    <plurals name="gallery_add_to_album_some_queued">
+        <item quantity="one">Hozzáadva az albumhoz. További %1$d fotó a feltöltés befejezése után kerül be</item>
+        <item quantity="other">Hozzáadva az albumhoz. További %1$d fotó a feltöltés befejezése után kerül be</item>
+    </plurals>
     <string name="share_role_can_view_desc">Megnézheti az albumot és a fotóit.</string>
     <string name="share_role_can_edit_desc">Hozzáadhat és eltávolíthat fotókat.</string>
     <string name="sel_label_back_up">Mentés</string>
@@ -1891,6 +1917,7 @@
     <string name="duplicates_leave_title">Elveted a kijelölést?</string>
     <string name="duplicates_leave_message">%1$d elem van kijelölve. Ha most kilépsz, a kijelölésed elveszik.</string>
     <string name="duplicates_leave_confirm">Kilépés</string>
+    <string name="duplicates_select_all_but_first">Összes kijelölése az első kivételével</string>
     <string name="metadata_editor_date_mode_filename">Fájlnévből</string>
     <string name="metadata_editor_filename_hint">Minden fotó dátumát a fájlnevében szereplő dátumból állítja be.</string>
     <string name="metadata_editor_filename_apply">Dátumok javítása</string>

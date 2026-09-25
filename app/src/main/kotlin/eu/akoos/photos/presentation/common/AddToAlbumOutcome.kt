@@ -46,3 +46,29 @@ fun addToAlbumOutcome(
 ): AddToAlbumOutcome =
     if (threw) AddToAlbumOutcome(added = 0, failed = requested)
     else AddToAlbumOutcome(added = succeededLinkIds, failed = failedLinkIds)
+
+/**
+ * What an "add to album" can truthfully say once it returns. A device-only photo is only queued: it
+ * uploads first and joins the album after, so it is never reported as added.
+ */
+sealed interface AddToAlbumMessage {
+    /** Every photo joined the album now. */
+    data object Added : AddToAlbumMessage
+
+    /** Some photos joined now and [uploading] more join once they upload. */
+    data class AddedAndUploading(val uploading: Int) : AddToAlbumMessage
+
+    /** Nothing joined yet: all [uploading] photos join once they upload. */
+    data class Uploading(val uploading: Int) : AddToAlbumMessage
+
+    /** Nothing joined and nothing was queued. */
+    data object NothingAdded : AddToAlbumMessage
+}
+
+/** Picks the [AddToAlbumMessage] for [joined] photos added now and [queued] photos uploading first. */
+fun addToAlbumMessage(joined: Int, queued: Int): AddToAlbumMessage = when {
+    queued > 0 && joined > 0 -> AddToAlbumMessage.AddedAndUploading(queued)
+    queued > 0 -> AddToAlbumMessage.Uploading(queued)
+    joined > 0 -> AddToAlbumMessage.Added
+    else -> AddToAlbumMessage.NothingAdded
+}

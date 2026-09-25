@@ -80,6 +80,8 @@ internal fun AlbumHeroHeader(
     coverParallax: () -> Float = { 0f },
     titleActions: @Composable (RowScope.() -> Unit)? = null,
     metaLeading: @Composable (RowScope.() -> Unit)? = null,
+    /** Full-width content under the closing divider, such as a line for photos still on their way. */
+    footer: @Composable (() -> Unit)? = null,
 ) {
     // Swap the still cover for its resolved full-res GIF when cover autoplay is on; otherwise the
     // still thumbnail stands. A non-String model, or a caller that never animates, is left untouched.
@@ -183,5 +185,6 @@ internal fun AlbumHeroHeader(
         }
 
         HorizontalDivider(color = PillBorder, thickness = 0.5.dp)
+        footer?.invoke()
     }
 }

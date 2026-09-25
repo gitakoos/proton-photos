@@ -87,6 +87,11 @@ object SettingsKeys {
      *  guest session and survives a sign-out. */
     val ALBUMS_SHOW_COLLECTION = booleanPreferencesKey("albums_show_collection")
 
+    /** How the Albums tab lays out its albums and device folders, an AlbumsViewMode ordinal
+     *  (0 = Grid, 1 = List). Absent = Grid. A view preference of the phone rather than of the
+     *  account, like [ALBUMS_SHOW_COLLECTION]: it holds in a guest session and survives a sign-out. */
+    val ALBUMS_VIEW_MODE = intPreferencesKey("albums_view_mode")
+
     /** Direction the photos inside an album are listed in, an AlbumPhotoSortMode ordinal
      *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order albums have always
      *  opened on. One global choice every album shares: a per-album key would grow with the
@@ -119,9 +124,28 @@ object SettingsKeys {
      *  when [ALBUMS_SORT_MODE] is Custom. Absent or empty = no arrangement yet, which Custom
      *  resolves as LastActivity. '|' matches [PENDING_ORPHAN_DELETES] and the widget's id lists,
      *  since a Drive linkId is base64 and can end in '=' padding. Holds ids the grid is not
-     *  currently showing, so a hidden album keeps its slot for its return; never pruned against
-     *  what is on screen. */
+     *  currently showing, so a hidden album, or one taken off the grid with [ALBUMS_GRID_EXCLUDED],
+     *  keeps its slot for its return; never pruned against what is on screen. */
     val ALBUMS_CUSTOM_ORDER = stringPreferencesKey("albums_custom_order")
+
+    /**
+     * Albums and device folders the user took off the Albums grid, one entry per card: "album:" and
+     * a cloud album's linkId, or "folder:" and a device folder's MediaStore bucket display name, the
+     * identity every per-folder preference here uses. The prefixes keep the two kinds apart, so a
+     * folder named like an album's id never matches it. Read and written through
+     * [eu.akoos.photos.presentation.albums.AlbumsGridExclusion].
+     *
+     * Only the grid reads it, and its Excluded filter lists these entries so each can be put back.
+     * Nothing else changes: the files stay where they are, backup and the timeline carry on, and
+     * every picker and search still finds the album. Deliberately NOT [HIDDEN_ALBUM_IDS] or
+     * [HIDDEN_FOLDER_NAMES], which also take the photos out of every listing and move a folder's
+     * photos into the vault.
+     *
+     * Device-wide rather than per account, like [ALBUMS_SHOW_COLLECTION]: it holds in a guest session
+     * and survives a sign-out, and an id of an album the signed-in account does not hold matches no
+     * card.
+     */
+    val ALBUMS_GRID_EXCLUDED = stringSetPreferencesKey("albums_grid_excluded")
 
     /** When true (default), the viewer + editor will NOT auto-download cloud full-res
      *  blobs on metered networks. Wifi-only is the data-conscious default; users on

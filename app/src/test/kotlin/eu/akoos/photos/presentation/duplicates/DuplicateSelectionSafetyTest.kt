@@ -22,6 +22,11 @@
 
 package eu.akoos.photos.presentation.duplicates
 
+import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase.DuplicateGroup
+import eu.akoos.photos.domain.usecase.FindDuplicatesUseCase.GroupType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,13 +34,50 @@ import org.junit.Test
 /**
  * Pins the delete-safety invariant of the duplicate finder's selection: the user ticks the copies to
  * DELETE, so the dangerous state is a group with every copy ticked. [toggleDuplicateRemoval] refuses
- * exactly that, which makes the [keepIdsForRemoval] complement handed to the view model always
- * non-empty and a whole group impossible to wipe out. Verified here without the app, a device, or a
- * user in the loop.
+ * exactly that and [selectAllButFirst] never ticks a group's first copy, which makes the
+ * [keepIdsForRemoval] complement handed to the view model always non-empty and a whole group
+ * impossible to wipe out. Verified here without the app, a device, or a user in the loop.
  */
 class DuplicateSelectionSafetyTest {
 
     private val allIds = setOf("a", "b", "c")
+
+    private fun deviceGroup(vararg uris: String) = DuplicateGroup(
+        GroupType.DEVICE,
+        uris.map { uri ->
+            GalleryItem.LocalOnly(
+                LocalMediaItem(
+                    uri = uri,
+                    dateTaken = 1_000L,
+                    displayName = "photo.jpg",
+                    mimeType = "image/jpeg",
+                    sizeBytes = 1024L,
+                    bucketName = "Camera",
+                ),
+            )
+        },
+    )
+
+    private fun cloudGroup(vararg linkIds: String) = DuplicateGroup(
+        GroupType.CLOUD,
+        linkIds.map { linkId ->
+            GalleryItem.CloudOnly(
+                CloudPhoto(
+                    linkId = linkId,
+                    shareId = "share1",
+                    volumeId = "vol1",
+                    captureTime = 1L,
+                    displayName = "photo.jpg",
+                    mimeType = "image/jpeg",
+                    sizeBytes = 1024L,
+                    thumbnailUrl = null,
+                    revisionId = "rev1",
+                ),
+            )
+        },
+    )
+
+    private fun DuplicateGroup.ids(): Set<String> = items.map { it.stableId }.toSet()
 
     @Test
     fun ticking_the_last_untouched_copy_is_refused_and_returns_the_input_unchanged() {
@@ -108,6 +150,61 @@ class DuplicateSelectionSafetyTest {
     fun the_default_state_of_a_two_copy_group_leaves_exactly_one_keeper() {
         val pair = setOf("a", "b")
         assertEquals(setOf("a"), keepIdsForRemoval(pair, pair - "a"))
+    }
+
+    @Test
+    fun select_all_but_the_first_ticks_every_copy_but_the_first_in_identical_and_similar_groups() {
+        // The keeper is the copy listed first, not the lowest id: nothing ranks the copies.
+        val identical = deviceGroup("z", "a", "m")
+        val similar = cloudGroup("c2", "c1")
+        val picked = selectAllButFirst(listOf(identical, similar))
+        assertEquals(
+            mapOf(
+                duplicateGroupKey(identical) to setOf("a", "m"),
+                duplicateGroupKey(similar) to setOf("c1"),
+            ),
+            picked,
+        )
+    }
+
+    @Test
+    fun select_all_but_the_first_never_selects_a_whole_group() {
+        val groups = listOf(
+            deviceGroup("a", "b"),
+            deviceGroup("c", "d", "e", "f"),
+            cloudGroup("g", "h", "i"),
+        )
+        val picked = selectAllButFirst(groups)
+        for (group in groups) {
+            val remove = picked.getValue(duplicateGroupKey(group))
+            assertTrue("$remove covers the whole group ${group.ids()}", remove.size < group.ids().size)
+            assertEquals(setOf(group.items.first().stableId), keepIdsForRemoval(group.ids(), remove))
+        }
+    }
+
+    @Test
+    fun select_all_but_the_first_selects_nothing_in_a_one_photo_group() {
+        val single = deviceGroup("only")
+        assertEquals(emptySet<String>(), selectAllButFirst(listOf(single)).getValue(duplicateGroupKey(single)))
+    }
+
+    @Test
+    fun select_all_but_the_first_over_no_groups_selects_nothing() {
+        assertTrue(selectAllButFirst(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun toggling_after_select_all_but_the_first_works_as_before() {
+        val group = deviceGroup("a", "b", "c")
+        val picked = selectAllButFirst(listOf(group)).getValue(duplicateGroupKey(group))
+        // Ticking the kept first copy on top would cover the whole group, so it is refused.
+        assertEquals(picked, toggleDuplicateRemoval(picked, "a", group.ids()))
+        // Unticking a copy and then ticking the first moves the keeper to that copy.
+        val unticked = toggleDuplicateRemoval(picked, "c", group.ids())
+        assertEquals(setOf("b"), unticked)
+        val moved = toggleDuplicateRemoval(unticked, "a", group.ids())
+        assertEquals(setOf("a", "b"), moved)
+        assertEquals(setOf("c"), keepIdsForRemoval(group.ids(), moved))
     }
 
     /** Every subset of this set, so a test can sweep all reachable selections of a small group. */

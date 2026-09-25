@@ -255,44 +255,57 @@ internal fun ContentFilterSheet(
         // categories / folders screen. Search leaves the callback null.
         val openTimelineSettings = onOpenTimelineSettings
         if (openTimelineSettings != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(0.5.dp)
-                    .background(PillBorder),
+            SheetSettingsPageRow(
+                label = stringResource(R.string.timeline_filter_more_settings),
+                onClick = {
+                    onDismiss()
+                    openTimelineSettings()
+                },
             )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        onDismiss()
-                        openTimelineSettings()
-                    }
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    Icons.Filled.Tune,
-                    contentDescription = null,
-                    tint = FgDim,
-                    modifier = Modifier.size(20.dp),
-                )
-                Text(
-                    text = stringResource(R.string.timeline_filter_more_settings),
-                    color = FgPrimary,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = FgMute,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
         }
+    }
+}
+
+/**
+ * A drawer's way out to its full settings page: a hairline, then a row with a chevron. Emitted into
+ * the drawer's own column, so the column's spacing sits between the two. The timeline drawer and the
+ * Albums filter sheet share it, so both ways out read the same.
+ */
+@Composable
+internal fun SheetSettingsPageRow(label: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(0.5.dp)
+            .background(PillBorder),
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            Icons.Filled.Tune,
+            contentDescription = null,
+            tint = FgDim,
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            text = label,
+            color = FgPrimary,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = FgMute,
+            modifier = Modifier.size(20.dp),
+        )
     }
 }
 

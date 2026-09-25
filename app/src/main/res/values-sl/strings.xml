@@ -768,6 +768,12 @@
     <string name="albums_create_album">Ustvari album</string>
     <string name="albums_create_album_hint">Ime albuma</string>
     <string name="albums_no_photos">V tem albumu ni fotografij</string>
+    <plurals name="albums_photos_uploading">
+        <item quantity="one">Nalaga se %1$d fotografija</item>
+        <item quantity="two">Nalagata se %1$d fotografiji</item>
+        <item quantity="few">Nalagajo se %1$d fotografije</item>
+        <item quantity="other">Nalaga se %1$d fotografij</item>
+    </plurals>
     <string name="albums_download_all">Prenesi vse</string>
     <!-- Background album-download notification. -->
     <string name="album_download_channel_name">Prenosi albumov</string>
@@ -1216,6 +1222,17 @@
     <string name="device_folder_hide_card">Skrij mapo</string>
     <string name="device_folder_hide_card_sub">Odstrani mapo iz Albumov in premakne njene fotografije med Skrite fotografije, stran iz galerije naprave, zato jih druge aplikacije ne prikazujejo več. Kopije v Proton Drive ostanejo popolnoma enake.</string>
     <string name="device_folder_unhide">Razkrij mapo</string>
+    <string name="device_folder_delete">Izbriši mapo</string>
+    <string name="device_folder_delete_confirm_title">Izbrisati to mapo?</string>
+    <plurals name="device_folder_delete_confirm_body">
+        <item quantity="one">Celotna vsebina mape \"%2$s\", %1$d fotografija ali videoposnetek, bo izbrisana iz te naprave.</item>
+        <item quantity="two">Celotna vsebina mape \"%2$s\", %1$d fotografiji in videoposnetka, bo izbrisana iz te naprave.</item>
+        <item quantity="few">Celotna vsebina mape \"%2$s\", %1$d fotografije in videoposnetki, bo izbrisana iz te naprave.</item>
+        <item quantity="other">Celotna vsebina mape \"%2$s\", %1$d fotografij in videoposnetkov, bo izbrisana iz te naprave.</item>
+    </plurals>
+    <string name="device_folder_delete_no_trash">Ta različica Androida nima koša, zato je brisanje iz te naprave trajno.</string>
+    <string name="device_folder_delete_everywhere">Izbriši povsod</string>
+    <string name="device_folder_delete_everywhere_desc">Premakne tudi kopije v Proton Drive v koš Drive</string>
     <string name="sync_folders_add_dialog_title">Dodaj mapo</string>
     <string name="sync_folders_add_row_title">Dodaj mapo po imenu</string>
     <string name="sync_folders_add_dialog_name_hint">Ime mape</string>
@@ -1325,12 +1342,21 @@
     <string name="albums_filter_remember_last_summary">Albume odpiraj z nazadnje izbranim filtrom</string>
     <string name="albums_show_collection">Prikaži Zbirko</string>
     <string name="albums_show_collection_summary">Osebe, kraji in „Na ta dan“ ostanejo na voljo v iskanju</string>
+    <string name="albums_filter_excluded">Izključeni</string>
+    <string name="albums_excluded_empty">Ni izključenih albumov ali map</string>
+    <string name="albums_exclude_from_albums">Izključi iz Albumov</string>
+    <string name="albums_show_in_albums">Prikaži v Albumih</string>
     <string name="albums_sort_heading">Razvrsti po</string>
     <string name="albums_cover_size_heading">Velikost naslovnice</string>
     <string name="albums_sort_custom">Po meri</string>
     <string name="albums_sort_name">Ime (A-Z)</string>
     <string name="albums_sort_activity">Zadnja dejavnost</string>
     <string name="albums_sort_count">Število fotografij</string>
+    <string name="albums_view_heading">Pogled</string>
+    <string name="albums_view_grid">Mreža</string>
+    <string name="albums_view_list">Seznam</string>
+    <string name="albums_more_settings">Več nastavitev</string>
+    <string name="album_options">Možnosti albuma</string>
     <string name="album_group_heading">Združi po</string>
     <string name="album_group_day">Dan</string>
     <string name="album_group_month">Mesec</string>
@@ -1600,6 +1626,12 @@
     <string name="album_remove_confirm_body">To odstrani iz albuma samo izbor. Vaše fotografije ostanejo na časovnici.</string>
     <string name="action_remove">Odstrani</string>
     <string name="gallery_add_to_album_queued">Fotografije bodo dodane, ko se nalaganje konča</string>
+    <plurals name="gallery_add_to_album_some_queued">
+        <item quantity="one">Dodano v album. Še %1$d fotografija bo dodana, ko se nalaganje konča</item>
+        <item quantity="two">Dodano v album. Še %1$d fotografiji bosta dodani, ko se nalaganje konča</item>
+        <item quantity="few">Dodano v album. Še %1$d fotografije bodo dodane, ko se nalaganje konča</item>
+        <item quantity="other">Dodano v album. Še %1$d fotografij bo dodanih, ko se nalaganje konča</item>
+    </plurals>
     <string name="share_role_can_view_desc">Lahko si ogleda album in njegove fotografije.</string>
     <string name="share_role_can_edit_desc">Lahko dodaja in odstranjuje fotografije.</string>
     <string name="sel_label_back_up">Varnostno kopiraj</string>
@@ -1987,6 +2019,7 @@
     <string name="duplicates_leave_title">Opustim izbor?</string>
     <string name="duplicates_leave_message">Izbrali ste %1$d elementov. Če zdaj odidete, bo izbor izbrisan.</string>
     <string name="duplicates_leave_confirm">Zapusti</string>
+    <string name="duplicates_select_all_but_first">Izberi vse razen prve</string>
     <string name="metadata_editor_date_mode_filename">Iz imena datoteke</string>
     <string name="metadata_editor_filename_hint">Nastavi datum vsake fotografije glede na datum, zapisan v imenu datoteke.</string>
     <string name="metadata_editor_filename_apply">Popravi datume</string>

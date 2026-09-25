@@ -688,6 +688,10 @@ fun AlbumDetailScreen(
                             )
                         }
                     },
+                    // Photos queued to upload and then join this album, counted down as each lands.
+                    footer = if (state.pendingJoinCount > 0) {
+                        { PendingJoinRow(state.pendingJoinCount) }
+                    } else null,
                 )
                 }
             }
@@ -707,6 +711,9 @@ fun AlbumDetailScreen(
                         )
                     }
                 }
+                // An album whose photos are all still uploading is not empty: the header's line says
+                // what is on its way instead.
+                state.photos.isEmpty() && state.pendingJoinCount > 0 -> Unit
                 state.photos.isEmpty() -> item(span = { GridItemSpan(maxLineSpan) }) {
                     Box(Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
                         Text(stringResource(R.string.albums_no_photos), color = FgMute, fontSize = 14.sp)
@@ -1554,4 +1561,27 @@ internal fun sectionSelectDescriptionRes(grouping: AlbumPhotoGrouping): Int = wh
     AlbumPhotoGrouping.Day -> R.string.cd_select_day
     AlbumPhotoGrouping.Month -> R.string.cd_select_month
     AlbumPhotoGrouping.Year -> R.string.cd_select_year
+}
+
+/** The slim line under the album header while [count] photos are still uploading to join it. */
+@Composable
+private fun PendingJoinRow(count: Int) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+    ) {
+        androidx.compose.material3.CircularProgressIndicator(
+            color = Accent,
+            strokeWidth = 2.dp,
+            modifier = Modifier.size(14.dp),
+        )
+        Text(
+            androidx.compose.ui.res.pluralStringResource(R.plurals.albums_photos_uploading, count, count),
+            color = FgMute,
+            fontSize = 14.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }

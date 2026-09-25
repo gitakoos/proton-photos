@@ -28,6 +28,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -40,15 +41,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -59,7 +64,10 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.imageLoader
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.ShimmerBox
+import eu.akoos.photos.presentation.common.ShimmerTextLine
 import eu.akoos.photos.presentation.theme.Bg2
+import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.LocalGifAutoplayCovers
@@ -118,30 +126,10 @@ fun UnifiedAlbumCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(14.dp))
+                .clip(AlbumCoverShape)
                 .background(Bg2),
         ) {
-            if (coverModel != null) {
-                // A GIF cover animates only when the user opted into cover autoplay; otherwise the
-                // decoder-free loader renders its still first frame. A local cover's content:// uri
-                // hides the extension, so [coverIsGif] carries the answer there; a resolved cloud GIF
-                // arrives as a file path ending in .gif. Every other cover keeps the default loader
-                // and is a still image regardless.
-                val autoplay = LocalGifAutoplayCovers.current
-                val staticLoader = LocalStaticImageLoader.current
-                val context = LocalContext.current
-                val modelIsGif = coverIsGif || coverModel.toString().endsWith(".gif", ignoreCase = true)
-                val coverLoader =
-                    if (modelIsGif && !autoplay) staticLoader ?: context.imageLoader
-                    else context.imageLoader
-                AsyncImage(
-                    model              = coverModel,
-                    imageLoader        = coverLoader,
-                    contentDescription = null,
-                    contentScale       = ContentScale.Crop,
-                    modifier           = Modifier.fillMaxSize(),
-                )
-            }
+            if (coverModel != null) AlbumCoverImage(coverModel, coverIsGif)
 
             CloudCornerBadge(
                 cloud = cloudBadge,
@@ -167,6 +155,162 @@ fun UnifiedAlbumCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+/** Corner of every album cover, on a card and on a list row alike. */
+private val AlbumCoverCorner = 14.dp
+private val AlbumCoverShape = RoundedCornerShape(AlbumCoverCorner)
+
+/** Edge of the square cover on a list row. */
+private val AlbumRowCoverSize = 56.dp
+
+/** A list row's insets: the Albums tab's 20dp margin ahead of the cover, and less behind, where the
+ *  options button's own touch padding makes up the rest. */
+private val AlbumRowPadding = PaddingValues(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
+
+/** Gap between a list row's cover and its text. */
+private val AlbumRowGap = 14.dp
+
+/**
+ * A cover image filling its box. A GIF cover animates only when the user opted into cover autoplay;
+ * otherwise the decoder-free loader renders its still first frame. A local cover's content:// uri
+ * hides the extension, so [coverIsGif] carries the answer there; a resolved cloud GIF arrives as a
+ * file path ending in .gif. Every other cover keeps the default loader and is a still image regardless.
+ */
+@Composable
+private fun AlbumCoverImage(coverModel: Any, coverIsGif: Boolean) {
+    val autoplay = LocalGifAutoplayCovers.current
+    val staticLoader = LocalStaticImageLoader.current
+    val context = LocalContext.current
+    val modelIsGif = coverIsGif || coverModel.toString().endsWith(".gif", ignoreCase = true)
+    val coverLoader =
+        if (modelIsGif && !autoplay) staticLoader ?: context.imageLoader
+        else context.imageLoader
+    AsyncImage(
+        model              = coverModel,
+        imageLoader        = coverLoader,
+        contentDescription = null,
+        contentScale       = ContentScale.Crop,
+        modifier           = Modifier.fillMaxSize(),
+    )
+}
+
+/**
+ * The list-view counterpart of [UnifiedAlbumCard]: the same cover, corner and badge at thumbnail
+ * size, the title and meta line beside it, and a trailing options button. The row spans the full
+ * width so a press lights all of it, and pads its own content.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun UnifiedAlbumRow(
+    coverModel: Any?,
+    /** Same as [UnifiedAlbumCard]'s: a local GIF cover whose uri hides its extension. */
+    coverIsGif: Boolean = false,
+    title: String,
+    /** The line under the title. Null leaves the title alone, centred on the cover. */
+    metaText: String? = null,
+    shareBadge: AlbumShareBadge = AlbumShareBadge.None,
+    cloudBadge: AlbumCloudBadge = AlbumCloudBadge.None,
+    isDeviceFolder: Boolean = false,
+    /** Drawn on an empty cover in place of an image, for a row that opens a screen rather than an
+     *  album. */
+    glyph: ImageVector? = null,
+    /** True while the albums are being arranged. The row's gestures belong to the arrangement then,
+     *  so its clicks are dropped, as a card's are, and a drag handle stands where the options button
+     *  was. */
+    arranging: Boolean = false,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    /** Opens the row's action sheet. Null leaves the row without the button. */
+    onOptionsClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (arranging) {
+                    Modifier
+                } else {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                }
+            )
+            .padding(AlbumRowPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AlbumRowGap),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(AlbumRowCoverSize)
+                .clip(AlbumCoverShape)
+                .background(Bg2),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                glyph != null ->
+                    Icon(glyph, contentDescription = null, tint = FgDim, modifier = Modifier.size(24.dp))
+                coverModel != null -> AlbumCoverImage(coverModel, coverIsGif)
+            }
+            CloudCornerBadge(
+                cloud = cloudBadge,
+                share = shareBadge,
+                folder = isDeviceFolder,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp),
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = FgPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (metaText != null) {
+                Text(
+                    text = metaText,
+                    color = FgMute,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (arranging) {
+            // The same 48dp slot the button takes, so the text does not reflow as the mode opens.
+            Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.DragHandle, contentDescription = null, tint = FgDim)
+            }
+        } else if (onOptionsClick != null) {
+            IconButton(onClick = onOptionsClick) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = stringResource(R.string.album_options),
+                    tint = FgDim,
+                )
+            }
+        }
+    }
+}
+
+/** Loading placeholder for [UnifiedAlbumRow], on the same insets so the rows land where it stood. */
+@Composable
+fun ShimmerAlbumRow() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(AlbumRowPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AlbumRowGap),
+    ) {
+        ShimmerBox(modifier = Modifier.size(AlbumRowCoverSize), cornerRadius = AlbumCoverCorner)
+        Column(modifier = Modifier.weight(1f)) {
+            ShimmerTextLine(widthFraction = 0.6f, height = 14.dp)
+            Spacer(Modifier.height(4.dp))
+            ShimmerTextLine(widthFraction = 0.3f, height = 12.dp)
+        }
     }
 }
 

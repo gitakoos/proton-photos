@@ -64,7 +64,9 @@ import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.selectionDrawerRestingHeight
 import eu.akoos.photos.presentation.gallery.PhotoCell
+import eu.akoos.photos.presentation.gallery.gridBottomPadding
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
@@ -155,7 +157,12 @@ fun OfflinePhotosScreen(
                     start = if (seamless) 0.dp else 8.dp,
                     top = contentTopPad,
                     end = if (seamless) 0.dp else 8.dp,
-                    bottom = 100.dp + navBottom,
+                    // The drawer's one action takes no slot, so it rests without the button row.
+                    bottom = gridBottomPadding(
+                        base = 100.dp + navBottom,
+                        selecting = inSelectionMode,
+                        drawerHeight = selectionDrawerRestingHeight(withPrimaryRow = false),
+                    ),
                 ),
                 horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                 verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),

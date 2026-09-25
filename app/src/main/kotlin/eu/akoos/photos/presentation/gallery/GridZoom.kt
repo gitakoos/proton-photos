@@ -139,7 +139,7 @@ fun rememberAlbumColumns(): Int {
 }
 
 /**
- * Live Collection-card switch for the Albums tab, set from the Albums filter sheet. Seeded
+ * Live Collection-card switch for the Albums tab, set from the Albums settings page. Seeded
  * synchronously from [AlbumGridPrefsBoot] like [rememberAlbumColumns], so a return to the tab with the
  * card switched off never shows it for a frame and then slides every cover one cell back. DataStore
  * stays canonical; the collector refreshes the mirror as the value changes. Default true.
@@ -155,6 +155,25 @@ fun rememberAlbumsShowCollection(): Boolean {
             .onEach { AlbumGridPrefsBoot.writeShowCollection(context, it) }
     }.collectAsStateWithLifecycle(initialValue = initial)
     return shown
+}
+
+/**
+ * Live grid-or-list choice for the Albums tab, set from the Albums filter sheet. Seeded synchronously
+ * from [AlbumGridPrefsBoot] like [rememberAlbumColumns], so a return to the tab in list view never
+ * shows the cover grid for a frame. DataStore stays canonical; the collector refreshes the mirror as
+ * the value changes. Default [AlbumsViewMode.Grid].
+ */
+@Composable
+fun rememberAlbumsViewMode(): AlbumsViewMode {
+    val context = LocalContext.current
+    val initial = remember { AlbumsViewMode.fromOrdinal(AlbumGridPrefsBoot.readViewMode(context)) }
+    val mode by remember {
+        context.settingsDataStore.data
+            .map { AlbumsViewMode.fromOrdinal(it[SettingsKeys.ALBUMS_VIEW_MODE]) }
+            .distinctUntilChanged()
+            .onEach { AlbumGridPrefsBoot.writeViewMode(context, it.ordinal) }
+    }.collectAsStateWithLifecycle(initialValue = initial)
+    return mode
 }
 
 /**

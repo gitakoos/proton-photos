@@ -193,8 +193,10 @@ import eu.akoos.photos.domain.usecase.AlbumSortMode
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.CloudMetadataSaveController
 import eu.akoos.photos.domain.usecase.CloudSavePhase
+import eu.akoos.photos.presentation.common.AddToAlbumMessage
 import eu.akoos.photos.presentation.common.AlbumMembership
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.addToAlbumMessage
 import eu.akoos.photos.presentation.common.albumMembershipState
 import eu.akoos.photos.presentation.common.anyLocalOnly
 import eu.akoos.photos.presentation.common.deleteConfirmRows
@@ -202,6 +204,7 @@ import eu.akoos.photos.presentation.common.deleteRowDescription
 import eu.akoos.photos.presentation.common.deleteRowTitleRes
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.HideConfirmSheet
+import eu.akoos.photos.presentation.folders.DeviceFolderDeleteSheet
 import eu.akoos.photos.presentation.common.DenseGridWarningDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.EmptyState
@@ -352,6 +355,8 @@ fun GalleryScreen(
     /** Opens the Timeline filter screen — reached from the Albums tab's filter button now that
      *  the obsolete All/Backed-up album filter is gone (device + cloud albums show together). */
     onOpenTimelineFilter: () -> Unit = {},
+    /** Opens the Albums settings page, from the More settings row of the Albums filter sheet. */
+    onOpenAlbumsSettings: () -> Unit = {},
     /** Opens the date + place editor for the current multi-selection. Gated to an all-device-only
      *  selection (matching the Strip action), so every handed item is editable. */
     onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
@@ -490,6 +495,9 @@ fun GalleryScreen(
     // Whether the Albums grid leads with the pinned Collection card (default on), seeded from the same
     // boot mirror so a return to the tab with the card switched off never flashes it in.
     val albumsShowCollection = rememberAlbumsShowCollection()
+    // Grid or list on the Albums tab (default grid), seeded from the same boot mirror so a return to
+    // the tab never flashes the other layout.
+    val albumsViewMode = rememberAlbumsViewMode()
     // Re-resolve the filter each time the pager reaches the Albums page: last-used when remembering,
     // otherwise the configured default. Leaving and returning therefore resets to the default
     // (remember-last off) or restores the last pick (remember-last on), rather than holding whatever
@@ -505,6 +513,23 @@ fun GalleryScreen(
             onAlbumsPage = pagerState.currentPage == 1,
             prefs = albumsFilterPrefs,
         )
+        albumFilter = next.filter
+        albumFilterSettled = next.settled
+    }
+    // A default picked on the Albums settings page shows on the tab at once, as a pick made on the tab
+    // does. Persisted alone it would leave the grid on its old filter until the next arrival, and the
+    // pick would read as ignored. The default last seen is saved with the gallery, which the page's
+    // return rebuilds, so a new default tells itself apart from the one already shown. The rule itself
+    // is [afterAlbumsDefaultChange].
+    var seenAlbumsDefault by rememberSaveable { mutableStateOf<AlbumDisplayFilter?>(null) }
+    LaunchedEffect(albumsFilterPrefs) {
+        val prefs = albumsFilterPrefs ?: return@LaunchedEffect
+        val next = afterAlbumsDefaultChange(
+            current = AlbumsEntryFilterState(albumFilter, albumFilterSettled),
+            seenDefault = seenAlbumsDefault,
+            prefs = prefs,
+        )
+        seenAlbumsDefault = albumDisplayFilterAt(prefs.defaultOrdinal)
         albumFilter = next.filter
         albumFilterSettled = next.settled
     }
@@ -1048,22 +1073,27 @@ fun GalleryScreen(
                 val queued = addToAlbumState.localMoved
                 // The blocking drawer already confirms a clean add, so skip the redundant result
                 // snackbar for it; only surface one when there's something more to say.
-                val msg: String? = when {
+                val msg: String? = if (addToAlbumState.skipped > 0) {
                     // Genuine failures the album couldn't accept — disclose the skip count so the
                     // user doesn't think the missing items disappeared.
-                    addToAlbumState.skipped > 0 -> context.resources.getQuantityString(
+                    context.resources.getQuantityString(
                         R.plurals.gallery_add_to_album_partial,
                         addToAlbumState.skipped,
                         cloudAdded, addToAlbumState.albumName, addToAlbumState.skipped,
                     )
-                    // Anything queued to upload-then-join now drives the live progress sheet, so the
-                    // thin "queued" snackbar would be redundant — suppress it for those cases.
-                    queued > 0 -> null
+                } else when (val outcome = addToAlbumMessage(cloudAdded, queued)) {
                     // Clean success — the drawer was enough, no extra message.
-                    cloudAdded > 0 -> null
+                    AddToAlbumMessage.Added -> null
+                    // Queued photos only join after they upload, which the backup pill does not say,
+                    // so the snackbar tells the user the album fills in later.
+                    is AddToAlbumMessage.AddedAndUploading -> context.resources.getQuantityString(
+                        R.plurals.gallery_add_to_album_some_queued, outcome.uploading, outcome.uploading,
+                    )
+                    is AddToAlbumMessage.Uploading -> context.getString(R.string.gallery_add_to_album_queued)
                     // Edge case: nothing added and nothing queued but the op still "succeeded"
                     // (e.g. the photos were already in the picked album). Surface a snackbar anyway.
-                    else -> context.getString(R.string.gallery_added_to_album, 0, addToAlbumState.albumName)
+                    AddToAlbumMessage.NothingAdded ->
+                        context.getString(R.string.gallery_added_to_album, 0, addToAlbumState.albumName)
                 }
                 if (msg != null) snackbarHostState.showSnackbar(msg)
                 viewModel.resetAddToAlbumState()
@@ -1220,12 +1250,14 @@ fun GalleryScreen(
                 gridState = albumsGridState,
                 columns = albumColumns,
                 showCollection = albumsShowCollection,
+                viewMode = albumsViewMode,
                 onAlbumClick = onAlbumClick,
                 onAlbumShareClick = onAlbumShareClick,
                 onAlbumActionClick = onAlbumActionClick,
                 onDeviceFolderClick = onDeviceFolderClick,
                 onDeviceFolderActionClick = onDeviceFolderActionClick,
                 onHideDeviceFolder = viewModel::requestHideFolder,
+                onDeleteDeviceFolder = viewModel::requestDeleteFolder,
                 onMemoriesClick = onMemoriesClick,
                 createRequestSignal = albumCreateSignal,
                 displayFilter = albumFilter,
@@ -1304,8 +1336,12 @@ fun GalleryScreen(
                         onAlbumFilterSelected = { picked ->
                             albumFilter = picked
                             albumFilterSettled = true
-                            tabScope.launch {
-                                context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_LAST_FILTER] = picked.ordinal }
+                            // The Excluded view is a place to put an album back rather than a view to
+                            // reopen on, so picking it leaves the remembered pick as it was.
+                            if (picked != AlbumDisplayFilter.Excluded) {
+                                tabScope.launch {
+                                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_LAST_FILTER] = picked.ordinal }
+                                }
                             }
                         },
                         onOpenAlbumsFilterSheet = { showAlbumsFilterSheet = true },
@@ -1590,31 +1626,11 @@ fun GalleryScreen(
     if (showAlbumsFilterSheet) {
         AlbumsFilterSheet(
             sheetState = albumsFilterSheetState,
-            default = albumDisplayFilterAt(albumsFilterPrefs?.defaultOrdinal ?: 0),
-            rememberLast = albumsFilterPrefs?.rememberLast == true,
-            showCollection = albumsShowCollection,
+            viewMode = albumsViewMode,
             sortMode = albumsSortMode,
-            columns = albumColumns,
-            onDefaultChange = { picked ->
-                // Show it now, not only on the next visit. The sheet writes the filter the Albums
-                // tab opens on, and picking one while looking at that tab is a statement about the
-                // list on screen as much as about the next open: persisting it alone left the grid
-                // unchanged, so the pick read as ignored until the user left the tab and came back,
-                // which is when the entry effect re-resolves this key.
-                albumFilter = picked
-                albumFilterSettled = true
+            onViewModeChange = { picked ->
                 tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] = picked.ordinal }
-                }
-            },
-            onRememberLastChange = { value ->
-                tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] = value }
-                }
-            },
-            onShowCollectionChange = { value ->
-                tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_SHOW_COLLECTION] = value }
+                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_VIEW_MODE] = picked.ordinal }
                 }
             },
             onSortModeChange = { picked ->
@@ -1622,11 +1638,7 @@ fun GalleryScreen(
                     context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_SORT_MODE] = picked.ordinal }
                 }
             },
-            onColumnsChange = { picked ->
-                tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUM_GRID_COLUMNS] = picked }
-                }
-            },
+            onOpenMoreSettings = onOpenAlbumsSettings,
             onDismiss = { showAlbumsFilterSheet = false },
         )
     }
@@ -1682,6 +1694,18 @@ fun GalleryScreen(
             title = stringResource(R.string.device_folder_hide_card),
             onConfirm = { viewModel.confirmHideFolder() },
             onDismiss = { viewModel.dismissHideFolderRequest() },
+        )
+    }
+    // Deleting a device folder from its card waits on a read of the folder the same way, then runs
+    // through the selection delete's own path: its blocking sheet, system trash dialog and failure
+    // snackbar.
+    val folderDeleteRequest by viewModel.folderDeleteRequest.collectAsStateWithLifecycle()
+    folderDeleteRequest?.let { request ->
+        DeviceFolderDeleteSheet(
+            request = request,
+            isSignedIn = state.isSignedIn,
+            onDelete = viewModel::confirmDeleteFolder,
+            onDismiss = viewModel::dismissDeleteFolderRequest,
         )
     }
     if (showMultiDeleteSheet && state.selectedItems.isNotEmpty()) {

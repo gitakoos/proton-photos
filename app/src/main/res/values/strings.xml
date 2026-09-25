@@ -1058,6 +1058,10 @@
     <string name="album_remove_confirm_body">This only removes the selection from the album. Your photos stay in your timeline.</string>
     <string name="action_remove">Remove</string>
     <string name="gallery_add_to_album_queued">Photos will be added once they finish uploading</string>
+    <plurals name="gallery_add_to_album_some_queued">
+        <item quantity="one">Added to album. %1$d more photo will join once it finishes uploading</item>
+        <item quantity="other">Added to album. %1$d more photos will join once they finish uploading</item>
+    </plurals>
     <!-- Labels on the selection drawer's action rows. Each one names what the tap does, and the
          viewer's own menu draws the same rows from here, so one action reads the same everywhere. -->
     <string name="sel_label_back_up">Back up</string>
@@ -1173,6 +1177,10 @@
     <string name="albums_create_album">Create Album</string>
     <string name="albums_create_album_hint">Album name</string>
     <string name="albums_no_photos">No photos in this album</string>
+    <plurals name="albums_photos_uploading">
+        <item quantity="one">%1$d photo uploading</item>
+        <item quantity="other">%1$d photos uploading</item>
+    </plurals>
     <string name="albums_download_all">Download all</string>
     <!-- Background album-download notification. -->
     <string name="album_download_channel_name">Album downloads</string>
@@ -1713,6 +1721,15 @@
     <string name="device_folder_hide_card">Hide folder</string>
     <string name="device_folder_hide_card_sub">Takes the folder out of Albums and moves its photos into Hidden Photos, out of the device gallery, so other apps stop showing them. Any Proton Drive copies stay exactly as they are.</string>
     <string name="device_folder_unhide">Unhide folder</string>
+    <string name="device_folder_delete">Delete folder</string>
+    <string name="device_folder_delete_confirm_title">Delete this folder?</string>
+    <plurals name="device_folder_delete_confirm_body">
+        <item quantity="one">The %1$d photo or video in \"%2$s\" will be deleted from this device.</item>
+        <item quantity="other">All %1$d photos and videos in \"%2$s\" will be deleted from this device.</item>
+    </plurals>
+    <string name="device_folder_delete_no_trash">This version of Android has no trash, so deleting from this device is permanent.</string>
+    <string name="device_folder_delete_everywhere">Delete everywhere</string>
+    <string name="device_folder_delete_everywhere_desc">Also moves the Proton Drive copies to Drive trash</string>
     <string name="sync_folders_add_dialog_title">Add folder</string>
     <string name="sync_folders_add_row_title">Add folder by name</string>
     <string name="sync_folders_add_dialog_name_hint">Folder name</string>
@@ -1819,12 +1836,21 @@
     <string name="albums_filter_remember_last_summary">Open albums with the filter you last selected</string>
     <string name="albums_show_collection">Show Collection</string>
     <string name="albums_show_collection_summary">People, places and On this day stay in Search</string>
+    <string name="albums_filter_excluded">Excluded</string>
+    <string name="albums_excluded_empty">No excluded albums or folders</string>
+    <string name="albums_exclude_from_albums">Exclude from Albums</string>
+    <string name="albums_show_in_albums">Show in Albums</string>
     <string name="albums_sort_heading">Sort by</string>
     <string name="albums_cover_size_heading">Cover size</string>
     <string name="albums_sort_custom">Custom</string>
     <string name="albums_sort_name">Name (A to Z)</string>
     <string name="albums_sort_activity">Last activity</string>
     <string name="albums_sort_count">Photo count</string>
+    <string name="albums_view_heading">View</string>
+    <string name="albums_view_grid">Grid</string>
+    <string name="albums_view_list">List</string>
+    <string name="albums_more_settings">More settings</string>
+    <string name="album_options">Album options</string>
     <string name="album_group_heading">Group by</string>
     <string name="album_group_day">Day</string>
     <string name="album_group_month">Month</string>
@@ -1984,6 +2010,7 @@
     <string name="duplicates_leave_title">Discard selection?</string>
     <string name="duplicates_leave_message">You have %1$d selected. If you leave now, your selection is cleared.</string>
     <string name="duplicates_leave_confirm">Leave</string>
+    <string name="duplicates_select_all_but_first">Select all but the first</string>
 
     <!-- What's new -->
     <string name="whats_new_title">What\'s new</string>

@@ -120,6 +120,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val undoController: UndoController,
     private val favoriteWriter: eu.akoos.photos.presentation.common.FavoriteWriter,
     private val moveController: MoveToFolderController,
+    private val folderDelete: DeviceFolderDeleteController,
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<GalleryItem>>(emptyList())
@@ -907,7 +908,51 @@ class DeviceFolderDetailViewModel @Inject constructor(
      * Drive copy. On Android 11+ the local delete routes through the system trash dialog and defers the cloud delete.
      */
     fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
-        val items = selectedGalleryItems()
+        deleteItems(selectedGalleryItems(), freeUpSpace, deleteFromCloud, wholeFolder = false)
+    }
+
+    /** The delete of this whole folder awaiting confirmation, or null when none is. */
+    val folderDeleteRequest: StateFlow<DeviceFolderDeleteRequest?> = folderDelete.request
+
+    /** True once a delete of this whole folder has landed, so the screen leaves a folder that is no
+     *  longer on the device rather than showing it empty. */
+    private val _folderDeleted = MutableStateFlow(false)
+    val folderDeleted: StateFlow<Boolean> = _folderDeleted.asStateFlow()
+
+    /** Whether the delete waiting on the system dialog is the whole folder's rather than a selection's. */
+    private var pendingFolderDelete = false
+
+    /**
+     * Ask about deleting this folder with everything it holds on the device. The device side alone
+     * offers it: the vault's side of a folder has no device file to delete. Held off while a folder
+     * hide or restore runs, whose own delete would share the one system dialog this one waits on.
+     */
+    fun requestDeleteFolder() {
+        if (openedFromVault.value || folderVaultJob?.isActive == true) return
+        folderDelete.ask(viewModelScope, bucketName.value)
+    }
+
+    /** Drop the question. The folder is untouched. */
+    fun dismissDeleteFolderRequest() = folderDelete.dismiss()
+
+    /** Delete the photos the confirmation named, through the same body as a selection delete. The
+     *  device copies always go; [deleteFromCloud] also moves the Drive copies to Drive trash. */
+    fun confirmDeleteFolder(deleteFromCloud: Boolean) {
+        val items = folderDelete.take() ?: return
+        deleteItems(items, freeUpSpace = true, deleteFromCloud = deleteFromCloud, wholeFolder = true)
+    }
+
+    /**
+     * The one delete body the selection and the whole folder share, so both raise the same blocking
+     * sheet and the same system trash dialog and report a failure the same way. [wholeFolder] marks a
+     * delete of the folder itself, reported through [folderDeleted] once it lands.
+     */
+    private fun deleteItems(
+        items: List<GalleryItem>,
+        freeUpSpace: Boolean,
+        deleteFromCloud: Boolean,
+        wholeFolder: Boolean,
+    ) {
         if (items.isEmpty()) return
         viewModelScope.launch {
             // A local (device) delete needs no account; the use case only requires a signed-in user
@@ -922,12 +967,17 @@ class DeviceFolderDetailViewModel @Inject constructor(
                         buildDeleteUndoAction(items, freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
                             ?.let { undoController.offer(it) }
                         selection.clear()
+                        if (wholeFolder) _folderDeleted.value = true
                     }
                     is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
                         pendingPermissionResult = result
+                        pendingFolderDelete = wholeFolder
                         _pendingDeleteIntent.value = result.pendingIntent
                     }
-                    is DeletePhotoUseCase.Result.CloudDeleteFailed -> Unit
+                    // Nothing was deleted: the request could not be built, or Drive refused before the
+                    // device was touched. Said the way the confirmed path below says it.
+                    is DeletePhotoUseCase.Result.CloudDeleteFailed ->
+                        _hideFailure.tryEmit(context.getString(R.string.viewer_delete_drive_failed))
                 }
             } finally {
                 _isDeleting.value = false
@@ -1172,6 +1222,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val pending = pendingPermissionResult
         pendingPermissionResult = null
         _pendingDeleteIntent.value = null
+        val wholeFolder = pendingFolderDelete
+        pendingFolderDelete = false
         viewModelScope.launch {
             if (pending != null) {
                 // A local (device) delete/hide finishes without an account; the use case guards its
@@ -1213,6 +1265,8 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 }
             }
             selection.clear()
+            // The device copies went with the confirmed dialog, whatever Drive answered after it.
+            if (wholeFolder) _folderDeleted.value = true
         }
     }
 
@@ -1220,6 +1274,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  copies. The originals are untouched, so the photos stay where the user already sees them. */
     fun clearPendingDeleteIntent() {
         pendingPermissionResult = null
+        pendingFolderDelete = false
         _pendingDeleteIntent.value = null
         rollbackPendingHide()
     }

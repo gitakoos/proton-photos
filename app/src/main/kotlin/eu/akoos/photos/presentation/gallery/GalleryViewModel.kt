@@ -220,6 +220,7 @@ class GalleryViewModel @Inject constructor(
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
     private val moveToFolder: MoveToFolderUseCase,
+    private val folderDelete: eu.akoos.photos.presentation.folders.DeviceFolderDeleteController,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
@@ -1484,7 +1485,12 @@ class GalleryViewModel @Inject constructor(
     private var pendingPermissionResult: DeletePhotoUseCase.Result.NeedsMediaWritePermission? = null
 
     fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) {
-        val items = _uiState.value.selectedItems.toList()
+        runDelete(_uiState.value.selectedItems.toList(), freeUpSpace, deleteFromCloud)
+    }
+
+    /** The one delete body the selection and a whole device folder share, so both raise the same
+     *  blocking sheet, the same system trash dialog and the same failure snackbar. */
+    private fun runDelete(items: List<GalleryItem>, freeUpSpace: Boolean, deleteFromCloud: Boolean) {
         if (items.isEmpty()) return
         viewModelScope.launch {
             _uiState.update { it.copy(multiDeleteState = MultiDeleteState.Working) }
@@ -1892,6 +1898,31 @@ class GalleryViewModel @Inject constructor(
      *  vault rather than being copied for nothing. */
     fun cancelFolderHide() {
         stopFolderHide.set(true)
+    }
+
+    /** The device folder delete awaiting confirmation, or null when none is. */
+    val folderDeleteRequest: StateFlow<eu.akoos.photos.presentation.folders.DeviceFolderDeleteRequest?> =
+        folderDelete.request
+
+    /**
+     * Ask about deleting [bucketName] with everything it holds on the device, and start reading what
+     * that would take. Nothing is deleted until [confirmDeleteFolder]. Held off while a folder hide
+     * runs, the same guard [requestHideFolder] keeps: that hide ends in a delete of its own, and the
+     * two would share the one system dialog a delete waits on.
+     */
+    fun requestDeleteFolder(bucketName: String) {
+        if (folderHideJob?.isActive == true) return
+        folderDelete.ask(viewModelScope, bucketName)
+    }
+
+    /** Drop the question. The folder is untouched. */
+    fun dismissDeleteFolderRequest() = folderDelete.dismiss()
+
+    /** Delete the photos the confirmation named, through the path a selection delete takes. The
+     *  device copies always go; [deleteFromCloud] also moves the Drive copies to Drive trash. */
+    fun confirmDeleteFolder(deleteFromCloud: Boolean) {
+        val items = folderDelete.take() ?: return
+        runDelete(items, freeUpSpace = true, deleteFromCloud = deleteFromCloud)
     }
 
     /**

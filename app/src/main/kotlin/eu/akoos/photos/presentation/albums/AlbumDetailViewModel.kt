@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -239,6 +240,9 @@ data class AlbumDetailUiState(
     val isHiddenFromTimeline: Boolean = false,
     /** True when this is a shared-with-me album the sharer granted edit rights on. */
     val sharedAlbumIsEditable: Boolean = false,
+    /** Photos queued to upload and then join this album, counted from the upload queue. Falls as each
+     *  one lands; zero when nothing is on its way or no account is signed in. */
+    val pendingJoinCount: Int = 0,
 ) {
     val isSelectionMode: Boolean get() = selectedPhotos.isNotEmpty()
     val selectedCount: Int get() = selectedPhotos.size
@@ -279,6 +283,7 @@ class AlbumDetailViewModel @Inject constructor(
     private val hiddenVaultJournal: HiddenVaultJournal,
     private val favoriteWriter: FavoriteWriter,
     private val resolveCoverGifUseCase: eu.akoos.photos.domain.usecase.ResolveCoverGifUseCase,
+    private val uploadAlbumTargetDao: eu.akoos.photos.data.db.dao.UploadAlbumTargetDao,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumDetailUiState())
@@ -453,6 +458,14 @@ class AlbumDetailViewModel @Inject constructor(
             albumListEvents.changes.collect {
                 if (suppressSelfRefresh) return@collect
                 if (_uiState.value.albumLinkId.isNotBlank()) refresh()
+            }
+        }
+        // Photos still uploading before they join this album, so an album whose members are on their
+        // way says so rather than reading as empty. The upload pass signals each join on the event
+        // above, which refreshes the grid as this count falls.
+        viewModelScope.launch {
+            observePendingJoinCount().collect { count ->
+                _uiState.update { it.copy(pendingJoinCount = count) }
             }
         }
         // A removal undone through the shared bar re-adds the photos server-side; refresh so they
@@ -2139,6 +2152,21 @@ class AlbumDetailViewModel @Inject constructor(
                 if (albumLinkId.isBlank()) emptyFlowOfWorkInfo()
                 else observeUniqueWork(AlbumDownloadWorker.uniqueName(albumLinkId))
             }
+
+    /** How many photos the signed-in account has queued to join the loaded album. Follows [load] and an
+     *  account switch through flatMapLatest; zero before an album is loaded or with no account. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun observePendingJoinCount(): Flow<Int> =
+        combine(
+            _uiState.map { it.albumLinkId }.distinctUntilChanged(),
+            accountManager.getPrimaryUserId().distinctUntilChanged(),
+        ) { albumLinkId, userId -> albumLinkId to userId }
+            .flatMapLatest { (albumLinkId, userId) ->
+                if (albumLinkId.isBlank() || userId == null) flowOf(0)
+                else uploadAlbumTargetDao.observePendingCount(albumLinkId, userId.id)
+            }
+            .distinctUntilChanged()
+            .catch { emit(0) }
 
     /** Empty stand-in so [flatMapLatest] has a flow to switch to before an album is loaded. */
     private fun emptyFlowOfWorkInfo(): Flow<WorkInfo?> = callbackFlow {

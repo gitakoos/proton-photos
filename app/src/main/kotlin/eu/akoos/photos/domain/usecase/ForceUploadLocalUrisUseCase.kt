@@ -85,13 +85,17 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
             val cloudFileId = existingRow?.cloudFileId
             if (cloudFileId != null) {
                 // Already on Drive, so the upload pipeline never re-runs for it. Record the target
-                // and drain the join here directly: on success drop the pair, on failure leave the
-                // target row so the upload pass's target-table drain retries it. A single linkId per
-                // request keeps the server's per-request link cap satisfied.
+                // and drain the join here directly: once the album holds the photo drop the pair,
+                // otherwise leave the target row so the upload pass's target-table drain retries it.
+                // The add reports an unsent or refused photo in its result, not by throwing, so the
+                // result decides. A single linkId per request keeps the server's per-request link cap
+                // satisfied.
                 if (isAlbumAdd) {
                     uploadAlbumTargetDao.insertIgnore(uri, albumLinkId)
                     runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudFileId)) }
-                        .onSuccess { uploadAlbumTargetDao.deleteTarget(uri, albumLinkId) }
+                        .onSuccess { result ->
+                            if (cloudFileId in result.succeededLinkIds) uploadAlbumTargetDao.deleteTarget(uri, albumLinkId)
+                        }
                 }
                 continue
             }
@@ -123,7 +127,8 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
         // an inline pass dies the moment the user leaves the screen, and never surfaces in the
         // Settings sync list. The worker survives navigation, resumes on app restart, and feeds
         // the same progress events the list observes. allowLowBattery = true because this is an
-        // explicit user action; wifi-only still honours the user's network preference.
+        // explicit user action. Wi-Fi-only does not hold these rows back either: the worker runs on
+        // any connection, and the upload pass lets a MANUAL or ALBUM_ADD row through on mobile data.
         val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] != false
         eu.akoos.photos.worker.SyncWorker.runNow(context, wifiOnly = wifiOnly, allowLowBattery = true)
         return uris.size
