@@ -134,6 +134,7 @@ import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.SelectionShareState
+import eu.akoos.photos.presentation.common.addToAlbumResultText
 import eu.akoos.photos.presentation.common.favoriteSelectionAction
 import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.anyCloudOnly
@@ -1040,12 +1041,9 @@ fun SearchScreen(
                 },
                 onCloudAlbumSelected = { album ->
                     showAddToAlbumSheet = false
-                    vm.addSelectedToAlbum(album.linkId) { joined, _ ->
-                        if (joined > 0) scope.launch {
-                            snackbarHostState.showSnackbar(
-                                context.getString(R.string.gallery_added_to_album, joined, album.name),
-                            )
-                        }
+                    vm.addSelectedToAlbum(album.linkId) { joined, queued ->
+                        val msg = addToAlbumResultText(context.resources, joined, queued, album.name)
+                        scope.launch { snackbarHostState.showSnackbar(msg) }
                     }
                 },
                 onDismiss = { showAddToAlbumSheet = false },
@@ -1072,9 +1070,8 @@ fun SearchScreen(
                 onDismiss = { showCreateAlbumInline = false },
                 onCreate = { name ->
                     showCreateAlbumInline = false
-                    vm.createAlbumThenAddSelected(name) { joined, _, error ->
-                        val msg = error
-                            ?: context.getString(R.string.gallery_added_to_album, joined, name)
+                    vm.createAlbumThenAddSelected(name) { joined, queued, error ->
+                        val msg = error ?: addToAlbumResultText(context.resources, joined, queued, name)
                         scope.launch { snackbarHostState.showSnackbar(msg) }
                     }
                 },

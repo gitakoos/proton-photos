@@ -99,9 +99,20 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
                 }
                 continue
             }
-            if (existingRow?.status == SyncStatus.UPLOADING ||
-                existingRow?.status == SyncStatus.HIDDEN
-            ) continue
+            if (existingRow?.status == SyncStatus.HIDDEN) continue
+            if (existingRow?.status == SyncStatus.UPLOADING) {
+                // Already uploading, so it is never seeded again: that would upload it a second time.
+                // An album-add records the target, which the upload in flight joins once it lands (or
+                // the next pass's drain, when it landed before the target was written), and stamps the
+                // intent so an upload that fails is retried as this album-add. A stamp that lands after
+                // the upload finished comes off again, since a backed-up row carries no intent.
+                if (isAlbumAdd) {
+                    uploadAlbumTargetDao.insertIgnore(uri, albumLinkId)
+                    syncStateRepo.markQueued(uri, queueSource, now)
+                    if (syncStateRepo.getByUri(uri)?.cloudFileId != null) syncStateRepo.clearQueuedForSynced(uri)
+                }
+                continue
+            }
             syncStateRepo.upsert(
                 SyncState(
                     localUri = uri,

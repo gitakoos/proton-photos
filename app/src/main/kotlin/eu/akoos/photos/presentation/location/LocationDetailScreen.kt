@@ -101,6 +101,7 @@ import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.SelectionShareState
+import eu.akoos.photos.presentation.common.addToAlbumResultText
 import eu.akoos.photos.presentation.common.allLocalOnly
 import eu.akoos.photos.presentation.common.anyCloudOnly
 import eu.akoos.photos.presentation.common.anyLocalOnly
@@ -779,12 +780,7 @@ fun LocationPhotosContent(
                 showAddToAlbumSheet = false
                 viewModel.addSelectedToAlbum(album.linkId) { joined, queued ->
                     scope.launch {
-                        val msg = when {
-                            joined > 0 -> context.getString(R.string.gallery_added_to_album, joined, album.name)
-                            queued > 0 -> context.getString(R.string.device_folder_added_to_album)
-                            else -> context.getString(R.string.album_picker_empty)
-                        }
-                        snackbarHostState.showSnackbar(msg)
+                        snackbarHostState.showSnackbar(addToAlbumResultText(context.resources, joined, queued, album.name))
                     }
                 }
             },
@@ -801,13 +797,7 @@ fun LocationPhotosContent(
                 showCreateAlbumInline = false
                 viewModel.createAlbumThenAddSelected(name) { joined, queued, error ->
                     scope.launch {
-                        val msg = when {
-                            error != null -> error
-                            joined > 0 -> context.getString(R.string.gallery_added_to_album, joined, name)
-                            queued > 0 -> context.getString(R.string.device_folder_added_to_album)
-                            else -> context.getString(R.string.album_picker_empty)
-                        }
-                        snackbarHostState.showSnackbar(msg)
+                        snackbarHostState.showSnackbar(error ?: addToAlbumResultText(context.resources, joined, queued, name))
                     }
                 }
             },

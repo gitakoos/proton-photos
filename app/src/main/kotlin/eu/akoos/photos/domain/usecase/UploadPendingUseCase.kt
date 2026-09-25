@@ -448,9 +448,11 @@ class UploadPendingUseCase @Inject constructor(
         // LOCAL_ONLY filter below and the cloudFileId-keyed album drain above, so the photo shows
         // "uploading" forever and redoing the album-add never re-queues it. Reset such rows to a clean
         // LOCAL_ONLY so this pass uploads them and then joins the album. HIDDEN is left untouched (the
-        // user moved it out of backup on purpose), matching ForceUploadLocalUrisUseCase. Manual/stuck
-        // UPLOADING rows are covered by resetStaleUploadingClaims + the stranded-intent recovery, so no
-        // separate manual set is needed here.
+        // user moved it out of backup on purpose), matching ForceUploadLocalUrisUseCase. So is UPLOADING:
+        // resetStaleUploadingClaims already reset the claims a dead process stranded, so one seen here is
+        // a live upload (an editor or metadata save runs outside this lock, and an album-add can target a
+        // photo mid-upload), and resetting it would upload the photo a second time. Manual rows are
+        // covered by the stranded-intent recovery, so no separate manual set is needed here.
         val albumTargetUris: Set<String> = uploadAlbumTargetDao.getAll().map { it.localUri }.toSet()
 
         // A device file queued for a cloud metadata edit is owned end to end by MetadataEditWorker (via
@@ -465,6 +467,7 @@ class UploadPendingUseCase @Inject constructor(
                 it.localUri !in metadataEditUris &&
                 it.cloudFileId == null &&
                 it.status != SyncStatus.LOCAL_ONLY &&
+                it.status != SyncStatus.UPLOADING &&
                 it.status != SyncStatus.HIDDEN
         }
         if (strandedForced.isNotEmpty()) {
@@ -1560,12 +1563,27 @@ class UploadPendingUseCase @Inject constructor(
      * it the pair stays for the next pass's drain and the membership is never lost. A refused add can
      * also be one that landed on an earlier try whose reply never arrived, so the album's own children
      * settle that case instead of a retry on every pass. A landed join goes out through [signalAlbumJoin].
+     *
+     * The one failure that drops the pair is [eu.akoos.photos.domain.entity.AlbumNotFoundException]:
+     * the album is gone, so no retry could ever land it. Only for a photo this account holds, though,
+     * because the drain also meets pairs another signed-in account queued, and an album of that
+     * account reads as missing from this one's volume.
      */
     private suspend fun joinQueuedAlbum(userId: UserId, localUri: String, albumLinkId: String, cloudId: String) {
         val added = runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudId)) }
             .onFailure { if (it is CancellationException) throw it }
         val joined = cloudId in added.getOrNull()?.succeededLinkIds.orEmpty() ||
             (added.isSuccess && albumHoldsPhoto(userId, albumLinkId, cloudId))
+        if (added.exceptionOrNull() is eu.akoos.photos.domain.entity.AlbumNotFoundException &&
+            holdsPairing(userId, localUri, cloudId)
+        ) {
+            uploadAlbumTargetDao.deleteTarget(localUri, albumLinkId)
+            Log.w(UPLOAD_TAG, "Queued album-add for $albumLinkId dropped: the album no longer exists")
+            eu.akoos.photos.util.SyncDiagnostics.log(
+                "upload ${eu.akoos.photos.util.uploadLogRef(localUri)} album join dropped: album no longer exists",
+            )
+            return
+        }
         if (!joined) {
             val reason = added.exceptionOrNull()?.let { eu.akoos.photos.util.describeUploadFailure(it) }
                 ?: "not accepted"
@@ -1579,6 +1597,13 @@ class UploadPendingUseCase @Inject constructor(
         signalAlbumJoin()
         Log.d(UPLOAD_TAG, "Added $cloudId to queued album $albumLinkId")
     }
+
+    /** Whether this account's own row pairs [localUri] to [cloudId]. A read that fails reads as false,
+     *  which keeps the pair queued. */
+    private suspend fun holdsPairing(userId: UserId, localUri: String, cloudId: String): Boolean =
+        runCatching { syncStateRepo.cloudPairedLinkIds(userId, listOf(localUri))[localUri] == cloudId }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrDefault(false)
 
     /** Whether [albumLinkId] already lists [cloudId] among its photos. A listing that fails reads as
      *  false, which keeps the pair queued. */

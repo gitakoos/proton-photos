@@ -37,3 +37,10 @@ class DriveNotFoundException(message: String = "Resource not found") : Exception
  */
 class AlbumDeleteWouldLosePhotos(val albumLinkId: String) :
     Exception("Deleting album $albumLinkId would delete photos held nowhere else")
+
+/**
+ * Drive no longer holds the album an add was aimed at: neither this user's own volume nor the albums
+ * shared with them has it. Raised apart from an add that merely failed, so a queued add to a deleted
+ * album can be let go instead of being sent again on every upload pass.
+ */
+class AlbumNotFoundException(val albumLinkId: String) : Exception("Album no longer exists")

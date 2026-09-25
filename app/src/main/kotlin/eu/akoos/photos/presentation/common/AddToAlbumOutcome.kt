@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.presentation.common
 
+import android.content.res.Resources
+import eu.akoos.photos.R
+
 /**
  * How an "add to album" landed, counted over the cloud-backed photos the action asked for. The server
  * caps an add at ten links per request, so a partial reject is a normal outcome the user must be told
@@ -72,3 +75,17 @@ fun addToAlbumMessage(joined: Int, queued: Int): AddToAlbumMessage = when {
     joined > 0 -> AddToAlbumMessage.Added
     else -> AddToAlbumMessage.NothingAdded
 }
+
+/**
+ * The snackbar line for a selection added to [albumName], read through [addToAlbumMessage]: the
+ * [joined] photos added now, the [queued] ones that join once they upload, or that nothing was added.
+ */
+fun addToAlbumResultText(resources: Resources, joined: Int, queued: Int, albumName: String): String =
+    when (val outcome = addToAlbumMessage(joined, queued)) {
+        AddToAlbumMessage.Added -> resources.getString(R.string.gallery_added_to_album, joined, albumName)
+        is AddToAlbumMessage.AddedAndUploading -> resources.getQuantityString(
+            R.plurals.gallery_add_to_album_some_queued, outcome.uploading, outcome.uploading,
+        )
+        is AddToAlbumMessage.Uploading -> resources.getString(R.string.gallery_add_to_album_queued)
+        AddToAlbumMessage.NothingAdded -> resources.getString(R.string.album_picker_empty)
+    }

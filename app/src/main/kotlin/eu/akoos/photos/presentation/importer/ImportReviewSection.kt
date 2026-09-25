@@ -86,6 +86,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -233,6 +235,10 @@ fun ImportReviewSection(
     ) {
         val contentTopPad = floatingHeaderContentTopPadding()
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val density = LocalDensity.current
+        // The confirm bar as drawn, navigation inset included; the album row makes it taller. Seeded with
+        // an estimate so the frame before the bar first measures already insets the grid.
+        var confirmBarHeight by remember { mutableStateOf(150.dp + navBottom) }
 
         LazyVerticalGrid(
             state = gridState,
@@ -244,10 +250,11 @@ fun ImportReviewSection(
                 start = 12.dp,
                 top = contentTopPad,
                 end = 12.dp,
-                // Clear the bottom bar (confirm button + discard row) so the last thumbnails stay reachable.
-                // The selection drawer that replaces it slots no action, so it rests without the button row.
+                // Clear the bottom bar by its measured height and one grid gap, so the last thumbnails stay
+                // reachable with or without the album row. The selection drawer that replaces it slots no
+                // action, so it rests without the button row.
                 bottom = gridBottomPadding(
-                    base = 150.dp + navBottom,
+                    base = confirmBarHeight + 8.dp,
                     selecting = selectionMode,
                     drawerHeight = selectionDrawerRestingHeight(withPrimaryRow = false),
                 ),
@@ -308,6 +315,7 @@ fun ImportReviewSection(
                 onOpenAlbumSheet = { showAlbumSheet = true },
                 onConfirm = { showImportConfirm = true },
                 onDiscard = { showDiscardConfirm = true },
+                modifier = Modifier.onSizeChanged { confirmBarHeight = with(density) { it.height.toDp() } },
             )
         }
 
@@ -380,6 +388,9 @@ fun ImportReviewSection(
             items = selectedItems,
             actions = selectionActions,
             onDismiss = { clearSelection() },
+            // Scrolling the review grid collapses an opened drawer, so reaching past it to carry on
+            // through the photos needs no deliberate pull or tap first.
+            contentScrolling = gridState.isScrollInProgress,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
 

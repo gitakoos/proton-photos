@@ -32,6 +32,7 @@ import eu.akoos.photos.data.repository.drive.UploadPhase
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumChild
+import eu.akoos.photos.domain.entity.AlbumNotFoundException
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.CloudTrashItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -52,8 +53,10 @@ import java.io.File
  *  - [addPhotosToAlbum] records membership into [albumMembership]; [failAddPhotosOnce] flips it to throw
  *    exactly once (the transient-failure scenarios), and [rejectAddPhotosOnce] to report every photo as
  *    failed in its result exactly once, the way the real add reports an unsent or refused photo;
- *    [loseAddReplyOnce] records the membership yet reports it failed. [loadAlbumChildren] lists the
- *    recorded membership.
+ *    [loseAddReplyOnce] records the membership yet reports it failed. An album in [goneAlbums] throws
+ *    [AlbumNotFoundException] on every add. [loadAlbumChildren] lists the recorded membership.
+ *  - [onUploadStarted] runs inside [uploadFile] before anything is recorded, while the uploading row is
+ *    still claimed, so a caller can act on a photo mid-upload.
  *  - [getAlbumIdsByPhoto] returns the seeded [albumIdsByPhoto] map.
  *  - [downloadFullResPhoto] returns a throwaway temp file carrying [downloadBytes].
  *  - [callLog] records the order of upload / add / delete calls so ordering invariants can be asserted.
@@ -92,6 +95,13 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     /** When true, the next [addPhotosToAlbum] call records the membership but still returns every
      *  photo as failed, then resets itself. Models an add that landed while its reply was lost. */
     var loseAddReplyOnce = false
+
+    /** Albums Drive no longer holds: every [addPhotosToAlbum] aimed at one throws
+     *  [AlbumNotFoundException], the way the real add reports a deleted album. */
+    val goneAlbums = mutableSetOf<String>()
+
+    /** Runs at the start of every [uploadFile] call, while the upload is in flight. */
+    var onUploadStarted: (suspend (LocalMediaItem) -> Unit)? = null
 
     /** When true, the next [uploadFile] call throws a [kotlinx.coroutines.CancellationException] before
      *  recording anything, then resets itself. Models the user cancelling a replace mid-upload so a
@@ -137,6 +147,7 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         xAttrMetadata: UploadXAttrMetadata,
         onProgress: ((phase: UploadPhase, doneBytes: Long, totalBytes: Long) -> Unit)?,
     ): String {
+        onUploadStarted?.invoke(item)
         if (cancelUploadOnce) {
             cancelUploadOnce = false
             throw kotlinx.coroutines.CancellationException("simulated upload cancel")
@@ -174,6 +185,7 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         photoLinkIds: List<String>,
     ): DrivePhotoRepository.AddPhotosToAlbumResult {
         callLog += "ADD:$albumLinkId"
+        if (albumLinkId in goneAlbums) throw AlbumNotFoundException(albumLinkId)
         addPhotosErrorOnce?.let { addPhotosErrorOnce = null; throw it }
         if (failAddPhotosOnce) {
             failAddPhotosOnce = false

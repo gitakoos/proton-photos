@@ -73,6 +73,7 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DeviceMediaScan
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.AlbumListEventBus
 import eu.akoos.photos.util.NetworkObserver
 import org.junit.After
@@ -469,6 +470,141 @@ class UploadPipelineIntegrationTest {
         // Nothing is left to drain, so a later pass never sends the add again.
         uploadUseCase(userId)
         assertEquals(1, cloud.callLog.count { it == "ADD:$albumLinkId" })
+    }
+
+    // ── Scenario 5d: album-add for a photo mid-upload ───────────────────────────────
+
+    @Test
+    fun `an album-add for a photo mid-upload joins once that upload lands and uploads it once`() = runTest {
+        val uri = "content://media/a5"
+        val albumLinkId = "album-mid-upload"
+        local.add(localItem(uri))
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        // The user adds the photo to an album while its backup is in flight.
+        var statusMidUpload: SyncStatus? = null
+        cloud.onUploadStarted = {
+            cloud.onUploadStarted = null
+            statusMidUpload = row(uri)?.status
+            forceUploadUseCase.queueForAlbum(userId, albumLinkId, listOf(uri))
+        }
+
+        uploadUseCase(userId)
+
+        assertEquals(SyncStatus.UPLOADING, statusMidUpload)
+        val cloudId = cloud.photos.value.single().linkId
+        assertEquals(listOf(cloudId), cloud.albumMembers(albumLinkId))
+        assertTrue("the upload in flight must join the target", targetDao.getTargetsFor(uri).isEmpty())
+        row(uri)!!.let {
+            assertEquals(SyncStatus.SYNCED, it.status)
+            assertEquals("a backed-up row carries no intent", false, it.queued)
+        }
+
+        // Nothing is left to upload or join, so a later pass sends neither again.
+        uploadUseCase(userId)
+        assertEquals(1, cloud.callLog.count { it == "UPLOAD" })
+        assertEquals(1, cloud.callLog.count { it == "ADD:$albumLinkId" })
+    }
+
+    @Test
+    fun `an album-add for a photo another save is uploading never uploads it again and joins once it lands`() = runTest {
+        val uri = "content://media/a6"
+        val albumLinkId = "album-held-upload"
+        local.add(localItem(uri))
+        // A first pass spends the once-per-process stale-claim reset, long over by the time a save runs.
+        uploadUseCase(userId)
+        // A save outside the backup pass, such as the editor's replacement upload, holds the row.
+        syncRepo.upsert(localOnlyRow(uri).copy(status = SyncStatus.UPLOADING), userId)
+        syncRepo.markQueued(uri, QueueSource.EDITOR, System.currentTimeMillis())
+
+        forceUploadUseCase.queueForAlbum(userId, albumLinkId, listOf(uri))
+        assertEquals(listOf(albumLinkId), targetDao.getTargetsFor(uri))
+        assertEquals("the held row must not be seeded again", SyncStatus.UPLOADING, row(uri)!!.status)
+
+        // A pass while that upload runs leaves the row to it.
+        uploadUseCase(userId)
+        assertTrue("a photo mid-upload must not upload a second time", cloud.callLog.none { it == "UPLOAD" })
+        assertEquals(SyncStatus.UPLOADING, row(uri)!!.status)
+
+        // The save lands, and the next pass's drain joins the album.
+        syncRepo.upsert(row(uri)!!.copy(cloudFileId = "cloud-saved", status = SyncStatus.SYNCED), userId)
+        syncRepo.clearQueuedForSynced(uri)
+        uploadUseCase(userId)
+
+        assertEquals(listOf("cloud-saved"), cloud.albumMembers(albumLinkId))
+        assertTrue("target must be cleared once the photo joins", targetDao.getTargetsFor(uri).isEmpty())
+        assertTrue(cloud.callLog.none { it == "UPLOAD" })
+    }
+
+    @Test
+    fun `an album-add whose upload lands before its intent is stamped leaves no intent on the backed-up row`() = runTest {
+        val uri = "content://media/a7"
+        val albumLinkId = "album-late-stamp"
+        local.add(localItem(uri))
+        syncRepo.upsert(localOnlyRow(uri).copy(cloudFileId = "cloud-landed", status = SyncStatus.SYNCED), userId)
+        // The add read the row mid-upload, and the upload landed before the add wrote anything.
+        val readMidUpload = object : SyncStateRepository by syncRepo {
+            private var first = true
+            override suspend fun getByUri(localUri: String): SyncState? {
+                val current = syncRepo.getByUri(localUri)
+                if (!first) return current
+                first = false
+                return current?.copy(cloudFileId = null, status = SyncStatus.UPLOADING)
+            }
+        }
+        ForceUploadLocalUrisUseCase(context, readMidUpload, cloud, targetDao)
+            .queueForAlbum(userId, albumLinkId, listOf(uri))
+
+        row(uri)!!.let {
+            assertEquals(SyncStatus.SYNCED, it.status)
+            assertEquals("a backed-up row carries no intent", false, it.queued)
+            assertNull(it.queueSource)
+        }
+        uploadUseCase(userId)
+        assertEquals(listOf("cloud-landed"), cloud.albumMembers(albumLinkId))
+        assertTrue(targetDao.getTargetsFor(uri).isEmpty())
+        assertTrue(cloud.callLog.none { it == "UPLOAD" })
+    }
+
+    // ── Scenario 5e: album-add to an album that no longer exists ───────────────────
+
+    @Test
+    fun `a queued album-add whose album is gone is dropped instead of retried on every pass`() = runTest {
+        val uri = "content://media/a8"
+        val albumLinkId = "album-deleted"
+        local.add(localItem(uri))
+        forceUploadUseCase.queueForAlbum(userId, albumLinkId, listOf(uri))
+        // The album is deleted on Drive before the photo finishes uploading.
+        cloud.goneAlbums += albumLinkId
+
+        uploadUseCase(userId)
+
+        // The photo still backs up; only the add to the missing album is let go.
+        assertEquals(SyncStatus.SYNCED, row(uri)!!.status)
+        assertTrue("a gone album's pair must be dropped", targetDao.getTargetsFor(uri).isEmpty())
+        verify(exactly = 0) { albumEvents.notifyChanged() }
+
+        // Nothing is left to retry, so a later pass never sends the add again.
+        uploadUseCase(userId)
+        assertEquals(1, cloud.callLog.count { it == "ADD:$albumLinkId" })
+    }
+
+    @Test
+    fun `a pair another signed-in account queued stays queued when its album is missing from this account`() = runTest {
+        val uri = "content://media/a9"
+        val albumLinkId = "album-other-account"
+        local.add(localItem(uri))
+        // Another signed-in account backed this photo up and queued it for one of its own albums.
+        syncRepo.upsert(
+            localOnlyRow(uri).copy(cloudFileId = "cloud-other", status = SyncStatus.SYNCED),
+            UserId("other-user"),
+        )
+        targetDao.insertIgnore(uri, albumLinkId)
+        // Asked for from this account, that album is not there.
+        cloud.goneAlbums += albumLinkId
+
+        uploadUseCase(userId)
+
+        assertEquals(listOf(albumLinkId), targetDao.getTargetsFor(uri))
     }
 
     // ── Scenario 6: out-of-scope de-queue vs explicit ───────────────────────────────
