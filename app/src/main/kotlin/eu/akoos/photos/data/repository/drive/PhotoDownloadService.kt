@@ -43,6 +43,7 @@ import eu.akoos.photos.crypto.CryptoServiceClient
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.util.isNotExistsApiError
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -59,6 +60,15 @@ private const val BLOCK_PARALLELISM = 4
  *  neither [CloudPhoto.sizeBytes] nor a per-block [RevisionBlockDto.size]. Matches the
  *  4 MiB Proton Drive block size so the denominator is close to reality. */
 private const val DEFAULT_BLOCK_SIZE = 4L * 1024 * 1024
+
+/**
+ * Thrown by [PhotoDownloadService.downloadFullResPhoto] when the server answered and the photo cannot be
+ * fetched however often it is retried: its link, its node keys, its parent album or its revision are
+ * gone. A failure to get an answer at all (offline, a timeout, a busy server) is never this. An
+ * [IllegalStateException], so every caller that already handles the download's failures handles it
+ * unchanged.
+ */
+class PhotoUnavailableException(message: String) : IllegalStateException(message)
 
 /**
  * Full-res photo download.
@@ -245,20 +255,22 @@ class PhotoDownloadService @Inject constructor(
         // 50-wide batch up front); otherwise fall back to the per-file one-element batch fetch.
         // Keyed strictly by this photo's linkId, so no cross-file key material can leak in. A shared
         // album's photo goes through the share endpoint, the only one that answers for a link on
-        // someone else's volume.
+        // someone else's volume. Strict, so a link the map leaves out is one the server said is gone,
+        // never one it could not be asked about.
         val linkDetail: BatchLinkDto = preResolvedLinkDetail ?: run {
             val fetched = if (sharingContext != null) {
                 linkDetailHelpers.batchFetchLinkDetailsViaShare(
-                    userId, sharingContext.sharingShareId, listOf(photo.linkId),
+                    userId, sharingContext.sharingShareId, listOf(photo.linkId), strict = true,
                 )
             } else {
-                linkDetailHelpers.batchFetchLinkDetails(userId, photo.volumeId, listOf(photo.linkId))
+                linkDetailHelpers.batchFetchLinkDetails(userId, photo.volumeId, listOf(photo.linkId), strict = true)
             }
             fetched[photo.linkId]
-        } ?: error("Link not found: ${photo.linkId}")
+        } ?: throw PhotoUnavailableException("Link not found: ${photo.linkId}")
         val link = linkDetail.link
-        val nodeKeyArmored = link.nodeKey ?: error("No nodeKey for ${photo.linkId}")
-        val nodePassphraseArmored = link.nodePassphrase ?: error("No nodePassphrase for ${photo.linkId}")
+        val nodeKeyArmored = link.nodeKey ?: throw PhotoUnavailableException("No nodeKey for ${photo.linkId}")
+        val nodePassphraseArmored = link.nodePassphrase
+            ?: throw PhotoUnavailableException("No nodePassphrase for ${photo.linkId}")
 
         val parentLinkId = link.parentLinkId
         val parentKeyBytes: ByteArray = if (sharingContext != null) {
@@ -271,15 +283,17 @@ class PhotoDownloadService @Inject constructor(
                 photoParentLinkId = parentLinkId,
                 photosRootLinkId = shareService.photosRootLinkId(),
                 sharingContext = sharingContext,
-            ) ?: error("No album key for shared photo ${photo.linkId}")
+            ) ?: throw PhotoUnavailableException("No album key for shared photo ${photo.linkId}")
         } else if (parentLinkId == null || parentLinkId == shareService.photosRootLinkId()) {
             rootLinkKeyBytes
         } else {
-            val albumDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, photo.volumeId, listOf(parentLinkId))
+            val albumDetailMap = linkDetailHelpers.batchFetchLinkDetails(userId, photo.volumeId, listOf(parentLinkId), strict = true)
             val albumLink = albumDetailMap[parentLinkId]?.link
-                ?: error("Parent album link not found for ${photo.linkId}: $parentLinkId")
-            val albumNodeKey = albumLink.nodeKey ?: error("No nodeKey on parent album $parentLinkId")
-            val albumNodePass = albumLink.nodePassphrase ?: error("No nodePassphrase on parent album $parentLinkId")
+                ?: throw PhotoUnavailableException("Parent album link not found for ${photo.linkId}: $parentLinkId")
+            val albumNodeKey = albumLink.nodeKey
+                ?: throw PhotoUnavailableException("No nodeKey on parent album $parentLinkId")
+            val albumNodePass = albumLink.nodePassphrase
+                ?: throw PhotoUnavailableException("No nodePassphrase on parent album $parentLinkId")
             // A failed parent key is fatal, matching both official clients. Substituting the root key
             // can never open a passphrase wrapped to the album, so it only trades a precise error for
             // a decrypt failure one step later.
@@ -313,9 +327,12 @@ class PhotoDownloadService @Inject constructor(
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "downloadFullResPhoto: listRevisions failed: ${e.message}")
+                // Only the server's own "does not exist" stands for an absent revision; any other
+                // failure is no answer and stays retryable.
+                if (!isNotExistsApiError(e)) throw e
                 null
             }
-        } ?: error("No revisionId for ${photo.linkId}")
+        } ?: throw PhotoUnavailableException("No revisionId for ${photo.linkId}")
 
         // ── Fetch revision (for block download URLs) ──────────────────────────────
         // The sharing share reaches a revision on the owner's volume; the volume endpoint does not,
@@ -380,7 +397,7 @@ class PhotoDownloadService @Inject constructor(
         else Log.d(TAG, "downloadFullResPhoto: no CKP in any source — will attempt per-block binary-PGP (thumbnails only)")
 
         val blocks = revisionResp.revision.blocks.sortedBy { it.index }
-        if (blocks.isEmpty()) error("No blocks in revision for ${photo.linkId}")
+        if (blocks.isEmpty()) throw PhotoUnavailableException("No blocks in revision for ${photo.linkId}")
 
         // ── Progress accounting ──────────────────────────────────────────────────
         // The viewer pill is gated on totalBytes > 0 (otherwise it falls back to a bare

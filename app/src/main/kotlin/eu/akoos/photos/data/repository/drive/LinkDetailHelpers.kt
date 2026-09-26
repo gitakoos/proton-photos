@@ -30,6 +30,7 @@ import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.api.dto.BatchLinkDto
 import eu.akoos.photos.data.api.dto.BatchLinksRequest
 import eu.akoos.photos.data.api.dto.ThumbnailBatchRequest
+import eu.akoos.photos.util.isNotExistsApiError
 import eu.akoos.photos.util.isTransientApiError
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -64,11 +65,16 @@ class LinkDetailHelpers @Inject constructor(
      * retry + failure accounting can act, not return a short map that looks like success and
      * silently truncates the listing. A genuinely non-transient single-chunk quirk is still
      * logged and skipped so one odd link can't fail the whole batch.
+     *
+     * A [strict] caller reads a link missing from the map as gone for good, so there only the server's
+     * own "does not exist" answer ([isNotExistsApiError]) may leave a chunk out; being offline, signed
+     * out, or any other refusal propagates instead.
      */
     suspend fun batchFetchLinkDetails(
         userId: UserId,
         volumeId: String,
         linkIds: List<String>,
+        strict: Boolean = false,
     ): Map<String, BatchLinkDto> {
         val result = mutableMapOf<String, BatchLinkDto>()
         val manager = apiProvider.get<DriveApiService>(userId)
@@ -85,6 +91,7 @@ class LinkDetailHelpers @Inject constructor(
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 if (isTransientApiError(e)) throw e
+                if (strict && !isNotExistsApiError(e)) throw e
                 Log.e(TAG, "batchFetchLinkDetails chunk failed: ${e.message}")
             }
         }
@@ -141,11 +148,14 @@ class LinkDetailHelpers @Inject constructor(
      * consume it without branching — the `photo` / `album` / `folder` / `sharing`
      * sub-fields stay null because the share endpoint doesn't surface them, but
      * downstream callers only ever read `detail.link` for shared-album photos.
+     *
+     * [strict] as for [batchFetchLinkDetails].
      */
     suspend fun batchFetchLinkDetailsViaShare(
         userId: UserId,
         shareId: String,
         linkIds: List<String>,
+        strict: Boolean = false,
     ): Map<String, eu.akoos.photos.data.api.dto.BatchLinkDto> {
         val result = mutableMapOf<String, eu.akoos.photos.data.api.dto.BatchLinkDto>()
         val manager = apiProvider.get<DriveApiService>(userId)
@@ -166,6 +176,7 @@ class LinkDetailHelpers @Inject constructor(
                 // runs rather than building a short map that looks like success and truncates the
                 // album. loadAlbumPhotos catches this in its runCatching and keeps the cached snapshot.
                 if (isTransientApiError(e)) throw e
+                if (strict && !isNotExistsApiError(e)) throw e
                 Log.w(TAG, "batchFetchLinkDetailsViaShare failed: ${e.message}")
             }
         }

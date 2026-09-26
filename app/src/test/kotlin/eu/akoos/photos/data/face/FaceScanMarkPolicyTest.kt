@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.face
 
+import eu.akoos.photos.util.SourceMiss
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,27 +30,39 @@ import org.junit.Test
 /**
  * Pins the pure rule that decides whether a photo whose source failed to load is recorded scanned (so a
  * later pass skips it) or left pending. The watchdog hardening leans on it: a device file with no frame
- * and a deterministic decode / decrypt wedge are marked, but a plain cloud defer or a transient download
- * timeout is left pending so a later pass retries it.
+ * and a deterministic decode / decrypt wedge are marked, and so is a cloud photo the load reports
+ * permanently unavailable, but a plain cloud defer or a transient failure is left pending so a later pass
+ * retries it.
  */
 class FaceScanMarkPolicyTest {
 
     @Test
     fun a_device_file_with_no_decodable_frame_is_marked() {
         // A corrupt or unsupported local file has no cloud original to retry, so mark it (never re-hang).
-        assertTrue(shouldMarkScannedOnNullSource(isLocalOnly = true, loadTimedOut = false))
-        assertTrue(shouldMarkScannedOnNullSource(isLocalOnly = true, loadTimedOut = true))
+        for (miss in SourceMiss.entries) {
+            assertTrue(shouldMarkScannedOnNullSource(isLocalOnly = true, loadTimedOut = false, miss = miss))
+            assertTrue(shouldMarkScannedOnNullSource(isLocalOnly = true, loadTimedOut = true, miss = miss))
+        }
     }
 
     @Test
-    fun a_cloud_item_that_merely_deferred_stays_pending() {
-        // Off Wi-Fi, out of budget, or a transient download timeout: no wedge flag set, so leave it pending.
-        assertFalse(shouldMarkScannedOnNullSource(isLocalOnly = false, loadTimedOut = false))
+    fun a_cloud_item_that_merely_deferred_or_failed_transiently_stays_pending() {
+        // Off Wi-Fi, out of budget, or a transient failure: no wedge flag set, so leave it pending.
+        assertFalse(shouldMarkScannedOnNullSource(isLocalOnly = false, loadTimedOut = false, miss = SourceMiss.DEFERRED))
+        assertFalse(shouldMarkScannedOnNullSource(isLocalOnly = false, loadTimedOut = false, miss = SourceMiss.OVER_BUDGET))
+        assertFalse(shouldMarkScannedOnNullSource(isLocalOnly = false, loadTimedOut = false, miss = SourceMiss.TRANSIENT))
+    }
+
+    @Test
+    fun a_cloud_item_the_load_reports_permanently_unavailable_is_marked() {
+        // The link, its keys or its revision are gone, or the original will not decode: retrying only
+        // spends the pass's budget on it again, so mark it and let the walk move past it.
+        assertTrue(shouldMarkScannedOnNullSource(isLocalOnly = false, loadTimedOut = false, miss = SourceMiss.PERMANENT))
     }
 
     @Test
     fun a_cloud_item_whose_load_wedged_is_marked() {
         // A decode or decrypt that ran past its watchdog is deterministic and would re-wedge next pass.
-        assertTrue(shouldMarkScannedOnNullSource(isLocalOnly = false, loadTimedOut = true))
+        assertTrue(shouldMarkScannedOnNullSource(isLocalOnly = false, loadTimedOut = true, miss = SourceMiss.TRANSIENT))
     }
 }

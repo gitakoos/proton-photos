@@ -168,6 +168,21 @@ fun isOfflineError(e: Throwable): Boolean {
     }
 }
 
+/** Proton's body code for "the item asked for does not exist". */
+private const val NOT_EXISTS_CODE = 2501
+
+/**
+ * Whether [e] is the server's own answer that what was asked for does not exist (Proton body code 2501),
+ * as opposed to a failure to answer at all. Read from the body code rather than the HTTP status, which is
+ * an ordinary 4xx that unrelated validation failures also produce. A caller that takes a missing item as
+ * gone for good accepts only this refusal as proof: being offline, signed out, or rate-limited says
+ * nothing about the item.
+ */
+fun isNotExistsApiError(e: Throwable): Boolean {
+    val http = (e as? ApiException)?.error as? ApiResult.Error.Http ?: return false
+    return http.proton?.code == NOT_EXISTS_CODE
+}
+
 /**
  * Inspects an OkHttp [Response] for a `Retry-After` header (seconds) and returns the
  * suggested delay in milliseconds, or null if absent / unparsable.

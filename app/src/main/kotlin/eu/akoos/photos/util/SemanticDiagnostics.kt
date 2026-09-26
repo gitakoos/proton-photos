@@ -77,6 +77,18 @@ object SemanticDiagnostics {
     private val watchdogTimeouts = AtomicInteger(0)
     private val embedFailures = AtomicInteger(0)
 
+    /** Cloud photos tombstoned this session because their source can never load: the server answered
+     *  that the link, its keys or its revision are gone, or the downloaded original is a format the
+     *  decoder cannot read. */
+    private val permanentSkips = AtomicInteger(0)
+
+    /** As of the last pass end: photos waiting out a retry backoff after a transient load failure, and
+     *  photos that pass left for the next one because its download budget was spent. */
+    @Volatile
+    private var transientWaiting = 0
+    @Volatile
+    private var overBudget = 0
+
     /** elapsedRealtime the foreground service last began, or 0 when off, so the snapshot shows how long a
      *  large first index has been running against the platform's daily foreground-service budget. */
     private val fgsStartMs = AtomicLong(0L)
@@ -123,6 +135,18 @@ object SemanticDiagnostics {
 
     fun recordEmbedFailure() {
         embedFailures.incrementAndGet()
+    }
+
+    /** Note one more cloud photo tombstoned because its source can never load. */
+    fun recordPermanentSkip() {
+        permanentSkips.incrementAndGet()
+    }
+
+    /** Record, at a pass end, how many photos wait out a retry backoff and how many the pass left over
+     *  its download budget. */
+    fun recordSourceBacklog(transientWaiting: Int, overBudget: Int) {
+        this.transientWaiting = transientWaiting
+        this.overBudget = overBudget
     }
 
     fun recordFgsStart() {
@@ -175,6 +199,9 @@ object SemanticDiagnostics {
         lastParkReason = "none"
         watchdogTimeouts.set(0)
         embedFailures.set(0)
+        permanentSkips.set(0)
+        transientWaiting = 0
+        overBudget = 0
         fgsStartMs.set(0L)
         fgsTimeouts.set(0)
         lastSearchEmbedMs = -1L
@@ -185,8 +212,9 @@ object SemanticDiagnostics {
     }
 
     /** Live numbers-only block for the copied diagnostics: index state + progress + throughput + stalls,
-     *  the foreground-service runtime, and the search timings that reveal how the ranker scales with the
-     *  library. Nothing here identifies a photo or a query. */
+     *  the photos left pending or tombstoned by why their source did not load, the foreground-service
+     *  runtime, and the search timings that reveal how the ranker scales with the library. Nothing here
+     *  identifies a photo or a query. */
     fun snapshot(): String {
         val pending = (total - indexed).coerceAtLeast(0)
         val now = SystemClock.elapsedRealtime()
@@ -208,6 +236,9 @@ object SemanticDiagnostics {
             append("lastAdvance=").append(lastAdvance).append('\n')
             append("watchdogSkips=").append(watchdogTimeouts.get())
             append(" embedFailures=").append(embedFailures.get()).append('\n')
+            append("permanentSkipped=").append(permanentSkips.get())
+            append(" transientWaiting=").append(transientWaiting)
+            append(" overBudget=").append(overBudget).append('\n')
             append("lastPark=").append(lastParkReason).append('\n')
             append("fgsRuntime=").append(fgsRuntime)
             append(" fgsTimeouts=").append(fgsTimeouts.get()).append('\n')

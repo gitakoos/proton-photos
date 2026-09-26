@@ -102,6 +102,15 @@ import eu.akoos.photos.util.FaceDiagnostics
 import eu.akoos.photos.util.FaceDiagnostics.RegroupTrigger
 import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.NetworkObserver
+import eu.akoos.photos.util.SOURCE_RETRIES_PER_PASS
+import eu.akoos.photos.util.SourceMiss
+import eu.akoos.photos.util.SourceMissNote
+import eu.akoos.photos.util.SourcePassTally
+import eu.akoos.photos.util.SourceRetryBook
+import eu.akoos.photos.util.WalkRetryKick
+import eu.akoos.photos.util.retryKickDelayMs
+import eu.akoos.photos.util.sourceMissForDownloadFailure
+import eu.akoos.photos.util.sourceMissForUndecodedDownload
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -112,6 +121,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -148,13 +158,14 @@ fun shouldRunForegroundIndex(pending: Int, backgroundEnabled: Boolean): Boolean 
 /**
  * Whether a photo whose source failed to load should be recorded scanned (so a later pass skips it)
  * rather than left pending. A device item that yields no bitmap is a corrupt or unsupported local file
- * with no cloud original to retry, so it is marked. A cloud item is marked only when its load wedged past
- * a decode or decrypt watchdog (a deterministic hang that would re-wedge next pass); a plain defer (off
- * Wi-Fi, out of budget) or a transient download timeout leaves it pending for a later retry. Pure so it
- * is unit-tested without Android.
+ * with no cloud original to retry, so it is marked. A cloud item is marked when its load wedged past a
+ * decode or decrypt watchdog (a deterministic hang that would re-wedge next pass), or when the load
+ * reported a [SourceMiss.PERMANENT] miss (the link, its keys or its revision gone, or an original the
+ * decoder cannot read); any other [miss] (off Wi-Fi, out of budget, a transient failure) leaves it
+ * pending for a later retry. Pure so it is unit-tested without Android.
  */
-internal fun shouldMarkScannedOnNullSource(isLocalOnly: Boolean, loadTimedOut: Boolean): Boolean =
-    isLocalOnly || loadTimedOut
+internal fun shouldMarkScannedOnNullSource(isLocalOnly: Boolean, loadTimedOut: Boolean, miss: SourceMiss): Boolean =
+    isLocalOnly || loadTimedOut || miss == SourceMiss.PERMANENT
 
 /**
  * Whether a finished walk pass should group the account's waiting faces into people. It needs a walk
@@ -372,6 +383,14 @@ class FaceIndexingScheduler @Inject constructor(
     /** Own scope so an unpause kick and the settings watcher outlive the caller that triggered them. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    /** Photos whose last load failed transiently, each with its attempts and when it is due again, so a
+     *  pass tries never-tried photos first and a failing one waits out its backoff. In memory only;
+     *  dropped on [reset], so a rescan or a new account tries everything afresh. */
+    private val retryBook = SourceRetryBook()
+
+    /** The re-kick a settled walk leaves for its earliest waiting retry. */
+    private val retryKick = WalkRetryKick(scope)
+
     private val faceModelManager by lazy { FaceModelManager(context) }
     private val faceEmbeddingModelManager by lazy { FaceEmbeddingModelManager(context) }
 
@@ -516,14 +535,17 @@ class FaceIndexingScheduler @Inject constructor(
         // what made a fresh start after import or reset appear to do nothing).
         if (!running.compareAndSet(false, true)) { restartRequested = true; return }
         walkRunning.value = true
+        // This pass supersedes any re-kick an earlier settled pass left for its retries.
+        retryKick.cancel()
         // Taken before this pass reads a face or a scan marker: once an import begins (or a sign-out or
         // rescan resets the scheduler), everything this pass would still write is dropped, and the pass
         // stops at its next photo.
         val passToken = writeFence.token()
         stopRequested = false
-        // Photos that actually got a source this walk. Zero means no progress (off Wi-Fi, or the
-        // budget could load nothing more), so the tail does not re-kick and spin.
-        val sourcesLoaded = AtomicInteger(0)
+        // What this pass's loads came to. Its moved count (a source loaded, or a photo settled without
+        // one) is the pass's headway: zero means none (off Wi-Fi, or every attempt failed transiently), so
+        // the tail does not re-kick and spin.
+        val tally = SourcePassTally(retryBook)
         try {
             val detFile = (faceModelManager.prepare() as? FaceModelPreparation.Ready)?.file
             val embFile = (faceEmbeddingModelManager.prepare() as? FaceModelPreparation.Ready)?.file
@@ -582,6 +604,7 @@ class FaceIndexingScheduler @Inject constructor(
             // pass instead, so changing the cluster threshold and relaunching re-groups the stored
             // embeddings with no re-embed; release keeps the new-faces-only guard.
             if (total == 0) {
+                retryBook.clear()
                 val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
                 // "Fully scanned" holds only for the library as this pass read it. An import since then may
                 // have brought or replaced faces, so the reattach and the grouping wait for the walk the
@@ -643,6 +666,10 @@ class FaceIndexingScheduler @Inject constructor(
                 _progress.value = FaceIndexingProgress(FaceIndexingState.Done, libraryTotal, libraryTotal)
                 return
             }
+            // Never-tried photos go first, then at most SOURCE_RETRIES_PER_PASS of the retries that are due,
+            // so photos that keep failing can never take the pass's download budget from ones not yet
+            // tried; a retry not yet due sits this pass out.
+            val queue = retryBook.planPass(pending, { it.stableId }, SystemClock.elapsedRealtime(), SOURCE_RETRIES_PER_PASS).queue
             _progress.value = FaceIndexingProgress(FaceIndexingState.Running, scannedBefore, libraryTotal)
 
             // Promote a substantial initial backlog onto a foreground service so the walk survives the
@@ -650,7 +677,7 @@ class FaceIndexingScheduler @Inject constructor(
             // notification. Idempotent across passes, and swallowed if a background start is disallowed.
             // A guest gets the same host: the service carries the local partition, so a large signed-out
             // library is exactly as durable as a signed-in one.
-            if (shouldRunForegroundIndex(total, prefs[SettingsKeys.FACE_INDEX_BACKGROUND] != false)) {
+            if (shouldRunForegroundIndex(queue.size, prefs[SettingsKeys.FACE_INDEX_BACKGROUND] != false)) {
                 FaceIndexingService.start(context, userId)
             }
 
@@ -688,8 +715,10 @@ class FaceIndexingScheduler @Inject constructor(
             val passLive = { active() && writeFence.allows(passToken) }
             // Hold the shared model gate for the session-resident window, so this face pair and a
             // semantic walk's CLIP session are never both loaded at once (the large-heap OOM risk).
-            // Released the moment the sessions are closed; the short user-facing scans stay ungated.
-            mlWalkGate.acquire(MlRail.FACE)
+            // Released the moment the sessions are closed; the short user-facing scans stay ungated. A pass
+            // with nothing due (every pending photo waiting out a backoff) loads no model and waits on no gate.
+            val gated = queue.isNotEmpty()
+            if (gated) mlWalkGate.acquire(MlRail.FACE)
             try {
                 coroutineScope {
                     repeat(WORKER_COUNT) { workerIndex ->
@@ -712,24 +741,24 @@ class FaceIndexingScheduler @Inject constructor(
                                 }
                                 if (!passLive()) break
                                 val i = cursor.getAndIncrement()
-                                if (i >= total) break
-                                val item = pending[i]
+                                if (i >= queue.size) break
+                                val item = queue[i]
                                 try {
-                                    indexOne(item, userId, ml, passToken, decryptBudget, sourcesLoaded, scannedKeys, persistedThisPass, "w$workerIndex", facesThisPass, acceptedScores, droppedTooBlurry, acceptedBlur)
+                                    indexOne(item, userId, ml, passToken, decryptBudget, tally, scannedKeys, persistedThisPass, "w$workerIndex", facesThisPass, acceptedScores, droppedTooBlurry, acceptedBlur)
                                 } catch (e: kotlinx.coroutines.CancellationException) {
                                     throw e
                                 } catch (e: Throwable) {
                                     Log.w(TAG, "index ${item.stableId} failed: ${e.message}")
                                 }
                                 val done = processed.incrementAndGet()
-                                if (done % PROGRESS_STRIDE == 0 || done >= total) {
+                                if (done % PROGRESS_STRIDE == 0 || done >= queue.size) {
                                     _progress.value = FaceIndexingProgress(
                                         if (active()) FaceIndexingState.Running else FaceIndexingState.Paused,
                                         scannedBefore + persistedThisPass.get() + scannedKeys.size,
                                         libraryTotal,
                                     )
                                 }
-                                if (BuildConfig.DEBUG && (done % DEBUG_PROGRESS_LOG_STRIDE == 0 || done >= total)) {
+                                if (BuildConfig.DEBUG && (done % DEBUG_PROGRESS_LOG_STRIDE == 0 || done >= queue.size)) {
                                     val elapsedS = (SystemClock.elapsedRealtime() - passStart) / 1000.0
                                     val rate = if (elapsedS > 0.0) done / elapsedS else 0.0
                                     Log.i(
@@ -758,7 +787,7 @@ class FaceIndexingScheduler @Inject constructor(
                 // Closes only the live pair; an abandoned (timed-out) instance was already dropped and is
                 // never closed here, so no session is freed while a wedged native call still uses it.
                 ml.close()
-                mlWalkGate.release(MlRail.FACE)
+                if (gated) mlWalkGate.release(MlRail.FACE)
             }
 
             // Persist this pass's remaining collected markers in one batch, so the next run skips these
@@ -790,7 +819,7 @@ class FaceIndexingScheduler @Inject constructor(
             // until its backoff passes. Decided under the grouping lock, so a regroup that just finished
             // elsewhere (a forced one after an import) counts and is not repeated.
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-            val willContinue = restartRequested || (active() && sourcesLoaded.get() > 0)
+            val willContinue = restartRequested || (active() && tally.moved > 0)
             val nowMs = SystemClock.elapsedRealtime()
             if (shouldGroupAtPassEnd(
                     active = active(),
@@ -824,6 +853,7 @@ class FaceIndexingScheduler @Inject constructor(
                 }
             }
             pushLibraryCounts(userId)
+            FaceDiagnostics.recordSourceBacklog(transientWaiting = retryBook.size(), overBudget = tally.overBudget)
             val indexedNow = scannedBefore + persistedThisPass.get() + scannedKeys.size
             _progress.value = when {
                 !aiEnabled -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
@@ -831,13 +861,14 @@ class FaceIndexingScheduler @Inject constructor(
                 // the drained branch above is the only place that reports Done. Reporting Done at every
                 // pass end is what made the bar look like it kept finishing and starting over.
                 paused || stopRequested -> FaceIndexingProgress(FaceIndexingState.Paused, indexedNow, libraryTotal)
-                // A re-kick is coming (this pass loaded a source, or a restart is already queued), so
-                // stay Running to match the tail re-kick below and not flap the foreground service.
-                sourcesLoaded.get() > 0 || restartRequested -> FaceIndexingProgress(FaceIndexingState.Running, indexedNow, libraryTotal)
-                // A full pass that loaded no source and is not paused means the remainder can't be scanned
-                // right now (deferred off Wi-Fi, or a few undecodable / low-memory cloud items). There is
-                // no re-kick then, so settle to Idle rather than a Running spinner that reads as "scanning
-                // forever, stuck at N of M". The pending items stay pending and retry on the next trigger.
+                // A re-kick is coming (this pass loaded a source or settled a photo, or a restart is already
+                // queued), so stay Running to match the tail re-kick below and not flap the foreground service.
+                tally.moved > 0 || restartRequested -> FaceIndexingProgress(FaceIndexingState.Running, indexedNow, libraryTotal)
+                // A full pass that moved nothing on and is not paused means the remainder can't be scanned
+                // right now (deferred off Wi-Fi, every attempt failed transiently, or every photo left waits
+                // out a retry backoff). There is no immediate re-kick then, so settle to Idle rather than a
+                // Running spinner that reads as "scanning forever, stuck at N of M". The pending items stay
+                // pending: the tail re-kicks once the earliest retry is due, and any other trigger retries.
                 else -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
             }
         } finally {
@@ -845,12 +876,18 @@ class FaceIndexingScheduler @Inject constructor(
             walkRunning.value = false
             // Auto-continue: a full-res walk only downloads a bounded batch per pass, so keep going
             // until the library is drained. A pending resume always re-kicks; otherwise re-kick only
-            // while the walk is still permitted and made progress, which stops cleanly at Done, off
-            // Wi-Fi, or on pause.
+            // while the walk is still permitted and made headway, which stops cleanly at Done, off
+            // Wi-Fi, or on pause. A walk that settles with retries still waiting comes back when the
+            // earliest is due.
             val resume = restartRequested
             restartRequested = false
-            if (resume || (active() && sourcesLoaded.get() > 0)) {
+            if (resume || (active() && tally.moved > 0)) {
                 scope.launch { runCatching { indexAll(userId) } }
+            } else if (active()) {
+                val now = SystemClock.elapsedRealtime()
+                retryKickDelayMs(retryBook.nextDueAfter(now), now)?.let { wait ->
+                    retryKick.schedule(wait) { runCatching { indexAll(userId) } }
+                }
             }
         }
     }
@@ -1061,7 +1098,7 @@ class FaceIndexingScheduler @Inject constructor(
         // scan records without a source (an unreadable device file).
         val markerOnly = ConcurrentHashMap.newKeySet<String>()
         val recorded = try {
-            scanOnePhoto(item, userId, ml, fenceToken, AtomicInteger(2), AtomicInteger(0), markerOnly, worker = "ondemand", force = force)
+            scanOnePhoto(item, userId, ml, fenceToken, AtomicInteger(2), null, markerOnly, worker = "ondemand", force = force)
         } finally {
             ml.close()
         }
@@ -1289,6 +1326,8 @@ class FaceIndexingScheduler @Inject constructor(
     suspend fun reset() {
         stopRequested = true
         writeFence.invalidate()
+        retryKick.cancel()
+        retryBook.clear()
         lastUserId = null
         lastFailedRegroupMs = null
         lastRegroupEndMs = null
@@ -1520,15 +1559,15 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /** Detect + embed every face in one photo and write them with its scan marker (see [scanOnePhoto]),
-     *  counting a written photo in [stored], so a later run skips it whether or not it held a face.
-     *  Bounded source in, recycled on the way out. */
+     *  counting a written photo in [stored], so a later run skips it whether or not it held a face, and
+     *  filing what its load came to in [tally]. Bounded source in, recycled on the way out. */
     private suspend fun indexOne(
         item: GalleryItem,
         userId: UserId?,
         ml: FaceMl,
         fenceToken: Long,
         decryptBudget: AtomicInteger,
-        sourcesLoaded: AtomicInteger,
+        tally: SourcePassTally,
         scannedKeys: MutableSet<String>,
         stored: AtomicInteger,
         worker: String,
@@ -1541,7 +1580,7 @@ class FaceIndexingScheduler @Inject constructor(
         // Background face indexing yields the process-global crypto gate to interactive decrypts; the
         // on-demand and faceless-sweep paths run scanOnePhoto/loadSource directly and stay foreground.
         withContext(DecryptPriorityContext(DecryptPriority.BACKGROUND)) {
-            scanOnePhoto(item, userId, ml, fenceToken, decryptBudget, sourcesLoaded, scannedKeys, worker = worker, stored = stored, facesFound = facesFound, acceptedScores = acceptedScores, droppedTooBlurry = droppedTooBlurry, acceptedBlur = acceptedBlur)
+            scanOnePhoto(item, userId, ml, fenceToken, decryptBudget, tally, scannedKeys, worker = worker, stored = stored, facesFound = facesFound, acceptedScores = acceptedScores, droppedTooBlurry = droppedTooBlurry, acceptedBlur = acceptedBlur)
         }
     }
 
@@ -1553,7 +1592,8 @@ class FaceIndexingScheduler @Inject constructor(
      * one transaction behind [fenceToken] ([storePhotoScan]), and counted in [stored]. A photo recorded
      * scanned without a source (or whose faces failed to write) goes to [scannedKeys] for the caller to
      * persist. Returns true when the photo is recorded either way, false when it stays pending: no source
-     * this time, or the fence turned its write away.
+     * this time, or the fence turned its write away. A walk's [tally] (null for an on-demand scan) learns
+     * whether the photo moved on or why it stayed pending.
      */
     private suspend fun scanOnePhoto(
         item: GalleryItem,
@@ -1561,7 +1601,7 @@ class FaceIndexingScheduler @Inject constructor(
         ml: FaceMl,
         fenceToken: Long,
         decryptBudget: AtomicInteger,
-        sourcesLoaded: AtomicInteger,
+        tally: SourcePassTally?,
         scannedKeys: MutableSet<String>,
         worker: String,
         force: Boolean = false,
@@ -1583,26 +1623,34 @@ class FaceIndexingScheduler @Inject constructor(
             // and gather the cloud fetch metrics so the diagnostics ring shows per-item load / dl cost.
             val loadTimedOut = AtomicBoolean(false)
             val loadMetrics = LoadMetrics()
+            val missNote = SourceMissNote()
             val loadStart = SystemClock.elapsedRealtime()
-            val loaded = loadSource(item, userId, decryptBudget, force, loadTimedOut, loadMetrics)
+            val loaded = loadSource(item, userId, decryptBudget, force, loadTimedOut, loadMetrics, missNote)
             val loadMs = SystemClock.elapsedRealtime() - loadStart
             val source = loaded ?: run {
                 // A device-only item that still yields no source is neither a decodable image nor a
                 // decodable video (a corrupt or unsupported local file), and has no cloud original to try on
                 // a later pass. Record it scanned rather than leave it pending forever: once only such items
                 // remained, a pass would load nothing, the walk would not re-kick, and the count would stand
-                // still at "Running" for good. A cloud item returning null is a transient defer (off Wi-Fi or
-                // out of budget) and stays pending on purpose, UNLESS a decode or decrypt wedged past its
-                // watchdog (loadTimedOut), which is recorded scanned so a deterministically hanging source is
-                // skipped next pass rather than re-hung; a transient download timeout is left pending to retry.
+                // still at "Running" for good. A cloud item the load reports permanently unavailable is
+                // recorded the same way, so it never again spends a pass's budget. A decode or decrypt that
+                // wedged past its watchdog (loadTimedOut) is recorded too, so a deterministically hanging
+                // source is skipped next pass rather than re-hung. Any other cloud miss stays pending: a
+                // transient failure waits out its backoff, a defer (off Wi-Fi or out of budget) waits for the
+                // next pass.
                 if (item is GalleryItem.LocalOnly) FaceDiagnostics.recordUnloadableLocal()
-                if (shouldMarkScannedOnNullSource(item is GalleryItem.LocalOnly, loadTimedOut.get())) {
+                val miss = missNote.reason
+                if (shouldMarkScannedOnNullSource(item is GalleryItem.LocalOnly, loadTimedOut.get(), miss)) {
+                    val permanent = item !is GalleryItem.LocalOnly && miss == SourceMiss.PERMANENT
+                    if (permanent) FaceDiagnostics.recordPermanentSkip()
+                    tally?.movedOn(photoKey, permanent)
                     scannedKeys.add(photoKey)
                     return true
                 }
+                tally?.stayed(photoKey, miss, SystemClock.elapsedRealtime())
                 return false
             }
-            sourcesLoaded.incrementAndGet()
+            tally?.movedOn(photoKey)
             // The faces the detection accepts, built inside the bounded run and written below by this worker
             // once the run is over and the ML lock is free, so the database write never holds up another
             // photo's inference nor counts against the inference watchdog. Guarded by its own monitor: a run
@@ -1741,7 +1789,8 @@ class FaceIndexingScheduler @Inject constructor(
      * full-resolution image on Wi-Fi (downloaded, decoded bounded, then deleted right away); off Wi-Fi
      * or once the per-pass budget is spent it returns null so the photo is deferred to a later pass
      * rather than indexed from a low-detail thumbnail. A cloud video falls back to its still-frame
-     * thumbnail, the only bitmap a video container yields.
+     * thumbnail, the only bitmap a video container yields. A cloud load that returns null notes why in
+     * [miss].
      */
     private suspend fun loadSource(
         item: GalleryItem,
@@ -1750,6 +1799,7 @@ class FaceIndexingScheduler @Inject constructor(
         force: Boolean = false,
         timedOut: AtomicBoolean = AtomicBoolean(false),
         metrics: LoadMetrics = LoadMetrics(),
+        miss: SourceMissNote = SourceMissNote(),
     ): Bitmap? = when (item) {
         // A device video decodes to no bitmap through BitmapFactory, so fall through to a still frame;
         // an image takes the first branch and never opens the retriever.
@@ -1758,8 +1808,8 @@ class FaceIndexingScheduler @Inject constructor(
         // The cloud fallback stays account-bound: a guest has only device items, so it is never reached.
         is GalleryItem.Synced -> decodeLocalBounded(item.local.uri, timedOut)
             ?: decodeLocalVideoFrame(item.local.uri)
-            ?: userId?.let { decodeCloud(item.cloud, it, decryptBudget, force, timedOut, metrics) }
-        is GalleryItem.CloudOnly -> userId?.let { decodeCloud(item.cloud, it, decryptBudget, force, timedOut, metrics) }
+            ?: userId?.let { decodeCloud(item.cloud, it, decryptBudget, force, timedOut, metrics, miss) }
+        is GalleryItem.CloudOnly -> userId?.let { decodeCloud(item.cloud, it, decryptBudget, force, timedOut, metrics, miss) }
     }
 
     /**
@@ -1813,9 +1863,10 @@ class FaceIndexingScheduler @Inject constructor(
         force: Boolean = false,
         timedOut: AtomicBoolean = AtomicBoolean(false),
         metrics: LoadMetrics = LoadMetrics(),
+        miss: SourceMissNote = SourceMissNote(),
     ): Bitmap? =
-        if (photo.mimeType.startsWith("video/")) decodeCloudBounded(photo.linkId, userId, decryptBudget, timedOut)
-        else decodeCloudFullRes(photo, userId, decryptBudget, force, timedOut, metrics)
+        if (photo.mimeType.startsWith("video/")) decodeCloudBounded(photo.linkId, userId, decryptBudget, timedOut, miss)
+        else decodeCloudFullRes(photo, userId, decryptBudget, force, timedOut, metrics, miss)
 
     /**
      * Detect a cloud image from its full-resolution bytes. On Wi-Fi and while the per-pass budget
@@ -1824,7 +1875,9 @@ class FaceIndexingScheduler @Inject constructor(
      * the library is never stored on disk. Off Wi-Fi, out of budget, or on a download failure it
      * returns null and the photo waits for a later pass: a low-detail thumbnail face is exactly what
      * the full-res path is here to avoid. The download itself is serialised through [downloadLock] so
-     * only one is ever in flight, and each spends one unit of the shared per-pass budget.
+     * only one is ever in flight, and each spends one unit of the shared per-pass budget. A null return
+     * notes why in [miss]: a download the service reports unavailable, or an original the decoder cannot
+     * read, is permanent; any other failure is transient.
      */
     private suspend fun decodeCloudFullRes(
         photo: CloudPhoto,
@@ -1833,27 +1886,31 @@ class FaceIndexingScheduler @Inject constructor(
         force: Boolean = false,
         timedOut: AtomicBoolean = AtomicBoolean(false),
         metrics: LoadMetrics = LoadMetrics(),
+        miss: SourceMissNote = SourceMissNote(),
     ): Bitmap? {
         // A forced pass (the user asked, from the viewer) downloads this one photo regardless of the
         // Wi-Fi-only rule and the walk's own stop/pause state; both exist to keep the BACKGROUND walk
         // from flooding data or crypto, which a single deliberate request is not. The Wi-Fi-only rule is
         // the user's "full-res on Wi-Fi only" setting, so once that is off the walk fetches over mobile
         // data too instead of stalling at the on-device photos.
-        if (!force && fullresWifiOnly && !networkObserver.currentlyOnWifi()) return null
-        if (!takeBudget(decryptBudget)) return null
+        if (!force && fullresWifiOnly && !networkObserver.currentlyOnWifi()) return miss.giveUp(SourceMiss.DEFERRED)
+        if (!takeBudget(decryptBudget)) return miss.giveUp(SourceMiss.OVER_BUDGET)
         // A download timeout is transient (a slow or stalled link), unlike a deterministic decode or
         // decrypt wedge: it gets its OWN flag, kept OFF [timedOut], so the item is left PENDING for a later
         // pass to retry when the network is better rather than marked permanently scanned. Only the decode
         // below feeds [timedOut] (a file that will not decode this pass will not decode next pass either).
         val downloadTimedOut = AtomicBoolean(false)
+        val downloadError = AtomicReference<Throwable?>(null)
         val file = downloadLock.withPermit {
-            if (!force && !active()) return null
+            if (!force && !active()) return miss.giveUp(SourceMiss.DEFERRED)
             // Bound the full-res download so a stalled link frees the worker rather than pinning it.
             // Generous, since a large original on a slow link can be legitimately slow. Time just the
             // download and note the bytes it fetched for the diagnostics ring; only a produced file counts.
             val dlStart = SystemClock.elapsedRealtime()
             boundedRun(DOWNLOAD_TIMEOUT_MS, Dispatchers.IO, downloadTimedOut) {
-                val produced = runCatching { photoDownloadService.downloadFullResPhoto(userId, photo) }.getOrNull()
+                val produced = runCatching { photoDownloadService.downloadFullResPhoto(userId, photo) }
+                    .onFailure { downloadError.set(it) }
+                    .getOrNull()
                 // A download that lands after the watchdog gave up has no consumer, so this detached block
                 // deletes it here rather than leave an orphan in the fullres cache.
                 if (produced != null && downloadTimedOut.get()) {
@@ -1866,9 +1923,11 @@ class FaceIndexingScheduler @Inject constructor(
                 metrics.downloadMs = SystemClock.elapsedRealtime() - dlStart
                 metrics.downloadedBytes = runCatching { it.length() }.getOrDefault(0L)
             }
-        } ?: return null
+        } ?: return miss.giveUp(sourceMissForDownloadFailure(downloadError.get()))
+        val unreadable = AtomicBoolean(false)
         return try {
-            decodeFileBounded(file, timedOut)
+            decodeFileBounded(file, timedOut, unreadable)
+                ?: miss.giveUp(sourceMissForUndecodedDownload(unreadable.get()))
         } finally {
             runCatching { file.delete() }
         }
@@ -1898,20 +1957,28 @@ class FaceIndexingScheduler @Inject constructor(
     }.getOrNull()
 
     /** A bounded decode of a cache file, run detached under a watchdog so a decode that wedges frees the
-     *  worker and flips [timedOut] rather than pinning it. */
-    private suspend fun decodeFileBounded(file: File, timedOut: AtomicBoolean): Bitmap? =
-        boundedRun(DECODE_TIMEOUT_MS, Dispatchers.IO, timedOut) { decodeFileBlocking(file) }
+     *  worker and flips [timedOut] rather than pinning it. [unreadable] as for [decodeFileBlocking]. */
+    private suspend fun decodeFileBounded(file: File, timedOut: AtomicBoolean, unreadable: AtomicBoolean? = null): Bitmap? =
+        boundedRun(DECODE_TIMEOUT_MS, Dispatchers.IO, timedOut) { decodeFileBlocking(file, unreadable) }
 
-    private fun decodeFileBlocking(file: File): Bitmap? = runCatching {
+    /** Flips [unreadable] when the decoder read the file and could make no image of it (a format it does
+     *  not support, or corrupt bytes), as opposed to a decode that threw (out of memory) or a file gone. */
+    private fun decodeFileBlocking(file: File, unreadable: AtomicBoolean? = null): Bitmap? = runCatching {
         if (!file.exists() || file.length() <= 0L) return@runCatching null
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.absolutePath, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            if (file.exists()) unreadable?.set(true)
+            return@runCatching null
+        }
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sampleSizeFor(bounds.outWidth, bounds.outHeight)
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bmp = BitmapFactory.decodeFile(file.absolutePath, opts) ?: return@runCatching null
+        val bmp = BitmapFactory.decodeFile(file.absolutePath, opts) ?: run {
+            if (file.exists()) unreadable?.set(true)
+            return@runCatching null
+        }
         val orientation = runCatching {
             ExifInterface(file.absolutePath)
                 .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
@@ -1952,30 +2019,43 @@ class FaceIndexingScheduler @Inject constructor(
      * through the gallery's bounded HD decrypt (same crypto semaphore and libgojni lock), rate-limited
      * per pass so the walk can never flood the crypto service. When the budget is spent the item is left
      * for a later pass (a warm Type 1 still decodes for free), and a revision with no Type 2 thumbnail
-     * falls back to the Type 1 path so it still indexes.
+     * falls back to the Type 1 path so it still indexes. A row still missing its cipher material spends
+     * no budget. A null return notes why in [miss].
      */
     private suspend fun decodeCloudBounded(
         linkId: String,
         userId: UserId,
         decryptBudget: AtomicInteger,
         timedOut: AtomicBoolean = AtomicBoolean(false),
+        miss: SourceMissNote = SourceMissNote(),
     ): Bitmap? {
         // Warm HD wins: best detail, no crypto, no budget.
         val hdCached = cloudHdThumbFile(linkId)
         if (hdCached.exists() && hdCached.length() > 0L) return decodeFileBounded(hdCached, timedOut)
 
-        // Cold path is budgeted. Once the per-pass budget is spent, still index off a warm Type 1
-        // thumbnail the gallery already made (free), else leave the photo for a later pass.
-        if (!takeBudget(decryptBudget)) {
+        // The cipher material comes off the listing row, read before any budget is spent: a row still
+        // missing it (a later listing refresh fills it in) has nothing to decrypt, so it costs the pass
+        // no budget and waits out a backoff, still indexing off a warm Type 1 thumbnail meanwhile.
+        val entity = runCatching { photoListingDao.getByLinkId(linkId) }.getOrNull()
+        val contentKeyPacket = entity?.contentKeyPacket
+        val encNodeKey = entity?.encNodeKey
+        val encNodePass = entity?.encNodePassphrase
+        val parentLinkId = entity?.parentLinkId
+        if (entity == null || contentKeyPacket == null || encNodeKey == null || encNodePass == null || parentLinkId == null) {
             val warmT1 = cloudThumbFile(linkId)
             return if (warmT1.exists() && warmT1.length() > 0L) decodeFileBounded(warmT1, timedOut) else null
         }
 
-        val entity = runCatching { photoListingDao.getByLinkId(linkId) }.getOrNull() ?: return null
-        val contentKeyPacket = entity.contentKeyPacket ?: return null
-        val encNodeKey = entity.encNodeKey ?: return null
-        val encNodePass = entity.encNodePassphrase ?: return null
-        val parentLinkId = entity.parentLinkId ?: return null
+        // Cold path is budgeted. Once the per-pass budget is spent, still index off a warm Type 1
+        // thumbnail the gallery already made (free), else leave the photo for a later pass.
+        if (!takeBudget(decryptBudget)) {
+            val warmT1 = cloudThumbFile(linkId)
+            return if (warmT1.exists() && warmT1.length() > 0L) {
+                decodeFileBounded(warmT1, timedOut)
+            } else {
+                miss.giveUp(SourceMiss.OVER_BUDGET)
+            }
+        }
 
         // Spend the budget unit on the HD decrypt (fresh Type 2 url + the shared node/session decrypt).
         // Bounded like the rest of the load path: a decrypt that wedges frees the worker and flips

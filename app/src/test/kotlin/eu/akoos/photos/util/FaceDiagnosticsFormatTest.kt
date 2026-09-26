@@ -153,6 +153,32 @@ class FaceDiagnosticsFormatTest {
     }
 
     @Test
+    fun source_deferrals_read_zero_before_anything_is_recorded() {
+        val snapshot = FaceDiagnostics.snapshot(now = 0L)
+        assertTrue(snapshot, snapshot.contains("watchdogSkips=0\npermanentSkipped=0 transientWaiting=0 overBudget=0\nfacesDetected=0\n"))
+    }
+
+    @Test
+    fun source_deferrals_print_the_session_skips_and_the_last_pass_backlog() {
+        FaceDiagnostics.recordPermanentSkip()
+        FaceDiagnostics.recordPermanentSkip()
+        FaceDiagnostics.recordSourceBacklog(transientWaiting = 7, overBudget = 120)
+        // A later pass end replaces the backlog rather than adding to it.
+        FaceDiagnostics.recordSourceBacklog(transientWaiting = 5, overBudget = 90)
+        val snapshot = FaceDiagnostics.snapshot(now = 0L)
+        assertTrue(snapshot, snapshot.contains("permanentSkipped=2 transientWaiting=5 overBudget=90\n"))
+    }
+
+    @Test
+    fun clear_resets_the_source_deferrals() {
+        FaceDiagnostics.recordPermanentSkip()
+        FaceDiagnostics.recordSourceBacklog(transientWaiting = 7, overBudget = 120)
+        FaceDiagnostics.clear()
+        val snapshot = FaceDiagnostics.snapshot(now = 0L)
+        assertTrue(snapshot, snapshot.contains("permanentSkipped=0 transientWaiting=0 overBudget=0\n"))
+    }
+
+    @Test
     fun clear_resets_the_totals_and_the_regroups() {
         FaceDiagnostics.recordLibraryCounts(faces = 1234, ungrouped = 34, people = 40, named = 5, atMs = 0L)
         FaceDiagnostics.recordRegroupStarted(RegroupTrigger.DRAINED)

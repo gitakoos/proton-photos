@@ -316,4 +316,35 @@ class RetryWithBackoffTest {
         every { httpDate.header("Retry-After") } returns "Wed, 21 Oct 2026 07:28:00 GMT"
         assertNull(httpDate.retryAfterMs())
     }
+
+    // ─── isNotExistsApiError ──────────────────────────────────────────────────
+
+    private fun protonError(httpCode: Int, protonCode: Int) = ApiException(
+        ApiResult.Error.Http(
+            httpCode = httpCode,
+            message = "http $httpCode",
+            proton = ApiResult.Error.ProtonData(code = protonCode, error = "refused"),
+        ),
+    )
+
+    @Test
+    fun `only the server's own does-not-exist body code reads as not exists`() {
+        assertTrue(isNotExistsApiError(protonError(422, 2501)))
+        assertTrue(isNotExistsApiError(protonError(404, 2501)))
+    }
+
+    @Test
+    fun `no answer or another refusal never reads as not exists`() {
+        // Offline, a timeout, a busy server, or a refusal with any other body code says nothing about
+        // whether the item exists.
+        assertFalse(isNotExistsApiError(protonError(422, 2000)))
+        assertFalse(isNotExistsApiError(httpError(404)))
+        assertFalse(isNotExistsApiError(httpError(403)))
+        assertFalse(isNotExistsApiError(httpError(503)))
+        assertFalse(isNotExistsApiError(ApiException(ApiResult.Error.NoInternet())))
+        assertFalse(isNotExistsApiError(ApiException(ApiResult.Error.Connection(false, cause = UnknownHostException("x")))))
+        assertFalse(isNotExistsApiError(UnknownHostException("x")))
+        assertFalse(isNotExistsApiError(IOException("reset")))
+        assertFalse(isNotExistsApiError(IllegalStateException("Link not found")))
+    }
 }
