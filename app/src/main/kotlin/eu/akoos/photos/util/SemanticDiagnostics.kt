@@ -77,6 +77,15 @@ object SemanticDiagnostics {
     private val watchdogTimeouts = AtomicInteger(0)
     private val embedFailures = AtomicInteger(0)
 
+    /** Image-model sessions the watchdog has abandoned in this process (never closed, so their memory stays
+     *  until the process ends), and whether that count has stopped the background index for the rest of the
+     *  process. Written whole by the scheduler, which owns the count, so the next pass after a clear sets
+     *  them right again. */
+    @Volatile
+    private var abandonedSessions = 0
+    @Volatile
+    private var indexHalted = false
+
     /** Cloud photos tombstoned this session because their source can never load: the server answered
      *  that the link, its keys or its revision are gone, or the downloaded original is a format the
      *  decoder cannot read. */
@@ -135,6 +144,13 @@ object SemanticDiagnostics {
 
     fun recordEmbedFailure() {
         embedFailures.incrementAndGet()
+    }
+
+    /** Record how many image-model sessions this process has abandoned to the watchdog, and whether the
+     *  background index has stopped for the rest of the process because of them. */
+    fun recordAbandonedSessions(count: Int, halted: Boolean) {
+        abandonedSessions = count
+        indexHalted = halted
     }
 
     /** Note one more cloud photo tombstoned because its source can never load. */
@@ -199,6 +215,8 @@ object SemanticDiagnostics {
         lastParkReason = "none"
         watchdogTimeouts.set(0)
         embedFailures.set(0)
+        abandonedSessions = 0
+        indexHalted = false
         permanentSkips.set(0)
         transientWaiting = 0
         overBudget = 0
@@ -212,7 +230,8 @@ object SemanticDiagnostics {
     }
 
     /** Live numbers-only block for the copied diagnostics: index state + progress + throughput + stalls,
-     *  the photos left pending or tombstoned by why their source did not load, the foreground-service
+     *  the photos left pending or tombstoned by why their source did not load, the abandoned model sessions
+     *  and whether they halted the index, the foreground-service
      *  runtime, and the search timings that reveal how the ranker scales with the library. Nothing here
      *  identifies a photo or a query. */
     fun snapshot(): String {
@@ -240,6 +259,8 @@ object SemanticDiagnostics {
             append(" transientWaiting=").append(transientWaiting)
             append(" overBudget=").append(overBudget).append('\n')
             append("lastPark=").append(lastParkReason).append('\n')
+            append("abandonedSessions=").append(abandonedSessions)
+            append(" indexHalted=").append(if (indexHalted) "yes" else "no").append('\n')
             append("fgsRuntime=").append(fgsRuntime)
             append(" fgsTimeouts=").append(fgsTimeouts.get()).append('\n')
             append("search=").append(lastSearch)

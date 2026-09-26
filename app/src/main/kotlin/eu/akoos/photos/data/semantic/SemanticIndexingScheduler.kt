@@ -47,6 +47,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.service.SemanticIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.MlAbandonCap
 import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.MlWalkGate
 import eu.akoos.photos.util.NetworkObserver
@@ -258,6 +259,10 @@ class SemanticIndexingScheduler @Inject constructor(
     /** The re-kick a settled walk leaves for its earliest waiting retry. */
     private val retryKick = WalkRetryKick(scope)
 
+    /** Image-model sessions the watchdog has abandoned in this process; once it is reached the walk opens
+     *  no more until the next process. */
+    private val abandonCap = MlAbandonCap()
+
     private val semanticModelManager by lazy { SemanticModelManager(context) }
 
     /** A zero-vector blob written as a tombstone for a decode-unloadable photo, so it is recorded
@@ -412,7 +417,12 @@ class SemanticIndexingScheduler @Inject constructor(
             // Never-tried photos go first, then at most SOURCE_RETRIES_PER_PASS of the retries that are due,
             // so photos that keep failing can never take the pass's download budget from ones not yet
             // tried; a retry not yet due sits this pass out.
-            val queue = retryBook.planPass(pending, { it.stableId }, SystemClock.elapsedRealtime(), SOURCE_RETRIES_PER_PASS).queue
+            val planned = retryBook.planPass(pending, { it.stableId }, SystemClock.elapsedRealtime(), SOURCE_RETRIES_PER_PASS).queue
+            // Once this process has abandoned its cap of sessions, the walk opens no more: the pass embeds
+            // nothing and settles until the next process resumes it.
+            val halted = abandonCap.reached()
+            if (halted) SemanticDiagnostics.recordAbandonedSessions(abandonCap.count(), halted = true)
+            val queue = if (halted) emptyList() else planned
             _progress.value = SemanticIndexingProgress(SemanticIndexingState.Running, scannedBefore, libraryTotal)
 
             // Host a large first pass in a foreground service so it survives the app being swiped from
@@ -441,7 +451,7 @@ class SemanticIndexingScheduler @Inject constructor(
                 coroutineScope {
                     repeat(WORKER_COUNT) {
                         launch {
-                            while (active()) {
+                            while (active() && !abandonCap.reached()) {
                                 // Gate the walk on the physical/power tier only, not interaction, matching
                                 // the face walk: the scan runs serialized on background threads, so viewing
                                 // a screen never freezes it. Poll so a pause or sign-out still stops the walk
@@ -516,7 +526,7 @@ class SemanticIndexingScheduler @Inject constructor(
             restartRequested = false
             if (resume || (active() && embeddedThisPass.get() > 0)) {
                 scope.launch { runCatching { indexAll(userId) } }
-            } else if (active()) {
+            } else if (active() && !abandonCap.reached()) {
                 val now = SystemClock.elapsedRealtime()
                 retryKickDelayMs(retryBook.nextDueAfter(now), now)?.let { wait ->
                     retryKick.schedule(wait) { runCatching { indexAll(userId) } }
@@ -617,6 +627,12 @@ class SemanticIndexingScheduler @Inject constructor(
             // (never closed under a live native call), and the next item opens a fresh one. The detached
             // block owns [source] and recycles it in its own finally, so a leaked run keeps a valid bitmap.
             val vector = mlLock.withLock {
+                // A photo that waited here while the process abandoned its cap of sessions opens no new one:
+                // it stays pending for the next process.
+                if (abandonCap.reached()) {
+                    if (!source.isRecycled) source.recycle()
+                    return@withContext
+                }
                 val encoder = ml.encoder()
                 val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher) {
                     try {
@@ -628,6 +644,9 @@ class SemanticIndexingScheduler @Inject constructor(
                 if (completed == null) {
                     SemanticDiagnostics.recordWatchdogTimeout()
                     ml.abandon()
+                    val count = abandonCap.recordAbandon()
+                    SemanticDiagnostics.recordAbandonedSessions(count, halted = abandonCap.reached())
+                    if (abandonCap.reached()) Log.w(TAG, "$count sessions abandoned, background index stops until the next start")
                 }
                 completed
             }

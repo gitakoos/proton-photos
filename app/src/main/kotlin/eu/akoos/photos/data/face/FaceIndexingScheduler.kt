@@ -100,6 +100,7 @@ import eu.akoos.photos.service.FaceIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.FaceDiagnostics
 import eu.akoos.photos.util.FaceDiagnostics.RegroupTrigger
+import eu.akoos.photos.util.MlAbandonCap
 import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.SOURCE_RETRIES_PER_PASS
@@ -391,6 +392,10 @@ class FaceIndexingScheduler @Inject constructor(
     /** The re-kick a settled walk leaves for its earliest waiting retry. */
     private val retryKick = WalkRetryKick(scope)
 
+    /** Model pairs the watchdog has abandoned in this process, by any scan; once it is reached the walk and
+     *  the find-more sweep open no more pairs until the next process. */
+    private val abandonCap = MlAbandonCap()
+
     private val faceModelManager by lazy { FaceModelManager(context) }
     private val faceEmbeddingModelManager by lazy { FaceEmbeddingModelManager(context) }
 
@@ -546,6 +551,9 @@ class FaceIndexingScheduler @Inject constructor(
         // one) is the pass's headway: zero means none (off Wi-Fi, or every attempt failed transiently), so
         // the tail does not re-kick and spin.
         val tally = SourcePassTally(retryBook)
+        // Whether this pass holds the shared model gate: taken for the scan and kept through the pass-end
+        // grouping, released once that is done, or in the finally below on any other way out.
+        var holdsGate = false
         try {
             val detFile = (faceModelManager.prepare() as? FaceModelPreparation.Ready)?.file
             val embFile = (faceEmbeddingModelManager.prepare() as? FaceModelPreparation.Ready)?.file
@@ -669,7 +677,12 @@ class FaceIndexingScheduler @Inject constructor(
             // Never-tried photos go first, then at most SOURCE_RETRIES_PER_PASS of the retries that are due,
             // so photos that keep failing can never take the pass's download budget from ones not yet
             // tried; a retry not yet due sits this pass out.
-            val queue = retryBook.planPass(pending, { it.stableId }, SystemClock.elapsedRealtime(), SOURCE_RETRIES_PER_PASS).queue
+            val planned = retryBook.planPass(pending, { it.stableId }, SystemClock.elapsedRealtime(), SOURCE_RETRIES_PER_PASS).queue
+            // Once this process has abandoned its cap of model pairs, the walk opens no more: the pass scans
+            // nothing, still groups what is stored, and settles until the next process resumes it.
+            val halted = abandonCap.reached()
+            if (halted) FaceDiagnostics.recordAbandonedSessions(abandonCap.count(), halted = true)
+            val queue = if (halted) emptyList() else planned
             _progress.value = FaceIndexingProgress(FaceIndexingState.Running, scannedBefore, libraryTotal)
 
             // Promote a substantial initial backlog onto a foreground service so the walk survives the
@@ -711,14 +724,18 @@ class FaceIndexingScheduler @Inject constructor(
             // then holds only the not-yet-flushed remainder. One flush runs at a time.
             val persistedThisPass = AtomicInteger(0)
             val scanFlushing = AtomicBoolean(false)
-            // A pass keeps going only while the walk is permitted and nothing has fenced its writes off.
-            val passLive = { active() && writeFence.allows(passToken) }
+            // A pass keeps going only while the walk is permitted, nothing has fenced its writes off, and the
+            // process has not abandoned its cap of model pairs.
+            val passLive = { active() && writeFence.allows(passToken) && !abandonCap.reached() }
             // Hold the shared model gate for the session-resident window, so this face pair and a
-            // semantic walk's CLIP session are never both loaded at once (the large-heap OOM risk).
-            // Released the moment the sessions are closed; the short user-facing scans stay ungated. A pass
-            // with nothing due (every pending photo waiting out a backoff) loads no model and waits on no gate.
-            val gated = queue.isNotEmpty()
-            if (gated) mlWalkGate.acquire(MlRail.FACE)
+            // semantic walk's CLIP session are never both loaded at once (the large-heap OOM risk), and on
+            // through the pass-end grouping, so the search model cannot load while a regroup holds every
+            // embedding on the heap. The short user-facing scans stay ungated. A pass with nothing due
+            // (every pending photo waiting out a backoff) loads no model and waits on no gate.
+            if (queue.isNotEmpty()) {
+                mlWalkGate.acquire(MlRail.FACE)
+                holdsGate = true
+            }
             try {
                 coroutineScope {
                     repeat(WORKER_COUNT) { workerIndex ->
@@ -787,7 +804,6 @@ class FaceIndexingScheduler @Inject constructor(
                 // Closes only the live pair; an abandoned (timed-out) instance was already dropped and is
                 // never closed here, so no session is freed while a wedged native call still uses it.
                 ml.close()
-                if (gated) mlWalkGate.release(MlRail.FACE)
             }
 
             // Persist this pass's remaining collected markers in one batch, so the next run skips these
@@ -846,11 +862,20 @@ class FaceIndexingScheduler @Inject constructor(
                             cooledDown = regroupCooledDown(decidedMs),
                         )
                     ) {
-                        regroupLocked(userId, if (willContinue) RegroupTrigger.PASS_CONTINUING else RegroupTrigger.PASS_SETTLED)
+                        regroupLocked(
+                            userId,
+                            if (willContinue) RegroupTrigger.PASS_CONTINUING else RegroupTrigger.PASS_SETTLED,
+                            gateHeld = holdsGate,
+                        )
                     } else {
                         lowerBaselineTo(userId, leftover)
                     }
                 }
+            }
+            // The grouping is over, so a semantic walk may load its model now.
+            if (holdsGate) {
+                holdsGate = false
+                mlWalkGate.release(MlRail.FACE)
             }
             pushLibraryCounts(userId)
             FaceDiagnostics.recordSourceBacklog(transientWaiting = retryBook.size(), overBudget = tally.overBudget)
@@ -872,18 +897,19 @@ class FaceIndexingScheduler @Inject constructor(
                 else -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
             }
         } finally {
+            if (holdsGate) mlWalkGate.release(MlRail.FACE)
             running.set(false)
             walkRunning.value = false
             // Auto-continue: a full-res walk only downloads a bounded batch per pass, so keep going
             // until the library is drained. A pending resume always re-kicks; otherwise re-kick only
             // while the walk is still permitted and made headway, which stops cleanly at Done, off
             // Wi-Fi, or on pause. A walk that settles with retries still waiting comes back when the
-            // earliest is due.
+            // earliest is due, unless the process has halted the walk.
             val resume = restartRequested
             restartRequested = false
             if (resume || (active() && tally.moved > 0)) {
                 scope.launch { runCatching { indexAll(userId) } }
-            } else if (active()) {
+            } else if (active() && !abandonCap.reached()) {
                 val now = SystemClock.elapsedRealtime()
                 retryKickDelayMs(retryBook.nextDueAfter(now), now)?.let { wait ->
                     retryKick.schedule(wait) { runCatching { indexAll(userId) } }
@@ -1187,7 +1213,8 @@ class FaceIndexingScheduler @Inject constructor(
             coroutineScope {
                 repeat(WORKER_COUNT) {
                     launch {
-                        while (isActive) {
+                        // Like the walk, the sweep opens no more pairs once this process has abandoned its cap.
+                        while (isActive && !abandonCap.reached()) {
                             val i = cursor.getAndIncrement()
                             if (i >= items.size) break
                             val item = items[i]
@@ -1277,7 +1304,7 @@ class FaceIndexingScheduler @Inject constructor(
                                         // The run is still inside an uncancellable native call on this pair;
                                         // abandon it (never close a session with a run still using it) so the
                                         // next item opens a fresh pair.
-                                        ml.abandon()
+                                        abandonWedgedPair(ml)
                                     }
                                     completed ?: (emptyList<FaceEntity>() to emptyList<FaceSweepEvent.Match>())
                                 }
@@ -1668,6 +1695,12 @@ class FaceIndexingScheduler @Inject constructor(
             var mlFailure: Throwable? = null
             try {
                 mlLock.withLock {
+                    // A walk photo that waited here while the process abandoned its cap of pairs opens no
+                    // new one: it stays pending for the next process.
+                    if (tally != null && abandonCap.reached()) {
+                        if (!source.isRecycled) source.recycle()
+                        return false
+                    }
                     val inferStart = SystemClock.elapsedRealtime()
                     // Snapshot the current pair inside the lock: a timeout below abandons exactly these, and the
                     // next lock holder opens and reads the fresh pair.
@@ -1738,7 +1771,7 @@ class FaceIndexingScheduler @Inject constructor(
                         // The detached run is still inside an uncancellable native call on this pair; abandon
                         // it (never close a session with a run still using it) so the next item opens a fresh
                         // pair.
-                        ml.abandon()
+                        abandonWedgedPair(ml)
                     }
                     inferMs = SystemClock.elapsedRealtime() - inferStart
                 }
@@ -2227,12 +2260,51 @@ class FaceIndexingScheduler @Inject constructor(
      * it. Returns true only when a grouping actually completed (not timed out, failed, or turned away), so
      * the caller can record that a parameter generation was applied. Each run's [trigger] and outcome, and
      * the library totals after it, go to the copied diagnostics.
+     *
+     * A regroup holds every stored embedding on the heap at once, so one that the free heap cannot hold is
+     * skipped before it reads a face: it is recorded, stamps [lastFailedRegroupMs] like a failure so the
+     * pass-end grouping retries after the usual backoff, and returns false. Across the rest it holds the
+     * shared model gate so a semantic walk cannot load its model meanwhile: the walk's pass-end grouping
+     * passes [gateHeld] since its pass already holds it; any other caller takes it only when it is free,
+     * without waiting, since it already holds [groupingLock] and the walk takes the gate before that lock.
      */
-    private suspend fun regroupLocked(userId: UserId?, trigger: RegroupTrigger): Boolean {
+    private suspend fun regroupLocked(userId: UserId?, trigger: RegroupTrigger, gateHeld: Boolean = false): Boolean {
         val fenceToken = writeFence.token()
         // An import is writing right now: a rebuild would read every stored embedding only to be turned
         // away, so leave it to the grouping the import's caller runs once it is done.
         if (!writeFence.allows(fenceToken)) return false
+        val faceCount = runCatching { faceDao.countForUser(accountOf(userId)) }.getOrDefault(0)
+        if (!regroupFitsHeapNow(regroupHeapNeedBytes(faceCount))) {
+            lastFailedRegroupMs = SystemClock.elapsedRealtime()
+            return false
+        }
+        val tookGate = !gateHeld && mlWalkGate.tryAcquire(MlRail.FACE)
+        try {
+            return regroupHoldingMemory(userId, trigger, fenceToken)
+        } finally {
+            if (tookGate) mlWalkGate.release(MlRail.FACE)
+        }
+    }
+
+    /**
+     * Whether a regroup needing [needBytes] fits the heap still free. The used figure counts garbage not yet
+     * collected, so a first no is asked again after a collection before the regroup is skipped; a skip is
+     * recorded with the need and the free heap it found.
+     */
+    private fun regroupFitsHeapNow(needBytes: Long): Boolean {
+        val runtime = Runtime.getRuntime()
+        val used = { runtime.totalMemory() - runtime.freeMemory() }
+        if (regroupFitsHeap(needBytes, runtime.maxMemory(), used())) return true
+        runtime.gc()
+        val usedAfter = used()
+        if (regroupFitsHeap(needBytes, runtime.maxMemory(), usedAfter)) return true
+        Log.w(TAG, "regroup skipped: needs ${needBytes / MIB}MiB, ${(runtime.maxMemory() - usedAfter) / MIB}MiB free")
+        FaceDiagnostics.recordRegroupHeapSkip(needBytes, runtime.maxMemory() - usedAfter)
+        return false
+    }
+
+    /** The body of [regroupLocked], run once the heap check has passed and the gate is settled. */
+    private suspend fun regroupHoldingMemory(userId: UserId?, trigger: RegroupTrigger, fenceToken: Long): Boolean {
         FaceDiagnostics.recordRegroupStarted(trigger)
         val grouped = try {
             // Hard ceiling on a single clustering round. The clusterer is bounded and cancellable
@@ -2436,6 +2508,15 @@ class FaceIndexingScheduler @Inject constructor(
         )
     }
 
+    /** Abandons [ml]'s wedged pair (see [FaceMl.abandon]) and counts it against [abandonCap], recording the
+     *  process's total and whether it now halts the walk. */
+    private fun abandonWedgedPair(ml: FaceMl) {
+        ml.abandon()
+        val count = abandonCap.recordAbandon()
+        FaceDiagnostics.recordAbandonedSessions(count, halted = abandonCap.reached())
+        if (abandonCap.reached()) Log.w(TAG, "$count model pairs abandoned, background scan stops until the next start")
+    }
+
     /** Claim one unit of the per-pass cold-decrypt budget, or false when it is spent. */
     private fun takeBudget(budget: AtomicInteger): Boolean {
         while (true) {
@@ -2549,6 +2630,8 @@ class FaceIndexingScheduler @Inject constructor(
         /** While the device is not in a good state for heavy work, each worker re-checks at this
          *  cadence, so a resume or a pause / sign-out both take effect within a second. */
         const val HEALTH_PAUSE_POLL_MS = 1_000L
+
+        const val MIB = 1024L * 1024L
 
         /** Hard ceiling on one clustering round (see [regroupLocked]). The clusterer is bounded and
          *  cancellable, so this only trips in a pathological case; when it does the walk carries on

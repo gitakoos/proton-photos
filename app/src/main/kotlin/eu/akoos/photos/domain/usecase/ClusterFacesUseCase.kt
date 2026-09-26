@@ -67,8 +67,9 @@ data class FaceRegroupOutcome(val committed: Boolean, val leftUngrouped: Int)
  * person's faces, so a rename survives the rebuild a newly indexed photo triggers rather than
  * reverting to an unnamed cluster.
  *
- * The merge needs every embedding at once, so the pass loads them together; memory stays proportional
- * to the library's face count, comfortably within the app's heap for a personal library.
+ * The merge needs every embedding at once, so the pass holds them together, each unpacked to its float
+ * vector as its page of rows is read ([loadRegroupInput]); the rows themselves are never all held, so the
+ * peak is the vectors plus one page.
  *
  * Both writing passes take a `writeAllowed` check, asked inside their transaction before anything is
  * written: the caller's fence against an import (or a sign-out) that began after the pass read the faces,
@@ -89,10 +90,20 @@ class ClusterFacesUseCase @Inject constructor(
     ): FaceRegroupOutcome = withContext(Dispatchers.Default) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
 
-        val faces = faceDao.allFacesByScoreDesc(account)
+        // Faces marked NOT a given person ("Is this X? No"): never confirmed for, nor pulled into, that
+        // person, no matter how the clustering churns.
+        val notPersonByFace = notPersonDao.allForUser(account)
+            .groupBy({ it.faceId }, { it.personName }).mapValues { it.value.toHashSet() }
+        val input = loadRegroupInput(account, notPersonByFace)
         // Every face a grouping can place (the removed ones never can), so the faces this rebuild leaves
         // without a person can be told apart from the ones indexed after it read the table.
-        val placeableFaces = faces.count { !it.rejected }
+        val placeableFaces = input.placeableFaces
+        val ids = input.ids
+        val oldPersonIds = input.oldPersonIds
+        val manualNames = input.manualNames
+        val blockedNames = input.blockedNames
+        val samples = input.samples
+        val photoKeyById = input.photoKeyById
         // The names the user has given, read before the rebuild clears the person table, so a rename
         // survives the recluster a newly indexed photo triggers.
         val oldNameById = personDao.namedPeopleForUser(account)
@@ -106,50 +117,14 @@ class ClusterFacesUseCase @Inject constructor(
         // The current "Unsorted" bucket id, read before the rebuild clears the table, so the leftover
         // faces keep the same person id across passes (a review screen open on it does not go stale).
         val oldOtherId = personDao.otherPersonId(account)
-        // Manual photos by name (they survive a rebuild) plus a face-id to photo map, so each person's
-        // count is the distinct photos across its faces AND any manually attached photos, not a raw
-        // face tally.
-        val photoKeyById = faces.associate { it.id to it.photoKey }
+        // Manual photos by name (they survive a rebuild), so each person's count is the distinct photos
+        // across its faces AND any manually attached photos, not a raw face tally.
         val manualByName = personManualPhotoDao.allForUser(account)
             .groupBy({ it.personName }, { it.photoKey })
             .mapValues { it.value.toHashSet() }
         // The cover photo a user picked per name, resolved to a member face below, so a chosen cover
         // survives the rebuild as long as the person still has a face on that photo.
         val coverByName = personCoverDao.allForUser(account).associate { it.personName to it.photoKey }
-        // Faces marked NOT a given person ("Is this X? No"): never confirmed for, nor pulled into, that
-        // person, no matter how the clustering churns.
-        val notPersonByFace = notPersonDao.allForUser(account)
-            .groupBy({ it.faceId }, { it.personName }).mapValues { it.value.toHashSet() }
-        val ids = ArrayList<String>(faces.size)
-        val oldPersonIds = ArrayList<Long?>(faces.size)
-        val manualNames = ArrayList<String?>(faces.size)
-        val blockedNames = ArrayList<Set<String>>(faces.size)
-        val samples = ArrayList<FaceSample>(faces.size)
-        for (face in faces) {
-            // A face the user removed from its person stays out of every future clustering pass.
-            if (face.rejected) continue
-            val embedding = unpackEmbedding(face.embedding)
-            if (embedding.size != FACE_EMBEDDING_DIM) continue
-            val confident = isConfidentFace(
-                detectionScore = face.score,
-                blur = face.blur?.toDouble(),
-                sideways = sidewaysFromEncoded(face.landmarks),
-            )
-            ids.add(face.id)
-            oldPersonIds.add(face.personId)
-            val blocked = notPersonByFace[face.id] ?: emptySet()
-            blockedNames.add(blocked)
-            // Confirmed name: ONLY the explicit label the user set by confirming a face they actually
-            // saw (the suggestion review), and never a person this face was told it is NOT. A single
-            // detected face on a manually attached photo is deliberately NOT treated as a confirmation:
-            // when the person's own face is too distant to detect, that lone face is usually a bystander,
-            // and trusting it poisons the person's centroid. Manual attachments stay display-only.
-            val confirmedName = face.manualName?.takeIf { it.isNotBlank() && it !in blocked }
-            manualNames.add(confirmedName)
-            // A confirmed face may seed a cluster even when its crop is weak, so a person the user has
-            // named is never left to fall into the Unsorted bucket for want of a confident crop.
-            samples.add(FaceSample(embedding, face.score, confident, confirmed = confirmedName != null))
-        }
 
         // Cluster off the database (pure CPU), so the transaction below holds only the writes and
         // Room's invalidation fires once, at commit, rather than mid-rebuild. The clusterer polls
@@ -572,20 +547,77 @@ class ClusterFacesUseCase @Inject constructor(
      * grading: rejected faces dropped, stale-width rows skipped, weak crops marked. Diagnostic only.
      */
     suspend fun samplesForSweep(userId: UserId): List<FaceSample> = withContext(Dispatchers.Default) {
-        faceDao.allFacesByScoreDesc(userId.id).mapNotNull { face ->
-            if (face.rejected) return@mapNotNull null
-            val embedding = unpackEmbedding(face.embedding)
-            if (embedding.size != FACE_EMBEDDING_DIM) return@mapNotNull null
-            FaceSample(
-                embedding = embedding,
-                score = face.score,
-                confident = isConfidentFace(
-                    detectionScore = face.score,
-                    blur = face.blur?.toDouble(),
-                    sideways = sidewaysFromEncoded(face.landmarks),
-                ),
-            )
+        loadRegroupInput(userId.id, emptyMap()).samples.map { FaceSample(it.embedding, it.score, it.confident) }
+    }
+
+    /**
+     * The faces a full regroup clusters, read a page of [REGROUP_PAGE_SIZE] rows at a time. Each row's
+     * embedding is unpacked and its quality graded as its page arrives, then the page is let go, so the
+     * rows and the unpacked vectors are never all held together. The faces are then put in the order the
+     * clusterer reads them, clearest detection first ([REGROUP_ORDER]), and reduced to the parallel lists
+     * [invoke] works from: removed faces never appear, and a face whose vector cannot be read counts
+     * toward [RegroupInput.placeableFaces] but is not clustered. [notPersonByFace] holds the names each
+     * face was marked as not being.
+     */
+    internal suspend fun loadRegroupInput(
+        account: String,
+        notPersonByFace: Map<String, Set<String>>,
+    ): RegroupInput {
+        val faces = ArrayList<RegroupFace>()
+        var placeable = 0
+        var afterId = ""
+        while (true) {
+            val page = faceDao.regroupFacesAfter(account, afterId, REGROUP_PAGE_SIZE)
+            for (row in page) {
+                placeable++
+                val embedding = unpackEmbedding(row.embedding)
+                if (embedding.size != FACE_EMBEDDING_DIM) continue
+                faces.add(
+                    RegroupFace(
+                        id = row.id,
+                        photoKey = row.photoKey,
+                        personId = row.personId,
+                        manualName = row.manualName,
+                        score = row.score,
+                        confident = isConfidentFace(
+                            detectionScore = row.score,
+                            blur = row.blur?.toDouble(),
+                            sideways = sidewaysFromEncoded(row.landmarks),
+                        ),
+                        embedding = embedding,
+                    ),
+                )
+            }
+            if (page.size < REGROUP_PAGE_SIZE) break
+            afterId = page.last().id
+            coroutineContext.ensureActive()
         }
+        faces.sortWith(REGROUP_ORDER)
+
+        val ids = ArrayList<String>(faces.size)
+        val oldPersonIds = ArrayList<Long?>(faces.size)
+        val manualNames = ArrayList<String?>(faces.size)
+        val blockedNames = ArrayList<Set<String>>(faces.size)
+        val samples = ArrayList<FaceSample>(faces.size)
+        val photoKeyById = HashMap<String, String>(faces.size)
+        for (face in faces) {
+            ids.add(face.id)
+            oldPersonIds.add(face.personId)
+            photoKeyById[face.id] = face.photoKey
+            val blocked = notPersonByFace[face.id] ?: emptySet()
+            blockedNames.add(blocked)
+            // Confirmed name: ONLY the explicit label the user set by confirming a face they actually
+            // saw (the suggestion review), and never a person this face was told it is NOT. A single
+            // detected face on a manually attached photo is deliberately NOT treated as a confirmation:
+            // when the person's own face is too distant to detect, that lone face is usually a bystander,
+            // and trusting it poisons the person's centroid. Manual attachments stay display-only.
+            val confirmedName = face.manualName?.takeIf { it.isNotBlank() && it !in blocked }
+            manualNames.add(confirmedName)
+            // A confirmed face may seed a cluster even when its crop is weak, so a person the user has
+            // named is never left to fall into the Unsorted bucket for want of a confident crop.
+            samples.add(FaceSample(face.embedding, face.score, face.confident, confirmed = confirmedName != null))
+        }
+        return RegroupInput(ids, oldPersonIds, manualNames, blockedNames, samples, photoKeyById, placeable)
     }
 
     private companion object {
@@ -593,5 +625,65 @@ class ClusterFacesUseCase @Inject constructor(
          *  scan or a big import forms cleaner people in one global pass than by placing faces one at a
          *  time against the existing centroids. A handful of newly indexed faces stays on the fast path. */
         const val INCREMENTAL_MAX_BACKLOG = 500
+
+        /** Rows per page of the full regroup's read: about a megabyte of blobs, inside one cursor window. */
+        const val REGROUP_PAGE_SIZE = 400
     }
+}
+
+/**
+ * What a full regroup clusters, in the clusterer's input order: per face its id, the person it was
+ * grouped under, its confirmed name, the names it was marked as not being and its clustering sample,
+ * plus each face's photo. [placeableFaces] counts every kept face, including those whose vector could
+ * not be read.
+ */
+internal class RegroupInput(
+    val ids: ArrayList<String>,
+    val oldPersonIds: ArrayList<Long?>,
+    val manualNames: ArrayList<String?>,
+    val blockedNames: ArrayList<Set<String>>,
+    val samples: ArrayList<FaceSample>,
+    val photoKeyById: HashMap<String, String>,
+    val placeableFaces: Int,
+)
+
+/** One kept face as the regroup holds it once its row is let go: the graded sample's parts and the
+ *  bookkeeping the rewrite needs, with no box, owner or landmark text. */
+internal class RegroupFace(
+    val id: String,
+    val photoKey: String,
+    val personId: Long?,
+    val manualName: String?,
+    val score: Float,
+    val confident: Boolean,
+    val embedding: FloatArray,
+)
+
+/**
+ * The clusterer's input order, the same total order SQLite's `ORDER BY score DESC, id` gives: the higher
+ * score first, compared as numbers (so 0.0 and -0.0 tie), then the ids in code-point order, which is the
+ * byte order of their UTF-8 text that SQLite's default collation compares. Ids are unique, so no two
+ * faces tie.
+ */
+internal val REGROUP_ORDER: Comparator<RegroupFace> = Comparator { a, b ->
+    when {
+        a.score > b.score -> -1
+        a.score < b.score -> 1
+        else -> compareCodePoints(a.id, b.id)
+    }
+}
+
+/** [a] against [b] by Unicode code point, the order UTF-8 bytes sort in; it differs from [String.compareTo]
+ *  only where a surrogate pair meets a character above it in the basic plane. */
+internal fun compareCodePoints(a: String, b: String): Int {
+    var i = 0
+    var j = 0
+    while (i < a.length && j < b.length) {
+        val ca = a.codePointAt(i)
+        val cb = b.codePointAt(j)
+        if (ca != cb) return ca.compareTo(cb)
+        i += Character.charCount(ca)
+        j += Character.charCount(cb)
+    }
+    return (a.length - i).compareTo(b.length - j)
 }

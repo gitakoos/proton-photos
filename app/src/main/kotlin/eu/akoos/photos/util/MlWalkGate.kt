@@ -46,8 +46,10 @@ enum class MlRail { FACE, SEMANTIC }
  * [activeRail] names whichever walk currently holds the gate (or null when it is free), so the waiting
  * walk's settings card can say it is standing by for that task rather than appearing frozen for no reason.
  *
- * Only the long background walks take the gate. The short, user-initiated scans (a viewer's on-demand
- * face scan, a person's "find more photos" sweep) are left ungated so they stay responsive.
+ * Only the long background walks wait for the gate. A full face regroup, whose every embedding sits on the
+ * heap at once, also holds it as [MlRail.FACE] across that peak, taking it with [tryAcquire] when it is
+ * free rather than waiting. The short, user-initiated scans (a viewer's on-demand face scan, a person's
+ * "find more photos" sweep) are left ungated so they stay responsive.
  */
 @Singleton
 class MlWalkGate @Inject constructor() {
@@ -67,7 +69,15 @@ class MlWalkGate @Inject constructor() {
         _activeRail.value = rail
     }
 
-    /** Releases the gate taken by [acquire] for [rail]. */
+    /** Takes the gate for [rail] only if it is free right now, never waiting, so a caller already holding
+     *  another lock can ask without risking a lock-order cycle. Pair a true result with [release]. */
+    fun tryAcquire(rail: MlRail): Boolean {
+        if (!gate.tryLock()) return false
+        _activeRail.value = rail
+        return true
+    }
+
+    /** Releases the gate taken by [acquire] or [tryAcquire] for [rail]. */
     fun release(rail: MlRail) {
         if (_activeRail.value == rail) _activeRail.value = null
         gate.unlock()

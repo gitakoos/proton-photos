@@ -130,6 +130,29 @@ data class CuratedFace(
     val manualName: String?,
 )
 
+/**
+ * One kept face reduced to what a full regroup reads: its [embedding], the three quality signals the
+ * confident-versus-weak grading reads ([score], [blur], [landmarks]), the person it is grouped under, the
+ * name confirmed for it, and its photo (for each person's photo count and cover). The box and owner
+ * columns are left out. Not a data class: nothing compares these, and the blob has no content equality.
+ */
+class RegroupFaceRow(
+    val id: String,
+    val photoKey: String,
+    val personId: Long?,
+    val manualName: String?,
+    val score: Float,
+    val blur: Float?,
+    val landmarks: String,
+    val embedding: ByteArray,
+)
+
+/** One face's id and recognition vector, the read a single person's centroid is summed from. */
+class FaceVector(val id: String, val embedding: ByteArray)
+
+/** How many kept faces one person holds. */
+data class PersonFaceCount(val personId: Long, val faces: Int)
+
 @Dao
 interface FaceDao {
 
@@ -358,10 +381,38 @@ interface FaceDao {
     @Query("SELECT * FROM face WHERE userId = :userId ORDER BY score DESC, id LIMIT :limit OFFSET :offset")
     suspend fun facesByScoreDesc(userId: String, limit: Int, offset: Int): List<FaceEntity>
 
-    /** Every face for the account, clearest detection first, the batch clustering pass's input. The
-     *  merge step needs all the embeddings at once, so the pass loads them together. */
+    /** Every face for the account as whole rows, clearest detection first. Holds every blob at once, so
+     *  the full regroup reads [regroupFacesAfter] instead. */
     @Query("SELECT * FROM face WHERE userId = :userId ORDER BY score DESC, id")
     suspend fun allFacesByScoreDesc(userId: String): List<FaceEntity>
+
+    /**
+     * The account's next [limit] kept faces after [afterId] in id order, reduced to [RegroupFaceRow], the
+     * full regroup's paged read: each page resumes from the last id seen along the primary key, as
+     * [facesAfter] does, so the whole library's blobs are never held at once. Removed faces are left out,
+     * since no grouping places them. Start from an empty [afterId].
+     */
+    @Query(
+        "SELECT id, photoKey, personId, manualName, score, blur, landmarks, embedding FROM face " +
+            "WHERE +userId = :userId AND rejected = 0 AND id > :afterId ORDER BY id LIMIT :limit",
+    )
+    suspend fun regroupFacesAfter(userId: String, afterId: String, limit: Int): List<RegroupFaceRow>
+
+    /** One person's next [limit] kept faces after [afterId] in id order, id and vector only, so a single
+     *  person's centroid is summed a page at a time. Start from an empty [afterId]. */
+    @Query(
+        "SELECT id, embedding FROM face WHERE userId = :userId AND personId = :personId AND rejected = 0 " +
+            "AND id > :afterId ORDER BY id LIMIT :limit",
+    )
+    suspend fun personVectorsAfter(userId: String, personId: Long, afterId: String, limit: Int): List<FaceVector>
+
+    /** How many kept faces each of the account's people holds, one row per person and no vector read, so
+     *  a cached centroid can be checked against the faces it should summarise. */
+    @Query(
+        "SELECT personId, COUNT(*) AS faces FROM face WHERE userId = :userId AND personId IS NOT NULL " +
+            "AND rejected = 0 GROUP BY personId",
+    )
+    suspend fun keptFaceCountsByPerson(userId: String): List<PersonFaceCount>
 
     /**
      * The account's next [limit] faces after [afterId] in id order, whole rows, the face snapshot export's

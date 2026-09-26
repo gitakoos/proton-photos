@@ -135,6 +135,21 @@ object FaceDiagnostics {
     @Volatile
     private var lastRegroupCompleted: CompletedRegroup? = null
 
+    /** Full regroups skipped this session because the heap still free could not hold every embedding at
+     *  once, and the latest one's estimated need beside the free heap it found. Null before any. */
+    private val regroupsSkippedHeap = AtomicInteger(0)
+    @Volatile
+    private var lastHeapSkip: HeapSkip? = null
+
+    /** Face model pairs the inference watchdog has abandoned in this process (never closed, so their
+     *  memory stays until the process ends), and whether that count has stopped the background scan for the
+     *  rest of the process. Written whole by the scheduler, which owns the count, so the next pass after a
+     *  clear sets them right again. */
+    @Volatile
+    private var abandonedSessions = 0
+    @Volatile
+    private var scanHalted = false
+
     /** What started a full regroup, printed as its fixed [label]: the drained walk, a pass end about to
      *  stop or about to continue, a scan brought forward from the viewer or a find-more sweep, or a
      *  request after a naming or merge edit. A closed set, so a trigger never carries free text. */
@@ -157,6 +172,9 @@ object FaceDiagnostics {
 
     /** A completed regroup's run time and the elapsedRealtime it finished at. */
     private data class CompletedRegroup(val durationMs: Long, val endMs: Long)
+
+    /** A regroup skipped for want of heap: the bytes it was estimated to need and the bytes free. */
+    private data class HeapSkip(val needBytes: Long, val freeBytes: Long)
 
     /** elapsedRealtime the foreground service last began a session, or 0 when it is not running, so the
      *  snapshot can show how long the dataSync service has run against the platform's daily budget. */
@@ -273,6 +291,20 @@ object FaceDiagnostics {
         regroupsTimedOut.incrementAndGet()
     }
 
+    /** Note a full regroup skipped before it read a face, because it was estimated to need [needBytes] of
+     *  heap and only [freeBytes] were free. */
+    fun recordRegroupHeapSkip(needBytes: Long, freeBytes: Long) {
+        regroupsSkippedHeap.incrementAndGet()
+        lastHeapSkip = HeapSkip(needBytes, freeBytes)
+    }
+
+    /** Record how many face model pairs this process has abandoned to the watchdog, and whether the
+     *  background scan has stopped for the rest of the process because of them. */
+    fun recordAbandonedSessions(count: Int, halted: Boolean) {
+        abandonedSessions = count
+        scanHalted = halted
+    }
+
     /** Note a full regroup that threw. Only the exception's simple class name is kept, never its message,
      *  so nothing about the account or a photo can reach the copied text. */
     fun recordRegroupFailed(error: Throwable) {
@@ -387,6 +419,10 @@ object FaceDiagnostics {
         lastRegroupTrigger = null
         lastRegroupFailure = null
         lastRegroupCompleted = null
+        regroupsSkippedHeap.set(0)
+        lastHeapSkip = null
+        abandonedSessions = 0
+        scanHalted = false
         fgsStartMs.set(0L)
         fgsTimeouts.set(0)
         imagesProcessed.set(0)
@@ -399,7 +435,8 @@ object FaceDiagnostics {
     /** Live numbers-only block for the copied diagnostics: state, progress, how long since the count last
      *  moved, pending, skips, the photos left pending or settled by why their source did not load, faces
      *  detected, the library totals, the regroup tallies with the latest trigger, failure class and
-     *  completion, the in-flight pointer, the last park reason, the foreground-service runtime and
+     *  completion, the regroups skipped for want of heap, the in-flight pointer, the last park reason, the
+     *  abandoned model pairs and whether they halted the scan, the foreground-service runtime and
      *  budget-timeout count, the run aggregates, the slowest item, and the rolling per-item detail
      *  newest-first. Pending is what is left to reach the whole library, so a scan stuck short of the end
      *  is obvious at a glance. Every relative age is measured from [now] (elapsedRealtime). */
@@ -413,6 +450,7 @@ object FaceDiagnostics {
         val recentLines = recentNewestFirst()
         val counts = libraryCounts
         val completed = lastRegroupCompleted
+        val heapSkip = lastHeapSkip
         return buildString {
             append("state=").append(state).append('\n')
             append("indexed=").append(indexed).append('/').append(total)
@@ -444,8 +482,15 @@ object FaceDiagnostics {
                 append(secondsAgo(now, completed.endMs)).append(" (").append(completed.durationMs).append("ms)")
             }
             append('\n')
+            append("regroupHeapSkips=").append(regroupsSkippedHeap.get())
+            heapSkip?.let {
+                append(" (need=").append(formatMb(it.needBytes)).append(" free=").append(formatMb(it.freeBytes)).append(')')
+            }
+            append('\n')
             append("inFlight=").append(inFlightSnapshot()).append('\n')
             append("lastPark=").append(lastParkReason).append('\n')
+            append("abandonedSessions=").append(abandonedSessions)
+            append(" scanHalted=").append(if (scanHalted) "yes" else "no").append('\n')
             append("fgsRuntime=").append(fgsRuntime)
             append(" fgsTimeouts=").append(fgsTimeouts.get()).append('\n')
             append("img=").append(imagesProcessed.get())
