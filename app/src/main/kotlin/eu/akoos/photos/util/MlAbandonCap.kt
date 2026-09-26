@@ -30,8 +30,9 @@ const val ML_ABANDON_CAP = 2
 
 /**
  * Counts the sessions of one model the inference watchdog has abandoned in this process. An abandoned
- * session is never closed, since its wedged native call still runs on it, so its memory stays until the
- * process ends; each further one stacks another model's worth. Once [cap] are abandoned the background
+ * session stays open while its wedged native call still runs on it and is closed only once that call
+ * returns, so a call that never returns keeps its memory until the process ends; each further one stacks
+ * another model's worth. Once [cap] are abandoned the background
  * walk stops opening sessions for the rest of the process, and the next process starts a fresh count, so
  * the usual resume on the next start picks the walk up again. Held by a process-wide scheduler, so a
  * sign-out does not reset it: the leaked sessions outlive the account. Pure so it is unit-tested.

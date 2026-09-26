@@ -153,6 +153,36 @@ class FaceVector(val id: String, val embedding: ByteArray)
 /** How many kept faces one person holds. */
 data class PersonFaceCount(val personId: Long, val faces: Int)
 
+/** One kept face's id and the person it is grouped under, with no vector. */
+data class FacePersonLink(val id: String, val personId: Long)
+
+/** One face reduced to its photo and its stored box: no curation, no vector. */
+data class FaceBoxRow(
+    val id: String,
+    val photoKey: String,
+    val boxLeft: Float,
+    val boxTop: Float,
+    val boxRight: Float,
+    val boxBottom: Float,
+)
+
+/**
+ * One face that may carry a name, reduced to its box, the person it is grouped under, the name confirmed
+ * for it and its detection [score] (the order names are captured in). No vector. Not a data class:
+ * nothing compares these rows.
+ */
+class FaceLabelRow(
+    val id: String,
+    val photoKey: String,
+    val boxLeft: Float,
+    val boxTop: Float,
+    val boxRight: Float,
+    val boxBottom: Float,
+    val personId: Long?,
+    val manualName: String?,
+    val score: Float,
+)
+
 @Dao
 interface FaceDao {
 
@@ -382,7 +412,8 @@ interface FaceDao {
     suspend fun facesByScoreDesc(userId: String, limit: Int, offset: Int): List<FaceEntity>
 
     /** Every face for the account as whole rows, clearest detection first. Holds every blob at once, so
-     *  the full regroup reads [regroupFacesAfter] instead. */
+     *  the face passes read lean pages instead ([regroupFacesAfter], [keptPersonLinksByScoreDesc],
+     *  [labelRowsAfter]), each reproducing this order where it matters. */
     @Query("SELECT * FROM face WHERE userId = :userId ORDER BY score DESC, id")
     suspend fun allFacesByScoreDesc(userId: String): List<FaceEntity>
 
@@ -413,6 +444,43 @@ interface FaceDao {
             "AND rejected = 0 GROUP BY personId",
     )
     suspend fun keptFaceCountsByPerson(userId: String): List<PersonFaceCount>
+
+    /** Every kept, grouped face of the account as its id and person, in [allFacesByScoreDesc]'s order
+     *  (clearest detection first, then id), with no vector read: the vectors follow by id. */
+    @Query(
+        "SELECT id, personId FROM face WHERE userId = :userId AND rejected = 0 AND personId IS NOT NULL " +
+            "ORDER BY score DESC, id",
+    )
+    suspend fun keptPersonLinksByScoreDesc(userId: String): List<FacePersonLink>
+
+    /** The account's faces among [faceIds] as id and vector, in no set order. One slice: the caller keeps
+     *  [faceIds] within the host-variable limit. */
+    @Query("SELECT id, embedding FROM face WHERE userId = :userId AND id IN (:faceIds)")
+    suspend fun vectorsByIdsChunk(userId: String, faceIds: List<String>): List<FaceVector>
+
+    /**
+     * The account's next [limit] faces after [afterId] in id order that are grouped or carry a confirmed
+     * name, removed ones included, reduced to [FaceLabelRow]: the name capture's paged read, a walk along
+     * the primary key as [facesAfter] is. Start from an empty [afterId].
+     */
+    @Query(
+        "SELECT id, photoKey, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, `bottom` AS boxBottom, " +
+            "personId, manualName, score FROM face WHERE +userId = :userId AND id > :afterId " +
+            "AND (personId IS NOT NULL OR manualName IS NOT NULL) ORDER BY id LIMIT :limit",
+    )
+    suspend fun labelRowsAfter(userId: String, afterId: String, limit: Int): List<FaceLabelRow>
+
+    /** Every face of the account on the given photos, removed ones included, as its box. One slice: the
+     *  caller keeps [photoKeys] within the host-variable limit. */
+    @Query(
+        "SELECT id, photoKey, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, `bottom` AS boxBottom " +
+            "FROM face WHERE userId = :userId AND photoKey IN (:photoKeys)",
+    )
+    suspend fun faceBoxesOnPhotosChunk(userId: String, photoKeys: List<String>): List<FaceBoxRow>
+
+    /** The photo of each of the account's faces among [faceIds]. One slice, as [faceBoxesOnPhotosChunk]. */
+    @Query("SELECT photoKey FROM face WHERE userId = :userId AND id IN (:faceIds)")
+    suspend fun photoKeysOfFacesChunk(userId: String, faceIds: List<String>): List<String>
 
     /**
      * The account's next [limit] faces after [afterId] in id order, whole rows, the face snapshot export's

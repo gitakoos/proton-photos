@@ -25,11 +25,13 @@ package eu.akoos.photos.domain.usecase
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonDao
-import eu.akoos.photos.data.db.entity.FaceEntity
+import eu.akoos.photos.util.SQL_CHUNK_SIZE
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
 
 /** One auto-merge fold: the unnamed cluster [fromClusterId] is folded into the named person [toPersonId]. */
@@ -85,34 +87,15 @@ class AutoMergePeopleUseCase @Inject constructor(
 ) {
     /** Folds the chosen candidates and returns how many clusters were merged (0 when nothing qualifies). */
     suspend operator fun invoke(account: String): Int = withContext(Dispatchers.Default) {
-        val faces = faceDao.allFacesByScoreDesc(account)
-        val centroids = centroidsByPerson(faces)
-        if (centroids.isEmpty()) return@withContext 0
         val named = personDao.namedPeopleForUser(account).filter { !it.displayName.isNullOrBlank() }
         if (named.isEmpty()) return@withContext 0
         val namedIds = named.mapTo(HashSet()) { it.id }
         val nameById = named.associate { it.id to it.displayName!!.trim() }
+        val input = readInput(account, nameById)
+        if (input.centroids.isEmpty()) return@withContext 0
         val otherId = personDao.otherPersonId(account) ?: -1L
 
-        // (named person, candidate cluster) pairs the user rejected: a candidate holding a face marked
-        // "not this person" under that person's name is never re-offered, so it is not auto-merged either.
-        val faceIdsByPerson = HashMap<Long, MutableSet<String>>()
-        for (f in faces) {
-            if (f.rejected) continue
-            val pid = f.personId ?: continue
-            faceIdsByPerson.getOrPut(pid) { HashSet() }.add(f.id)
-        }
-        val rejectedByName = notPersonDao.allForUser(account).groupBy({ it.personName }, { it.faceId })
-        val rejectedPairs = HashSet<Pair<Long, Long>>()
-        for ((namedId, name) in nameById) {
-            val rejected = rejectedByName[name]?.toHashSet() ?: continue
-            for (cid in centroids.keys) {
-                if (cid == namedId) continue
-                if (faceIdsByPerson[cid]?.any { it in rejected } == true) rejectedPairs.add(namedId to cid)
-            }
-        }
-
-        val pairs = pickAutoMergePairs(centroids, namedIds, otherId, rejectedPairs, FACE_SUGGEST_THRESHOLD)
+        val pairs = pickAutoMergePairs(input.centroids, namedIds, otherId, input.rejectedPairs, FACE_SUGGEST_THRESHOLD)
         for (pair in pairs) {
             val name = nameById[pair.toPersonId] ?: continue
             // Fold the candidate into the named person (by name); the surviving side is the named person.
@@ -121,24 +104,57 @@ class AutoMergePeopleUseCase @Inject constructor(
         pairs.size
     }
 
-    /** L2-normalised mean embedding per person, over their kept faces, mirroring the manual suggestion path. */
-    private fun centroidsByPerson(faces: List<FaceEntity>): Map<Long, FloatArray> {
+    /**
+     * Every person's L2-normalised mean embedding over their kept faces, mirroring the manual suggestion
+     * path, and the (named person, candidate) pairs the user rejected. The faces' ids and people are read
+     * first, clearest detection first; the vectors then follow by id a slice at a time and are summed in
+     * that same order, so the centroids match a whole-table read bit for bit while only one slice of
+     * vectors is ever held.
+     */
+    internal suspend fun readInput(account: String, nameById: Map<Long, String>): AutoMergeInput {
+        val marks = notPersonDao.allForUser(account)
+        val markedFaceIds = marks.mapTo(HashSet()) { it.faceId }
+        val links = faceDao.keptPersonLinksByScoreDesc(account)
+        val personOfMarkedFace = HashMap<String, Long>()
         val sums = HashMap<Long, DoubleArray>()
-        for (f in faces) {
-            if (f.rejected) continue
-            val pid = f.personId ?: continue
-            val e = unpackEmbedding(f.embedding)
-            if (e.size != FACE_EMBEDDING_DIM) continue
-            val acc = sums.getOrPut(pid) { DoubleArray(e.size) }
-            for (i in e.indices) acc[i] += e[i]
+        for (start in links.indices step SQL_CHUNK_SIZE) {
+            val slice = links.subList(start, minOf(start + SQL_CHUNK_SIZE, links.size))
+            val vectors = HashMap<String, ByteArray>(slice.size * 2)
+            for (v in faceDao.vectorsByIdsChunk(account, slice.map { it.id })) vectors[v.id] = v.embedding
+            for (link in slice) {
+                if (link.id in markedFaceIds) personOfMarkedFace[link.id] = link.personId
+                val e = unpackEmbedding(vectors[link.id] ?: continue)
+                if (e.size != FACE_EMBEDDING_DIM) continue
+                val acc = sums.getOrPut(link.personId) { DoubleArray(e.size) }
+                for (i in e.indices) acc[i] += e[i]
+            }
+            coroutineContext.ensureActive()
         }
-        val out = HashMap<Long, FloatArray>()
+        val centroids = HashMap<Long, FloatArray>()
         for ((pid, acc) in sums) {
             var norm = 0.0
             for (v in acc) norm += v * v
             val inv = if (norm > 0.0) 1.0 / sqrt(norm) else 0.0
-            out[pid] = FloatArray(acc.size) { (acc[it] * inv).toFloat() }
+            centroids[pid] = FloatArray(acc.size) { (acc[it] * inv).toFloat() }
         }
-        return out
+
+        // (named person, candidate cluster) pairs the user rejected: a candidate holding a face marked
+        // "not this person" under that person's name is never re-offered, so it is not auto-merged either.
+        val rejectedByName = marks.groupBy({ it.personName }, { it.faceId })
+        val rejectedPairs = HashSet<Pair<Long, Long>>()
+        for ((namedId, name) in nameById) {
+            val rejected = rejectedByName[name] ?: continue
+            for (faceId in rejected) {
+                val cid = personOfMarkedFace[faceId] ?: continue
+                if (cid != namedId && cid in centroids) rejectedPairs.add(namedId to cid)
+            }
+        }
+        return AutoMergeInput(centroids, rejectedPairs)
     }
 }
+
+/** What one auto-merge pass chooses from: each person's centroid and the pairs the user rejected. */
+internal class AutoMergeInput(
+    val centroids: Map<Long, FloatArray>,
+    val rejectedPairs: Set<Pair<Long, Long>>,
+)

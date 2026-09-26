@@ -47,17 +47,20 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.service.SemanticIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
+import eu.akoos.photos.util.GuardedSessionHolder
 import eu.akoos.photos.util.MlAbandonCap
 import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.MlWalkGate
 import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.SOURCE_RETRIES_PER_PASS
 import eu.akoos.photos.util.SemanticDiagnostics
+import eu.akoos.photos.util.SessionLease
 import eu.akoos.photos.util.SourceMiss
 import eu.akoos.photos.util.SourceMissNote
 import eu.akoos.photos.util.SourcePassTally
 import eu.akoos.photos.util.SourceRetryBook
 import eu.akoos.photos.util.WalkRetryKick
+import eu.akoos.photos.util.boundedDetachedRun
 import eu.akoos.photos.util.retryKickDelayMs
 import eu.akoos.photos.util.sourceMissForDownloadFailure
 import eu.akoos.photos.util.sourceMissForUndecodedDownload
@@ -490,8 +493,9 @@ class SemanticIndexingScheduler @Inject constructor(
                     }
                 }
             } finally {
-                // Closes only the live session; an abandoned (timed-out) one was already dropped and is
-                // never closed here, so no session is freed while a wedged native call still uses it.
+                // Retires the live session: closed now when idle, else once the run a cancelled worker left
+                // in flight returns. An abandoned one closes itself when its wedged run ends, so no session
+                // is freed while a native call still uses it.
                 ml.close()
                 if (gated) mlWalkGate.release(MlRail.SEMANTIC)
             }
@@ -624,7 +628,7 @@ class SemanticIndexingScheduler @Inject constructor(
             }
             // Bound the native inference: one wedged ONNX run must not pin the shared lock and freeze every
             // worker. On a timeout control returns here, mlLock releases, the wedged session is ABANDONED
-            // (never closed under a live native call), and the next item opens a fresh one. The detached
+            // (closed only once that native call returns), and the next item opens a fresh one. The detached
             // block owns [source] and recycles it in its own finally, so a leaked run keeps a valid bitmap.
             val vector = mlLock.withLock {
                 // A photo that waited here while the process abandoned its cap of sessions opens no new one:
@@ -633,8 +637,11 @@ class SemanticIndexingScheduler @Inject constructor(
                     if (!source.isRecycled) source.recycle()
                     return@withContext
                 }
-                val encoder = ml.encoder()
-                val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher) {
+                // The lease is released when the detached run ends, so the session is never closed under
+                // it, even once the walk is cancelled mid-run.
+                val lease = ml.beginRun()
+                val encoder = lease.value
+                val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher, onRunEnd = lease.release) {
                     try {
                         encoder.encode(source)
                     } finally {
@@ -1007,26 +1014,25 @@ class SemanticIndexingScheduler @Inject constructor(
      * it: one pathological item then releases the shared lock and the walk moves on. Returns the block's
      * result, or null when the block returned null. On a true timeout it flips [timedOut], cancels the
      * wait, and returns null; the abandoned work keeps running on its own detached coroutine (a wedged
-     * native call cannot be cancelled). The caller's decrypt priority rides into the detached context so a
-     * background load stays background at the crypto gate.
+     * native call cannot be cancelled). [onRunEnd] runs exactly once when the detached run itself is over
+     * (see [boundedDetachedRun]), which is how an inference releases its session's lease. The caller's
+     * decrypt priority rides into the detached context so a background load stays background at the
+     * crypto gate.
      */
     private suspend fun <T> boundedRun(
         timeoutMs: Long,
         dispatcher: CoroutineDispatcher,
         timedOut: AtomicBoolean? = null,
+        onRunEnd: (() -> Unit)? = null,
         block: suspend CoroutineScope.() -> T,
-    ): T? {
-        val work = scope.async(
-            dispatcher + (coroutineContext[DecryptPriorityContext] ?: EmptyCoroutineContext),
-            block = block,
-        )
-        val result = withTimeoutOrNull(timeoutMs) { work.await() }
-        if (result == null && work.isActive) {
-            timedOut?.set(true)
-            work.cancel()
-        }
-        return result
-    }
+    ): T? = boundedDetachedRun(
+        scope,
+        dispatcher + (coroutineContext[DecryptPriorityContext] ?: EmptyCoroutineContext),
+        timeoutMs,
+        timedOut,
+        onRunEnd,
+        block,
+    )
 
     private fun packEmbedding(vector: FloatArray): ByteArray {
         val buffer = ByteBuffer.allocate(vector.size * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
@@ -1036,27 +1042,23 @@ class SemanticIndexingScheduler @Inject constructor(
 
     /**
      * Holds a walk's image encoder as a reassignable reference, so a per-item inference timeout can abandon
-     * the wedged session and open a fresh one. A timed-out native run cannot be cancelled and keeps using
-     * its ONNX session after the watchdog gives up, so that instance must never be [close]d (closing frees
-     * the session mid-run: a native use-after-free). [abandon] drops the wedged reference without closing
-     * it and the next [encoder] opens a fresh one; [close] frees only the live session. Opened lazily and
-     * every access is serialised under [mlLock], so the plain nullable field is safe.
+     * the wedged session and open a fresh one. A native run cannot be cancelled and keeps using its ONNX
+     * session after its caller has gone (the watchdog gave up, or the walk was cancelled), so a session is
+     * never closed under a run (a native use-after-free). Every detached run holds a lease on its encoder
+     * ([beginRun]) that its completion releases; [abandon] and [close] both retire the live encoder, which
+     * closes at once when idle, else when its last run returns, and the next [beginRun] opens a fresh one.
      */
-    private class SemanticMl(private val openEncoder: () -> ClipImageEncoder) : AutoCloseable {
-        private var encoder: ClipImageEncoder? = null
+    private class SemanticMl(openEncoder: () -> ClipImageEncoder) : AutoCloseable {
+        private val encoders = GuardedSessionHolder(openEncoder)
 
-        fun encoder(): ClipImageEncoder = encoder ?: openEncoder().also { encoder = it }
+        /** Opens the live encoder if needed and counts one run on it; the run's end must call the release. */
+        fun beginRun(): SessionLease<ClipImageEncoder> = encoders.lease { it }
 
-        /** A run on the current session timed out: drop the reference without closing, so the wedged native
-         *  call keeps a valid session and the next [encoder] opens a fresh one. */
-        fun abandon() {
-            encoder = null
-        }
+        /** A run on the live session timed out: retire it (closed when that run ends) so the next run opens
+         *  a fresh one. */
+        fun abandon() = encoders.retire()
 
-        override fun close() {
-            encoder?.let { e -> runCatching { e.close() } }
-            encoder = null
-        }
+        override fun close() = encoders.retire()
     }
 
     private companion object {

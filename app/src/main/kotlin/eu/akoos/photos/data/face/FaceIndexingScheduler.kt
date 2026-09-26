@@ -59,7 +59,6 @@ import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
 import eu.akoos.photos.domain.usecase.clusterFaces
 import eu.akoos.photos.domain.usecase.cosineSimilarity
 import eu.akoos.photos.domain.usecase.REATTACH_MIN_IOU
-import eu.akoos.photos.domain.usecase.ReattachFace
 import eu.akoos.photos.domain.usecase.ReattachLabel
 import eu.akoos.photos.domain.usecase.matchReattachLabels
 import kotlinx.coroutines.flow.collect
@@ -100,10 +99,13 @@ import eu.akoos.photos.service.FaceIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.FaceDiagnostics
 import eu.akoos.photos.util.FaceDiagnostics.RegroupTrigger
+import eu.akoos.photos.util.GuardedSessionHolder
 import eu.akoos.photos.util.MlAbandonCap
 import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.SOURCE_RETRIES_PER_PASS
+import eu.akoos.photos.util.SessionLease
+import eu.akoos.photos.util.boundedDetachedRun
 import eu.akoos.photos.util.SourceMiss
 import eu.akoos.photos.util.SourceMissNote
 import eu.akoos.photos.util.SourcePassTally
@@ -801,8 +803,9 @@ class FaceIndexingScheduler @Inject constructor(
                     logBlurStats(acceptedBlur.orEmpty(), droppedTooBlurry.get())
                 }
             } finally {
-                // Closes only the live pair; an abandoned (timed-out) instance was already dropped and is
-                // never closed here, so no session is freed while a wedged native call still uses it.
+                // Retires the live pair: closed now when idle, else once the run a cancelled worker left in
+                // flight returns. An abandoned pair closes itself when its wedged run ends, so no session is
+                // freed while a native call still uses it.
                 ml.close()
             }
 
@@ -1112,7 +1115,8 @@ class FaceIndexingScheduler @Inject constructor(
         val detFile = (faceModelManager.prepare() as? FaceModelPreparation.Ready)?.file ?: return false
         val embFile = (faceEmbeddingModelManager.prepare() as? FaceModelPreparation.Ready)?.file ?: return false
         // Same abandon-on-timeout holder as the walk: a single on-demand inference that exceeds the ML
-        // watchdog on a slow device abandons its (wedged) pair rather than closing a session mid-run.
+        // watchdog on a slow device abandons its (wedged) pair rather than closing a session mid-run, and a
+        // caller that leaves the viewer mid-run defers the close below until that run returns.
         val ml = FaceMl(
             {
                 if (force) FaceDetector(detFile, scoreThreshold = 0.5f, inputSize = 640, dispatcher = mlDispatcher)
@@ -1225,11 +1229,14 @@ class FaceIndexingScheduler @Inject constructor(
                                 // matches to stream. The DB writes happen after the lock is released, so
                                 // the mlLock only ever holds native inference, exactly as the walk does.
                                 val (rows, matches) = mlLock.withLock {
-                                    // Snapshot the current pair inside the lock: a timeout below abandons
-                                    // exactly these, and the next lock holder opens the fresh pair.
-                                    val detector = ml.detector()
-                                    val embedder = ml.embedder()
-                                    val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher) {
+                                    // Lease the current pair inside the lock: a timeout below abandons
+                                    // exactly this pair, and the next lock holder opens the fresh one. The
+                                    // lease is released when the detached run ends, so the pair is never
+                                    // closed under it, even once this sweep is cancelled mid-run.
+                                    val lease = ml.beginRun()
+                                    val detector = lease.value.detector
+                                    val embedder = lease.value.embedder
+                                    val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher, onRunEnd = lease.release) {
                                         try {
                                             val sw = source.width.toFloat()
                                             val sh = source.height.toFloat()
@@ -1302,8 +1309,8 @@ class FaceIndexingScheduler @Inject constructor(
                                     if (completed == null) {
                                         FaceDiagnostics.recordWatchdogTimeout()
                                         // The run is still inside an uncancellable native call on this pair;
-                                        // abandon it (never close a session with a run still using it) so the
-                                        // next item opens a fresh pair.
+                                        // abandon it (it closes only once that run returns) so the next item
+                                        // opens a fresh pair.
                                         abandonWedgedPair(ml)
                                     }
                                     completed ?: (emptyList<FaceEntity>() to emptyList<FaceSweepEvent.Match>())
@@ -1334,6 +1341,8 @@ class FaceIndexingScheduler @Inject constructor(
                 }
             }
         } finally {
+            // Leaving the screen cancels the sweep while a detached run may still be inside the pair; the
+            // close then waits for that run to return rather than freeing its sessions under it.
             runCatching { ml.close() }
         }
         // The sweep added faces to photos the walk had left faceless, so group them once the sweep
@@ -1491,11 +1500,7 @@ class FaceIndexingScheduler @Inject constructor(
         val nameById = personDao.namedPeopleForUser(account)
             .mapNotNull { p -> p.displayName?.takeIf { it.isNotBlank() }?.let { p.id to it } }
             .toMap()
-        val members = faceDao.allFacesByScoreDesc(account).mapNotNull { f ->
-            val name = f.personId?.let { nameById[it] } ?: f.manualName?.takeIf { it.isNotBlank() }
-            name ?: return@mapNotNull null
-            ReattachLabel(f.id, f.photoKey, f.left, f.top, f.right, f.bottom, name)
-        }
+        val members = readReattachMembers(faceDao, account, nameById)
         val nots = notPersonDao.facesForUser(account).map {
             ReattachLabel(it.faceId, it.photoKey, it.boxLeft, it.boxTop, it.boxRight, it.boxBottom, it.personName)
         }
@@ -1546,9 +1551,7 @@ class FaceIndexingScheduler @Inject constructor(
             }
         }
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val localFaces = faceDao.allFacesByScoreDesc(account).map {
-            ReattachFace(it.id, it.photoKey, it.left, it.top, it.right, it.bottom)
-        }
+        val localFaces = readReattachFaces(faceDao, account, data)
         val labelled = matchReattachLabels(data.members, localFaces)
         val marks = if (data.nots.isNotEmpty()) matchReattachLabels(data.nots, localFaces) else emptyMap()
         // Re-apply the removed faces by box overlap, at the same threshold the named-face reattach uses:
@@ -1687,10 +1690,10 @@ class FaceIndexingScheduler @Inject constructor(
             // pin the shared lock and freeze every worker forever. On a timeout control returns here, mlLock
             // releases, and the item keeps only the faces found before the timeout (usually none) so the walk
             // moves on. The run cannot be cancelled once native, so on a timeout the wedged pair is ABANDONED
-            // (never closed) and the next item opens a fresh pair (see [FaceMl]); the snapshot below binds THIS
-            // run to the current pair so the abandon frees exactly it, and no later run shares a session with
-            // the leaked one. The detached block owns [source] and recycles it in its own finally, so a leaked
-            // in-flight run keeps a valid bitmap rather than reading a recycled one.
+            // (closed only once that run returns) and the next item opens a fresh pair (see [FaceMl]); the lease
+            // below binds THIS run to the current pair so the abandon retires exactly it, and no later run shares
+            // a session with the wedged one. The detached block owns [source] and recycles it in its own
+            // finally, so a leaked in-flight run keeps a valid bitmap rather than reading a recycled one.
             var inferMs = 0L
             var mlFailure: Throwable? = null
             try {
@@ -1702,11 +1705,13 @@ class FaceIndexingScheduler @Inject constructor(
                         return false
                     }
                     val inferStart = SystemClock.elapsedRealtime()
-                    // Snapshot the current pair inside the lock: a timeout below abandons exactly these, and the
-                    // next lock holder opens and reads the fresh pair.
-                    val detector = ml.detector()
-                    val embedder = ml.embedder()
-                    val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher) {
+                    // Lease the current pair inside the lock: a timeout below abandons exactly this pair, and the
+                    // next lock holder opens the fresh one. The lease is released when the detached run ends, so
+                    // the pair is never closed under it, even once this caller is cancelled mid-run.
+                    val lease = ml.beginRun()
+                    val detector = lease.value.detector
+                    val embedder = lease.value.embedder
+                    val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher, onRunEnd = lease.release) {
                         try {
                             val faces = detector.detect(source)
                             // Count every face the detector returned, before the blur / size gates drop any,
@@ -1769,8 +1774,7 @@ class FaceIndexingScheduler @Inject constructor(
                     if (completed == null) {
                         FaceDiagnostics.recordWatchdogTimeout()
                         // The detached run is still inside an uncancellable native call on this pair; abandon
-                        // it (never close a session with a run still using it) so the next item opens a fresh
-                        // pair.
+                        // it (it closes only once that run returns) so the next item opens a fresh pair.
                         abandonWedgedPair(ml)
                     }
                     inferMs = SystemClock.elapsedRealtime() - inferStart
@@ -2163,27 +2167,26 @@ class FaceIndexingScheduler @Inject constructor(
      * null; the abandoned work keeps running on its own detached coroutine (a wedged native call cannot
      * be cancelled) and finishes or dies on its own. An abandoned ONNX run keeps using its session, so the
      * ML caller ABANDONS that detector / embedder and opens a fresh pair for the next item (see [FaceMl]);
-     * that reallocation, not buffer isolation, is what keeps two runs off the one session. The caller's
-     * decrypt priority rides into the detached context so a background load stays background at the
-     * crypto gate. This is [decodeLocalVideoFrame]'s bounded-decode pattern, generalised.
+     * that reallocation, not buffer isolation, is what keeps two runs off the one session. [onRunEnd] runs
+     * exactly once when the detached run itself is over (see [boundedDetachedRun]), which is how an ML
+     * run releases its pair's lease. The caller's decrypt priority rides into the detached context so a
+     * background load stays background at the crypto gate. This is [decodeLocalVideoFrame]'s
+     * bounded-decode pattern, generalised.
      */
     private suspend fun <T> boundedRun(
         timeoutMs: Long,
         dispatcher: CoroutineDispatcher,
         timedOut: AtomicBoolean? = null,
+        onRunEnd: (() -> Unit)? = null,
         block: suspend CoroutineScope.() -> T,
-    ): T? {
-        val work = scope.async(
-            dispatcher + (coroutineContext[DecryptPriorityContext] ?: EmptyCoroutineContext),
-            block = block,
-        )
-        val result = withTimeoutOrNull(timeoutMs) { work.await() }
-        if (result == null && work.isActive) {
-            timedOut?.set(true)
-            work.cancel()
-        }
-        return result
-    }
+    ): T? = boundedDetachedRun(
+        scope,
+        dispatcher + (coroutineContext[DecryptPriorityContext] ?: EmptyCoroutineContext),
+        timeoutMs,
+        timedOut,
+        onRunEnd,
+        block,
+    )
 
     /** What kind of item [item] is, for the copied diagnostics' in-flight pointer and per-item lines: where
      *  it lives and nothing that identifies it (no key, id, path or token, not even a fragment of one),
@@ -2551,41 +2554,56 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /**
-     * Holds a walk's or an on-demand call's detector + embedder as reassignable references, so a per-item
-     * ML timeout can abandon the wedged pair and open a fresh one. A timed-out native run cannot be
-     * cancelled and keeps using its ONNX session after the watchdog gives up, so that instance must never
-     * be [close]d (closing frees the session mid-run: a native use-after-free). [abandon] drops the wedged
-     * references WITHOUT closing them (the leaked thread finishes against a still-valid session, an already
-     * accepted tradeoff) and the next [detector] / [embedder] opens a fresh pair, so no later run shares a
-     * session with the leaked one. [close] frees only the live pair. Opened lazily and every access is
-     * serialised under [mlLock], so the plain nullable fields are safe.
+     * Holds a walk's or an on-demand call's detector + embedder as a reassignable pair, so a per-item ML
+     * timeout can abandon the wedged pair and open a fresh one. A native run cannot be cancelled and keeps
+     * using its ONNX sessions after its caller has gone (the watchdog gave up, or the caller itself was
+     * cancelled), so a pair is never closed under a run (a native use-after-free). Every detached run
+     * holds a lease on its pair ([beginRun]) that its completion releases; [abandon] and [close] both
+     * retire the live pair, which closes at once when idle, else when its last run returns. An abandoned
+     * pair therefore closes itself once its wedged run ends, and the next [beginRun] opens a fresh pair,
+     * so no later run shares a session with the wedged one.
      */
     private class FaceMl(
+        openDetector: () -> FaceDetector,
+        openEmbedder: () -> FaceEmbedder,
+    ) : AutoCloseable {
+        private val pairs = GuardedSessionHolder { FacePair(openDetector, openEmbedder) }
+
+        /** Opens the live pair if needed and counts one run on it. The run's end must call the lease's
+         *  release, which [boundedRun] does through its run-end callback. */
+        fun beginRun(): SessionLease<FaceRun> =
+            pairs.lease { pair -> FaceRun(pair.detector(), pair.embedder()) }
+
+        /** The live detector's min-size drop count for the debug pass-end log; 0 before it opens. */
+        fun droppedTooSmall(): Int = pairs.peek()?.droppedTooSmall() ?: 0
+
+        /** A run on the live pair timed out: retire it (closed when that run ends) so the next run opens a
+         *  fresh one. */
+        fun abandon() = pairs.retire()
+
+        override fun close() = pairs.retire()
+    }
+
+    /** One detached run's view of a [FaceMl] pair. */
+    private class FaceRun(val detector: FaceDetector, val embedder: FaceEmbedder)
+
+    /** A detector + embedder opened lazily and closed together once no run uses them (see [FaceMl]). */
+    private class FacePair(
         private val openDetector: () -> FaceDetector,
         private val openEmbedder: () -> FaceEmbedder,
     ) : AutoCloseable {
-        private var detector: FaceDetector? = null
-        private var embedder: FaceEmbedder? = null
+        @Volatile private var detector: FaceDetector? = null
+        @Volatile private var embedder: FaceEmbedder? = null
 
         fun detector(): FaceDetector = detector ?: openDetector().also { detector = it }
 
         fun embedder(): FaceEmbedder = embedder ?: openEmbedder().also { embedder = it }
 
-        /** The current detector's min-size drop count for the debug pass-end log; 0 before it opens. */
         fun droppedTooSmall(): Int = detector?.droppedTooSmall?.get() ?: 0
-
-        /** A run on the current pair timed out: drop the references WITHOUT closing, so the wedged native
-         *  call keeps a valid session and the next [detector] / [embedder] opens a fresh one. */
-        fun abandon() {
-            detector = null
-            embedder = null
-        }
 
         override fun close() {
             detector?.let { d -> runCatching { d.close() } }
             embedder?.let { e -> runCatching { e.close() } }
-            detector = null
-            embedder = null
         }
     }
 
