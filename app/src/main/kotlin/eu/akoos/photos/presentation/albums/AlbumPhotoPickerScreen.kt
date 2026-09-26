@@ -84,19 +84,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.IconBubble
-import eu.akoos.photos.presentation.common.isUnfiled
 import eu.akoos.photos.presentation.gallery.GridZoom
 import eu.akoos.photos.presentation.gallery.PhotoCell
-import eu.akoos.photos.presentation.gallery.TimelineGrouping
 import eu.akoos.photos.presentation.gallery.TimelineScrubber
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns
 import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier
 import eu.akoos.photos.presentation.gallery.rememberGridPinchZoomModifier
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgMute
@@ -114,17 +109,6 @@ import androidx.compose.runtime.snapshotFlow
  * entire screen is always in selection mode. [excludeLinkIds] are the album's current cloud members,
  * pre-filtered out so the user can't re-add duplicates.
  */
-/** Type filter for the album photo picker: everything, cloud-backed only, or on-device only. */
-private enum class PickerFilter { All, Cloud, Device }
-
-/** Mime type of a gallery item across all three states, for the videos-only picker filter. Prefers the
- *  device original's type when present, else the cloud record's. */
-private fun pickerMimeTypeOf(item: GalleryItem): String? = when (item) {
-    is GalleryItem.LocalOnly -> item.local.mimeType
-    is GalleryItem.Synced -> item.local.mimeType
-    is GalleryItem.CloudOnly -> item.cloud.mimeType
-}
-
 @Composable
 fun AlbumPhotoPickerScreen(
     albumLinkId: String = "",
@@ -159,9 +143,7 @@ fun AlbumPhotoPickerScreen(
     viewModel: AlbumPhotoPickerViewModel = hiltViewModel(),
 ) {
     val appColors = AppColors.current
-    val allItems by viewModel.items.collectAsStateWithLifecycle()
-    val hiddenCloudLinkIds by viewModel.hiddenCloudLinkIds.collectAsStateWithLifecycle()
-    val inAnyAlbumLinkIds by viewModel.inAnyAlbumLinkIds.collectAsStateWithLifecycle()
+    val content by viewModel.content.collectAsStateWithLifecycle()
     val selected by viewModel.selected.collectAsStateWithLifecycle()
     val addState by viewModel.addState.collectAsStateWithLifecycle()
     val gridState = rememberLazyGridState()
@@ -181,36 +163,9 @@ fun AlbumPhotoPickerScreen(
     // The "Add" bar floats above the navigation bar, so the grid's last row clears both.
     val navBottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-    // Drop photos already in this album, and photos hidden on this device, so the picker only
-    // offers addable new ones. A hidden photo re-added to an album would un-hide it.
-    val basePhotos = remember(allItems, excludeLinkIds, excludeKeys, hiddenCloudLinkIds, deviceOnly) {
-        val filtered =
-            if (excludeLinkIds.isEmpty() && excludeKeys.isEmpty() && hiddenCloudLinkIds.isEmpty()) allItems
-            else allItems.filter { item ->
-                val cloudId = when (item) {
-                    is GalleryItem.CloudOnly -> item.cloud.linkId
-                    is GalleryItem.Synced    -> item.cloud.linkId
-                    is GalleryItem.LocalOnly -> null
-                }
-                val cloudOk = cloudId == null || (cloudId !in excludeLinkIds && cloudId !in hiddenCloudLinkIds)
-                cloudOk && AlbumPhotoPickerViewModel.stableKeyOf(item) !in excludeKeys
-            }
-        // Device-only mode keeps only photos with a device original, since a folder move relocates a
-        // device file; a cloud-only photo has nothing on disk to move.
-        if (deviceOnly) filtered.filter { it is GalleryItem.LocalOnly || it is GalleryItem.Synced } else filtered
-    }
-    // Type filter (#40): narrow the mixed library to cloud-backed photos (CloudOnly + Synced) or
-    // on-device-only photos (LocalOnly), so it is clear which source a photo comes from. The
-    // unfiled-only filter (#73) then composes on top, so a pick like "cloud AND unfiled" holds.
-    val photos = remember(basePhotos, pickerFilter, unfiledOnly, inAnyAlbumLinkIds, videosOnly) {
-        val bySource = when (pickerFilter) {
-            PickerFilter.All -> basePhotos
-            PickerFilter.Cloud -> basePhotos.filter { it is GalleryItem.CloudOnly || it is GalleryItem.Synced }
-            PickerFilter.Device -> basePhotos.filter { it is GalleryItem.LocalOnly }
-        }
-        val byType = if (videosOnly) bySource.filter { pickerMimeTypeOf(it)?.startsWith("video/") == true } else bySource
-        if (unfiledOnly) byType.filter { isUnfiled(it, inAnyAlbumLinkIds) } else byType
-    }
+    // Filtering, date sections and key maps are prepared in the view model off the main thread, so a
+    // large library never stalls the first frame. Null means still loading, distinct from an empty result.
+    val photos = content?.photos ?: emptyList()
 
     // Pop back to the album once the add succeeds.
     androidx.compose.runtime.LaunchedEffect(addState) {
@@ -231,9 +186,7 @@ fun AlbumPhotoPickerScreen(
     }
 
     // Drive on-demand thumbnail decrypts for the visible cloud tiles, mirroring the gallery grid.
-    val keyToIndex = remember(photos) {
-        photos.mapIndexed { i, p -> AlbumPhotoPickerViewModel.stableKeyOf(p) to i }.toMap()
-    }
+    val keyToIndex = content?.indexByKey ?: emptyMap()
     androidx.compose.runtime.LaunchedEffect(photos) {
         var requested = emptySet<String>()
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.mapNotNull { it.key as? String } }
@@ -267,17 +220,27 @@ fun AlbumPhotoPickerScreen(
         var levelIndex by rememberSaveable { mutableIntStateOf(GridZoom.levelForColumns(defaultCols)) }
         val (columnCount, grouping) = GridZoom.LEVELS[levelIndex.coerceIn(0, GridZoom.LEVELS.lastIndex)]
 
-        // Drag-sweep and decrypt both read the FLAT photos order; grouping below is presentational and
-        // preserves order, so the flat key->index map stays valid for hit-testing across group headers.
-        val photoKeys = remember(photos) { photos.map { AlbumPhotoPickerViewModel.stableKeyOf(it) } }
-        val indexByKey = remember(photoKeys) { photoKeys.withIndex().associate { (i, k) -> k to i } }
+        val query = PickerQuery(
+            excludeLinkIds = excludeLinkIds,
+            excludeKeys = excludeKeys,
+            deviceOnly = deviceOnly,
+            videosOnly = videosOnly,
+            filter = pickerFilter,
+            unfiledOnly = unfiledOnly,
+            grouping = grouping,
+        )
+        androidx.compose.runtime.LaunchedEffect(query) { viewModel.setQuery(query) }
+
+        // Drag-sweep and decrypt both read the FLAT photos order; the sections below keep that order,
+        // so the flat key->index map stays valid for hit-testing across group headers.
+        val photoKeys = content?.photoKeys ?: emptyList()
         // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
         // cell back off (otherwise a stationary long-press would select then immediately deselect).
         val tapGuard = remember { mutableStateOf(false) }
         val dragSelectModifier = rememberDragMultiSelectModifier(
             gridState = gridState,
             items = photoKeys,
-            indexByKey = indexByKey,
+            indexByKey = keyToIndex,
             selected = selected,
             onSelectionChange = { proposed ->
                 // A locked key (the video editor's primary) stays selected even through a drag-sweep.
@@ -299,18 +262,7 @@ fun AlbumPhotoPickerScreen(
         )
         val pinchModifier = rememberGridPinchZoomModifier(levelIndex, GridZoom.LEVELS.size) { levelIndex = it }
 
-        // Group the flat list by the level's grouping for full-span section headers. Order is preserved,
-        // so the rendering order matches the flat `photos` order the drag indices/scrubber rely on.
-        val grouped: List<Pair<String, List<GalleryItem>>> = remember(photos, grouping) {
-            val pattern = when (grouping) {
-                TimelineGrouping.None -> "yyyy"
-                TimelineGrouping.Day -> "d MMMM yyyy"
-                TimelineGrouping.Month -> "MMMM yyyy"
-                TimelineGrouping.Year -> "yyyy"
-            }
-            val fmt = SimpleDateFormat(pattern, Locale.getDefault())
-            photos.groupBy { fmt.format(Date(it.captureTimeMs)) }.entries.map { it.key to it.value }
-        }
+        val grouped = content?.sections ?: emptyList()
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(columnCount),
@@ -331,9 +283,11 @@ fun AlbumPhotoPickerScreen(
             modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(pinchModifier),
         ) {
             if (photos.isEmpty()) {
+                val loading = content == null
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Box(Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
-                        Text(stringResource(R.string.album_picker_empty), color = FgMute, fontSize = 14.sp)
+                        if (loading) CircularProgressIndicator(color = Accent)
+                        else Text(stringResource(R.string.album_picker_empty), color = FgMute, fontSize = 14.sp)
                     }
                 }
             } else {
@@ -496,7 +450,7 @@ fun AlbumPhotoPickerScreen(
                 .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
                 .clickable(enabled = canAdd) {
                     if (onPick != null) {
-                        onPick(allItems.filter { AlbumPhotoPickerViewModel.stableKeyOf(it) in selected })
+                        onPick(viewModel.selectedItems())
                     } else {
                         viewModel.addSelectedToAlbum(albumLinkId)
                     }
