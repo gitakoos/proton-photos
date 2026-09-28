@@ -42,7 +42,10 @@ enum class AlbumSortMode {
     LastActivity,
 
     /** Largest album first. */
-    PhotoCount;
+    PhotoCount,
+
+    /** Z to A by album name. Last in the list so the stored ordinals of the others stay put. */
+    NameDesc;
 
     companion object {
         /** The order the album cache is read in, so an install that never picks a mode keeps the
@@ -73,6 +76,7 @@ fun sortAlbums(
 ): List<Album> = when (mode) {
     AlbumSortMode.Custom -> sortByCustomOrder(albums, customOrder)
     AlbumSortMode.NameAsc -> albums.sortedWith(byName())
+    AlbumSortMode.NameDesc -> albums.sortedWith(byName(descending = true))
     AlbumSortMode.LastActivity -> albums.sortedWith(byLastActivity)
     AlbumSortMode.PhotoCount -> albums.sortedWith(byPhotoCount)
 }
@@ -132,9 +136,11 @@ private val byPhotoCount: Comparator<Album> =
  * expects them rather than after `z`. SECONDARY strength keeps accents significant while ignoring
  * case, which leaves names differing only in case to the linkId tie-break.
  */
-private fun byName(): Comparator<Album> {
+private fun byName(descending: Boolean = false): Comparator<Album> {
     val collator = Collator.getInstance().apply { strength = Collator.SECONDARY }
-    return Comparator<Album> { a, b -> collator.compare(a.name, b.name) }.thenBy { it.linkId }
+    val names = Comparator<Album> { a, b -> collator.compare(a.name, b.name) }
+    // The link-id tie-break stays ascending either way, so equal names keep one fixed order.
+    return (if (descending) names.reversed() else names).thenBy { it.linkId }
 }
 
 private fun sortByCustomOrder(albums: List<Album>, customOrder: List<String>): List<Album> {

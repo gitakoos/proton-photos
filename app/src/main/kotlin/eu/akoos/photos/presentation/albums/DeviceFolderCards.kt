@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.albums
 
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.usecase.AlbumSortMode
 
 /**
  * The one definition of a device-folder card, and of which side of the hidden line it falls on.
@@ -66,6 +67,7 @@ object DeviceFolderCards {
                 name = name,
                 coverUri = coverItem?.uri,
                 itemCount = sorted.size,
+                latestTakenMs = sorted.firstOrNull()?.dateTaken ?: 0L,
                 coverIsGif = coverItem?.let {
                     it.mimeType.equals("image/gif", ignoreCase = true) ||
                         it.displayName.endsWith(".gif", ignoreCase = true)
@@ -89,6 +91,23 @@ object DeviceFolderCards {
      * out exactly what the user put away.
      */
     fun visible(folders: List<DeviceFolder>): List<DeviceFolder> = folders.filter { it.itemCount > 0 }
+
+    /**
+     * Order the folder cards the way the Albums grid is set to order albums, so one Sort by covers
+     * both. Folders cannot be arranged by hand, so Custom keeps the usual largest-first order. Every
+     * mode breaks ties on the name, so equal keys hold a fixed order.
+     */
+    fun sorted(folders: List<DeviceFolder>, mode: AlbumSortMode): List<DeviceFolder> {
+        val collator = java.text.Collator.getInstance().apply { strength = java.text.Collator.SECONDARY }
+        val byName = Comparator<DeviceFolder> { a, b -> collator.compare(a.name, b.name) }
+        return when (mode) {
+            AlbumSortMode.NameAsc -> folders.sortedWith(byName)
+            AlbumSortMode.NameDesc -> folders.sortedWith(byName.reversed())
+            AlbumSortMode.LastActivity -> folders.sortedWith(compareByDescending<DeviceFolder> { it.latestTakenMs }.then(byName))
+            AlbumSortMode.PhotoCount, AlbumSortMode.Custom ->
+                folders.sortedWith(compareByDescending<DeviceFolder> { it.itemCount }.then(byName))
+        }
+    }
 
     /**
      * The cards the hidden area draws: one per stored name, counted and covered by what the vault

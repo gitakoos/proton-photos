@@ -97,7 +97,6 @@ import java.util.Locale
 fun CalendarScreen(
     onBack: () -> Unit,
     onDayClick: (date: String) -> Unit,
-    onOpenSearch: () -> Unit = {},
     viewModel: CalendarViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()

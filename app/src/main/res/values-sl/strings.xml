@@ -260,7 +260,6 @@
     <string name="offline_screen_title">Fotografije brez povezave</string>
     <string name="offline_screen_empty">Fotografije, ki jih daste na voljo brez povezave, se prikažejo tukaj</string>
     <string name="settings_offline_photos">Fotografije brez povezave</string>
-    <string name="filter_offline">Brez povezave</string>
     <string name="gallery_add_to_album_local_note">Te fotografije se najprej varnostno kopirajo, nato pa dodajo v album.</string>
     <string name="gallery_no_albums_yet">Še ni albumov. Ustvarite enega zgoraj.</string>
     <plurals name="gallery_add_to_album_partial">
@@ -289,7 +288,6 @@
     <string name="gallery_filter_panoramas">Panorame</string>
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Osebe</string>
-    <string name="gallery_filter_photos">Fotografije</string>
     <string name="gallery_category_show">Pokaži %1$s</string>
     <string name="gallery_category_hide">Skrij %1$s</string>
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
@@ -624,7 +622,6 @@
     <string name="settings_hide_all_folders">Skrij vse mape naprave</string>
     <string name="settings_hide_all_folders_desc">Fotografije v skritih mapah naprave se ne prikažejo na vaši glavni časovnici Fotografije. Ostanejo v vaši napravi.</string>
     <string name="settings_hide_album_photos_desc">Fotografije, dodane v album Drive (oblak), se ne prikažejo na vaši glavni časovnici Fotografije. Še naprej so vidne v zavihkih Albumi in V skupni rabi.</string>
-    <string name="settings_timeline_filter">Filter časovnice</string>
     <string name="settings_timeline">Časovnica</string>
     <string name="settings_timeline_section_layout">Postavitev</string>
     <string name="settings_timeline_section_display">Prikaz</string>
@@ -637,13 +634,12 @@
     <string name="settings_seamless_grid">Od roba do roba</string>
     <string name="settings_seamless_grid_desc">Gostejša mreža s pravokotnimi vogali in sličicami, ki segajo do roba zaslona.</string>
     <string name="timeline_filter_subtitle">Izberite, kaj naj se skrije z vaše glavne časovnice Fotografije. Skrite fotografije ostanejo v napravi in se še naprej varnostno kopirajo.</string>
-    <string name="timeline_filter_categories_header">Vrstica kategorij</string>
+    <string name="timeline_filter_categories_header">Meni filtrov</string>
     <string name="timeline_filter_layout_desc">Velja za vse mreže fotografij</string>
-    <string name="timeline_filter_reorder_hint">S puščicami nastavite vrstni red vrstice kategorij, prikazane nad vašo časovnico Fotografije.</string>
+    <string name="timeline_filter_reorder_hint">Povlecite, da spremenite vrstni red kategorij v meniju filtrov fotografij. Tapnite oko, da kategorijo skrijete.</string>
     <string name="timeline_filter_per_album_hint">Posamezne albume skrijte s časovnice. Stikalo zgoraj jih skrije vse naenkrat.</string>
     <string name="timeline_filter_hidden_album">Skrit album</string>
     <string name="timeline_filter_albums_header">Albumi Drive</string>
-    <string name="timeline_filter_more_settings">Več nastavitev</string>
     <string name="settings_telemetry">Telemetrija</string>
     <string name="settings_telemetry_desc">Nadzorovano z nastavitvami vašega računa Proton. Za spremembo odprite account.proton.me.</string>
     <string name="settings_telemetry_on">Vklopljena</string>
@@ -885,7 +881,8 @@
     <string name="share_all">Vse</string>
     <string name="share_shared_with_me">V skupni rabi z menoj</string>
     <string name="share_shared_by_me">V skupni rabi z moje strani</string>
-    <string name="share_filter_account">Filtriraj po računu</string>
+    <string name="share_segment_with_me">Z mano</string>
+    <string name="share_segment_by_me">Od mene</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
     <string name="share_sheet_title">Deli %1$s</string>
@@ -944,16 +941,20 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filter</string>
-    <string name="filter_type_label">Vrsta</string>
     <string name="filter_type_videos">Videoposnetki</string>
     <string name="filter_sync_label">Stanje sinhronizacije</string>
     <string name="filter_sync_local">V napravi</string>
     <string name="filter_sync_backedup">Varnostno kopirano</string>
     <string name="filter_sync_cloud">Samo v oblaku</string>
-    <string name="filter_year_label">Leto</string>
     <string name="filter_any">Poljubno</string>
-    <string name="filter_whole_month">Cel mesec</string>
     <string name="filter_reset">Ponastavi</string>
+    <string name="filter_clear_all">Počisti filtre</string>
+    <plurals name="filter_show_items">
+        <item quantity="one">Prikaži %1$s element</item>
+        <item quantity="two">Prikaži %1$s elementa</item>
+        <item quantity="few">Prikaži %1$s elemente</item>
+        <item quantity="other">Prikaži %1$s elementov</item>
+    </plurals>
 
     <!-- Notification permission rationale -->
     <string name="notifications_blocked_snackbar">Obvestila so izklopljena. Ne boste videli poteka nalaganja ali prenašanja.</string>
@@ -961,22 +962,27 @@
 
     <!-- Search -->
     <string name="search_title">Iskanje</string>
-    <string name="search_placeholder">Iskanje po imenu datoteke</string>
     <string name="search_placeholder_semantic">Iskanje fotografij</string>
-    <string name="search_empty_idle">Za začetek iskanja vnesite ime</string>
     <string name="search_empty_no_results">Ni zadetkov</string>
-    <string name="search_section_on_this_day">Na ta dan</string>
-    <string name="search_section_on_this_day_years">Pred %1$d letom</string>
-    <string name="search_section_on_this_day_years_plural">Pred %1$d leti</string>
-    <string name="search_section_jump_to_month">Skoči na mesec</string>
+    <string name="search_results_header">Rezultati</string>
+    <string name="search_photos_hint">Iskanje fotografij</string>
     <string name="search_section_recent">Nedavno</string>
+    <string name="search_section_times">Obdobja</string>
+    <string name="search_section_storage">Shramba</string>
+    <string name="search_time_this_month">Ta mesec</string>
+    <string name="search_time_last_month">Prejšnji mesec</string>
+    <string name="search_time_last_3_months">Zadnji 3 meseci</string>
+    <string name="menu_timeline_settings">Nastavitve časovnice</string>
+    <string name="menu_album_settings">Nastavitve albumov</string>
+    <string name="time_view_switch">Leta, meseci, dnevi</string>
+    <string name="time_view_years">Leta</string>
+    <string name="time_view_months">Meseci</string>
+    <string name="time_view_days">Dnevi</string>
 
     <!-- Map -->
     <string name="map_title">Zemljevid</string>
+    <string name="library_view_offline">Brez povezave</string>
     <string name="map_vector_title">Zemljevid sveta</string>
-    <string name="map_card_title">Zemljevid</string>
-    <string name="map_card_subtitle_empty">Še ni lociranih fotografij</string>
-    <string name="map_card_calendar_subtitle">Koledarski pogled vaših fotografij</string>
     <string name="map_search_places">Iskanje krajev</string>
     <string name="places_title">Kraji</string>
     <string name="map_search_no_places">Še ni krajev</string>
@@ -1046,12 +1052,6 @@
         <item quantity="two">%d fotografiji na voljo brez povezave</item>
         <item quantity="few">%d fotografije na voljo brez povezave</item>
         <item quantity="other">%d fotografij na voljo brez povezave</item>
-    </plurals>
-    <plurals name="map_card_cities_count">
-        <item quantity="one">%d mesto</item>
-        <item quantity="two">%d mesti</item>
-        <item quantity="few">%d mesta</item>
-        <item quantity="other">%d mest</item>
     </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">%d videoposnetek</item>
@@ -1310,18 +1310,24 @@
     <string name="settings_help_about_section">Pomoč in informacije</string>
     <string name="cd_scroll_to_top">Pomakni se na vrh</string>
     <string name="albums_filter_all">Vse</string>
-    <string name="albums_filter_cloud">Oblak</string>
-    <string name="albums_filter_local">V napravi</string>
-    <string name="albums_filter_sheet_title">Filter albumov</string>
-    <string name="albums_filter_default_heading">Privzeto ob odpiranju</string>
-    <string name="albums_filter_remember_last">Zapomni si nazadnje uporabljeni filter</string>
-    <string name="albums_filter_remember_last_summary">Albume odpiraj z nazadnje izbranim filtrom</string>
+    <string name="albums_filter_cloud">Albumi v oblaku</string>
+    <string name="albums_filter_local">Mape v napravi</string>
     <string name="albums_sort_heading">Razvrsti po</string>
     <string name="albums_cover_size_heading">Velikost naslovnice</string>
     <string name="albums_sort_custom">Po meri</string>
     <string name="albums_sort_name">Ime (A-Z)</string>
+    <string name="albums_sort_name_desc">Ime (Ž do A)</string>
     <string name="albums_sort_activity">Zadnja dejavnost</string>
     <string name="albums_sort_count">Število fotografij</string>
+    <string name="albums_show_heading">Prikaži</string>
+    <string name="settings_library_section">Knjižnica</string>
+    <string name="settings_timeline_desc">Postavitev, meni filtrov, vsebina časovnice</string>
+    <string name="settings_albums_desc">Prikaz, razvrščanje, velikost naslovnic, vrstni red fotografij</string>
+    <string name="settings_albums_desc_local">Razvrščanje, velikost naslovnic, vrstni red fotografij v mapah</string>
+    <string name="settings_albums_photo_order">Vrstni red fotografij v albumih</string>
+    <string name="settings_folders_photo_order">Vrstni red fotografij v mapah naprave</string>
+    <string name="timeline_folders_hidden_count">%1$d od %2$d map skritih s časovnice</string>
+    <string name="timeline_folders_hide_all">Skrij vse</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Podatki o datoteki</string>
@@ -1539,7 +1545,6 @@
     <string name="thanks_2_5_0_website">Spletna stran</string>
     <string name="thanks_2_5_0_coffee">Kupi mi kavo</string>
     <string name="thanks_2_5_0_dismiss">Zapri</string>
-    <string name="offline_card_subtitle">Fotografije, shranjene za ogled brez povezave</string>
     <string name="duplicates_filter_identical">Enake</string>
     <string name="duplicates_filter_similar">Podobne</string>
     <string name="duplicates_filter_match_label">Ujemanje</string>
@@ -1771,7 +1776,6 @@
     <string name="settings_ai_clear_confirm_msg">To odstrani vse najdene osebe in vse podatke obrazov. Vaše fotografije ostanejo nedotaknjene. Obrazi bodo znova zaznani ob naslednjem indeksiranju.</string>
     <string name="gallery_add_to_person">Dodaj k osebi</string>
     <string name="people_search_hint">Iskanje oseb</string>
-    <string name="people_card_subtitle">Prebrskajte fotografije po osebah</string>
     <string name="person_set_cover">Nastavi kot naslovnico</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>

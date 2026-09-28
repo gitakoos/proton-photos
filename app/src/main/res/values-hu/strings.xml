@@ -150,7 +150,6 @@
     <string name="offline_screen_title">Offline fotók</string>
     <string name="offline_screen_empty">Az offline elérhetővé tett fotók itt jelennek meg</string>
     <string name="settings_offline_photos">Offline fotók</string>
-    <string name="filter_offline">Offline</string>
     <string name="gallery_add_to_album_local_note">Ezek a fotók előbb feltöltődnek, majd bekerülnek az albumba.</string>
     <string name="gallery_no_albums_yet">Még nincs album. Hozz létre egyet fent.</string>
     <plurals name="gallery_add_to_album_partial">
@@ -177,7 +176,6 @@
     <string name="gallery_filter_panoramas">Panorámák</string>
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Emberek</string>
-    <string name="gallery_filter_photos">Fotók</string>
     <string name="gallery_category_show">%1$s megjelenítése</string>
     <string name="gallery_category_hide">%1$s elrejtése</string>
 
@@ -405,7 +403,6 @@
     <string name="settings_hide_all_folders">Összes eszközmappa elrejtése</string>
     <string name="settings_hide_all_folders_desc">Az elrejtett eszközmappákban lévő fotók nem jelennek meg a fő Fotók idővonaladon. A készülékeden maradnak.</string>
     <string name="settings_hide_album_photos_desc">A Drive-albumba (felhő) rakott fotók nem jelennek meg a fő Fotók idővonaladon. Az Albumok és Megosztott füleken továbbra is láthatók.</string>
-    <string name="settings_timeline_filter">Idővonal szűrő</string>
     <string name="settings_timeline">Idővonal</string>
     <string name="settings_timeline_section_layout">Elrendezés</string>
     <string name="settings_timeline_section_display">Megjelenítés</string>
@@ -418,13 +415,12 @@
     <string name="settings_seamless_grid">Széltől szélig</string>
     <string name="settings_seamless_grid_desc">Sűrűbb rács szögletes sarkokkal és a képernyő széléig érő bélyegképekkel.</string>
     <string name="timeline_filter_subtitle">Válaszd ki, mi ne jelenjen meg a fő Fotók idővonaladon. Az elrejtett fotók az eszközön maradnak és tovább mentődnek.</string>
-    <string name="timeline_filter_categories_header">Kategória sáv</string>
+    <string name="timeline_filter_categories_header">Szűrőmenü</string>
     <string name="timeline_filter_layout_desc">Minden fotórácsra érvényes</string>
-    <string name="timeline_filter_reorder_hint">A nyilakkal állítsd be a Fotók idővonalad fölött megjelenő kategória sáv sorrendjét.</string>
+    <string name="timeline_filter_reorder_hint">Húzással rendezd át a Fotók szűrőmenüjének kategóriáit. A szemre koppintva elrejthetsz egyet.</string>
     <string name="timeline_filter_per_album_hint">Egyes albumok elrejtése az idővonalról. A fenti kapcsoló egyszerre mindet elrejti.</string>
     <string name="timeline_filter_hidden_album">Rejtett album</string>
     <string name="timeline_filter_albums_header">Drive-albumok</string>
-    <string name="timeline_filter_more_settings">További beállítások</string>
     <string name="settings_telemetry">Telemetria</string>
     <string name="settings_telemetry_desc">A Proton fiókod beállításai vezérlik. A módosításhoz nyisd meg az account.proton.me oldalt.</string>
     <string name="settings_telemetry_on">Be</string>
@@ -701,7 +697,8 @@
     <string name="share_all">Összes</string>
     <string name="share_shared_with_me">Velem megosztva</string>
     <string name="share_shared_by_me">Általam megosztva</string>
-    <string name="share_filter_account">Szűrés fiók szerint</string>
+    <string name="share_segment_with_me">Velem</string>
+    <string name="share_segment_by_me">Általam</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
     <string name="share_sheet_title">%1$s megosztása</string>
@@ -743,16 +740,18 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Szűrő</string>
-    <string name="filter_type_label">Típus</string>
     <string name="filter_type_videos">Videók</string>
     <string name="filter_sync_label">Szinkron állapot</string>
     <string name="filter_sync_local">Eszközön</string>
     <string name="filter_sync_backedup">Mentett</string>
     <string name="filter_sync_cloud">Csak felhő</string>
-    <string name="filter_year_label">Év</string>
     <string name="filter_any">Bármelyik</string>
-    <string name="filter_whole_month">Egész hónap</string>
     <string name="filter_reset">Visszaállítás</string>
+    <string name="filter_clear_all">Szűrők törlése</string>
+    <plurals name="filter_show_items">
+        <item quantity="one">%1$s elem megjelenítése</item>
+        <item quantity="other">%1$s elem megjelenítése</item>
+    </plurals>
 
     <!-- Megosztott albumok képernyő -->
     <string name="shared_pending_invitations">Függő meghívók</string>
@@ -774,10 +773,22 @@
 
     <!-- Keresés -->
     <string name="search_title">Keresés</string>
-    <string name="search_placeholder">Keresés fájlnév szerint</string>
     <string name="search_placeholder_semantic">Fotók keresése</string>
-    <string name="search_empty_idle">Írj be egy nevet a kereséshez</string>
     <string name="search_empty_no_results">Nincs találat</string>
+    <string name="search_results_header">Találatok</string>
+    <string name="search_photos_hint">Fotók keresése</string>
+    <string name="search_section_recent">Legutóbbi</string>
+    <string name="search_section_times">Időszakok</string>
+    <string name="search_section_storage">Tárolás</string>
+    <string name="search_time_this_month">Ez a hónap</string>
+    <string name="search_time_last_month">Előző hónap</string>
+    <string name="search_time_last_3_months">Utolsó 3 hónap</string>
+    <string name="menu_timeline_settings">Idővonal beállításai</string>
+    <string name="menu_album_settings">Album beállításai</string>
+    <string name="time_view_switch">Évek, hónapok, napok</string>
+    <string name="time_view_years">Évek</string>
+    <string name="time_view_months">Hónapok</string>
+    <string name="time_view_days">Napok</string>
 
     <string name="viewer_play_slideshow">Diavetítés indítása</string>
     <string name="viewer_pause_slideshow">Diavetítés szüneteltetése</string>
@@ -829,10 +840,6 @@
     <plurals name="offline_batch_result">
         <item quantity="one">%d fotó offline elérhető</item>
         <item quantity="other">%d fotó offline elérhető</item>
-    </plurals>
-    <plurals name="map_card_cities_count">
-        <item quantity="one">%d város</item>
-        <item quantity="other">%d város</item>
     </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">1 videó</item>
@@ -966,16 +973,9 @@
     <string name="model_download_progress">%1$s / %2$s</string>
     <string name="model_download_preparing">Előkészítés…</string>
     <string name="model_download_stop">Leállítás</string>
-    <string name="search_section_on_this_day">Ezen a napon</string>
-    <string name="search_section_on_this_day_years">%1$d éve</string>
-    <string name="search_section_on_this_day_years_plural">%1$d éve</string>
-    <string name="search_section_jump_to_month">Ugrás hónaphoz</string>
-    <string name="search_section_recent">Legutóbbi</string>
     <string name="map_title">Térkép</string>
+    <string name="library_view_offline">Offline</string>
     <string name="map_vector_title">Világtérkép</string>
-    <string name="map_card_title">Térkép</string>
-    <string name="map_card_subtitle_empty">Még nincs helyhez kötött fénykép</string>
-    <string name="map_card_calendar_subtitle">A képeid naptár nézetben</string>
     <string name="map_search_places">Helyek keresése</string>
     <string name="places_title">Helyek</string>
     <string name="map_search_no_places">Még nincsenek helyek</string>
@@ -1107,18 +1107,24 @@
     <string name="settings_help_about_section">Súgó és névjegy</string>
     <string name="cd_scroll_to_top">Ugrás a tetejére</string>
     <string name="albums_filter_all">Mind</string>
-    <string name="albums_filter_cloud">Felhő</string>
-    <string name="albums_filter_local">Eszközön</string>
-    <string name="albums_filter_sheet_title">Albumszűrő</string>
-    <string name="albums_filter_default_heading">Alapértelmezett megnyitáskor</string>
-    <string name="albums_filter_remember_last">Utoljára használt szűrő megjegyzése</string>
-    <string name="albums_filter_remember_last_summary">Az albumok az utoljára kiválasztott szűrővel nyílnak meg</string>
+    <string name="albums_filter_cloud">Felhőalbumok</string>
+    <string name="albums_filter_local">Eszközmappák</string>
     <string name="albums_sort_heading">Rendezés</string>
     <string name="albums_cover_size_heading">Borító mérete</string>
     <string name="albums_sort_custom">Egyéni</string>
     <string name="albums_sort_name">Név (A-Z)</string>
+    <string name="albums_sort_name_desc">Név (Z–A)</string>
     <string name="albums_sort_activity">Legutóbbi módosítás</string>
     <string name="albums_sort_count">Fotók száma</string>
+    <string name="albums_show_heading">Megjelenítés</string>
+    <string name="settings_library_section">Könyvtár</string>
+    <string name="settings_timeline_desc">Elrendezés, szűrőmenü, mit mutat az idővonal</string>
+    <string name="settings_albums_desc">Megjelenítés, rendezés, borítóméret, fotósorrend</string>
+    <string name="settings_albums_desc_local">Rendezés, borítóméret, fotósorrend a mappákban</string>
+    <string name="settings_albums_photo_order">Fotósorrend az albumokban</string>
+    <string name="settings_folders_photo_order">Fotósorrend az eszközmappákban</string>
+    <string name="timeline_folders_hidden_count">%2$d mappából %1$d elrejtve az idővonalról</string>
+    <string name="timeline_folders_hide_all">Összes elrejtése</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Fájl infó</string>
@@ -1489,7 +1495,6 @@
     <string name="thanks_2_5_0_website">Weboldal</string>
     <string name="thanks_2_5_0_coffee">Hívj meg egy kávéra</string>
     <string name="thanks_2_5_0_dismiss">Bezárás</string>
-    <string name="offline_card_subtitle">Offline megtekintésre mentett fotók</string>
     <string name="duplicates_filter_identical">Azonos</string>
     <string name="duplicates_filter_similar">Hasonló</string>
     <string name="duplicates_filter_match_label">Egyezés</string>
@@ -1685,7 +1690,6 @@
     <string name="settings_ai_clear_confirm_msg">Ez eltávolít minden megtalált embert és az összes arcadatot. A fotóidat nem érinti. Az arcokat a következő indexeléskor újra megtalálja.</string>
     <string name="gallery_add_to_person">Hozzáadás emberhez</string>
     <string name="people_search_hint">Emberek keresése</string>
-    <string name="people_card_subtitle">Fotóid böngészése emberek szerint</string>
     <string name="person_set_cover">Beállítás borítóként</string>
     <string name="person_set_cover_confirm_title">Beállítod borítónak?</string>
     <string name="person_set_cover_confirm_body">Ez a kép legyen a személy borítója.</string>

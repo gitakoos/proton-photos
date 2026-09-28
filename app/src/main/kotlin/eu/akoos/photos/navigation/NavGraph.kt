@@ -139,7 +139,6 @@ import eu.akoos.photos.presentation.settings.BackupProcessingScreen
 import eu.akoos.photos.presentation.settings.SyncSettingsScreen
 import eu.akoos.photos.presentation.map.MapScreen
 import eu.akoos.photos.presentation.map.vector.CustomMapScreen
-import eu.akoos.photos.presentation.search.SearchScreen
 import eu.akoos.photos.presentation.settings.TrashScreen
 import eu.akoos.photos.presentation.viewer.PhotoViewerScreen
 import eu.akoos.photos.presentation.news.NewsScreen
@@ -218,7 +217,7 @@ sealed class Screen(val route: String) {
     data object TimelineCategories : Screen("timeline_categories")
     data object TimelineAlbums : Screen("timeline_albums")
     data object TimelineDeviceFolders : Screen("timeline_device_folders")
-    data object Search : Screen("search")
+    data object AlbumsSettings : Screen("albums_settings")
     data object Map : Screen("map")
 
     /** Spike: the custom vector world map, reached from the osmdroid [Map] screen. */
@@ -377,6 +376,15 @@ fun NavGraph(
     // the map it came from, so a switch REPLACES that map instead of stacking a second one; null means
     // the first-run prompt, which opens the chosen map fresh.
     var mapStyleSwitchFrom by remember { mutableStateOf<String?>(null) }
+    // The one way into the map from any entry point (the Albums views row, a place link): raise the
+    // first-run style chooser, or open the style already picked.
+    val openMap: () -> Unit = {
+        if (!mapStylePrompted) {
+            showMapStyleChooser = true
+        } else {
+            navController.navigate(if (mapStyleOsm) Screen.Map.route else Screen.CustomMap.route)
+        }
+    }
     var selectedViewerItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     var selectedViewerIndex by remember { mutableIntStateOf(0) }
     // The return leg of the line above: the photo the viewer closed on, for the grid underneath to
@@ -616,9 +624,6 @@ fun NavGraph(
         LocalThumbnailUrls provides thumbnailUrlsState,
         LocalViewerReturnKey provides viewerReturnKey,
     ) {
-    // Routes that open with their own scale/zoom transition (Search), so the screen behind them holds
-    // still (fade only) instead of sliding, letting the scale read cleanly. Others keep the slide.
-    val scaleOpenRoutes = setOf(Screen.Search.route)
     NavHost(
         navController = navController,
         startDestination = Screen.Loading.route,
@@ -627,14 +632,8 @@ fun NavGraph(
         // the forward edge, and back reverses it, so navigation reads as motion rather than a flat cut.
         // The slide is small (a sixth of the width) so it also suits full-screen routes like the viewer.
         enterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 6 } },
-        exitTransition = {
-            if (targetState.destination.route in scaleOpenRoutes) fadeOut(tween(200))
-            else fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { -it / 12 }
-        },
-        popEnterTransition = {
-            if (initialState.destination.route in scaleOpenRoutes) fadeIn(tween(200))
-            else fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 12 }
-        },
+        exitTransition = { fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { -it / 12 } },
+        popEnterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 12 } },
         popExitTransition = { fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { it / 6 } },
     ) {
         composable(Screen.Loading.route) {
@@ -774,10 +773,13 @@ fun NavGraph(
                 onOpenUploads = { navController.navigate("activity?tab=uploads") },
                 onOpenDownloads = { navController.navigate("activity?tab=downloads") },
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
-                onSearchClick = { navController.navigate(Screen.Search.route) },
-                onCalendarClick = { navController.navigate(Screen.Calendar.route) },
+                onOpenTimelineSettings = { navController.navigate(Screen.TimelineFilter.route) },
+                onOpenAlbumsSettings = { navController.navigate(Screen.AlbumsSettings.route) },
                 onMemoriesClick = { navController.navigate(Screen.Memories.route) },
-                onOpenTimelineFilter = { navController.navigate(Screen.TimelineFilter.route) },
+                onPeopleClick = { navController.navigate(Screen.People.route) },
+                onMapClick = openMap,
+                onCalendarClick = { navController.navigate(Screen.Calendar.route) },
+                onOfflineClick = { navController.navigate(Screen.Offline.route) },
                 onEditMetadata = { selection ->
                     // A timeline selection is the user's own library, never an album someone shared
                     // with them, so the editor's own per-item rules decide what is writable.
@@ -810,12 +812,6 @@ fun NavGraph(
                 onDayClick = { date ->
                     selectedDayDate = date
                     navController.navigate(Screen.DayDetail.route)
-                },
-                onOpenSearch = {
-                    navController.navigate(Screen.Search.route) {
-                        popUpTo(Screen.Calendar.route) { inclusive = true }
-                        launchSingleTop = true
-                    }
                 },
             )
         }
@@ -1439,6 +1435,9 @@ fun NavGraph(
                 onFindDuplicatesClick     = { navController.navigate(Screen.DuplicateFinder.route) },
                 onImportClick             = { navController.navigate(Screen.Import.route) },
                 onAppearanceClick         = { navController.navigate(Screen.AppearanceSettings.route) },
+                onTimelineClick           = { navController.navigate(Screen.TimelineFilter.route) },
+                onAlbumsSettingsClick     = { navController.navigate(Screen.AlbumsSettings.route) },
+                onLandingTabClick         = { navController.navigate(Screen.LandingTab.route) },
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
                 onAboutClick              = { navController.navigate(Screen.About.route) },
                 onWhatsNewClick           = { navController.navigate(Screen.WhatsNewHistory.route) },
@@ -1469,12 +1468,18 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
-                onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
             )
         }
 
         composable(Screen.LandingTab.route) {
             LandingTabScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.AlbumsSettings.route) {
+            eu.akoos.photos.presentation.settings.AlbumsSettingsScreen(
+                onBack = { navController.popBackStack() },
+                isSignedIn = navViewModel.isLoggedIn.collectAsStateWithLifecycle().value == true,
+            )
         }
 
         composable(Screen.ThemeSettings.route) {
@@ -1712,7 +1717,6 @@ fun NavGraph(
                 onOpenCategories = { navController.navigate(Screen.TimelineCategories.route) },
                 onOpenAlbums = { navController.navigate(Screen.TimelineAlbums.route) },
                 onOpenDeviceFolders = { navController.navigate(Screen.TimelineDeviceFolders.route) },
-                onOpenLandingTab = { navController.navigate(Screen.LandingTab.route) },
             )
         }
 
@@ -1773,57 +1777,6 @@ fun NavGraph(
 
         composable(Screen.Import.route) {
             ImportScreen(onBack = { navController.popBackStack() })
-        }
-
-        composable(
-            Screen.Search.route,
-            // Container-transform feel on open: the search page grows up from the top bar (where the
-            // search affordance sits) and fades in, then shrinks back on the way out, so it reads as the
-            // search field enlarging into the page rather than a plain push. Gentler scale than the globe.
-            enterTransition = {
-                scaleIn(animationSpec = tween(300), initialScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0.0f)) +
-                    fadeIn(animationSpec = tween(220))
-            },
-            exitTransition = { fadeOut(animationSpec = tween(160)) },
-            popEnterTransition = { fadeIn(animationSpec = tween(200)) },
-            popExitTransition = {
-                scaleOut(animationSpec = tween(260), targetScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0.0f)) +
-                    fadeOut(animationSpec = tween(200))
-            },
-        ) {
-            SearchScreen(
-                onBack = { navController.popBackStack() },
-                onPhotoClick = { items, index ->
-                    selectedViewerItems = items
-                    selectedViewerIndex = index
-                    selectedViewerHiddenLinkIds = emptySet()
-                    viewerFromAlbum = false
-                    viewerTrashMode = false
-                    navController.navigate(Screen.Viewer.route)
-                },
-                onOpenMap = {
-                    if (!mapStylePrompted) {
-                        showMapStyleChooser = true
-                    } else {
-                        navController.navigate(if (mapStyleOsm) Screen.Map.route else Screen.CustomMap.route)
-                    }
-                },
-                onOpenCalendar = {
-                    navController.navigate(Screen.Calendar.route) {
-                        popUpTo(Screen.Search.route) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                },
-                onOpenOffline = { navController.navigate(Screen.Offline.route) },
-                onOpenPeople = { navController.navigate(Screen.People.route) },
-                onEditMetadata = { selection ->
-                    // Search runs over the user's own library, never an album someone shared with
-                    // them, so the editor's own per-item rules decide what is writable.
-                    metadataEditorRequest = MetadataEditorRequest(selection, isReadOnlyAlbum = false)
-                    navController.navigate(Screen.MetadataEditor.route)
-                },
-                onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
-            )
         }
 
         composable(

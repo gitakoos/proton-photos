@@ -66,20 +66,23 @@ object SettingsKeys {
      *  and mosaic grids. */
     val SEAMLESS_GRID = booleanPreferencesKey("seamless_grid")
 
-    /** Albums-tab filter default, an AlbumDisplayFilter ordinal (0 = All, 1 = Cloud, 2 = Local).
-     *  Absent = 0 (All). Applied when [ALBUMS_REMEMBER_LAST_FILTER] is off. */
+    /** Which albums the Albums tab shows, an AlbumDisplayFilter ordinal (0 = All, 1 = Cloud albums,
+     *  2 = Device folders), set in Album settings. Absent = 0 (All). The stored name predates that
+     *  page, when this was only the default a live filter opened on. */
     val ALBUMS_DEFAULT_FILTER = intPreferencesKey("albums_default_filter")
-    /** When true, the Albums tab opens on the last filter the user picked ([ALBUMS_LAST_FILTER])
-     *  instead of [ALBUMS_DEFAULT_FILTER]. Off by default. */
+    /** No longer read: the Albums tab keeps one Show choice ([ALBUMS_DEFAULT_FILTER]) instead of a
+     *  live filter with a remember-last option. Kept so account switches still clear old values. */
     val ALBUMS_REMEMBER_LAST_FILTER = booleanPreferencesKey("albums_remember_last_filter")
-    /** Last Albums-tab filter the user selected, an AlbumDisplayFilter ordinal. Absent = 0 (All).
-     *  Restored on entry when [ALBUMS_REMEMBER_LAST_FILTER] is on. */
+    /** No longer read, see [ALBUMS_REMEMBER_LAST_FILTER]. */
     val ALBUMS_LAST_FILTER = intPreferencesKey("albums_last_filter")
 
     /** Albums-grid sort mode, an AlbumSortMode ordinal (0 = Custom, 1 = NameAsc, 2 = LastActivity,
      *  3 = PhotoCount). Absent = LastActivity, which is the order the album cache is read in, so an
      *  install that never picks a mode keeps the grid it already had. */
     val ALBUMS_SORT_MODE = intPreferencesKey("albums_sort_mode")
+
+    /** The Photos search's recent typed queries, newest first, newline-separated (at most 8). */
+    val SEARCH_RECENT = stringPreferencesKey("search_recent")
 
     /** Direction the photos inside an album are listed in, an AlbumPhotoSortMode ordinal
      *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order albums have always

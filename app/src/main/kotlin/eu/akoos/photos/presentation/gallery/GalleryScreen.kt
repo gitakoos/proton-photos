@@ -56,6 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.produceState
 import kotlinx.coroutines.flow.map
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -124,7 +125,6 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -138,7 +138,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.derivedStateOf
@@ -189,7 +188,6 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.domain.usecase.AlbumSortMode
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.CloudMetadataSaveController
 import eu.akoos.photos.domain.usecase.CloudSavePhase
@@ -237,10 +235,11 @@ import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.pillShape
-import java.text.SimpleDateFormat
 import java.util.Calendar
+import eu.akoos.photos.presentation.common.LocalViewerReturnKey
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Date
-import java.util.Locale
 
 internal fun formatCount(n: Int): String = when {
     n >= 1_000_000 -> "${n / 1_000_000}M"
@@ -253,44 +252,6 @@ internal fun formatCount(n: Int): String = when {
         }
     }
     else -> n.toString()
-}
-
-internal fun buildContentFilterSummary(
-    filter: ContentFilter,
-    photosLabel: String,
-    videosLabel: String,
-    localLabel: String,
-    backedUpLabel: String,
-    cloudLabel: String,
-): String? {
-    if (filter == ContentFilter()) return null
-    val parts = buildList {
-        when (filter.mediaType) {
-            MediaType.PhotosOnly -> add(photosLabel)
-            MediaType.VideosOnly -> add(videosLabel)
-            else -> {}
-        }
-        when (filter.syncStatus) {
-            SyncStatusFilter.LocalOnly -> add(localLabel)
-            SyncStatusFilter.BackedUp  -> add(backedUpLabel)
-            SyncStatusFilter.CloudOnly -> add(cloudLabel)
-            else -> {}
-        }
-        if (filter.year != null) add("${filter.year}")
-        if (filter.month != null) {
-            val monthName = java.text.SimpleDateFormat("MMM", java.util.Locale.getDefault()).format(
-                java.util.Calendar.getInstance().apply { set(java.util.Calendar.MONTH, filter.month - 1) }.time
-            )
-            add(
-                when {
-                    filter.day != null && filter.dayEnd != null -> "$monthName ${filter.day}-${filter.dayEnd}"
-                    filter.day != null -> "$monthName ${filter.day}"
-                    else -> monthName
-                }
-            )
-        }
-    }
-    return parts.joinToString(" · ").ifEmpty { null }
 }
 
 /**
@@ -341,13 +302,16 @@ fun GalleryScreen(
     /** Opens the Activity screen on its Downloads tab, from the avatar's active-download indicator. */
     onOpenDownloads: () -> Unit = {},
     onHiddenAlbumClick: () -> Unit = {},
-    onSearchClick: () -> Unit = {},
-    onCalendarClick: () -> Unit = {},
+    /** The ⋮ menus' settings pages (also under Settings → Library). */
+    onOpenTimelineSettings: () -> Unit = {},
+    onOpenAlbumsSettings: () -> Unit = {},
     /** Opens the Memories screen — reached from the pinned card at the top of the Albums tab. */
     onMemoriesClick: () -> Unit = {},
-    /** Opens the Timeline filter screen — reached from the Albums tab's filter button now that
-     *  the obsolete All/Backed-up album filter is gone (device + cloud albums show together). */
-    onOpenTimelineFilter: () -> Unit = {},
+    /** The Albums tab's views row: People, Map, Calendar and Offline photos. */
+    onPeopleClick: () -> Unit = {},
+    onMapClick: () -> Unit = {},
+    onCalendarClick: () -> Unit = {},
+    onOfflineClick: () -> Unit = {},
     /** Opens the date + place editor for the current multi-selection. Gated to an all-device-only
      *  selection (matching the Strip action), so every handed item is editable. */
     onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
@@ -388,9 +352,13 @@ fun GalleryScreen(
     val context = LocalContext.current
     val appColors = AppColors.current
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
-    // People rail: the face bar is open either because the chip is toggled on (this flag) or because a
-    // person is selected. Local UI state, the person filter itself lives in the ViewModel.
-    var peopleExpanded by rememberSaveable { mutableStateOf(false) }
+    // Photos tab time view: null = the normal timeline with the tab dock; otherwise the Years /
+    // Months / Days switcher replaces the dock and Years or Months replace the grid.
+    var timeView by rememberSaveable { mutableStateOf<TimeView?>(null) }
+    var monthsFocusYear by rememberSaveable { mutableStateOf<Int?>(null) }
+    // Set right before the app itself moves the timeline (drilling into a month), so that move keeps
+    // the header and bottom row on screen instead of reading as a scroll down.
+    var keepControlsOnJump by remember { mutableStateOf(false) }
     val gridState = rememberLazyGridState()
     // Mosaic uses a staggered grid; its scroll state is hoisted here so the screen-level behaviours
     // keyed on scroll position (re-tap scroll-to-top, overlay auto-hide, look-ahead prefetch) follow
@@ -418,6 +386,95 @@ fun GalleryScreen(
     // between as well as tapped. Seeded from the saved tab so a config change restores the page.
     // A local-only session (no account) drops the cloud-only Shared page, leaving Photos + Albums.
     val pagerState = rememberPagerState(initialPage = selectedTab) { if (state.isSignedIn) 3 else 2 }
+    // People entry on the Albums views row: shown whenever on-device face grouping is on, independent
+    // of sign-in, so a local-only guest can reach and name their clusters too.
+    val faceEnabled by remember {
+        context.settingsDataStore.data.map {
+            it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true
+        }
+    }.collectAsState(initial = false)
+    // Photos-tab search: search and filter are one list of terms (typed text, person, time,
+    // category, storage), all held in the view model as the timeline's filter state. The bar shows
+    // them, the search page edits them, and the timeline itself is the result.
+    var photosSearchOpen by rememberSaveable { mutableStateOf(false) }
+    val photosQuery by viewModel.query.collectAsStateWithLifecycle()
+    val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val semanticSearchEnabled by viewModel.semanticSearchEnabled.collectAsStateWithLifecycle()
+    val recentSearches by viewModel.recentSearches.collectAsStateWithLifecycle()
+    val searchGridState = rememberLazyGridState()
+    val searchStaggeredState = rememberLazyStaggeredGridState()
+    // Years the library has photos in, newest first, for the search page's time suggestions. Off the
+    // main thread: it walks the whole library.
+    // Assigns `value` below; the lint check misreads the `value = withContext { … }` form.
+    @Suppress("ProduceStateDoesNotAssignValue")
+    val libraryYears by produceState(emptyList<Int>(), state.items) {
+        value = withContext(Dispatchers.Default) {
+            val zone = java.time.ZoneId.systemDefault()
+            state.items.asSequence()
+                .map { java.time.Instant.ofEpochMilli(it.captureTimeMs).atZone(zone).year }
+                .distinct().sortedDescending().toList()
+        }
+    }
+    val clearPersonTerm = { viewModel.onPersonSelected(null) }
+    // Years / Months views: the filtered timeline grouped off the main thread, only while shown.
+    // Tagged with the view they were grouped for: switching Months → Years must never hand the
+    // Years list the month buckets still held from before (several per year).
+    // Assigns `value` below; the lint check misreads the `value = withContext { … }` form.
+    @Suppress("ProduceStateDoesNotAssignValue")
+    val taggedBuckets by produceState<Pair<TimeView?, List<TimeBucket>>>(null to emptyList(), state.filteredItems, timeView) {
+        val view = timeView
+        value = view to when (view) {
+            TimeView.Years -> withContext(Dispatchers.Default) { yearBuckets(state.filteredItems) }
+            TimeView.Months -> withContext(Dispatchers.Default) { monthBuckets(state.filteredItems) }
+            else -> emptyList()
+        }
+    }
+    val timeBuckets = taggedBuckets.second.takeIf { taggedBuckets.first == timeView } ?: emptyList()
+    // Drilling from a month into the days: land the timeline on that month's newest photo through
+    // the same return-to-photo request the viewer uses, which every grid layout already follows.
+    val viewerReturnKey = LocalViewerReturnKey.current
+    val openMonthInDays: (Int, Int) -> Unit = { year, month ->
+        val zone = java.time.ZoneId.systemDefault()
+        state.filteredItems.firstOrNull { item ->
+            val date = java.time.Instant.ofEpochMilli(item.captureTimeMs).atZone(zone)
+            date.year == year && date.monthValue == month
+        }?.let {
+            keepControlsOnJump = true
+            viewerReturnKey.value = it.stableId
+        }
+        timeView = TimeView.Days
+    }
+    val photosSearchTerms = buildList {
+        if (photosQuery.isNotBlank()) {
+            add(SearchTerm(SEARCH_TERM_TEXT, "“${photosQuery.trim()}”") { viewModel.setQuery("") })
+        }
+        state.selectedPersonId?.let { id ->
+            val name = state.people.firstOrNull { it.personId == id }?.displayName
+                ?: stringResource(R.string.gallery_category_people)
+            add(SearchTerm("person", name) { clearPersonTerm() })
+        }
+        state.contentFilter.dateRange?.let { range ->
+            add(SearchTerm("time", dateRangeLabel(range)) {
+                viewModel.setContentFilter(state.contentFilter.copy(dateRange = null))
+            })
+        }
+        state.selectedFilters.forEach { category ->
+            add(SearchTerm("category-${category.name}", categoryLabel(category)) {
+                viewModel.toggleCategory(category)
+            })
+        }
+        if (state.contentFilter.syncStatus != SyncStatusFilter.All) {
+            add(SearchTerm("storage", syncStatusLabel(state.contentFilter.syncStatus)) {
+                viewModel.setContentFilter(state.contentFilter.copy(syncStatus = SyncStatusFilter.All))
+            })
+        }
+    }
+    val clearPhotosSearch = {
+        viewModel.setQuery("")
+        viewModel.setCategories(emptySet())
+        viewModel.setContentFilter(ContentFilter())
+        if (state.selectedPersonId != null) clearPersonTerm()
+    }
     // Two-way sync between the pager and [selectedTab] (which drives the header rail + dock highlight).
     // Settling on a page — by swipe or by the dock's animateScrollToPage — adopts it as the active tab;
     // a tap path updates selectedTab and animates the pager below.
@@ -449,7 +506,6 @@ fun GalleryScreen(
         context.settingsDataStore.data.map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, if (state.isSignedIn) 2 else 1) }
     }.collectAsState(initial = 0)
     var sharedFilter by remember { mutableStateOf(SharedFilter.SharedWithMe) }
-    var albumFilter by remember { mutableStateOf(AlbumDisplayFilter.All) }
     // Albums-tab inline search: the typed query (kept across a config change) and whether the rail's
     // search bar is open. Hoisted beside the filter so the header rail and the Albums page read one
     // source. Arranging takes the whole rail, so it and the search are mutually exclusive: opening the
@@ -457,37 +513,18 @@ fun GalleryScreen(
     var albumQuery by rememberSaveable { mutableStateOf("") }
     var albumSearchActive by remember { mutableStateOf(false) }
     var albumReorderActive by remember { mutableStateOf(false) }
-    // Albums-tab view filter: default narrowing, a remember-last toggle, and the last picked value.
-    val albumsDefaultFilter by remember {
+    // Which albums the Albums tab shows (All / Cloud albums / Device folders), one remembered choice
+    // set in Album settings alongside the sort order and cover size. A guest has no cloud albums, so
+    // the grid is always All for them whatever an earlier session stored.
+    val albumsShowOrdinal by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] ?: 0 }
     }.collectAsState(initial = 0)
-    val albumsRememberLastFilter by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] ?: false }
-    }.collectAsState(initial = false)
-    val albumsLastFilter by remember {
-        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_LAST_FILTER] ?: 0 }
-    }.collectAsState(initial = 0)
-    // Only drives the sheet's selection; the grid reads this key on its own side.
-    val albumsSortMode by remember {
-        context.settingsDataStore.data.map { AlbumSortMode.fromOrdinal(it[SettingsKeys.ALBUMS_SORT_MODE]) }
-    }.collectAsState(initial = AlbumSortMode.Default)
+    val albumFilter = if (!state.isSignedIn) AlbumDisplayFilter.All
+        else AlbumDisplayFilter.entries[albumsShowOrdinal.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)]
     // How many album covers sit per row on the Albums tab (default 2). Seeded from the synchronous
     // boot mirror so returning to the tab opens at the stored size on the first frame instead of
     // flashing 2 columns and letting the cover cards' animateItem reshuffle into the real layout.
     val albumColumns = rememberAlbumColumns()
-    // Re-resolve the filter each time the pager reaches the Albums page: last-used when remembering,
-    // otherwise the configured default. Leaving and returning therefore resets to the default
-    // (remember-last off) or restores the last pick (remember-last on), rather than holding whatever
-    // was left on screen from a prior visit. Keyed on currentPage (which advances during the swipe)
-    // and resolved from the already-collected state so the target filter is applied before the page
-    // settles, with no visible "All" flash from awaiting a fresh DataStore read.
-    LaunchedEffect(pagerState.currentPage) {
-        if (pagerState.currentPage != 1) return@LaunchedEffect
-        val ordinal = if (albumsRememberLastFilter) albumsLastFilter else albumsDefaultFilter
-        albumFilter = AlbumDisplayFilter.entries[ordinal.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)]
-    }
-    var showAlbumsFilterSheet by remember { mutableStateOf(false) }
-    val albumsFilterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var activeEmailFilter by remember { mutableStateOf<String?>(null) }
     var showEmailFilterSheet by remember { mutableStateOf(false) }
     // Bump to ask AlbumsScreen to open its create-album dialog (the Albums-tab "New album" pill).
@@ -709,7 +746,14 @@ fun GalleryScreen(
         isPhotosScrollingDown = false
         snapshotFlow { activeFirstVisibleItemIndex() to activeFirstVisibleItemScrollOffset() }
             .collect { (idx, off) ->
-                isPhotosScrollingDown = idx > prevIndex || (idx == prevIndex && off > prevOffset)
+                if (keepControlsOnJump) {
+                    // A jump the app made (a month picked in the Months view) is not the user
+                    // scrolling down, so it must not hide the header and the bottom row.
+                    isPhotosScrollingDown = false
+                    if (idx != prevIndex) keepControlsOnJump = false
+                } else {
+                    isPhotosScrollingDown = idx > prevIndex || (idx == prevIndex && off > prevOffset)
+                }
                 prevIndex = idx
                 prevOffset = off
             }
@@ -747,8 +791,6 @@ fun GalleryScreen(
     }
 
     // ── Filter bottom sheet state ─────────────────────────────────────────────
-    var showFilterSheet by remember { mutableStateOf(false) }
-    val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Grouping is controlled exclusively by the photo grid's pinch gesture (see
     // PhotoGrid). Pinching zooms across (cols, grouping) pairs in one motion.
@@ -1077,7 +1119,24 @@ fun GalleryScreen(
             modifier = Modifier.fillMaxSize(),
         ) { page ->
         when (page) {
-            0 -> {
+            0 -> if ((timeView == TimeView.Years || timeView == TimeView.Months) && photosQuery.isBlank()) {
+                if (timeView == TimeView.Years) {
+                    YearsView(
+                        buckets = timeBuckets,
+                        topPadding = headerHeightDp,
+                        onYearClick = { year -> monthsFocusYear = year; timeView = TimeView.Months },
+                        onRequestThumbnail = viewModel::requestThumbnailDecrypt,
+                    )
+                } else {
+                    MonthsView(
+                        buckets = timeBuckets,
+                        topPadding = headerHeightDp,
+                        focusYear = monthsFocusYear,
+                        onMonthClick = openMonthInDays,
+                        onRequestThumbnail = viewModel::requestThumbnailDecrypt,
+                    )
+                }
+            } else {
                 val pullState = rememberPullToRefreshState()
                 PullToRefreshBox(
                     isRefreshing = state.isRefreshing,
@@ -1089,11 +1148,19 @@ fun GalleryScreen(
                     // Coarse phase so the cross-fade fires only on a real skeleton/empty/content change,
                     // never on scroll or a thumbnail update. The grid's scroll state is remembered
                     // outside this block, so a fade never resets the position.
+                    // While a query is typed the grid shows its results in place of the timeline.
+                    val searching = photosQuery.isNotBlank()
+                    val shownItems = if (searching) searchResults.items else state.filteredItems
                     val galleryPhase = when {
-                        state.isLoading && state.filteredItems.isEmpty() -> 0
-                        state.filteredItems.isEmpty() && state.items.isNotEmpty() -> 1
-                        state.filteredItems.isEmpty() -> 2
+                        searching && shownItems.isEmpty() -> if (searchResults.searching) 0 else 1
+                        state.isLoading && shownItems.isEmpty() -> 0
+                        shownItems.isEmpty() && state.items.isNotEmpty() -> 1
+                        shownItems.isEmpty() -> 2
                         else -> 3
+                    }
+                    val resultsLabel = stringResource(R.string.search_results_header)
+                    val resultGroups = remember(searchResults.items, resultsLabel) {
+                        listOf(resultsLabel to searchResults.items)
                     }
                     Crossfade(targetState = galleryPhase, label = "galleryContent") { phase ->
                     when (phase) {
@@ -1135,13 +1202,17 @@ fun GalleryScreen(
                             )
                         else ->
                             PhotoGrid(
-                                items              = state.filteredItems,
+                                items              = shownItems,
                                 allItems           = state.items,
-                                monthGroups        = state.monthGroups,
-                                dayGroups          = state.dayGroups,
-                                onThisDayGroups    = state.onThisDayGroups,
-                                gridState          = gridState,
-                                staggeredState     = staggeredState,
+                                // Results are one relevance-ordered group (name / date matches first,
+                                // then content matches), not re-bucketed by date.
+                                monthGroups        = if (searching) resultGroups else state.monthGroups,
+                                dayGroups          = if (searching) resultGroups else state.dayGroups,
+                                onThisDayGroups    = if (searching) emptyList() else state.onThisDayGroups,
+                                // Own scroll positions, so leaving a search returns to where the
+                                // timeline was.
+                                gridState          = if (searching) searchGridState else gridState,
+                                staggeredState     = if (searching) searchStaggeredState else staggeredState,
                                 topContentPadding  = headerHeightDp,
                                 permissionState    = state.permissionState,
                                 onPermissionGrant  = { permissionLauncher.launch(mediaPermissions) },
@@ -1183,6 +1254,11 @@ fun GalleryScreen(
                 onDeviceFolderActionClick = onDeviceFolderActionClick,
                 onHideDeviceFolder = viewModel::requestHideFolder,
                 onMemoriesClick = onMemoriesClick,
+                onPeopleClick = onPeopleClick.takeIf { faceEnabled },
+                onMapClick = onMapClick,
+                onCalendarClick = onCalendarClick,
+                // Only cloud photos can be pinned for offline, so a guest has nothing to show there.
+                onOfflineClick = onOfflineClick.takeIf { state.isSignedIn },
                 createRequestSignal = albumCreateSignal,
                 displayFilter = albumFilter,
                 query = albumQuery,
@@ -1207,29 +1283,6 @@ fun GalleryScreen(
         // transition DURING the swipe rather than after it settles. Crossfade swaps the per-tab content
         // and animateContentSize animates the height between the taller Photos header (2 rows + category
         // rail) and the shorter Albums/Shared ones, so the shrink/grow is smooth instead of a snap.
-        // People rail data handed to the category rail (inside the header) through a CompositionLocal,
-        // so the People chip + face bar render without new header parameters. The bar is open when the
-        // chip is toggled on or a person is selected; toggling it off also clears any person filter.
-        val peopleActive = peopleExpanded || state.selectedPersonId != null
-        val peopleRail = remember(state.people, state.selectedPersonId, peopleActive) {
-            PeopleRailData(
-                people = state.people,
-                selectedPersonId = state.selectedPersonId,
-                active = peopleActive,
-                onToggle = {
-                    if (peopleActive) {
-                        peopleExpanded = false
-                        viewModel.onPersonSelected(null)
-                    } else {
-                        peopleExpanded = true
-                    }
-                },
-                onPersonSelected = { id ->
-                    peopleExpanded = true
-                    viewModel.onPersonSelected(if (state.selectedPersonId == id) null else id)
-                },
-            )
-        }
         AnimatedVisibility(
             visible = showOverlays && !state.isSelectionMode,
             enter = fadeIn() + slideInVertically { -it },
@@ -1238,7 +1291,6 @@ fun GalleryScreen(
         ) {
             Box(modifier = Modifier.animateContentSize()) {
                 Crossfade(targetState = pagerState.currentPage, label = "headerTab") { page ->
-                    CompositionLocalProvider(LocalPeopleRail provides peopleRail) {
                     GalleryHeader(
                         selectedTab = page,
                         galleryState = state,
@@ -1246,24 +1298,12 @@ fun GalleryScreen(
                         sharedFilter = sharedFilter,
                         activeEmailFilter = activeEmailFilter,
                         isOnlineNow = isOnlineNow,
-                        onFilterSelected = viewModel::onFilterSelected,
-                        onSearchClick = onSearchClick,
-                        onCalendarClick = onCalendarClick,
-                        onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
+                        photosSearchTerms = photosSearchTerms,
+                        onOpenPhotosSearch = { photosSearchOpen = true },
+                        onClearPhotosSearch = clearPhotosSearch,
+                        onOpenTimelineSettings = onOpenTimelineSettings,
+                        onOpenAlbumsSettings = onOpenAlbumsSettings,
                         onHiddenAlbumClick = onHiddenAlbumClick,
-                        // The Photos-tab filter icon opens the content-filter drawer (sync status
-                        // + date), the same sheet the Search screen shows.
-                        onShowAlbumsFilterSheet = { showFilterSheet = true },
-                        onNewAlbumClick = { albumCreateSignal++ },
-                        onNewLocalFolder = { showNewFolderNameDialog = true },
-                        albumFilter = albumFilter,
-                        onAlbumFilterSelected = { picked ->
-                            albumFilter = picked
-                            tabScope.launch {
-                                context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_LAST_FILTER] = picked.ordinal }
-                            }
-                        },
-                        onOpenAlbumsFilterSheet = { showAlbumsFilterSheet = true },
                         albumQuery = albumQuery,
                         onAlbumQueryChange = { albumQuery = it },
                         albumSearchActive = albumSearchActive,
@@ -1275,6 +1315,7 @@ fun GalleryScreen(
                             activeEmailFilter = null
                         },
                         onShowSharedEmailSheet = { showEmailFilterSheet = true },
+                        onClearSharedEmailFilter = { activeEmailFilter = null },
                         onSettingsClick = onSettingsClick,
                         onOpenUploads = onOpenUploads,
                         onOpenDownloads = onOpenDownloads,
@@ -1285,7 +1326,6 @@ fun GalleryScreen(
                         newsUnread = newsUnread,
                         onUpdateClick = viewModel::openUpdateFromDot,
                     )
-                    }
                 }
             }
         }
@@ -1436,37 +1476,89 @@ fun GalleryScreen(
             exit = fadeOut() + slideOutVertically { it },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(bottom = 24.dp),
+                .padding(bottom = 24.dp, start = 16.dp, end = 16.dp),
         ) {
-            BottomDock(
-                // The live fractional page position drives the sliding highlight, so it follows a swipe.
-                position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
-                // A local-only session has no account, so the cloud-only Shared tab is omitted.
-                showShared = state.isSignedIn,
-                onTabSelected = { tab ->
-                    // Re-tapping the active tab always returns it to the visual top (item 0). Switching
-                    // to a different tab also resets to the top, unless "keep place when switching tabs"
-                    // is on, in which case the target page stays where it was last scrolled. At this
-                    // point [selectedTab] still holds the previous tab, so tab == selectedTab marks a
-                    // re-tap. The Photos tab targets whichever grid is showing (staggered when mosaic is
-                    // on), and item 0 is the top in every order, including reversed, where the top is
-                    // the oldest photo by design.
-                    if (!keepScrollOnTabSwitch || tab == selectedTab) {
-                        when (tab) {
-                            0 -> tabScope.launch {
-                                if (mosaicGrid) staggeredState.scrollToItem(0) else gridState.scrollToItem(0)
-                            }
-                            1 -> tabScope.launch { albumsGridState.scrollToItem(0) }
+            // Left = moving through time (Photos only, the one time-based tab), right = the tab's main
+            // action (Photos: filter, Albums: New album), the tab dock between. How a tab looks lives in
+            // its settings page, behind the top ⋮. While a time view is being picked the switcher takes
+            // the dock's place (✕ brings the dock back).
+            val onPhotos = pagerState.currentPage == 0
+            val onAlbums = pagerState.currentPage == 1 && !albumReorderActive
+            val onTabSelected: (Int) -> Unit = { tab ->
+                // Re-tapping the active tab always returns it to the visual top (item 0). Switching
+                // to a different tab also resets to the top, unless "keep place when switching tabs"
+                // is on, in which case the target page stays where it was last scrolled. At this
+                // point [selectedTab] still holds the previous tab, so tab == selectedTab marks a
+                // re-tap. The Photos tab targets whichever grid is showing (staggered when mosaic is
+                // on), and item 0 is the top in every order, including reversed, where the top is
+                // the oldest photo by design.
+                if (!keepScrollOnTabSwitch || tab == selectedTab) {
+                    when (tab) {
+                        0 -> tabScope.launch {
+                            if (mosaicGrid) staggeredState.scrollToItem(0) else gridState.scrollToItem(0)
                         }
+                        1 -> tabScope.launch { albumsGridState.scrollToItem(0) }
                     }
-                    // Drive the pager so a tap slides to the page; the rail and dock highlight both
-                    // follow pagerState.currentPage, which flips as the slide crosses the midpoint —
-                    // the same point a swipe flips them, so tap and swipe stay in sync.
-                    selectedTab = tab
-                    tabScope.launch { pagerState.animateScrollToPage(tab) }
-                },
-            )
+                }
+                // Drive the pager so a tap slides to the page; the rail and dock highlight both
+                // follow pagerState.currentPage, which flips as the slide crosses the midpoint —
+                // the same point a swipe flips them, so tap and swipe stay in sync.
+                selectedTab = tab
+                tabScope.launch { pagerState.animateScrollToPage(tab) }
+            }
+            // Three fixed slots: the side buttons keep their 48dp on both sides on every tab (empty
+            // where a tab has none), and the dock or switcher gets only the width between them, its
+            // labels shortening with "…" before it could ever run under a button.
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    when {
+                        onPhotos && timeView != null -> TimeViewCloseButton(onClick = { timeView = null })
+                        onPhotos -> TimeViewButton(onClick = { monthsFocusYear = null; timeView = TimeView.Months })
+                    }
+                }
+                Box(
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (onPhotos && timeView != null) {
+                        TimeViewSwitcher(
+                            current = timeView ?: TimeView.Days,
+                            onSelect = { view ->
+                                if (view == TimeView.Months && timeView != TimeView.Months) monthsFocusYear = null
+                                timeView = view
+                            },
+                        )
+                    } else {
+                        BottomDock(
+                            // The live fractional page position drives the sliding highlight, so it
+                            // follows a swipe.
+                            position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
+                            // A local-only session has no account, so the cloud-only Shared tab is omitted.
+                            showShared = state.isSignedIn,
+                            onTabSelected = onTabSelected,
+                        )
+                    }
+                }
+                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    // New album with an account; a guest creates a real device folder instead, which
+                    // needs the scoped-storage write of Android 10+.
+                    val canCreate = state.isSignedIn || Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                    when {
+                        onAlbums && canCreate -> CreateButton(
+                            label = stringResource(if (state.isSignedIn) R.string.albums_new_album else R.string.new_folder),
+                            onClick = { if (state.isSignedIn) albumCreateSignal++ else showNewFolderNameDialog = true },
+                        )
+                        onPhotos -> FilterButton(
+                            categories = rememberVisibleCategories(),
+                            selected = state.selectedFilters,
+                            onToggle = viewModel::toggleCategory,
+                            onClear = { viewModel.setCategories(emptySet()) },
+                        )
+                    }
+                }
+            }
         }
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
@@ -1497,34 +1589,49 @@ fun GalleryScreen(
                 )
             }
         }
-    }
 
-    // ── Bottom sheets — extracted to GalleryDialogs.kt for JIT-blob shrink ────
-    if (showFilterSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showFilterSheet = false },
-            sheetState = filterSheetState,
-            containerColor = AppColors.current.sheetBg,
-            scrimColor = Color.Black.copy(alpha = 0.5f),
-        ) {
-            ContentFilterSheet(
-                currentFilter = state.contentFilter,
-                currentCategory = state.selectedFilter,
-                onApply = { filter -> viewModel.setContentFilter(filter) },
-                onCategorySelected = { cat -> viewModel.onFilterSelected(cat) },
-                onDismiss = { showFilterSheet = false },
-                // Categories + media type live inline in the timeline rail, so the drawer keeps the
-                // sync-status + date pickers only, matching the Search screen's sheet.
-                showCategorySection = false,
-                showMediaTypeSection = false,
-                showDateSection = false,
-                // Signed out there is only on-device media, so the backed-up / cloud chips are hidden.
-                showSyncStatusSection = state.isSignedIn,
-                // Timeline-only bottom row into the full layout / categories / folders screen.
-                onOpenTimelineSettings = onOpenTimelineFilter,
+        // ── Search page ───────────────────────────────────────────────────────
+        // Over everything, dock included: it edits the terms, and closing it lands on the timeline,
+        // which is the result.
+        if (photosSearchOpen) {
+            val closeSearch = {
+                viewModel.rememberSearch(photosQuery)
+                photosSearchOpen = false
+            }
+            PhotosSearchPage(
+                query = photosQuery,
+                onQueryChange = viewModel::setQuery,
+                placeholder = stringResource(
+                    if (semanticSearchEnabled) R.string.search_placeholder_semantic else R.string.search_photos_hint,
+                ),
+                terms = photosSearchTerms,
+                recentSearches = recentSearches,
+                people = state.people,
+                selectedPersonId = state.selectedPersonId,
+                onPersonClick = { id ->
+                    if (state.selectedPersonId == id) clearPersonTerm() else viewModel.onPersonSelected(id)
+                },
+                dateRange = state.contentFilter.dateRange,
+                years = libraryYears,
+                onDateRange = { range -> viewModel.setContentFilter(state.contentFilter.copy(dateRange = range)) },
+                categories = rememberVisibleCategories(),
+                selectedCategories = state.selectedFilters,
+                onCategoryClick = viewModel::toggleCategory,
+                // Signed out there is only on-device media, so where a photo is stored says nothing.
+                showStorage = state.isSignedIn,
+                syncStatus = state.contentFilter.syncStatus,
+                onSyncClick = { status ->
+                    val next = if (state.contentFilter.syncStatus == status) SyncStatusFilter.All else status
+                    viewModel.setContentFilter(state.contentFilter.copy(syncStatus = next))
+                },
+                resultCount = if (photosQuery.isNotBlank()) searchResults.items.size else state.filteredItems.size,
+                onReset = clearPhotosSearch,
+                onClose = closeSearch,
             )
         }
     }
+
+    // ── Bottom sheets — extracted to GalleryDialogs.kt for JIT-blob shrink ────
     if (showEmailFilterSheet) {
         GallerySharedEmailFilterDialog(
             availableEmails = sharedUiState.availableEmails,
@@ -1534,42 +1641,6 @@ fun GalleryScreen(
                 showEmailFilterSheet = false
             },
             onDismiss = { showEmailFilterSheet = false },
-        )
-    }
-    if (showAlbumsFilterSheet) {
-        AlbumsFilterSheet(
-            sheetState = albumsFilterSheetState,
-            default = AlbumDisplayFilter.entries[albumsDefaultFilter.coerceIn(0, AlbumDisplayFilter.entries.lastIndex)],
-            rememberLast = albumsRememberLastFilter,
-            sortMode = albumsSortMode,
-            columns = albumColumns,
-            onDefaultChange = { picked ->
-                // Show it now, not only on the next visit. The sheet writes the filter the Albums
-                // tab opens on, and picking one while looking at that tab is a statement about the
-                // list on screen as much as about the next open: persisting it alone left the grid
-                // unchanged, so the pick read as ignored until the user left the tab and came back,
-                // which is when the entry effect re-resolves this key.
-                albumFilter = picked
-                tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_DEFAULT_FILTER] = picked.ordinal }
-                }
-            },
-            onRememberLastChange = { value ->
-                tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_REMEMBER_LAST_FILTER] = value }
-                }
-            },
-            onSortModeChange = { picked ->
-                tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_SORT_MODE] = picked.ordinal }
-                }
-            },
-            onColumnsChange = { picked ->
-                tabScope.launch {
-                    context.settingsDataStore.edit { it[SettingsKeys.ALBUM_GRID_COLUMNS] = picked }
-                }
-            },
-            onDismiss = { showAlbumsFilterSheet = false },
         )
     }
     if (showShareCloudWarning) {
