@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.albums
 
 import eu.akoos.photos.data.hidden.HiddenFolderRecords
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.usecase.AlbumSortMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -281,5 +282,21 @@ class DeviceFolderCardsTest {
         assertEquals(listOf("Camera", "Screenshots", "Videos"), grid(all).map { it.name })
         // Screenshots is hidden, so its one photo is now a vault file rather than a MediaStore row.
         assertEquals(listOf("Camera", "Videos"), grid(all - shot1).map { it.name })
+    }
+
+    @Test
+    fun `folders follow the albums sort order`() {
+        val folders = listOf(
+            DeviceFolder(name = "Camera", coverUri = null, itemCount = 50, latestTakenMs = 100L),
+            DeviceFolder(name = "screenshots", coverUri = null, itemCount = 4, latestTakenMs = 300L),
+            DeviceFolder(name = "Download", coverUri = null, itemCount = 10, latestTakenMs = 200L),
+        )
+        fun order(mode: AlbumSortMode) = DeviceFolderCards.sorted(folders, mode).map { it.name }
+        assertEquals(listOf("Camera", "Download", "screenshots"), order(AlbumSortMode.NameAsc))
+        assertEquals(listOf("screenshots", "Download", "Camera"), order(AlbumSortMode.NameDesc))
+        assertEquals(listOf("screenshots", "Download", "Camera"), order(AlbumSortMode.LastActivity))
+        assertEquals(listOf("Camera", "Download", "screenshots"), order(AlbumSortMode.PhotoCount))
+        // Folders cannot be arranged by hand, so Custom keeps the largest-first order.
+        assertEquals(order(AlbumSortMode.PhotoCount), order(AlbumSortMode.Custom))
     }
 }

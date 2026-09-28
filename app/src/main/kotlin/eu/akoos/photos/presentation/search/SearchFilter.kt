@@ -35,7 +35,7 @@ import java.util.Locale
 
 /**
  * What the Search screen actually narrows the library down to: list in, list out, no Android and no
- * coroutine scope. [SearchViewModel] supplies the localized month and category names (the only part
+ * coroutine scope. The gallery view model supplies the localized month and category names (the only part
  * that needs a resources handle) and does nothing else to the result.
  */
 internal object SearchFilter {
@@ -73,8 +73,8 @@ internal object SearchFilter {
     /**
      * The whole narrowing, in the order the screen applies it: query words, then the content filter,
      * then the category chip. [foldedMonths] and [foldedCategoryNames] are pre-folded localized text
-     * the query is matched against; [offlinePinIds] backs the Offline chip, which is a local pin set
-     * rather than a server tag, and [favoriteIds] backs the Favourites chip for the photos whose
+     * the query is matched against; [offlinePinIds] backs the "Available offline" sync status, which
+     * is a local pin set rather than a server tag, and [favoriteIds] backs the Favourites chip for the photos whose
      * heart lives on the device rather than in Drive.
      */
     fun apply(
@@ -96,40 +96,14 @@ internal object SearchFilter {
         ) {
             return emptyList()
         }
-        var out = items
-        if (qTrimmed.isNotEmpty()) {
-            // Match every query word against the item's folded metadata haystack (name + date +
-            // type + categories) so multi-word queries like "june 2024" or "beach video" work too.
-            val needleWords = fold(qTrimmed).split(' ').filter { it.isNotBlank() }
-            val cal = Calendar.getInstance()
-            out = out.filter { item ->
-                // A word matches if it is in the file name OR the full date/type/tag haystack.
-                // Test the cheap folded name first and only build the heavier haystack when the
-                // name misses — for plain name queries the haystack is never built. Cache it per
-                // item so multi-word queries build it at most once.
-                val foldedName = fold(displayNameOf(item))
-                var haystack: String? = null
-                needleWords.all { word ->
-                    foldedName.contains(word) || run {
-                        val full = haystack
-                            ?: searchHaystack(item, cal, foldedMonths, foldedCategoryNames)
-                                .also { haystack = it }
-                        full.contains(word)
-                    }
-                }
-            }
-        }
-        out = applyContentFilter(out, filter)
+        var out = matchQuery(items, qTrimmed, foldedMonths, foldedCategoryNames)
+        out = applyContentFilter(out, filter, offlinePinIds)
         if (category != GalleryFilter.All) {
             out = when (category) {
                 // Live Photos (tag 3) and Motion Photos (tag 4) are the same concept on iOS/Android
                 // and share one chip, so either tag matches both — mirror the gallery filter.
                 GalleryFilter.LivePhotos, GalleryFilter.MotionPhotos ->
                     out.filter { CategorizeItem.belongsTo(it, 3) || CategorizeItem.belongsTo(it, 4) }
-                // Offline = the cloud photos pinned for offline; not a server tag, so it filters on
-                // the pinned linkId set rather than CategorizeItem. Mirrors the gallery filter.
-                GalleryFilter.Offline ->
-                    out.filter { (it as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { id -> id in offlinePinIds } == true }
                 // Favourite = the device-side set for a photo that lives only on the device, Drive
                 // PhotoTag 0 for a backed-up one. Through the same helper the timeline, the grid
                 // hearts and the viewer use, so the one chip cannot mean two things on two screens.
@@ -145,7 +119,46 @@ internal object SearchFilter {
         return out
     }
 
-    fun applyContentFilter(items: List<GalleryItem>, filter: ContentFilter): List<GalleryItem> {
+    /**
+     * Keep the items every word of [q] matches, against the file name first and then the folded
+     * date / type / category haystack. Blank [q] keeps everything. Shared by [apply] and the timeline,
+     * where the query is one more narrowing on top of its own filters.
+     */
+    fun matchQuery(
+        items: List<GalleryItem>,
+        q: String,
+        foldedMonths: List<String>,
+        foldedCategoryNames: Map<Int, String>,
+    ): List<GalleryItem> {
+        val qTrimmed = q.trim()
+        if (qTrimmed.isEmpty()) return items
+        // Match every query word against the item's folded metadata haystack (name + date +
+        // type + categories) so multi-word queries like "june 2024" or "beach video" work too.
+        val needleWords = fold(qTrimmed).split(' ').filter { it.isNotBlank() }
+        val cal = Calendar.getInstance()
+        return items.filter { item ->
+            // A word matches if it is in the file name OR the full date/type/tag haystack.
+            // Test the cheap folded name first and only build the heavier haystack when the
+            // name misses — for plain name queries the haystack is never built. Cache it per
+            // item so multi-word queries build it at most once.
+            val foldedName = fold(displayNameOf(item))
+            var haystack: String? = null
+            needleWords.all { word ->
+                foldedName.contains(word) || run {
+                    val full = haystack
+                        ?: searchHaystack(item, cal, foldedMonths, foldedCategoryNames)
+                            .also { haystack = it }
+                    full.contains(word)
+                }
+            }
+        }
+    }
+
+    fun applyContentFilter(
+        items: List<GalleryItem>,
+        filter: ContentFilter,
+        offlinePinIds: Set<String> = emptySet(),
+    ): List<GalleryItem> {
         var out = items
         out = when (filter.mediaType) {
             MediaType.All        -> out
@@ -157,26 +170,12 @@ internal object SearchFilter {
             SyncStatusFilter.LocalOnly -> out.filter { it is GalleryItem.LocalOnly }
             SyncStatusFilter.BackedUp  -> out.filter { it is GalleryItem.Synced }
             SyncStatusFilter.CloudOnly -> out.filter { it is GalleryItem.CloudOnly }
+            // Pinned for offline: not a server tag, so it filters on the pinned linkId set. Mirrors
+            // the gallery filter.
+            SyncStatusFilter.AvailableOffline ->
+                out.filter { (it as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { id -> id in offlinePinIds } == true }
         }
-        // Every date part that is set narrows on its own, which is what the timeline's own filter
-        // does. Hanging the whole branch off the year made a month or a day without one inert here
-        // while it still narrowed there, and inert is worse than unreachable: the empty-state check
-        // above counts any non-default filter as "something was asked for", so a month alone
-        // answered with the entire library instead of with nothing.
-        val year = filter.year
-        val month = filter.month
-        val day = filter.day
-        val dayEnd = filter.dayEnd
-        if (year != null || month != null || day != null) {
-            val cal = Calendar.getInstance()
-            out = out.filter {
-                cal.timeInMillis = it.captureTimeMs
-                val dom = cal.get(Calendar.DAY_OF_MONTH)
-                (year == null || cal.get(Calendar.YEAR) == year) &&
-                    (month == null || cal.get(Calendar.MONTH) + 1 == month) &&
-                    (day == null || (if (dayEnd != null) dom in day..dayEnd else dom == day))
-            }
-        }
+        filter.dateRange?.let { range -> out = out.filter { range.contains(it.captureTimeMs) } }
         return out
     }
 

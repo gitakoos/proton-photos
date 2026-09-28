@@ -81,6 +81,8 @@ data class DeviceFolder(
      *  cover uri is a MediaStore `content://` id that never reveals the extension, so gif-ness is
      *  resolved from the cover item's mime type / display name when the card is built. */
     val coverIsGif: Boolean = false,
+    /** Capture time of the folder's newest photo, for the "Last activity" order. */
+    val latestTakenMs: Long = 0L,
 )
 
 /**
@@ -95,13 +97,14 @@ data class DeviceFolderPrefs(
     val mirroredAsAlbum: Set<String> = emptySet(),
     val excludedFromBackup: Set<String> = emptySet(),
     val hiddenFromTimeline: Set<String> = emptySet(),
-    val sortMode: AlbumPhotoSortMode = AlbumPhotoSortMode.Default,
 )
 
 data class AlbumsUiState(
     val isLoading: Boolean = true,
     val albums: List<Album> = emptyList(),
     val deviceFolders: List<DeviceFolder> = emptyList(),
+    /** The Albums grid order, applied to the device folders as well as the cloud albums. */
+    val sortMode: AlbumSortMode = AlbumSortMode.Default,
     val hiddenAlbumIds: Set<String> = emptySet(),
     /** Albums whose photos are kept out of the main feed alone. Whole set rather than a resolved
      *  flag, for the same reason [folderPrefs] is: the grid shows every album at once and the drawer
@@ -119,9 +122,6 @@ data class AlbumsUiState(
      *  rather than a resolved flag, because the grid shows every folder at once and the drawer asks
      *  about whichever card was held. */
     val folderPrefs: DeviceFolderPrefs = DeviceFolderPrefs(),
-    /** The direction every album lists its photos in. One global choice, so the album long-press
-     *  drawer needs it here to tick the one in force without opening the album. */
-    val albumPhotoSortMode: AlbumPhotoSortMode = AlbumPhotoSortMode.Default,
 ) {
     /** Cloud albums hidden client-side drop off the Albums grid. */
     val visibleCloudAlbums: List<Album> get() = albums.filter { it.linkId !in hiddenAlbumIds }
@@ -129,7 +129,7 @@ data class AlbumsUiState(
     /** Device folders that still hold a photo. A folder the vault holds entirely produces no card,
      *  so the hidden set never has to be subtracted here. */
     val visibleDeviceFolders: List<DeviceFolder>
-        get() = DeviceFolderCards.visible(deviceFolders)
+        get() = DeviceFolderCards.sorted(DeviceFolderCards.visible(deviceFolders), sortMode)
 
     /**
      * Every album a selected photo may be added to: the user's own, plus the shared ones they hold
@@ -191,7 +191,6 @@ class AlbumsViewModel @Inject constructor(
 
     init {
         observeSortMode()
-        observeAlbumPhotoSortMode()
         loadAlbums()
         observeDeviceFolders()
         // Re-fetch on share-state changes so the grid badge updates without a manual pull-to-refresh.
@@ -231,23 +230,8 @@ class AlbumsViewModel @Inject constructor(
                 .collect { (mode, order) ->
                     sortMode.value = mode
                     customOrder.value = order
-                    _uiState.update { it.copy(albums = applySort(it.albums)) }
+                    _uiState.update { it.copy(albums = applySort(it.albums), sortMode = mode) }
                 }
-        }
-    }
-
-    /**
-     * Track the direction albums list their photos in, so a card's drawer can tick the one in force.
-     * Its own collector rather than a member of the pair above: that pair orders the grid, this
-     * orders what is inside an album, and the two are set from different places.
-     */
-    private fun observeAlbumPhotoSortMode() {
-        viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { AlbumPhotoSortMode.fromOrdinal(it[SettingsKeys.ALBUM_PHOTO_SORT_MODE]) }
-                .distinctUntilChanged()
-                .catch { emit(AlbumPhotoSortMode.Default) }
-                .collect { mode -> _uiState.update { it.copy(albumPhotoSortMode = mode) } }
         }
     }
 
@@ -309,7 +293,6 @@ class AlbumsViewModel @Inject constructor(
                         mirroredAsAlbum = prefs[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet(),
                         excludedFromBackup = prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet(),
                         hiddenFromTimeline = prefs[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet(),
-                        sortMode = AlbumPhotoSortMode.fromOrdinal(prefs[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE]),
                     )
                 }
                 .distinctUntilChanged()
@@ -388,21 +371,6 @@ class AlbumsViewModel @Inject constructor(
      *  reconcile: the gallery observes the key and re-filters on the next emission. */
     fun toggleFolderHiddenFromTimeline(folderName: String) {
         viewModelScope.launch { toggleFolderName(SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES, folderName) }
-    }
-
-    /** Persist the direction every device folder lists its photos in. */
-    fun setDeviceFolderSortMode(mode: AlbumPhotoSortMode) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE] = mode.ordinal }
-        }
-    }
-
-    /** Persist the direction every album lists its photos in, the same key the album's own screen
-     *  writes, so a direction set from a card and one set inside an album are one choice. */
-    fun setAlbumPhotoSortMode(mode: AlbumPhotoSortMode) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.ALBUM_PHOTO_SORT_MODE] = mode.ordinal }
-        }
     }
 
     fun refresh() = loadAlbums()

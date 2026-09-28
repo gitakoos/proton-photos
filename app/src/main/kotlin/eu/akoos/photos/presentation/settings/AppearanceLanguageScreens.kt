@@ -64,16 +64,15 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.paletteAccent
 
 /**
- * Appearance hub — menu rows to the theme/palette and language sub-pages, plus the photo
- * timeline page. Kept thin so each concern lives on its own focused page instead of one
- * long mixed scroll.
+ * Appearance hub — menu rows to the theme/palette and language sub-pages. Kept thin so each
+ * concern lives on its own focused page instead of one long mixed scroll. The Timeline page
+ * moved to the Settings "Library" section beside Albums.
  */
 @Composable
 fun AppearanceSettingsScreen(
     onBack: () -> Unit,
     onThemeClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
-    onTimelineFilterClick: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
         SettingsCard {
@@ -85,13 +84,6 @@ fun AppearanceSettingsScreen(
             NavRow(
                 label = stringResource(R.string.language_section),
                 onClick = onLanguageClick,
-            )
-            RowDivider()
-            // Photos timeline page: the single home for the timeline display settings
-            // (layout, category bar, albums, device folders, and the landing tab).
-            NavRow(
-                label = stringResource(R.string.settings_timeline),
-                onClick = onTimelineFilterClick,
             )
         }
     }

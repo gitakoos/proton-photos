@@ -211,6 +211,9 @@ fun SettingsScreen(
     onFindDuplicatesClick: () -> Unit = {},
     onImportClick: () -> Unit = {},
     onAppearanceClick: () -> Unit = {},
+    onTimelineClick: () -> Unit = {},
+    onAlbumsSettingsClick: () -> Unit = {},
+    onLandingTabClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     onFaqClick: () -> Unit = {},
@@ -700,6 +703,36 @@ fun SettingsScreen(
                         onClick = onImportClick,
                     )
                 }
+            }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── Library ───────────────────────────────────────────────────────
+            // How the three tabs look and open: the Timeline and Albums pages hold the preferences
+            // that used to hide under Appearance or inside the Albums filter sheet, and the landing
+            // tab is an app-wide choice, so it sits beside them rather than under Timeline.
+            CollapsibleSection(label = stringResource(R.string.settings_library_section)) {
+            SettingsCard {
+                NavRow(
+                    label = stringResource(R.string.settings_timeline),
+                    description = stringResource(R.string.settings_timeline_desc),
+                    onClick = onTimelineClick,
+                )
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.gallery_tab_albums),
+                    description = stringResource(
+                        if (state.isSignedIn) R.string.settings_albums_desc else R.string.settings_albums_desc_local,
+                    ),
+                    onClick = onAlbumsSettingsClick,
+                )
+                RowDivider()
+                NavRow(
+                    label = stringResource(R.string.settings_landing_tab),
+                    description = stringResource(R.string.settings_landing_tab_desc),
+                    onClick = onLandingTabClick,
+                )
             }
             }
 

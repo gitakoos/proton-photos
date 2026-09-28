@@ -216,10 +216,22 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         listOf("language", "locale", "nyelv"),
         Screen.LanguageSettings.route,
     ),
+
+    // ── Library ────────────────────────────────────────────────────────────────
     SettingsSearchEntry(
-        R.string.settings_timeline, R.string.settings_appearance,
-        listOf("timeline", "layout", "grid", "categories", "idővonal"),
+        R.string.settings_timeline, R.string.settings_library_section,
+        listOf("timeline", "layout", "grid", "categories", "filter", "filter menu", "idővonal"),
         Screen.TimelineFilter.route,
+    ),
+    SettingsSearchEntry(
+        R.string.gallery_tab_albums, R.string.settings_library_section,
+        listOf("albums", "cover", "cover size", "photo order", "sort", "newest", "oldest", "folders", "albumok", "rendezés"),
+        Screen.AlbumsSettings.route,
+    ),
+    SettingsSearchEntry(
+        R.string.settings_landing_tab, R.string.settings_library_section,
+        listOf("landing", "start tab", "open on", "startup", "kezdőlap"),
+        Screen.LandingTab.route,
     ),
 
     // ── Help & about ───────────────────────────────────────────────────────────

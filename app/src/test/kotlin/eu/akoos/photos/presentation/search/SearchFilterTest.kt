@@ -26,6 +26,7 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.presentation.gallery.ContentFilter
+import eu.akoos.photos.presentation.gallery.DateRange
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
@@ -33,6 +34,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 import java.util.Calendar
 import java.util.Locale
 
@@ -382,69 +384,43 @@ class SearchFilterTest {
         )
     }
 
-    // ── the year / month / day filter ───────────────────────────────────────────────────────────
+    // ── the date range ──────────────────────────────────────────────────────────────────────────
 
     @Test
-    fun `a year on its own keeps every photo from that year`() {
+    fun `a year keeps every photo from that year`() {
         val items = listOf(local("a.jpg", at = juneDay), local("b.jpg", at = julyDay), local("c.jpg", at = lastJune))
-        assertEquals(listOf("a.jpg", "b.jpg"), namesFrom(search(items, filter = ContentFilter(year = 2024))))
+        assertEquals(listOf("a.jpg", "b.jpg"), namesFrom(search(items, filter = ContentFilter(dateRange = DateRange.year(2024)))))
     }
 
     @Test
     fun `a month narrows within its year and is counted from one`() {
         val items = listOf(local("a.jpg", at = juneDay), local("b.jpg", at = julyDay))
-        assertEquals(listOf("a.jpg"), namesFrom(search(items, filter = ContentFilter(year = 2024, month = 6))))
-        assertEquals(listOf("b.jpg"), namesFrom(search(items, filter = ContentFilter(year = 2024, month = 7))))
+        assertEquals(listOf("a.jpg"), namesFrom(search(items, filter = ContentFilter(dateRange = DateRange.month(2024, 6)))))
+        assertEquals(listOf("b.jpg"), namesFrom(search(items, filter = ContentFilter(dateRange = DateRange.month(2024, 7)))))
     }
 
     @Test
-    fun `a day narrows within its month`() {
-        val items = listOf(local("a.jpg", at = juneDay), local("b.jpg", at = at(2024, 6, 16)))
-        assertEquals(
-            listOf("a.jpg"),
-            namesFrom(search(items, filter = ContentFilter(year = 2024, month = 6, day = 15))),
-        )
-    }
-
-    @Test
-    fun `a month without a year keeps that month in every year`() {
-        // Each date part narrows on its own, the way the timeline's own filter has always read them.
-        // A month that narrowed nothing while still counting as "something was asked for" made the
-        // page answer with the whole library.
-        val items = listOf(local("a.jpg", at = juneDay), local("b.jpg", at = julyDay), local("c.jpg", at = lastJune))
-        assertEquals(listOf("a.jpg", "c.jpg"), namesFrom(search(items, filter = ContentFilter(month = 6))))
-    }
-
-    @Test
-    fun `a day without a year or a month keeps that day number across the library`() {
+    fun `a custom range keeps its first day and stops before its end`() {
         val items = listOf(
-            local("a.jpg", at = juneDay),
-            local("b.jpg", at = at(2024, 6, 16)),
-            local("c.jpg", at = lastJune),
+            local("before.jpg", at = at(2024, 6, 9, hour = 23)),
+            local("first.jpg", at = at(2024, 6, 10, hour = 0)),
+            local("inside.jpg", at = at(2024, 7, 1)),
+            local("end.jpg", at = at(2024, 7, 5, hour = 0)),
         )
-        assertEquals(listOf("a.jpg", "c.jpg"), namesFrom(search(items, filter = ContentFilter(day = 15))))
+        val range = DateRange(LocalDate.of(2024, 6, 10), LocalDate.of(2024, 7, 5))
+        assertEquals(listOf("first.jpg", "inside.jpg"), namesFrom(search(items, filter = ContentFilter(dateRange = range))))
     }
 
     @Test
-    fun `a month and a day without a year keep that date in every year`() {
-        val items = listOf(
-            local("a.jpg", at = juneDay),
-            local("b.jpg", at = at(2024, 7, 15)),
-            local("c.jpg", at = lastJune),
-        )
-        assertEquals(listOf("a.jpg", "c.jpg"), namesFrom(search(items, filter = ContentFilter(month = 6, day = 15))))
+    fun `the last three months include the current one and cross a year boundary`() {
+        val range = DateRange.lastMonths(LocalDate.of(2025, 2, 14), 3)
+        assertEquals(DateRange(LocalDate.of(2024, 12, 1), LocalDate.of(2025, 3, 1)), range)
     }
 
     @Test
     fun `a date filter that matches nothing answers with nothing, not with everything`() {
         val items = listOf(local("a.jpg", at = juneDay), local("b.jpg", at = julyDay))
-        assertTrue(search(items, filter = ContentFilter(month = 2)).isEmpty())
-    }
-
-    @Test
-    fun `a day without a month still narrows to that day number in every month of the year`() {
-        val items = listOf(local("a.jpg", at = juneDay), local("b.jpg", at = at(2024, 7, 15)), local("c.jpg", at = julyDay))
-        assertEquals(listOf("a.jpg", "b.jpg"), namesFrom(search(items, filter = ContentFilter(year = 2024, day = 15))))
+        assertTrue(search(items, filter = ContentFilter(dateRange = DateRange.month(2024, 2))).isEmpty())
     }
 
     @Test
@@ -458,10 +434,8 @@ class SearchFilterTest {
                 mimeType = "image/jpeg", sizeBytes = 1L, bucketName = null,
             ),
         )
-        assertEquals(
-            listOf("a.jpg"),
-            namesFrom(search(listOf(item), filter = ContentFilter(year = 2024, month = 6, day = 15))),
-        )
+        val june15 = DateRange(LocalDate.of(2024, 6, 15), LocalDate.of(2024, 6, 16))
+        assertEquals(listOf("a.jpg"), namesFrom(search(listOf(item), filter = ContentFilter(dateRange = june15))))
     }
 
     // ── the category chips ──────────────────────────────────────────────────────────────────────
@@ -492,19 +466,26 @@ class SearchFilterTest {
     }
 
     @Test
-    fun `the offline chip only ever matches a photo that lives in the cloud alone`() {
+    fun `available offline only ever matches a photo that lives in the cloud alone`() {
         val cloudPinned = cloud("c.jpg", linkId = "pinned")
         val syncedPinned = synced("s.jpg", linkId = "pinned-too")
         val items = listOf(cloudPinned, syncedPinned)
         assertEquals(
             listOf("c.jpg"),
-            namesFrom(search(items, category = GalleryFilter.Offline, offlinePinIds = setOf("pinned", "pinned-too"))),
+            namesFrom(
+                search(
+                    items,
+                    filter = ContentFilter(syncStatus = SyncStatusFilter.AvailableOffline),
+                    offlinePinIds = setOf("pinned", "pinned-too"),
+                )
+            ),
         )
     }
 
     @Test
-    fun `the offline chip with nothing pinned finds nothing`() {
-        assertTrue(search(listOf(cloud("c.jpg")), category = GalleryFilter.Offline).isEmpty())
+    fun `available offline with nothing pinned finds nothing`() {
+        val filter = ContentFilter(syncStatus = SyncStatusFilter.AvailableOffline)
+        assertTrue(search(listOf(cloud("c.jpg")), filter = filter).isEmpty())
     }
 
     @Test
@@ -563,7 +544,7 @@ class SearchFilterTest {
         val out = search(
             items,
             q = "beach",
-            filter = ContentFilter(mediaType = MediaType.VideosOnly, year = 2024),
+            filter = ContentFilter(mediaType = MediaType.VideosOnly, dateRange = DateRange.year(2024)),
             category = GalleryFilter.Videos,
         )
         assertEquals(1, out.size)
@@ -579,7 +560,7 @@ class SearchFilterTest {
     @Test
     fun `an empty library survives every filter`() {
         assertTrue(search(emptyList(), q = "beach").isEmpty())
-        assertTrue(search(emptyList(), filter = ContentFilter(year = 2024)).isEmpty())
+        assertTrue(search(emptyList(), filter = ContentFilter(dateRange = DateRange.year(2024))).isEmpty())
         assertTrue(search(emptyList(), category = GalleryFilter.Videos).isEmpty())
     }
 

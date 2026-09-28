@@ -130,7 +130,6 @@
     <string name="offline_screen_title">Fotos sin conexión</string>
     <string name="offline_screen_empty">Las fotos que hagas disponibles sin conexión aparecen aquí</string>
     <string name="settings_offline_photos">Fotos sin conexión</string>
-    <string name="filter_offline">Sin conexión</string>
     <string name="gallery_add_to_album_local_note">Estas fotos se respaldarán primero y luego se añadirán al álbum.</string>
     <string name="gallery_no_albums_yet">Aún no hay álbumes. Crea uno arriba.</string>
     <plurals name="gallery_add_to_album_partial">
@@ -158,7 +157,6 @@
     <string name="gallery_filter_panoramas">Panorámicas</string>
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Personas</string>
-    <string name="gallery_filter_photos">Fotos</string>
     <string name="gallery_category_show">Mostrar %1$s</string>
     <string name="gallery_category_hide">Ocultar %1$s</string>
 
@@ -386,7 +384,6 @@
     <string name="settings_hide_all_folders">Ocultar todas las carpetas del dispositivo</string>
     <string name="settings_hide_all_folders_desc">Las fotos en carpetas del dispositivo ocultas no aparecerán en tu línea de tiempo principal de Fotos. Permanecen en tu dispositivo.</string>
     <string name="settings_hide_album_photos_desc">Las fotos añadidas a un álbum de Drive (nube) no aparecerán en tu línea de tiempo principal de Fotos. Siguen visibles en las pestañas Álbumes y Compartidos.</string>
-    <string name="settings_timeline_filter">Filtro de la línea de tiempo</string>
     <string name="settings_timeline">Línea de tiempo</string>
     <string name="settings_timeline_section_layout">Diseño</string>
     <string name="settings_timeline_section_display">Visualización</string>
@@ -399,13 +396,12 @@
     <string name="settings_seamless_grid">De borde a borde</string>
     <string name="settings_seamless_grid_desc">Cuadrícula más densa con esquinas cuadradas y miniaturas que llegan al borde de la pantalla.</string>
     <string name="timeline_filter_subtitle">Elige qué ocultar de tu línea de tiempo principal de Fotos. Las fotos ocultas permanecen en el dispositivo y se siguen respaldando.</string>
-    <string name="timeline_filter_categories_header">Barra de categorías</string>
+    <string name="timeline_filter_categories_header">Menú de filtros</string>
     <string name="timeline_filter_layout_desc">Se aplica a todas las cuadrículas de fotos</string>
-    <string name="timeline_filter_reorder_hint">Usa las flechas para definir el orden de la barra de categorías que aparece sobre tu línea de tiempo de Fotos.</string>
+    <string name="timeline_filter_reorder_hint">Arrastra para reordenar las categorías del menú de filtros de Fotos. Toca el ojo para ocultar una.</string>
     <string name="timeline_filter_per_album_hint">Oculta álbumes concretos de la línea de tiempo. El interruptor de arriba los oculta todos a la vez.</string>
     <string name="timeline_filter_hidden_album">Álbum oculto</string>
     <string name="timeline_filter_albums_header">Álbumes de Drive</string>
-    <string name="timeline_filter_more_settings">Más ajustes</string>
     <string name="settings_telemetry">Telemetría</string>
     <string name="settings_telemetry_desc">Se controla desde los ajustes de tu cuenta de Proton. Abre account.proton.me para cambiarla.</string>
     <string name="settings_telemetry_on">Activada</string>
@@ -682,7 +678,8 @@
     <string name="share_all">Todos</string>
     <string name="share_shared_with_me">Compartido conmigo</string>
     <string name="share_shared_by_me">Compartido por mí</string>
-    <string name="share_filter_account">Filtrar por cuenta</string>
+    <string name="share_segment_with_me">Conmigo</string>
+    <string name="share_segment_by_me">Por mí</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
     <string name="share_sheet_title">Compartir %1$s</string>
@@ -724,16 +721,18 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filtrar</string>
-    <string name="filter_type_label">Tipo</string>
     <string name="filter_type_videos">Vídeos</string>
     <string name="filter_sync_label">Estado de sincronización</string>
     <string name="filter_sync_local">En el dispositivo</string>
     <string name="filter_sync_backedup">Respaldadas</string>
     <string name="filter_sync_cloud">Solo en la nube</string>
-    <string name="filter_year_label">Año</string>
     <string name="filter_any">Cualquiera</string>
-    <string name="filter_whole_month">Mes completo</string>
     <string name="filter_reset">Restablecer</string>
+    <string name="filter_clear_all">Borrar filtros</string>
+    <plurals name="filter_show_items">
+        <item quantity="one">Mostrar %1$s elemento</item>
+        <item quantity="other">Mostrar %1$s elementos</item>
+    </plurals>
 
     <!-- Álbumes compartidos -->
     <string name="shared_pending_invitations">Invitaciones pendientes</string>
@@ -755,10 +754,22 @@
 
     <!-- Búsqueda -->
     <string name="search_title">Buscar</string>
-    <string name="search_placeholder">Buscar por nombre de archivo</string>
     <string name="search_placeholder_semantic">Buscar tus fotos</string>
-    <string name="search_empty_idle">Escribe un nombre para empezar</string>
     <string name="search_empty_no_results">Sin resultados</string>
+    <string name="search_results_header">Resultados</string>
+    <string name="search_photos_hint">Buscar fotos</string>
+    <string name="search_section_recent">Recientes</string>
+    <string name="search_section_times">Fechas</string>
+    <string name="search_section_storage">Almacenamiento</string>
+    <string name="search_time_this_month">Este mes</string>
+    <string name="search_time_last_month">Mes pasado</string>
+    <string name="search_time_last_3_months">Últimos 3 meses</string>
+    <string name="menu_timeline_settings">Ajustes de la cronología</string>
+    <string name="menu_album_settings">Ajustes de álbumes</string>
+    <string name="time_view_switch">Años, meses, días</string>
+    <string name="time_view_years">Años</string>
+    <string name="time_view_months">Meses</string>
+    <string name="time_view_days">Días</string>
 
     <string name="viewer_play_slideshow">Iniciar pase de diapositivas</string>
     <string name="viewer_pause_slideshow">Pausar pase de diapositivas</string>
@@ -814,11 +825,6 @@
         <item quantity="one">%d foto disponible sin conexión</item>
         <item quantity="many">%d fotos disponibles sin conexión</item>
         <item quantity="other">%d fotos disponibles sin conexión</item>
-    </plurals>
-    <plurals name="map_card_cities_count">
-        <item quantity="one">%d ciudad</item>
-        <item quantity="many">%d ciudades</item>
-        <item quantity="other">%d ciudades</item>
     </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">1 vídeo</item>
@@ -956,16 +962,9 @@
     <string name="model_download_progress">%1$s de %2$s</string>
     <string name="model_download_preparing">Preparando…</string>
     <string name="model_download_stop">Detener</string>
-    <string name="search_section_on_this_day">En este día</string>
-    <string name="search_section_on_this_day_years">Hace %1$d año</string>
-    <string name="search_section_on_this_day_years_plural">Hace %1$d años</string>
-    <string name="search_section_jump_to_month">Saltar al mes</string>
-    <string name="search_section_recent">Recientes</string>
     <string name="map_title">Mapa</string>
+    <string name="library_view_offline">Sin conexión</string>
     <string name="map_vector_title">Mapa del mundo</string>
-    <string name="map_card_title">Mapa</string>
-    <string name="map_card_subtitle_empty">Aún no hay fotos ubicadas</string>
-    <string name="map_card_calendar_subtitle">Tus fotos en vista de calendario</string>
     <string name="map_search_places">Buscar lugares</string>
     <string name="places_title">Lugares</string>
     <string name="map_search_no_places">Aún no hay lugares</string>
@@ -1097,18 +1096,24 @@
     <string name="settings_help_about_section">Ayuda e información</string>
     <string name="cd_scroll_to_top">Ir arriba</string>
     <string name="albums_filter_all">Todos</string>
-    <string name="albums_filter_cloud">Nube</string>
-    <string name="albums_filter_local">Dispositivo</string>
-    <string name="albums_filter_sheet_title">Filtro de álbumes</string>
-    <string name="albums_filter_default_heading">Predeterminado al abrir</string>
-    <string name="albums_filter_remember_last">Recordar el último filtro usado</string>
-    <string name="albums_filter_remember_last_summary">Abrir los álbumes con el filtro seleccionado por última vez</string>
+    <string name="albums_filter_cloud">Álbumes en la nube</string>
+    <string name="albums_filter_local">Carpetas del dispositivo</string>
     <string name="albums_sort_heading">Ordenar por</string>
     <string name="albums_cover_size_heading">Tamaño de portada</string>
     <string name="albums_sort_custom">Personalizado</string>
     <string name="albums_sort_name">Nombre (A-Z)</string>
+    <string name="albums_sort_name_desc">Nombre (Z a A)</string>
     <string name="albums_sort_activity">Última actividad</string>
     <string name="albums_sort_count">Número de fotos</string>
+    <string name="albums_show_heading">Mostrar</string>
+    <string name="settings_library_section">Biblioteca</string>
+    <string name="settings_timeline_desc">Diseño, menú de filtros, qué muestra la cronología</string>
+    <string name="settings_albums_desc">Mostrar, orden, tamaño de portada, orden de fotos</string>
+    <string name="settings_albums_desc_local">Orden, tamaño de portada, orden de fotos en carpetas</string>
+    <string name="settings_albums_photo_order">Orden de fotos en álbumes</string>
+    <string name="settings_folders_photo_order">Orden de fotos en carpetas del dispositivo</string>
+    <string name="timeline_folders_hidden_count">%1$d de %2$d carpetas ocultas de la cronología</string>
+    <string name="timeline_folders_hide_all">Ocultar todas</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Información del archivo</string>
@@ -1485,7 +1490,6 @@
     <string name="thanks_2_5_0_website">Sitio web</string>
     <string name="thanks_2_5_0_coffee">Invítame a un café</string>
     <string name="thanks_2_5_0_dismiss">Cerrar</string>
-    <string name="offline_card_subtitle">Fotos guardadas para ver sin conexión</string>
     <string name="duplicates_filter_identical">Idénticas</string>
     <string name="duplicates_filter_similar">Similares</string>
     <string name="duplicates_filter_match_label">Coincidencia</string>
@@ -1718,7 +1722,6 @@
     <string name="settings_ai_clear_confirm_msg">Esto elimina todas las personas encontradas y todos los datos faciales. Tus fotos no se ven afectadas. Los rostros se detectan de nuevo la próxima vez que se ejecute la indexación.</string>
     <string name="gallery_add_to_person">Añadir a persona</string>
     <string name="people_search_hint">Buscar personas</string>
-    <string name="people_card_subtitle">Explora tus fotos por persona</string>
     <string name="person_set_cover">Establecer como portada</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>

@@ -407,14 +407,12 @@
     <string name="new_folder_create">Create</string>
     <string name="offline_make_available">Make available offline</string>
     <string name="offline_remove">Remove from offline</string>
-    <string name="offline_card_subtitle">Photos saved for offline viewing</string>
     <string name="offline_available">Available offline</string>
     <string name="offline_removed">Removed from offline</string>
     <string name="offline_failed">Couldn\'t save for offline</string>
     <string name="offline_screen_title">Offline photos</string>
     <string name="offline_screen_empty">Photos you make available offline appear here</string>
     <string name="settings_offline_photos">Offline photos</string>
-    <string name="filter_offline">Offline</string>
     <string name="gallery_add_to_album_local_note">These photos will back up first, then join the album.</string>
     <string name="gallery_no_albums_yet">No albums yet. Create one above.</string>
     <plurals name="gallery_add_to_album_partial">
@@ -443,7 +441,6 @@
     <string name="gallery_category_people">People</string>
     <string name="gallery_category_show">Show %1$s</string>
     <string name="gallery_category_hide">Hide %1$s</string>
-    <string name="gallery_filter_photos">Photos</string>
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
     <string name="gallery_error_title">Error</string>
     <string name="gallery_undo">Undo</string>
@@ -905,7 +902,6 @@
     <string name="settings_hide_all_folders">Hide all device folders</string>
     <string name="settings_hide_all_folders_desc">Photos in hidden device folders won\'t appear in your main Photos timeline. They stay on your device.</string>
     <string name="settings_hide_album_photos_desc">Photos added to a Drive (cloud) album won\'t appear in your main Photos timeline. They still show in the Albums and Shared tabs.</string>
-    <string name="settings_timeline_filter">Timeline filter</string>
     <string name="settings_timeline">Timeline</string>
     <string name="settings_timeline_section_layout">Layout</string>
     <string name="settings_timeline_section_display">Display</string>
@@ -922,13 +918,12 @@
     <string name="settings_gif_autoplay_covers">Play GIF album covers</string>
     <string name="settings_gif_autoplay_covers_summary">Animate an album cover when it is a GIF, including cloud albums (the cover downloads once).</string>
     <string name="timeline_filter_subtitle">Choose what to hide from your main Photos timeline. Hidden photos stay on your device and keep backing up.</string>
-    <string name="timeline_filter_categories_header">Category bar</string>
+    <string name="timeline_filter_categories_header">Filter menu</string>
     <string name="timeline_filter_layout_desc">Applies to all photo grids</string>
-    <string name="timeline_filter_reorder_hint">Use the arrows to set the order of the category bar shown above your Photos timeline.</string>
+    <string name="timeline_filter_reorder_hint">Drag to reorder the categories in the Photos filter menu. Tap the eye to hide one.</string>
     <string name="timeline_filter_per_album_hint">Hide individual albums from the timeline. The switch above hides them all at once.</string>
     <string name="timeline_filter_hidden_album">Hidden album</string>
     <string name="timeline_filter_albums_header">Drive albums</string>
-    <string name="timeline_filter_more_settings">Further settings</string>
     <string name="settings_telemetry">Telemetry</string>
     <string name="settings_telemetry_desc">Controlled by your Proton account settings. Open account.proton.me to change.</string>
     <string name="settings_telemetry_on">On</string>
@@ -1210,7 +1205,8 @@
     <string name="share_all">All</string>
     <string name="share_shared_with_me">Shared with me</string>
     <string name="share_shared_by_me">Shared by me</string>
-    <string name="share_filter_account">Filter by account</string>
+    <string name="share_segment_with_me">With me</string>
+    <string name="share_segment_by_me">By me</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
     <string name="share_sheet_title">Share %1$s</string>
@@ -1269,16 +1265,18 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filter</string>
-    <string name="filter_type_label">Type</string>
     <string name="filter_type_videos">Videos</string>
     <string name="filter_sync_label">Sync status</string>
     <string name="filter_sync_local">On device</string>
     <string name="filter_sync_backedup">Backed up</string>
     <string name="filter_sync_cloud">Cloud only</string>
-    <string name="filter_year_label">Year</string>
     <string name="filter_any">Any</string>
-    <string name="filter_whole_month">Whole month</string>
     <string name="filter_reset">Reset</string>
+    <string name="filter_clear_all">Clear filters</string>
+    <plurals name="filter_show_items">
+        <item quantity="one">Show %1$s item</item>
+        <item quantity="other">Show %1$s items</item>
+    </plurals>
 
     <!-- Notification permission rationale -->
     <string name="notifications_blocked_snackbar">Notifications are off. You won\'t see upload or download progress.</string>
@@ -1290,22 +1288,27 @@
 
     <!-- Search -->
     <string name="search_title">Search</string>
-    <string name="search_placeholder">Search by filename</string>
     <string name="search_placeholder_semantic">Search your photos</string>
-    <string name="search_empty_idle">Type a name to start searching</string>
     <string name="search_empty_no_results">No matches</string>
-    <string name="search_section_on_this_day">On this day</string>
-    <string name="search_section_on_this_day_years">%1$d year ago</string>
-    <string name="search_section_on_this_day_years_plural">%1$d years ago</string>
-    <string name="search_section_jump_to_month">Jump to month</string>
+    <string name="search_results_header">Results</string>
+    <string name="search_photos_hint">Search photos</string>
     <string name="search_section_recent">Recent</string>
+    <string name="search_section_times">Times</string>
+    <string name="search_section_storage">Storage</string>
+    <string name="search_time_this_month">This month</string>
+    <string name="search_time_last_month">Last month</string>
+    <string name="search_time_last_3_months">Last 3 months</string>
+    <string name="menu_timeline_settings">Timeline settings</string>
+    <string name="menu_album_settings">Album settings</string>
+    <string name="time_view_switch">Years, months, days</string>
+    <string name="time_view_years">Years</string>
+    <string name="time_view_months">Months</string>
+    <string name="time_view_days">Days</string>
 
     <!-- Map -->
     <string name="map_title">Map</string>
+    <string name="library_view_offline">Offline</string>
     <string name="map_vector_title">World map</string>
-    <string name="map_card_title">Map</string>
-    <string name="map_card_subtitle_empty">No located photos yet</string>
-    <string name="map_card_calendar_subtitle">A calendar view of your photos</string>
     <string name="map_search_places">Search places</string>
     <string name="map_search_no_places">No places yet</string>
     <!-- Places -->
@@ -1358,7 +1361,6 @@
     <string name="people_review_title">People to name</string>
     <string name="people_review_empty">No unnamed people right now. As your photos are scanned, clusters to name and merge show up here.</string>
     <string name="people_search_hint">Search people</string>
-    <string name="people_card_subtitle">Browse your photos by person</string>
     <string name="person_set_cover">Set as cover</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
@@ -1442,10 +1444,6 @@
     <plurals name="offline_batch_result">
         <item quantity="one">%d photo available offline</item>
         <item quantity="other">%d photos available offline</item>
-    </plurals>
-    <plurals name="map_card_cities_count">
-        <item quantity="one">%d city</item>
-        <item quantity="other">%d cities</item>
     </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">1 video</item>
@@ -1717,18 +1715,24 @@
     <string name="settings_help_about_section">Help &amp; about</string>
     <string name="cd_scroll_to_top">Scroll to top</string>
     <string name="albums_filter_all">All</string>
-    <string name="albums_filter_cloud">Cloud</string>
-    <string name="albums_filter_local">On device</string>
-    <string name="albums_filter_sheet_title">Album filter</string>
-    <string name="albums_filter_default_heading">Default when opening</string>
-    <string name="albums_filter_remember_last">Remember last-used filter</string>
-    <string name="albums_filter_remember_last_summary">Open albums with the filter you last selected</string>
+    <string name="albums_filter_cloud">Cloud albums</string>
+    <string name="albums_filter_local">Device folders</string>
     <string name="albums_sort_heading">Sort by</string>
     <string name="albums_cover_size_heading">Cover size</string>
     <string name="albums_sort_custom">Custom</string>
     <string name="albums_sort_name">Name (A to Z)</string>
+    <string name="albums_sort_name_desc">Name (Z to A)</string>
     <string name="albums_sort_activity">Last activity</string>
     <string name="albums_sort_count">Photo count</string>
+    <string name="albums_show_heading">Show</string>
+    <string name="settings_library_section">Library</string>
+    <string name="settings_timeline_desc">Layout, filter menu, what the timeline shows</string>
+    <string name="settings_albums_desc">Show, sort order, cover size, photo order</string>
+    <string name="settings_albums_desc_local">Sort order, cover size, photo order in folders</string>
+    <string name="settings_albums_photo_order">Photo order in albums</string>
+    <string name="settings_folders_photo_order">Photo order in device folders</string>
+    <string name="timeline_folders_hidden_count">%1$d of %2$d folders hidden from the timeline</string>
+    <string name="timeline_folders_hide_all">Hide all</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">File Info</string>

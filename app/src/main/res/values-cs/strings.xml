@@ -259,7 +259,6 @@
     <string name="offline_screen_title">Offline fotky</string>
     <string name="offline_screen_empty">Fotky, které zpřístupníte offline, se zobrazí zde</string>
     <string name="settings_offline_photos">Offline fotky</string>
-    <string name="filter_offline">Offline</string>
     <string name="gallery_add_to_album_local_note">Tyto fotky se nejprve zazálohují a poté se přidají do alba.</string>
     <string name="gallery_no_albums_yet">Zatím žádná alba. Vytvořte jedno výše.</string>
     <plurals name="gallery_add_to_album_partial">
@@ -288,7 +287,6 @@
     <string name="gallery_filter_panoramas">Panoramata</string>
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Lidé</string>
-    <string name="gallery_filter_photos">Fotky</string>
     <string name="gallery_category_show">Zobrazit %1$s</string>
     <string name="gallery_category_hide">Skrýt %1$s</string>
     <!-- Gallery snackbar / error fallbacks (raw exception text stays in the log) -->
@@ -623,7 +621,6 @@
     <string name="settings_hide_all_folders">Skrýt všechny složky zařízení</string>
     <string name="settings_hide_all_folders_desc">Fotky ve skrytých složkách zařízení se neobjeví ve vaší hlavní časové ose fotek. Zůstanou ve vašem zařízení.</string>
     <string name="settings_hide_album_photos_desc">Fotky přidané do alba na Drive (cloud) se neobjeví ve vaší hlavní časové ose fotek. Stále se zobrazují v záložkách Alba a Sdílené.</string>
-    <string name="settings_timeline_filter">Filtr časové osy</string>
     <string name="settings_timeline">Časová osa</string>
     <string name="settings_timeline_section_layout">Rozvržení</string>
     <string name="settings_timeline_section_display">Zobrazení</string>
@@ -636,13 +633,12 @@
     <string name="settings_seamless_grid">Od kraje ke kraji</string>
     <string name="settings_seamless_grid_desc">Hustší mřížka s pravoúhlými rohy a náhledy, které sahají až k okraji obrazovky.</string>
     <string name="timeline_filter_subtitle">Vyberte, co skrýt z hlavní časové osy fotek. Skryté fotky zůstanou ve vašem zařízení a dál se zálohují.</string>
-    <string name="timeline_filter_categories_header">Lišta kategorií</string>
+    <string name="timeline_filter_categories_header">Nabídka filtrů</string>
     <string name="timeline_filter_layout_desc">Platí pro všechny mřížky fotek</string>
-    <string name="timeline_filter_reorder_hint">Šipkami nastavte pořadí lišty kategorií zobrazené nad časovou osou fotek.</string>
+    <string name="timeline_filter_reorder_hint">Přetažením změňte pořadí kategorií v nabídce filtrů fotek. Klepnutím na oko kategorii skryjete.</string>
     <string name="timeline_filter_per_album_hint">Skryjte jednotlivá alba z časové osy. Přepínač výše skryje všechna najednou.</string>
     <string name="timeline_filter_hidden_album">Skryté album</string>
     <string name="timeline_filter_albums_header">Alba na Drive</string>
-    <string name="timeline_filter_more_settings">Další nastavení</string>
     <string name="settings_telemetry">Telemetrie</string>
     <string name="settings_telemetry_desc">Řízeno nastavením vašeho účtu Proton. Pro změnu otevřete account.proton.me.</string>
     <string name="settings_telemetry_on">Zapnutá</string>
@@ -884,7 +880,8 @@
     <string name="share_all">Vše</string>
     <string name="share_shared_with_me">Sdíleno se mnou</string>
     <string name="share_shared_by_me">Sdíleno mnou</string>
-    <string name="share_filter_account">Filtrovat podle účtu</string>
+    <string name="share_segment_with_me">Se mnou</string>
+    <string name="share_segment_by_me">Ode mě</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
     <string name="share_sheet_title">Sdílet %1$s</string>
@@ -943,16 +940,20 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filtr</string>
-    <string name="filter_type_label">Typ</string>
     <string name="filter_type_videos">Videa</string>
     <string name="filter_sync_label">Stav synchronizace</string>
     <string name="filter_sync_local">V zařízení</string>
     <string name="filter_sync_backedup">Zálohováno</string>
     <string name="filter_sync_cloud">Jen v cloudu</string>
-    <string name="filter_year_label">Rok</string>
     <string name="filter_any">Libovolný</string>
-    <string name="filter_whole_month">Celý měsíc</string>
     <string name="filter_reset">Obnovit</string>
+    <string name="filter_clear_all">Zrušit filtry</string>
+    <plurals name="filter_show_items">
+        <item quantity="one">Zobrazit %1$s položku</item>
+        <item quantity="few">Zobrazit %1$s položky</item>
+        <item quantity="many">Zobrazit %1$s položek</item>
+        <item quantity="other">Zobrazit %1$s položek</item>
+    </plurals>
 
     <!-- Notification permission rationale -->
     <string name="notifications_blocked_snackbar">Oznámení jsou vypnutá. Neuvidíte průběh nahrávání ani stahování.</string>
@@ -960,22 +961,27 @@
 
     <!-- Search -->
     <string name="search_title">Hledat</string>
-    <string name="search_placeholder">Hledat podle názvu souboru</string>
     <string name="search_placeholder_semantic">Hledat fotky</string>
-    <string name="search_empty_idle">Začněte hledat zadáním názvu</string>
     <string name="search_empty_no_results">Žádné shody</string>
-    <string name="search_section_on_this_day">V tento den</string>
-    <string name="search_section_on_this_day_years">Před %1$d rokem</string>
-    <string name="search_section_on_this_day_years_plural">Před %1$d lety</string>
-    <string name="search_section_jump_to_month">Přejít na měsíc</string>
+    <string name="search_results_header">Výsledky</string>
+    <string name="search_photos_hint">Hledat fotky</string>
     <string name="search_section_recent">Nedávné</string>
+    <string name="search_section_times">Období</string>
+    <string name="search_section_storage">Úložiště</string>
+    <string name="search_time_this_month">Tento měsíc</string>
+    <string name="search_time_last_month">Minulý měsíc</string>
+    <string name="search_time_last_3_months">Poslední 3 měsíce</string>
+    <string name="menu_timeline_settings">Nastavení časové osy</string>
+    <string name="menu_album_settings">Nastavení alb</string>
+    <string name="time_view_switch">Roky, měsíce, dny</string>
+    <string name="time_view_years">Roky</string>
+    <string name="time_view_months">Měsíce</string>
+    <string name="time_view_days">Dny</string>
 
     <!-- Map -->
     <string name="map_title">Mapa</string>
+    <string name="library_view_offline">Offline</string>
     <string name="map_vector_title">Mapa světa</string>
-    <string name="map_card_title">Mapa</string>
-    <string name="map_card_subtitle_empty">Zatím žádné lokalizované fotky</string>
-    <string name="map_card_calendar_subtitle">Vaše fotky v zobrazení kalendáře</string>
     <string name="map_search_places">Hledat místa</string>
     <string name="places_title">Místa</string>
     <string name="map_search_no_places">Zatím žádná místa</string>
@@ -1045,12 +1051,6 @@
         <item quantity="few">%d fotky dostupné offline</item>
         <item quantity="many">%d fotky dostupné offline</item>
         <item quantity="other">%d fotek dostupných offline</item>
-    </plurals>
-    <plurals name="map_card_cities_count">
-        <item quantity="one">%d město</item>
-        <item quantity="few">%d města</item>
-        <item quantity="many">%d města</item>
-        <item quantity="other">%d měst</item>
     </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">1 video</item>
@@ -1309,18 +1309,24 @@
     <string name="settings_help_about_section">Nápověda a informace</string>
     <string name="cd_scroll_to_top">Přejít nahoru</string>
     <string name="albums_filter_all">Vše</string>
-    <string name="albums_filter_cloud">Cloud</string>
-    <string name="albums_filter_local">V zařízení</string>
-    <string name="albums_filter_sheet_title">Filtr alb</string>
-    <string name="albums_filter_default_heading">Výchozí při otevření</string>
-    <string name="albums_filter_remember_last">Zapamatovat naposledy použitý filtr</string>
-    <string name="albums_filter_remember_last_summary">Otevírat alba s naposledy vybraným filtrem</string>
+    <string name="albums_filter_cloud">Cloudová alba</string>
+    <string name="albums_filter_local">Složky v zařízení</string>
     <string name="albums_sort_heading">Řadit podle</string>
     <string name="albums_cover_size_heading">Velikost obálky</string>
     <string name="albums_sort_custom">Vlastní</string>
     <string name="albums_sort_name">Název (A-Z)</string>
+    <string name="albums_sort_name_desc">Název (Z až A)</string>
     <string name="albums_sort_activity">Poslední aktivita</string>
     <string name="albums_sort_count">Počet fotek</string>
+    <string name="albums_show_heading">Zobrazit</string>
+    <string name="settings_library_section">Knihovna</string>
+    <string name="settings_timeline_desc">Rozvržení, nabídka filtrů, obsah časové osy</string>
+    <string name="settings_albums_desc">Zobrazení, řazení, velikost obálek, pořadí fotek</string>
+    <string name="settings_albums_desc_local">Řazení, velikost obálek, pořadí fotek ve složkách</string>
+    <string name="settings_albums_photo_order">Pořadí fotek v albech</string>
+    <string name="settings_folders_photo_order">Pořadí fotek ve složkách zařízení</string>
+    <string name="timeline_folders_hidden_count">%1$d z %2$d složek skryto z časové osy</string>
+    <string name="timeline_folders_hide_all">Skrýt vše</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Informace o souboru</string>
@@ -1538,7 +1544,6 @@
     <string name="thanks_2_5_0_website">Webová stránka</string>
     <string name="thanks_2_5_0_coffee">Kup mi kávu</string>
     <string name="thanks_2_5_0_dismiss">Zavřít</string>
-    <string name="offline_card_subtitle">Fotky uložené pro offline prohlížení</string>
     <string name="duplicates_filter_identical">Stejné</string>
     <string name="duplicates_filter_similar">Podobné</string>
     <string name="duplicates_filter_match_label">Shoda</string>
@@ -1772,7 +1777,6 @@
     <string name="settings_ai_clear_confirm_msg">Tímto se odstraní všechny nalezené osoby a veškerá data obličejů. Vaše fotografie zůstanou nedotčené. Obličeje se znovu rozpoznají při příštím indexování.</string>
     <string name="gallery_add_to_person">Přidat k osobě</string>
     <string name="people_search_hint">Hledat osoby</string>
-    <string name="people_card_subtitle">Procházejte fotky podle osob</string>
     <string name="person_set_cover">Nastavit jako obálku</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>

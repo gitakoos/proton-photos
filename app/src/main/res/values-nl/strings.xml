@@ -175,7 +175,6 @@
     <string name="offline_screen_title">Offline foto\'s</string>
     <string name="offline_screen_empty">Foto\'s die je offline beschikbaar maakt, verschijnen hier</string>
     <string name="settings_offline_photos">Offline foto\'s</string>
-    <string name="filter_offline">Offline</string>
     <string name="gallery_add_to_album_local_note">Deze foto\'s worden eerst geback-upt en daarna aan het album toegevoegd.</string>
     <string name="gallery_no_albums_yet">Nog geen albums. Maak er hierboven een aan.</string>
     <plurals name="gallery_add_to_album_partial">
@@ -202,7 +201,6 @@
     <string name="gallery_filter_panoramas">Panorama\'s</string>
     <string name="gallery_filter_raw">RAW</string>
     <string name="gallery_category_people">Personen</string>
-    <string name="gallery_filter_photos">Foto\'s</string>
     <string name="gallery_category_show">%1$s tonen</string>
     <string name="gallery_category_hide">%1$s verbergen</string>
 
@@ -465,7 +463,6 @@
     <string name="settings_hide_all_folders">Alle apparaatmappen verbergen</string>
     <string name="settings_hide_all_folders_desc">Foto\'s in verborgen apparaatmappen verschijnen niet in je hoofdtijdlijn met foto\'s. Ze blijven op je apparaat.</string>
     <string name="settings_hide_album_photos_desc">Foto\'s die aan een Drive-album (cloud) zijn toegevoegd, verschijnen niet in je hoofdtijdlijn met foto\'s. Ze blijven wel zichtbaar in de tabbladen Albums en Gedeeld.</string>
-    <string name="settings_timeline_filter">Tijdlijnfilter</string>
     <string name="settings_timeline">Tijdlijn</string>
     <string name="settings_timeline_section_layout">Indeling</string>
     <string name="settings_timeline_section_display">Weergave</string>
@@ -478,13 +475,12 @@
     <string name="settings_seamless_grid">Rand tot rand</string>
     <string name="settings_seamless_grid_desc">Dichter raster met vierkante hoeken en miniaturen die tot aan de schermrand reiken.</string>
     <string name="timeline_filter_subtitle">Kies wat je wilt verbergen uit je hoofdtijdlijn met foto\'s. Verborgen foto\'s blijven op je apparaat en worden verder geback-upt.</string>
-    <string name="timeline_filter_categories_header">Categoriebalk</string>
+    <string name="timeline_filter_categories_header">Filtermenu</string>
     <string name="timeline_filter_layout_desc">Geldt voor alle fotorasters</string>
-    <string name="timeline_filter_reorder_hint">Gebruik de pijlen om de volgorde van de categoriebalk boven je Foto\'s-tijdlijn in te stellen.</string>
+    <string name="timeline_filter_reorder_hint">Sleep om de categorieën in het filtermenu van Foto\'s te herschikken. Tik op het oog om er een te verbergen.</string>
     <string name="timeline_filter_per_album_hint">Verberg afzonderlijke albums uit de tijdlijn. De schakelaar hierboven verbergt ze allemaal tegelijk.</string>
     <string name="timeline_filter_hidden_album">Verborgen album</string>
     <string name="timeline_filter_albums_header">Drive-albums</string>
-    <string name="timeline_filter_more_settings">Meer instellingen</string>
     <string name="settings_telemetry">Telemetrie</string>
     <string name="settings_telemetry_desc">Geregeld door je Proton-accountinstellingen. Open account.proton.me om te wijzigen.</string>
     <string name="settings_telemetry_on">Aan</string>
@@ -712,7 +708,8 @@
     <string name="share_all">Alle</string>
     <string name="share_shared_with_me">Met mij gedeeld</string>
     <string name="share_shared_by_me">Door mij gedeeld</string>
-    <string name="share_filter_account">Filteren op account</string>
+    <string name="share_segment_with_me">Met mij</string>
+    <string name="share_segment_by_me">Door mij</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
     <string name="share_sheet_title">%1$s delen</string>
@@ -768,16 +765,18 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filter</string>
-    <string name="filter_type_label">Type</string>
     <string name="filter_type_videos">Video\'s</string>
     <string name="filter_sync_label">Synchronisatiestatus</string>
     <string name="filter_sync_local">Op apparaat</string>
     <string name="filter_sync_backedup">Geback-upt</string>
     <string name="filter_sync_cloud">Alleen cloud</string>
-    <string name="filter_year_label">Jaar</string>
     <string name="filter_any">Alle</string>
-    <string name="filter_whole_month">Hele maand</string>
     <string name="filter_reset">Herstellen</string>
+    <string name="filter_clear_all">Filters wissen</string>
+    <plurals name="filter_show_items">
+        <item quantity="one">%1$s item tonen</item>
+        <item quantity="other">%1$s items tonen</item>
+    </plurals>
 
     <!-- Notification permission rationale -->
     <string name="notifications_blocked_snackbar">Meldingen staan uit. Je ziet de voortgang van uploads of downloads niet.</string>
@@ -785,20 +784,25 @@
 
     <!-- Search -->
     <string name="search_title">Zoeken</string>
-    <string name="search_placeholder">Zoeken op bestandsnaam</string>
     <string name="search_placeholder_semantic">Foto\'s zoeken</string>
-    <string name="search_empty_idle">Typ een naam om te beginnen met zoeken</string>
     <string name="search_empty_no_results">Geen overeenkomsten</string>
-    <string name="search_section_on_this_day">Op deze dag</string>
-    <string name="search_section_on_this_day_years">%1$d jaar geleden</string>
-    <string name="search_section_on_this_day_years_plural">%1$d jaar geleden</string>
-    <string name="search_section_jump_to_month">Naar maand springen</string>
+    <string name="search_results_header">Resultaten</string>
+    <string name="search_photos_hint">Foto\'s zoeken</string>
     <string name="search_section_recent">Recent</string>
+    <string name="search_section_times">Periodes</string>
+    <string name="search_section_storage">Opslag</string>
+    <string name="search_time_this_month">Deze maand</string>
+    <string name="search_time_last_month">Vorige maand</string>
+    <string name="search_time_last_3_months">Laatste 3 maanden</string>
+    <string name="menu_timeline_settings">Tijdlijninstellingen</string>
+    <string name="menu_album_settings">Albuminstellingen</string>
+    <string name="time_view_switch">Jaren, maanden, dagen</string>
+    <string name="time_view_years">Jaren</string>
+    <string name="time_view_months">Maanden</string>
+    <string name="time_view_days">Dagen</string>
     <string name="map_title">Kaart</string>
+    <string name="library_view_offline">Offline</string>
     <string name="map_vector_title">Wereldkaart</string>
-    <string name="map_card_title">Kaart</string>
-    <string name="map_card_subtitle_empty">Nog geen gelokaliseerde foto\'s</string>
-    <string name="map_card_calendar_subtitle">Je afbeeldingen in kalenderweergave</string>
     <string name="map_search_places">Plaatsen zoeken</string>
     <string name="places_title">Plaatsen</string>
     <string name="map_search_no_places">Nog geen plaatsen</string>
@@ -860,10 +864,6 @@
     <plurals name="offline_batch_result">
         <item quantity="one">%d foto offline beschikbaar</item>
         <item quantity="other">%d foto\'s offline beschikbaar</item>
-    </plurals>
-    <plurals name="map_card_cities_count">
-        <item quantity="one">%d stad</item>
-        <item quantity="other">%d steden</item>
     </plurals>
     <plurals name="count_videos_plural">
         <item quantity="one">1 video</item>
@@ -1100,18 +1100,24 @@
     <string name="settings_help_about_section">Help &amp; info</string>
     <string name="cd_scroll_to_top">Naar boven</string>
     <string name="albums_filter_all">Alle</string>
-    <string name="albums_filter_cloud">Cloud</string>
-    <string name="albums_filter_local">Op apparaat</string>
-    <string name="albums_filter_sheet_title">Albumfilter</string>
-    <string name="albums_filter_default_heading">Standaard bij openen</string>
-    <string name="albums_filter_remember_last">Laatst gebruikte filter onthouden</string>
-    <string name="albums_filter_remember_last_summary">Albums openen met het laatst gekozen filter</string>
+    <string name="albums_filter_cloud">Cloudalbums</string>
+    <string name="albums_filter_local">Apparaatmappen</string>
     <string name="albums_sort_heading">Sorteren op</string>
     <string name="albums_cover_size_heading">Omslaggrootte</string>
     <string name="albums_sort_custom">Aangepast</string>
     <string name="albums_sort_name">Naam (A-Z)</string>
+    <string name="albums_sort_name_desc">Naam (Z tot A)</string>
     <string name="albums_sort_activity">Laatste activiteit</string>
     <string name="albums_sort_count">Aantal foto\'s</string>
+    <string name="albums_show_heading">Tonen</string>
+    <string name="settings_library_section">Bibliotheek</string>
+    <string name="settings_timeline_desc">Indeling, filtermenu, wat de tijdlijn toont</string>
+    <string name="settings_albums_desc">Tonen, sortering, omslaggrootte, fotovolgorde</string>
+    <string name="settings_albums_desc_local">Sortering, omslaggrootte, fotovolgorde in mappen</string>
+    <string name="settings_albums_photo_order">Fotovolgorde in albums</string>
+    <string name="settings_folders_photo_order">Fotovolgorde in apparaatmappen</string>
+    <string name="timeline_folders_hidden_count">%1$d van %2$d mappen verborgen in de tijdlijn</string>
+    <string name="timeline_folders_hide_all">Alles verbergen</string>
 
     <!-- Photo viewer details / metadata sheet -->
     <string name="viewer_meta_section_file_info">Bestandsinfo</string>
@@ -1479,7 +1485,6 @@
     <string name="thanks_2_5_0_website">Website</string>
     <string name="thanks_2_5_0_coffee">Trakteer me op een koffie</string>
     <string name="thanks_2_5_0_dismiss">Sluiten</string>
-    <string name="offline_card_subtitle">Foto\'s opgeslagen voor offline weergave</string>
     <string name="duplicates_filter_identical">Identiek</string>
     <string name="duplicates_filter_similar">Vergelijkbaar</string>
     <string name="duplicates_filter_match_label">Overeenkomst</string>
@@ -1713,7 +1718,6 @@
     <string name="settings_ai_clear_confirm_msg">Dit verwijdert alle gevonden personen en alle gezichtsgegevens. Je foto\'s blijven ongemoeid. Gezichten worden opnieuw gedetecteerd bij de volgende indexering.</string>
     <string name="gallery_add_to_person">Aan persoon toevoegen</string>
     <string name="people_search_hint">Personen zoeken</string>
-    <string name="people_card_subtitle">Blader door je foto\'s per persoon</string>
     <string name="person_set_cover">Als omslag instellen</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>

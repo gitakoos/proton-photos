@@ -71,8 +71,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DragHandle
@@ -84,6 +82,14 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Collections
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.outlined.OfflinePin
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.Face
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -161,7 +167,7 @@ import eu.akoos.photos.presentation.theme.PillBorder
 /** Height of the reorder-mode bar, also the grid's extra top inset while that mode is on. */
 private val ReorderBarHeight = 52.dp
 
-/** Grid index the cloud albums start at: the pinned Memories cell is the one item{} emitted ahead of them. */
+/** Grid index the cloud albums start at: the pinned views row is the one item{} emitted ahead of them. */
 private const val CloudSegmentStart = 1
 
 /** The laid-out cell at [gridIndex], or null once it has scrolled out of the viewport. */
@@ -261,6 +267,13 @@ fun AlbumsScreen(
      *  pressed. The host runs it and shows its progress, so hiding a folder goes nowhere. */
     onHideDeviceFolder: (bucketName: String) -> Unit = {},
     onMemoriesClick: () -> Unit = {},
+    /** The other ways to browse the library, pinned as a row of tiles above the albums: people,
+     *  the map, the calendar and the offline set. A null callback drops its tile (People while face
+     *  grouping is off, Offline without an account, since only cloud photos can be pinned). */
+    onPeopleClick: (() -> Unit)? = null,
+    onMapClick: () -> Unit = {},
+    onCalendarClick: () -> Unit = {},
+    onOfflineClick: (() -> Unit)? = null,
     /** Increments each time the Albums-tab header "New album" pill is tapped; opens the create
      *  dialog. The in-grid New album row opens it directly, so 0 (no external trigger) is fine. */
     createRequestSignal: Int = 0,
@@ -589,11 +602,17 @@ fun AlbumsScreen(
                         verticalArrangement = Arrangement.spacedBy(20.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        // Search results are albums only, so the pinned Memories card steps aside
-                        // while a query is present.
+                        // Search results are albums only, so the pinned views row steps aside while a
+                        // query is present. One full-width item, so CloudSegmentStart stays 1.
                         if (!searching) {
-                            item {
-                                MemoriesPinnedCard(onClick = onMemoriesClick)
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "library_views") {
+                                LibraryViewsRow(
+                                    onMemoriesClick = onMemoriesClick,
+                                    onPeopleClick = onPeopleClick,
+                                    onMapClick = onMapClick,
+                                    onCalendarClick = onCalendarClick,
+                                    onOfflineClick = onOfflineClick,
+                                )
                             }
                         }
                         if (displayFilter != eu.akoos.photos.presentation.gallery.AlbumDisplayFilter.Local) {
@@ -889,7 +908,6 @@ fun AlbumsScreen(
         CloudAlbumActionSheet(
             album = album,
             sheetState = cloudAlbumSheetState,
-            sortMode = state.albumPhotoSortMode,
             isHiddenFromTimeline = AlbumTimelineHide.isExcluded(state.timelineExcludedAlbumIds, album.linkId),
             onDismiss = { cloudAlbumSheetFor = null },
             onShare = { onAlbumShareClick(album) },
@@ -898,7 +916,6 @@ fun AlbumsScreen(
             onHide = { viewModel.hideAlbum(album.linkId) },
             onReorder = { reorderMode = true },
             onDelete = { albumToDelete = album },
-            onSortSelected = viewModel::setAlbumPhotoSortMode,
             onOpenAction = { action -> onAlbumActionClick(album, action) },
         )
     }
@@ -923,7 +940,9 @@ fun AlbumsScreen(
             // same folder from an earlier hide.
             isHiddenCard = false,
             isSignedIn = isSignedIn,
-            sortMode = state.folderPrefs.sortMode,
+            // The photo order is global to every folder, so from the grid it is set in Settings →
+            // Albums; the folder's own screen still offers it in context.
+            sortMode = null,
             onDismiss = { deviceFolderSheetFor = null },
             onBackUp = { asMirror ->
                 onDeviceFolderActionClick(
@@ -937,7 +956,6 @@ fun AlbumsScreen(
             onToggleExcludedFromBackup = { viewModel.toggleFolderExcludedFromBackup(folder.name) },
             onToggleHiddenFromTimeline = { viewModel.toggleFolderHiddenFromTimeline(folder.name) },
             onToggleHiddenCard = { onHideDeviceFolder(folder.name) },
-            onSortSelected = viewModel::setDeviceFolderSortMode,
             // Held to a logged-out session inside the sheet, where there is no Drive album to rename.
             onRename = { deviceFolderRenameFor = folder },
         )
@@ -990,11 +1008,12 @@ fun AlbumsScreen(
 /**
  * Bottom sheet that opens on long-press of a cloud album card. It offers what the album's own drawer
  * offers, so the shortest route to an album's actions is not the poorer one: add photos, share,
- * download all, slideshow, rename, hide, reorder, sort, delete.
+ * download all, slideshow, rename, hide, reorder, delete. The photo order is not here: it is one
+ * global choice every album shares, so it lives in Settings → Albums and on the album's own screen,
+ * where "Sort by" cannot be read as ordering this grid.
  *
  * Sections follow the app's action-sheet taxonomy: what runs on the album's photos, then the album's
- * settings, then the sort, then what cannot be undone below a rule. The sort direction is one global
- * choice every album shares, so [sortMode] is the direction in force rather than this album's own.
+ * settings, then what cannot be undone below a rule.
  *
  * Who is looking decides several of them: share, download, rename and delete belong to the owner,
  * matching what the album's own drawer offers a guest, so a shared album shows what is still the
@@ -1020,7 +1039,6 @@ fun AlbumsScreen(
 private fun CloudAlbumActionSheet(
     album: Album,
     sheetState: SheetState,
-    sortMode: AlbumPhotoSortMode,
     /** True while this album's photos are kept out of the main feed. About the photos, which
      *  [onHide] is not: that one takes the album itself out of every list. */
     isHiddenFromTimeline: Boolean,
@@ -1031,7 +1049,6 @@ private fun CloudAlbumActionSheet(
     onHide: () -> Unit,
     onReorder: () -> Unit,
     onDelete: () -> Unit,
-    onSortSelected: (AlbumPhotoSortMode) -> Unit,
     onOpenAction: (AlbumOpenAction) -> Unit,
 ) {
     val colors = AppColors.current
@@ -1165,25 +1182,6 @@ private fun CloudAlbumActionSheet(
                 onClick = { close(onReorder) },
             )
 
-            ActionSheetSectionHeading(stringResource(R.string.albums_sort_heading))
-            AlbumPhotoSortMode.entries.forEachIndexed { index, mode ->
-                if (index > 0) Spacer(Modifier.height(8.dp))
-                ActionSheetRow(
-                    icon = when (mode) {
-                        AlbumPhotoSortMode.NewestFirst -> Icons.Default.ArrowDownward
-                        AlbumPhotoSortMode.OldestFirst -> Icons.Default.ArrowUpward
-                    },
-                    title = stringResource(
-                        when (mode) {
-                            AlbumPhotoSortMode.NewestFirst -> R.string.sort_newest_first
-                            AlbumPhotoSortMode.OldestFirst -> R.string.sort_oldest_first
-                        },
-                    ),
-                    onClick = { close { onSortSelected(mode) } },
-                    showCheck = mode == sortMode,
-                )
-            }
-
             if (!album.isSharedWithMe) {
                 // Deleting takes the album off Drive, so it keeps the rule above it and the red
                 // treatment it carries everywhere else.
@@ -1239,16 +1237,44 @@ private fun CloudAlbumCard(
 }
 
 /**
- * First cell in the album grid. Mirrors [UnifiedAlbumCard]'s shape, corner radius and title
- * typography, but with a neutral cover holding a single centred Collections glyph — a normal
- * album card labelled "Memories" that opens the Memories screen.
+ * Row of tiles at the top of the Albums tab for the other ways to browse the library: Memories,
+ * People, Map, Calendar and Offline photos. These are views of the whole library rather than search
+ * or filter tools, so they live here beside the albums instead of on the Search page. A fixed row
+ * (no scrolling) so every entry is visible at once.
  */
 @Composable
-private fun MemoriesPinnedCard(onClick: () -> Unit) {
+private fun LibraryViewsRow(
+    onMemoriesClick: () -> Unit,
+    onPeopleClick: (() -> Unit)?,
+    onMapClick: () -> Unit,
+    onCalendarClick: () -> Unit,
+    onOfflineClick: (() -> Unit)?,
+) {
+    // Sized as five slots whatever the count, so a guest's three tiles stay the same size as a
+    // signed-in user's five instead of stretching.
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val tileWidth = (maxWidth - LibraryTileGap * (LibraryTileSlots - 1)) / LibraryTileSlots
+        Row(horizontalArrangement = Arrangement.spacedBy(LibraryTileGap)) {
+            LibraryViewTile(tileWidth, Icons.Outlined.Collections, stringResource(R.string.memories_title), onMemoriesClick)
+            onPeopleClick?.let { LibraryViewTile(tileWidth, Icons.Outlined.Face, stringResource(R.string.gallery_category_people), it) }
+            LibraryViewTile(tileWidth, Icons.Outlined.Map, stringResource(R.string.map_title), onMapClick)
+            LibraryViewTile(tileWidth, Icons.Outlined.CalendarMonth, stringResource(R.string.calendar_title), onCalendarClick)
+            onOfflineClick?.let { LibraryViewTile(tileWidth, Icons.Outlined.OfflinePin, stringResource(R.string.library_view_offline), it) }
+        }
+    }
+}
+
+private const val LibraryTileSlots = 5
+private val LibraryTileGap = 10.dp
+
+@Composable
+private fun LibraryViewTile(width: Dp, icon: ImageVector, label: String, onClick: () -> Unit) {
     Column(
         modifier = Modifier
-            .fillMaxWidth()
+            .width(width)
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             modifier = Modifier
@@ -1258,19 +1284,14 @@ private fun MemoriesPinnedCard(onClick: () -> Unit) {
                 .background(Bg2),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                Icons.Outlined.Collections,
-                contentDescription = null,
-                tint = FgDim,
-                modifier = Modifier.size(36.dp),
-            )
+            Icon(icon, contentDescription = null, tint = FgDim, modifier = Modifier.size(24.dp))
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
-            text = stringResource(R.string.memories_title),
+            text = label,
             color = FgPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

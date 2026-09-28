@@ -93,6 +93,16 @@ class SortAlbumsTest {
     }
 
     @Test
+    fun `name sorts Z to A`() {
+        val albums = listOf(
+            album("a", name = "Zermatt"),
+            album("b", name = "Athens"),
+            album("c", name = "munich"),
+        )
+        assertEquals(listOf("a", "c", "b"), sortAlbums(albums, AlbumSortMode.NameDesc).ids())
+    }
+
+    @Test
     fun `name sorting ignores case`() {
         // Without a case-insensitive comparison an ASCII sort puts every capitalised name ahead of
         // every lowercase one, so "apple" would land after "Banana".

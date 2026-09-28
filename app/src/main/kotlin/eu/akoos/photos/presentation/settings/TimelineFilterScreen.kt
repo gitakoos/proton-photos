@@ -101,7 +101,6 @@ fun TimelineFilterScreen(
     onOpenCategories: () -> Unit = {},
     onOpenAlbums: () -> Unit = {},
     onOpenDeviceFolders: () -> Unit = {},
-    onOpenLandingTab: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_timeline), onBack = onBack) {
         SettingsCard {
@@ -119,8 +118,6 @@ fun TimelineFilterScreen(
                 RowDivider()
             }
             NavRow(label = stringResource(R.string.device_folders_section), onClick = onOpenDeviceFolders)
-            RowDivider()
-            NavRow(label = stringResource(R.string.settings_landing_tab), onClick = onOpenLandingTab)
         }
     }
 }
@@ -334,13 +331,13 @@ fun TimelineDeviceFoldersScreen(
         ) {
             Text(
                 stringResource(
-                    R.string.settings_excluded_folders_count_label,
+                    R.string.timeline_folders_hidden_count,
                     filterState.excludedCount, filterState.folders.size,
                 ),
                 color = FgDim, fontSize = 12.sp,
             )
             Text(
-                stringResource(R.string.settings_excluded_folders_select_all),
+                stringResource(R.string.timeline_folders_hide_all),
                 color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                 modifier = Modifier.clickable { filterViewModel.excludeAll() },
             )
@@ -373,7 +370,7 @@ fun TimelineDeviceFoldersScreen(
 
 /** Selectable pill used by the default-columns row, matching the Appearance theme pills. */
 @Composable
-private fun TimelinePill(
+internal fun TimelinePill(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,

@@ -40,7 +40,9 @@ data class GalleryUiState(
     /** "On this day" memories (year → items, most-recent-first) precomputed off the main thread
      *  from the unfiltered [items], matching the carousel's filter-independent source. */
     val onThisDayGroups: List<Pair<Int, List<GalleryItem>>> = emptyList(),
-    val selectedFilter: GalleryFilter = GalleryFilter.All,
+    /** The categories the timeline is narrowed to; empty = every category. Media types combine as
+     *  either/or (Videos + Live Photos), Favorites narrows on top of them (favourite videos). */
+    val selectedFilters: Set<GalleryFilter> = emptySet(),
     val favoriteIds: Set<String> = emptySet(),
     /** Cloud linkIds pinned for offline; the grid draws a download badge on each matching cell. */
     val offlinePinIds: Set<String> = emptySet(),
@@ -177,9 +179,6 @@ enum class GalleryFilter(val tagId: Int? = null) {
     Bursts(tagId = 7),
     Panoramas(tagId = 8),
     Raw(tagId = 9),
-    // Not a Drive tag — locally computed from OFFLINE_PIN_IDS, like Favorites. Filters to the
-    // cloud photos pinned for offline.
-    Offline,
 }
 
 enum class PermissionState {
@@ -192,16 +191,37 @@ enum class PermissionState {
 data class ContentFilter(
     val mediaType: MediaType = MediaType.All,
     val syncStatus: SyncStatusFilter = SyncStatusFilter.All,
-    val year: Int? = null,
-    val month: Int? = null,
-    val day: Int? = null,
-    // Inclusive end of a day range within (year, month); when set, [day] is the range start. A single
-    // day leaves this null. Only meaningful alongside a month, since a range is swept in one month grid.
-    val dayEnd: Int? = null,
+    /** Capture-date window, or null for any time. */
+    val dateRange: DateRange? = null,
 )
 
+/**
+ * A window of local calendar days: [start] inclusive, [endExclusive] exclusive, so a month is
+ * (1 Jun, 1 Jul) and a year (1 Jan, 1 Jan next year). Days, not instants, so a window reads the same
+ * in whatever zone the photo is shown in; the capture time is placed in the device's zone.
+ */
+data class DateRange(val start: java.time.LocalDate, val endExclusive: java.time.LocalDate) {
+    fun contains(captureTimeMs: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Boolean {
+        val day = java.time.Instant.ofEpochMilli(captureTimeMs).atZone(zone).toLocalDate()
+        return !day.isBefore(start) && day.isBefore(endExclusive)
+    }
+
+    companion object {
+        fun year(year: Int) = java.time.LocalDate.of(year, 1, 1).let { DateRange(it, it.plusYears(1)) }
+        fun month(year: Int, month: Int) = java.time.LocalDate.of(year, month, 1).let { DateRange(it, it.plusMonths(1)) }
+        /** The [count] calendar months ending with the one [today] is in ("last 3 months" = this one
+         *  and the two before it). */
+        fun lastMonths(today: java.time.LocalDate, count: Int): DateRange {
+            val thisMonth = today.withDayOfMonth(1)
+            return DateRange(thisMonth.minusMonths((count - 1).toLong()), thisMonth.plusMonths(1))
+        }
+    }
+}
+
 enum class MediaType { All, PhotosOnly, VideosOnly }
-enum class SyncStatusFilter { All, LocalOnly, BackedUp, CloudOnly }
+/** Where an item lives. [AvailableOffline] is the cloud-only photos pinned for offline use
+ *  (OFFLINE_PIN_IDS), so it narrows within cloud-only rather than being a content category. */
+enum class SyncStatusFilter { All, LocalOnly, BackedUp, CloudOnly, AvailableOffline }
 
 enum class TimelineGrouping { None, Day, Month, Year }
 

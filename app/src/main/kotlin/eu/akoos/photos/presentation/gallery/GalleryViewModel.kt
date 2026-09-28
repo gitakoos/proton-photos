@@ -20,7 +20,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+@file:OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class, kotlinx.coroutines.FlowPreview::class)
 
 package eu.akoos.photos.presentation.gallery
 
@@ -53,6 +53,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
@@ -75,6 +77,7 @@ import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.data.hidden.HiddenFolderProgress
 import eu.akoos.photos.data.hidden.HiddenFolderRecords
@@ -204,6 +207,7 @@ class GalleryViewModel @Inject constructor(
     private val observePeopleUseCase: eu.akoos.photos.domain.usecase.ObservePeopleUseCase,
     private val addPhotosToPersonUseCase: eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase,
     private val moveToFolder: MoveToFolderUseCase,
+    private val semanticSearchUseCase: eu.akoos.photos.domain.usecase.SemanticSearchUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GalleryUiState())
@@ -494,8 +498,8 @@ class GalleryViewModel @Inject constructor(
                     // gallery emission re-applied it — a visible flicker while "Hide photos in
                     // albums" is on.
                     val filtered = applyFilter(
-                        applyContentFilter(state.items, state.contentFilter),
-                        state.selectedFilter,
+                        applyContentFilter(state.items, state.contentFilter, state.offlinePinIds),
+                        state.selectedFilters,
                         favIds,
                         state.albumHideCloudIds,
                         state.offlinePinIds,
@@ -506,10 +510,10 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** Offline-pinned cloud linkIds drive the per-cell offline badge everywhere and the Offline
-     *  filter's membership. The badge tracks [GalleryUiState.offlinePinIds] directly, so a pin/un-pin
-     *  reflects live without re-filtering; applyFilter only needs re-running while the Offline tab
-     *  itself is showing (otherwise its list would go stale on an un-pin). */
+    /** Offline-pinned cloud linkIds drive the per-cell offline badge everywhere and the "Available
+     *  offline" sync-status filter's membership. The badge tracks [GalleryUiState.offlinePinIds]
+     *  directly, so a pin/un-pin reflects live without re-filtering; the filter chain only needs
+     *  re-running while that filter is active (otherwise its list would go stale on an un-pin). */
     private fun observeOfflinePins() {
         viewModelScope.launch {
             context.settingsDataStore.data
@@ -517,10 +521,10 @@ class GalleryViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { ids ->
                     val state = _uiState.value
-                    if (state.selectedFilter == GalleryFilter.Offline) {
+                    if (state.contentFilter.syncStatus == SyncStatusFilter.AvailableOffline) {
                         val filtered = applyFilter(
-                            applyContentFilter(state.items, state.contentFilter),
-                            state.selectedFilter,
+                            applyContentFilter(state.items, state.contentFilter, ids),
+                            state.selectedFilters,
                             state.favoriteIds,
                             state.albumHideCloudIds,
                             ids,
@@ -586,6 +590,104 @@ class GalleryViewModel @Inject constructor(
         )
     }
 
+    // ── Search ────────────────────────────────────────────────────────────────
+    // The query is one more narrowing on the timeline, on top of its category / sync / date / person
+    // filters, rather than a separate screen with a filter state of its own. While it is non-blank
+    // the Photos tab shows [searchResults] instead of the timeline.
+
+    private val _query = MutableStateFlow("")
+    val query: StateFlow<String> = _query.asStateFlow()
+    fun setQuery(value: String) { _query.value = value }
+
+    /** Recent typed searches, newest first, offered on the search page before anything is typed. */
+    val recentSearches: StateFlow<List<String>> = context.settingsDataStore.data
+        .map { prefs -> prefs[SettingsKeys.SEARCH_RECENT]?.split('\n')?.filter { it.isNotBlank() } ?: emptyList() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Keep [text] at the top of the recent searches, without duplicates, at most [MAX_RECENT_SEARCHES]. */
+    fun rememberSearch(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                val current = prefs[SettingsKeys.SEARCH_RECENT]?.split('\n')?.filter { it.isNotBlank() } ?: emptyList()
+                val next = (listOf(trimmed) + current.filterNot { it.equals(trimmed, ignoreCase = true) })
+                    .take(MAX_RECENT_SEARCHES)
+                prefs[SettingsKeys.SEARCH_RECENT] = next.joinToString("\n")
+            }
+        }
+    }
+
+    /** The AI master switch and semantic search both on: the query then also matches what is in a
+     *  photo, not just its name, date and categories. */
+    val semanticSearchEnabled: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.SEMANTIC_ENABLED] == true }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Image-content matches for the query as (still running, ranked photo keys). A fresh query emits
+     *  "running" at once, waits for typing to settle (flatMapLatest cancels a superseded one), then
+     *  embeds and ranks off the main thread. Empty while semantic search is off or the query blank. */
+    private val rankedKeys: Flow<Pair<Boolean, List<String>>> = combine(
+        semanticSearchEnabled,
+        accountManager.getPrimaryUserId(),
+    ) { on, userId -> on to userId }
+        .flatMapLatest { (on, userId) ->
+            if (!on) flowOf(false to emptyList<String>())
+            else _query.flatMapLatest { q ->
+                if (q.isBlank()) flowOf(false to emptyList<String>())
+                else flow {
+                    emit(true to emptyList<String>())
+                    delay(SEMANTIC_DEBOUNCE_MS)
+                    emit(false to semanticSearchUseCase.searchKeys(q, userId, SEMANTIC_LIMIT))
+                }
+            }
+        }
+        .flowOn(Dispatchers.Default)
+
+    /** What the Photos tab shows while a query is typed: the filtered timeline's name / date /
+     *  category matches in timeline order, then any content-only match in relevance order. Both are
+     *  taken from [GalleryUiState.filteredItems], so every active filter applies to the results too. */
+    data class SearchResults(val searching: Boolean = false, val items: List<GalleryItem> = emptyList())
+
+    val searchResults: StateFlow<SearchResults> = combine(
+        _uiState.map { it.filteredItems }.distinctUntilChanged { a, b -> a === b },
+        _query.debounce(SEARCH_DEBOUNCE_MS),
+        rankedKeys,
+    ) { filtered, q, (running, keys) ->
+        if (q.isBlank()) return@combine SearchResults()
+        val keyword = SearchFilter.matchQuery(filtered, q, foldedMonths, foldedCategoryNames)
+        if (keys.isEmpty()) return@combine SearchResults(running, keyword)
+        val byKey = filtered.associateBy { it.stableId }
+        val seen = keyword.mapTo(HashSet(keyword.size + keys.size)) { it.stableId }
+        val tail = keys.mapNotNull { key -> byKey[key]?.takeIf { seen.add(key) } }
+        SearchResults(running, keyword + tail)
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SearchResults())
+
+    /** Localized month names, pre-folded once, so a "june" / "június" query matches by capture month. */
+    private val foldedMonths: List<String> by lazy {
+        SearchFilter.foldedMonthNames(java.util.Locale.getDefault())
+    }
+
+    /** PhotoTag id → pre-folded localized category name, so "screenshot" / "selfie" etc. match. */
+    private val foldedCategoryNames: Map<Int, String> by lazy {
+        mapOf(
+            0 to R.string.gallery_filter_favorites,
+            1 to R.string.gallery_filter_screenshots,
+            2 to R.string.filter_type_videos,
+            3 to R.string.gallery_filter_live_photos,
+            4 to R.string.gallery_filter_motion_photos,
+            5 to R.string.gallery_filter_selfies,
+            6 to R.string.gallery_filter_portraits,
+            7 to R.string.gallery_filter_bursts,
+            8 to R.string.gallery_filter_panoramas,
+            9 to R.string.gallery_filter_raw,
+        ).mapValues { SearchFilter.fold(context.getString(it.value)) }
+    }
+
     /**
      * Filter the timeline to one person's photos, or clear the person filter when [personId] is null.
      * Loads the person's photo keys once into state and re-applies the filter; the membership test in
@@ -617,8 +719,8 @@ class GalleryViewModel @Inject constructor(
     private fun recomputeFilteredForPerson() {
         val state = _uiState.value
         val filtered = applyFilter(
-            applyContentFilter(state.items, state.contentFilter),
-            state.selectedFilter,
+            applyContentFilter(state.items, state.contentFilter, state.offlinePinIds),
+            state.selectedFilters,
             state.favoriteIds,
             state.albumHideCloudIds,
             state.offlinePinIds,
@@ -846,7 +948,7 @@ class GalleryViewModel @Inject constructor(
                 // over the full library) run on Default, off the collector's Main thread; only
                 // the finished lists reach the Main-thread state update. A thumbnail-decrypt
                 // re-emission therefore can't stall the UI thread with filtering work.
-                // contentFilter/selectedFilter/favoriteIds are snapshotted from the current
+                // contentFilter/selectedFilters/favoriteIds are snapshotted from the current
                 // state — the dedicated filter-change handlers recompute filteredItems
                 // themselves, so last-writer-wins here is unchanged from the inline version.
                 val snapshot = _uiState.value
@@ -871,8 +973,8 @@ class GalleryViewModel @Inject constructor(
                         notHidden && notExcludedBucket
                     }
                     val filtered = applyFilter(
-                        applyContentFilter(items, snapshot.contentFilter),
-                        snapshot.selectedFilter,
+                        applyContentFilter(items, snapshot.contentFilter, snapshot.offlinePinIds),
+                        snapshot.selectedFilters,
                         snapshot.favoriteIds,
                         sources.cloudInAlbum,
                         snapshot.offlinePinIds,
@@ -1117,17 +1219,24 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    fun onFilterSelected(filter: GalleryFilter) {
+    /** Replace the category selection (empty = every category). */
+    fun setCategories(categories: Set<GalleryFilter>) {
         val state = _uiState.value
         val filtered = applyFilter(
-            applyContentFilter(state.items, state.contentFilter),
-            filter,
+            applyContentFilter(state.items, state.contentFilter, state.offlinePinIds),
+            categories,
             state.favoriteIds,
             state.albumHideCloudIds,
             state.offlinePinIds,
         )
-        _uiState.update { it.copy(selectedFilter = filter, filteredItems = filtered) }
+        _uiState.update { it.copy(selectedFilters = categories, filteredItems = filtered) }
         recomputeMonthGroups(filtered)
+    }
+
+    /** Add [category] to the selection, or take it off again. */
+    fun toggleCategory(category: GalleryFilter) {
+        val current = _uiState.value.selectedFilters
+        setCategories(if (category in current) current - category else current + category)
     }
 
     /**
@@ -1166,8 +1275,8 @@ class GalleryViewModel @Inject constructor(
     fun setContentFilter(filter: ContentFilter) {
         val state = _uiState.value
         val filtered = applyFilter(
-            applyContentFilter(state.items, filter),
-            state.selectedFilter,
+            applyContentFilter(state.items, filter, state.offlinePinIds),
+            state.selectedFilters,
             state.favoriteIds,
             state.albumHideCloudIds,
             state.offlinePinIds,
@@ -2619,17 +2728,16 @@ class GalleryViewModel @Inject constructor(
 
     private fun applyFilter(
         items: List<GalleryItem>,
-        filter: GalleryFilter,
+        categories: Set<GalleryFilter>,
         favoriteIds: Set<String> = emptySet(),
         albumHideCloudIds: Set<String> = emptySet(),
         offlinePinIds: Set<String> = emptySet(),
     ): List<GalleryItem> {
-        // Album-membership filter only applies on the [GalleryFilter.All] view. Non-All tabs
-        // (Favorites, Screenshots, Videos, …) bypass it — when the user explicitly picks a
-        // category, they want every matching item, regardless of whether the photo is also
-        // in an album. The set is empty when the "Hide photos in albums" toggle is off,
-        // so this is a no-op for users who don't enable the feature.
-        val baseItems = if (filter == GalleryFilter.All) {
+        // Album-membership filter only applies to the unfiltered view. With a category picked
+        // (Favorites, Screenshots, Videos, …) the user wants every matching item, regardless of
+        // whether the photo is also in an album. The set is empty when the "Hide photos in albums"
+        // toggle is off, so this is a no-op for users who don't enable the feature.
+        val baseItems = if (categories.isEmpty()) {
             items.filter { item ->
                 val cloudLinkId = when (item) {
                     is GalleryItem.CloudOnly -> item.cloud.linkId
@@ -2640,30 +2748,17 @@ class GalleryViewModel @Inject constructor(
                 !inCloudAlbum
             }
         } else items
-        val categoryFiltered = when (filter) {
-            GalleryFilter.All -> baseItems
-            // Favourite = the device-side flag for a photo that lives only on the device, the Drive
-            // Favorite tag (id 0) for a backed-up one. Same rule the grid hearts and the viewer use,
-            // through the one helper, so a tab and a heart can never disagree.
-            GalleryFilter.Favorites -> baseItems.filter { isItemFavorite(it, favoriteIds) }
-            // All other tag filters: server-side tags win when set, but for freshly-uploaded photos
-            // and local-only items we also try a client-side heuristic (mime type, filename pattern,
-            // aspect ratio, bucket name) so Videos / Screenshots / Panoramas / RAW work immediately.
-            // Live Photos (iOS, tag 3) and Motion Photos (Android, tag 4) are the same concept on
-            // different platforms and share one "Live Photos" chip in the UI, so either one matches
-            // both tags.
-            GalleryFilter.LivePhotos, GalleryFilter.MotionPhotos -> baseItems.filter {
-                CategorizeItem.belongsTo(it, tagId = 3) || CategorizeItem.belongsTo(it, tagId = 4)
-            }
-            // Offline = the cloud photos pinned for offline (their linkId is in OFFLINE_PIN_IDS).
-            // Not a server tag, so it filters on the pinned set rather than CategorizeItem.
-            GalleryFilter.Offline -> baseItems.filter { item ->
-                (item as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { id -> id in offlinePinIds } == true
-            }
-            else -> {
-                val tagId = filter.tagId
-                if (tagId == null) baseItems else baseItems.filter { CategorizeItem.belongsTo(it, tagId) }
-            }
+        // Favourite = the device-side flag for a photo that lives only on the device, the Drive
+        // Favorite tag (id 0) for a backed-up one. Same rule the grid hearts and the viewer use,
+        // through the one helper, so a filter and a heart can never disagree. It narrows on top of
+        // the media types (Favorites + Videos = favourite videos).
+        var categoryFiltered = if (GalleryFilter.Favorites in categories) {
+            baseItems.filter { isItemFavorite(it, favoriteIds) }
+        } else baseItems
+        // Media types combine as either/or: Videos + Live Photos keeps both.
+        val types = categories - GalleryFilter.Favorites - GalleryFilter.All
+        if (types.isNotEmpty()) {
+            categoryFiltered = categoryFiltered.filter { item -> types.any { matchesCategory(item, it) } }
         }
         // Person filter (People rail): keep only items in the selected person's photo set. An
         // in-memory membership test over the already-filtered list, the same shape as the Offline
@@ -2677,7 +2772,22 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    private fun applyContentFilter(items: List<GalleryItem>, filter: ContentFilter): List<GalleryItem> {
+    /** Whether [item] belongs to media type [category]. Server-side tags win when set, but for
+     *  freshly-uploaded photos and local-only items a client-side heuristic (mime type, filename
+     *  pattern, aspect ratio, bucket name) also counts, so Videos / Screenshots / Panoramas / RAW
+     *  work immediately. Live Photos (iOS, tag 3) and Motion Photos (Android, tag 4) are the same
+     *  concept on different platforms and share one entry, so either tag matches both. */
+    private fun matchesCategory(item: GalleryItem, category: GalleryFilter): Boolean = when (category) {
+        GalleryFilter.LivePhotos, GalleryFilter.MotionPhotos ->
+            CategorizeItem.belongsTo(item, tagId = 3) || CategorizeItem.belongsTo(item, tagId = 4)
+        else -> category.tagId?.let { CategorizeItem.belongsTo(item, it) } ?: true
+    }
+
+    private fun applyContentFilter(
+        items: List<GalleryItem>,
+        filter: ContentFilter,
+        offlinePinIds: Set<String>,
+    ): List<GalleryItem> {
         var result = items
 
         // Sync status
@@ -2686,6 +2796,11 @@ class GalleryViewModel @Inject constructor(
             SyncStatusFilter.LocalOnly -> result.filterIsInstance<GalleryItem.LocalOnly>()
             SyncStatusFilter.BackedUp  -> result.filterIsInstance<GalleryItem.Synced>()
             SyncStatusFilter.CloudOnly -> result.filterIsInstance<GalleryItem.CloudOnly>()
+            // The cloud photos pinned for offline (their linkId is in OFFLINE_PIN_IDS): a subset of
+            // cloud-only, so a storage state rather than a content category.
+            SyncStatusFilter.AvailableOffline -> result.filter { item ->
+                (item as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { id -> id in offlinePinIds } == true
+            }
         }
 
         // Media type
@@ -2709,19 +2824,22 @@ class GalleryViewModel @Inject constructor(
             }
         }
 
-        // Date
-        if (filter.year != null || filter.month != null || filter.day != null) {
-            result = result.filter { item ->
-                val cal = java.util.Calendar.getInstance().apply { timeInMillis = item.captureTimeMs }
-                val dom = cal.get(java.util.Calendar.DAY_OF_MONTH)
-                val yearMatch  = filter.year  == null || cal.get(java.util.Calendar.YEAR) == filter.year
-                val monthMatch = filter.month == null || (cal.get(java.util.Calendar.MONTH) + 1) == filter.month
-                val dayMatch   = filter.day   == null ||
-                    (if (filter.dayEnd != null) dom in filter.day..filter.dayEnd else dom == filter.day)
-                yearMatch && monthMatch && dayMatch
-            }
-        }
+        // Capture-date window (a preset, a year, a month or a custom range).
+        filter.dateRange?.let { range -> result = result.filter { range.contains(it.captureTimeMs) } }
 
         return result
     }
 }
+
+/** Settle delay before the typed query re-filters the library, so typing stays responsive. */
+private const val SEARCH_DEBOUNCE_MS = 250L
+
+/** Settle delay before a content search embeds the query: the keyword delay plus a touch, since the
+ *  embed is far dearer than the per-item match. */
+private const val SEMANTIC_DEBOUNCE_MS = 300L
+
+/** The semantic top-K a search folds in, matching the use case's own cap. */
+private const val SEMANTIC_LIMIT = 200
+
+/** How many recent searches the search page keeps. */
+private const val MAX_RECENT_SEARCHES = 8

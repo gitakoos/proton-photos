@@ -101,13 +101,15 @@ internal fun DeviceFolderActionsSheet(
     isHiddenCard: Boolean,
     /** False in a local-only session, which drops the rows that act on the Drive copy. */
     isSignedIn: Boolean = true,
-    sortMode: AlbumPhotoSortMode,
+    /** The photo order in force, or null to leave the sort rows out (the Albums grid, where a
+     *  "Sort by" would read as ordering the grid rather than every folder's photos). */
+    sortMode: AlbumPhotoSortMode?,
     onDismiss: () -> Unit,
     onToggleMirrorAsAlbum: () -> Unit,
     onToggleExcludedFromBackup: () -> Unit,
     onToggleHiddenFromTimeline: () -> Unit,
     onToggleHiddenCard: () -> Unit,
-    onSortSelected: (AlbumPhotoSortMode) -> Unit,
+    onSortSelected: (AlbumPhotoSortMode) -> Unit = {},
     /** Heads the drawer with the folder's name where several are in reach; the folder's own screen
      *  already says which folder this is, so it leaves this null and keeps the generic heading. */
     folderName: String? = null,
@@ -253,6 +255,7 @@ internal fun DeviceFolderActionsSheet(
                 showCheck = isHiddenCard,
             )
 
+            if (sortMode != null) {
             ActionSheetSectionHeading(stringResource(R.string.albums_sort_heading))
             AlbumPhotoSortMode.entries.forEachIndexed { index, mode ->
                 if (index > 0) Spacer(Modifier.height(8.dp))
@@ -270,6 +273,7 @@ internal fun DeviceFolderActionsSheet(
                     onClick = { close { onSortSelected(mode) } },
                     showCheck = mode == sortMode,
                 )
+            }
             }
 
             Spacer(Modifier.height(16.dp))
