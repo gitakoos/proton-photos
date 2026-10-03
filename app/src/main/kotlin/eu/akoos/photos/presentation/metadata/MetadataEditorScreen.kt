@@ -117,6 +117,8 @@ import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.util.appLocale
@@ -154,7 +156,9 @@ fun MetadataEditorScreen(
     LaunchedEffect(items) { viewModel.load(items, isReadOnlyAlbum) }
 
     // A write against a file the app doesn't own needs one-shot system consent; launch the request
-    // and, on approval, retry the queued write. Same recipe the album delete flow uses.
+    // and, on approval, retry the queued write. Same recipe the album delete flow uses. The system
+    // dialog would open above the app lock, so the launch waits for the unlock.
+    val appLock = LocalAppLock.current
     val writeConsentLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -163,7 +167,7 @@ fun MetadataEditorScreen(
     }
     LaunchedEffect(state.pendingWriteIntent) {
         val sender = state.pendingWriteIntent ?: return@LaunchedEffect
-        writeConsentLauncher.launch(IntentSenderRequest.Builder(sender).build())
+        appLock.runWhenOpen { writeConsentLauncher.launch(IntentSenderRequest.Builder(sender).build()) }
     }
 
     val screenContext = LocalContext.current

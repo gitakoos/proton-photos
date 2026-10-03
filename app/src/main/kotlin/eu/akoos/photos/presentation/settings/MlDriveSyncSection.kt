@@ -88,6 +88,7 @@ import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SecondaryButton
+import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.settings.components.ActionRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SectionLabel
@@ -162,6 +163,11 @@ internal fun MlDriveSyncSection(
             enabled = actionsEnabled,
         )
     }
+
+    // A job's outcome, the folder prompt and the Merge or Replace question all arrive once background work
+    // settles, and a sheet raised then is a window of its own that would open above the app lock. Under the
+    // lock none is composed; each keeps its state in the view model and shows on the unlock.
+    if (LocalAppLock.current.isLocked) return
 
     when (val sheet = restoreSheet) {
         MlRestoreSheet.Hidden -> Unit

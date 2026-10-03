@@ -207,6 +207,59 @@ class DuplicateSelectionSafetyTest {
         assertEquals(setOf("c"), keepIdsForRemoval(group.ids(), moved))
     }
 
+    @Test
+    fun select_all_keeps_a_group_the_user_picked_in_and_fills_the_groups_with_no_pick() {
+        val picked = deviceGroup("a", "b", "c")
+        val untouched = deviceGroup("d", "e", "f")
+        val cleared = cloudGroup("g", "h")
+        val current = mapOf(
+            duplicateGroupKey(picked) to setOf("c"),
+            duplicateGroupKey(cleared) to emptySet(),
+        )
+        val added = selectAllButFirstInUnpicked(listOf(picked, untouched, cleared), current)
+        assertEquals(
+            mapOf(
+                duplicateGroupKey(untouched) to setOf("e", "f"),
+                duplicateGroupKey(cleared) to setOf("h"),
+            ),
+            added,
+        )
+        val after = current + added
+        assertEquals(setOf("c"), after.getValue(duplicateGroupKey(picked)))
+    }
+
+    @Test
+    fun select_all_never_adds_to_a_hand_ticked_first_copy() {
+        // The user moved the keeper by ticking the first copy; adding the rule's pick would cover the group.
+        val group = deviceGroup("a", "b", "c")
+        val current = mapOf(duplicateGroupKey(group) to setOf("a", "b"))
+        val added = selectAllButFirstInUnpicked(listOf(group), current)
+        assertTrue(added.isEmpty())
+        val remove = (current + added).getValue(duplicateGroupKey(group))
+        assertEquals(setOf("c"), keepIdsForRemoval(group.ids(), remove))
+    }
+
+    @Test
+    fun select_all_with_no_picks_matches_select_all_but_the_first() {
+        val groups = listOf(deviceGroup("a", "b"), cloudGroup("c", "d", "e"))
+        assertEquals(selectAllButFirst(groups), selectAllButFirstInUnpicked(groups, emptyMap()))
+    }
+
+    @Test
+    fun select_all_over_any_picks_never_selects_a_whole_group() {
+        val group = deviceGroup("a", "b", "c")
+        val other = deviceGroup("d", "e")
+        for (pick in group.ids().subsets()) {
+            if (pick.size == group.ids().size) continue
+            val current = mapOf(duplicateGroupKey(group) to pick)
+            val after = current + selectAllButFirstInUnpicked(listOf(group, other), current)
+            for (g in listOf(group, other)) {
+                val remove = after[duplicateGroupKey(g)].orEmpty()
+                assertTrue("$pick then Select all left nothing of ${g.ids()}", keepIdsForRemoval(g.ids(), remove).isNotEmpty())
+            }
+        }
+    }
+
     /** Every subset of this set, so a test can sweep all reachable selections of a small group. */
     private fun Set<String>.subsets(): List<Set<String>> {
         val ids = toList()

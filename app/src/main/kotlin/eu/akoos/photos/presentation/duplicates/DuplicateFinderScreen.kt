@@ -106,6 +106,8 @@ import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.FilterSectionLabel
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
@@ -135,6 +137,7 @@ fun DuplicateFinderScreen(
     val context = LocalContext.current
 
     // System trash dialog launcher for the device-delete path (Android 11+ asks the user).
+    val appLock = LocalAppLock.current
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -146,8 +149,11 @@ fun DuplicateFinderScreen(
         // Guard the launch: on some OEMs a large or foreign trash IntentSender can throw right here,
         // which would otherwise force-close instead of failing gracefully. Fall back to the normal
         // "delete failed" path so the user sees a toast, not a crash.
-        runCatching { deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build()) }
-            .onFailure { viewModel.onDeleteLaunchFailed() }
+        // The system trash dialog would open above the app lock, so the launch waits for the unlock.
+        appLock.runWhenOpen {
+            runCatching { deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build()) }
+                .onFailure { viewModel.onDeleteLaunchFailed() }
+        }
     }
     val deleteFailed = stringResource(R.string.duplicates_delete_failed)
     LaunchedEffect(state.errorMessage) {
@@ -221,13 +227,16 @@ fun DuplicateFinderScreen(
             }
         // The ticked copies across every visible group, flattened for the shared selection drawer.
         val selectedItems = batchSelections.flatMap { (g, remove) -> g.items.filter { it.stableId in remove } }
-        // Ticks every copy but the first of each listed group, identical and similar alike. It REPLACES
-        // those groups' selections instead of adding to them: a first copy ticked by hand plus the rest
-        // would be the whole group.
-        val selectAllButFirstListed: () -> Unit = { groupSelections.putAll(selectAllButFirst(listedGroups)) }
-        // The most the rule can tick; once the selection holds that many, every group is down to one
-        // unticked copy and the drawer's Select all has nothing left to add.
-        val maxRemovable = listedGroups.sumOf { it.items.size - 1 }
+        // Ticks every copy but the first of each listed group that has nothing ticked yet, identical and
+        // similar alike. A group the user already ticked copies in keeps exactly those picks, so Select all
+        // never undoes a choice of keeper, and never adds to a pick, which could tick the whole group.
+        val selectAllButFirstListed: () -> Unit = {
+            groupSelections.putAll(selectAllButFirstInUnpicked(listedGroups, groupSelections))
+        }
+        // Whether Select all has anything left to tick: a listed group of two or more copies with no pick.
+        val canSelectMore = listedGroups.any {
+            it.items.size > 1 && groupSelections[duplicateGroupKey(it)].isNullOrEmpty()
+        }
         var showBatchConfirm by remember { mutableStateOf(false) }
         // A selection lives only on this screen, so leaving the overview would silently drop the ticked
         // copies. Guard both exits (system back and the header arrow) whenever anything is ticked. The
@@ -377,7 +386,8 @@ fun DuplicateFinderScreen(
 
         // Floating pill header (matches Search / Map). The trailing filter bubble opens the sync-status
         // and match-type sheet; it carries the accent outline when a non-default filter is active. While
-        // any group is listed, the bubble before it ticks every copy but the first of each group.
+        // any group is listed, the bubble before it ticks every copy but the first of each group with no
+        // pick yet.
         val filtersActive = scope != DupScope.ALL || filter != DupFilter.ALL
         val showSelectAllButFirst = listedGroups.isNotEmpty()
         FloatingHeader(
@@ -433,9 +443,9 @@ fun DuplicateFinderScreen(
             ),
             onDismiss = { groupSelections.clear() },
             modifier = Modifier.align(Alignment.BottomCenter),
-            // Select all runs the header button's rule. No count is handed in, so it selects at once
-            // exactly as that button does; the delete below keeps its own confirmation.
-            onSelectAll = if (selectedItems.size < maxRemovable) selectAllButFirstListed else null,
+            // Select all runs the header button's rule on the groups with no pick yet. No count is handed
+            // in, so it selects at once exactly as that button does; the delete keeps its own confirmation.
+            onSelectAll = if (canSelectMore) selectAllButFirstListed else null,
         )
         if (showBatchConfirm) {
             // A backed-up (Synced) copy carries its device file with it, so the message says so, exactly
@@ -568,6 +578,17 @@ internal fun selectAllButFirst(groups: List<DuplicateGroup>): Map<String, Set<St
         val ids = group.items.map { it.stableId }
         duplicateGroupKey(group) to (ids.toSet() - ids.take(1).toSet())
     }
+
+/**
+ * What Select all adds to the [current] selections: [selectAllButFirst] for each of [groups] with nothing ticked
+ * yet, keyed the same way. A group the user already ticked copies in is left out, so putting the result over
+ * [current] keeps those picks exactly as they are.
+ */
+internal fun selectAllButFirstInUnpicked(
+    groups: List<DuplicateGroup>,
+    current: Map<String, Set<String>>,
+): Map<String, Set<String>> =
+    selectAllButFirst(groups.filter { current[duplicateGroupKey(it)].isNullOrEmpty() })
 
 /** Device bytes reclaimed by deleting [items], matching the regular delete confirmation: a device or
  *  synced copy frees its device file, and a cloud-only copy counts as zero, since deleting it moves the

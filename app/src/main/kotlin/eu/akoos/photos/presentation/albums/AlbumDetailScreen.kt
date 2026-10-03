@@ -215,6 +215,7 @@ fun AlbumDetailScreen(
         mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
     }
     // System trash-dialog launcher for deletes that remove the on-device copy (Android 11+).
+    val appLock = LocalAppLock.current
     val deletePermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -226,8 +227,11 @@ fun AlbumDetailScreen(
         // Some OEMs throw when the trash sender is launched, and a sender already spent across a
         // configuration change does too. Unguarded that took the app down and left the pending hide
         // neither committed nor rolled back, which the other screens already avoid.
-        runCatching { deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build()) }
-            .onFailure { viewModel.clearPendingDeleteIntent() }
+        // The system trash dialog would open above the app lock, so the launch waits for the unlock.
+        appLock.runWhenOpen {
+            runCatching { deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build()) }
+                .onFailure { viewModel.clearPendingDeleteIntent() }
+        }
     }
     var showShareSheet by remember { mutableStateOf(false) }
     var showRenameSheet by remember { mutableStateOf(false) }
@@ -287,7 +291,6 @@ fun AlbumDetailScreen(
     // originals finish downloading, and the chooser would open above the lock, so it waits for the unlock.
     val shareCtx = LocalContext.current
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
-    val appLock = LocalAppLock.current
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
             appLock.runWhenOpen {

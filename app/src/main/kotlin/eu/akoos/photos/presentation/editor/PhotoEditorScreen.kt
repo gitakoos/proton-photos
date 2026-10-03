@@ -26,6 +26,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.editor.components.SaveOptionRow
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
 
 import android.graphics.Bitmap
 import android.graphics.PointF
@@ -347,7 +349,9 @@ fun PhotoEditorScreen(
         }
     }
 
-    // System consent dialog for overwriting foreign MediaStore URIs.
+    // System consent dialog for overwriting foreign MediaStore URIs. A save can raise it after the app
+    // lock came up, and the system dialog would open above the lock, so it waits for the unlock.
+    val appLock = LocalAppLock.current
     val writePermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
     ) { result ->
@@ -356,9 +360,11 @@ fun PhotoEditorScreen(
     }
     androidx.compose.runtime.LaunchedEffect(state.pendingWriteIntent) {
         val pi = state.pendingWriteIntent ?: return@LaunchedEffect
-        writePermissionLauncher.launch(
-            androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build()
-        )
+        appLock.runWhenOpen {
+            writePermissionLauncher.launch(
+                androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build()
+            )
+        }
     }
 
     // OS consent dialog for deleting the original device file after a Synced + Overwrite
@@ -370,9 +376,11 @@ fun PhotoEditorScreen(
     ) { _ -> vm.onDeletePermissionResolved() }
     androidx.compose.runtime.LaunchedEffect(state.pendingDeleteIntent) {
         val pi = state.pendingDeleteIntent ?: return@LaunchedEffect
-        deletePermissionLauncher.launch(
-            androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build()
-        )
+        appLock.runWhenOpen {
+            deletePermissionLauncher.launch(
+                androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build()
+            )
+        }
     }
 
     // Navigate away after a successful save. SuccessAsCopy gets a toast so the user knows
@@ -564,15 +572,23 @@ fun PhotoEditorScreen(
                         onFrameCommit = { vm.finalizeAdjustments() },
                     )
                 }
-                state.previewBitmap != null -> ImageWithRedactOverlay(
-                    bitmap = state.previewBitmap!!,
-                    redactActive = activeTool == Tool.Redact,
-                    brushDp = state.redactBrushDp,
-                    bakedStrokes = state.previewRedactStrokes,
-                    drawStrokes = state.adjustments.drawStrokes,
-                    textItems = state.adjustments.textItems,
-                    onStrokeFinished = { stroke -> vm.addRedactStroke(stroke) },
-                )
+                state.previewBitmap != null -> {
+                    // The preview and the edit it shows land together, so a stroke drawn on this bitmap maps
+                    // through this edit's frame and crop onto the photo.
+                    val shown = state.previewBitmap!!
+                    val shownEdit = state.previewAdjustments
+                    ImageWithRedactOverlay(
+                        bitmap = shown,
+                        redactActive = activeTool == Tool.Redact,
+                        brushDp = state.redactBrushDp,
+                        bakedStrokes = shownEdit.redactStrokes,
+                        drawStrokes = state.adjustments.drawStrokes,
+                        textItems = state.adjustments.textItems,
+                        onStrokeFinished = { stroke ->
+                            vm.addRedactStroke(stroke, shown.width, shown.height, shownEdit)
+                        },
+                    )
+                }
             }
             // While the preview is held, the untouched original is drawn over the top with a label,
             // so the user can compare against everything applied so far.
@@ -728,8 +744,9 @@ fun PhotoEditorScreen(
     // A blocking save failure flagged for the dialog (a cloud edit attempted with no internet). Shown
     // as the app's own bottom-sheet dialog rather than inline text; dismissing clears the result and
     // leaves the editor open with the edit intact, so the user can reconnect and save again, or discard.
+    // It is a window of its own, so under the app lock it waits, the result kept, and shows on the unlock.
     val failedResult = (state.saveResult as? SaveResult.Failed)?.takeIf { it.asDialog }
-    if (failedResult != null) {
+    if (failedResult != null && !appLock.isLocked) {
         ConfirmDialog(
             title = stringResource(R.string.editor_save_failed),
             message = failedResult.message,
@@ -742,8 +759,8 @@ fun PhotoEditorScreen(
 
     // Raised by the Detect-faces action itself, so it answers something the user just asked for rather
     // than interrupting. Accepting persists consent and re-runs detection; the failure case is shown
-    // inline in the panel instead.
-    if (state.hideFacesState is HideFacesState.NeedsConsent) {
+    // inline in the panel instead. Held back under the app lock like the save failure above.
+    if (state.hideFacesState is HideFacesState.NeedsConsent && !appLock.isLocked) {
         ConfirmDialog(
             title = stringResource(R.string.editor_face_model_title),
             message = stringResource(R.string.editor_face_model_body),

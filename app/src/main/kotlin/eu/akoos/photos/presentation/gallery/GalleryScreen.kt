@@ -828,8 +828,11 @@ fun GalleryScreen(
         val pi = state.pendingDeleteIntent ?: return@LaunchedEffect
         // Guard the launch so an OEM that throws on a large or foreign trash IntentSender fails
         // gracefully instead of force-closing.
-        runCatching { deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build()) }
-            .onFailure { viewModel.clearPendingDeleteIntent() }
+        // The system trash dialog would open above the app lock, so the launch waits for the unlock.
+        appLock.runWhenOpen {
+            runCatching { deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build()) }
+                .onFailure { viewModel.clearPendingDeleteIntent() }
+        }
     }
 
     // ── Metadata-strip write-permission launcher ──────────────────────────────

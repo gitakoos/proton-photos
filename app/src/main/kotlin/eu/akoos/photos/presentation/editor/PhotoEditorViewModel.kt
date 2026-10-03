@@ -121,8 +121,10 @@ enum class RedactMode { Black, Pixelate }
 enum class FaceCoverStyle { Pixelate, Blur }
 
 /**
- * A single redaction stroke. Points are in SOURCE-BITMAP coordinates so they survive
- * preview-area resizing; [brushSize] is the diameter (also in bitmap coordinates).
+ * A single redaction stroke. Points are pixels of the full-size photo as the frame step receives it (turned,
+ * straightened and cropped, before any frame), so a frame added, changed or moved later leaves the stroke on
+ * what it covers; [brushSize] is the diameter in those same pixels. [previewToPhoto] maps a stroke drawn on
+ * any preview into them.
  */
 data class RedactionStroke(
     val points: List<android.graphics.PointF>,
@@ -212,7 +214,8 @@ data class EditorAdjustments(
     /** Crop in display-space coords (the rotated/flipped orientation the user sees), consumed after
      *  the pipeline's rotate step so it stays in its authoring space. null = no crop. */
     val cropRect: Rect? = null,
-    /** Black-out / pixelate strokes applied after all color and geometry transforms. */
+    /** Black-out / pixelate strokes, drawn on the photo after its colour, geometry and vignette steps and
+     *  before any [frame], so the framed canvas and a blurred fill around the photo carry them. */
     val redactStrokes: List<RedactionStroke> = emptyList(),
     /** Oriented ellipses covering detected faces, composited alongside the redaction step. Coordinates
      *  are pixels of the ORIGINAL image (the unrotated, uncropped source the detection ran on), so they
@@ -235,8 +238,8 @@ data class EditorAdjustments(
     /** Text overlays (normalised), drawn last. */
     val textItems: List<TextItem> = emptyList(),
     /** The frame around the photo: a canvas of its ratio, filled with a colour or a blur of the photo, with
-     *  the photo shrunk and placed on it ([FrameSpec]). Drawn after the vignette, so the redaction, face
-     *  covers, pen strokes and text land on the framed canvas. null = no frame. */
+     *  the photo shrunk and placed on it ([FrameSpec]). Drawn after the redaction, so the face covers, pen
+     *  strokes and text land on the framed canvas. null = no frame. */
     val frame: FrameSpec? = null,
 )
 
@@ -307,9 +310,10 @@ data class EditorUiState(
     /** The edit as it stands. Every edit commits here at once and the preview renders after it, so a
      *  save or a follow-up edit made while that render is in flight already builds on this edit. */
     val adjustments: EditorAdjustments = EditorAdjustments(),
-    /** The redact strokes baked into [previewBitmap]. It trails [adjustments] by the render, so the
-     *  Redact overlay keeps a finished stroke on screen until the preview carrying it lands. */
-    val previewRedactStrokes: List<RedactionStroke> = emptyList(),
+    /** The edit [previewBitmap] was rendered from. It trails [adjustments] by the render, so the Redact
+     *  overlay keeps a finished stroke on screen until the preview carrying it lands, and maps a new stroke
+     *  through the frame and crop the preview actually shows. */
+    val previewAdjustments: EditorAdjustments = EditorAdjustments(),
     /** Redact brush diameter in screen dp, adjustable from the Redact panel (default 28). */
     val redactBrushDp: Float = 28f,
     /** The text overlay currently selected for moving / editing / colour+size in the Text tool. */
@@ -529,13 +533,13 @@ class PhotoEditorViewModel @Inject constructor(
         _state.update { it.copy(adjustments = previous) }
         val gen = ++renderGen
         viewModelScope.launch(Dispatchers.Default) {
-            val newPreview = applyAdjustments(orig, forPreview(previous))
-            val noCropPreview = applyColorOnly(orig, previous)
+            val newPreview = renderPreview { applyAdjustments(orig, forPreview(previous)) } ?: return@launch
+            val noCropPreview = renderPreview { applyColorOnly(orig, previous) }
             if (gen == renderGen) {
                 _state.update { it.copy(
                     previewBitmap = newPreview,
-                    adjustedBitmapNoCrop = noCropPreview,
-                    previewRedactStrokes = previous.redactStrokes,
+                    adjustedBitmapNoCrop = noCropPreview ?: it.adjustedBitmapNoCrop,
+                    previewAdjustments = previous,
                 ) }
             }
         }
@@ -553,13 +557,13 @@ class PhotoEditorViewModel @Inject constructor(
         _state.update { it.copy(adjustments = next) }
         val gen = ++renderGen
         viewModelScope.launch(Dispatchers.Default) {
-            val newPreview = applyAdjustments(orig, forPreview(next))
-            val noCropPreview = applyColorOnly(orig, next)
+            val newPreview = renderPreview { applyAdjustments(orig, forPreview(next)) } ?: return@launch
+            val noCropPreview = renderPreview { applyColorOnly(orig, next) }
             if (gen == renderGen) {
                 _state.update { it.copy(
                     previewBitmap = newPreview,
-                    adjustedBitmapNoCrop = noCropPreview,
-                    previewRedactStrokes = next.redactStrokes,
+                    adjustedBitmapNoCrop = noCropPreview ?: it.adjustedBitmapNoCrop,
+                    previewAdjustments = next,
                 ) }
             }
         }
@@ -584,7 +588,8 @@ class PhotoEditorViewModel @Inject constructor(
      * that a cancel cannot stop once it runs, so starting a job per tick, as the sliders do, would let a quick
      * pinch start renders faster than they finish, each on a thread and a canvas of its own, and let one land
      * after a newer one. The conflated channel holds only the tick not yet drawn, so a busy renderer goes
-     * straight to the latest; a tick from before a newer full render (a later token) is dropped.
+     * straight to the latest; a tick from before a newer full render (a later token) is dropped, and so is
+     * one that runs out of memory, the last preview staying on screen.
      */
     private val liveFrames = Channel<LiveFrame>(Channel.CONFLATED)
 
@@ -593,11 +598,9 @@ class PhotoEditorViewModel @Inject constructor(
             for (tick in liveFrames) {
                 val orig = _state.value.originalBitmap ?: continue
                 if (tick.gen != renderGen) continue
-                val preview = fastPreview(orig, tick.adjustments)
+                val preview = fastPreview(orig, tick.adjustments) ?: continue
                 if (tick.gen == renderGen) {
-                    _state.update {
-                        it.copy(previewBitmap = preview, previewRedactStrokes = tick.adjustments.redactStrokes)
-                    }
+                    _state.update { it.copy(previewBitmap = preview, previewAdjustments = tick.adjustments) }
                 }
             }
         }
@@ -619,18 +622,34 @@ class PhotoEditorViewModel @Inject constructor(
         return small
     }
 
-    /** Scale a full-res crop rect down to the small preview source, so a smooth small-source render still
-     *  crops in the right place. [sc] is the small source's scale factor (smallWidth / originalWidth). */
-    private fun scaleCropForSmall(adj: EditorAdjustments, sc: Float): EditorAdjustments {
-        val crop = adj.cropRect ?: return adj
+    /** Scale the full-res crop rect, redact strokes and face covers down to the small preview source, so a
+     *  smooth small-source render still crops, redacts and covers in the right place. [sc] is the small
+     *  source's scale factor (smallWidth / originalWidth). */
+    private fun scaleForSmall(adj: EditorAdjustments, sc: Float): EditorAdjustments {
         if (sc >= 1f) return adj
         return adj.copy(
-            cropRect = Rect(
-                (crop.left * sc).roundToInt(),
-                (crop.top * sc).roundToInt(),
-                (crop.right * sc).roundToInt(),
-                (crop.bottom * sc).roundToInt(),
-            ),
+            cropRect = adj.cropRect?.let { crop ->
+                Rect(
+                    (crop.left * sc).roundToInt(),
+                    (crop.top * sc).roundToInt(),
+                    (crop.right * sc).roundToInt(),
+                    (crop.bottom * sc).roundToInt(),
+                )
+            },
+            redactStrokes = adj.redactStrokes.map { stroke ->
+                stroke.copy(
+                    points = stroke.points.map { android.graphics.PointF(it.x * sc, it.y * sc) },
+                    brushSize = stroke.brushSize * sc,
+                )
+            },
+            faceCovers = adj.faceCovers.map { oval ->
+                oval.copy(
+                    centerX = oval.centerX * sc,
+                    centerY = oval.centerY * sc,
+                    radiusX = oval.radiusX * sc,
+                    radiusY = oval.radiusY * sc,
+                )
+            },
         )
     }
 
@@ -646,13 +665,13 @@ class PhotoEditorViewModel @Inject constructor(
         if (snap != null && snap != adj) pushUndo(snap)
         val gen = ++renderGen
         viewModelScope.launch(Dispatchers.Default) {
-            val full = applyAdjustments(orig, forPreview(adj))
-            val noCropFull = applyColorOnly(orig, adj)
+            val full = renderPreview { applyAdjustments(orig, forPreview(adj)) } ?: return@launch
+            val noCropFull = renderPreview { applyColorOnly(orig, adj) }
             if (gen == renderGen) {
                 _state.update { it.copy(
                     previewBitmap = full,
-                    adjustedBitmapNoCrop = noCropFull,
-                    previewRedactStrokes = adj.redactStrokes,
+                    adjustedBitmapNoCrop = noCropFull ?: it.adjustedBitmapNoCrop,
+                    previewAdjustments = adj,
                 ) }
             }
         }
@@ -810,6 +829,7 @@ class PhotoEditorViewModel @Inject constructor(
                 originalBitmap = oriented,
                 previewBitmap = oriented,
                 adjustedBitmapNoCrop = oriented,
+                previewAdjustments = EditorAdjustments(),
                 isLoading = false,
             ) }
         }
@@ -844,7 +864,12 @@ class PhotoEditorViewModel @Inject constructor(
                     return@launch
                 }
             }
-            _state.update { it.copy(originalBitmap = oriented, previewBitmap = oriented, isLoading = false) }
+            _state.update { it.copy(
+                originalBitmap = oriented,
+                previewBitmap = oriented,
+                previewAdjustments = EditorAdjustments(),
+                isLoading = false,
+            ) }
         }
     }
 
@@ -890,6 +915,7 @@ class PhotoEditorViewModel @Inject constructor(
                 originalBitmap = oriented,
                 previewBitmap = oriented,
                 adjustedBitmapNoCrop = oriented,
+                previewAdjustments = EditorAdjustments(),
                 isLoading = false,
             ) }
         }
@@ -1003,8 +1029,21 @@ class PhotoEditorViewModel @Inject constructor(
         liveFrames.trySend(LiveFrame(next, renderGen))
     }
 
-    fun addRedactStroke(stroke: RedactionStroke) = updateAdjustments {
-        it.copy(redactStrokes = it.redactStrokes + stroke)
+    /**
+     * Adds [stroke], drawn in pixels of a [previewWidth] x [previewHeight] preview of [shown], the edit that
+     * preview was rendered from. It is kept on the full-size photo ([previewToPhoto]), through the frame and
+     * crop the preview shows, so a later frame change leaves it on what it covers.
+     */
+    fun addRedactStroke(stroke: RedactionStroke, previewWidth: Int, previewHeight: Int, shown: EditorAdjustments) {
+        val orig = _state.value.originalBitmap ?: return
+        val (photoW, photoH) = renderedPhotoSize(orig, shown)
+        val toPhoto = previewToPhoto(previewWidth, previewHeight, photoW, photoH, shown.frame)
+        val onPhoto = RedactionStroke(
+            points = stroke.points.map { android.graphics.PointF(toPhoto.x(it.x), toPhoto.y(it.y)) },
+            brushSize = stroke.brushSize * toPhoto.scaleX,
+            mode = stroke.mode,
+        )
+        updateAdjustments { it.copy(redactStrokes = it.redactStrokes + onPhoto) }
     }
     fun undoLastRedactStroke() = updateAdjustments {
         it.copy(redactStrokes = if (it.redactStrokes.isEmpty()) it.redactStrokes else it.redactStrokes.dropLast(1))
@@ -1024,7 +1063,7 @@ class PhotoEditorViewModel @Inject constructor(
      * The detect runs on a copy of the ORIGINAL (unrotated, uncropped) source whose long edge is capped
      * so a large source never inflates ARGB_8888 past the heap, then each resulting oval is scaled UP to
      * original-image pixels and kept there. The render carries the covers through whatever turn, flip,
-     * straighten, keystone, crop or frame the edit has (step 4b), before or after this runs, so the
+     * straighten, keystone, crop or frame the edit has (step 4), before or after this runs, so the
      * preview and the full-res save both put them on the faces. Committed through [updateAdjustments], so
      * it is one undo entry and one re-render.
      */
@@ -1378,23 +1417,25 @@ class PhotoEditorViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.Default) {
             // Instant screen-res preview first, so a filter / rotate / crop / auto-fix shows immediately
             // instead of after the slow full-res pass on a big photo, with the crop scaled down to the
-            // small source. Redact strokes and face covers skip it (their geometry is in full-res
-            // coordinates and the small source would drift it).
+            // small source. Redact strokes and face covers skip it, so redacting keeps a sharp preview to
+            // draw the next stroke on rather than flashing the small one after every stroke.
             if (newAdj.redactStrokes.isEmpty() && newAdj.faceCovers.isEmpty()) {
-                val small = ensureSmallSource(orig)
-                val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
-                val smallPreview = applyAdjustments(small, scaleCropForSmall(forPreview(newAdj), sc))
-                if (gen == renderGen) {
-                    _state.update { it.copy(previewBitmap = smallPreview, previewRedactStrokes = newAdj.redactStrokes) }
+                val smallPreview = renderPreview {
+                    val small = ensureSmallSource(orig)
+                    val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
+                    applyAdjustments(small, scaleForSmall(forPreview(newAdj), sc))
+                }
+                if (smallPreview != null && gen == renderGen) {
+                    _state.update { it.copy(previewBitmap = smallPreview, previewAdjustments = newAdj) }
                 }
             }
-            val newPreview = applyAdjustments(orig, forPreview(newAdj))
-            val noCropPreview = applyColorOnly(orig, newAdj)
+            val newPreview = renderPreview { applyAdjustments(orig, forPreview(newAdj)) } ?: return@launch
+            val noCropPreview = renderPreview { applyColorOnly(orig, newAdj) }
             if (gen == renderGen) {
                 _state.update { it.copy(
                     previewBitmap = newPreview,
-                    adjustedBitmapNoCrop = noCropPreview,
-                    previewRedactStrokes = newAdj.redactStrokes,
+                    adjustedBitmapNoCrop = noCropPreview ?: it.adjustedBitmapNoCrop,
+                    previewAdjustments = newAdj,
                 ) }
             }
             // No eager recycle of the old previewBitmap — see finalizeAdjustments.
@@ -1410,13 +1451,13 @@ class PhotoEditorViewModel @Inject constructor(
         _state.update { it.copy(adjustments = newAdj) }
         val gen = ++renderGen
         viewModelScope.launch(Dispatchers.Default) {
-            val newPreview = applyAdjustments(orig, forPreview(newAdj))
-            val noCropPreview = applyColorOnly(orig, newAdj)
+            val newPreview = renderPreview { applyAdjustments(orig, forPreview(newAdj)) } ?: return@launch
+            val noCropPreview = renderPreview { applyColorOnly(orig, newAdj) }
             if (gen == renderGen) {
                 _state.update { it.copy(
                     previewBitmap = newPreview,
-                    adjustedBitmapNoCrop = noCropPreview,
-                    previewRedactStrokes = newAdj.redactStrokes,
+                    adjustedBitmapNoCrop = noCropPreview ?: it.adjustedBitmapNoCrop,
+                    previewAdjustments = newAdj,
                 ) }
             }
         }
@@ -1440,22 +1481,43 @@ class PhotoEditorViewModel @Inject constructor(
         _state.update { it.copy(adjustments = newAdj) }
         sliderRenderJob?.cancel()
         sliderRenderJob = viewModelScope.launch(Dispatchers.Default) {
-            val newPreview = fastPreview(orig, newAdj)
-            _state.update { it.copy(previewBitmap = newPreview, previewRedactStrokes = newAdj.redactStrokes) }
+            val newPreview = fastPreview(orig, newAdj) ?: return@launch
+            _state.update { it.copy(previewBitmap = newPreview, previewAdjustments = newAdj) }
         }
     }
 
-    /** The preview a live control draws for [adj]: a smooth small-source render, with the crop scaled down
-     *  to match, so it stays fast even after a crop. Redact strokes and face covers force the full-res path
-     *  (their geometry is in full-res coordinates and the small source would drift it); that case is rare. */
-    private fun fastPreview(orig: Bitmap, adj: EditorAdjustments): Bitmap =
-        if (adj.redactStrokes.isEmpty() && adj.faceCovers.isEmpty()) {
-            val small = ensureSmallSource(orig)
-            val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
-            applyAdjustments(small, scaleCropForSmall(forPreview(adj), sc))
-        } else {
-            applyAdjustments(orig, forPreview(adj))
-        }
+    /** The preview a live control draws for [adj]: a smooth small-source render, with the crop, the redact
+     *  strokes and the face covers scaled down to match, so it stays fast after a crop and with marks on the
+     *  photo. Nothing of it is on screen but the result, so each step is freed as the next one is made.
+     *  Null when it runs out of memory ([renderPreview]). */
+    private fun fastPreview(orig: Bitmap, adj: EditorAdjustments): Bitmap? = renderPreview {
+        val small = ensureSmallSource(orig)
+        val sc = if (orig.width > 0) small.width.toFloat() / orig.width.toFloat() else 1f
+        applyAdjustments(small, scaleForSmall(forPreview(adj), sc), recycleIntermediates = true)
+    }
+
+    /**
+     * Runs one preview [render], or drops it when it runs out of memory: the preview on screen stays, and the
+     * image cache is cleared as the save path does, so the next render has room. Null when dropped.
+     */
+    private inline fun renderPreview(render: () -> Bitmap): Bitmap? = try {
+        render()
+    } catch (oom: OutOfMemoryError) {
+        context.imageLoader.memoryCache?.clear()
+        eu.akoos.photos.util.PerfDiagnostics.recordOom("editor-preview")
+        null
+    }
+
+    /** The full-size photo [adj] cuts from [source] before any frame, as the render cuts it: the whole image
+     *  turned by its quarter turns, or the crop clamped to that. The space [RedactionStroke]s live in. */
+    private fun renderedPhotoSize(source: Bitmap, adj: EditorAdjustments): Pair<Int, Int> {
+        val w = displayWidth(source, adj)
+        val h = displayHeight(source, adj)
+        val crop = adj.cropRect ?: return w to h
+        val cropW = crop.right.coerceIn(1, w) - crop.left.coerceIn(0, w - 1)
+        val cropH = crop.bottom.coerceIn(1, h) - crop.top.coerceIn(0, h - 1)
+        return if (cropW > 0 && cropH > 0) cropW to cropH else w to h
+    }
 
     /** Source dimensions after [adj]'s rotation (swapped on 90°/270°) — the display space the crop rect lives in. */
     private fun displayWidth(source: Bitmap, adj: EditorAdjustments): Int =
@@ -1525,7 +1587,7 @@ class PhotoEditorViewModel @Inject constructor(
     }
 
     /**
-     * Step 3d: a [layout]-sized canvas that [fill] covers, with [picture] drawn into its photo box through
+     * Step 3e: a [layout]-sized canvas that [fill] covers, with [picture] drawn into its photo box through
      * [placement], the matrix the face covers follow onto the canvas. A blurred fill is [frameBackdrop]
      * scaled to cover the whole canvas under a [FRAME_BLUR_SCRIM], so the sharp photo stands out on it; when
      * the edit covers faces, [backdropCovers] is where each original point lands on [picture], and the
@@ -1857,8 +1919,9 @@ class PhotoEditorViewModel @Inject constructor(
 
     /**
      * Renders all adjustments onto a fresh bitmap. Heavy — call from a background dispatcher.
-     * [recycleIntermediates] frees each transient stage; only the off-screen save path may set it,
-     * since preview callers' bitmaps may still be held by Compose's draw pipeline.
+     * [recycleIntermediates] frees each transient stage as soon as the next one is made. Only [source] and
+     * the result can be on screen, and neither is ever freed here, so the save path and the live preview
+     * path set it; the other preview paths leave the stages to GC.
      */
     private fun applyAdjustments(
         source: Bitmap,
@@ -1932,7 +1995,8 @@ class PhotoEditorViewModel @Inject constructor(
         // Where a point of the original lands in this render once [placement] has put the picture on a
         // frame's canvas. Face covers are kept in original-image pixels (where the detection found them),
         // so this carries each through the very rotate / flip, straighten / keystone and crop the pixels
-        // took in steps 1 to 2. [source] is the original here: covers force the full-res render path.
+        // took in steps 1 to 2. [source] is the original, or the small preview source with the covers
+        // scaled to it.
         fun coversToRender(placement: PlaneTransform) = originalToRenderTransform(
             sourceWidth = source.width,
             sourceHeight = source.height,
@@ -1947,16 +2011,22 @@ class PhotoEditorViewModel @Inject constructor(
             framePlacement = placement,
         )
 
-        // 3d. frame: the picture so far shrinks onto a canvas of the frame's ratio, a colour or a blur of
+        // 3d. redaction strokes, on the photo before any frame, so the framed canvas and a blurred fill
+        //     around the photo carry them. Their points are pixels of this photo ([RedactionStroke]).
+        val redacted = if (adj.redactStrokes.isEmpty()) vignetted
+            else applyRedactStrokes(vignetted, adj.redactStrokes, recycleIntermediates)
+        recycle(vignetted, redacted)
+
+        // 3e. frame: the picture so far shrinks onto a canvas of the frame's ratio, a colour or a blur of
         //     itself filling the rest, and every later step draws on that canvas. frameCanvas lays it out
         //     from fractions for this render's own size, so the small preview and the full-res save frame
         //     alike, and holds the canvas's long side to FRAME_MAX_LONG_SIDE.
         val frameSpec = adj.frame
-        val frameLayout = frameSpec?.let { frameCanvas(vignetted.width, vignetted.height, it) }
-        val framePlacement = frameLayout?.let { frameTransform(vignetted.width, vignetted.height, it.photo) }
+        val frameLayout = frameSpec?.let { frameCanvas(redacted.width, redacted.height, it) }
+        val framePlacement = frameLayout?.let { frameTransform(redacted.width, redacted.height, it.photo) }
             ?: PlaneTransform.IDENTITY
-        val framed = if (frameSpec == null || frameLayout == null) vignetted else applyFrame(
-            picture = vignetted,
+        val framed = if (frameSpec == null || frameLayout == null) redacted else applyFrame(
+            picture = redacted,
             layout = frameLayout,
             fill = frameSpec.fill,
             placement = framePlacement,
@@ -1970,23 +2040,17 @@ class PhotoEditorViewModel @Inject constructor(
             adj = adj,
             recycleIntermediates = recycleIntermediates,
         )
-        recycle(vignetted, framed)
+        recycle(redacted, framed)
 
-        // 4. redaction strokes cover the final visible content. Their points are pixels of the displayed
-        //    image: the frame's canvas, when there is one.
-        val redacted = if (adj.redactStrokes.isEmpty()) framed
-            else applyRedactStrokes(framed, adj.redactStrokes, recycleIntermediates)
-        recycle(framed, redacted)
-
-        // 4b. face covers: oriented ellipses over detected faces, each drawn through [coversToRender] with
-        //     the frame's placement, so it lands on its face in the preview and the full-res save alike. A
-        //     frame holds them to its photo box.
-        val faceCovered = if (adj.faceCovers.isEmpty()) redacted else applyFaceCovers(
-            redacted, adj.faceCovers, coversToRender(framePlacement), adj.faceCoverStyle, adj.faceCoverStrength,
+        // 4. face covers: oriented ellipses over detected faces, each drawn through [coversToRender] with
+        //    the frame's placement, so it lands on its face in the preview and the full-res save alike. A
+        //    frame holds them to its photo box.
+        val faceCovered = if (adj.faceCovers.isEmpty()) framed else applyFaceCovers(
+            framed, adj.faceCovers, coversToRender(framePlacement), adj.faceCoverStyle, adj.faceCoverStrength,
             recycleIntermediates,
             clip = frameLayout?.photo?.let { RectF(it.left, it.top, it.right, it.bottom) },
         )
-        recycle(redacted, faceCovered)
+        recycle(framed, faceCovered)
 
         // 5. pen strokes (normalised geometry, any resolution)
         val drawn = if (adj.drawStrokes.isEmpty()) faceCovered else applyDrawStrokes(faceCovered, adj.drawStrokes)
@@ -2065,7 +2129,7 @@ class PhotoEditorViewModel @Inject constructor(
         }
         // Free `pixelated` on the save path; guard on a Pixelate stroke so we don't force the lazy here.
         if (recycleIntermediates && strokes.any { it.mode == RedactMode.Pixelate } &&
-            pixelated !== out && !pixelated.isRecycled) {
+            pixelated !== out && pixelated !== src && !pixelated.isRecycled) {
             pixelated.recycle()
         }
         return out
@@ -2186,7 +2250,7 @@ class PhotoEditorViewModel @Inject constructor(
 
                 if (recycleIntermediates) {
                     if (!mask.isRecycled) mask.recycle()
-                    if (coverLayer !== out && !coverLayer.isRecycled) coverLayer.recycle()
+                    if (coverLayer !== out && coverLayer !== src && !coverLayer.isRecycled) coverLayer.recycle()
                 }
             }
         }

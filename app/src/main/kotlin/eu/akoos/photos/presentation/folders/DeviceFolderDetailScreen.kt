@@ -337,9 +337,12 @@ fun DeviceFolderDetailScreen(
     LaunchedEffect(pendingDeleteIntent) {
         val pi = pendingDeleteIntent ?: return@LaunchedEffect
         // Guard the launch so a stale or already-consumed sender can't force-close the screen.
-        runCatching {
-            deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-        }.onFailure { viewModel.clearPendingDeleteIntent() }
+        // The system trash dialog would open above the app lock, so the launch waits for the unlock.
+        appLock.runWhenOpen {
+            runCatching {
+                deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+            }.onFailure { viewModel.clearPendingDeleteIntent() }
+        }
     }
     // Metadata-strip write-permission launcher (foreign files on Android 11+) + result snackbar.
     val stripPermissionLauncher = rememberLauncherForActivityResult(

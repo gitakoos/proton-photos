@@ -279,6 +279,41 @@ internal fun FrameSpec.afterPreviewGesture(
 }
 
 /**
+ * How a point on a preview of the edit maps onto the full-size photo the frame step receives: across, the photo
+ * pixel is (preview pixel - [offsetX]) * [scaleX], and down likewise. One preview pixel spans [scaleX] photo pixels,
+ * which sizes a brush.
+ */
+internal data class PreviewToPhoto(val offsetX: Float, val offsetY: Float, val scaleX: Float, val scaleY: Float) {
+    fun x(previewX: Float): Float = (previewX - offsetX) * scaleX
+    fun y(previewY: Float): Float = (previewY - offsetY) * scaleY
+}
+
+/**
+ * Where a point on a [previewW] x [previewH] preview lands on the full-size [photoW] x [photoH] photo. With a
+ * [frame] the preview is the frame's canvas at whatever size it rendered, so the point goes through the canvas
+ * [frameCanvas] lays out for the full-size photo and back off the photo's box on it; with none the preview is the
+ * photo itself. A preview at the photo's own size with no frame maps every point to itself exactly. A side under one
+ * pixel counts as one.
+ */
+internal fun previewToPhoto(previewW: Int, previewH: Int, photoW: Int, photoH: Int, frame: FrameSpec?): PreviewToPhoto {
+    val pw = previewW.coerceAtLeast(1).toFloat()
+    val ph = previewH.coerceAtLeast(1).toFloat()
+    val w = photoW.coerceAtLeast(1)
+    val h = photoH.coerceAtLeast(1)
+    if (frame == null) return PreviewToPhoto(0f, 0f, w / pw, h / ph)
+    val canvas = frameCanvas(w, h, frame)
+    val canvasPerPreviewX = canvas.width / pw
+    val canvasPerPreviewY = canvas.height / ph
+    val box = canvas.photo
+    return PreviewToPhoto(
+        offsetX = box.left / canvasPerPreviewX,
+        offsetY = box.top / canvasPerPreviewY,
+        scaleX = canvasPerPreviewX * w / max(box.width, FRAME_MIN_ROOM_PX),
+        scaleY = canvasPerPreviewY * h / max(box.height, FRAME_MIN_ROOM_PX),
+    )
+}
+
+/**
  * A frame after [snappedToCentre], and whether the photo sits on the frame's middle across ([snappedX]) and down
  * ([snappedY]).
  */
