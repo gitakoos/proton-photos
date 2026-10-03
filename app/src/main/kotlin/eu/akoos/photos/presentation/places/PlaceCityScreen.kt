@@ -25,25 +25,20 @@ package eu.akoos.photos.presentation.places
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.location.LocationDetailViewModel
 import eu.akoos.photos.presentation.location.LocationPhotosContent
-import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
-import eu.akoos.photos.presentation.util.appLocale
-import eu.akoos.photos.util.cityCountryLabel
 
 /**
  * Full-screen page for one place: every photo taken in a city, reached by a coordinate. Opens like
  * the person and memory detail pages rather than as a bottom sheet, and shows no map. The photo grid,
- * hero header and selection come from the shared [LocationPhotosContent]; the shell wraps it in the
- * app's floating pill header carrying a back button and the resolved place name, with the content
- * scrolling underneath. A photo tap calls [onPhotoClick]; the caller opens the viewer.
+ * hero header and selection come from the shared [LocationPhotosContent], which also carries the back
+ * button and, once the hero has scrolled away, the floating header with the resolved place name. A
+ * photo tap calls [onPhotoClick]; the caller opens the viewer.
  */
 @Composable
 fun PlaceCityScreen(
@@ -62,24 +57,17 @@ fun PlaceCityScreen(
         viewModel.load(latitude, longitude)
     }
 
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val appColors = AppColors.current
-    val locale = appLocale()
 
     LocationPhotosContent(
         onPhotoClick = onPhotoClick,
         modifier = Modifier.fillMaxSize(),
         backgroundColor = appColors.bg0,
-        // No top inset, so the cover fills to the very top and the pill header floats over it, the way
-        // the album and person detail pages open (rather than sitting below a solid header band).
+        // No top inset, so the cover fills to the very top with the back button over it, the way the
+        // album pages open; the floating header with the place's name appears once the hero scrolls away.
         contentTopPadding = 0.dp,
         onEditMetadata = onEditMetadata,
-        headerOverlay = {
-            FloatingHeader(
-                title = cityCountryLabel(state.city, state.countryCode, state.countryName, locale),
-                onBack = onBack,
-            )
-        },
+        onBack = onBack,
         viewModel = viewModel,
     )
 }

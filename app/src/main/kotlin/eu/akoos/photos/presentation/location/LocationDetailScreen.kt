@@ -34,9 +34,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -53,6 +53,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -95,6 +96,8 @@ import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.albums.components.StickyAlbumHeader
+import eu.akoos.photos.presentation.albums.components.rememberHeroScrolledAway
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.MultiStripState
 import eu.akoos.photos.presentation.common.PrimarySlot
@@ -137,7 +140,8 @@ import java.util.TimeZone
  * the photo grid under month headers with drag multi-select, the shared selection drawer with the
  * full action set (share, add-to-album, move-to-folder, favourite, back up, download, offline, edit
  * metadata, strip, hide, delete) and the save-as-album flow. [modifier] shapes the host,
- * [contentTopPadding] clears a floating header, [headerOverlay] draws one on top, and
+ * [contentTopPadding] clears a floating header, [onBack] adds the back button over the hero (which
+ * the page's floating header takes over from once the hero has scrolled away), and
  * [showDragHandle] adds a pull-down grip. [onEditMetadata] opens the date + place editor for the
  * current selection, matching the timeline.
  */
@@ -150,7 +154,7 @@ fun LocationPhotosContent(
     contentTopPadding: Dp = 0.dp,
     showDragHandle: Boolean = false,
     onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
-    headerOverlay: (@Composable BoxScope.() -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
     viewModel: LocationDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -727,9 +731,66 @@ fun LocationPhotosContent(
             modifier = Modifier.align(Alignment.BottomCenter),
         )
 
-        // A full-screen host draws its floating pill header last so it sits above the grid; the sheet
-        // passes none and shows the pull-down grip instead.
-        headerOverlay?.invoke(this)
+        // A full-screen host gets the back button over the hero, then the floating header with the
+        // place's name once the hero has scrolled away; the sheet passes none and shows the pull-down
+        // grip instead.
+        if (onBack != null) {
+            val heroGone by rememberHeroScrolledAway(gridState)
+            val stickyShown = heroGone && !isSelectionMode
+            AnimatedVisibility(
+                visible = !stickyShown,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 12.dp, top = 8.dp),
+            ) {
+                IconBubble(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = if (isSelectionMode)
+                        stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
+                    onClick = { if (isSelectionMode) viewModel.clearSelection() else onBack() },
+                    diameter = 40.dp,
+                    iconSize = 18.dp,
+                    background = PillBg,
+                    borderColor = PillBorder,
+                    tint = FgPrimary,
+                )
+            }
+            StickyAlbumHeader(
+                visible = stickyShown,
+                title = placeTitle,
+                onBack = onBack,
+                modifier = Modifier.align(Alignment.TopCenter),
+                trailing = if (isSignedIn && state.items.isNotEmpty()) {
+                    {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(PillBg, CircleShape)
+                                .border(0.5.dp, PillBorder, CircleShape)
+                                .clickable(enabled = !state.isSavingAsAlbum) { showSaveAsAlbumConfirm = true },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (state.isSavingAsAlbum) {
+                                CircularProgressIndicator(
+                                    color = Accent, strokeWidth = 2.dp,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.LibraryAdd,
+                                    contentDescription = stringResource(R.string.location_save_as_album),
+                                    tint = Accent,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                } else null,
+            )
+        }
     }
 
     if (showStripPicker) {

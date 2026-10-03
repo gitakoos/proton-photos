@@ -102,6 +102,8 @@ import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.addToAlbumMessage
 import eu.akoos.photos.presentation.common.HideConfirmSheet
+import eu.akoos.photos.presentation.albums.components.StickyAlbumHeader
+import eu.akoos.photos.presentation.albums.components.rememberHeroScrolledAway
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.ReturnToViewerPhoto
@@ -685,26 +687,51 @@ fun DeviceFolderDetailScreen(
         // Fixed back button, floating over the grid. Cancels selection while selecting, and stops a
         // running vault move the same cooperative way the system back does, so neither route out
         // kills the copy loop half-way.
-        IconBubble(
-            icon = Icons.AutoMirrored.Filled.ArrowBack,
-            contentDescription = if (isSelectionMode)
-                stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
-            onClick = {
-                when {
-                    isSelectionMode -> viewModel.clearSelection()
-                    folderVault != null -> viewModel.cancelFolderVault()
-                    else -> onBack()
-                }
-            },
+        // Once the hero has scrolled away the page's floating header takes over with the folder's name.
+        val heroGone by rememberHeroScrolledAway(gridState)
+        val stickyShown = heroGone && !isSelectionMode
+        AnimatedVisibility(
+            visible = !stickyShown,
+            enter = fadeIn(),
+            exit = fadeOut(),
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
-                .padding(start = 16.dp, top = 10.dp),
-            diameter = 40.dp,
-            iconSize = 18.dp,
-            background = PillBg,
-            borderColor = PillBorder,
-            tint = FgPrimary,
+                .padding(start = 12.dp, top = 8.dp),
+        ) {
+            IconBubble(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = if (isSelectionMode)
+                    stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
+                onClick = {
+                    when {
+                        isSelectionMode -> viewModel.clearSelection()
+                        folderVault != null -> viewModel.cancelFolderVault()
+                        else -> onBack()
+                    }
+                },
+                diameter = 40.dp,
+                iconSize = 18.dp,
+                background = PillBg,
+                borderColor = PillBorder,
+                tint = FgPrimary,
+            )
+        }
+        StickyAlbumHeader(
+            visible = stickyShown,
+            title = bucketName,
+            onBack = { if (folderVault != null) viewModel.cancelFolderVault() else onBack() },
+            modifier = Modifier.align(Alignment.TopCenter),
+            trailing = {
+                IconBubble(
+                    icon = Icons.Default.MoreVert,
+                    contentDescription = stringResource(R.string.albums_more_actions),
+                    onClick = { showFolderOverflow = true },
+                    background = PillBg,
+                    borderColor = PillBorder,
+                    tint = FgPrimary,
+                )
+            },
         )
 
         // Selection drawer: the shared surface every multi-select uses, so a folder's bulk actions
