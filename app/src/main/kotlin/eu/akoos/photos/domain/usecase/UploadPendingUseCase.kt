@@ -349,6 +349,7 @@ class UploadPendingUseCase @Inject constructor(
 
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
         val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
+        val compressHdrPhotos = prefs[SettingsKeys.COMPRESS_HDR_PHOTOS] ?: false
         val compressTier = UploadCompressionTier
             .fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: -1)
         // #108: the video path re-encodes at its own tier, seeded from the shared value on upgrade.
@@ -658,6 +659,7 @@ class UploadPendingUseCase @Inject constructor(
                     albumOptInFolders = albumOptInFolders,
                     stripOnUpload = stripOnUpload,
                     compressOnUpload = compressOnUpload,
+                    compressHdrPhotos = compressHdrPhotos,
                     compressTier = compressTier,
                     videoCompressTier = videoCompressTier,
                     mirrorStripToLocal = mirrorStripToLocal,
@@ -731,6 +733,7 @@ class UploadPendingUseCase @Inject constructor(
         albumOptInFolders: Set<String>,
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
+        compressHdrPhotos: Boolean,
         compressTier: UploadCompressionTier,
         videoCompressTier: UploadCompressionTier,
         mirrorStripToLocal: Boolean,
@@ -1059,6 +1062,7 @@ class UploadPendingUseCase @Inject constructor(
                 eu.akoos.photos.data.upload.UploadImageCompressor.skipsCompressionForGainMap(
                     localItem.mimeType,
                     compressOnUpload,
+                    compressHdrPhotos,
                     hasGainMap = { structuralStripper.hasGainMapUpload(strippedUploadUri) },
                 )
             if (compressHasGainMap) {
@@ -1291,6 +1295,7 @@ class UploadPendingUseCase @Inject constructor(
                     !eu.akoos.photos.data.upload.UploadImageCompressor.skipsCompressionForGainMap(
                         localItem.mimeType,
                         compressOnUpload,
+                        compressHdrPhotos,
                         hasGainMap = { structuralStripper.hasGainMapUpload(state.localUri) },
                     )
                 ) {

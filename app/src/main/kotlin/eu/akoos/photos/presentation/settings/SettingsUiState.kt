@@ -192,6 +192,8 @@ data class SettingsUiState(
      *  Drive. Separate opt-in from [compressOnUpload]. The on-device original is never modified. Off
      *  by default. */
     val compressVideosOnUpload: Boolean = false,
+    /** When true, Ultra HDR photos are compressed too, which drops their HDR. See [compressOnUpload]. */
+    val compressHdrPhotos: Boolean = false,
     /** Which quality tier the PHOTO upload compression uses when [compressOnUpload] is on. */
     val compressTier: UploadCompressionTier = UploadCompressionTier.BALANCED,
     /** Which quality tier the VIDEO upload compression uses when [compressVideosOnUpload] is on, the

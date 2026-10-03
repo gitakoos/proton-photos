@@ -51,7 +51,8 @@ class UploadGainMapGateTest {
         mime: String = "image/jpeg",
         compress: Boolean = true,
         gainMap: Boolean = true,
-    ) = UploadImageCompressor.skipsCompressionForGainMap(mime, compress) { gainMap }
+        compressHdr: Boolean = false,
+    ) = UploadImageCompressor.skipsCompressionForGainMap(mime, compress, compressHdr) { gainMap }
 
     private fun attemptsStrip(
         mime: String = "image/jpeg",
@@ -66,6 +67,18 @@ class UploadGainMapGateTest {
     fun `a gain map with compression on skips compression`() {
         assertTrue(skipsCompression())
         assertTrue(skipsCompression(mime = "image/jpg"))
+    }
+
+    @Test
+    fun `a gain map with the HDR opt-in is compressed like any other photo`() {
+        assertFalse(skipsCompression(compressHdr = true))
+    }
+
+    @Test
+    fun `the HDR opt-in does not probe the file`() {
+        var probes = 0
+        UploadImageCompressor.skipsCompressionForGainMap("image/jpeg", true, true) { probes++; true }
+        assertEquals(0, probes)
     }
 
     @Test
@@ -140,14 +153,14 @@ class UploadGainMapGateTest {
         var probes = 0
         val probe = { probes++; true }
 
-        UploadImageCompressor.skipsCompressionForGainMap("image/jpeg", false, probe)
-        UploadImageCompressor.skipsCompressionForGainMap("video/mp4", true, probe)
+        UploadImageCompressor.skipsCompressionForGainMap("image/jpeg", false, hasGainMap = probe)
+        UploadImageCompressor.skipsCompressionForGainMap("video/mp4", true, hasGainMap = probe)
         UploadImageCompressor.attemptsGainMapPreservingStrip("image/jpeg", false, SDK_WITH_GAIN_MAP_QUERY, probe)
         UploadImageCompressor.attemptsGainMapPreservingStrip("image/jpeg", true, SDK_BELOW_GAIN_MAP_QUERY, probe)
         UploadImageCompressor.attemptsGainMapPreservingStrip("video/mp4", true, SDK_WITH_GAIN_MAP_QUERY, probe)
         assertEquals(0, probes)
 
-        UploadImageCompressor.skipsCompressionForGainMap("image/jpeg", true, probe)
+        UploadImageCompressor.skipsCompressionForGainMap("image/jpeg", true, hasGainMap = probe)
         assertEquals(1, probes)
         UploadImageCompressor.attemptsGainMapPreservingStrip("image/jpeg", true, SDK_WITH_GAIN_MAP_QUERY, probe)
         assertEquals(2, probes)

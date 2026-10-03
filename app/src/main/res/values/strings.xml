@@ -125,9 +125,7 @@
     <string name="metadata_editor_set">Set</string>
     <string name="metadata_editor_place_label">Place</string>
     <string name="metadata_editor_place_none">No location</string>
-    <string name="metadata_editor_place_choose_country">Choose a country</string>
-    <string name="metadata_editor_place_country_hint">Picking only a country places the photo at its center.</string>
-    <string name="metadata_editor_place_search_city">Search for a city</string>
+    <string name="metadata_editor_place_search">Search a country or city</string>
     <string name="metadata_editor_place_remove">Remove location</string>
     <string name="metadata_editor_country_search">Search countries</string>
     <string name="metadata_editor_note_cloud">This photo keeps the date and place it was uploaded to Proton Drive with, so they can\'t be changed here.</string>
@@ -597,6 +595,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
+    <string name="settings_more_title">More settings</string>
+    <string name="settings_more_desc">AI, privacy, notifications and help</string>
     <string name="settings_sync_wifi_only">Sync on Wi‑Fi only</string>
     <string name="settings_sync_now">Sync now</string>
     <string name="settings_storage_section">Storage</string>
@@ -629,20 +629,16 @@
     <string name="settings_account_link_drive_web_desc">Browse your photos and files at drive.proton.me.</string>
     <string name="cancel">Cancel</string>
     <string name="settings_language_system">System default</string>
-    <string name="settings_sync_wifi_desc">Pause sync on mobile network</string>
     <string name="settings_fullres_wifi_only">Full-res over Wi‑Fi only</string>
     <string name="settings_fullres_wifi_only_desc">Download cloud full-res photos and videos on Wi‑Fi only. Thumbnails always load.</string>
     <string name="viewer_wifi_for_full_quality">Connect to Wi‑Fi for full quality</string>
-    <string name="settings_sync_now_action">Sync →</string>
     <string name="settings_backup_folders">Backup folders</string>
     <string name="settings_backup_folders_desc">Choose which folders to back up</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">What gets backed up</string>
     <string name="settings_network_section">Network usage</string>
     <string name="settings_continuous_backup">Continuous backup</string>
-    <string name="settings_continuous_backup_desc">Photos and videos upload within seconds of capture.</string>
     <string name="settings_backup_everything">Back up everything</string>
-    <string name="settings_backup_everything_desc">Auto-upload every photo and video on this device.</string>
     <!-- Excluded folders feature (paired with backup-everything mode). -->
     <string name="settings_excluded_folders">Excluded folders</string>
     <string name="settings_excluded_folders_desc_none">No folders excluded</string>
@@ -652,6 +648,7 @@
     <string name="settings_excluded_folders_intro">Photos in these folders won\'t back up, even while \"Back up everything\" is on. Already-uploaded items stay on Drive.</string>
     <string name="settings_excluded_folders_empty">No folders found on this device</string>
     <string name="settings_excluded_folders_count_label">%1$d of %2$d folders excluded</string>
+    <string name="settings_excluded_albums_count_label">%1$d of %2$d albums excluded</string>
     <string name="settings_excluded_folders_select_all">Exclude all</string>
     <string name="settings_excluded_folders_deselect_all">Include all</string>
     <!-- Album mirror -->
@@ -733,7 +730,6 @@
     <string name="settings_ai_section">Machine learning</string>
     <string name="settings_ai_nav_desc">On-device Copy text, Hide faces, and more</string>
     <string name="settings_ai_enable">Enable machine learning</string>
-    <string name="settings_ai_enable_desc">Everything runs on your phone. Turning this on lets the app download the small models it needs and use Copy text and Hide faces. More features are coming.</string>
     <string name="settings_ai_ocr">Copy text</string>
     <string name="settings_ai_ocr_desc">Recognise and copy text you see in a photo</string>
     <string name="settings_ai_ocr_downloading">Downloading…</string>
@@ -778,20 +774,15 @@
     <string name="settings_ai_semantic_indexing_waiting">Waiting for the search models</string>
     <string name="settings_ai_semantic_ready">Your photos are searchable</string>
     <string name="settings_ai_semantic_rescan">Rescan all photos</string>
-    <string name="settings_ai_semantic_rescan_desc">Clear the search index and build it again for every photo.</string>
     <string name="settings_ai_semantic_rescan_confirm_title">Rescan all photos?</string>
     <string name="settings_ai_semantic_rescan_confirm_msg">The search index is cleared and then built again for every photo, which can take a while.</string>
     <string name="settings_ai_semantic_not_indexed">Your photos are not indexed yet</string>
     <string name="settings_ai_semantic_clear">Clear search data</string>
-    <string name="settings_ai_semantic_clear_desc">Remove the search index for every photo from this phone.</string>
     <string name="settings_ai_semantic_clear_confirm_title">Clear search data?</string>
     <string name="settings_ai_semantic_clear_confirm_msg">This removes the search index for every photo. Your photos are not affected.</string>
     <string name="settings_face_section">Recognized faces</string>
     <string name="settings_face_maintenance">Maintenance</string>
-    <string name="settings_face_rescan_desc">Detect faces again, keeping your names and corrections.</string>
-    <string name="settings_face_clear_desc">Remove every found person and all face data from this phone.</string>
     <string name="settings_face_excluded">Excluded faces</string>
-    <string name="settings_face_excluded_desc">Review faces you removed from a person or dismissed</string>
     <string name="face_excluded_empty">Nothing is excluded. Faces you remove from a person, or dismiss as not a person, appear here so you can undo them.</string>
     <string name="face_excluded_not_person_section">Not this person: %1$s</string>
     <string name="face_excluded_ignored_section">Ignored (not a person)</string>
@@ -896,7 +887,6 @@
     <string name="settings_security">Security</string>
     <string name="settings_security_desc">App lock, Hidden Photos</string>
     <string name="settings_strip_metadata_upload">Strip metadata on upload</string>
-    <string name="settings_strip_metadata_upload_desc">Removes location and camera details from the uploaded copy. The copy on the phone keeps them unless the local mirror below is on. Add camera, timestamp and software fields under Customize.</string>
     <string name="settings_mirror_strip_local">Mirror changes to local files</string>
     <string name="settings_mirror_strip_local_desc">Also removes those details from the copy on the phone, so the backed-up copy and the local file stay identical. Needs all-files access and changes your original files.</string>
     <string name="settings_mirror_compress_local">Also compress the local file</string>
@@ -907,7 +897,6 @@
     <string name="onboarding_mirror_toggle_desc">When backing up, apply the same metadata and filename changes to the on-device original, so the local file and the backed-up copy stay identical. This changes your original files.</string>
     <string name="onboarding_mirror_grant">Allow all-files access</string>
     <string name="settings_rename_on_upload">Rename to capture date on upload</string>
-    <string name="settings_rename_on_upload_desc">Names the uploaded copy by its capture date and time from the photo or video metadata. Files on the phone keep their names.</string>
     <string name="settings_delete_after_backup">Delete device file after backup</string>
     <string name="settings_delete_after_backup_desc">Removes the local copy from your device after Drive has the upload. On Android 11+ it goes to the device trash first, so you can still restore it there for about a month.</string>
     <string name="settings_strip_gps">Remove GPS location</string>
@@ -920,13 +909,11 @@
     <string name="settings_strip_software_desc">Strip software, comment, artist and copyright fields</string>
     <string name="settings_strip_authorship">Remove artist and copyright</string>
     <string name="settings_strip_share">Remove metadata when sharing</string>
-    <string name="settings_strip_share_title">Metadata when sharing</string>
     <string name="settings_strip_share_desc">Removes the selected fields from the shared copy only, never your original. For videos, only the location is removed.</string>
     <string name="settings_strip_format_note">Some formats, such as HEIC, cannot store metadata changes. When metadata removal is on, the uploaded copy of such a photo is converted to JPEG so the selected data is actually removed. The photo on your device stays unchanged.</string>
-    <string name="settings_compress_upload_desc">Uploads a lighter version to save space. The copy on the phone stays full quality unless the local mirror below is on.</string>
     <string name="settings_compress_photos">Compress photos</string>
     <string name="settings_compress_videos">Compress videos</string>
-    <string name="settings_compress_videos_desc">Transcodes videos to a smaller size before upload. The original on your device is never changed.</string>
+    <string name="settings_compress_hdr_photos">Compress HDR photos too</string>
     <string name="settings_compress_tier_light">Light</string>
     <string name="settings_compress_tier_light_desc">Barely visible quality loss, modest space saving</string>
     <string name="settings_compress_tier_balanced">Balanced</string>
@@ -934,7 +921,6 @@
     <string name="settings_compress_tier_space_saver">Space saver</string>
     <string name="settings_compress_tier_space_saver_desc">Smallest uploads, more visible quality loss</string>
     <string name="settings_app_lock">App Lock</string>
-    <string name="settings_app_lock_desc">Require biometric or PIN when opening the app</string>
     <string name="settings_app_lock_timeout">Lock after</string>
     <string name="settings_app_lock_timeout_desc">Re-lock the app after this much time in the background</string>
     <string name="settings_app_lock_timeout_immediate">Immediately</string>
@@ -947,7 +933,6 @@
     <string name="settings_app_lock_timeout_15min">15 minutes</string>
     <string name="settings_app_lock_timeout_1h">1 hour</string>
     <string name="settings_clear_cache_on_close">Clear cache on app close</string>
-    <string name="settings_clear_cache_on_close_desc">Wipe viewed cloud photos from the cache when the app closes</string>
     <string name="settings_screenshot_overlay">Screenshot quick actions</string>
     <string name="settings_screenshot_overlay_desc">Shows a small action bar over a new screenshot so you can edit, share, upload it to Drive, or make a link. On some phones the built-in screenshot toolbar cannot be turned off, so both may appear.</string>
     <string name="screenshot_overlay_channel_desc">The notification shown while screenshot quick actions are running.</string>
@@ -972,22 +957,13 @@
     <string name="settings_timeline_section_layout">Layout</string>
     <string name="settings_timeline_section_display">Display</string>
     <string name="settings_show_scroll_date">Show date while scrolling</string>
-    <string name="settings_show_scroll_date_desc">A floating month and year label appears over the timeline while you scroll, so you always have a time reference.</string>
     <string name="settings_reverse_timeline">Reverse timeline order</string>
-    <string name="settings_reverse_timeline_desc">Show the oldest photos at the top and the newest at the bottom. The timeline opens on your newest photos.</string>
     <string name="settings_mosaic_grid">Mosaic grid</string>
-    <string name="settings_mosaic_grid_desc">Lay the timeline out as a staggered mosaic where each photo keeps its own shape, so portrait photos stand taller.</string>
     <string name="settings_seamless_grid">Edge to edge</string>
-    <string name="settings_seamless_grid_desc">Denser grid with square corners and thumbnails that reach the screen edge.</string>
     <string name="settings_gif_autoplay_grid">Play GIFs in grids</string>
-    <string name="settings_gif_autoplay_grid_summary">Animate GIFs in the timeline, albums, and device folders. When off, they show a still frame.</string>
     <string name="settings_gif_autoplay_covers">Play GIF album covers</string>
-    <string name="settings_gif_autoplay_covers_summary">Animate an album cover when it is a GIF, including cloud albums (the cover downloads once).</string>
-    <string name="timeline_filter_subtitle">Choose what to hide from your main Photos timeline. Hidden photos stay on your device and keep backing up.</string>
     <string name="timeline_filter_categories_header">Category bar</string>
     <string name="timeline_filter_layout_desc">Applies to all photo grids</string>
-    <string name="timeline_filter_reorder_hint">Use the arrows to set the order of the category bar shown above your Photos timeline.</string>
-    <string name="timeline_filter_per_album_hint">Hide individual albums from the timeline. The switch above hides them all at once.</string>
     <string name="timeline_filter_hidden_album">Hidden album</string>
     <string name="timeline_filter_albums_header">Drive albums</string>
     <string name="timeline_filter_more_settings">Further settings</string>
@@ -996,7 +972,6 @@
     <string name="settings_telemetry_on">On</string>
     <string name="settings_telemetry_off">Off</string>
     <string name="settings_telemetry_checking">Checking…</string>
-    <string name="settings_privacy_map_tiles_note">The map\'s background tiles come from OpenStreetMap, so their servers see your IP address and the map area you are looking at. Your photos and their locations are never sent.</string>
     <string name="settings_hidden_photos">Hidden Photos</string>
     <string name="settings_hidden_photos_desc">Photos hidden from the main gallery, unlocked with your device biometrics or PIN</string>
     <string name="settings_appearance">Appearance &amp; Language</string>
@@ -1094,9 +1069,7 @@
     <string name="map_style_modern">World map</string>
     <string name="map_style_modern_summary">A modern globe you can spin to your places.</string>
     <string name="settings_amoled_black">Pure black (AMOLED)</string>
-    <string name="settings_amoled_black_summary">Use true black backgrounds in dark mode to save power on OLED screens.</string>
     <string name="settings_tint_cloud">Accent-tinted cloud badges</string>
-    <string name="settings_tint_cloud_summary">Use your accent color for the backed-up cloud badges instead of green.</string>
 
     <!-- Language -->
     <string name="language_en">English</string>
@@ -1640,7 +1613,6 @@
     <string name="update_downloading">Downloading update… %1$d%%</string>
     <string name="update_install_prompt">Download complete. Install now?</string>
     <string name="update_check_settings_row">Check for updates</string>
-    <string name="update_check_settings_summary">You\'re on version %1$s</string>
     <string name="update_no_update">You\'re on the latest version.</string>
     <string name="update_check_failed">Could not check for updates. Try again later.</string>
     <string name="update_permission_required">Allow installing unknown apps in system settings to update.</string>
@@ -1789,16 +1761,11 @@
     <string name="force_update_body">This version is no longer supported. Please update to continue.</string>
     <string name="force_update_action">Update</string>
     <string name="notifications_title">Notifications</string>
-    <string name="notifications_subtitle">Choose which notifications the app may show. Everything is on by default.</string>
-    <string name="notifications_nav_desc">Choose which notifications you see</string>
     <string name="notifications_backup_status">Always-on backup notification</string>
     <string name="notifications_backup_status_desc">Show the always-on notification while the app watches for new photos. Backup keeps running and upload notifications still appear when it is off; new photos may just be picked up a little less instantly.</string>
     <string name="notifications_album_download">Album downloads</string>
-    <string name="notifications_album_download_desc">Show progress and a summary when you download an album to your device.</string>
     <string name="notifications_delete_reminder">Delete after backup reminder</string>
-    <string name="notifications_delete_reminder_desc">After a backup, remind me which photos are safe to remove from this device.</string>
     <string name="notifications_update_available">New version available</string>
-    <string name="notifications_update_available_desc">Check for a newer version in the background and post a notification when one is published. On Wi-Fi the update downloads ahead of time, so installing it is instant.</string>
     <string name="update_channel_name">App updates</string>
     <string name="update_channel_desc">Tells you when a newer version of the app is available.</string>
     <string name="update_notification_text">Tap to install version %1$s.</string>
@@ -1814,7 +1781,6 @@
     <string name="albums_filter_sheet_title">Album filter</string>
     <string name="albums_filter_default_heading">Default when opening</string>
     <string name="albums_filter_remember_last">Remember last-used filter</string>
-    <string name="albums_filter_remember_last_summary">Open albums with the filter you last selected</string>
     <string name="albums_show_collection">Show Collection</string>
     <string name="albums_show_collection_summary">People, places and On this day stay in Search</string>
     <string name="albums_filter_excluded">Excluded</string>
@@ -1959,9 +1925,7 @@
 
     <!-- Grid layout (Appearance) -->
     <string name="grid_remember_last">Remember last used</string>
-    <string name="grid_remember_last_desc">Open your photos at the zoom level you last used</string>
     <string name="settings_keep_scroll_tabs">Keep place when switching tabs</string>
-    <string name="settings_keep_scroll_tabs_desc">When you switch tabs, stay where you were instead of jumping to the top.</string>
     <string name="grid_default_columns_section">Photos per row</string>
 
     <!-- Duplicate finder -->
@@ -2067,16 +2031,13 @@
     <string name="whats_new_albums_drag">For your own order, press and hold an album and pick Reorder albums, then drag the covers where you want. The order sticks until you change it.</string>
     <string name="whats_new_crop_title">Crop to a fixed shape</string>
     <string name="whats_new_crop_body">Pick 1:1, 4:3, 16:9 or the photo\'s own shape in the editor, and the frame keeps that shape while you drag it smaller.</string>
-    <string name="whats_new_history_desc">Read the highlights from this and earlier updates</string>
     <string name="whats_new_version">Version %1$s</string>
 
     <!-- News feed -->
     <string name="news_title">News</string>
     <string name="news_banner">New news available</string>
     <string name="news_new_badge">New</string>
-    <string name="news_settings_desc">Messages and updates about the app</string>
     <string name="news_show_title">Show news</string>
-    <string name="news_show_desc">A small dot shows when there is something new</string>
     <string name="news_empty">Nothing new right now.</string>
     <string name="news_read_more">Read more</string>
     <string name="news_feedback_heading">Questions or a bug?</string>
@@ -2244,5 +2205,4 @@
     <string name="person_move_confirm_body">Move the selected photos to %1$s?</string>
     <string name="person_move_confirm">Move</string>
     <string name="settings_face_auto_merge">Merge likely matches automatically</string>
-    <string name="settings_face_auto_merge_desc">When a scan finds a group very likely to be someone you already named, add it to them without asking. Merges cannot be undone, so leave this off to confirm each one yourself.</string>
 </resources>

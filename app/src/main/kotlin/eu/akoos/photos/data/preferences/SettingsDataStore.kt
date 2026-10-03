@@ -546,6 +546,10 @@ object SettingsKeys {
      *  [COMPRESS_ON_UPLOAD]; its quality tier is [COMPRESS_UPLOAD_TIER_VIDEO]. The on-device original
      *  is never touched. Off by default. */
     val COMPRESS_VIDEO_ON_UPLOAD = booleanPreferencesKey("compress_video_on_upload")
+    /** When true, an Ultra HDR photo is compressed like any other and loses its HDR rendition; when
+     *  false it uploads whole so the gain map survives. Only read while [COMPRESS_ON_UPLOAD] is on.
+     *  Off by default. */
+    val COMPRESS_HDR_PHOTOS = booleanPreferencesKey("compress_hdr_photos")
     /** Ordinal of the PHOTO compression tier, mapping to an [eu.akoos.photos.domain.entity.UploadCompressionTier]
      *  value. Absent = the Balanced default. Consulted by the photo ([COMPRESS_ON_UPLOAD]) path; the
      *  video path reads its own [COMPRESS_UPLOAD_TIER_VIDEO]. */

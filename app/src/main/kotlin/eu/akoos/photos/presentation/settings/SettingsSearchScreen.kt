@@ -129,7 +129,7 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
     ),
     SettingsSearchEntry(
         R.string.settings_compress_photos, R.string.settings_metadata,
-        listOf("compress", "compression", "quality", "size", "resolution", "reduce", "shrink", "jpeg", "megapixel", "tömörítés", "minőség", "méret", "felbontás", "kicsinyítés"),
+        listOf("compress", "compression", "quality", "size", "resolution", "reduce", "shrink", "jpeg", "hdr", "ultra hdr", "megapixel", "tömörítés", "minőség", "méret", "felbontás", "kicsinyítés"),
         Screen.BackupProcessing.route,
         cloud = true,
     ),
@@ -176,13 +176,7 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
     SettingsSearchEntry(
         R.string.settings_strip_share, R.string.settings_privacy_security,
         listOf("metadata", "exif", "strip", "share", "sharing", "location", "gps", "megosztás", "metaadat", "helyadat"),
-        Screen.ShareMetadata.route,
-    ),
-    SettingsSearchEntry(
-        R.string.settings_offline_photos, R.string.settings_privacy_security,
-        listOf("offline", "download", "available offline", "pinned", "letöltés"),
-        Screen.Offline.route,
-        cloud = true,
+        Screen.PrivacySecuritySettings.route,
     ),
     SettingsSearchEntry(
         R.string.settings_hidden_photos, R.string.settings_privacy_security,

@@ -414,6 +414,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Nastavitve</string>
+    <string name="settings_more_title">Več nastavitev</string>
+    <string name="settings_more_desc">UI, zasebnost, obvestila in pomoč</string>
     <string name="settings_search_hint">Iskanje nastavitev</string>
     <string name="settings_search_no_results">Ni ujemajočih se nastavitev</string>
     <string name="settings_sync_wifi_only">Sinhroniziraj samo prek Wi‑Fi</string>
@@ -448,20 +450,16 @@
     <string name="settings_account_link_drive_web_desc">Brskajte po fotografijah in datotekah na drive.proton.me.</string>
     <string name="cancel">Prekliči</string>
     <string name="settings_language_system">Privzeto za sistem</string>
-    <string name="settings_sync_wifi_desc">Začasno ustavi sinhronizacijo prek mobilnega omrežja</string>
     <string name="settings_fullres_wifi_only">Polna ločljivost samo prek Wi‑Fi</string>
     <string name="settings_fullres_wifi_only_desc">Fotografije in videoposnetke iz oblaka v polni ločljivosti prenašaj samo prek Wi‑Fi. Sličice se naložijo vedno.</string>
     <string name="viewer_wifi_for_full_quality">Za polno kakovost se povežite z Wi‑Fi</string>
-    <string name="settings_sync_now_action">Sinhroniziraj →</string>
     <string name="settings_backup_folders">Mape za varnostno kopiranje</string>
     <string name="settings_backup_folders_desc">Izberite, katere mape naj se varnostno kopirajo</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">Kaj se varnostno kopira</string>
     <string name="settings_network_section">Uporaba omrežja</string>
     <string name="settings_continuous_backup">Neprekinjeno varnostno kopiranje</string>
-    <string name="settings_continuous_backup_desc">Fotografije in videoposnetki se naložijo v nekaj sekundah po zajemu.</string>
     <string name="settings_backup_everything">Varnostno kopiraj vse</string>
-    <string name="settings_backup_everything_desc">Samodejno naloži vsako fotografijo in videoposnetek v tej napravi.</string>
     <!-- Excluded folders feature (paired with backup-everything mode). -->
     <string name="settings_excluded_folders">Izključene mape</string>
     <string name="settings_excluded_folders_desc_none">Nobena mapa ni izključena</string>
@@ -471,6 +469,7 @@
     <string name="settings_excluded_folders_intro">Fotografije v teh mapah se ne varnostno kopirajo, tudi ko je vklopljeno »Varnostno kopiraj vse«. Že naloženi elementi ostanejo v Drive.</string>
     <string name="settings_excluded_folders_empty">V tej napravi ni najdenih map</string>
     <string name="settings_excluded_folders_count_label">%1$d od %2$d map izključenih</string>
+    <string name="settings_excluded_albums_count_label">%1$d od %2$d albumov izključenih</string>
     <string name="settings_excluded_folders_select_all">Izključi vse</string>
     <string name="settings_excluded_folders_deselect_all">Vključi vse</string>
     <!-- Album mirror -->
@@ -557,7 +556,6 @@
     <string name="settings_security">Varnost</string>
     <string name="settings_security_desc">Zaklepanje aplikacije, Skrite fotografije</string>
     <string name="settings_strip_metadata_upload">Odstrani metapodatke ob nalaganju</string>
-    <string name="settings_strip_metadata_upload_desc">Odstrani lokacijo in podatke o fotoaparatu iz naložene kopije. Kopija v telefonu jih obdrži, razen če je spodaj vklopljeno lokalno zrcaljenje. Polja za fotoaparat, časovni žig in programsko opremo dodajte v razdelku Prilagodi.</string>
     <string name="settings_mirror_strip_local">Zrcali spremembe v lokalne datoteke</string>
     <string name="settings_mirror_strip_local_desc">Te podatke odstrani tudi iz kopije v telefonu, tako da varnostno kopirana in lokalna datoteka ostaneta enaki. Zahteva dostop do vseh datotek in spremeni vaše izvirne datoteke.</string>
     <string name="settings_mirror_compress_local">Stisni tudi lokalno datoteko</string>
@@ -568,7 +566,6 @@
     <string name="onboarding_mirror_toggle_desc">Ob varnostnem kopiranju iste spremembe metapodatkov in imena datoteke uveljavi na izvirniku v napravi, tako da lokalna in varnostno kopirana datoteka ostaneta enaki. To spremeni vaše izvirne datoteke.</string>
     <string name="onboarding_mirror_grant">Dovoli dostop do vseh datotek</string>
     <string name="settings_rename_on_upload">Preimenuj v datum zajema ob nalaganju</string>
-    <string name="settings_rename_on_upload_desc">Naloženo kopijo poimenuje po datumu in času zajema iz metapodatkov fotografije ali videoposnetka. Datoteke v telefonu obdržijo svoja imena.</string>
     <string name="settings_delete_after_backup">Po varnostnem kopiranju izbriši datoteko v napravi</string>
     <string name="settings_delete_after_backup_desc">Odstrani lokalno kopijo iz naprave, ko ima Drive naloženo datoteko. V sistemu Android 11+ najprej odide v koš naprave, od koder jo lahko obnovite približno en mesec.</string>
     <string name="settings_strip_gps">Odstrani lokacijo GPS</string>
@@ -581,13 +578,11 @@
     <string name="settings_strip_software_desc">Odstrani polja za programsko opremo, opombo, avtorja in avtorske pravice</string>
     <string name="settings_strip_authorship">Odstrani avtorja in avtorske pravice</string>
     <string name="settings_strip_share">Odstrani metapodatke ob deljenju</string>
-    <string name="settings_strip_share_title">Metapodatki ob deljenju</string>
     <string name="settings_strip_share_desc">Odstrani izbrana polja samo iz deljene kopije, nikoli iz izvirnika. Pri videoposnetkih se odstrani samo lokacija.</string>
     <string name="settings_strip_format_note">Nekateri formati, na primer HEIC, ne morejo shraniti sprememb metapodatkov. Ko je odstranjevanje metapodatkov vklopljeno, se naložena kopija take fotografije pretvori v JPEG, da se izbrani podatki dejansko odstranijo. Fotografija v napravi ostane nespremenjena.</string>
-    <string name="settings_compress_upload_desc">Naloži lažjo različico za prihranek prostora. Kopija v telefonu ostane v polni kakovosti, razen če je spodaj vklopljeno lokalno zrcaljenje.</string>
     <string name="settings_compress_photos">Stisni fotografije</string>
     <string name="settings_compress_videos">Stisni videoposnetke</string>
-    <string name="settings_compress_videos_desc">Pred nalaganjem pretvori videoposnetke v manjšo velikost. Izvirnik v napravi se nikoli ne spremeni.</string>
+    <string name="settings_compress_hdr_photos">Stisni tudi fotografije HDR</string>
     <string name="settings_compress_tier_light">Rahlo</string>
     <string name="settings_compress_tier_light_desc">Komaj opazna izguba kakovosti, zmeren prihranek prostora</string>
     <string name="settings_compress_tier_balanced">Uravnoteženo</string>
@@ -595,7 +590,6 @@
     <string name="settings_compress_tier_space_saver">Varčevanje s prostorom</string>
     <string name="settings_compress_tier_space_saver_desc">Najmanjši prenosi, opaznejša izguba kakovosti</string>
     <string name="settings_app_lock">Zaklepanje aplikacije</string>
-    <string name="settings_app_lock_desc">Zahtevaj biometrijo ali PIN ob odpiranju aplikacije</string>
     <string name="settings_app_lock_timeout">Zakleni po</string>
     <string name="settings_app_lock_timeout_desc">Znova zakleni aplikacijo po tem času v ozadju</string>
     <string name="settings_app_lock_timeout_immediate">Takoj</string>
@@ -608,7 +602,6 @@
     <string name="settings_app_lock_timeout_15min">15 minut</string>
     <string name="settings_app_lock_timeout_1h">1 ura</string>
     <string name="settings_clear_cache_on_close">Počisti predpomnilnik ob zaprtju aplikacije</string>
-    <string name="settings_clear_cache_on_close_desc">Ob zaprtju aplikacije iz predpomnilnika izbriši ogledane fotografije iz oblaka</string>
     <string name="settings_screenshot_overlay">Hitra dejanja za posnetek zaslona</string>
     <string name="settings_screenshot_overlay_desc">Nad novim posnetkom zaslona prikaže majhno vrstico z dejanji, da ga lahko uredite, delite, naložite v Drive ali ustvarite povezavo. V nekaterih telefonih vgrajene vrstice za posnetke zaslona ni mogoče izklopiti, zato se lahko pojavita obe.</string>
     <string name="screenshot_overlay_channel_desc">Obvestilo, prikazano med izvajanjem hitrih dejanj za posnetke zaslona.</string>
@@ -633,18 +626,11 @@
     <string name="settings_timeline_section_layout">Postavitev</string>
     <string name="settings_timeline_section_display">Prikaz</string>
     <string name="settings_show_scroll_date">Prikaži datum med drsenjem</string>
-    <string name="settings_show_scroll_date_desc">Med drsenjem se nad časovnico pojavi lebdeča oznaka z mesecem in letom, tako da imate vedno časovno orientacijo.</string>
     <string name="settings_reverse_timeline">Obrni vrstni red časovnice</string>
-    <string name="settings_reverse_timeline_desc">Prikaži najstarejše fotografije na vrhu in najnovejše na dnu. Časovnica se odpre pri vaših najnovejših fotografijah.</string>
     <string name="settings_mosaic_grid">Mozaična mreža</string>
-    <string name="settings_mosaic_grid_desc">Razporedi časovnico kot zamaknjen mozaik, kjer vsaka fotografija ohrani svojo obliko, tako da so pokončne fotografije višje.</string>
     <string name="settings_seamless_grid">Od roba do roba</string>
-    <string name="settings_seamless_grid_desc">Gostejša mreža s pravokotnimi vogali in sličicami, ki segajo do roba zaslona.</string>
-    <string name="timeline_filter_subtitle">Izberite, kaj naj se skrije z vaše glavne časovnice Fotografije. Skrite fotografije ostanejo v napravi in se še naprej varnostno kopirajo.</string>
     <string name="timeline_filter_categories_header">Vrstica kategorij</string>
     <string name="timeline_filter_layout_desc">Velja za vse mreže fotografij</string>
-    <string name="timeline_filter_reorder_hint">S puščicami nastavite vrstni red vrstice kategorij, prikazane nad vašo časovnico Fotografije.</string>
-    <string name="timeline_filter_per_album_hint">Posamezne albume skrijte s časovnice. Stikalo zgoraj jih skrije vse naenkrat.</string>
     <string name="timeline_filter_hidden_album">Skrit album</string>
     <string name="timeline_filter_albums_header">Albumi Drive</string>
     <string name="timeline_filter_more_settings">Več nastavitev</string>
@@ -653,7 +639,6 @@
     <string name="settings_telemetry_on">Vklopljena</string>
     <string name="settings_telemetry_off">Izklopljena</string>
     <string name="settings_telemetry_checking">Preverjanje…</string>
-    <string name="settings_privacy_map_tiles_note">Ploščice ozadja zemljevida prihajajo iz OpenStreetMap, zato njihovi strežniki vidijo vaš naslov IP in območje zemljevida, ki ga gledate. Vaše fotografije in njihove lokacije se nikoli ne pošljejo.</string>
     <string name="settings_hidden_photos">Skrite fotografije</string>
     <string name="settings_hidden_photos_desc">Fotografije, skrite iz glavne galerije, odklenjene z biometrijo ali PIN-om naprave</string>
     <string name="settings_appearance">Videz in jezik</string>
@@ -715,13 +700,9 @@
     <string name="map_style_modern">Zemljevid sveta</string>
     <string name="map_style_modern_summary">Sodoben globus, ki ga lahko zavrtite do svojih krajev.</string>
     <string name="settings_amoled_black">Čisto črna (AMOLED)</string>
-    <string name="settings_amoled_black_summary">V temnem načinu uporabi pravo črno ozadje za varčevanje z energijo na zaslonih OLED.</string>
     <string name="settings_tint_cloud">Oznake oblaka v poudarni barvi</string>
-    <string name="settings_tint_cloud_summary">Za oznake varnostno kopiranih fotografij uporabi poudarno barvo namesto zelene.</string>
     <string name="settings_gif_autoplay_grid">Predvajaj GIF-e v mrežah</string>
-    <string name="settings_gif_autoplay_grid_summary">Animiraj GIF-e na časovnici, v albumih in mapah naprave. Ko je izklopljeno, se prikaže mirujoča sličica.</string>
     <string name="settings_gif_autoplay_covers">Predvajaj GIF ovitke albumov</string>
-    <string name="settings_gif_autoplay_covers_summary">Animiraj ovitek albuma, kadar je GIF, tudi pri albumih v oblaku (ovitek se prenese enkrat).</string>
 
     <!-- Language -->
     <string name="language_en">English</string>
@@ -1159,7 +1140,6 @@
     <string name="update_downloading">Prenašanje posodobitve… %1$d %%</string>
     <string name="update_install_prompt">Prenos dokončan. Namestiti zdaj?</string>
     <string name="update_check_settings_row">Preveri za posodobitve</string>
-    <string name="update_check_settings_summary">Uporabljate različico %1$s</string>
     <string name="update_no_update">Uporabljate najnovejšo različico.</string>
     <string name="update_check_failed">Posodobitev ni bilo mogoče preveriti. Poskusite pozneje.</string>
     <string name="update_permission_required">Za posodobitev v sistemskih nastavitvah dovolite namestitev neznanih aplikacij.</string>
@@ -1312,16 +1292,11 @@
     <string name="force_update_body">Ta različica ni več podprta. Za nadaljevanje posodobite.</string>
     <string name="force_update_action">Posodobi</string>
     <string name="notifications_title">Obvestila</string>
-    <string name="notifications_subtitle">Izberite, katera obvestila lahko aplikacija prikaže. Privzeto je vse vklopljeno.</string>
-    <string name="notifications_nav_desc">Izberite, katera obvestila vidite</string>
     <string name="notifications_backup_status">Stalno obvestilo o varnostnem kopiranju</string>
     <string name="notifications_backup_status_desc">Prikaže stalno obvestilo, medtem ko aplikacija spremlja nove fotografije. Varnostno kopiranje teče naprej in obvestila o nalaganju se še vedno prikažejo, ko je izklopljeno; nove fotografije bodo morda le zaznane nekoliko manj takoj.</string>
     <string name="notifications_album_download">Prenosi albumov</string>
-    <string name="notifications_album_download_desc">Prikaže potek in povzetek, ko album prenesete v napravo.</string>
     <string name="notifications_delete_reminder">Opomnik za brisanje po varnostnem kopiranju</string>
-    <string name="notifications_delete_reminder_desc">Po varnostnem kopiranju me opomni, katere fotografije je varno odstraniti iz te naprave.</string>
     <string name="notifications_update_available">Na voljo je nova različica</string>
-    <string name="notifications_update_available_desc">V ozadju poišči novejšo različico in pošlji obvestilo, takoj ko izide. Prek Wi-Fi se posodobitev prenese vnaprej, zato je namestitev takojšnja.</string>
     <string name="update_channel_name">Posodobitve aplikacije</string>
     <string name="update_channel_desc">Sporoči, ko je na voljo novejša različica aplikacije.</string>
     <string name="update_notification_text">Tapnite za namestitev različice %1$s.</string>
@@ -1337,7 +1312,6 @@
     <string name="albums_filter_sheet_title">Filter albumov</string>
     <string name="albums_filter_default_heading">Privzeto ob odpiranju</string>
     <string name="albums_filter_remember_last">Zapomni si nazadnje uporabljeni filter</string>
-    <string name="albums_filter_remember_last_summary">Albume odpiraj z nazadnje izbranim filtrom</string>
     <string name="albums_show_collection">Prikaži Zbirko</string>
     <string name="albums_show_collection_summary">Osebe, kraji in „Na ta dan“ ostanejo na voljo v iskanju</string>
     <string name="albums_filter_excluded">Izključeni</string>
@@ -1484,9 +1458,7 @@
 
     <!-- Grid layout (Appearance) -->
     <string name="grid_remember_last">Zapomni si nazadnje uporabljeno</string>
-    <string name="grid_remember_last_desc">Odpri svoje fotografije pri ravni povečave, ki ste jo nazadnje uporabili</string>
     <string name="settings_keep_scroll_tabs">Ohrani položaj ob menjavi zavihkov</string>
-    <string name="settings_keep_scroll_tabs_desc">Ob menjavi zavihkov ostaneš, kjer si bil, namesto skoka na vrh.</string>
     <string name="grid_default_columns_section">Fotografij na vrstico</string>
     <!-- FAQ -->
     <string name="faq_title">Pogosta vprašanja</string>
@@ -1565,7 +1537,6 @@
     <string name="whats_new_albums_drag">Za svoj vrstni red pridržite album, izberite Prerazporedi albume in povlecite naslovnice, kamor želite. Vrstni red ostane, dokler ga ne spremenite.</string>
     <string name="whats_new_crop_title">Obrezovanje v stalnem razmerju</string>
     <string name="whats_new_crop_body">V urejevalniku izberite 1:1, 4:3, 16:9 ali obliko same fotografije in okvir jo ohrani, ko ga pomanjšujete.</string>
-    <string name="whats_new_history_desc">Preberite novosti te in prejšnjih posodobitev</string>
     <string name="whats_new_version">Različica %1$s</string>
     <string name="whats_new_more_241">Poleg tega lahko datum več fotografij premakneš naenkrat, skriješ celo mapo naprave, posodobitve pa se namestijo brez vsakokratnega spraševanja. Fotografije, izbrisane v drugi napravi, zdaj izginejo tudi tukaj, tudi pri veliki knjižnici, preimenovanje ne pusti več kopije, varnostno kopiranje, skrivanje, dvojniki in albumi v skupni rabi pa so stabilnejši.</string>
     <string name="whats_new_more_240">Poleg tega kopirane povezave ostanejo skrite v predogledu odložišča, velikosti datotek se povsod ujemajo, samodejno sproščanje prostora pred odstranitvijo kopije iz telefona preveri v Drive, veliki albumi in izbori pa so bolj stabilni.</string>
@@ -1698,9 +1669,7 @@
     <string name="metadata_editor_set">Nastavi</string>
     <string name="metadata_editor_place_label">Kraj</string>
     <string name="metadata_editor_place_none">Brez lokacije</string>
-    <string name="metadata_editor_place_choose_country">Izberite državo</string>
-    <string name="metadata_editor_place_country_hint">Izbira samo države postavi fotografijo v njeno središče.</string>
-    <string name="metadata_editor_place_search_city">Iskanje mesta</string>
+    <string name="metadata_editor_place_search">Poišči državo ali mesto</string>
     <string name="metadata_editor_place_remove">Odstrani lokacijo</string>
     <string name="metadata_editor_country_search">Iskanje držav</string>
     <string name="metadata_editor_note_cloud">Ta fotografija ohrani datum in kraj, s katerima je bila naložena v Proton Drive, zato ju tukaj ni mogoče spremeniti.</string>
@@ -1738,7 +1707,6 @@
     <string name="settings_ai_section">Strojno učenje</string>
     <string name="settings_ai_nav_desc">Kopiranje besedila, skrivanje obrazov in več, na napravi</string>
     <string name="settings_ai_enable">Vklopi strojno učenje</string>
-    <string name="settings_ai_enable_desc">Vse teče v vašem telefonu. Ko to vklopite, lahko aplikacija prenese majhne modele, ki jih potrebuje, ter uporablja Kopiranje besedila in Skrivanje obrazov. Prihaja več funkcij.</string>
     <string name="settings_ai_ocr">Kopiranje besedila</string>
     <string name="settings_ai_ocr_desc">Prepozna in kopira besedilo, ki ga vidite na fotografiji</string>
     <string name="settings_ai_ocr_downloading">Prenašanje…</string>
@@ -1783,18 +1751,14 @@
     <string name="settings_ai_semantic_indexing_waiting">Čakanje na iskalne modele</string>
     <string name="settings_ai_semantic_ready">Vaše fotografije je mogoče iskati</string>
     <string name="settings_ai_semantic_rescan">Znova preglej vse fotografije</string>
-    <string name="settings_ai_semantic_rescan_desc">Počisti iskalni indeks in ga znova zgradi za vsako fotografijo.</string>
     <string name="settings_ai_semantic_rescan_confirm_title">Znova pregledati vse fotografije?</string>
     <string name="settings_ai_semantic_rescan_confirm_msg">Iskalni indeks se počisti in nato znova zgradi za vsako fotografijo, kar lahko traja nekaj časa.</string>
     <string name="settings_ai_semantic_not_indexed">Vaše fotografije še niso indeksirane</string>
     <string name="settings_ai_semantic_clear">Počisti podatke iskanja</string>
-    <string name="settings_ai_semantic_clear_desc">Odstrani iskalni indeks za vse fotografije iz tega telefona.</string>
     <string name="settings_ai_semantic_clear_confirm_title">Počisti podatke iskanja?</string>
     <string name="settings_ai_semantic_clear_confirm_msg">To odstrani iskalni indeks za vse fotografije. Vaše fotografije ostanejo nespremenjene.</string>
     <string name="settings_face_section">Prepoznani obrazi</string>
     <string name="settings_face_maintenance">Vzdrževanje</string>
-    <string name="settings_face_rescan_desc">Znova zazna obraze in ohrani vaša imena in popravke.</string>
-    <string name="settings_face_clear_desc">Odstrani vse najdene osebe in vse podatke obrazov iz tega telefona.</string>
     <string name="settings_ai_indexing_running">Pregledovanje fotografij</string>
     <string name="settings_ai_indexing_waiting">Čakanje na model obrazov</string>
     <string name="settings_ai_indexing_waiting_other">Čakanje na dokončanje drugega opravila v napravi</string>
@@ -1973,9 +1937,7 @@
     <string name="news_title">Novice</string>
     <string name="news_banner">Nove novice</string>
     <string name="news_new_badge">Novo</string>
-    <string name="news_settings_desc">Sporočila in posodobitve o aplikaciji</string>
     <string name="news_show_title">Pokaži novice</string>
-    <string name="news_show_desc">Majhna pika se prikaže, ko je kaj novega</string>
     <string name="news_empty">Trenutno nič novega.</string>
     <string name="news_read_more">Preberi več</string>
     <string name="news_feedback_heading">Vprašanja ali napaka?</string>
@@ -2296,7 +2258,6 @@
     <string name="folder_rename">Preimenuj mapo</string>
     <string name="folder_renamed">Preimenovano v \"%1$s\"</string>
     <string name="settings_face_excluded">Izključeni obrazi</string>
-    <string name="settings_face_excluded_desc">Preglejte obraze, odstranjene z osebe ali zavržene</string>
     <string name="face_excluded_empty">Nič ni izključeno. Obrazi, ki jih odstranite z osebe ali zavržete, ker ne gre za osebo, se prikažejo tukaj, da jih lahko razveljavite.</string>
     <string name="face_excluded_not_person_section">Ni ta oseba: %1$s</string>
     <string name="face_excluded_ignored_section">Zavrženo (ni oseba)</string>
@@ -2311,5 +2272,4 @@
     <string name="person_move_confirm_body">Premakniti izbrane fotografije k %1$s?</string>
     <string name="person_move_confirm">Premakni</string>
     <string name="settings_face_auto_merge">Samodejno združi verjetna ujemanja</string>
-    <string name="settings_face_auto_merge_desc">Ko pregled najde skupino, ki je zelo verjetno nekdo, ki ste ga že poimenovali, jo doda brez vprašanja. Združitev ni mogoče razveljaviti, zato pustite to izklopljeno, če želite vsako potrditi sami.</string>
 </resources>

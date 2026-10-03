@@ -169,7 +169,6 @@ fun ThemeSettingsScreen(
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_tint_cloud),
-                description = stringResource(R.string.settings_tint_cloud_summary),
                 checked = state.tintCloudWithAccent,
                 onCheckedChange = { viewModel.setTintCloudWithAccent(it) },
             )
@@ -184,7 +183,6 @@ fun ThemeSettingsScreen(
             SettingsCard {
                 ToggleRow(
                     label = stringResource(R.string.settings_amoled_black),
-                    description = stringResource(R.string.settings_amoled_black_summary),
                     checked = state.amoledBlack,
                     onCheckedChange = { viewModel.setAmoledBlack(it) },
                 )

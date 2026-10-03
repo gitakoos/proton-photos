@@ -285,6 +285,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Instellingen</string>
+    <string name="settings_more_title">Meer instellingen</string>
+    <string name="settings_more_desc">AI, privacy, meldingen en help</string>
     <string name="settings_search_hint">Instellingen zoeken</string>
     <string name="settings_search_no_results">Geen overeenkomende instellingen</string>
     <string name="settings_sync_wifi_only">Alleen synchroniseren via wifi</string>
@@ -319,20 +321,16 @@
     <string name="settings_account_link_drive_web_desc">Bekijk je foto\'s en bestanden op drive.proton.me.</string>
     <string name="cancel">Annuleren</string>
     <string name="settings_language_system">Systeemstandaard</string>
-    <string name="settings_sync_wifi_desc">Synchronisatie pauzeren op mobiel netwerk</string>
     <string name="settings_fullres_wifi_only">Volle resolutie alleen via wifi</string>
     <string name="settings_fullres_wifi_only_desc">Download foto\'s en video\'s op volle resolutie uit de cloud alleen via wifi. Miniaturen laden altijd.</string>
     <string name="viewer_wifi_for_full_quality">Maak verbinding met wifi voor volle kwaliteit</string>
-    <string name="settings_sync_now_action">Synchroniseren →</string>
     <string name="settings_backup_folders">Back-upmappen</string>
     <string name="settings_backup_folders_desc">Kies welke mappen je wilt back-uppen</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">Wat wordt geback-upt</string>
     <string name="settings_network_section">Netwerkgebruik</string>
     <string name="settings_continuous_backup">Doorlopende back-up</string>
-    <string name="settings_continuous_backup_desc">Foto\'s en video\'s worden binnen enkele seconden na de opname geüpload.</string>
     <string name="settings_backup_everything">Alles back-uppen</string>
-    <string name="settings_backup_everything_desc">Elke foto en video op dit apparaat automatisch uploaden.</string>
     <!-- Excluded folders feature (paired with backup-everything mode). -->
     <string name="settings_excluded_folders">Uitgesloten mappen</string>
     <string name="settings_excluded_folders_desc_none">Geen mappen uitgesloten</string>
@@ -342,6 +340,7 @@
     <string name="settings_excluded_folders_intro">Foto\'s in deze mappen worden niet geback-upt, ook niet wanneer \"Alles back-uppen\" aanstaat. Reeds geüploade items blijven op Drive.</string>
     <string name="settings_excluded_folders_empty">Geen mappen op dit apparaat gevonden</string>
     <string name="settings_excluded_folders_count_label">%1$d van %2$d mappen uitgesloten</string>
+    <string name="settings_excluded_albums_count_label">%1$d van %2$d albums uitgesloten</string>
     <string name="settings_excluded_folders_select_all">Alles uitsluiten</string>
     <string name="settings_excluded_folders_deselect_all">Alles opnemen</string>
     <!-- Album mirror -->
@@ -398,7 +397,6 @@
     <string name="settings_security">Beveiliging</string>
     <string name="settings_security_desc">App-vergrendeling, Verborgen foto\'s</string>
     <string name="settings_strip_metadata_upload">Metadata verwijderen bij uploaden</string>
-    <string name="settings_strip_metadata_upload_desc">Verwijdert locatie- en cameragegevens uit de geüploade kopie. De kopie op je telefoon behoudt ze, tenzij de lokale spiegel hieronder aanstaat. Voeg camera-, tijdstempel- en softwarevelden toe onder Aanpassen.</string>
     <string name="settings_mirror_strip_local">Wijzigingen spiegelen naar lokale bestanden</string>
     <string name="settings_mirror_strip_local_desc">Verwijdert die gegevens ook uit de kopie op je telefoon, zodat de geback-upte kopie en het lokale bestand identiek blijven. Vereist toegang tot alle bestanden en wijzigt je originele bestanden.</string>
     <string name="settings_mirror_compress_local">Ook het lokale bestand comprimeren</string>
@@ -409,7 +407,6 @@
     <string name="onboarding_mirror_toggle_desc">Pas bij het uploaden dezelfde metadata- en bestandsnaamwijzigingen toe op het origineel op het apparaat, zodat het lokale bestand en de geüploade kopie identiek blijven. Dit wijzigt je originele bestanden.</string>
     <string name="onboarding_mirror_grant">Toegang tot alle bestanden toestaan</string>
     <string name="settings_rename_on_upload">Hernoemen naar opnamedatum bij uploaden</string>
-    <string name="settings_rename_on_upload_desc">Benoemt de geüploade kopie naar de opnamedatum en -tijd uit de metadata van de foto of video. Bestanden op je telefoon behouden hun naam.</string>
     <string name="settings_delete_after_backup">Apparaatbestand verwijderen na back-up</string>
     <string name="settings_delete_after_backup_desc">Verwijdert de lokale kopie van je apparaat zodra Drive de upload heeft. Op Android 11+ gaat die eerst naar de apparaatprullenbak, waar je hem nog ongeveer een maand kunt herstellen.</string>
     <string name="settings_strip_gps">GPS-locatie verwijderen</string>
@@ -422,13 +419,11 @@
     <string name="settings_strip_software_desc">Software-, opmerking-, maker- en copyrightvelden verwijderen</string>
     <string name="settings_strip_authorship">Maker en copyright verwijderen</string>
     <string name="settings_strip_share">Metadata verwijderen bij delen</string>
-    <string name="settings_strip_share_title">Metadata bij delen</string>
     <string name="settings_strip_share_desc">Verwijdert de geselecteerde velden alleen uit de gedeelde kopie, nooit uit je origineel. Bij video\'s wordt alleen de locatie verwijderd.</string>
     <string name="settings_strip_format_note">Sommige formaten, zoals HEIC, kunnen geen metadatawijzigingen opslaan. Wanneer het verwijderen van metadata aanstaat, wordt de geüploade kopie van een dergelijke foto naar JPEG omgezet zodat de geselecteerde gegevens echt worden verwijderd. De foto op je apparaat blijft ongewijzigd.</string>
-    <string name="settings_compress_upload_desc">Uploadt een lichtere versie om ruimte te besparen. De kopie op je telefoon blijft op volle kwaliteit, tenzij de lokale spiegel hieronder aanstaat.</string>
     <string name="settings_compress_photos">Foto\'s comprimeren</string>
     <string name="settings_compress_videos">Video\'s comprimeren</string>
-    <string name="settings_compress_videos_desc">Zet video\'s vóór het uploaden om naar een kleiner formaat. Het origineel op je apparaat wordt nooit gewijzigd.</string>
+    <string name="settings_compress_hdr_photos">Ook HDR-foto\'s comprimeren</string>
     <string name="settings_compress_tier_light">Licht</string>
     <string name="settings_compress_tier_light_desc">Nauwelijks zichtbaar kwaliteitsverlies, bescheiden ruimtebesparing</string>
     <string name="settings_compress_tier_balanced">Gebalanceerd</string>
@@ -436,7 +431,6 @@
     <string name="settings_compress_tier_space_saver">Ruimtebesparend</string>
     <string name="settings_compress_tier_space_saver_desc">Kleinste uploads, zichtbaarder kwaliteitsverlies</string>
     <string name="settings_app_lock">App-vergrendeling</string>
-    <string name="settings_app_lock_desc">Biometrie of pincode vereisen bij het openen van de app</string>
     <string name="settings_app_lock_timeout">Vergrendelen na</string>
     <string name="settings_app_lock_timeout_desc">De app opnieuw vergrendelen na zoveel tijd op de achtergrond</string>
     <string name="settings_app_lock_timeout_immediate">Direct</string>
@@ -449,7 +443,6 @@
     <string name="settings_app_lock_timeout_15min">15 minuten</string>
     <string name="settings_app_lock_timeout_1h">1 uur</string>
     <string name="settings_clear_cache_on_close">Cache wissen bij sluiten van app</string>
-    <string name="settings_clear_cache_on_close_desc">Wis lokale kopieën van bekeken cloudfoto\'s wanneer de app naar de achtergrond gaat. Worden bij de volgende keer openen opnieuw gedownload.</string>
     <string name="settings_screenshot_overlay">Snelacties voor schermafbeeldingen</string>
     <string name="settings_screenshot_overlay_desc">Toont een kleine actiebalk over een nieuwe schermafbeelding, zodat je die kunt bewerken, delen, naar Drive uploaden of er een link van maken. Op sommige telefoons kan de ingebouwde schermafbeeldingsbalk niet worden uitgeschakeld, dus kunnen ze allebei verschijnen.</string>
     <string name="screenshot_overlay_channel_desc">De melding die wordt getoond terwijl de snelle acties voor schermafbeeldingen actief zijn.</string>
@@ -474,18 +467,11 @@
     <string name="settings_timeline_section_layout">Indeling</string>
     <string name="settings_timeline_section_display">Weergave</string>
     <string name="settings_show_scroll_date">Datum tonen tijdens scrollen</string>
-    <string name="settings_show_scroll_date_desc">Tijdens het scrollen verschijnt een zwevend label met maand en jaar boven de tijdlijn, zodat je altijd een tijdsaanduiding hebt.</string>
     <string name="settings_reverse_timeline">Tijdlijnvolgorde omkeren</string>
-    <string name="settings_reverse_timeline_desc">Toon de oudste foto\'s bovenaan en de nieuwste onderaan. De tijdlijn opent bij je nieuwste foto\'s.</string>
     <string name="settings_mosaic_grid">Mozaïekraster</string>
-    <string name="settings_mosaic_grid_desc">Plaats de tijdlijn als een verspringend mozaïek waarbij elke foto zijn eigen vorm behoudt, zodat staande foto\'s hoger lijken.</string>
     <string name="settings_seamless_grid">Rand tot rand</string>
-    <string name="settings_seamless_grid_desc">Dichter raster met vierkante hoeken en miniaturen die tot aan de schermrand reiken.</string>
-    <string name="timeline_filter_subtitle">Kies wat je wilt verbergen uit je hoofdtijdlijn met foto\'s. Verborgen foto\'s blijven op je apparaat en worden verder geback-upt.</string>
     <string name="timeline_filter_categories_header">Categoriebalk</string>
     <string name="timeline_filter_layout_desc">Geldt voor alle fotorasters</string>
-    <string name="timeline_filter_reorder_hint">Gebruik de pijlen om de volgorde van de categoriebalk boven je Foto\'s-tijdlijn in te stellen.</string>
-    <string name="timeline_filter_per_album_hint">Verberg afzonderlijke albums uit de tijdlijn. De schakelaar hierboven verbergt ze allemaal tegelijk.</string>
     <string name="timeline_filter_hidden_album">Verborgen album</string>
     <string name="timeline_filter_albums_header">Drive-albums</string>
     <string name="timeline_filter_more_settings">Meer instellingen</string>
@@ -494,7 +480,6 @@
     <string name="settings_telemetry_on">Aan</string>
     <string name="settings_telemetry_off">Uit</string>
     <string name="settings_telemetry_checking">Controleren…</string>
-    <string name="settings_privacy_map_tiles_note">De achtergrondtegels van de kaart komen van OpenStreetMap, dus hun servers zien je IP-adres en het kaartgebied dat je bekijkt. Je foto\'s en hun locaties worden nooit verstuurd.</string>
     <string name="settings_hidden_photos">Verborgen foto\'s</string>
     <string name="settings_hidden_photos_desc">Foto\'s verborgen uit de hoofdgalerij, ontgrendeld met je apparaatbiometrie of pincode</string>
     <string name="settings_appearance">Weergave &amp; taal</string>
@@ -556,13 +541,9 @@
     <string name="map_style_modern">Wereldkaart</string>
     <string name="map_style_modern_summary">Een moderne globe die je naar je plekken kunt draaien.</string>
     <string name="settings_amoled_black">Puur zwart (AMOLED)</string>
-    <string name="settings_amoled_black_summary">Gebruik echt zwarte achtergronden in de donkere modus om stroom te besparen op OLED-schermen.</string>
     <string name="settings_tint_cloud">Cloudbadges in accentkleur</string>
-    <string name="settings_tint_cloud_summary">Gebruik de accentkleur voor de cloudbadges in plaats van groen.</string>
     <string name="settings_gif_autoplay_grid">Gifs afspelen in rasters</string>
-    <string name="settings_gif_autoplay_grid_summary">Animeer gifs in de tijdlijn, albums en apparaatmappen. Wanneer uit, wordt een stilstaand beeld getoond.</string>
     <string name="settings_gif_autoplay_covers">Gif-albumhoezen afspelen</string>
-    <string name="settings_gif_autoplay_covers_summary">Animeer een albumhoes als het een gif is, ook bij cloudalbums (de hoes wordt één keer gedownload).</string>
 
     <!-- Language -->
     <string name="language_en">English, English</string>
@@ -1000,7 +981,6 @@
     <string name="update_downloading">Update wordt gedownload… %1$d%%</string>
     <string name="update_install_prompt">Download voltooid. Nu installeren?</string>
     <string name="update_check_settings_row">Controleren op updates</string>
-    <string name="update_check_settings_summary">Je hebt versie %1$s</string>
     <string name="update_no_update">Je hebt de nieuwste versie.</string>
     <string name="update_check_failed">Kon niet controleren op updates. Probeer het later opnieuw.</string>
     <string name="update_permission_required">Sta het installeren van onbekende apps toe in de systeeminstellingen om bij te werken.</string>
@@ -1098,16 +1078,11 @@
     <string name="force_update_body">Deze versie wordt niet meer ondersteund. Werk bij om door te gaan.</string>
     <string name="force_update_action">Bijwerken</string>
     <string name="notifications_title">Meldingen</string>
-    <string name="notifications_subtitle">Kies welke meldingen de app mag tonen. Alles staat standaard aan.</string>
-    <string name="notifications_nav_desc">Kies welke meldingen je ziet</string>
     <string name="notifications_backup_status">Permanente back-upmelding</string>
     <string name="notifications_backup_status_desc">Toont de permanente melding terwijl de app op nieuwe foto\'s let. De back-up blijft werken en uploadmeldingen verschijnen ook als dit uit staat; nieuwe foto\'s worden alleen iets minder direct opgepikt.</string>
     <string name="notifications_album_download">Albumdownloads</string>
-    <string name="notifications_album_download_desc">Toont voortgang en een samenvatting wanneer je een album naar je apparaat downloadt.</string>
     <string name="notifications_delete_reminder">Herinnering verwijderen na back-up</string>
-    <string name="notifications_delete_reminder_desc">Herinner me na een back-up welke foto\'s veilig van dit apparaat kunnen worden verwijderd.</string>
     <string name="notifications_update_available">Nieuwe versie beschikbaar</string>
-    <string name="notifications_update_available_desc">Op de achtergrond naar een nieuwere versie zoeken en een melding sturen zodra er een uitkomt. Op wifi wordt de update vooraf gedownload, zodat installeren meteen gaat.</string>
     <string name="update_channel_name">App-updates</string>
     <string name="update_channel_desc">Meldt wanneer er een nieuwere versie van de app beschikbaar is.</string>
     <string name="update_notification_text">Tik om versie %1$s te installeren.</string>
@@ -1123,7 +1098,6 @@
     <string name="albums_filter_sheet_title">Albumfilter</string>
     <string name="albums_filter_default_heading">Standaard bij openen</string>
     <string name="albums_filter_remember_last">Laatst gebruikte filter onthouden</string>
-    <string name="albums_filter_remember_last_summary">Albums openen met het laatst gekozen filter</string>
     <string name="albums_show_collection">Collectie tonen</string>
     <string name="albums_show_collection_summary">Personen, plaatsen en \"Op deze dag\" blijven beschikbaar via Zoeken</string>
     <string name="albums_filter_excluded">Uitgesloten</string>
@@ -1420,9 +1394,7 @@
 
     <!-- Grid layout (Appearance) -->
     <string name="grid_remember_last">Laatst gebruikte onthouden</string>
-    <string name="grid_remember_last_desc">Open je foto\'s op het laatst gebruikte zoomniveau</string>
     <string name="settings_keep_scroll_tabs">Positie behouden bij tabwissel</string>
-    <string name="settings_keep_scroll_tabs_desc">Bij het wisselen van tab blijf je waar je was in plaats van naar boven te springen.</string>
     <string name="grid_default_columns_section">Foto\'s per rij</string>
     <!-- FAQ -->
     <string name="faq_title">Veelgestelde vragen</string>
@@ -1501,7 +1473,6 @@
     <string name="whats_new_albums_drag">Voor je eigen volgorde houd je een album ingedrukt, kies je Albums herschikken en sleep je de covers waar je ze wilt. De volgorde blijft staan tot je hem wijzigt.</string>
     <string name="whats_new_crop_title">Bijsnijden met een vaste vorm</string>
     <string name="whats_new_crop_body">Kies 1:1, 4:3, 16:9 of de vorm van de foto zelf in de editor, en het kader behoudt die vorm terwijl je het kleiner maakt.</string>
-    <string name="whats_new_history_desc">Lees de hoogtepunten van deze en eerdere updates</string>
     <string name="whats_new_version">Versie %1$s</string>
     <string name="whats_new_more_241">Daarnaast kun je de datum van meerdere foto\'s tegelijk verschuiven, een hele apparaatmap verbergen, en updates installeren zonder elke keer te vragen. Foto\'s die op een ander apparaat zijn verwijderd, verdwijnen nu ook hier, zelfs bij een grote bibliotheek, een hernoeming laat geen kopie meer achter, en back-up, verbergen, duplicaten en gedeelde albums zijn allemaal stabieler geworden.</string>
     <string name="whats_new_more_240">Plus gekopieerde links blijven verborgen in het klembordvoorbeeld, bestandsgroottes komen overal overeen, automatisch ruimte vrijmaken controleert bij Drive voordat een kopie van je telefoon wordt verwijderd, en grote albums en selecties blijven beter overeind.</string>
@@ -1636,9 +1607,7 @@
     <string name="metadata_editor_set">Instellen</string>
     <string name="metadata_editor_place_label">Plaats</string>
     <string name="metadata_editor_place_none">Geen locatie</string>
-    <string name="metadata_editor_place_choose_country">Kies een land</string>
-    <string name="metadata_editor_place_country_hint">Als je alleen een land kiest, komt de foto in het midden daarvan te staan.</string>
-    <string name="metadata_editor_place_search_city">Zoek een stad</string>
+    <string name="metadata_editor_place_search">Zoek een land of stad</string>
     <string name="metadata_editor_place_remove">Locatie verwijderen</string>
     <string name="metadata_editor_country_search">Landen zoeken</string>
     <string name="metadata_editor_note_cloud">Deze foto behoudt de datum en plaats waarmee die naar Proton Drive is geüpload, dus ze kunnen hier niet worden gewijzigd.</string>
@@ -1674,7 +1643,6 @@
     <string name="settings_ai_section">Machine learning</string>
     <string name="settings_ai_nav_desc">Tekst kopiëren, gezichten verbergen en meer, op het apparaat</string>
     <string name="settings_ai_enable">Machine learning inschakelen</string>
-    <string name="settings_ai_enable_desc">Alles draait op je telefoon. Als je dit inschakelt, kan de app de kleine modellen downloaden die het nodig heeft en Tekst kopiëren en Gezichten verbergen gebruiken. Er komen meer functies aan.</string>
     <string name="settings_ai_ocr">Tekst kopiëren</string>
     <string name="settings_ai_ocr_desc">Herkent en kopieert tekst die je in een foto ziet</string>
     <string name="settings_ai_ocr_downloading">Downloaden…</string>
@@ -1719,18 +1687,14 @@
     <string name="settings_ai_semantic_indexing_waiting">Wachten op de zoekmodellen</string>
     <string name="settings_ai_semantic_ready">Je foto\'s zijn doorzoekbaar</string>
     <string name="settings_ai_semantic_rescan">Alle foto\'s opnieuw scannen</string>
-    <string name="settings_ai_semantic_rescan_desc">Wist de zoekindex en bouwt deze opnieuw op voor elke foto.</string>
     <string name="settings_ai_semantic_rescan_confirm_title">Alle foto\'s opnieuw scannen?</string>
     <string name="settings_ai_semantic_rescan_confirm_msg">De zoekindex wordt gewist en daarna opnieuw opgebouwd voor elke foto, wat even kan duren.</string>
     <string name="settings_ai_semantic_not_indexed">Je foto\'s zijn nog niet geïndexeerd</string>
     <string name="settings_ai_semantic_clear">Zoekgegevens wissen</string>
-    <string name="settings_ai_semantic_clear_desc">Verwijdert de zoekindex voor elke foto van deze telefoon.</string>
     <string name="settings_ai_semantic_clear_confirm_title">Zoekgegevens wissen?</string>
     <string name="settings_ai_semantic_clear_confirm_msg">Dit verwijdert de zoekindex voor elke foto. Je foto\'s worden niet aangetast.</string>
     <string name="settings_face_section">Herkende gezichten</string>
     <string name="settings_face_maintenance">Onderhoud</string>
-    <string name="settings_face_rescan_desc">Detecteert gezichten opnieuw en behoudt je namen en correcties.</string>
-    <string name="settings_face_clear_desc">Verwijdert alle gevonden personen en alle gezichtsgegevens van deze telefoon.</string>
     <string name="settings_ai_indexing_running">Je foto\'s worden doorzocht</string>
     <string name="settings_ai_indexing_waiting">Wachten op het gezichtsmodel</string>
     <string name="settings_ai_indexing_waiting_other">Wachten tot een andere taak op het apparaat klaar is</string>
@@ -1899,9 +1863,7 @@
     <string name="news_title">Nieuws</string>
     <string name="news_banner">Nieuws beschikbaar</string>
     <string name="news_new_badge">Nieuw</string>
-    <string name="news_settings_desc">Berichten en updates over de app</string>
     <string name="news_show_title">Nieuws tonen</string>
-    <string name="news_show_desc">Een klein stipje verschijnt als er iets nieuws is</string>
     <string name="news_empty">Nu even niets nieuws.</string>
     <string name="news_read_more">Meer lezen</string>
     <string name="news_feedback_heading">Vragen of een bug?</string>
@@ -2219,7 +2181,6 @@
     <string name="folder_rename">Map hernoemen</string>
     <string name="folder_renamed">Hernoemd naar \"%1$s\"</string>
     <string name="settings_face_excluded">Uitgesloten gezichten</string>
-    <string name="settings_face_excluded_desc">Bekijk gezichten die je van een persoon hebt verwijderd of hebt afgewezen</string>
     <string name="face_excluded_empty">Er is niets uitgesloten. Gezichten die je van een persoon verwijdert of afwijst omdat het geen persoon is, verschijnen hier, zodat je ze ongedaan kunt maken.</string>
     <string name="face_excluded_not_person_section">Niet deze persoon: %1$s</string>
     <string name="face_excluded_ignored_section">Afgewezen (geen persoon)</string>
@@ -2234,5 +2195,4 @@
     <string name="person_move_confirm_body">De selectie naar %1$s verplaatsen?</string>
     <string name="person_move_confirm">Verplaatsen</string>
     <string name="settings_face_auto_merge">Waarschijnlijke overeenkomsten automatisch samenvoegen</string>
-    <string name="settings_face_auto_merge_desc">Wanneer een scan een groep vindt die zeer waarschijnlijk iemand is die je al een naam gaf, wordt die zonder vragen toegevoegd. Samenvoegen kan niet ongedaan worden gemaakt, laat dit dus uit om ze zelf te bevestigen.</string>
 </resources>

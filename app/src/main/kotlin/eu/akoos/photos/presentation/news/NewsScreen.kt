@@ -184,7 +184,6 @@ fun NewsScreen(onBack: () -> Unit) {
             SettingsCard {
                 ToggleRow(
                     label = stringResource(R.string.news_show_title),
-                    description = stringResource(R.string.news_show_desc),
                     checked = newsEnabled,
                     onCheckedChange = vm::setNewsEnabled,
                 )

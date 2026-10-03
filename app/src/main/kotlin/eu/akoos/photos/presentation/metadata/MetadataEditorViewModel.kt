@@ -639,32 +639,24 @@ class MetadataEditorViewModel @Inject constructor(
         _state.update { it.copy(dateChosen = true) }
     }
 
-    /** Places every editable image at [code]'s country centroid, labelling it with the country name. */
-    fun pickCountry(code: String) {
+    /** Places every editable image at [latitude]/[longitude], labelling it with the nearest city. */
+    fun pickPoint(latitude: Double, longitude: Double) {
         if (_state.value.placeLock != null) return
         viewModelScope.launch {
-            val point = OfflineGeocoder.countryPoint(context, code) ?: run {
-                _events.send(MetadataEditorEvent.Failed)
-                return@launch
-            }
-            val picked = OfflineGeocoder.GeoLabel(city = "", countryCode = code, countryName = "")
-            performBatch(PendingAction.Location(point.first, point.second, picked), placeTargetUris)
+            val nearest = OfflineGeocoder.reverseGeocodeDetailed(context, latitude, longitude)
+            val picked = OfflineGeocoder.GeoLabel(
+                city = nearest?.city.orEmpty(),
+                countryCode = nearest?.countryCode.orEmpty(),
+                countryName = "",
+            )
+            performBatch(PendingAction.Location(latitude, longitude, picked), placeTargetUris)
             val cloudTargets = cloudImageTargets + syncedImageTargets
             if (cloudTargets.isEmpty()) return@launch
-            stageCloudLocation(cloudTargets, LocationEdit.Set(point.first, point.second))
-            _state.update { it.copy(hasLocation = true, place = picked, placeChosen = true) }
+            stageCloudLocation(cloudTargets, LocationEdit.Set(latitude, longitude))
+            _state.update {
+                it.copy(hasLocation = true, latitude = latitude, longitude = longitude, place = picked, placeChosen = true)
+            }
         }
-    }
-
-    /** Places every editable image at [place]'s coordinates, labelling it "City, Country". */
-    fun pickCity(place: OfflineGeocoder.GeoPlace) {
-        if (_state.value.placeLock != null) return
-        val picked = OfflineGeocoder.GeoLabel(city = place.name, countryCode = place.countryCode, countryName = "")
-        performBatch(PendingAction.Location(place.latitude, place.longitude, picked), placeTargetUris)
-        val cloudTargets = cloudImageTargets + syncedImageTargets
-        if (cloudTargets.isEmpty()) return
-        stageCloudLocation(cloudTargets, LocationEdit.Set(place.latitude, place.longitude))
-        _state.update { it.copy(hasLocation = true, place = picked, placeChosen = true) }
     }
 
     /** Strips the GPS location from every editable image. */

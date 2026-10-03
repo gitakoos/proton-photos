@@ -251,8 +251,7 @@ fun MetadataEditorScreen(
                 )
                 PlaceField(
                     state = state,
-                    onPickCountry = viewModel::pickCountry,
-                    onPickCity = viewModel::pickCity,
+                    onPickPoint = viewModel::pickPoint,
                     onRemoveLocation = viewModel::removeLocation,
                 )
                 // The tag labels are the ones the viewer's details sheet shows, so the same EXIF tag
@@ -719,17 +718,17 @@ private fun DateField(
 @Composable
 private fun PlaceField(
     state: MetadataEditorUiState,
-    onPickCountry: (String) -> Unit,
-    onPickCity: (OfflineGeocoder.GeoPlace) -> Unit,
+    onPickPoint: (Double, Double) -> Unit,
     onRemoveLocation: () -> Unit,
 ) {
     val colors = AppColors.current
-    var expanded by remember { mutableStateOf(false) }
+    var picking by remember { mutableStateOf(false) }
     // "City, Country" with the country named in the app language, like the labels around it.
     val locale = appLocale()
     val placeName = remember(state.place, locale) {
         state.place?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
     }
+    val editable = state.placeLock == null && !state.isSaving
 
     FieldCard {
         FieldHeaderRow(
@@ -737,8 +736,8 @@ private fun PlaceField(
                 if (state.bulk) R.string.metadata_editor_bulk_place_label
                 else R.string.metadata_editor_place_label,
             ),
-            editable = state.placeLock == null && !state.isSaving,
-            onEdit = { expanded = !expanded },
+            editable = editable,
+            onEdit = { picking = true },
         )
         val placeText = if (state.bulk && !state.placeChosen) {
             stringResource(R.string.metadata_editor_bulk_apply_hint)
@@ -760,132 +759,13 @@ private fun PlaceField(
                 fontSize = 12.sp,
             )
         }
-
-        if (state.placeLock == null && expanded) {
-            Spacer(Modifier.height(4.dp))
-            LocationEditor(
-                // Bulk photos may each carry a different location, so offer "remove" even before a
-                // place is picked: it clears the location across every editable image.
-                canRemove = state.bulk || state.hasLocation,
-                enabled = !state.isSaving,
-                onPickCountry = onPickCountry,
-                onPickCity = onPickCity,
-                onRemoveLocation = onRemoveLocation,
-            )
-        }
-    }
-}
-
-@Composable
-private fun LocationEditor(
-    canRemove: Boolean,
-    enabled: Boolean,
-    onPickCountry: (String) -> Unit,
-    onPickCity: (OfflineGeocoder.GeoPlace) -> Unit,
-    onRemoveLocation: () -> Unit,
-) {
-    val context = LocalContext.current
-    val colors = AppColors.current
-    // Country names and their order follow the app language, which the system default need not match.
-    val locale = appLocale()
-    var countries by remember { mutableStateOf<List<OfflineGeocoder.GeoCountry>>(emptyList()) }
-    var showCountryPicker by remember { mutableStateOf(false) }
-    var selectedCountry by remember { mutableStateOf<OfflineGeocoder.GeoCountry?>(null) }
-    var cityQuery by remember { mutableStateOf("") }
-    var cityResults by remember { mutableStateOf<List<OfflineGeocoder.GeoPlace>>(emptyList()) }
-    val selectedCountryName = remember(selectedCountry, locale) {
-        selectedCountry?.let { countryName(it.code, locale, it.displayName) }
-    }
-
-    LaunchedEffect(locale) {
-        countries = OfflineGeocoder.countries(context, locale)
-    }
-    // In-memory scan after the first parse, so a per-keystroke search stays cheap; a short query is
-    // ignored to keep the result list meaningful.
-    LaunchedEffect(cityQuery, selectedCountry) {
-        val q = cityQuery.trim()
-        cityResults = if (q.length < 2) emptyList()
-        else OfflineGeocoder.searchPlaces(context, q, selectedCountry?.code, limit = 30)
-    }
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Country selector: choosing a country places the photo at its center and narrows the search.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(colors.surfaceWeak, RoundedCornerShape(10.dp))
-                .border(0.5.dp, colors.line2, RoundedCornerShape(10.dp))
-                .clickable(enabled = enabled) { showCountryPicker = true }
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = selectedCountryName
-                    ?: stringResource(R.string.metadata_editor_place_choose_country),
-                color = if (selectedCountry != null) colors.fgPrimary else colors.fgMute,
-                fontSize = 14.sp,
-            )
-        }
-        Text(
-            text = stringResource(R.string.metadata_editor_place_country_hint),
-            color = colors.fgMute,
-            fontSize = 11.5.sp,
-        )
-
-        // City search, filtered to the selected country when one is chosen.
-        OutlinedTextField(
-            value = cityQuery,
-            onValueChange = { cityQuery = it },
-            shape = RoundedCornerShape(14.dp),
-            enabled = enabled,
-            singleLine = true,
-            placeholder = {
-                Text(stringResource(R.string.metadata_editor_place_search_city), color = colors.fgMute)
-            },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = colors.fgPrimary,
-                unfocusedTextColor = colors.fgPrimary,
-                focusedBorderColor = colors.accent,
-                unfocusedBorderColor = colors.line2,
-                cursorColor = colors.accent,
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        if (cityResults.isNotEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(colors.surfaceWeak, RoundedCornerShape(10.dp))
-                    .border(0.5.dp, colors.line2, RoundedCornerShape(10.dp)),
-            ) {
-                cityResults.forEach { place ->
-                    val label = remember(place, locale) {
-                        cityCountryLabel(place.name, place.countryCode, "", locale)
-                    }
-                    Text(
-                        text = label,
-                        color = colors.fgPrimary,
-                        fontSize = 14.sp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable(enabled = enabled) {
-                                cityQuery = ""
-                                onPickCity(place)
-                            }
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                    )
-                }
-            }
-        }
-
-        if (canRemove) {
+        // Bulk photos may each carry a different location, so offer "remove" even before a place is
+        // picked: it clears the location across every editable image.
+        if (state.placeLock == null && (state.bulk || state.hasLocation)) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = enabled) { onRemoveLocation() }
+                    .clickable(enabled = editable) { onRemoveLocation() }
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -906,69 +786,16 @@ private fun LocationEditor(
         }
     }
 
-    if (showCountryPicker) {
-        CountryPickerDialog(
-            countries = countries,
-            onSelect = { country ->
-                selectedCountry = country
-                showCountryPicker = false
-                onPickCountry(country.code)
+    if (picking) {
+        LocationPickerDialog(
+            initialLatitude = state.latitude.takeIf { state.hasLocation },
+            initialLongitude = state.longitude.takeIf { state.hasLocation },
+            onConfirm = { latitude, longitude ->
+                picking = false
+                onPickPoint(latitude, longitude)
             },
-            onDismiss = { showCountryPicker = false },
+            onDismiss = { picking = false },
         )
-    }
-}
-
-@Composable
-private fun CountryPickerDialog(
-    countries: List<OfflineGeocoder.GeoCountry>,
-    onSelect: (OfflineGeocoder.GeoCountry) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val colors = AppColors.current
-    var filter by remember { mutableStateOf("") }
-    // Case- and accent-insensitive, so "irorszag" finds "Írország".
-    val shown = remember(filter, countries) {
-        val f = SearchFilter.fold(filter.trim())
-        if (f.isEmpty()) countries
-        else countries.filter { SearchFilter.fold(it.displayName).contains(f) }
-    }
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(shape = RoundedCornerShape(20.dp), color = colors.bg2) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                OutlinedTextField(
-                    value = filter,
-                    onValueChange = { filter = it },
-                    shape = RoundedCornerShape(14.dp),
-                    singleLine = true,
-                    placeholder = {
-                        Text(stringResource(R.string.metadata_editor_country_search), color = colors.fgMute)
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = colors.fgPrimary,
-                        unfocusedTextColor = colors.fgPrimary,
-                        focusedBorderColor = colors.accent,
-                        unfocusedBorderColor = colors.line2,
-                        cursorColor = colors.accent,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
-                    items(shown) { country ->
-                        Text(
-                            text = country.displayName,
-                            color = colors.fgPrimary,
-                            fontSize = 15.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelect(country) }
-                                .padding(horizontal = 6.dp, vertical = 13.dp),
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 

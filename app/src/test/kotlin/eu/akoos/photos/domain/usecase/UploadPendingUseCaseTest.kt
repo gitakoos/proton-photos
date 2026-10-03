@@ -142,6 +142,7 @@ class UploadPendingUseCaseTest {
         // on-device by UploadImageCompressorTest.
         every { mockPrefs[SettingsKeys.COMPRESS_ON_UPLOAD] } returns false
         every { mockPrefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns false
+        every { mockPrefs[SettingsKeys.COMPRESS_HDR_PHOTOS] } returns false
         every { mockPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER] } returns null
         every { mockPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] } returns null
         every { mockPrefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] } returns false
@@ -612,7 +613,7 @@ class UploadPendingUseCaseTest {
         // The compressor returns null so the upload proceeds with the original bytes; the test only
         // cares which tier the branch hands it. mockkObject unmocks on block exit.
         mockkObject(UploadImageCompressor) {
-            every { UploadImageCompressor.skipsCompressionForGainMap(any(), any(), any()) } returns false
+            every { UploadImageCompressor.skipsCompressionForGainMap(any(), any(), any(), any()) } returns false
             every {
                 UploadImageCompressor.compressToTemp(any(), any(), capture(photoTierSlot), any())
             } returns null

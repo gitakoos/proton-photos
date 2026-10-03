@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.gallery
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -182,9 +183,8 @@ private fun AlbumViewChipRow(
     }
 }
 
-/** Chips for the [AlbumSortMode] values, in the order they are offered. Wraps rather than clipping,
- *  since four labels overrun one line on a narrow screen in most locales. */
-@OptIn(ExperimentalLayoutApi::class)
+/** Chips for the [AlbumSortMode] values, in the order they are offered, on one row that scrolls
+ *  sideways when the labels overrun a narrow screen. */
 @Composable
 private fun AlbumSortChipRow(
     selected: AlbumSortMode,
@@ -196,9 +196,9 @@ private fun AlbumSortChipRow(
         AlbumSortMode.LastActivity to stringResource(R.string.albums_sort_activity),
         AlbumSortMode.PhotoCount to stringResource(R.string.albums_sort_count),
     )
-    FlowRow(
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         options.forEach { (mode, label) ->
             FilterChip(

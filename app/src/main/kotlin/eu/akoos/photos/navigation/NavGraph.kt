@@ -172,6 +172,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 sealed class Screen(val route: String) {
     data object Gallery : Screen("gallery")
     data object Settings : Screen("settings")
+    data object MoreSettings : Screen("more_settings")
     data object SyncSettings : Screen("sync_settings")
     data object BackupProcessing : Screen("backup_processing")
     data object Activity : Screen("activity")
@@ -182,7 +183,6 @@ sealed class Screen(val route: String) {
     data object FaceExclusions : Screen("face_exclusions")
     data object FreeUpSpace : Screen("free_up_space")
     data object PrivacySecuritySettings : Screen("privacy_security_settings")
-    data object ShareMetadata : Screen("share_metadata")
     data object Permissions : Screen("permissions")
     data object Viewer : Screen("viewer")
     data object AlbumDetail : Screen("album_detail")
@@ -1506,8 +1506,10 @@ fun NavGraph(
             }
         }
 
-        composable(Screen.Settings.route) {
+        val settingsPage: @Composable (Boolean) -> Unit = { more ->
             SettingsScreen(
+                more                      = more,
+                onMoreSettingsClick       = { navController.navigate(Screen.MoreSettings.route) },
                 onBack                    = { navController.popBackStack() },
                 onSyncSettingsClick       = { navController.navigate(Screen.SyncSettings.route) },
                 onActivityClick           = { navController.navigate(Screen.Activity.route) },
@@ -1522,23 +1524,27 @@ fun NavGraph(
                 onAppearanceClick         = { navController.navigate(Screen.AppearanceSettings.route) },
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },
                 onAboutClick              = { navController.navigate(Screen.About.route) },
-                onWhatsNewClick           = { navController.navigate(Screen.WhatsNewHistory.route) },
                 onNewsClick               = { navController.navigate(Screen.News.route) },
-                onFaqClick                = { navController.navigate(Screen.Faq.route) },
                 onAccountClick            = { navController.navigate(Screen.Account.route) },
                 onSignIn                  = { navController.navigate(Screen.Login.route) },
-                onCheckForUpdatesClick    = onCheckForUpdates,
                 // Inline settings search opens a result by its route; the screen resets its own query.
                 onOpenRoute               = { route -> navController.navigate(route) },
             )
         }
+        composable(Screen.Settings.route) { settingsPage(false) }
+        composable(Screen.MoreSettings.route) { settingsPage(true) }
 
         composable(Screen.Permissions.route) {
             eu.akoos.photos.presentation.settings.PermissionsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.About.route) {
-            AboutScreen(onBack = { navController.popBackStack() })
+            AboutScreen(
+                onBack = { navController.popBackStack() },
+                onWhatsNewClick = { navController.navigate(Screen.WhatsNewHistory.route) },
+                onFaqClick = { navController.navigate(Screen.Faq.route) },
+                onCheckForUpdatesClick = onCheckForUpdates,
+            )
         }
 
         composable(Screen.Faq.route) {
@@ -1649,15 +1655,7 @@ fun NavGraph(
         composable(Screen.PrivacySecuritySettings.route) {
             eu.akoos.photos.presentation.settings.PrivacySecuritySettingsScreen(
                 onBack = { navController.popBackStack() },
-                onOfflinePhotosClick = { navController.navigate(Screen.Offline.route) },
                 onHiddenAlbumClick = { navController.navigate(Screen.HiddenAlbum.route) },
-                onShareMetadataClick = { navController.navigate(Screen.ShareMetadata.route) },
-            )
-        }
-
-        composable(Screen.ShareMetadata.route) {
-            eu.akoos.photos.presentation.settings.ShareMetadataScreen(
-                onBack = { navController.popBackStack() },
             )
         }
 

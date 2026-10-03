@@ -969,6 +969,7 @@ class SettingsViewModel @Inject constructor(
                     stripOnUpload = migratedPrefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false,
                     compressOnUpload = migratedPrefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false,
                     compressVideosOnUpload = migratedPrefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false,
+                    compressHdrPhotos = migratedPrefs[SettingsKeys.COMPRESS_HDR_PHOTOS] ?: false,
                     compressTier = UploadCompressionTier.fromOrdinalOrDefault(
                         migratedPrefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: UploadCompressionTier.BALANCED.ordinal
                     ),
@@ -1802,6 +1803,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_ON_UPLOAD] = enabled }
             _uiState.update { it.copy(compressOnUpload = enabled) }
+        }
+    }
+
+    fun setCompressHdrPhotos(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.COMPRESS_HDR_PHOTOS] = enabled }
+            _uiState.update { it.copy(compressHdrPhotos = enabled) }
         }
     }
 

@@ -60,13 +60,6 @@ fun NotificationSettingsScreen(
     val colors = AppColors.current
 
     SettingsSubPageScaffold(title = stringResource(R.string.notifications_title), onBack = onBack) {
-        Text(
-            stringResource(R.string.notifications_subtitle),
-            color = colors.fgMute,
-            fontSize = 12.sp,
-            lineHeight = 17.sp,
-            modifier = Modifier.padding(bottom = 16.dp),
-        )
 
         SettingsCard {
             // Backup, album-download and delete-reminder notifications concern cloud sync, so they
@@ -81,14 +74,12 @@ fun NotificationSettingsScreen(
                 RowDivider()
                 ToggleRow(
                     label = stringResource(R.string.notifications_album_download),
-                    description = stringResource(R.string.notifications_album_download_desc),
                     checked = state.albumDownload,
                     onCheckedChange = viewModel::setAlbumDownload,
                 )
                 RowDivider()
                 ToggleRow(
                     label = stringResource(R.string.notifications_delete_reminder),
-                    description = stringResource(R.string.notifications_delete_reminder_desc),
                     checked = state.deleteReminder,
                     onCheckedChange = viewModel::setDeleteReminder,
                 )
@@ -96,7 +87,6 @@ fun NotificationSettingsScreen(
             }
             ToggleRow(
                 label = stringResource(R.string.notifications_update_available),
-                description = stringResource(R.string.notifications_update_available_desc),
                 checked = state.updateAvailable,
                 onCheckedChange = viewModel::setUpdateAvailable,
             )

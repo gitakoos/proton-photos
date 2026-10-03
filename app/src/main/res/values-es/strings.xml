@@ -199,6 +199,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Ajustes</string>
+    <string name="settings_more_title">Más ajustes</string>
+    <string name="settings_more_desc">IA, privacidad, notificaciones y ayuda</string>
     <string name="settings_search_hint">Buscar ajustes</string>
     <string name="settings_search_no_results">No hay ajustes coincidentes</string>
     <string name="settings_sync_wifi_only">Sincronizar solo por Wi-Fi</string>
@@ -235,20 +237,16 @@
     <string name="settings_account_link_drive_web_desc">Explora tus fotos y archivos en drive.proton.me.</string>
     <string name="cancel">Cancelar</string>
     <string name="settings_language_system">Predeterminado del sistema</string>
-    <string name="settings_sync_wifi_desc">Pausar sincronización en red móvil</string>
     <string name="settings_fullres_wifi_only">Resolución completa solo por Wi-Fi</string>
     <string name="settings_fullres_wifi_only_desc">Descarga fotos y vídeos en resolución completa solo por Wi-Fi. Las miniaturas siempre se cargan.</string>
     <string name="viewer_wifi_for_full_quality">Conéctate a Wi-Fi para calidad completa</string>
-    <string name="settings_sync_now_action">Sincronizar →</string>
     <string name="settings_backup_folders">Carpetas a respaldar</string>
     <string name="settings_backup_folders_desc">Elige qué carpetas respaldar</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">Qué se respalda</string>
     <string name="settings_network_section">Uso de red</string>
     <string name="settings_continuous_backup">Respaldo continuo</string>
-    <string name="settings_continuous_backup_desc">Las fotos y vídeos se suben pocos segundos después de capturarse.</string>
     <string name="settings_backup_everything">Respaldar todo</string>
-    <string name="settings_backup_everything_desc">Sube automáticamente cada foto y vídeo de este dispositivo.</string>
     <!-- Excluded folders feature (paired with backup-everything mode). -->
     <string name="settings_excluded_folders">Carpetas excluidas</string>
     <string name="settings_excluded_folders_desc_none">Ninguna carpeta excluida</string>
@@ -258,6 +256,7 @@
     <string name="settings_excluded_folders_intro">Las fotos de estas carpetas no se respaldarán, ni siquiera con «Respaldar todo» activado. Los elementos ya subidos permanecen en Drive.</string>
     <string name="settings_excluded_folders_empty">No se encontraron carpetas en este dispositivo</string>
     <string name="settings_excluded_folders_count_label">%1$d de %2$d carpetas excluidas</string>
+    <string name="settings_excluded_albums_count_label">%1$d de %2$d álbumes excluidos</string>
     <string name="settings_excluded_folders_select_all">Excluir todo</string>
     <string name="settings_excluded_folders_deselect_all">Incluir todo</string>
     <!-- Album mirror -->
@@ -317,7 +316,6 @@
     <string name="settings_security">Seguridad</string>
     <string name="settings_security_desc">Bloqueo de app, Fotos ocultas</string>
     <string name="settings_strip_metadata_upload">Quitar metadatos al subir</string>
-    <string name="settings_strip_metadata_upload_desc">Quita la ubicación y los datos de la cámara de la copia que se sube. La copia en el teléfono los conserva salvo que actives el reflejo local de abajo. Añade campos de cámara, fecha y software en Personalizar.</string>
     <string name="settings_mirror_strip_local">Reflejar los cambios en los archivos locales</string>
     <string name="settings_mirror_strip_local_desc">Quita también esos datos de la copia en el teléfono, para que la copia respaldada y el archivo local sean idénticos. Requiere acceso a todos los archivos y modifica tus archivos originales.</string>
     <string name="settings_mirror_compress_local">Comprimir también el archivo local</string>
@@ -328,7 +326,6 @@
     <string name="onboarding_mirror_toggle_desc">Al subir, aplica los mismos cambios de metadatos y nombre al original en el dispositivo, para que el archivo local y la copia subida sean idénticos. Esto modifica tus archivos originales.</string>
     <string name="onboarding_mirror_grant">Permitir acceso a todos los archivos</string>
     <string name="settings_rename_on_upload">Renombrar a la fecha de captura al subir</string>
-    <string name="settings_rename_on_upload_desc">Nombra la copia que se sube con su fecha y hora de captura tomadas de los metadatos de la foto o el vídeo. Los archivos en el teléfono conservan sus nombres.</string>
     <string name="settings_strip_gps">Quitar ubicación GPS</string>
     <string name="settings_strip_gps_desc">Eliminar coordenadas GPS y datos de ubicación</string>
     <string name="settings_strip_camera">Quitar info de cámara</string>
@@ -339,13 +336,11 @@
     <string name="settings_strip_software_desc">Eliminar campos de software, comentario, artista y copyright</string>
     <string name="settings_strip_authorship">Quitar artista y copyright</string>
     <string name="settings_strip_share">Quitar metadatos al compartir</string>
-    <string name="settings_strip_share_title">Metadatos al compartir</string>
     <string name="settings_strip_share_desc">Quita los campos seleccionados solo de la copia compartida, nunca del original. En los vídeos solo se quita la ubicación.</string>
     <string name="settings_strip_format_note">Algunos formatos, como HEIC, no pueden almacenar cambios en los metadatos. Cuando la eliminación de metadatos está activada, la copia subida de una foto de este tipo se convierte a JPEG para que los datos seleccionados se eliminen realmente. La foto en tu dispositivo permanece sin cambios.</string>
-    <string name="settings_compress_upload_desc">Sube una versión más ligera para ahorrar espacio. La copia en el teléfono se mantiene con calidad completa salvo que actives el reflejo local de abajo.</string>
     <string name="settings_compress_photos">Comprimir fotos</string>
     <string name="settings_compress_videos">Comprimir vídeos</string>
-    <string name="settings_compress_videos_desc">Transcodifica los vídeos a un tamaño menor antes de subirlos. El original en el dispositivo nunca se modifica.</string>
+    <string name="settings_compress_hdr_photos">Comprimir también las fotos HDR</string>
     <string name="settings_compress_tier_light">Ligera</string>
     <string name="settings_compress_tier_light_desc">Pérdida de calidad apenas visible, ahorro de espacio moderado</string>
     <string name="settings_compress_tier_balanced">Equilibrada</string>
@@ -353,7 +348,6 @@
     <string name="settings_compress_tier_space_saver">Ahorro de espacio</string>
     <string name="settings_compress_tier_space_saver_desc">Subidas más pequeñas, pérdida de calidad más visible</string>
     <string name="settings_app_lock">Bloqueo de la app</string>
-    <string name="settings_app_lock_desc">Requerir biometría o PIN al abrir la app</string>
     <string name="settings_app_lock_timeout">Bloquear tras</string>
     <string name="settings_app_lock_timeout_desc">Volver a bloquear la app después de este tiempo en segundo plano</string>
     <string name="settings_app_lock_timeout_immediate">Inmediatamente</string>
@@ -366,7 +360,6 @@
     <string name="settings_app_lock_timeout_15min">15 minutos</string>
     <string name="settings_app_lock_timeout_1h">1 hora</string>
     <string name="settings_clear_cache_on_close">Vaciar caché al cerrar la app</string>
-    <string name="settings_clear_cache_on_close_desc">Borra las copias locales de las fotos en la nube vistas cuando la app pasa a segundo plano. Se vuelven a descargar al abrirla de nuevo.</string>
     <string name="settings_screenshot_overlay">Acciones rápidas de captura</string>
     <string name="settings_screenshot_overlay_desc">Muestra una pequeña barra de acciones sobre una captura nueva para poder editarla, compartirla, subirla a Drive o crear un enlace. En algunos teléfonos no se puede desactivar la barra de capturas del sistema, así que pueden aparecer las dos.</string>
     <string name="screenshot_overlay_channel_desc">La notificación que se muestra mientras las acciones rápidas de captura están activas.</string>
@@ -391,18 +384,11 @@
     <string name="settings_timeline_section_layout">Diseño</string>
     <string name="settings_timeline_section_display">Visualización</string>
     <string name="settings_show_scroll_date">Mostrar la fecha al desplazarse</string>
-    <string name="settings_show_scroll_date_desc">Al desplazarte aparece una etiqueta flotante con el mes y el año sobre la línea de tiempo, para que siempre tengas una referencia temporal.</string>
     <string name="settings_reverse_timeline">Invertir el orden de la línea de tiempo</string>
-    <string name="settings_reverse_timeline_desc">Muestra las fotos más antiguas arriba y las más recientes abajo. La línea de tiempo se abre en tus fotos más recientes.</string>
     <string name="settings_mosaic_grid">Cuadrícula en mosaico</string>
-    <string name="settings_mosaic_grid_desc">Organiza la línea de tiempo como un mosaico escalonado en el que cada foto conserva su propia forma, de modo que las fotos verticales se ven más altas.</string>
     <string name="settings_seamless_grid">De borde a borde</string>
-    <string name="settings_seamless_grid_desc">Cuadrícula más densa con esquinas cuadradas y miniaturas que llegan al borde de la pantalla.</string>
-    <string name="timeline_filter_subtitle">Elige qué ocultar de tu línea de tiempo principal de Fotos. Las fotos ocultas permanecen en el dispositivo y se siguen respaldando.</string>
     <string name="timeline_filter_categories_header">Barra de categorías</string>
     <string name="timeline_filter_layout_desc">Se aplica a todas las cuadrículas de fotos</string>
-    <string name="timeline_filter_reorder_hint">Usa las flechas para definir el orden de la barra de categorías que aparece sobre tu línea de tiempo de Fotos.</string>
-    <string name="timeline_filter_per_album_hint">Oculta álbumes concretos de la línea de tiempo. El interruptor de arriba los oculta todos a la vez.</string>
     <string name="timeline_filter_hidden_album">Álbum oculto</string>
     <string name="timeline_filter_albums_header">Álbumes de Drive</string>
     <string name="timeline_filter_more_settings">Más ajustes</string>
@@ -411,7 +397,6 @@
     <string name="settings_telemetry_on">Activada</string>
     <string name="settings_telemetry_off">Desactivada</string>
     <string name="settings_telemetry_checking">Comprobando…</string>
-    <string name="settings_privacy_map_tiles_note">Las teselas de fondo del mapa provienen de OpenStreetMap, así que sus servidores ven tu dirección IP y la zona del mapa que estás viendo. Tus fotos y sus ubicaciones nunca se envían.</string>
     <string name="settings_hidden_photos">Fotos ocultas</string>
     <string name="settings_hidden_photos_desc">Fotos ocultas de la galería principal, se desbloquean con la biometría o el PIN del dispositivo</string>
     <string name="settings_appearance">Apariencia e idioma</string>
@@ -511,13 +496,9 @@
     <string name="map_style_modern">Mapa del mundo</string>
     <string name="map_style_modern_summary">Un globo terráqueo moderno que puedes girar hacia tus lugares.</string>
     <string name="settings_amoled_black">Negro puro (AMOLED)</string>
-    <string name="settings_amoled_black_summary">Usar fondos de negro puro en el modo oscuro para ahorrar energía en pantallas OLED.</string>
     <string name="settings_tint_cloud">Insignias de nube con color de acento</string>
-    <string name="settings_tint_cloud_summary">Usar el color de acento para las insignias de las fotos respaldadas en lugar del verde.</string>
     <string name="settings_gif_autoplay_grid">Reproducir GIF en las cuadrículas</string>
-    <string name="settings_gif_autoplay_grid_summary">Animar los GIF en la línea de tiempo, los álbumes y las carpetas del dispositivo. Si se desactiva, se muestra un fotograma fijo.</string>
     <string name="settings_gif_autoplay_covers">Reproducir portadas de álbum GIF</string>
-    <string name="settings_gif_autoplay_covers_summary">Animar la portada de un álbum cuando es un GIF, también en álbumes en la nube (la portada se descarga una vez).</string>
 
     <!-- Language -->
     <string name="language_en">Inglés, English</string>
@@ -1002,7 +983,6 @@
     <string name="update_downloading">Descargando… %1$d%%</string>
     <string name="update_install_prompt">Descarga completa. ¿Instalar ahora?</string>
     <string name="update_check_settings_row">Buscar actualizaciones</string>
-    <string name="update_check_settings_summary">Estás en la versión %1$s</string>
     <string name="update_no_update">Tienes la versión más reciente.</string>
     <string name="update_check_failed">No se pudo buscar actualizaciones. Inténtalo más tarde.</string>
     <string name="update_permission_required">Permite instalar aplicaciones desconocidas en los ajustes del sistema.</string>
@@ -1097,16 +1077,11 @@
     <string name="force_update_body">Esta versión ya no es compatible. Actualiza para continuar.</string>
     <string name="force_update_action">Actualizar</string>
     <string name="notifications_title">Notificaciones</string>
-    <string name="notifications_subtitle">Elige qué notificaciones puede mostrar la aplicación. Todo está activado de forma predeterminada.</string>
-    <string name="notifications_nav_desc">Elige qué notificaciones ves</string>
     <string name="notifications_backup_status">Notificación de copia siempre activa</string>
     <string name="notifications_backup_status_desc">Muestra la notificación siempre activa mientras la aplicación espera nuevas fotos. La copia sigue funcionando y las notificaciones de subida aparecen aunque esté desactivada; las fotos nuevas solo se detectan algo menos al instante.</string>
     <string name="notifications_album_download">Descargas de álbumes</string>
-    <string name="notifications_album_download_desc">Muestra el progreso y un resumen cuando descargas un álbum en tu dispositivo.</string>
     <string name="notifications_delete_reminder">Recordatorio de borrado tras la copia</string>
-    <string name="notifications_delete_reminder_desc">Después de una copia de seguridad, recuérdame qué fotos se pueden quitar de este dispositivo de forma segura.</string>
     <string name="notifications_update_available">Nueva versión disponible</string>
-    <string name="notifications_update_available_desc">Buscar una versión más reciente en segundo plano y avisar cuando se publique una. Con Wi-Fi la actualización se descarga por adelantado, así que instalarla es inmediato.</string>
     <string name="update_channel_name">Actualizaciones de la app</string>
     <string name="update_channel_desc">Avisa cuando hay una versión más reciente de la app.</string>
     <string name="update_notification_text">Toca para instalar la versión %1$s.</string>
@@ -1122,7 +1097,6 @@
     <string name="albums_filter_sheet_title">Filtro de álbumes</string>
     <string name="albums_filter_default_heading">Predeterminado al abrir</string>
     <string name="albums_filter_remember_last">Recordar el último filtro usado</string>
-    <string name="albums_filter_remember_last_summary">Abrir los álbumes con el filtro seleccionado por última vez</string>
     <string name="albums_show_collection">Mostrar la colección</string>
     <string name="albums_show_collection_summary">Las personas, los lugares y «En este día» siguen disponibles en la búsqueda</string>
     <string name="albums_filter_excluded">Excluidos</string>
@@ -1428,9 +1402,7 @@
 
     <!-- Grid layout (Appearance) -->
     <string name="grid_remember_last">Recordar el último usado</string>
-    <string name="grid_remember_last_desc">Abrir tus fotos con el último nivel de zoom usado</string>
     <string name="settings_keep_scroll_tabs">Mantener la posición al cambiar de pestaña</string>
-    <string name="settings_keep_scroll_tabs_desc">Al cambiar de pestaña, permaneces donde estabas en vez de saltar arriba.</string>
     <string name="grid_default_columns_section">Fotos por fila</string>
     <!-- FAQ -->
     <string name="faq_title">Preguntas frecuentes</string>
@@ -1509,7 +1481,6 @@
     <string name="whats_new_albums_drag">Para tu propio orden, mantén pulsado un álbum, elige Reordenar álbumes y arrastra las portadas donde quieras. El orden se mantiene hasta que lo cambies.</string>
     <string name="whats_new_crop_title">Recortar con una forma fija</string>
     <string name="whats_new_crop_body">Elige 1:1, 4:3, 16:9 o la forma de la propia foto en el editor, y el marco la conserva mientras lo haces más pequeño.</string>
-    <string name="whats_new_history_desc">Consulta las novedades de esta actualización y de las anteriores</string>
     <string name="whats_new_version">Versión %1$s</string>
     <string name="whats_new_more_241">Además, puedes cambiar la fecha de varias fotos a la vez, ocultar una carpeta entera del dispositivo, y las actualizaciones se instalan sin preguntar cada vez. Las fotos borradas en otro dispositivo desaparecen también aquí, incluso con una biblioteca grande, cambiar el nombre ya no deja una copia atrás, y la copia de seguridad, la ocultación, los duplicados y los álbumes compartidos son más estables.</string>
     <string name="whats_new_more_240">Además, los enlaces copiados quedan ocultos en la vista previa del portapapeles, los tamaños de archivo coinciden en todos los sitios donde aparecen, la liberación automática consulta con Drive antes de quitar una copia del teléfono, y los álbumes y las selecciones grandes aguantan mejor.</string>
@@ -1644,9 +1615,7 @@
     <string name="metadata_editor_set">Establecer</string>
     <string name="metadata_editor_place_label">Lugar</string>
     <string name="metadata_editor_place_none">Sin ubicación</string>
-    <string name="metadata_editor_place_choose_country">Elige un país</string>
-    <string name="metadata_editor_place_country_hint">Elegir solo un país coloca la foto en su centro.</string>
-    <string name="metadata_editor_place_search_city">Buscar una ciudad</string>
+    <string name="metadata_editor_place_search">Buscar un país o una ciudad</string>
     <string name="metadata_editor_place_remove">Quitar ubicación</string>
     <string name="metadata_editor_country_search">Buscar países</string>
     <string name="metadata_editor_note_cloud">Esta foto conserva la fecha y el lugar con los que se subió a Proton Drive, así que no se pueden cambiar aquí.</string>
@@ -1683,7 +1652,6 @@
     <string name="settings_ai_section">Aprendizaje automático</string>
     <string name="settings_ai_nav_desc">Copiar texto, ocultar caras y más, en el dispositivo</string>
     <string name="settings_ai_enable">Activar aprendizaje automático</string>
-    <string name="settings_ai_enable_desc">Todo se ejecuta en tu teléfono. Al activarlo, la aplicación podrá descargar los pequeños modelos que necesita y usar Copiar texto y Ocultar caras. Llegarán más funciones.</string>
     <string name="settings_ai_ocr">Copiar texto</string>
     <string name="settings_ai_ocr_desc">Reconoce y copia el texto que ves en una foto</string>
     <string name="settings_ai_ocr_downloading">Descargando…</string>
@@ -1728,18 +1696,14 @@
     <string name="settings_ai_semantic_indexing_waiting">Esperando los modelos de búsqueda</string>
     <string name="settings_ai_semantic_ready">Tus fotos se pueden buscar</string>
     <string name="settings_ai_semantic_rescan">Volver a analizar todas las fotos</string>
-    <string name="settings_ai_semantic_rescan_desc">Borra el índice de búsqueda y lo vuelve a crear para cada foto.</string>
     <string name="settings_ai_semantic_rescan_confirm_title">¿Volver a analizar todas las fotos?</string>
     <string name="settings_ai_semantic_rescan_confirm_msg">El índice de búsqueda se borra y luego se vuelve a crear para cada foto, lo que puede tardar un rato.</string>
     <string name="settings_ai_semantic_not_indexed">Tus fotos aún no están indexadas</string>
     <string name="settings_ai_semantic_clear">Borrar datos de búsqueda</string>
-    <string name="settings_ai_semantic_clear_desc">Elimina el índice de búsqueda de todas las fotos de este teléfono.</string>
     <string name="settings_ai_semantic_clear_confirm_title">¿Borrar datos de búsqueda?</string>
     <string name="settings_ai_semantic_clear_confirm_msg">Esto elimina el índice de búsqueda de todas las fotos. Tus fotos no se ven afectadas.</string>
     <string name="settings_face_section">Caras reconocidas</string>
     <string name="settings_face_maintenance">Mantenimiento</string>
-    <string name="settings_face_rescan_desc">Detecta las caras de nuevo y conserva tus nombres y correcciones.</string>
-    <string name="settings_face_clear_desc">Elimina todas las personas encontradas y todos los datos faciales de este teléfono.</string>
     <string name="settings_ai_indexing_running">Analizando tus fotos</string>
     <string name="settings_ai_indexing_waiting">Esperando el modelo de caras</string>
     <string name="settings_ai_indexing_waiting_other">Esperando a que termine otra tarea en el dispositivo</string>
@@ -1908,9 +1872,7 @@
     <string name="news_title">Noticias</string>
     <string name="news_banner">Novedades disponibles</string>
     <string name="news_new_badge">Nuevo</string>
-    <string name="news_settings_desc">Mensajes y novedades sobre la app</string>
     <string name="news_show_title">Mostrar noticias</string>
-    <string name="news_show_desc">Un pequeño punto aparece cuando hay algo nuevo</string>
     <string name="news_empty">Nada nuevo por ahora.</string>
     <string name="news_read_more">Leer más</string>
     <string name="news_feedback_heading">¿Preguntas o un error?</string>
@@ -2229,7 +2191,6 @@
     <string name="folder_rename">Renombrar carpeta</string>
     <string name="folder_renamed">Renombrado a \"%1$s\"</string>
     <string name="settings_face_excluded">Caras excluidas</string>
-    <string name="settings_face_excluded_desc">Revisa las caras que quitaste de una persona o descartaste</string>
     <string name="face_excluded_empty">No hay nada excluido. Las caras que quites de una persona o descartes por no ser una persona aparecen aquí para que puedas deshacerlo.</string>
     <string name="face_excluded_not_person_section">No es esta persona: %1$s</string>
     <string name="face_excluded_ignored_section">Descartadas (no es una persona)</string>
@@ -2244,5 +2205,4 @@
     <string name="person_move_confirm_body">¿Mover las fotos seleccionadas a %1$s?</string>
     <string name="person_move_confirm">Mover</string>
     <string name="settings_face_auto_merge">Combinar coincidencias probables automáticamente</string>
-    <string name="settings_face_auto_merge_desc">Cuando un análisis encuentra un grupo que muy probablemente es alguien a quien ya nombraste, lo añade sin preguntar. Las combinaciones no se pueden deshacer, así que déjalo desactivado para confirmar cada una tú mismo.</string>
 </resources>

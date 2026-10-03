@@ -218,6 +218,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Beállítások</string>
+    <string name="settings_more_title">További beállítások</string>
+    <string name="settings_more_desc">AI, adatvédelem, értesítések és súgó</string>
     <string name="settings_search_hint">Beállítások keresése</string>
     <string name="settings_search_no_results">Nincs megfelelő beállítás</string>
     <string name="settings_sync_wifi_only">Szinkronizálás csak Wi‑Fi-n</string>
@@ -252,20 +254,16 @@
     <string name="settings_account_link_drive_web_desc">Fotók és fájlok böngészése a drive.proton.me oldalon.</string>
     <string name="cancel">Mégse</string>
     <string name="settings_language_system">Rendszer alapértelmezett</string>
-    <string name="settings_sync_wifi_desc">Szinkronizálás szüneteltetése mobilhálózaton</string>
     <string name="settings_fullres_wifi_only">Teljes felbontás csak Wi‑Fi-n</string>
     <string name="settings_fullres_wifi_only_desc">Felhős teljes felbontású fotók és videók letöltése csak Wi‑Fi-n. Az előnézetek mindig betöltődnek.</string>
     <string name="viewer_wifi_for_full_quality">Csatlakozz Wi‑Fi-re a teljes minőséghez</string>
-    <string name="settings_sync_now_action">Szinkronizálás →</string>
     <string name="settings_backup_folders">Mentett mappák</string>
     <string name="settings_backup_folders_desc">Válaszd ki, mely mappákat mentse</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">Mi kerül mentésre</string>
     <string name="settings_network_section">Hálózathasználat</string>
     <string name="settings_continuous_backup">Folyamatos mentés</string>
-    <string name="settings_continuous_backup_desc">A fotók és videók másodperceken belül feltöltődnek.</string>
     <string name="settings_backup_everything">Minden mentése</string>
-    <string name="settings_backup_everything_desc">Az eszközön lévő összes fotó és videó automatikus feltöltése.</string>
     <!-- Excluded folders feature (paired with backup-everything mode). -->
     <string name="settings_excluded_folders">Kizárt mappák</string>
     <string name="settings_excluded_folders_desc_none">Nincs kizárt mappa</string>
@@ -275,6 +273,7 @@
     <string name="settings_excluded_folders_intro">Az ezekben a mappákban lévő fotók akkor sem kerülnek mentésre, ha a „Minden mentése” be van kapcsolva. A már feltöltött elemek a Drive-on maradnak.</string>
     <string name="settings_excluded_folders_empty">Nem található mappa ezen az eszközön</string>
     <string name="settings_excluded_folders_count_label">%1$d / %2$d mappa kizárva</string>
+    <string name="settings_excluded_albums_count_label">%1$d / %2$d album kizárva</string>
     <string name="settings_excluded_folders_select_all">Mind kizárása</string>
     <string name="settings_excluded_folders_deselect_all">Mind visszavétele</string>
     <!-- Album mirror -->
@@ -334,7 +333,6 @@
     <string name="settings_security">Biztonság</string>
     <string name="settings_security_desc">Alkalmazás zárolása, Rejtett fotók</string>
     <string name="settings_strip_metadata_upload">Metaadatok eltávolítása feltöltéskor</string>
-    <string name="settings_strip_metadata_upload_desc">Eltávolítja a hely- és kameraadatokat a feltöltött másolatból. A telefonon lévő másolat megtartja ezeket, kivéve ha az alábbi helyi tükrözés be van kapcsolva. Kamera-, időbélyeg- és szoftvermezők hozzáadhatók a Testreszabás alatt.</string>
     <string name="settings_mirror_strip_local">Módosítások tükrözése a helyi fájlokra</string>
     <string name="settings_mirror_strip_local_desc">Ezeket az adatokat a telefonon lévő másolatból is eltávolítja, így a mentett és a helyi fájl azonos marad. Az összes fájl elérése szükséges hozzá, és módosítja az eredeti fájljaidat.</string>
     <string name="settings_mirror_compress_local">A helyi fájl tömörítése is</string>
@@ -345,7 +343,6 @@
     <string name="onboarding_mirror_toggle_desc">Feltöltéskor ugyanazokat a metaadat- és fájlnév-módosításokat a helyi eredetin is elvégzi, így a helyi fájl és a felhő-másolat megegyezik. Ez módosítja az eredeti fájljaidat.</string>
     <string name="onboarding_mirror_grant">Összes fájl elérése</string>
     <string name="settings_rename_on_upload">Átnevezés készítés dátumára feltöltéskor</string>
-    <string name="settings_rename_on_upload_desc">A feltöltött másolatot a fotó vagy videó metaadataiból kinyert felvételi dátum és idő alapján nevezi el. A telefonon lévő fájlok megtartják a nevüket.</string>
     <string name="settings_delete_after_backup">Eszközről törlés mentés után</string>
     <string name="settings_delete_after_backup_desc">A sikeres Drive-ra mentés után törli a fájl helyi másolatát. Android 11+ rendszeren előbb az eszköz kukájába kerül, ahonnan körülbelül egy hónapig visszaállítható.</string>
     <string name="settings_strip_gps">GPS-hely eltávolítása</string>
@@ -358,13 +355,11 @@
     <string name="settings_strip_software_desc">Szoftver, megjegyzés, szerző és szerzői jog mezők eltávolítása</string>
     <string name="settings_strip_authorship">Szerző és szerzői jog eltávolítása</string>
     <string name="settings_strip_share">Metaadatok eltávolítása megosztáskor</string>
-    <string name="settings_strip_share_title">Metaadatok megosztáskor</string>
     <string name="settings_strip_share_desc">A kiválasztott mezőket csak a megosztott másolatból távolítja el, az eredetiből soha. Videóknál csak a helyadatok tűnnek el.</string>
     <string name="settings_strip_format_note">Egyes formátumok, például a HEIC, nem tudják tárolni a metaadat-módosításokat. Ha a metaadat-eltávolítás be van kapcsolva, az ilyen fénykép feltöltött másolata JPEG formátumúra alakul, hogy a kiválasztott adatok valóban eltűnjenek. Az eszközön lévő fénykép változatlan marad.</string>
-    <string name="settings_compress_upload_desc">Egy könnyebb változatot tölt fel a hely megtakarításához. A telefonon lévő másolat teljes minőségű marad, kivéve ha az alábbi helyi tükrözés be van kapcsolva.</string>
     <string name="settings_compress_photos">Fényképek tömörítése</string>
     <string name="settings_compress_videos">Videók tömörítése</string>
-    <string name="settings_compress_videos_desc">A videókat kisebb méretűre kódolja át feltöltés előtt. Az eszközön lévő eredeti soha nem változik meg.</string>
+    <string name="settings_compress_hdr_photos">HDR fotók tömörítése is</string>
     <string name="settings_compress_tier_light">Enyhe</string>
     <string name="settings_compress_tier_light_desc">Alig látható minőségromlás, mérsékelt helymegtakarítás</string>
     <string name="settings_compress_tier_balanced">Kiegyensúlyozott</string>
@@ -372,7 +367,6 @@
     <string name="settings_compress_tier_space_saver">Helytakarékos</string>
     <string name="settings_compress_tier_space_saver_desc">A legkisebb feltöltések, láthatóbb minőségromlás</string>
     <string name="settings_app_lock">Alkalmazás zárolása</string>
-    <string name="settings_app_lock_desc">Biometrikus vagy PIN-azonosítás az alkalmazás indításakor</string>
     <string name="settings_app_lock_timeout">Zárolás ennyi után</string>
     <string name="settings_app_lock_timeout_desc">Ennyi háttérben töltött idő után újra lezárja az appot</string>
     <string name="settings_app_lock_timeout_immediate">Azonnal</string>
@@ -385,7 +379,6 @@
     <string name="settings_app_lock_timeout_15min">15 perc</string>
     <string name="settings_app_lock_timeout_1h">1 óra</string>
     <string name="settings_clear_cache_on_close">Gyorsítótár ürítése bezáráskor</string>
-    <string name="settings_clear_cache_on_close_desc">A megnézett felhős fotók helyi másolatainak törlése, amikor az alkalmazás a háttérbe kerül. Következő megnyitáskor újra letölti őket.</string>
     <string name="settings_screenshot_overlay">Képernyőkép gyorsműveletek</string>
     <string name="settings_screenshot_overlay_desc">Egy kis műveletsávot jelenít meg az új képernyőképen, hogy szerkeszthesd, megoszthasd, feltölthesd a Drive-ba, vagy hivatkozást készíthess hozzá. Néhány telefonon a beépített képernyőkép-eszköztár nem kapcsolható ki, ezért mindkettő megjelenhet.</string>
     <string name="screenshot_overlay_channel_desc">A képernyőkép-gyorsműveletek futása közben megjelenő értesítés.</string>
@@ -410,18 +403,11 @@
     <string name="settings_timeline_section_layout">Elrendezés</string>
     <string name="settings_timeline_section_display">Megjelenítés</string>
     <string name="settings_show_scroll_date">Dátum mutatása görgetés közben</string>
-    <string name="settings_show_scroll_date_desc">Görgetés közben egy lebegő hónap- és évcímke jelenik meg az idővonal felett, így mindig van időbeli viszonyítási pontod.</string>
     <string name="settings_reverse_timeline">Idővonal fordított sorrendje</string>
-    <string name="settings_reverse_timeline_desc">A legrégebbi fotók legyenek felül, a legújabbak alul. Az idővonal a legújabb fotóidnál nyílik meg.</string>
     <string name="settings_mosaic_grid">Mozaik rács</string>
-    <string name="settings_mosaic_grid_desc">Az idővonal lépcsőzetes mozaikként jelenik meg, ahol minden fotó megtartja a saját formáját, így az álló fotók magasabbak lesznek.</string>
     <string name="settings_seamless_grid">Széltől szélig</string>
-    <string name="settings_seamless_grid_desc">Sűrűbb rács szögletes sarkokkal és a képernyő széléig érő bélyegképekkel.</string>
-    <string name="timeline_filter_subtitle">Válaszd ki, mi ne jelenjen meg a fő Fotók idővonaladon. Az elrejtett fotók az eszközön maradnak és tovább mentődnek.</string>
     <string name="timeline_filter_categories_header">Kategória sáv</string>
     <string name="timeline_filter_layout_desc">Minden fotórácsra érvényes</string>
-    <string name="timeline_filter_reorder_hint">A nyilakkal állítsd be a Fotók idővonalad fölött megjelenő kategória sáv sorrendjét.</string>
-    <string name="timeline_filter_per_album_hint">Egyes albumok elrejtése az idővonalról. A fenti kapcsoló egyszerre mindet elrejti.</string>
     <string name="timeline_filter_hidden_album">Rejtett album</string>
     <string name="timeline_filter_albums_header">Drive-albumok</string>
     <string name="timeline_filter_more_settings">További beállítások</string>
@@ -430,7 +416,6 @@
     <string name="settings_telemetry_on">Be</string>
     <string name="settings_telemetry_off">Ki</string>
     <string name="settings_telemetry_checking">Ellenőrzés…</string>
-    <string name="settings_privacy_map_tiles_note">A térkép háttércsempéi az OpenStreetMap szervereiről érkeznek, így azok látják az IP-címedet és a térképnek azt a részét, amit épp nézel. A térkép a fotóidat és a helyadataikat soha nem küldi el.</string>
     <string name="settings_hidden_photos">Rejtett fotók</string>
     <string name="settings_hidden_photos_desc">A főgalériából elrejtett fotók, az eszköz biometriájával vagy PIN-jével feloldva</string>
     <string name="settings_appearance">Megjelenés és nyelv</string>
@@ -530,13 +515,9 @@
     <string name="map_style_modern">Világtérkép</string>
     <string name="map_style_modern_summary">Modern földgömb, amelyet a helyeidhez pörgethetsz.</string>
     <string name="settings_amoled_black">Tiszta fekete (AMOLED)</string>
-    <string name="settings_amoled_black_summary">Valódi fekete háttér használata sötét módban, hogy az OLED kijelzők kevesebb energiát fogyasszanak.</string>
     <string name="settings_tint_cloud">Felhő jelvények a paletta színével</string>
-    <string name="settings_tint_cloud_summary">A mentett fotók felhő jelvénye a paletta színét használja a zöld helyett.</string>
     <string name="settings_gif_autoplay_grid">GIF-ek lejátszása a rácsokban</string>
-    <string name="settings_gif_autoplay_grid_summary">A GIF-ek animálnak az idővonalon, az albumokban és az eszközmappákban. Kikapcsolva állókockát mutatnak.</string>
     <string name="settings_gif_autoplay_covers">GIF album borítók lejátszása</string>
-    <string name="settings_gif_autoplay_covers_summary">Az album borítója animál, ha GIF, a felhő albumoknál is (a borító egyszer töltődik le).</string>
 
     <!-- Language -->
     <string name="language_en">Angol, English</string>
@@ -1011,7 +992,6 @@
     <string name="update_downloading">Letöltés… %1$d%%</string>
     <string name="update_install_prompt">A letöltés kész. Telepíted?</string>
     <string name="update_check_settings_row">Frissítések keresése</string>
-    <string name="update_check_settings_summary">Jelenlegi verzió: %1$s</string>
     <string name="update_no_update">A legfrissebb verziót használod.</string>
     <string name="update_check_failed">Nem sikerült ellenőrizni a frissítéseket. Próbáld újra később.</string>
     <string name="update_permission_required">Engedélyezd az ismeretlen alkalmazások telepítését a rendszerbeállításokban.</string>
@@ -1105,16 +1085,11 @@
     <string name="force_update_body">Ez a verzió már nem támogatott. A folytatáshoz frissítsd az appot.</string>
     <string name="force_update_action">Frissítés</string>
     <string name="notifications_title">Értesítések</string>
-    <string name="notifications_subtitle">Válaszd ki, mely értesítéseket jelenítheti meg az alkalmazás. Alapból minden be van kapcsolva.</string>
-    <string name="notifications_nav_desc">Válaszd ki, mely értesítéseket látod</string>
     <string name="notifications_backup_status">Folyamatos háttér-értesítés</string>
     <string name="notifications_backup_status_desc">Megjeleníti a folyamatos értesítést, amíg az alkalmazás új fotókat figyel. A mentés ettől függetlenül fut, és a feltöltési értesítések kikapcsolva is megjelennek; az új fotók csak kicsit kevésbé azonnal kerülnek be.</string>
     <string name="notifications_album_download">Albumletöltések</string>
-    <string name="notifications_album_download_desc">Megjeleníti a folyamatot és az összegzést, amikor egy albumot letöltesz az eszközödre.</string>
     <string name="notifications_delete_reminder">Mentés utáni törlési emlékeztető</string>
-    <string name="notifications_delete_reminder_desc">Mentés után emlékeztessen, mely fotók távolíthatók el biztonságosan erről az eszközről.</string>
     <string name="notifications_update_available">Új verzió érhető el</string>
-    <string name="notifications_update_available_desc">Újabb verzió keresése a háttérben, és értesítés küldése, amint megjelenik egy. Wi-Fin a frissítés előre letöltődik, így a telepítés azonnali.</string>
     <string name="update_channel_name">Alkalmazásfrissítések</string>
     <string name="update_channel_desc">Jelzi, ha elérhető az alkalmazás újabb verziója.</string>
     <string name="update_notification_text">Koppints a(z) %1$s verzió telepítéséhez.</string>
@@ -1130,7 +1105,6 @@
     <string name="albums_filter_sheet_title">Albumszűrő</string>
     <string name="albums_filter_default_heading">Alapértelmezett megnyitáskor</string>
     <string name="albums_filter_remember_last">Utoljára használt szűrő megjegyzése</string>
-    <string name="albums_filter_remember_last_summary">Az albumok az utoljára kiválasztott szűrővel nyílnak meg</string>
     <string name="albums_show_collection">Gyűjtemény megjelenítése</string>
     <string name="albums_show_collection_summary">Az emberek, a helyek és az „Ezen a napon” továbbra is elérhetők a keresésben</string>
     <string name="albums_filter_excluded">Kizárt</string>
@@ -1428,9 +1402,7 @@
 
     <!-- Grid layout (Appearance) -->
     <string name="grid_remember_last">Utolsó nézet megjegyzése</string>
-    <string name="grid_remember_last_desc">A fotók az utoljára használt nagyításon nyíljanak meg</string>
     <string name="settings_keep_scroll_tabs">Hely megőrzése lapváltáskor</string>
-    <string name="settings_keep_scroll_tabs_desc">Lapváltáskor ott maradsz, ahol voltál, a tetejére ugrás helyett.</string>
     <string name="grid_default_columns_section">Kép / sor</string>
     <!-- FAQ -->
     <string name="faq_title">Gyakori kérdések</string>
@@ -1511,7 +1483,6 @@
     <string name="whats_new_albums_drag">Saját sorrendhez tartsd nyomva az albumot, válaszd az Albumok átrendezése pontot, majd húzd a borítókat oda, ahová szeretnéd. A sorrend megmarad, amíg meg nem változtatod.</string>
     <string name="whats_new_crop_title">Vágás rögzített alakban</string>
     <string name="whats_new_crop_body">Válaszd az 1:1, 4:3, 16:9 arányt vagy a fotó saját alakját a szerkesztőben, és a keret megtartja azt, miközben kisebbre húzod.</string>
-    <string name="whats_new_history_desc">Olvasd el ennek és a korábbi frissítéseknek az újdonságait</string>
     <string name="whats_new_version">%1$s verzió</string>
     <string name="whats_new_more_241">Ráadásul több fotó dátumát egyszerre eltolhatod, elrejthetsz egy egész eszközmappát, és a frissítések minden alkalommal rákérdezés nélkül települnek. A másik eszközön törölt fotók itt is eltűnnek, nagy gyűjtemény esetén is, az átnevezés már nem hagy hátra másolatot, a biztonsági mentés, a rejtés, a duplikátumok és a megosztott albumok pedig stabilabbak lettek.</string>
     <string name="whats_new_more_240">Emellett a másolt hivatkozások rejtve maradnak a vágólap előnézetében, a fájlméretek mindenhol egyeznek, az automatikus helyfelszabadítás a Drive-on is ellenőriz, mielőtt eltávolít egy másolatot a telefonodról, és a nagy albumok és kijelölések stabilabban működnek.</string>
@@ -1608,9 +1579,7 @@
     <string name="metadata_editor_set">Beállítás</string>
     <string name="metadata_editor_place_label">Hely</string>
     <string name="metadata_editor_place_none">Nincs helyadat</string>
-    <string name="metadata_editor_place_choose_country">Válassz országot</string>
-    <string name="metadata_editor_place_country_hint">Ha csak országot választasz, a fotó az ország közepére kerül.</string>
-    <string name="metadata_editor_place_search_city">Város keresése</string>
+    <string name="metadata_editor_place_search">Ország vagy város keresése</string>
     <string name="metadata_editor_place_remove">Helyadat eltávolítása</string>
     <string name="metadata_editor_country_search">Országok keresése</string>
     <string name="metadata_editor_note_cloud">Ez a fotó megtartja a dátumot és a helyet, amellyel a Proton Drive-ra fel lett töltve, ezért ezek itt nem módosíthatók.</string>
@@ -1646,7 +1615,6 @@
     <string name="settings_ai_section">Gépi tanulás</string>
     <string name="settings_ai_nav_desc">Szövegmásolás, arcelrejtés és még több, közvetlenül az eszközön</string>
     <string name="settings_ai_enable">Gépi tanulás bekapcsolása</string>
-    <string name="settings_ai_enable_desc">Minden a telefonodon fut. Ha bekapcsolod, az alkalmazás letöltheti a szükséges kis modelleket, és használhatod a szöveg másolása és az arcok elrejtése funkciókat. Több funkció is érkezik.</string>
     <string name="settings_ai_ocr">Szöveg másolása</string>
     <string name="settings_ai_ocr_desc">Felismeri és lemásolja a fényképen látható szöveget</string>
     <string name="settings_ai_ocr_downloading">Letöltés…</string>
@@ -1691,18 +1659,14 @@
     <string name="settings_ai_semantic_indexing_waiting">Várakozás a keresési modellekre</string>
     <string name="settings_ai_semantic_ready">A fényképeid kereshetők</string>
     <string name="settings_ai_semantic_rescan">Az összes fotó újravizsgálata</string>
-    <string name="settings_ai_semantic_rescan_desc">Törli a keresési indexet, majd minden fotóhoz újraépíti.</string>
     <string name="settings_ai_semantic_rescan_confirm_title">Újravizsgálod az összes fotót?</string>
     <string name="settings_ai_semantic_rescan_confirm_msg">A keresési index törlődik, majd minden fotóhoz újraépül, ami eltarthat egy ideig.</string>
     <string name="settings_ai_semantic_not_indexed">A fényképeid még nincsenek indexelve</string>
     <string name="settings_ai_semantic_clear">Keresési adatok törlése</string>
-    <string name="settings_ai_semantic_clear_desc">Eltávolítja az összes fénykép keresési indexét erről a telefonról.</string>
     <string name="settings_ai_semantic_clear_confirm_title">Törlöd a keresési adatokat?</string>
     <string name="settings_ai_semantic_clear_confirm_msg">Ez eltávolítja minden fénykép keresési indexét. A fényképeidet ez nem érinti.</string>
     <string name="settings_face_section">Felismert arcok</string>
     <string name="settings_face_maintenance">Karbantartás</string>
-    <string name="settings_face_rescan_desc">Újra felismeri az arcokat, megtartva a neveidet és javításaidat.</string>
-    <string name="settings_face_clear_desc">Eltávolít minden megtalált embert és az összes arcadatot erről a telefonról.</string>
     <string name="settings_ai_indexing_running">Fotók átvizsgálása</string>
     <string name="settings_ai_indexing_waiting">Várakozás az arc-modellre</string>
     <string name="settings_ai_indexing_waiting_other">Várakozás egy másik, eszközön futó feladat befejezésére</string>
@@ -1871,9 +1835,7 @@
     <string name="news_title">Hírek</string>
     <string name="news_banner">Új hír érkezett</string>
     <string name="news_new_badge">Új</string>
-    <string name="news_settings_desc">Üzenetek és frissítések az alkalmazásról</string>
     <string name="news_show_title">Hírek megjelenítése</string>
-    <string name="news_show_desc">Egy kis pont jelzi, ha van valami új</string>
     <string name="news_empty">Jelenleg nincs semmi új.</string>
     <string name="news_read_more">Tovább</string>
     <string name="news_feedback_heading">Kérdés vagy hiba?</string>
@@ -2191,7 +2153,6 @@
     <string name="folder_rename">Mappa átnevezése</string>
     <string name="folder_renamed">Átnevezve erre: \"%1$s\"</string>
     <string name="settings_face_excluded">Kizárt arcok</string>
-    <string name="settings_face_excluded_desc">Egy személyről levett vagy elvetett arcok áttekintése</string>
     <string name="face_excluded_empty">Nincs kizárt arc. Az egy személyről levett vagy nem személyként elvetett arcok itt jelennek meg, hogy visszavonhasd őket.</string>
     <string name="face_excluded_not_person_section">Nem ez a személy: %1$s</string>
     <string name="face_excluded_ignored_section">Elvetve (nem személy)</string>
@@ -2206,5 +2167,4 @@
     <string name="person_move_confirm_body">Áthelyezed a kijelölt fotókat ide: %1$s?</string>
     <string name="person_move_confirm">Áthelyezés</string>
     <string name="settings_face_auto_merge">Valószínű egyezések automatikus összevonása</string>
-    <string name="settings_face_auto_merge_desc">Ha a vizsgálat talál egy csoportot, ami nagyon valószínűleg egy már elnevezett személy, kérdés nélkül hozzáadja. Az összevonás nem vonható vissza, ezért hagyd kikapcsolva, ha egyesével akarod megerősíteni.</string>
 </resources>

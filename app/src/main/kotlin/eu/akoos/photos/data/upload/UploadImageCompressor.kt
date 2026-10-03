@@ -250,16 +250,18 @@ object UploadImageCompressor {
      * second image and with it the HDR rendition. So one is never compressed and its bytes upload as
      * they are, exactly like the motion-photo skip.
      *
-     * [hasGainMap] is queried LAST, after [compressOnUpload] and the image [mimeType], so the header
-     * probe it performs never runs for an upload that would not be compressed anyway. Side-effect-free
+     * [compressHdrPhotos] is the user's opt-in to compress such a photo anyway, flattening its HDR.
+     * [hasGainMap] is queried LAST, after [compressOnUpload], [compressHdrPhotos] and the image
+     * [mimeType], so the header probe it performs never runs for an upload that would not be skipped. Side-effect-free
      * apart from that caller-supplied probe, so a plain JVM test pins it with no Android and no file.
      */
     fun skipsCompressionForGainMap(
         mimeType: String,
         compressOnUpload: Boolean,
+        compressHdrPhotos: Boolean = false,
         hasGainMap: () -> Boolean = { false },
     ): Boolean {
-        if (!compressOnUpload || !isImageMime(mimeType)) return false
+        if (!compressOnUpload || compressHdrPhotos || !isImageMime(mimeType)) return false
         return hasGainMap()
     }
 

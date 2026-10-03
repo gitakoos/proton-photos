@@ -413,6 +413,8 @@
 
     <!-- Settings -->
     <string name="settings_title">Nastavení</string>
+    <string name="settings_more_title">Další nastavení</string>
+    <string name="settings_more_desc">AI, soukromí, oznámení a nápověda</string>
     <string name="settings_search_hint">Hledat v nastavení</string>
     <string name="settings_search_no_results">Žádné odpovídající nastavení</string>
     <string name="settings_sync_wifi_only">Synchronizovat jen přes Wi‑Fi</string>
@@ -447,20 +449,16 @@
     <string name="settings_account_link_drive_web_desc">Procházejte své fotky a soubory na drive.proton.me.</string>
     <string name="cancel">Zrušit</string>
     <string name="settings_language_system">Výchozí systémový</string>
-    <string name="settings_sync_wifi_desc">Pozastavit synchronizaci v mobilní síti</string>
     <string name="settings_fullres_wifi_only">Plné rozlišení jen přes Wi‑Fi</string>
     <string name="settings_fullres_wifi_only_desc">Stahovat cloudové fotky a videa v plném rozlišení jen přes Wi‑Fi. Náhledy se načítají vždy.</string>
     <string name="viewer_wifi_for_full_quality">Připojte se k Wi‑Fi pro plnou kvalitu</string>
-    <string name="settings_sync_now_action">Synchronizovat →</string>
     <string name="settings_backup_folders">Složky pro zálohu</string>
     <string name="settings_backup_folders_desc">Vyberte, které složky zálohovat</string>
     <!-- Sync settings reorganisation (v1.3.2): two grouped sections. -->
     <string name="settings_what_backed_up_section">Co se zálohuje</string>
     <string name="settings_network_section">Využití sítě</string>
     <string name="settings_continuous_backup">Průběžné zálohování</string>
-    <string name="settings_continuous_backup_desc">Fotky a videa se nahrají během několika sekund od pořízení.</string>
     <string name="settings_backup_everything">Zálohovat vše</string>
-    <string name="settings_backup_everything_desc">Automaticky nahrávat každou fotku a video v tomto zařízení.</string>
     <!-- Excluded folders feature (paired with backup-everything mode). -->
     <string name="settings_excluded_folders">Vyloučené složky</string>
     <string name="settings_excluded_folders_desc_none">Žádné vyloučené složky</string>
@@ -470,6 +468,7 @@
     <string name="settings_excluded_folders_intro">Fotky v těchto složkách se nezálohují, i když je zapnuto \"Zálohovat vše\". Již nahrané položky zůstanou na Drive.</string>
     <string name="settings_excluded_folders_empty">V tomto zařízení nebyly nalezeny žádné složky</string>
     <string name="settings_excluded_folders_count_label">Vyloučeno %1$d z %2$d složek</string>
+    <string name="settings_excluded_albums_count_label">%1$d z %2$d alb vyloučeno</string>
     <string name="settings_excluded_folders_select_all">Vyloučit vše</string>
     <string name="settings_excluded_folders_deselect_all">Zahrnout vše</string>
     <!-- Album mirror -->
@@ -556,7 +555,6 @@
     <string name="settings_security">Zabezpečení</string>
     <string name="settings_security_desc">Zámek aplikace, Skryté fotky</string>
     <string name="settings_strip_metadata_upload">Odstranit metadata při nahrávání</string>
-    <string name="settings_strip_metadata_upload_desc">Odebere polohu a údaje o fotoaparátu z nahrané kopie. Kopie v telefonu si je ponechá, pokud není zapnuté místní zrcadlení níže. Pole fotoaparátu, časové razítko a software přidejte v sekci Přizpůsobit.</string>
     <string name="settings_mirror_strip_local">Zrcadlit změny do místních souborů</string>
     <string name="settings_mirror_strip_local_desc">Odebere tyto údaje i z kopie v telefonu, takže zálohovaná kopie a místní soubor zůstanou totožné. Vyžaduje přístup ke všem souborům a změní vaše původní soubory.</string>
     <string name="settings_mirror_compress_local">Komprimovat i místní soubor</string>
@@ -567,7 +565,6 @@
     <string name="onboarding_mirror_toggle_desc">Při zálohování aplikovat stejné změny metadat a názvu souboru i na originál v zařízení, aby místní soubor a zálohovaná kopie zůstaly totožné. Tím se změní vaše původní soubory.</string>
     <string name="onboarding_mirror_grant">Povolit přístup ke všem souborům</string>
     <string name="settings_rename_on_upload">Přejmenovat na datum pořízení při nahrávání</string>
-    <string name="settings_rename_on_upload_desc">Pojmenuje nahranou kopii podle data a času pořízení z metadat fotky nebo videa. Soubory v telefonu si ponechají své názvy.</string>
     <string name="settings_delete_after_backup">Po záloze smazat soubor v zařízení</string>
     <string name="settings_delete_after_backup_desc">Odebere místní kopii ze zařízení poté, co je nahrávka na Drive. V systému Android 11+ nejprve putuje do koše zařízení, odkud ji můžete zhruba měsíc obnovit.</string>
     <string name="settings_strip_gps">Odstranit polohu GPS</string>
@@ -580,13 +577,11 @@
     <string name="settings_strip_software_desc">Odstranit pole software, komentář, autor a autorská práva</string>
     <string name="settings_strip_authorship">Odstranit autora a autorská práva</string>
     <string name="settings_strip_share">Odstranit metadata při sdílení</string>
-    <string name="settings_strip_share_title">Metadata při sdílení</string>
     <string name="settings_strip_share_desc">Odstraní vybraná pole pouze ze sdílené kopie, nikdy z originálu. U videí se odstraní pouze poloha.</string>
     <string name="settings_strip_format_note">Některé formáty, například HEIC, nemohou uložit změny metadat. Když je odstraňování metadat zapnuté, nahraná kopie takové fotografie se převede do formátu JPEG, aby se vybraná data skutečně odstranila. Fotografie ve vašem zařízení zůstane beze změny.</string>
-    <string name="settings_compress_upload_desc">Nahraje lehčí verzi pro úsporu místa. Kopie v telefonu zůstane v plné kvalitě, pokud není zapnuté místní zrcadlení níže.</string>
     <string name="settings_compress_photos">Komprimovat fotky</string>
     <string name="settings_compress_videos">Komprimovat videa</string>
-    <string name="settings_compress_videos_desc">Před nahráním převede videa na menší velikost. Originál v zařízení se nikdy nezmění.</string>
+    <string name="settings_compress_hdr_photos">Komprimovat i HDR fotky</string>
     <string name="settings_compress_tier_light">Mírná</string>
     <string name="settings_compress_tier_light_desc">Sotva znatelná ztráta kvality, mírná úspora místa</string>
     <string name="settings_compress_tier_balanced">Vyvážená</string>
@@ -594,7 +589,6 @@
     <string name="settings_compress_tier_space_saver">Úspora místa</string>
     <string name="settings_compress_tier_space_saver_desc">Nejmenší soubory, viditelnější ztráta kvality</string>
     <string name="settings_app_lock">Zámek aplikace</string>
-    <string name="settings_app_lock_desc">Vyžadovat biometriku nebo PIN při otevření aplikace</string>
     <string name="settings_app_lock_timeout">Zamknout po</string>
     <string name="settings_app_lock_timeout_desc">Znovu zamknout aplikaci po této době na pozadí</string>
     <string name="settings_app_lock_timeout_immediate">Okamžitě</string>
@@ -607,7 +601,6 @@
     <string name="settings_app_lock_timeout_15min">15 minut</string>
     <string name="settings_app_lock_timeout_1h">1 hodina</string>
     <string name="settings_clear_cache_on_close">Vymazat mezipaměť při zavření aplikace</string>
-    <string name="settings_clear_cache_on_close_desc">Při zavření aplikace vymazat z mezipaměti zobrazené cloudové fotky</string>
     <string name="settings_screenshot_overlay">Rychlé akce snímku obrazovky</string>
     <string name="settings_screenshot_overlay_desc">Zobrazí malý panel akcí nad novým snímkem obrazovky, abyste jej mohli upravit, sdílet, nahrát na Drive nebo z něj vytvořit odkaz. V některých telefonech nelze vestavěný panel snímků obrazovky vypnout, takže se mohou zobrazit oba.</string>
     <string name="screenshot_overlay_channel_desc">Oznámení zobrazené během běhu rychlých akcí pro snímky obrazovky.</string>
@@ -632,18 +625,11 @@
     <string name="settings_timeline_section_layout">Rozvržení</string>
     <string name="settings_timeline_section_display">Zobrazení</string>
     <string name="settings_show_scroll_date">Zobrazovat datum při posouvání</string>
-    <string name="settings_show_scroll_date_desc">Při posouvání se nad časovou osou objeví plovoucí popisek s měsícem a rokem, takže máte vždy časovou orientaci.</string>
     <string name="settings_reverse_timeline">Obrátit pořadí časové osy</string>
-    <string name="settings_reverse_timeline_desc">Zobrazit nejstarší fotky nahoře a nejnovější dole. Časová osa se otevře u vašich nejnovějších fotek.</string>
     <string name="settings_mosaic_grid">Mozaiková mřížka</string>
-    <string name="settings_mosaic_grid_desc">Uspořádat časovou osu jako odstupňovanou mozaiku, kde si každá fotka zachová svůj tvar, takže fotky na výšku budou vyšší.</string>
     <string name="settings_seamless_grid">Od kraje ke kraji</string>
-    <string name="settings_seamless_grid_desc">Hustší mřížka s pravoúhlými rohy a náhledy, které sahají až k okraji obrazovky.</string>
-    <string name="timeline_filter_subtitle">Vyberte, co skrýt z hlavní časové osy fotek. Skryté fotky zůstanou ve vašem zařízení a dál se zálohují.</string>
     <string name="timeline_filter_categories_header">Lišta kategorií</string>
     <string name="timeline_filter_layout_desc">Platí pro všechny mřížky fotek</string>
-    <string name="timeline_filter_reorder_hint">Šipkami nastavte pořadí lišty kategorií zobrazené nad časovou osou fotek.</string>
-    <string name="timeline_filter_per_album_hint">Skryjte jednotlivá alba z časové osy. Přepínač výše skryje všechna najednou.</string>
     <string name="timeline_filter_hidden_album">Skryté album</string>
     <string name="timeline_filter_albums_header">Alba na Drive</string>
     <string name="timeline_filter_more_settings">Další nastavení</string>
@@ -652,7 +638,6 @@
     <string name="settings_telemetry_on">Zapnutá</string>
     <string name="settings_telemetry_off">Vypnutá</string>
     <string name="settings_telemetry_checking">Zjišťuje se…</string>
-    <string name="settings_privacy_map_tiles_note">Podkladové dlaždice mapy pocházejí z OpenStreetMap, takže jejich servery vidí vaši IP adresu a oblast mapy, kterou si prohlížíte. Vaše fotky ani jejich polohy se nikdy neodesílají.</string>
     <string name="settings_hidden_photos">Skryté fotky</string>
     <string name="settings_hidden_photos_desc">Fotky skryté z hlavní galerie, odemykané biometrikou nebo PINem zařízení</string>
     <string name="settings_appearance">Vzhled a jazyk</string>
@@ -714,13 +699,9 @@
     <string name="map_style_modern">Mapa světa</string>
     <string name="map_style_modern_summary">Moderní glóbus, kterým můžete otáčet ke svým místům.</string>
     <string name="settings_amoled_black">Čistá černá (AMOLED)</string>
-    <string name="settings_amoled_black_summary">V tmavém režimu používat skutečně černé pozadí pro úsporu energie na OLED displejích.</string>
     <string name="settings_tint_cloud">Odznaky cloudu v barvě akcentu</string>
-    <string name="settings_tint_cloud_summary">Použít pro odznaky zálohovaných fotek barvu akcentu místo zelené.</string>
     <string name="settings_gif_autoplay_grid">Přehrávat GIFy v mřížkách</string>
-    <string name="settings_gif_autoplay_grid_summary">Animovat GIFy na časové ose, v albech a ve složkách zařízení. Když je vypnuto, zobrazí se statický snímek.</string>
     <string name="settings_gif_autoplay_covers">Přehrávat GIF obaly alb</string>
-    <string name="settings_gif_autoplay_covers_summary">Animovat obal alba, pokud je to GIF, i u cloudových alb (obal se stáhne jednou).</string>
 
     <!-- Language -->
     <string name="language_en">English, Angličtina</string>
@@ -1158,7 +1139,6 @@
     <string name="update_downloading">Stahování aktualizace… %1$d %%</string>
     <string name="update_install_prompt">Stahování dokončeno. Nainstalovat nyní?</string>
     <string name="update_check_settings_row">Zkontrolovat aktualizace</string>
-    <string name="update_check_settings_summary">Máte verzi %1$s</string>
     <string name="update_no_update">Máte nejnovější verzi.</string>
     <string name="update_check_failed">Nepodařilo se zkontrolovat aktualizace. Zkuste to později.</string>
     <string name="update_permission_required">Pro aktualizaci povolte v nastavení systému instalaci neznámých aplikací.</string>
@@ -1311,16 +1291,11 @@
     <string name="force_update_body">Tato verze již není podporována. Pro pokračování aktualizujte.</string>
     <string name="force_update_action">Aktualizovat</string>
     <string name="notifications_title">Oznámení</string>
-    <string name="notifications_subtitle">Vyberte, která oznámení smí aplikace zobrazovat. Ve výchozím nastavení je vše zapnuté.</string>
-    <string name="notifications_nav_desc">Vyberte, která oznámení uvidíte</string>
     <string name="notifications_backup_status">Trvalé oznámení o zálohování</string>
     <string name="notifications_backup_status_desc">Zobrazovat trvalé oznámení, dokud aplikace sleduje nové fotky. Zálohování běží dál a oznámení o nahrávání se zobrazují i při vypnutí; nové fotky mohou být jen zachyceny o něco méně okamžitě.</string>
     <string name="notifications_album_download">Stahování alb</string>
-    <string name="notifications_album_download_desc">Zobrazovat průběh a souhrn při stahování alba do vašeho zařízení.</string>
     <string name="notifications_delete_reminder">Připomínka mazání po záloze</string>
-    <string name="notifications_delete_reminder_desc">Po záloze mi připomeň, které fotky lze bezpečně odebrat z tohoto zařízení.</string>
     <string name="notifications_update_available">Nová verze k dispozici</string>
-    <string name="notifications_update_available_desc">Hledat novější verzi na pozadí a poslat oznámení, jakmile nějaká vyjde. Na Wi-Fi se aktualizace stáhne předem, takže instalace proběhne okamžitě.</string>
     <string name="update_channel_name">Aktualizace aplikace</string>
     <string name="update_channel_desc">Oznámí, když je k dispozici novější verze aplikace.</string>
     <string name="update_notification_text">Klepnutím nainstalujete verzi %1$s.</string>
@@ -1336,7 +1311,6 @@
     <string name="albums_filter_sheet_title">Filtr alb</string>
     <string name="albums_filter_default_heading">Výchozí při otevření</string>
     <string name="albums_filter_remember_last">Zapamatovat naposledy použitý filtr</string>
-    <string name="albums_filter_remember_last_summary">Otevírat alba s naposledy vybraným filtrem</string>
     <string name="albums_show_collection">Zobrazovat Sbírku</string>
     <string name="albums_show_collection_summary">Lidé, místa a „V tento den“ zůstávají v hledání</string>
     <string name="albums_filter_excluded">Vyloučené</string>
@@ -1483,9 +1457,7 @@
 
     <!-- Grid layout (Appearance) -->
     <string name="grid_remember_last">Pamatovat naposledy použité</string>
-    <string name="grid_remember_last_desc">Otevírat fotky v úrovni přiblížení, kterou jste použili naposledy</string>
     <string name="settings_keep_scroll_tabs">Zachovat pozici při přepnutí karet</string>
-    <string name="settings_keep_scroll_tabs_desc">Při přepnutí karet zůstaneš tam, kde jsi byl, místo skoku nahoru.</string>
     <string name="grid_default_columns_section">Fotek na řádek</string>
     <!-- FAQ -->
     <string name="faq_title">Časté dotazy</string>
@@ -1564,7 +1536,6 @@
     <string name="whats_new_albums_drag">Pro vlastní pořadí podržte album, zvolte Změnit pořadí alb a přetáhněte obaly tam, kam chcete. Pořadí zůstane, dokud ho nezměníte.</string>
     <string name="whats_new_crop_title">Oříznutí v pevném poměru</string>
     <string name="whats_new_crop_body">V editoru zvolte 1:1, 4:3, 16:9 nebo tvar samotné fotky a rámeček si ho zachová i při zmenšování.</string>
-    <string name="whats_new_history_desc">Přečtěte si novinky z této i dřívějších aktualizací</string>
     <string name="whats_new_version">Verze %1$s</string>
     <string name="whats_new_more_241">Navíc můžeš posunout datum několika fotek najednou, skrýt celou složku v zařízení a aktualizace se instalují bez opakovaného dotazu. Fotky smazané na jiném zařízení teď zmizí i tady, a to i u velké knihovny, přejmenování už po sobě nenechává kopii a zálohování, skrývání, duplicity i sdílená alba jsou stabilnější.</string>
     <string name="whats_new_more_240">K tomu zkopírované odkazy zůstávají skryté v náhledu schránky, velikosti souborů se všude shodují, automatické uvolňování místa si před odebráním kopie z telefonu ověří Drive a velká alba i rozsáhlé výběry drží pohromadě lépe.</string>
@@ -1699,9 +1670,7 @@
     <string name="metadata_editor_set">Nastavit</string>
     <string name="metadata_editor_place_label">Místo</string>
     <string name="metadata_editor_place_none">Bez polohy</string>
-    <string name="metadata_editor_place_choose_country">Vyberte zemi</string>
-    <string name="metadata_editor_place_country_hint">Výběr jen země umístí fotku do jejího středu.</string>
-    <string name="metadata_editor_place_search_city">Hledat město</string>
+    <string name="metadata_editor_place_search">Hledat zemi nebo město</string>
     <string name="metadata_editor_place_remove">Odebrat polohu</string>
     <string name="metadata_editor_country_search">Hledat země</string>
     <string name="metadata_editor_note_cloud">Tato fotka si ponechává datum a místo, se kterými byla nahrána na Proton Drive, a proto je zde nelze změnit.</string>
@@ -1739,7 +1708,6 @@
     <string name="settings_ai_section">Strojové učení</string>
     <string name="settings_ai_nav_desc">Kopírování textu, skrývání obličejů a další, přímo v zařízení</string>
     <string name="settings_ai_enable">Zapnout strojové učení</string>
-    <string name="settings_ai_enable_desc">Vše běží ve vašem telefonu. Zapnutím umožníte aplikaci stáhnout potřebné malé modely a používat funkce Kopírovat text a Skrýt obličeje. Další funkce se připravují.</string>
     <string name="settings_ai_ocr">Kopírovat text</string>
     <string name="settings_ai_ocr_desc">Rozpozná a zkopíruje text, který vidíte na fotografii</string>
     <string name="settings_ai_ocr_downloading">Stahování…</string>
@@ -1784,18 +1752,14 @@
     <string name="settings_ai_semantic_indexing_waiting">Čekání na vyhledávací modely</string>
     <string name="settings_ai_semantic_ready">Vaše fotky lze prohledávat</string>
     <string name="settings_ai_semantic_rescan">Znovu prohledat všechny fotky</string>
-    <string name="settings_ai_semantic_rescan_desc">Vymaže vyhledávací index a znovu jej sestaví pro každou fotku.</string>
     <string name="settings_ai_semantic_rescan_confirm_title">Znovu prohledat všechny fotky?</string>
     <string name="settings_ai_semantic_rescan_confirm_msg">Vyhledávací index se vymaže a poté se znovu sestaví pro každou fotku, což může chvíli trvat.</string>
     <string name="settings_ai_semantic_not_indexed">Vaše fotky ještě nejsou zaindexované</string>
     <string name="settings_ai_semantic_clear">Vymazat data vyhledávání</string>
-    <string name="settings_ai_semantic_clear_desc">Odstraní vyhledávací index všech fotek z tohoto telefonu.</string>
     <string name="settings_ai_semantic_clear_confirm_title">Vymazat data vyhledávání?</string>
     <string name="settings_ai_semantic_clear_confirm_msg">Tímto se odstraní vyhledávací index všech fotek. Vašich fotek se to nedotkne.</string>
     <string name="settings_face_section">Rozpoznané obličeje</string>
     <string name="settings_face_maintenance">Údržba</string>
-    <string name="settings_face_rescan_desc">Znovu rozpozná obličeje a zachová vaše jména a opravy.</string>
-    <string name="settings_face_clear_desc">Odstraní všechny nalezené osoby a veškerá data obličejů z tohoto telefonu.</string>
     <string name="settings_ai_indexing_running">Prohledávání fotek</string>
     <string name="settings_ai_indexing_waiting">Čekání na model obličejů</string>
     <string name="settings_ai_indexing_waiting_other">Čekání na dokončení jiné úlohy v zařízení</string>
@@ -1974,9 +1938,7 @@
     <string name="news_title">Aktuality</string>
     <string name="news_banner">Nové novinky</string>
     <string name="news_new_badge">Nové</string>
-    <string name="news_settings_desc">Zprávy a novinky o aplikaci</string>
     <string name="news_show_title">Zobrazovat aktuality</string>
-    <string name="news_show_desc">Malá tečka se objeví, když je něco nového</string>
     <string name="news_empty">Zatím nic nového.</string>
     <string name="news_read_more">Číst více</string>
     <string name="news_feedback_heading">Dotazy nebo chyba?</string>
@@ -2302,7 +2264,6 @@
     <string name="folder_rename">Přejmenovat složku</string>
     <string name="folder_renamed">Přejmenováno na \"%1$s\"</string>
     <string name="settings_face_excluded">Vyloučené obličeje</string>
-    <string name="settings_face_excluded_desc">Zkontrolujte obličeje odebrané z osoby nebo zamítnuté</string>
     <string name="face_excluded_empty">Nic není vyloučeno. Obličeje, které odeberete z osoby nebo je zamítnete, protože nejde o osobu, se zde zobrazí, abyste je mohli vrátit zpět.</string>
     <string name="face_excluded_not_person_section">Nejde o tuto osobu: %1$s</string>
     <string name="face_excluded_ignored_section">Zamítnuto (není osoba)</string>
@@ -2317,5 +2278,4 @@
     <string name="person_move_confirm_body">Přesunout vybrané fotky k %1$s?</string>
     <string name="person_move_confirm">Přesunout</string>
     <string name="settings_face_auto_merge">Automaticky slučovat pravděpodobné shody</string>
-    <string name="settings_face_auto_merge_desc">Když skenování najde skupinu, která je velmi pravděpodobně někdo, koho jste už pojmenovali, přidá ji bez ptaní. Sloučení nelze vrátit zpět, proto to nechte vypnuté, chcete-li každé potvrdit sami.</string>
 </resources>

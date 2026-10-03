@@ -55,14 +55,19 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.whatsnew.ThankYouViewModel
+import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SectionLabel
+import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
 import eu.akoos.photos.presentation.theme.AppColors
 
 @Composable
 fun AboutScreen(
     onBack: () -> Unit,
+    onWhatsNewClick: () -> Unit = {},
+    onFaqClick: () -> Unit = {},
+    onCheckForUpdatesClick: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val colors = AppColors.current
@@ -117,6 +122,25 @@ fun AboutScreen(
                 color = colors.fgDim,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        SettingsCard {
+            NavRow(
+                label = stringResource(R.string.whats_new_title),
+                onClick = onWhatsNewClick,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.faq_settings_entry),
+                onClick = onFaqClick,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.update_check_settings_row),
+                onClick = onCheckForUpdatesClick,
             )
         }
 

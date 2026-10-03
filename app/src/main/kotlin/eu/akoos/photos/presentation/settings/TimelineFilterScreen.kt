@@ -145,14 +145,12 @@ fun TimelineLayoutScreen(
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.grid_remember_last),
-                description = stringResource(R.string.grid_remember_last_desc),
                 checked = settings.gridRememberLast,
                 onCheckedChange = settingsViewModel::setGridRememberLast,
             )
             RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_keep_scroll_tabs),
-                description = stringResource(R.string.settings_keep_scroll_tabs_desc),
                 checked = settings.keepScrollOnTabSwitch,
                 onCheckedChange = settingsViewModel::setKeepScrollOnTabSwitch,
             )
@@ -184,28 +182,24 @@ fun TimelineLayoutScreen(
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_show_scroll_date),
-                description = stringResource(R.string.settings_show_scroll_date_desc),
                 checked = settings.showScrollDate,
                 onCheckedChange = settingsViewModel::setShowScrollDate,
             )
             RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_reverse_timeline),
-                description = stringResource(R.string.settings_reverse_timeline_desc),
                 checked = settings.reverseTimelineOrder,
                 onCheckedChange = settingsViewModel::setReverseTimelineOrder,
             )
             RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_mosaic_grid),
-                description = stringResource(R.string.settings_mosaic_grid_desc),
                 checked = settings.mosaicGrid,
                 onCheckedChange = settingsViewModel::setMosaicGrid,
             )
             RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_seamless_grid),
-                description = stringResource(R.string.settings_seamless_grid_desc),
                 checked = settings.seamlessGrid,
                 onCheckedChange = settingsViewModel::setSeamlessGrid,
             )
@@ -221,14 +215,12 @@ fun TimelineLayoutScreen(
             RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_gif_autoplay_grid),
-                description = stringResource(R.string.settings_gif_autoplay_grid_summary),
                 checked = settings.gifAutoplayGrid,
                 onCheckedChange = settingsViewModel::setGifAutoplayGrid,
             )
             RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_gif_autoplay_covers),
-                description = stringResource(R.string.settings_gif_autoplay_covers_summary),
                 checked = settings.gifAutoplayCovers,
                 onCheckedChange = settingsViewModel::setGifAutoplayCovers,
             )
@@ -244,11 +236,6 @@ fun TimelineCategoriesScreen(onBack: () -> Unit) {
         title = stringResource(R.string.timeline_filter_categories_header),
         onBack = onBack,
     ) {
-        Text(
-            stringResource(R.string.timeline_filter_reorder_hint),
-            color = FgMute, fontSize = 12.sp, lineHeight = 17.sp,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
         SettingsCard {
             Column(modifier = Modifier.padding(vertical = 6.dp)) {
                 CategoryReorderList()
@@ -270,11 +257,6 @@ fun TimelineAlbumsScreen(
         title = stringResource(R.string.timeline_filter_albums_header),
         onBack = onBack,
     ) {
-        Text(
-            stringResource(R.string.timeline_filter_subtitle),
-            color = FgMute, fontSize = 13.sp, lineHeight = 18.sp,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_hide_album_photos),
@@ -284,10 +266,13 @@ fun TimelineAlbumsScreen(
             )
         }
         if (filterState.albums.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
-                stringResource(R.string.timeline_filter_per_album_hint),
-                color = FgMute, fontSize = 12.sp, lineHeight = 17.sp,
+                stringResource(
+                    R.string.settings_excluded_albums_count_label,
+                    filterState.albums.count { it.isExcluded }, filterState.albums.size,
+                ),
+                color = FgDim, fontSize = 12.sp,
                 modifier = Modifier.padding(bottom = 8.dp),
             )
             SettingsCard {
@@ -338,11 +323,6 @@ fun TimelineDeviceFoldersScreen(
                     filterState.excludedCount, filterState.folders.size,
                 ),
                 color = FgDim, fontSize = 12.sp,
-            )
-            Text(
-                stringResource(R.string.settings_excluded_folders_select_all),
-                color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.clickable { filterViewModel.excludeAll() },
             )
         }
         SettingsCard {

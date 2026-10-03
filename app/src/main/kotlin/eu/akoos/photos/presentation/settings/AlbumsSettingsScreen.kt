@@ -154,7 +154,6 @@ fun AlbumsSettingsScreen(onBack: () -> Unit) {
                         SettingsCard {
                             ToggleRow(
                                 label = stringResource(R.string.albums_filter_remember_last),
-                                description = stringResource(R.string.albums_filter_remember_last_summary),
                                 checked = rememberLast,
                                 onCheckedChange = { on ->
                                     scope.launch {
