@@ -1230,8 +1230,6 @@
         <item quantity="other">Z tohto zariadenia sa odstráni všetkých %1$d fotiek a videí z priečinka \"%2$s\".</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Táto verzia Androidu nemá kôš, takže odstránenie z tohto zariadenia je trvalé.</string>
-    <string name="device_folder_delete_everywhere">Odstrániť všade</string>
-    <string name="device_folder_delete_everywhere_desc">Presunie aj kópie na Proton Drive do koša Drive</string>
     <string name="sync_folders_add_dialog_title">Pridať priečinok</string>
     <string name="sync_folders_add_row_title">Pridať priečinok podľa názvu</string>
     <string name="sync_folders_add_dialog_name_hint">Názov priečinka</string>

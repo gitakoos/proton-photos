@@ -116,6 +116,9 @@ private const val UPLOAD_PARALLELISM = 3
  */
 private const val ALBUM_JOIN_SIGNAL_GAP_MS = 5_000L
 
+/** Passes a queued add to an album shared with this user may miss before the pair is let go. */
+internal const val FOREIGN_ALBUM_JOIN_ATTEMPTS = 5
+
 /**
  * Per-file upload event surfaced to UI (Settings sync progress).
  *
@@ -1568,12 +1571,17 @@ class UploadPendingUseCase @Inject constructor(
      * the album is gone, so no retry could ever land it. Only for a photo this account holds, though,
      * because the drain also meets pairs another signed-in account queued, and an album of that
      * account reads as missing from this one's volume.
+     *
+     * An album shared with this user takes a copy under a new link id, so its children can never
+     * confirm the join. A miss there is counted instead, and the pair is let go once
+     * [FOREIGN_ALBUM_JOIN_ATTEMPTS] passes have missed.
      */
     private suspend fun joinQueuedAlbum(userId: UserId, localUri: String, albumLinkId: String, cloudId: String) {
+        val foreign = isSharedWithMe(albumLinkId)
         val added = runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudId)) }
             .onFailure { if (it is CancellationException) throw it }
         val joined = cloudId in added.getOrNull()?.succeededLinkIds.orEmpty() ||
-            (added.isSuccess && albumHoldsPhoto(userId, albumLinkId, cloudId))
+            (added.isSuccess && !foreign && albumHoldsPhoto(userId, albumLinkId, cloudId))
         if (added.exceptionOrNull() is eu.akoos.photos.domain.entity.AlbumNotFoundException &&
             holdsPairing(userId, localUri, cloudId)
         ) {
@@ -1591,11 +1599,51 @@ class UploadPendingUseCase @Inject constructor(
             eu.akoos.photos.util.SyncDiagnostics.log(
                 "upload ${eu.akoos.photos.util.uploadLogRef(localUri)} album join deferred: $reason",
             )
+            if (foreign) noteSharedAlbumMiss(localUri, albumLinkId)
             return
         }
         uploadAlbumTargetDao.deleteTarget(localUri, albumLinkId)
+        if (foreign) editSharedAlbumMisses { ForeignAlbumJoinMisses.clear(it, localUri, albumLinkId) }
         signalAlbumJoin()
         Log.d(UPLOAD_TAG, "Added $cloudId to queued album $albumLinkId")
+    }
+
+    /** Whether [albumLinkId] is an album shared with this user, by the same cached lookup the add
+     *  routes on. A lookup that fails reads as false, which keeps the owned album's handling. */
+    private suspend fun isSharedWithMe(albumLinkId: String): Boolean =
+        runCatching { cloudRepo.loadSharedAddableAlbumsCached().any { it.linkId == albumLinkId } }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrDefault(false)
+
+    /** Counts one more pass the queued add of [localUri] to the shared [albumLinkId] missed, and lets
+     *  the pair go once [FOREIGN_ALBUM_JOIN_ATTEMPTS] have. */
+    private suspend fun noteSharedAlbumMiss(localUri: String, albumLinkId: String) {
+        var misses = 0
+        editSharedAlbumMisses { entries ->
+            ForeignAlbumJoinMisses.bump(entries, localUri, albumLinkId).let { (next, count) ->
+                misses = count
+                next
+            }
+        }
+        if (misses < FOREIGN_ALBUM_JOIN_ATTEMPTS) return
+        uploadAlbumTargetDao.deleteTarget(localUri, albumLinkId)
+        editSharedAlbumMisses { ForeignAlbumJoinMisses.clear(it, localUri, albumLinkId) }
+        Log.w(UPLOAD_TAG, "Queued add to shared album $albumLinkId dropped after $misses missed passes")
+        eu.akoos.photos.util.SyncDiagnostics.log(
+            "upload ${eu.akoos.photos.util.uploadLogRef(localUri)} album join dropped: " +
+                "shared album did not take it in $misses passes",
+        )
+    }
+
+    /** Rewrites the shared-album miss counts through [change]. A failed write only loses a count. */
+    private suspend fun editSharedAlbumMisses(change: (Set<String>) -> Set<String>) {
+        runCatching {
+            context.settingsDataStore.edit { p ->
+                val current = p[SettingsKeys.FOREIGN_ALBUM_JOIN_MISSES] ?: emptySet()
+                val next = change(current)
+                if (next != current) p[SettingsKeys.FOREIGN_ALBUM_JOIN_MISSES] = next
+            }
+        }.onFailure { if (it is CancellationException) throw it }
     }
 
     /** Whether this account's own row pairs [localUri] to [cloudId]. A read that fails reads as false,
@@ -2108,5 +2156,28 @@ internal suspend fun <T> runUploadWorkers(
                 }
             }
         }.awaitAll()
+    }
+}
+
+/**
+ * The miss counts behind [FOREIGN_ALBUM_JOIN_ATTEMPTS], kept as "count|albumLinkId|localUri" entries
+ * of [SettingsKeys.FOREIGN_ALBUM_JOIN_MISSES]. Neither a link id nor a content uri holds a '|'.
+ */
+internal object ForeignAlbumJoinMisses {
+
+    private fun pairKey(localUri: String, albumLinkId: String) = "$albumLinkId|$localUri"
+
+    /** [entries] with the pair's count raised by one, and that count. */
+    fun bump(entries: Set<String>, localUri: String, albumLinkId: String): Pair<Set<String>, Int> {
+        val key = pairKey(localUri, albumLinkId)
+        val previous = entries.firstOrNull { it.substringAfter('|') == key }
+        val count = (previous?.substringBefore('|')?.toIntOrNull() ?: 0) + 1
+        return (entries - setOfNotNull(previous) + "$count|$key") to count
+    }
+
+    /** [entries] without the pair's count. */
+    fun clear(entries: Set<String>, localUri: String, albumLinkId: String): Set<String> {
+        val key = pairKey(localUri, albumLinkId)
+        return entries.filterNotTo(HashSet()) { it.substringAfter('|') == key }
     }
 }

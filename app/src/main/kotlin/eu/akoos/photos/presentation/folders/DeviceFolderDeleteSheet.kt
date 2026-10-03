@@ -61,7 +61,8 @@ import eu.akoos.photos.presentation.util.formatBytes
  *
  * What it adds is the folder as a whole: the title asks about the folder, and the message says that
  * everything in it leaves this device, with the count and the name. Where the device has no trash it
- * also says the delete is permanent, and the rows follow suit ([DeviceFolderDeletion.choices]).
+ * also says the delete is permanent, and the row follows suit ([DeviceFolderDeletion.choice]). Drive
+ * copies are never part of it.
  *
  * While the folder is still being read the sheet says so and offers only Cancel, since agreeing to a
  * count that is not on screen yet is agreeing to nothing.
@@ -72,9 +73,8 @@ internal fun DeviceFolderDeleteSheet(
     request: DeviceFolderDeleteRequest,
     /** False in a local-only session, which leaves the Drive copies out of the choice. */
     isSignedIn: Boolean,
-    /** Runs the delete of every photo the sheet named; [deleteFromCloud] also moves the Drive copies
-     *  of the backed-up ones to Drive trash. */
-    onDelete: (deleteFromCloud: Boolean) -> Unit,
+    /** Runs the device delete of every photo the sheet named. */
+    onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val colors = AppColors.current
@@ -110,15 +110,10 @@ internal fun DeviceFolderDeleteSheet(
                 if (!DeviceFolderDeletion.hasDeviceTrash(sdkInt)) {
                     Text(stringResource(R.string.device_folder_delete_no_trash), color = colors.fgDim, fontSize = 14.sp)
                 }
-                val choices = remember(items, isSignedIn) {
-                    DeviceFolderDeletion.choices(items, isSignedIn, sdkInt)
+                val choice = remember(items, isSignedIn) {
+                    DeviceFolderDeletion.choice(items, isSignedIn, sdkInt)
                 }
-                if (choices.size > 1) {
-                    Text(stringResource(R.string.delete_multi_mixed_msg), color = colors.fgDim, fontSize = 14.sp)
-                }
-                choices.forEach { choice ->
-                    FolderDeleteChoiceRow(choice) { onDelete(choice.row.deleteFromCloud) }
-                }
+                if (choice != null) FolderDeleteChoiceRow(choice, onDelete)
             }
             Box(
                 modifier = Modifier
@@ -134,7 +129,7 @@ internal fun DeviceFolderDeleteSheet(
     }
 }
 
-/** One choice as the selection's delete sheet draws its rows, with the freed-space note after the
+/** The row as the selection's delete sheet draws its rows, with the freed-space note after the
  *  description, or alone where the row carries none. */
 @Composable
 private fun FolderDeleteChoiceRow(choice: DeviceFolderDeletion.Choice, onClick: () -> Unit) {

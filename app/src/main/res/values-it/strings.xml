@@ -1065,8 +1065,6 @@
         <item quantity="other">Tutti i %1$d elementi di \"%2$s\", tra foto e video, verranno eliminati da questo dispositivo.</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Questa versione di Android non ha un cestino, quindi l\'eliminazione da questo dispositivo è definitiva.</string>
-    <string name="device_folder_delete_everywhere">Elimina ovunque</string>
-    <string name="device_folder_delete_everywhere_desc">Sposta anche le copie su Proton Drive nel cestino di Drive</string>
     <string name="sync_folders_add_dialog_title">Aggiungi cartella</string>
     <string name="sync_folders_add_row_title">Aggiungi cartella per nome</string>
     <string name="sync_folders_add_dialog_name_hint">Nome cartella</string>

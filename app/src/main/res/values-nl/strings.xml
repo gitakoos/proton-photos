@@ -1064,8 +1064,6 @@
         <item quantity="other">Alle %1$d foto\'s en video\'s in \"%2$s\" worden van dit apparaat verwijderd.</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Deze Android-versie heeft geen prullenbak, dus verwijderen van dit apparaat is definitief.</string>
-    <string name="device_folder_delete_everywhere">Overal verwijderen</string>
-    <string name="device_folder_delete_everywhere_desc">Verplaatst ook de Proton Drive-kopieën naar de Drive-prullenbak</string>
     <string name="sync_folders_add_dialog_title">Map toevoegen</string>
     <string name="sync_folders_add_row_title">Map toevoegen op naam</string>
     <string name="sync_folders_add_dialog_name_hint">Mapnaam</string>

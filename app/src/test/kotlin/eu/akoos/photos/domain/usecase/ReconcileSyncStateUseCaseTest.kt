@@ -85,6 +85,8 @@ class ReconcileSyncStateUseCaseTest {
     @Before
     fun setUp() {
         localRepo = mockk()
+        // A lookup by id confirms every gone-file candidate unless a test says otherwise.
+        coEvery { localRepo.confirmedGone(any()) } answers { firstArg<Collection<String>>().toSet() }
         cloudRepo = mockk(relaxed = true)
         syncStateRepo = mockk(relaxed = true)
         // Strict: the pairing rows are the only listing read a pass may make.
@@ -334,6 +336,52 @@ class ReconcileSyncStateUseCaseTest {
             )
         }
         coVerify { syncStateRepo.deleteLocalOnlyByUris(listOf("content://media/external/images/media/91")) }
+    }
+
+    @Test
+    fun `a file the scan skipped but a lookup by id still finds is neither demoted nor dropped`() = runTest {
+        // A torn read skipped both rows, or the files sit in the trash: the lookup by id is asked about
+        // exactly the candidates and still finds them, so neither row is touched.
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("content://media/external/images/media/1")))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloudPhoto("linkGone", name = "gone.jpg")))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(vanishedRows())
+        coEvery { localRepo.confirmedGone(any()) } returns emptySet()
+
+        useCase(userId).toList()
+
+        coVerify { localRepo.confirmedGone(listOf("content://media/external/images/media/90")) }
+        coVerify { localRepo.confirmedGone(listOf("content://media/external/images/media/91")) }
+        coVerify(exactly = 0) { syncStateRepo.upsert(match { it.status == SyncStatus.CLOUD_ONLY }, userId) }
+        coVerify(exactly = 0) { syncStateRepo.deleteLocalOnlyByUris(any()) }
+    }
+
+    @Test
+    fun `only the candidates the lookup by id confirms gone are demoted and dropped`() = runTest {
+        val rows = vanishedRows() + listOf(
+            syncState("content://media/external/images/media/92", cloudId = "linkKept", status = SyncStatus.SYNCED),
+            syncState("content://media/external/images/media/93", cloudId = null, status = SyncStatus.LOCAL_ONLY,
+                queued = true, queueSource = eu.akoos.photos.domain.entity.QueueSource.MANUAL),
+        )
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(localItem("content://media/external/images/media/1")))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(
+            listOf(cloudPhoto("linkGone", name = "gone.jpg"), cloudPhoto("linkKept", name = "kept.jpg")),
+        )
+        every { syncStateRepo.observeAll(userId) } returns flowOf(rows)
+        // 92 and 93 are still on the device, in the trash.
+        coEvery { localRepo.confirmedGone(any()) } answers {
+            firstArg<Collection<String>>().filterTo(HashSet()) { it.endsWith("/90") || it.endsWith("/91") }
+        }
+
+        useCase(userId).toList()
+
+        coVerify(exactly = 1) { syncStateRepo.upsert(match { it.status == SyncStatus.CLOUD_ONLY }, userId) }
+        coVerify {
+            syncStateRepo.upsert(
+                match { it.localUri == "content://media/external/images/media/90" && it.status == SyncStatus.CLOUD_ONLY },
+                userId,
+            )
+        }
+        coVerify(exactly = 1) { syncStateRepo.deleteLocalOnlyByUris(listOf("content://media/external/images/media/91")) }
     }
 
     @Test

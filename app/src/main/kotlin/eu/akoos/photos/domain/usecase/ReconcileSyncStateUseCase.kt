@@ -247,6 +247,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // reconcile ran, and the new states aren't persisted until the upsertAll below.
         val syncedStates = existingByUri.values
             .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
+        val goneCandidates = ArrayList<SyncState>()
         for (state in syncedStates) {
             when {
                 // Cloud counterpart absent from the local cloud listing. A photo just uploaded is
@@ -269,10 +270,17 @@ class ReconcileSyncStateUseCase @Inject constructor(
                 // user the photo is "on this device" when it actually isn't. Only on a scan that saw
                 // the whole device, and only for a row that predates it: a download saved while this
                 // pass ran is recorded SYNCED, yet the scan, begun before it, could not list its file.
-                deviceFileGone(state, scanComplete, allLocalUris, scanStartMs) -> syncStateRepo.upsert(
-                    state.copy(status = SyncStatus.CLOUD_ONLY),
-                    userId,
-                )
+                deviceFileGone(state, scanComplete, allLocalUris, scanStartMs) -> goneCandidates += state
+            }
+        }
+        // The scan's word alone is not proof: a torn read can skip a row, and a trashed file is still
+        // restorable. Only a file a lookup by id no longer finds is demoted.
+        if (goneCandidates.isNotEmpty()) {
+            val confirmed = localRepo.confirmedGone(goneCandidates.map { it.localUri })
+            for (state in goneCandidates) {
+                if (state.localUri in confirmed) {
+                    syncStateRepo.upsert(state.copy(status = SyncStatus.CLOUD_ONLY), userId)
+                }
             }
         }
 
@@ -539,13 +547,18 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // is status-guarded, so a row another pass just claimed to UPLOADING is left alone. The delete
         // takes an explicit intent with it, so it runs only on a scan that saw the whole device, and
         // never on a row queued since the scan began (a "back up now" on a photo taken mid-pass).
-        val goneQueued = syncStateRepo.observeAll(userId).first().filter {
-            it.status == SyncStatus.LOCAL_ONLY && it.queued &&
-                deviceFileGone(it, scanComplete, allLocalUris, scanStartMs)
-        }
-        if (goneQueued.isNotEmpty()) {
-            syncStateRepo.deleteLocalOnlyByUris(goneQueued.map { it.localUri })
-            Log.d(TAG, "reconcile: dropped ${goneQueued.size} queued LOCAL_ONLY rows whose file is gone")
+        // The scan's word is then checked by a lookup by id, which alone drops the row: a torn read can
+        // skip a file, and a trashed one is still restorable.
+        val goneQueued = syncStateRepo.observeAll(userId).first()
+            .filter {
+                it.status == SyncStatus.LOCAL_ONLY && it.queued &&
+                    deviceFileGone(it, scanComplete, allLocalUris, scanStartMs)
+            }
+            .map { it.localUri }
+        val confirmedGone = if (goneQueued.isEmpty()) emptySet() else localRepo.confirmedGone(goneQueued)
+        if (confirmedGone.isNotEmpty()) {
+            syncStateRepo.deleteLocalOnlyByUris(goneQueued.filter { it in confirmedGone })
+            Log.d(TAG, "reconcile: dropped ${confirmedGone.size} queued LOCAL_ONLY rows whose file is gone")
         }
 
         // One post-delete snapshot serves both this out-of-scope de-queue and the stranded-intent
@@ -656,7 +669,8 @@ internal fun writtenSinceScan(state: SyncState, scanStartMs: Long): Boolean =
  * steps (the demotion to CLOUD_ONLY and the drop of a queued row). It needs a scan that saw the whole
  * device ([scanComplete]) and found something ([deviceUris], every uri it returned, is not empty), no
  * trace of the file in it, and a row that predates the scan ([writtenSinceScan]). Short of any of
- * these the step leaves the row for a later pass to judge on a scan of its own.
+ * these the step leaves the row for a later pass to judge on a scan of its own. A row that passes is
+ * a candidate only: the step acts on it once [LocalMediaRepository.confirmedGone] agrees.
  */
 internal fun deviceFileGone(
     state: SyncState,

@@ -196,6 +196,7 @@ internal class ReconcileReferencePass(
         val nowMs = System.currentTimeMillis()
         val syncedStates = existingByUri.values
             .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
+        val goneCandidates = mutableListOf<SyncState>()
         for (state in syncedStates) {
             when {
                 state.cloudFileId !in cloudByLinkId ->
@@ -203,10 +204,13 @@ internal class ReconcileReferencePass(
                         syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
                         syncStateRepo.clearQueuedForSynced(state.localUri)
                     }
-                goneFromDevice(state, localUriSet) -> syncStateRepo.upsert(
-                    state.copy(status = SyncStatus.CLOUD_ONLY),
-                    userId,
-                )
+                goneFromDevice(state, localUriSet) -> goneCandidates += state
+            }
+        }
+        if (goneCandidates.isNotEmpty()) {
+            val confirmed = localRepo.confirmedGone(goneCandidates.map { it.localUri })
+            for (state in goneCandidates) {
+                if (state.localUri in confirmed) syncStateRepo.upsert(state.copy(status = SyncStatus.CLOUD_ONLY), userId)
             }
         }
 
@@ -237,10 +241,11 @@ internal class ReconcileReferencePass(
         val allLocalUris = allLocalItems.mapTo(HashSet(allLocalItems.size)) { it.uri }
         val goneQueued = syncStateRepo.observeAll(userId).first().filter {
             it.status == SyncStatus.LOCAL_ONLY && it.queued && goneFromDevice(it, allLocalUris)
-        }
-        if (goneQueued.isNotEmpty()) {
-            syncStateRepo.deleteLocalOnlyByUris(goneQueued.map { it.localUri })
-            Log.d(TAG, "reconcile: dropped ${goneQueued.size} queued LOCAL_ONLY rows whose file is gone")
+        }.map { it.localUri }
+        val confirmedQueued = if (goneQueued.isEmpty()) emptySet() else localRepo.confirmedGone(goneQueued)
+        if (confirmedQueued.isNotEmpty()) {
+            syncStateRepo.deleteLocalOnlyByUris(goneQueued.filter { it in confirmedQueued })
+            Log.d(TAG, "reconcile: dropped ${confirmedQueued.size} queued LOCAL_ONLY rows whose file is gone")
         }
 
         val afterDropSnapshot = syncStateRepo.observeAll(userId).first()

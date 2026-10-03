@@ -1073,8 +1073,6 @@
         <item quantity="other">A mappa (\"%2$s\") %1$d fotója és videója mind törlődik erről az eszközről.</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Az Android ezen verziójában nincs kuka, így a törlés erről az eszközről végleges.</string>
-    <string name="device_folder_delete_everywhere">Törlés mindenhol</string>
-    <string name="device_folder_delete_everywhere_desc">A Proton Drive-on lévő másolatokat is a Drive kukájába helyezi</string>
     <string name="sync_folders_add_dialog_title">Mappa hozzáadása</string>
     <string name="sync_folders_add_row_title">Mappa hozzáadása név szerint</string>
     <string name="sync_folders_add_dialog_name_hint">Mappa neve</string>

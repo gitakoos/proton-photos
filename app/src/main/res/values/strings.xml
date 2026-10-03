@@ -1711,8 +1711,6 @@
         <item quantity="other">All %1$d photos and videos in \"%2$s\" will be deleted from this device.</item>
     </plurals>
     <string name="device_folder_delete_no_trash">This version of Android has no trash, so deleting from this device is permanent.</string>
-    <string name="device_folder_delete_everywhere">Delete everywhere</string>
-    <string name="device_folder_delete_everywhere_desc">Also moves the Proton Drive copies to Drive trash</string>
     <string name="sync_folders_add_dialog_title">Add folder</string>
     <string name="sync_folders_add_row_title">Add folder by name</string>
     <string name="sync_folders_add_dialog_name_hint">Folder name</string>

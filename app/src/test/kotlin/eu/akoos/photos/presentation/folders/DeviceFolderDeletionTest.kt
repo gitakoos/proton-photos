@@ -26,7 +26,20 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.LocalMediaRepository
+import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
 import eu.akoos.photos.presentation.common.DeleteRowKind
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runTest
+import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.domain.entity.UserId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -36,10 +49,10 @@ import org.junit.Test
 /**
  * Pins what a folder delete acts on and what its confirmation may say.
  *
- * Three rules carry it. Every choice takes the device copies, since that is what deleting a folder
- * means. The Drive copies are offered only with an account and a backed-up photo to act on. And no row
- * promises a trash the device does not have: Android 10 and older delete for good, so there the rows
- * leave the trash wording of Android 11 and later out. Plain JVM assertions over hand-built folders.
+ * Four rules carry it. The delete takes the device copies and never a Drive copy. Which photo is
+ * backed up follows its sync record's pairing, never a match by name. The one row is neutral only
+ * when every photo keeps a Drive copy. And no row promises a trash the device does not have: Android
+ * 10 and older delete for good. Plain JVM assertions over hand-built folders.
  */
 class DeviceFolderDeletionTest {
 
@@ -73,11 +86,12 @@ class DeviceFolderDeletionTest {
         GalleryItem.Synced(cloud(linkId), local(uri, size))
 
     private val deviceOnlyFolder = listOf(localOnly("uri://a"), localOnly("uri://b"))
-    private val backedUpFolder = listOf(localOnly("uri://a"), synced("uri://b", "link-b"))
+    private val mixedFolder = listOf(localOnly("uri://a"), synced("uri://b", "link-b"))
+    private val backedUpFolder = listOf(synced("uri://a", "link-a"), synced("uri://b", "link-b"))
 
     @Test
     fun `a folder with nothing backed up is one red row that only takes the device copies`() {
-        val choice = DeviceFolderDeletion.choices(deviceOnlyFolder, isSignedIn = true, sdkInt = android11).single()
+        val choice = DeviceFolderDeletion.choice(deviceOnlyFolder, isSignedIn = true, sdkInt = android11)!!
         assertEquals(DeleteRowKind.TrashLocal, choice.row.kind)
         assertTrue(choice.row.destructive)
         assertTrue(choice.row.freeUpSpace)
@@ -85,81 +99,75 @@ class DeviceFolderDeletionTest {
     }
 
     @Test
-    fun `a backed-up photo adds the Drive copies as a second, red choice`() {
-        val choices = DeviceFolderDeletion.choices(backedUpFolder, isSignedIn = true, sdkInt = android11)
-        assertEquals(
-            listOf(DeleteRowKind.RemoveDevice, DeleteRowKind.RemoveEverywhere),
-            choices.map { it.row.kind },
-        )
-        val keepDrive = choices.first()
-        val everywhere = choices.last()
-        assertFalse(keepDrive.row.deleteFromCloud)
-        assertFalse("keeping the Drive copy leaves a copy, so it is not the red row", keepDrive.row.destructive)
-        assertTrue(everywhere.row.deleteFromCloud)
-        assertTrue(everywhere.row.destructive)
+    fun `a fully backed-up folder is the neutral row that keeps the Drive backup`() {
+        val choice = DeviceFolderDeletion.choice(backedUpFolder, isSignedIn = true, sdkInt = android11)!!
+        assertEquals(DeleteRowKind.RemoveDevice, choice.row.kind)
+        assertFalse("every photo keeps a Drive copy, so it is not the red row", choice.row.destructive)
+        assertFalse(choice.row.deleteFromCloud)
     }
 
     @Test
-    fun `without an account the Drive copies are never offered`() {
+    fun `a device-only photo among backed-up ones keeps the row red`() {
+        val choice = DeviceFolderDeletion.choice(mixedFolder, isSignedIn = true, sdkInt = android11)!!
+        assertEquals(DeleteRowKind.TrashLocal, choice.row.kind)
+        assertTrue(choice.row.destructive)
+        assertFalse(choice.row.deleteFromCloud)
+    }
+
+    @Test
+    fun `without an account the row is the plain device delete`() {
         listOf(android10, android11).forEach { sdkInt ->
-            val choice = DeviceFolderDeletion.choices(backedUpFolder, isSignedIn = false, sdkInt = sdkInt).single()
+            val choice = DeviceFolderDeletion.choice(backedUpFolder, isSignedIn = false, sdkInt = sdkInt)!!
             assertEquals(DeleteRowKind.TrashLocal, choice.row.kind)
             assertFalse(choice.row.deleteFromCloud)
         }
     }
 
     @Test
-    fun `every choice takes the device copies and none keeps them`() {
-        for (items in listOf(deviceOnlyFolder, backedUpFolder)) {
+    fun `a folder delete never takes a Drive copy`() {
+        for (items in listOf(deviceOnlyFolder, mixedFolder, backedUpFolder)) {
             for (signedIn in listOf(true, false)) {
                 for (sdkInt in listOf(android10, android11)) {
-                    val choices = DeviceFolderDeletion.choices(items, signedIn, sdkInt)
-                    assertTrue(choices.isNotEmpty())
-                    choices.forEach { choice ->
-                        assertTrue(choice.row.freeUpSpace)
-                        assertTrue(
-                            "a folder delete never offers the cloud-only removal",
-                            choice.row.kind != DeleteRowKind.RemoveCloud,
-                        )
-                    }
+                    val choice = DeviceFolderDeletion.choice(items, signedIn, sdkInt)!!
+                    assertTrue(choice.row.freeUpSpace)
+                    assertFalse(choice.row.deleteFromCloud)
+                    assertTrue(
+                        "a folder delete offers no row that touches Drive",
+                        choice.row.kind == DeleteRowKind.TrashLocal || choice.row.kind == DeleteRowKind.RemoveDevice,
+                    )
+                    // What the delete then acts on: device uris only, no Drive link.
+                    val targets = DeletePhotoUseCase.computeDeleteTargets(items, freeUpSpace = true, deleteFromCloud = false)
+                    assertTrue(targets.cloudLinkIds.isEmpty())
+                    assertEquals(items.size, targets.localUriStrings.size)
                 }
             }
         }
     }
 
     @Test
-    fun `Android 11 and later word the rows as every other delete sheet does`() {
-        val single = DeviceFolderDeletion.choices(deviceOnlyFolder, isSignedIn = true, sdkInt = android11).single()
-        assertEquals(R.string.delete_multi_move_trash, single.titleRes)
-        assertEquals(R.string.delete_multi_move_trash_desc, single.descRes)
+    fun `Android 11 and later word the row as every other delete sheet does`() {
+        val deviceOnly = DeviceFolderDeletion.choice(deviceOnlyFolder, isSignedIn = true, sdkInt = android11)!!
+        assertEquals(R.string.delete_multi_move_trash, deviceOnly.titleRes)
+        assertEquals(R.string.delete_multi_move_trash_desc, deviceOnly.descRes)
 
-        val (keepDrive, everywhere) = DeviceFolderDeletion.choices(backedUpFolder, isSignedIn = true, sdkInt = android11)
-        assertEquals(R.string.delete_multi_remove_device, keepDrive.titleRes)
-        assertEquals(R.string.delete_multi_remove_device_desc, keepDrive.descRes)
-        assertEquals(R.string.delete_multi_move_trash_everywhere, everywhere.titleRes)
-        assertEquals(R.string.delete_multi_move_trash_everywhere_desc, everywhere.descRes)
+        val backedUp = DeviceFolderDeletion.choice(backedUpFolder, isSignedIn = true, sdkInt = android11)!!
+        assertEquals(R.string.delete_multi_remove_device, backedUp.titleRes)
+        assertEquals(R.string.delete_multi_remove_device_desc, backedUp.descRes)
     }
 
     @Test
     fun `Android 10 and older never promise a trash`() {
-        val single = DeviceFolderDeletion.choices(deviceOnlyFolder, isSignedIn = true, sdkInt = android10).single()
-        assertEquals(R.string.delete_button_permanently, single.titleRes)
-        assertNull(single.descRes)
+        val deviceOnly = DeviceFolderDeletion.choice(mixedFolder, isSignedIn = true, sdkInt = android10)!!
+        assertEquals(R.string.delete_button_permanently, deviceOnly.titleRes)
+        assertNull(deviceOnly.descRes)
 
-        val (keepDrive, everywhere) = DeviceFolderDeletion.choices(backedUpFolder, isSignedIn = true, sdkInt = android10)
         // The Drive backup is kept on every version, so that row reads the same.
-        assertEquals(R.string.delete_multi_remove_device, keepDrive.titleRes)
-        assertEquals(R.string.delete_multi_remove_device_desc, keepDrive.descRes)
-        assertEquals(R.string.device_folder_delete_everywhere, everywhere.titleRes)
-        assertEquals(R.string.device_folder_delete_everywhere_desc, everywhere.descRes)
+        val backedUp = DeviceFolderDeletion.choice(backedUpFolder, isSignedIn = true, sdkInt = android10)!!
+        assertEquals(R.string.delete_multi_remove_device, backedUp.titleRes)
+        assertEquals(R.string.delete_multi_remove_device_desc, backedUp.descRes)
 
-        val trashWording = setOf(
-            R.string.delete_multi_move_trash,
-            R.string.delete_multi_move_trash_desc,
-            R.string.delete_multi_move_trash_everywhere,
-            R.string.delete_multi_move_trash_everywhere_desc,
-        )
-        listOf(single, keepDrive, everywhere)
+        val trashWording = setOf(R.string.delete_multi_move_trash, R.string.delete_multi_move_trash_desc)
+        listOf(deviceOnly, backedUp)
             .flatMap { listOfNotNull(it.titleRes, it.descRes) }
             .forEach { assertFalse(it in trashWording) }
     }
@@ -173,23 +181,21 @@ class DeviceFolderDeletionTest {
     }
 
     @Test
-    fun `every choice frees the whole folder's device bytes`() {
+    fun `the row frees the whole folder's device bytes`() {
         val folder = listOf(localOnly("uri://a", size = 1_000L), synced("uri://b", "link-b", size = 2_500L))
-        DeviceFolderDeletion.choices(folder, isSignedIn = true, sdkInt = android11).forEach {
-            assertEquals(3_500L, it.row.freedBytes)
-        }
+        assertEquals(3_500L, DeviceFolderDeletion.choice(folder, isSignedIn = true, sdkInt = android11)!!.row.freedBytes)
     }
 
     @Test
     fun `an empty folder has nothing to confirm`() {
-        assertTrue(DeviceFolderDeletion.choices(emptyList(), isSignedIn = true, sdkInt = android11).isEmpty())
+        assertNull(DeviceFolderDeletion.choice(emptyList(), isSignedIn = true, sdkInt = android11))
     }
 
     @Test
-    fun `a row with a known Drive copy is typed as backed up and every other as device-only`() {
+    fun `a row with a recorded pairing is typed as backed up and every other as device-only`() {
         val rows = listOf(local("uri://a"), local("uri://b"), local("uri://c"))
         val copy = cloud("link-b")
-        val items = DeviceFolderDeletion.items(rows, mapOf("uri://b" to copy))
+        val items = DeviceFolderDeletion.items(rows, mapOf("uri://b" to "link-b"), mapOf("link-b" to copy))
         assertEquals(
             listOf(GalleryItem.LocalOnly(rows[0]), GalleryItem.Synced(copy, rows[1]), GalleryItem.LocalOnly(rows[2])),
             items,
@@ -197,10 +203,64 @@ class DeviceFolderDeletionTest {
     }
 
     @Test
+    fun `a pairing the cloud listing has not caught up with still types the row as backed up`() {
+        val row = local("uri://a")
+        val item = DeviceFolderDeletion.items(listOf(row), mapOf("uri://a" to "link-new"), emptyMap()).single()
+        assertTrue(item is GalleryItem.Synced)
+        assertEquals("link-new", (item as GalleryItem.Synced).cloud.linkId)
+        assertEquals(row, item.local)
+        // So its row becomes cloud-only, never a record of a photo that was never backed up.
+        assertEquals(
+            eu.akoos.photos.domain.entity.SyncStatus.CLOUD_ONLY,
+            DeletePhotoUseCase.postDeleteSyncStatus(item, freeUpSpace = true, hide = false),
+        )
+    }
+
+    @Test
     fun `every device row is kept, so nothing is left behind under the card`() {
         val rows = listOf(local("uri://a"), local("uri://b"))
-        val items = DeviceFolderDeletion.items(rows, mapOf("uri://elsewhere" to cloud("link-x")))
+        val items = DeviceFolderDeletion.items(rows, mapOf("uri://elsewhere" to "link-x"), mapOf("link-x" to cloud("link-x")))
         assertEquals(rows.size, items.size)
         assertTrue(items.all { it is GalleryItem.LocalOnly })
+    }
+
+    @Test
+    fun `the sync record's pairing decides, never a same-named Drive photo`() = runTest {
+        val userId = UserId("user1")
+        val rows = listOf(local("uri://a"), local("uri://b"))
+        val accountManager = mockk<AccountManager> { every { getPrimaryUserId() } returns flowOf(userId) }
+        val localRepo = mockk<LocalMediaRepository> { coEvery { queryByBucket("Camera") } returns rows }
+        val syncRepo = mockk<SyncStateRepository> {
+            coEvery { cloudPairedLinkIds(userId, any()) } returns mapOf("uri://b" to "link-b")
+        }
+        // The listing holds a photo named exactly like uri://a's, which a name match would pair it to.
+        val driveRepo = mockk<DrivePhotoRepository> {
+            every { observePhotosByLinkIds(any()) } returns flowOf(listOf(cloud("link-b"), cloud("link-namesake")))
+        }
+        val controller = DeviceFolderDeleteController(accountManager, localRepo, syncRepo, driveRepo)
+
+        controller.ask(this, "Camera")
+        advanceUntilIdle()
+
+        val items = controller.request.value!!.items!!
+        assertEquals(GalleryItem.LocalOnly(rows[0]), items[0])
+        assertEquals(GalleryItem.Synced(cloud("link-b"), rows[1]), items[1])
+        coVerify { syncRepo.cloudPairedLinkIds(userId, listOf("uri://a", "uri://b")) }
+        coVerify { driveRepo.observePhotosByLinkIds(listOf("link-b")) }
+    }
+
+    @Test
+    fun `without an account every row is device-only and no pairing is read`() = runTest {
+        val rows = listOf(local("uri://a"))
+        val accountManager = mockk<AccountManager> { every { getPrimaryUserId() } returns flowOf(null) }
+        val localRepo = mockk<LocalMediaRepository> { coEvery { queryByBucket("Camera") } returns rows }
+        val syncRepo = mockk<SyncStateRepository>()
+        val controller = DeviceFolderDeleteController(accountManager, localRepo, syncRepo, mockk())
+
+        controller.ask(this, "Camera")
+        advanceUntilIdle()
+
+        assertEquals(listOf(GalleryItem.LocalOnly(rows[0])), controller.request.value!!.items)
+        coVerify(exactly = 0) { syncRepo.cloudPairedLinkIds(any(), any()) }
     }
 }

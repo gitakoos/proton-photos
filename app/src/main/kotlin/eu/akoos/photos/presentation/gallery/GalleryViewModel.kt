@@ -1509,11 +1509,11 @@ class GalleryViewModel @Inject constructor(
                     // No system-trash dialog was needed, so any device copies were either untouched or
                     // removed permanently (pre-R). Only a cloud trash is reversible, so the undo carries
                     // no local URIs: localRecoverable = false.
-                    buildDeleteUndoAction(items, freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
+                    buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
                         ?.let { undoController.offer(it) }
                     _uiState.update { it.copy(
                         selectedItems    = emptySet(),
-                        multiDeleteState = MultiDeleteState.Done,
+                        multiDeleteState = deleteOutcome(result),
                     ) }
                 }
                 is DeletePhotoUseCase.Result.CloudDeleteFailed ->
@@ -1535,73 +1535,93 @@ class GalleryViewModel @Inject constructor(
         // would end up BOTH in Hidden and in MediaStore — the worst of both worlds).
         // Unguarded: rollback owns both halves and no-ops when there is nothing pending, so a
         // condition on the private copies alone would skip a cloud-only half that is still hidden.
+        val pending = pendingPermissionResult
         pendingPermissionResult = null
-        rollbackPendingHide()
         _uiState.update { it.copy(pendingDeleteIntent = null) }
+        // A later chunk of a large delete was declined. The chunks before it already went, so they
+        // finish as a landed delete, whose hide commit keeps every photo still on the device in view.
+        if (pending != null && pending.done.isNotEmpty()) {
+            viewModelScope.launch { finishConfirmedDelete(pending, pending.done, DeletePhotoUseCase.Result.Success()) }
+            return
+        }
+        rollbackPendingHide()
     }
 
+    /** "Couldn't delete the photos" when [result] left device files in place, else done. */
+    private fun deleteOutcome(result: DeletePhotoUseCase.Result.Success): MultiDeleteState =
+        if (result.keptOnDevice.isEmpty()) MultiDeleteState.Done
+        else MultiDeleteState.Failed(context.getString(R.string.album_delete_photos_failed))
 
     fun onDeletePermissionGranted() {
         val pending = pendingPermissionResult
         pendingPermissionResult = null
+        _uiState.update { it.copy(pendingDeleteIntent = null) }
         viewModelScope.launch {
             // Run the deferred cloud delete first; surface failure as a multi-delete error.
             val cloudResult = if (pending != null) {
                 // No account is needed to finish a local delete; the use case guards its own cloud
                 // branch, returning CloudDeleteFailed only when there are cloud links and no session.
                 val userId = accountManager.getPrimaryUserId().first()
-                deletePhotoUseCase.completeAfterPermissionGranted(
-                    userId          = userId,
-                    cloudLinkIds    = pending.cloudLinkIds,
-                    items           = pending.itemsBeingDeleted,
-                    freeUpSpace     = pending.freeUpSpace,
-                    hide            = pending.hide,
-                )
-            } else DeletePhotoUseCase.Result.Success
-            if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
-                _uiState.update { it.copy(
+                deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
+            } else DeletePhotoUseCase.Result.Success()
+            when (cloudResult) {
+                is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                    // The next chunk of a delete too large for one request, launched like the first.
+                    pendingPermissionResult = cloudResult
+                    _uiState.update { it.copy(pendingDeleteIntent = cloudResult.pendingIntent) }
+                }
+                is DeletePhotoUseCase.Result.CloudDeleteFailed -> _uiState.update { it.copy(
                     multiDeleteState    = MultiDeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed)),
                     pendingDeleteIntent = null,
                 ) }
-                return@launch
+                is DeletePhotoUseCase.Result.Success ->
+                    finishConfirmedDelete(pending, pending?.confirmedItems.orEmpty(), cloudResult)
             }
-            // If a multi-hide flow was waiting on this permission, commit the private URIs now
-            // so the photos start appearing in the Hidden album. No-op if no hide was pending.
-            // Snapshot the URIs first — commitPendingHide() clears the pending list.
-            val hideUris = pendingHidePrivateUris
-            val hideCloudIds = pendingHideCloudLinkIds
-            // The cloud-only half is the whole hide here and it landed, so the folder stays
-            // hidden and its pending name is released rather than rolled back. Left set, it
-            // outlives this hide on a long-lived screen and the next rollback for anything
-            // else reads it as its own, revealing a folder the user never asked to reveal.
-            pendingHideCloudLinkIds = emptyList()
-            pendingHideFolderName = null
-            if (hideUris.isNotEmpty()) commitPendingHide()
-            // Offer Undo for whichever reversible action just landed: a hide (restore the
-            // vault URIs and drop the client-side filter) or a cloud-trash delete (restore the
-            // Drive linkIds). A plain local free-up-space delete carries no undo. A cancelled
-            // dialog never reaches here.
-            val undo: UndoAction? = when {
-                hideUris.isNotEmpty() -> buildHideUndoAction(hideUris, hideCloudIds)
-                pending != null && !pending.hide ->
-                    // The system trash keeps the local files for ~30 days, so a confirmed delete (cloud
-                    // and/or device) is reversible: localRecoverable = true.
-                    buildDeleteUndoAction(
-                        pending.itemsBeingDeleted,
-                        pending.freeUpSpace,
-                        deleteFromCloud = pending.cloudLinkIds.isNotEmpty(),
-                        hide = false,
-                        localRecoverable = true,
-                    )
-                else -> null
-            }
-            if (undo != null) undoController.offer(undo)
-            _uiState.update { it.copy(
-                selectedItems       = emptySet(),
-                multiDeleteState    = MultiDeleteState.Done,
-                pendingDeleteIntent = null,
-            ) }
         }
+    }
+
+    /** Settle a delete or hide whose system dialog was confirmed, for the [carriedOut] items it took. */
+    private fun finishConfirmedDelete(
+        pending: DeletePhotoUseCase.Result.NeedsMediaWritePermission?,
+        carriedOut: List<GalleryItem>,
+        result: DeletePhotoUseCase.Result.Success,
+    ) {
+        // If a multi-hide flow was waiting on this permission, commit the private URIs now
+        // so the photos start appearing in the Hidden album. No-op if no hide was pending.
+        // Snapshot the URIs first: commitPendingHide() clears the pending list.
+        val hideUris = pendingHidePrivateUris
+        val hideCloudIds = pendingHideCloudLinkIds
+        // The cloud-only half is the whole hide here and it landed, so the folder stays
+        // hidden and its pending name is released rather than rolled back. Left set, it
+        // outlives this hide on a long-lived screen and the next rollback for anything
+        // else reads it as its own, revealing a folder the user never asked to reveal.
+        pendingHideCloudLinkIds = emptyList()
+        pendingHideFolderName = null
+        if (hideUris.isNotEmpty()) commitPendingHide()
+        // Offer Undo for whichever reversible action just landed: a hide (restore the
+        // vault URIs and drop the client-side filter) or a cloud-trash delete (restore the
+        // Drive linkIds). A plain local free-up-space delete carries no undo.
+        val undo: UndoAction? = when {
+            hideUris.isNotEmpty() -> buildHideUndoAction(hideUris, hideCloudIds)
+            pending != null && !pending.hide ->
+                // The system trash keeps the local files for ~30 days, so a confirmed delete (cloud
+                // and/or device) is reversible: localRecoverable = true.
+                buildDeleteUndoAction(
+                    carriedOut,
+                    pending.freeUpSpace,
+                    deleteFromCloud = pending.deleteFromCloud,
+                    hide = false,
+                    localRecoverable = true,
+                )
+            else -> null
+        }
+        if (undo != null) undoController.offer(undo)
+        _uiState.update { it.copy(
+            selectedItems       = emptySet(),
+            // A hide's commit already returns any photo still on the device to view.
+            multiDeleteState    = if (pending?.hide == true) MultiDeleteState.Done else deleteOutcome(result),
+            pendingDeleteIntent = null,
+        ) }
     }
 
     fun resetMultiDeleteState() {
@@ -1918,11 +1938,11 @@ class GalleryViewModel @Inject constructor(
     /** Drop the question. The folder is untouched. */
     fun dismissDeleteFolderRequest() = folderDelete.dismiss()
 
-    /** Delete the photos the confirmation named, through the path a selection delete takes. The
-     *  device copies always go; [deleteFromCloud] also moves the Drive copies to Drive trash. */
-    fun confirmDeleteFolder(deleteFromCloud: Boolean) {
+    /** Delete the photos the confirmation named, through the path a selection delete takes. Only the
+     *  device copies go: a backed-up photo keeps its Drive copy and becomes cloud-only. */
+    fun confirmDeleteFolder() {
         val items = folderDelete.take() ?: return
-        runDelete(items, freeUpSpace = true, deleteFromCloud = deleteFromCloud)
+        runDelete(items, freeUpSpace = true, deleteFromCloud = false)
     }
 
     /**

@@ -501,6 +501,10 @@ class LocalMediaRepositoryImpl @Inject constructor(
 
     override fun hasMediaPermission(): Flow<Boolean> = flowOf(checkMediaPermission())
 
+    override suspend fun confirmedGone(uris: Collection<String>): Set<String> =
+        if (uris.isEmpty()) emptySet()
+        else withContext(Dispatchers.IO) { confirmGone(uris.toList()).toHashSet() }
+
     override suspend fun sha1(uri: String): String? = withContext(Dispatchers.IO) {
         val digest = java.security.MessageDigest.getInstance("SHA-1")
         try {

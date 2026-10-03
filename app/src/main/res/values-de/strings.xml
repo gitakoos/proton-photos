@@ -1050,8 +1050,6 @@
         <item quantity="other">Alle %1$d Fotos und Videos in \"%2$s\" werden von diesem Gerät gelöscht.</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Diese Android-Version hat keinen Papierkorb, daher ist das Löschen von diesem Gerät dauerhaft.</string>
-    <string name="device_folder_delete_everywhere">Überall löschen</string>
-    <string name="device_folder_delete_everywhere_desc">Verschiebt auch die Proton Drive-Kopien in den Drive-Papierkorb</string>
     <string name="sync_folders_add_dialog_title">Ordner hinzufügen</string>
     <string name="sync_folders_add_row_title">Ordner per Name hinzufügen</string>
     <string name="sync_folders_add_dialog_name_hint">Ordnername</string>

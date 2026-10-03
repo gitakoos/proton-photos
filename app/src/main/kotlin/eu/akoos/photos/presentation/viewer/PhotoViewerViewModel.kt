@@ -561,6 +561,9 @@ class PhotoViewerViewModel @Inject constructor(
                 deleteFromCloud = deleteFromCloud,
             )
             _deleteState.value = when (result) {
+                // Android 10 refused to remove another app's file: nothing changed, the photo stays.
+                is DeletePhotoUseCase.Result.Success if result.keptOnDevice.isNotEmpty() ->
+                    DeleteState.Failed(context.getString(R.string.viewer_delete_vault_failed))
                 is DeletePhotoUseCase.Result.Success           -> {
                     // A cloud-trash delete is reversible; offer Undo through the shared bar so it
                     // shows even after the viewer closes. A local-only free-up carries no undo.
@@ -810,7 +813,7 @@ class PhotoViewerViewModel @Inject constructor(
                     freeUpSpace     = pending.freeUpSpace,
                     hide            = pending.hide,
                 )
-            } else DeletePhotoUseCase.Result.Success
+            } else DeletePhotoUseCase.Result.Success()
 
             if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
                 _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_delete_drive_failed))
@@ -1227,6 +1230,11 @@ class PhotoViewerViewModel @Inject constructor(
                     HiddenVaultDiagnostics.originalsAwaitingConsent(1)
                     pendingPermissionResult = result
                     _deleteState.value = DeleteState.NeedsPermission(result.pendingIntent)
+                }
+                // Android 10 refused to remove another app's original, so the vault copy goes again.
+                is DeletePhotoUseCase.Result.Success if result.keptOnDevice.isNotEmpty() -> {
+                    cancelPendingHide()
+                    _deleteState.value = DeleteState.Failed(context.getString(R.string.viewer_hide_failed))
                 }
                 is DeletePhotoUseCase.Result.Success -> {
                     HiddenVaultDiagnostics.originalsRemoved(1, neededConsent = false)

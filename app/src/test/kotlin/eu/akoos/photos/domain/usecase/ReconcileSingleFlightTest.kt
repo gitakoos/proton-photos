@@ -109,6 +109,7 @@ class ReconcileSingleFlightTest {
     fun setUp() {
         localRepo = mockk()
         coEvery { localRepo.freshScan() } coAnswers { DeviceMediaScan(scans.scan(), complete = true) }
+        coEvery { localRepo.confirmedGone(any()) } answers { firstArg<Collection<String>>().toSet() }
         syncStateRepo = mockk(relaxed = true)
         every { syncStateRepo.observeAll(any()) } returns flowOf(emptyList())
 

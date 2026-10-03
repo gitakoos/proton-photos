@@ -1065,8 +1065,6 @@
         <item quantity="other">Todas las %1$d fotos y vídeos de \"%2$s\" se eliminarán de este dispositivo.</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Esta versión de Android no tiene papelera, así que eliminar de este dispositivo es permanente.</string>
-    <string name="device_folder_delete_everywhere">Eliminar en todas partes</string>
-    <string name="device_folder_delete_everywhere_desc">También mueve las copias de Proton Drive a la papelera de Drive</string>
     <string name="sync_folders_add_dialog_title">Añadir carpeta</string>
     <string name="sync_folders_add_row_title">Añadir carpeta por nombre</string>
     <string name="sync_folders_add_dialog_name_hint">Nombre de la carpeta</string>

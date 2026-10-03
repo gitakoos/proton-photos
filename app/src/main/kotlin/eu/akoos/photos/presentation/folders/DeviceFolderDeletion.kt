@@ -31,7 +31,6 @@ import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
-import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.presentation.common.DeleteRow
 import eu.akoos.photos.presentation.common.DeleteRowKind
 import eu.akoos.photos.presentation.common.deleteConfirmRows
@@ -46,19 +45,20 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
-import me.proton.core.domain.entity.UserId
 import javax.inject.Inject
 
 /**
  * What deleting a whole device folder adds to the delete every surface already runs: which photos the
- * folder holds, and how its confirmation words the choice.
+ * folder holds, and how its confirmation words the delete.
  *
- * The delete itself is [eu.akoos.photos.domain.usecase.DeletePhotoUseCase] behind the owning screen's
- * system-consent launcher, the path a selection delete takes, so nothing here removes a file.
+ * A folder delete takes the device files only. Drive copies are never touched: a backed-up photo stays
+ * in Drive and becomes cloud-only. The delete itself is
+ * [eu.akoos.photos.domain.usecase.DeletePhotoUseCase] behind the owning screen's system-consent
+ * launcher, the path a selection delete takes, so nothing here removes a file.
  */
 object DeviceFolderDeletion {
 
-    /** One choice the confirmation offers: the delete it asks for, and the words it wears. A null
+    /** The one row the confirmation offers: the delete it asks for, and the words it wears. A null
      *  [descRes] leaves the row with its title alone. */
     data class Choice(
         val row: DeleteRow,
@@ -68,42 +68,58 @@ object DeviceFolderDeletion {
 
     /**
      * Every device row of the folder as the item the delete runs on: [GalleryItem.Synced] where
-     * [driveCopies] names the row's Drive copy by its uri, [GalleryItem.LocalOnly] otherwise.
+     * [pairedLinkIds] records a Drive copy for the row's uri, [GalleryItem.LocalOnly] otherwise.
      *
-     * The type is what lets the delete trash the Drive copy when asked to, and what moves each photo's
-     * sync record to the right state afterwards: a backed-up photo passed as device-only would have its
-     * record rewritten as one that was never backed up.
+     * The type is what moves each photo's sync record afterwards: a backed-up photo becomes cloud-only,
+     * a device-only one leaves no copy behind. So it follows the sync record's own pairing, never a
+     * match by name. [listed] supplies the Drive copy as the cloud listing holds it; one the listing
+     * has not caught up with yet stands in from its link id and the device row, the only parts of it
+     * the delete reads.
      */
-    fun items(rows: List<LocalMediaItem>, driveCopies: Map<String, CloudPhoto>): List<GalleryItem> =
+    fun items(
+        rows: List<LocalMediaItem>,
+        pairedLinkIds: Map<String, String>,
+        listed: Map<String, CloudPhoto>,
+    ): List<GalleryItem> =
         rows.map { row ->
-            driveCopies[row.uri]?.let { GalleryItem.Synced(it, row) } ?: GalleryItem.LocalOnly(row)
+            val linkId = pairedLinkIds[row.uri] ?: return@map GalleryItem.LocalOnly(row)
+            GalleryItem.Synced(listed[linkId] ?: standIn(linkId, row), row)
         }
+
+    private fun standIn(linkId: String, row: LocalMediaItem) = CloudPhoto(
+        linkId = linkId,
+        shareId = "",
+        volumeId = "",
+        captureTime = row.dateTaken / 1000L,
+        displayName = row.displayName,
+        mimeType = row.mimeType,
+        sizeBytes = row.sizeBytes,
+        thumbnailUrl = null,
+        revisionId = "",
+    )
 
     /** Whether a device delete on [sdkInt] lands in the system trash, where it can still be restored,
      *  rather than removing the files for good as Android 10 and older do. */
     fun hasDeviceTrash(sdkInt: Int): Boolean = sdkInt >= Build.VERSION_CODES.R
 
     /**
-     * The choices the confirmation offers for deleting [items].
+     * The row the confirmation offers for deleting [items], or null for an empty folder.
      *
-     * The rows of the selection's delete sheet, less the one that keeps the device copies: a folder
-     * delete always takes them. With nothing to decide about Drive, which is always the case without an
-     * account, that leaves the one red row. With a backed-up photo in the folder and an account to act
-     * for, the user also picks whether the Drive copies go too.
+     * With an account and a Drive copy behind every photo, it is the selection sheet's neutral
+     * "remove from device" row, the Drive backup kept. Otherwise at least one photo has no other copy,
+     * so it is the red device delete, which is always the case without an account.
      *
-     * The words follow [sdkInt]. Where the device has no trash, no row promises one: the device-only
-     * delete reads as permanent, and the everywhere row says only where the Drive copies go.
+     * The words follow [sdkInt]. Where the device has no trash, the red row reads as permanent.
      */
-    fun choices(items: Collection<GalleryItem>, isSignedIn: Boolean, sdkInt: Int): List<Choice> {
-        if (items.isEmpty()) return emptyList()
+    fun choice(items: Collection<GalleryItem>, isSignedIn: Boolean, sdkInt: Int): Choice? {
+        if (items.isEmpty()) return null
         val trash = hasDeviceTrash(sdkInt)
-        return deleteConfirmRows(
+        val row = deleteConfirmRows(
             hasLocal = true,
-            hasCloud = isSignedIn && items.any { it is GalleryItem.Synced },
+            hasCloud = isSignedIn && items.all { it is GalleryItem.Synced },
             reclaimableBytes = items.sumOf { deviceBytes(it) },
-        )
-            .filter { it.freeUpSpace }
-            .map { row -> Choice(row, titleRes(row.kind, trash), descRes(row.kind, trash)) }
+        ).first { it.freeUpSpace && !it.deleteFromCloud }
+        return Choice(row, titleRes(row.kind, trash), descRes(row.kind, trash))
     }
 
     private fun deviceBytes(item: GalleryItem): Long = when (item) {
@@ -113,20 +129,12 @@ object DeviceFolderDeletion {
     }
 
     @StringRes
-    private fun titleRes(kind: DeleteRowKind, trash: Boolean): Int = when {
-        trash -> deleteRowTitleRes(kind)
-        kind == DeleteRowKind.TrashLocal -> R.string.delete_button_permanently
-        kind == DeleteRowKind.RemoveEverywhere -> R.string.device_folder_delete_everywhere
-        else -> deleteRowTitleRes(kind)
-    }
+    private fun titleRes(kind: DeleteRowKind, trash: Boolean): Int =
+        if (!trash && kind == DeleteRowKind.TrashLocal) R.string.delete_button_permanently else deleteRowTitleRes(kind)
 
     @StringRes
-    private fun descRes(kind: DeleteRowKind, trash: Boolean): Int? = when {
-        trash -> deleteRowDescRes(kind)
-        kind == DeleteRowKind.TrashLocal -> null
-        kind == DeleteRowKind.RemoveEverywhere -> R.string.device_folder_delete_everywhere_desc
-        else -> deleteRowDescRes(kind)
-    }
+    private fun descRes(kind: DeleteRowKind, trash: Boolean): Int? =
+        if (!trash && kind == DeleteRowKind.TrashLocal) null else deleteRowDescRes(kind)
 }
 
 /**
@@ -152,7 +160,6 @@ data class DeviceFolderDeleteRequest(
 class DeviceFolderDeleteController @Inject constructor(
     private val accountManager: AccountManager,
     private val localMediaRepo: LocalMediaRepository,
-    private val getGalleryItems: GetGalleryItemsUseCase,
     private val syncStateRepo: SyncStateRepository,
     private val driveRepo: DrivePhotoRepository,
 ) {
@@ -206,37 +213,22 @@ class DeviceFolderDeleteController @Inject constructor(
      * Everything [bucketName] holds on the device, read for the one bucket the way its card on the
      * Albums grid counts it, so the delete leaves nothing behind for that card to go on showing.
      *
-     * Which of them has a Drive copy comes from the pairing every grid draws its cloud badge from. That
-     * listing leaves out the photos of a hidden album, which the folder still holds, so those are paired
-     * from their sync records instead.
+     * Which of them has a Drive copy comes from their sync records alone, the same uris-bounded read a
+     * folder hide pairs by, never from the name match a grid badge may draw on.
      */
     private suspend fun itemsOf(bucketName: String): List<GalleryItem> {
         val rows = localMediaRepo.queryByBucket(bucketName)
         if (rows.isEmpty()) return emptyList()
         // Without an account no photo on the device has a Drive copy this session can act on.
         val userId = accountManager.getPrimaryUserId().first()
-            ?: return DeviceFolderDeletion.items(rows, emptyMap())
-        val listed = HashMap<String, GalleryItem>()
-        for (item in getGalleryItems.invoke(userId).first()) {
-            val local = when (item) {
-                is GalleryItem.LocalOnly -> item.local
-                is GalleryItem.Synced -> item.local
-                is GalleryItem.CloudOnly -> null
-            }
-            if (local != null && local.bucketName == bucketName) listed[local.uri] = item
-        }
-        val shown = listed.values.filterIsInstance<GalleryItem.Synced>().associate { it.local.uri to it.cloud }
-        val unlisted = rows.map { it.uri }.filter { it !in listed }
-        return DeviceFolderDeletion.items(rows, shown + recordedCopies(userId, unlisted))
+            ?: return DeviceFolderDeletion.items(rows, emptyMap(), emptyMap())
+        val linkByUri = syncStateRepo.cloudPairedLinkIds(userId, rows.map { it.uri })
+        return DeviceFolderDeletion.items(rows, linkByUri, listedCopies(linkByUri.values))
     }
 
-    /** The Drive copy each of [uris] is paired to by its sync record, for the photos no listing shows. */
-    private suspend fun recordedCopies(userId: UserId, uris: List<String>): Map<String, CloudPhoto> {
-        if (uris.isEmpty()) return emptyMap()
-        val linkByUri = syncStateRepo.cloudPairedLinkIds(userId, uris)
-        if (linkByUri.isEmpty()) return emptyMap()
-        val copies = driveRepo.observePhotosByLinkIds(linkByUri.values.distinct()).first()
-            .associateBy { it.linkId }
-        return linkByUri.mapNotNull { (uri, linkId) -> copies[linkId]?.let { uri to it } }.toMap()
+    /** The cloud listing's copy of each of [linkIds] it holds. */
+    private suspend fun listedCopies(linkIds: Collection<String>): Map<String, CloudPhoto> {
+        if (linkIds.isEmpty()) return emptyMap()
+        return driveRepo.observePhotosByLinkIds(linkIds.distinct()).first().associateBy { it.linkId }
     }
 }

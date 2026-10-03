@@ -588,6 +588,76 @@ class UploadPipelineIntegrationTest {
         assertEquals(1, cloud.callLog.count { it == "ADD:$albumLinkId" })
     }
 
+    // ── Scenario 5f: album-add to an album shared with this user ───────────────────
+
+    private fun sharedAlbum(linkId: String) = Album(
+        linkId = linkId, name = "Shared", photoCount = 0, coverLinkId = null, lastActivityTimeMs = null,
+    )
+
+    private suspend fun sharedAlbumMisses(): Set<String> =
+        context.settingsDataStore.data.first()[SettingsKeys.FOREIGN_ALBUM_JOIN_MISSES] ?: emptySet()
+
+    @Test
+    fun `a queued add to a shared album settles once its copy lands, after earlier misses`() = runTest {
+        val uri = "content://media/a10"
+        val albumLinkId = "album-shared"
+        local.add(localItem(uri))
+        cloud.sharedAddableAlbums += sharedAlbum(albumLinkId)
+        cloud.refusingAlbums += albumLinkId
+        forceUploadUseCase.queueForAlbum(userId, albumLinkId, listOf(uri))
+
+        // Two passes miss: the pair stays, and each miss is counted.
+        uploadUseCase(userId)
+        uploadUseCase(userId)
+        assertEquals(listOf(albumLinkId), targetDao.getTargetsFor(uri))
+        assertEquals(1, sharedAlbumMisses().size)
+        assertTrue(sharedAlbumMisses().single().startsWith("2|"))
+
+        // The album takes the copy on the next pass: the pair and its count are gone.
+        cloud.refusingAlbums -= albumLinkId
+        uploadUseCase(userId)
+        assertTrue(targetDao.getTargetsFor(uri).isEmpty())
+        assertTrue(sharedAlbumMisses().isEmpty())
+        verify(exactly = 1) { albumEvents.notifyChanged() }
+    }
+
+    @Test
+    fun `a queued add a shared album keeps refusing is dropped after the bounded passes`() = runTest {
+        val uri = "content://media/a11"
+        val albumLinkId = "album-shared-refusing"
+        local.add(localItem(uri))
+        cloud.sharedAddableAlbums += sharedAlbum(albumLinkId)
+        cloud.refusingAlbums += albumLinkId
+        forceUploadUseCase.queueForAlbum(userId, albumLinkId, listOf(uri))
+
+        repeat(FOREIGN_ALBUM_JOIN_ATTEMPTS - 1) { uploadUseCase(userId) }
+        assertEquals("the pair is retried until the bound", listOf(albumLinkId), targetDao.getTargetsFor(uri))
+
+        uploadUseCase(userId)
+        assertEquals(SyncStatus.SYNCED, row(uri)!!.status)
+        assertTrue("the pair is let go at the bound", targetDao.getTargetsFor(uri).isEmpty())
+        assertTrue(sharedAlbumMisses().isEmpty())
+        verify(exactly = 0) { albumEvents.notifyChanged() }
+
+        // Nothing is left to retry, so a later pass never sends the add again.
+        uploadUseCase(userId)
+        assertEquals(FOREIGN_ALBUM_JOIN_ATTEMPTS, cloud.callLog.count { it == "ADD:$albumLinkId" })
+    }
+
+    @Test
+    fun `an owned album that refuses keeps its pair past the shared-album bound`() = runTest {
+        val uri = "content://media/a12"
+        val albumLinkId = "album-owned-refusing"
+        local.add(localItem(uri))
+        cloud.refusingAlbums += albumLinkId
+        forceUploadUseCase.queueForAlbum(userId, albumLinkId, listOf(uri))
+
+        repeat(FOREIGN_ALBUM_JOIN_ATTEMPTS + 1) { uploadUseCase(userId) }
+
+        assertEquals(listOf(albumLinkId), targetDao.getTargetsFor(uri))
+        assertTrue(sharedAlbumMisses().isEmpty())
+    }
+
     @Test
     fun `a pair another signed-in account queued stays queued when its album is missing from this account`() = runTest {
         val uri = "content://media/a9"
@@ -743,5 +813,7 @@ private class FakeLocalMediaRepository : LocalMediaRepository {
 
     override fun observeTrashedMedia(): Flow<List<LocalMediaItem>> = MutableStateFlow(emptyList())
     override fun hasMediaPermission(): Flow<Boolean> = MutableStateFlow(true)
+    override suspend fun confirmedGone(uris: Collection<String>): Set<String> =
+        uris.filterTo(HashSet()) { uri -> items.value.none { it.uri == uri } }
     override fun notifyMediaChanged() {}
 }

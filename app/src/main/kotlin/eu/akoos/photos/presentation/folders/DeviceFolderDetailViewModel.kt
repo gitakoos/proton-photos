@@ -935,11 +935,11 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Drop the question. The folder is untouched. */
     fun dismissDeleteFolderRequest() = folderDelete.dismiss()
 
-    /** Delete the photos the confirmation named, through the same body as a selection delete. The
-     *  device copies always go; [deleteFromCloud] also moves the Drive copies to Drive trash. */
-    fun confirmDeleteFolder(deleteFromCloud: Boolean) {
+    /** Delete the photos the confirmation named, through the same body as a selection delete. Only
+     *  the device copies go: a backed-up photo keeps its Drive copy and becomes cloud-only. */
+    fun confirmDeleteFolder() {
         val items = folderDelete.take() ?: return
-        deleteItems(items, freeUpSpace = true, deleteFromCloud = deleteFromCloud, wholeFolder = true)
+        deleteItems(items, freeUpSpace = true, deleteFromCloud = false, wholeFolder = true)
     }
 
     /**
@@ -964,10 +964,15 @@ class DeviceFolderDetailViewModel @Inject constructor(
                     is DeletePhotoUseCase.Result.Success -> {
                         // No system-trash dialog was needed, so device copies were untouched or removed
                         // permanently (pre-R): only a cloud trash is reversible, localRecoverable = false.
-                        buildDeleteUndoAction(items, freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
+                        buildDeleteUndoAction(result.landed(items), freeUpSpace, deleteFromCloud, hide = false, localRecoverable = false)
                             ?.let { undoController.offer(it) }
                         selection.clear()
-                        if (wholeFolder) _folderDeleted.value = true
+                        // A file Android 10 refused stays, and so does the folder that holds it.
+                        if (result.keptOnDevice.isNotEmpty()) {
+                            _hideFailure.tryEmit(context.getString(R.string.album_delete_photos_failed))
+                        } else if (wholeFolder) {
+                            _folderDeleted.value = true
+                        }
                     }
                     is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
                         pendingPermissionResult = result
@@ -1225,57 +1230,85 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val wholeFolder = pendingFolderDelete
         pendingFolderDelete = false
         viewModelScope.launch {
-            if (pending != null) {
-                // A local (device) delete/hide finishes without an account; the use case guards its
-                // own cloud branch. run {} instead of an if-null so a guest's confirmed action commits.
-                val userId = accountManager.getPrimaryUserId().first()
-                run {
-                    // The refusal comes back as an answer rather than an exception, so it was
-                    // being dropped: the device file had gone, the Drive copy had not, and the
-                    // screen said nothing at all. The timeline surface already reports this.
-                    val cloudResult = deletePhotoUseCase.completeAfterPermissionGranted(
-                        userId = userId,
-                        cloudLinkIds = pending.cloudLinkIds,
-                        items = pending.itemsBeingDeleted,
-                        freeUpSpace = pending.freeUpSpace,
-                        hide = pending.hide,
-                    )
-                    if (cloudResult is DeletePhotoUseCase.Result.CloudDeleteFailed) {
-                        _hideFailure.tryEmit(context.getString(R.string.viewer_delete_drive_failed))
-                    }
-                    if (pending.hide) {
-                        // Snapshot both halves before commitPendingHide() clears them, then offer Undo.
-                        val hideUris = pendingHidePrivateUris
-                        val hideCloudIds = pendingHideCloudLinkIds
-                        pendingHideCloudLinkIds = emptyList()
-                        commitPendingHide()
-                        buildHideUndoAction(hideUris, hideCloudIds)?.let { undoController.offer(it) }
-                        reportHideFailures()
-                    } else {
-                        // The system trash keeps the local files for ~30 days, so a confirmed delete is
-                        // reversible: localRecoverable = true.
-                        buildDeleteUndoAction(
-                            pending.itemsBeingDeleted,
-                            pending.freeUpSpace,
-                            deleteFromCloud = pending.cloudLinkIds.isNotEmpty(),
-                            hide = false,
-                            localRecoverable = true,
-                        )?.let { undoController.offer(it) }
+            if (pending == null) {
+                selection.clear()
+                if (wholeFolder) _folderDeleted.value = true
+                return@launch
+            }
+            // A local (device) delete/hide finishes without an account; the use case guards its
+            // own cloud branch, so a guest's confirmed action commits.
+            val userId = accountManager.getPrimaryUserId().first()
+            // The refusal comes back as an answer rather than an exception, so it was
+            // being dropped: the device file had gone, the Drive copy had not, and the
+            // screen said nothing at all. The timeline surface already reports this.
+            val result = deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
+            if (result is DeletePhotoUseCase.Result.NeedsMediaWritePermission) {
+                // The next chunk of a delete too large for one request, launched like the first.
+                pendingPermissionResult = result
+                pendingFolderDelete = wholeFolder
+                _pendingDeleteIntent.value = result.pendingIntent
+                return@launch
+            }
+            if (result is DeletePhotoUseCase.Result.CloudDeleteFailed) {
+                _hideFailure.tryEmit(context.getString(R.string.viewer_delete_drive_failed))
+            }
+            val leftOnDevice = when (result) {
+                is DeletePhotoUseCase.Result.Success -> result.keptOnDevice.also {
+                    if (it.isNotEmpty() && !pending.hide) {
+                        _hideFailure.tryEmit(context.getString(R.string.album_delete_photos_failed))
                     }
                 }
+                // A failed Drive half ends the delete, so any later chunk was never asked about.
+                else -> pending.remaining
             }
-            selection.clear()
             // The device copies went with the confirmed dialog, whatever Drive answered after it.
-            if (wholeFolder) _folderDeleted.value = true
+            finishConfirmedDelete(pending, pending.confirmedItems, folderGone = wholeFolder && leftOnDevice.isEmpty())
         }
     }
 
+    /** Settle a delete or hide whose system dialog was confirmed, for the [carriedOut] items it took. */
+    private suspend fun finishConfirmedDelete(
+        pending: DeletePhotoUseCase.Result.NeedsMediaWritePermission,
+        carriedOut: List<GalleryItem>,
+        folderGone: Boolean,
+    ) {
+        if (pending.hide) {
+            // Snapshot both halves before commitPendingHide() clears them, then offer Undo. The
+            // commit returns any photo whose original is still on the device to view.
+            val hideUris = pendingHidePrivateUris
+            val hideCloudIds = pendingHideCloudLinkIds
+            pendingHideCloudLinkIds = emptyList()
+            commitPendingHide()
+            buildHideUndoAction(hideUris, hideCloudIds)?.let { undoController.offer(it) }
+            reportHideFailures()
+        } else {
+            // The system trash keeps the local files for ~30 days, so a confirmed delete is
+            // reversible: localRecoverable = true.
+            buildDeleteUndoAction(
+                carriedOut,
+                pending.freeUpSpace,
+                deleteFromCloud = pending.deleteFromCloud,
+                hide = false,
+                localRecoverable = true,
+            )?.let { undoController.offer(it) }
+        }
+        selection.clear()
+        if (folderGone) _folderDeleted.value = true
+    }
+
     /** User cancelled the system trash dialog — drop the deferred cloud work and any pending vault
-     *  copies. The originals are untouched, so the photos stay where the user already sees them. */
+     *  copies. The originals are untouched, so the photos stay where the user already sees them.
+     *  A later chunk of a large delete declined leaves the chunks before it carried out, so those
+     *  finish as a landed delete while the folder keeps the rest. */
     fun clearPendingDeleteIntent() {
+        val pending = pendingPermissionResult
         pendingPermissionResult = null
         pendingFolderDelete = false
         _pendingDeleteIntent.value = null
+        if (pending != null && pending.done.isNotEmpty()) {
+            viewModelScope.launch { finishConfirmedDelete(pending, pending.done, folderGone = false) }
+            return
+        }
         rollbackPendingHide()
     }
 

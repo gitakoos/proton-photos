@@ -1230,8 +1230,6 @@
         <item quantity="other">Z tohoto zařízení se smaže všech %1$d fotek a videí ze složky \"%2$s\".</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Tato verze Androidu nemá koš, takže smazání z tohoto zařízení je trvalé.</string>
-    <string name="device_folder_delete_everywhere">Smazat všude</string>
-    <string name="device_folder_delete_everywhere_desc">Přesune také kopie na Proton Drive do koše na Drive</string>
     <string name="sync_folders_add_dialog_title">Přidat složku</string>
     <string name="sync_folders_add_row_title">Přidat složku podle názvu</string>
     <string name="sync_folders_add_dialog_name_hint">Název složky</string>

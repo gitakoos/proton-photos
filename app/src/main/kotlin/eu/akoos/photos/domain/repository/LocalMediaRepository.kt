@@ -79,6 +79,15 @@ interface LocalMediaRepository {
     fun countTrashedMedia(): Flow<Int> = observeTrashedMedia().map { it.size }
 
     fun hasMediaPermission(): Flow<Boolean>
+
+    /**
+     * Which of [uris] a direct look by id confirms are gone from the device, for a step that drops or
+     * demotes a row on a scan's word alone: a trashed file is missing from every scan yet still
+     * restorable, and a torn read can skip a row without repeating one. A file in the trash counts as
+     * present, and a uri that cannot be looked up is never reported gone.
+     */
+    suspend fun confirmedGone(uris: Collection<String>): Set<String>
+
     suspend fun queryByUri(uri: String): LocalMediaItem?
 
     /**

@@ -100,6 +100,13 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
      *  [AlbumNotFoundException], the way the real add reports a deleted album. */
     val goneAlbums = mutableSetOf<String>()
 
+    /** Albums shared with this user that it may add to, as [loadSharedAddableAlbumsCached] lists them. */
+    val sharedAddableAlbums = mutableListOf<Album>()
+
+    /** Albums that report every photo as failed on each [addPhotosToAlbum], without adding any: a
+     *  shared album whose copy keeps being refused. */
+    val refusingAlbums = mutableSetOf<String>()
+
     /** Runs at the start of every [uploadFile] call, while the upload is in flight. */
     var onUploadStarted: (suspend (LocalMediaItem) -> Unit)? = null
 
@@ -191,7 +198,7 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
             failAddPhotosOnce = false
             error("simulated transient album-add failure")
         }
-        if (rejectAddPhotosOnce) {
+        if (rejectAddPhotosOnce || albumLinkId in refusingAlbums) {
             rejectAddPhotosOnce = false
             return DrivePhotoRepository.AddPhotosToAlbumResult(
                 succeededLinkIds = emptyList(),
@@ -253,7 +260,7 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun refreshCloudPhotos(userId: UserId, force: Boolean) {}
     override suspend fun refreshCloudPhotosIncremental(userId: UserId) {}
     override suspend fun loadAlbumsCached(): List<Album> = emptyList()
-    override suspend fun loadSharedAddableAlbumsCached(): List<Album> = emptyList()
+    override suspend fun loadSharedAddableAlbumsCached(): List<Album> = sharedAddableAlbums.toList()
     override suspend fun loadSharedWithMeAlbumsCached(): List<Album> = emptyList()
     override suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>) {}
     override suspend fun prefetchSharedAlbumsMembership(userId: UserId, albums: List<Album>) {}

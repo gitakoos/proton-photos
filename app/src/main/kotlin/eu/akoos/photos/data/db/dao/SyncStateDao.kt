@@ -62,13 +62,17 @@ interface SyncStateDao {
 
     /** Every column of every row [userId] holds, re-read in full on each write to the table. Legacy:
      *  a reader that needs only the pairing, the status or the queue flag takes
-     *  [eu.akoos.photos.data.repository.SyncStateSnapshot], one lean read shared by the whole app. */
+     *  [eu.akoos.photos.data.repository.SyncStateSnapshot], one lean read shared by the whole app.
+     *  One transaction, so a table larger than one cursor window is read from one snapshot, for the
+     *  reason [PhotoListingDao.getOwnStreamLite] gives. */
+    @Transaction
     @Query("SELECT * FROM sync_state WHERE userId = :userId")
     fun observeAll(userId: String): Flow<List<SyncStateEntity>>
 
     /** Every row [userId] holds, as the [SyncStateLite] columns only. A one-shot read: the shared
      *  [eu.akoos.photos.data.repository.SyncStateSnapshot] decides when it runs, so a burst of writes
-     *  costs one read instead of one per write. */
+     *  costs one read instead of one per write. One transaction, like [observeAll]. */
+    @Transaction
     @Query("SELECT localUri, cloudFileId, localHash, status, queued FROM sync_state WHERE userId = :userId")
     suspend fun getAllLite(userId: String): List<SyncStateLite>
 

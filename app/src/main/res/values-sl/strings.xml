@@ -1231,8 +1231,6 @@
         <item quantity="other">Celotna vsebina mape \"%2$s\", %1$d fotografij in videoposnetkov, bo izbrisana iz te naprave.</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Ta različica Androida nima koša, zato je brisanje iz te naprave trajno.</string>
-    <string name="device_folder_delete_everywhere">Izbriši povsod</string>
-    <string name="device_folder_delete_everywhere_desc">Premakne tudi kopije v Proton Drive v koš Drive</string>
     <string name="sync_folders_add_dialog_title">Dodaj mapo</string>
     <string name="sync_folders_add_row_title">Dodaj mapo po imenu</string>
     <string name="sync_folders_add_dialog_name_hint">Ime mape</string>

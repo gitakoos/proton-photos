@@ -415,6 +415,14 @@ object SettingsKeys {
     const val PENDING_ALBUM_ADD_NO_ALBUM = "__force_upload_no_album__"
 
     /**
+     * How many upload passes a queued add to an album shared with this user has missed, one
+     * "count|albumLinkId|localUri" entry per queued pair. Such an add is a copy under a new link id,
+     * so the album's children cannot confirm it the way they confirm an add to an owned album; the
+     * pair is let go after a bounded number of misses instead of being retried on every pass.
+     */
+    val FOREIGN_ALBUM_JOIN_MISSES = stringSetPreferencesKey("foreign_album_join_misses")
+
+    /**
      * Folder names the user opted in to mirror as Drive albums. When a photo is uploaded
      * from a device bucket whose name is in this set, the upload pipeline also creates
      * (or reuses) a matching Drive album and adds the photo. Names not in this set never

@@ -494,6 +494,8 @@ class ReconcileEquivalenceTest {
         override suspend fun freshScan(): DeviceMediaScan = DeviceMediaScan(items, complete)
         override fun observeTrashedMedia(): Flow<List<LocalMediaItem>> = flowOf(emptyList())
         override fun hasMediaPermission(): Flow<Boolean> = flowOf(true)
+        override suspend fun confirmedGone(uris: Collection<String>): Set<String> =
+            uris.filterTo(HashSet()) { uri -> items.none { it.uri == uri } }
         override suspend fun queryByUri(uri: String): LocalMediaItem? = items.firstOrNull { it.uri == uri }
         override suspend fun queryByBucket(bucketName: String): List<LocalMediaItem> =
             items.filter { it.bucketName == bucketName }

@@ -1230,8 +1230,6 @@
         <item quantity="other">Cała zawartość folderu \"%2$s\", %1$d zdjęcia i filmy, zostanie usunięta z tego urządzenia.</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Ta wersja Androida nie ma kosza, więc usunięcie z tego urządzenia jest trwałe.</string>
-    <string name="device_folder_delete_everywhere">Usuń wszędzie</string>
-    <string name="device_folder_delete_everywhere_desc">Przenosi też kopie w Proton Drive do kosza Drive</string>
     <string name="sync_folders_add_dialog_title">Dodaj folder</string>
     <string name="sync_folders_add_row_title">Dodaj folder według nazwy</string>
     <string name="sync_folders_add_dialog_name_hint">Nazwa folderu</string>

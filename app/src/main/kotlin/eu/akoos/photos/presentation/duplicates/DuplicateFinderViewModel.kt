@@ -523,8 +523,11 @@ class DuplicateFinderViewModel @Inject constructor(
                 )
                 when (result) {
                     is DeletePhotoUseCase.Result.Success -> {
-                        removeFromGroup(group, toDelete.map { it.stableId }.toSet())
-                        markDeleted(toDelete)
+                        // A copy Android 10 refused to remove is still there, so it stays in its group.
+                        val landed = result.landed(toDelete)
+                        removeFromGroup(group, landed.map { it.stableId }.toSet())
+                        markDeleted(landed)
+                        if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
                     is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
                         pendingPermissionResult = result
@@ -584,10 +587,12 @@ class DuplicateFinderViewModel @Inject constructor(
                 )
                 when (result) {
                     is DeletePhotoUseCase.Result.Success -> {
+                        // A copy Android 10 refused to remove is still there, so it stays in its group.
                         perGroup.forEach { (group, items) ->
-                            removeFromGroup(group, items.map { it.stableId }.toSet())
+                            removeFromGroup(group, result.landed(items).map { it.stableId }.toSet())
                         }
-                        markDeleted(toDelete)
+                        markDeleted(result.landed(toDelete))
+                        if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
                     }
                     is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
                         pendingPermissionResult = result
@@ -620,14 +625,14 @@ class DuplicateFinderViewModel @Inject constructor(
                 // does, so ignoring the answer recorded the copies as gone while the Drive half was
                 // still there: the card left the screen, the quota did not move, and nothing said so.
                 // Mirrors the branches the pre-dialog path already takes.
-                val result = deletePhotoUseCase.completeAfterPermissionGranted(
-                    userId = userId,
-                    cloudLinkIds = pending.cloudLinkIds,
-                    items = pending.itemsBeingDeleted,
-                    freeUpSpace = pending.freeUpSpace,
-                )
+                // Each chunk of a delete too large for one request is recorded as it lands, so a
+                // later chunk declined leaves exactly the earlier ones marked.
+                val result = deletePhotoUseCase.completeAfterPermissionGranted(userId, pending)
                 when (result) {
-                    is DeletePhotoUseCase.Result.Success -> markDeleted(pending.itemsBeingDeleted)
+                    is DeletePhotoUseCase.Result.Success -> {
+                        markDeleted(pending.itemsBeingDeleted)
+                        if (result.keptOnDevice.isNotEmpty()) _uiState.update { it.copy(errorMessage = "delete") }
+                    }
                     is DeletePhotoUseCase.Result.CloudDeleteFailed -> {
                         // The system already carried out the device delete before handing back
                         // here, so this copy IS gone from the phone even though Drive kept its own.
@@ -637,8 +642,12 @@ class DuplicateFinderViewModel @Inject constructor(
                         markDeleted(pending.itemsBeingDeleted)
                         _uiState.update { it.copy(errorMessage = "drive") }
                     }
-                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission ->
-                        _uiState.update { it.copy(errorMessage = "delete") }
+                    is DeletePhotoUseCase.Result.NeedsMediaWritePermission -> {
+                        // The next chunk, launched like the first.
+                        markDeleted(pending.itemsBeingDeleted)
+                        pendingPermissionResult = result
+                        _uiState.update { it.copy(pendingDeleteIntent = result.pendingIntent) }
+                    }
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e

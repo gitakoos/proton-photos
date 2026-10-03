@@ -1052,8 +1052,6 @@
         <item quantity="other">Toutes les %1$d photos et vidéos de \"%2$s\" seront supprimées de cet appareil.</item>
     </plurals>
     <string name="device_folder_delete_no_trash">Cette version d\'Android n\'a pas de corbeille, la suppression sur cet appareil est donc définitive.</string>
-    <string name="device_folder_delete_everywhere">Supprimer partout</string>
-    <string name="device_folder_delete_everywhere_desc">Déplace aussi les copies Proton Drive dans la corbeille Drive</string>
     <string name="sync_folders_add_dialog_title">Ajouter un dossier</string>
     <string name="sync_folders_add_row_title">Ajouter un dossier par nom</string>
     <string name="sync_folders_add_dialog_name_hint">Nom du dossier</string>
