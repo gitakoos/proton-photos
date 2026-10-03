@@ -252,6 +252,15 @@ class SharedViewModel @Inject constructor(
         }
     }
 
+    /** Re-reads only the invitations waiting for an answer, enough to keep the Shared tile's dot current. */
+    fun refreshInvitations() {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            runCatching { driveRepo.loadPendingInvitations(userId) }
+                .onSuccess { pending -> _uiState.update { it.copy(pendingInvitations = pending) } }
+        }
+    }
+
     fun declineInvitation(invitationId: String) {
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
@@ -323,7 +332,9 @@ class SharedViewModel @Inject constructor(
             val painted = sharedTabHasCachedContent(cachedOwn, cachedSharedWithMe)
             _uiState.update { state ->
                 state.copy(
-                    isLoading = !painted,
+                    // A list that is empty because nothing is shared reads the same as one not loaded yet, so
+                    // once a load has finished the screen no longer goes back to the skeleton on every visit.
+                    isLoading = !painted && !loadedOnce,
                     allAlbums = cachedOwn.ifEmpty { state.allAlbums },
                     sharedWithMeAlbums = cachedSharedWithMe.ifEmpty { state.sharedWithMeAlbums },
                 )
@@ -331,10 +342,12 @@ class SharedViewModel @Inject constructor(
 
             // Phase 2: network refresh, online only — else the painted cache stands.
             if (!networkObserver.isOnline.value) {
+                loadedOnce = true
                 _uiState.update { it.copy(isLoading = false) }
                 return@launch
             }
             val userId = accountManager.getPrimaryUserId().first() ?: run {
+                loadedOnce = true
                 _uiState.update { it.copy(isLoading = false) }
                 return@launch
             }
@@ -359,6 +372,7 @@ class SharedViewModel @Inject constructor(
                 }
             }.fold(
                 onSuccess = { load ->
+                    loadedOnce = true
                     _uiState.update { it.copy(
                         isLoading = false,
                         sharedWithMeAlbums = load.sharedWithMe,
@@ -369,6 +383,7 @@ class SharedViewModel @Inject constructor(
                     prefetchSharedAlbums(userId, load.sharedWithMe)
                 },
                 onFailure = { e ->
+                    loadedOnce = true
                     // Every list already on screen stays: a refresh that failed knows nothing that
                     // would justify clearing what the cache painted.
                     val isNetworkFailure = friendlyNetworkError(e, networkObserver.isOnline.value, context) != null
@@ -386,6 +401,9 @@ class SharedViewModel @Inject constructor(
             )
         }
     }
+
+    /** True once a load has run to its end, whatever it found. */
+    @Volatile private var loadedOnce = false
 
     private var ownAlbumsRefreshJob: kotlinx.coroutines.Job? = null
 

@@ -238,6 +238,7 @@ fun AlbumDetailScreen(
     var showSaveToLibraryConfirm by remember { mutableStateOf(false) }
     var showAlbumOverflow by remember { mutableStateOf(false) }
     var showLeaveAlbumConfirm by remember { mutableStateOf(false) }
+    var showDeleteAlbumConfirm by remember { mutableStateOf(false) }
     // Confirm the album actions that apply immediately, so a single tap can't trigger them by accident.
     var showDownloadAllConfirm by remember { mutableStateOf(false) }
     var showSetCoverConfirm by remember { mutableStateOf(false) }
@@ -523,9 +524,10 @@ fun AlbumDetailScreen(
     // for the same reason; a fresh open starts from the saved choice.
     var visitGrouping by rememberSaveable { mutableStateOf<AlbumPhotoGrouping?>(null) }
     val shownGrouping = visitGrouping ?: photoGrouping
-    LaunchedEffect(Unit) {
+    LaunchedEffect(state.albumLinkId) {
+        val albumLinkId = state.albumLinkId
         shareCtx.settingsDataStore.data
-            .map { AlbumPhotoGrouping.fromOrdinal(it[SettingsKeys.ALBUM_PHOTO_GROUPING]) }
+            .map { PhotoViewChoices.from(it).groupingOfAlbum(albumLinkId) }
             .collect { photoGrouping = it }
     }
     // Group photos under the headers shown, on the same capture time the rest of the app groups that
@@ -551,8 +553,9 @@ fun AlbumDetailScreen(
     }.collectAsState(initial = false)
     // Which sort chip the drawer marks. The ViewModel reads the same preference for the order itself,
     // so this only has to say which one is active.
-    val photoSortMode by remember {
-        shareCtx.settingsDataStore.data.map { AlbumPhotoSortMode.fromOrdinal(it[SettingsKeys.ALBUM_PHOTO_SORT_MODE]) }
+    val photoSortMode by remember(state.albumLinkId) {
+        val albumLinkId = state.albumLinkId
+        shareCtx.settingsDataStore.data.map { PhotoViewChoices.from(it).sortOfAlbum(albumLinkId) }
     }.collectAsState(initial = AlbumPhotoSortMode.Default)
     // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
     var scrubberDragging by remember { mutableStateOf(false) }
@@ -1321,6 +1324,7 @@ fun AlbumDetailScreen(
             sortMode = photoSortMode,
             grouping = photoGrouping,
             isHiddenFromTimeline = state.isHiddenFromTimeline,
+            isExcludedFromGrid = state.isExcludedFromGrid,
             onDismiss = { showAlbumOverflow = false },
             onAddPhotos = { addPhotos() },
             onShareOrInfo = { showShareSheet = true },
@@ -1332,21 +1336,15 @@ fun AlbumDetailScreen(
             onRename = { showRenameSheet = true },
             onToggleHiddenFromTimeline = { viewModel.toggleHiddenFromTimeline() },
             onHide = { viewModel.hideAlbum() },
+            onToggleExcludedFromGrid = { viewModel.toggleExcludedFromGrid() },
+            onDelete = if (state.isSharedWithMe) null else ({ showDeleteAlbumConfirm = true }),
             onSlideshow = { playSlideshow() },
             onSortSelected = { mode ->
-                scope.launch {
-                    shareCtx.settingsDataStore.edit {
-                        it[SettingsKeys.ALBUM_PHOTO_SORT_MODE] = mode.ordinal
-                    }
-                }
+                scope.launch { PhotoViewChoiceStore.setAlbumSort(shareCtx, state.albumLinkId, mode) }
             },
             onGroupingSelected = { grouping ->
                 visitGrouping = grouping
-                scope.launch {
-                    shareCtx.settingsDataStore.edit {
-                        it[SettingsKeys.ALBUM_PHOTO_GROUPING] = grouping.ordinal
-                    }
-                }
+                scope.launch { PhotoViewChoiceStore.setAlbumGrouping(shareCtx, state.albumLinkId, grouping) }
             },
             onLeaveAlbum = { showLeaveAlbumConfirm = true },
         )
@@ -1529,6 +1527,40 @@ fun AlbumDetailScreen(
     // Leave-album confirmation dialog. Mounted off the overflow menu on
     // shared-with-me albums. Destructive styling matches "Delete album" since
     // the entry disappears from the user's library in both flows.
+    // Deleting removes the album from Drive and keeps its photos, the same question the Albums grid asks.
+    if (showDeleteAlbumConfirm) {
+        ConfirmDialog(
+            title = "\"${state.albumName}\"",
+            message = stringResource(R.string.delete_album_container_warning),
+            confirmLabel = stringResource(R.string.delete_button_permanently),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                showDeleteAlbumConfirm = false
+                viewModel.deleteAlbum()
+            },
+            onDismiss = { showDeleteAlbumConfirm = false },
+            destructive = true,
+        )
+    }
+
+    // The server refuses a plain delete when the album holds the only copy of some photos, and the
+    // choice to go on is the user's.
+    if (state.deleteWouldLosePhotos) {
+        ConfirmDialog(
+            title = stringResource(R.string.albums_delete_would_lose_title),
+            message = stringResource(R.string.albums_delete_would_lose_body),
+            confirmLabel = stringResource(R.string.albums_delete_would_lose_action),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = { viewModel.deleteAlbum(deletePhotosToo = true) },
+            onDismiss = { viewModel.dismissDeleteWouldLosePhotos() },
+            destructive = true,
+        )
+    }
+
+    androidx.compose.runtime.LaunchedEffect(state.deleteAlbumDone) {
+        if (state.deleteAlbumDone) onBack()
+    }
+
     if (showLeaveAlbumConfirm) {
         ConfirmDialog(
             title = stringResource(R.string.leave_album_confirm_title),

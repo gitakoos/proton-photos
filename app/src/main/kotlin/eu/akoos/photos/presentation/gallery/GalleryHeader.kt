@@ -53,14 +53,10 @@ internal fun GalleryHeader(
     selectedTab: Int,
     galleryState: GalleryUiState,
     albumsState: AlbumsUiState,
-    sharedFilter: SharedFilter,
-    activeEmailFilter: String?,
     isOnlineNow: Boolean,
     onFilterSelected: (GalleryFilter) -> Unit,
-    onSearchClick: () -> Unit,
     onCalendarClick: () -> Unit,
     onClearContentFilter: () -> Unit,
-    onHiddenAlbumClick: () -> Unit,
     /** Opens the content-filter drawer from the Photos-tab filter icon. */
     onShowAlbumsFilterSheet: () -> Unit,
     /** Opens the create-album dialog from the Albums-tab "New album" pill. */
@@ -79,8 +75,6 @@ internal fun GalleryHeader(
     onAlbumSearchActiveChange: (Boolean) -> Unit = {},
     /** True while the Albums page is in arrange mode, which hides the search entry in the rail. */
     albumReorderActive: Boolean = false,
-    onSharedFilterSelected: (SharedFilter) -> Unit,
-    onShowSharedEmailSheet: () -> Unit,
     onSettingsClick: () -> Unit,
     onHeaderMeasured: (Int) -> Unit,
     updateAvailable: Boolean = false,
@@ -106,18 +100,23 @@ internal fun GalleryHeader(
             when (selectedTab) {
                 0 -> {
                     FilterRail(
-                        totalCount = galleryState.items.size,
+                        // What is on screen: the filtered count while any filter narrows the timeline.
+                        totalCount = if (galleryState.contentFilter != ContentFilter() ||
+                            galleryState.selectedFilter != GalleryFilter.All
+                        ) galleryState.filteredItems.size else galleryState.items.size,
                         contentFilter = galleryState.contentFilter,
-                        onSearchClick = onSearchClick,
+                        selectedCategory = galleryState.selectedFilter,
                         onCalendarClick = onCalendarClick,
-                        onClearContentFilter = onClearContentFilter,
+                        onClearContentFilter = {
+                            onClearContentFilter()
+                            onFilterSelected(GalleryFilter.All)
+                        },
                         onOpenTimelineFilter = onShowAlbumsFilterSheet,
                         modifier = Modifier.weight(1f),
                     )
                 }
                 1 -> {
                     AlbumsFilterRail(
-                        onHiddenAlbumClick = onHiddenAlbumClick,
                         onNewAlbumClick = onNewAlbumClick,
                         onNewLocalFolder = onNewLocalFolder,
                         selectedFilter = albumFilter,
@@ -129,15 +128,6 @@ internal fun GalleryHeader(
                         searchActive = albumSearchActive,
                         onSearchActiveChange = onAlbumSearchActiveChange,
                         reorderActive = albumReorderActive,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                2 -> {
-                    SharedFilterRail(
-                        selectedFilter = sharedFilter,
-                        onFilterSelected = onSharedFilterSelected,
-                        activeEmailFilter = activeEmailFilter,
-                        onFilterClick = onShowSharedEmailSheet,
                         modifier = Modifier.weight(1f),
                     )
                 }

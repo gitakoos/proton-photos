@@ -879,6 +879,8 @@
     <string name="share_all">Všetko</string>
     <string name="share_shared_with_me">Zdieľané so mnou</string>
     <string name="share_shared_by_me">Zdieľané mnou</string>
+    <string name="share_scope_with_me">So mnou</string>
+    <string name="share_scope_by_me">Mnou</string>
     <string name="share_filter_account">Filtrovať podľa účtu</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
@@ -968,9 +970,6 @@
     <!-- Map -->
     <string name="map_title">Mapa</string>
     <string name="map_vector_title">Mapa sveta</string>
-    <string name="map_card_title">Mapa</string>
-    <string name="map_card_subtitle_empty">Zatiaľ žiadne fotky s polohou</string>
-    <string name="map_card_calendar_subtitle">Kalendárové zobrazenie vašich fotiek</string>
     <string name="map_search_places">Hľadať miesta</string>
     <string name="places_title">Miesta</string>
     <string name="map_search_no_places">Zatiaľ žiadne miesta</string>
@@ -1313,8 +1312,8 @@
     <string name="albums_filter_sheet_title">Filter albumov</string>
     <string name="albums_filter_default_heading">Predvolené pri otvorení</string>
     <string name="albums_filter_remember_last">Zapamätať naposledy použitý filter</string>
-    <string name="albums_show_collection">Zobrazovať Kolekciu</string>
-    <string name="albums_show_collection_summary">Ľudia, miesta a „V tento deň“ zostávajú vo vyhľadávaní</string>
+    <string name="albums_show_collection">Zobraziť riadok odkazov</string>
+    <string name="albums_shortcuts_heading">Odkazy</string>
     <string name="albums_filter_excluded">Vylúčené</string>
     <string name="albums_excluded_empty">Žiadne vylúčené albumy ani priečinky</string>
     <string name="albums_exclude_from_albums">Vylúčiť z Albumov</string>
@@ -1548,7 +1547,6 @@
     <string name="thanks_2_5_0_website">Webová stránka</string>
     <string name="thanks_2_5_0_coffee">Kúp mi kávu</string>
     <string name="thanks_2_5_0_dismiss">Zavrieť</string>
-    <string name="offline_card_subtitle">Fotky uložené na offline prezeranie</string>
     <string name="duplicates_filter_identical">Rovnaké</string>
     <string name="duplicates_filter_similar">Podobné</string>
     <string name="duplicates_filter_match_label">Zhoda</string>
@@ -1786,7 +1784,6 @@
     <string name="settings_ai_clear_confirm_msg">Týmto sa odstránia všetky nájdené osoby a všetky údaje tvárí. Vaše fotografie zostanú nedotknuté. Tváre sa znova rozpoznajú pri ďalšom indexovaní.</string>
     <string name="gallery_add_to_person">Pridať k osobe</string>
     <string name="people_search_hint">Hľadať osoby</string>
-    <string name="people_card_subtitle">Prehliadajte fotky podľa osôb</string>
     <string name="person_set_cover">Nastaviť ako obálku</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>

@@ -129,6 +129,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.AppSearchField
+import eu.akoos.photos.presentation.common.SearchFieldTerm
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
@@ -150,6 +151,9 @@ import eu.akoos.photos.presentation.common.ScrollScrubber
 import eu.akoos.photos.presentation.common.ShimmerSquare
 import androidx.compose.material.icons.filled.PrivacyTip
 import eu.akoos.photos.presentation.gallery.CategoryRail
+import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.presentation.gallery.categoryLabel
+import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.LocalPeopleRail
 import eu.akoos.photos.presentation.gallery.PeopleRailData
 import eu.akoos.photos.presentation.gallery.ContentFilter
@@ -169,12 +173,8 @@ import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.search.components.AlbumSuggestionRow
 import eu.akoos.photos.presentation.search.components.AlbumsRow
-import eu.akoos.photos.presentation.search.components.CalendarPreviewCard
-import eu.akoos.photos.presentation.search.components.OfflinePreviewCard
-import eu.akoos.photos.presentation.search.components.PeoplePreviewCard
 import eu.akoos.photos.presentation.search.components.JumpToMonthHeader
 import eu.akoos.photos.presentation.search.components.MonthTileRow
-import eu.akoos.photos.presentation.search.components.MapPreviewSwitcher
 import eu.akoos.photos.presentation.search.components.OnThisDayRow
 import eu.akoos.photos.presentation.search.components.RecentRow
 import eu.akoos.photos.presentation.search.components.MonthBucket
@@ -193,10 +193,6 @@ import java.util.Calendar
 fun SearchScreen(
     onBack: () -> Unit,
     onPhotoClick: (List<GalleryItem>, Int) -> Unit,
-    onOpenMap: () -> Unit = {},
-    onOpenCalendar: () -> Unit = {},
-    onOpenOffline: () -> Unit = {},
-    onOpenPeople: () -> Unit = {},
     /** Opens the date + place editor for the current selection, matching the timeline's entry. */
     onEditMetadata: (items: List<GalleryItem>) -> Unit = {},
     /** Opens a matched person's page from the name suggestion row. */
@@ -216,14 +212,13 @@ fun SearchScreen(
     val semanticSearching by vm.semanticSearching.collectAsStateWithLifecycle()
     val semanticSearchEnabled by vm.semanticSearchEnabled.collectAsStateWithLifecycle()
     val filter by vm.contentFilter.collectAsStateWithLifecycle()
+    val dateSuggestions by vm.dateSuggestions.collectAsStateWithLifecycle()
     val selectedCategory by vm.selectedCategory.collectAsStateWithLifecycle()
     val people by vm.people.collectAsStateWithLifecycle()
     val selectedPersonId by vm.selectedPersonId.collectAsStateWithLifecycle()
     // Whether the People face bar is revealed under the category rail (mirrors the timeline).
     var peopleExpanded by remember { mutableStateOf(false) }
     val allItems by vm.allItems.collectAsStateWithLifecycle()
-    val geotaggedPins by vm.geotaggedPins.collectAsStateWithLifecycle()
-    val distinctCityCount by vm.distinctCityCount.collectAsStateWithLifecycle()
     val selectedItems by vm.selectedItems.collectAsStateWithLifecycle()
     val albums by vm.albums.collectAsStateWithLifecycle()
     val pendingDeleteIntent by vm.pendingDeleteIntent.collectAsStateWithLifecycle()
@@ -459,26 +454,6 @@ fun SearchScreen(
                     .navigationBarsPadding(),
                 contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = 24.dp),
             ) {
-                item(key = "map_preview_section") {
-                    MapPreviewSwitcher(
-                        pins = geotaggedPins,
-                        cityCount = distinctCityCount,
-                        onOpenMap = onOpenMap,
-                    )
-                }
-                item(key = "calendar_preview_section") {
-                    CalendarPreviewCard(onClick = onOpenCalendar)
-                }
-                item(key = "offline_preview_section") {
-                    OfflinePreviewCard(onClick = onOpenOffline)
-                }
-                // Entry point to the People page, shown whenever on-device face grouping is on and
-                // independent of sign-in, so a local-only guest can reach and name their clusters.
-                if (faceEnabled) {
-                    item(key = "people_preview_section") {
-                        PeoplePreviewCard(onClick = onOpenPeople)
-                    }
-                }
                 if (recent.isNotEmpty()) {
                     item(key = "recent_section") {
                         RecentRow(
@@ -721,9 +696,36 @@ fun SearchScreen(
                     background = colors.chipUnselectedBg,
                     borderColor = colors.line,
                 )
+                // Whatever already narrows the results sits in the field as a pill: the chosen category,
+                // the type and storage filters and the date, each removable on its own.
+                val searchLocale = appLocale()
+                val categoryName = if (selectedCategory == GalleryFilter.All) null else categoryLabel(selectedCategory)
+                val photosName = stringResource(R.string.gallery_filter_photos)
+                val videosName = stringResource(R.string.filter_type_videos)
+                val localName = stringResource(R.string.filter_sync_local)
+                val backedUpName = stringResource(R.string.filter_sync_backedup)
+                val cloudName = stringResource(R.string.filter_sync_cloud)
+                val searchTerms = buildList {
+                    categoryName?.let { add(SearchFieldTerm(it) { vm.onCategorySelected(GalleryFilter.All) }) }
+                    when (filter.mediaType) {
+                        MediaType.PhotosOnly -> add(SearchFieldTerm(photosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
+                        MediaType.VideosOnly -> add(SearchFieldTerm(videosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
+                        MediaType.All -> Unit
+                    }
+                    when (filter.syncStatus) {
+                        SyncStatusFilter.LocalOnly -> add(SearchFieldTerm(localName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
+                        SyncStatusFilter.BackedUp -> add(SearchFieldTerm(backedUpName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
+                        SyncStatusFilter.CloudOnly -> add(SearchFieldTerm(cloudName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
+                        SyncStatusFilter.All -> Unit
+                    }
+                    dateTermLabel(filter.year, filter.month, filter.day, filter.dayEnd, searchLocale)?.let { label ->
+                        add(SearchFieldTerm(label) { vm.setContentFilter(filter.copy(year = null, month = null, day = null, dayEnd = null)) })
+                    }
+                }
                 AppSearchField(
                     query = query,
                     onQueryChange = vm::setQuery,
+                    terms = searchTerms,
                     // With semantic search on the field matches any description, so "by filename"
                     // would read as wrong; fall back to it only when semantic search is off.
                     placeholder = stringResource(
@@ -785,6 +787,25 @@ fun SearchScreen(
                     onFilterSelected = vm::onCategorySelected,
                     shape = RoundedCornerShape(14.dp),
                 )
+            }
+
+            // A month or a year typed into the field is offered as a date to pick, which turns it into a
+            // pill and leaves the field free for words and names.
+            if (dateSuggestions.isNotEmpty()) {
+                val dateLocale = appLocale()
+                Spacer(modifier = Modifier.height(8.dp))
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(dateSuggestions) { suggestion ->
+                        FilterChip(
+                            label = dateTermLabel(suggestion.year, suggestion.month, null, null, dateLocale).orEmpty(),
+                            selected = false,
+                            onClick = { vm.applyDateSuggestion(suggestion) },
+                        )
+                    }
+                }
             }
 
             // People whose name matches the query, above the results so a name search reaches a

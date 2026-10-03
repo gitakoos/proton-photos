@@ -66,9 +66,7 @@ import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
-import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -90,10 +88,8 @@ import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.PersonUi
-import eu.akoos.photos.presentation.map.MapPin
 import eu.akoos.photos.util.FolderCoverMap
 import eu.akoos.photos.util.MetadataStripConfig
-import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.retryOnDbTear
 import javax.inject.Inject
 
@@ -102,9 +98,7 @@ import javax.inject.Inject
 class SearchViewModel @Inject constructor(
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val accountManager: AccountManager,
-    private val photoLocationDao: PhotoLocationDao,
     private val selectionFactory: GalleryItemSelectionController.Factory,
-    private val thumbnailUrlStore: ThumbnailUrlStore,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val semanticSearchUseCase: SemanticSearchUseCase,
     private val faceDao: FaceDao,
@@ -143,18 +137,6 @@ class SearchViewModel @Inject constructor(
                 is GalleryItem.CloudOnly -> null
             }
             uri == null || uri !in hiddenUris
-        }
-
-    /** Overlay the store's freshly-decrypted thumbnail URL onto a cloud-only item so its map pin has
-     *  an image source (the lite feed no longer carries the URL). A Local/Synced fix already paints
-     *  from its local uri, so it is returned untouched. */
-    private fun resolveThumbnail(item: GalleryItem, urls: Map<String, String>): GalleryItem =
-        if (item is GalleryItem.CloudOnly) {
-            val url = urls[item.cloud.linkId] ?: item.cloud.thumbnailUrl
-            if (url == item.cloud.thumbnailUrl) item
-            else GalleryItem.CloudOnly(item.cloud.copy(thumbnailUrl = url))
-        } else {
-            item
         }
 
     /** Whether a Proton account is signed in. A null-userId local-only session leaves the cloud
@@ -209,84 +191,6 @@ class SearchViewModel @Inject constructor(
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** Geotagged photos for the account — the Map entry card renders these as a live mini-map
-     *  preview. Reads the persisted location table directly so it reflects the GPS backfill as
-     *  rows land. */
-    val geotaggedLocations: StateFlow<List<PhotoLocationEntity>> = accountManager.getPrimaryUserId()
-        .flatMapLatest { userId ->
-            // Read the local partition when signed out, so a guest's Search map card populates too.
-            photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
-        }
-        .retryOnDbTear("SearchGeotagged")
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** The geotagged fixes enriched with the [GalleryItem] each id resolves to in the merged library,
-     *  so the Map card's mini-pins have a thumbnail source (local uri or cloud thumbnail, both loaded
-     *  through the gallery's Coil path). An id with no library match yet yields a null item, leaving
-     *  that pin on the placeholder until the merge catches up. */
-    val geotaggedPins: StateFlow<List<MapPin>> = accountManager.getPrimaryUserId()
-        .flatMapLatest { userId ->
-            // The mini-pin thumbnail is built imperatively (outside any Compose cell), so it can't
-            // read the LocalThumbnailUrls CompositionLocal. Fold the store in and stamp each cloud
-            // pin's freshly-decrypted URL onto the item so cloud-only fixes get a thumbnail again;
-            // the set is bounded by the preview marker cap, so the extra re-emit is cheap.
-            val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
-                else getGalleryItems.invoke(userId)
-            combine(
-                geotaggedLocations,
-                libraryFlow,
-                thumbnailUrlStore.urls,
-            ) { locs, library, urls ->
-                val itemByKey = HashMap<String, GalleryItem>(library.size * 2)
-                for (item in library) {
-                    when (item) {
-                        is GalleryItem.LocalOnly -> itemByKey[item.local.uri] = item
-                        is GalleryItem.Synced -> {
-                            itemByKey[item.local.uri] = item
-                            itemByKey[item.cloud.linkId] = item
-                        }
-                        is GalleryItem.CloudOnly -> itemByKey[item.cloud.linkId] = item
-                    }
-                }
-                // A fix whose photo is gone from the library is dropped rather than kept with an
-                // empty thumbnail. The map screen already resolves the same way, so keeping them
-                // here put a marker with no picture on the card and counted a city the map does not
-                // show: the card said seven while the map had one.
-                locs.mapNotNull { loc ->
-                    itemByKey[loc.id]?.let { item ->
-                        MapPin(loc.id, loc.latitude, loc.longitude, resolveThumbnail(item, urls))
-                    }
-                }
-            }
-        }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** Number of distinct cities the account's geotagged photos were taken in — the Map card's
-     *  subtitle. Each fix is reverse-geocoded to a "City, Country" label off the main thread (the
-     *  offline geocoder caches its dataset after the first lookup) and the distinct labels counted.
-     *  Recomputes whenever [geotaggedLocations] changes; emits 0 until the first pass completes. */
-    private object CityCountCache {
-        @Volatile var last: Int = 0
-    }
-
-    val distinctCityCount: StateFlow<Int> = geotaggedPins
-        .mapLatest { resolved ->
-            // The count is stable across a session, but this view-model is recreated on every Search
-            // entry, so the last count is cached and used as the initial value. While the pins are still
-            // loading they read empty; keep the cached count then instead of recomputing from zero, so
-            // the card shows the number at once instead of only after the geocode finishes.
-            if (resolved.isEmpty()) return@mapLatest CityCountCache.last
-            val labels = HashSet<String>()
-            for (loc in resolved) {
-                OfflineGeocoder.reverseGeocode(context, loc.latitude, loc.longitude)
-                    ?.let { labels.add(it) }
-            }
-            labels.size.also { CityCountCache.last = it }
-        }
-        .flowOn(Dispatchers.Default)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CityCountCache.last)
 
     /** The text field updates [_query] on every keystroke for instant echo, but the heavy
      *  per-item filter only needs to run once typing settles. Debouncing the query feed into
@@ -588,6 +492,36 @@ class SearchViewModel @Inject constructor(
         _query.value = ""
         _contentFilter.value = ContentFilter()
         _selectedCategory.value = GalleryFilter.All
+    }
+
+    /** The years the library has photos from, newest first: what a typed month is offered with. */
+    private val availableYears: StateFlow<List<Int>> = allItems
+        .map { items ->
+            val calendar = java.util.Calendar.getInstance()
+            val seen = HashSet<Int>()
+            for (item in items) {
+                if (item.captureTimeMs <= 0L) continue
+                calendar.timeInMillis = item.captureTimeMs
+                seen.add(calendar.get(java.util.Calendar.YEAR))
+            }
+            seen.sortedDescending()
+        }
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Dates the end of the typed query could mean, to pick as a filter instead of matching as text. */
+    val dateSuggestions: StateFlow<List<DateSuggestion>> = combine(_query, availableYears) { q, years ->
+        DateSuggestions.suggest(q, foldedMonths, years)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Takes a suggested date: the words that spelled it leave the text and it becomes the date filter. */
+    fun applyDateSuggestion(suggestion: DateSuggestion) {
+        val words = _query.value.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        _query.value = words.dropLast(suggestion.consumedTokens).joinToString(" ")
+        _contentFilter.value = _contentFilter.value.copy(
+            year = suggestion.year, month = suggestion.month, day = null, dayEnd = null,
+        )
     }
 
     // ── Multi-select ──────────────────────────────────────────────────────────────────────────────

@@ -879,6 +879,8 @@
     <string name="share_all">Wszystkie</string>
     <string name="share_shared_with_me">Udostępnione mnie</string>
     <string name="share_shared_by_me">Udostępnione przeze mnie</string>
+    <string name="share_scope_with_me">Ze mną</string>
+    <string name="share_scope_by_me">Przeze mnie</string>
     <string name="share_filter_account">Filtruj według konta</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
@@ -968,9 +970,6 @@
     <!-- Map -->
     <string name="map_title">Mapa</string>
     <string name="map_vector_title">Mapa świata</string>
-    <string name="map_card_title">Mapa</string>
-    <string name="map_card_subtitle_empty">Brak zlokalizowanych zdjęć</string>
-    <string name="map_card_calendar_subtitle">Widok kalendarza Twoich zdjęć</string>
     <string name="map_search_places">Szukaj miejsc</string>
     <string name="places_title">Miejsca</string>
     <string name="map_search_no_places">Brak miejsc</string>
@@ -1313,8 +1312,8 @@
     <string name="albums_filter_sheet_title">Filtr albumów</string>
     <string name="albums_filter_default_heading">Domyślnie przy otwieraniu</string>
     <string name="albums_filter_remember_last">Zapamiętaj ostatnio użyty filtr</string>
-    <string name="albums_show_collection">Pokazuj Kolekcję</string>
-    <string name="albums_show_collection_summary">Osoby, miejsca i „Tego dnia” pozostają dostępne w wyszukiwaniu</string>
+    <string name="albums_show_collection">Pokaż rząd skrótów</string>
+    <string name="albums_shortcuts_heading">Skróty</string>
     <string name="albums_filter_excluded">Wykluczone</string>
     <string name="albums_excluded_empty">Brak wykluczonych albumów ani folderów</string>
     <string name="albums_exclude_from_albums">Wyklucz z Albumów</string>
@@ -1548,7 +1547,6 @@
     <string name="thanks_2_5_0_website">Strona internetowa</string>
     <string name="thanks_2_5_0_coffee">Postaw mi kawę</string>
     <string name="thanks_2_5_0_dismiss">Zamknij</string>
-    <string name="offline_card_subtitle">Zdjęcia zapisane do przeglądania offline</string>
     <string name="duplicates_filter_identical">Identyczne</string>
     <string name="duplicates_filter_similar">Podobne</string>
     <string name="duplicates_filter_match_label">Dopasowanie</string>
@@ -1776,7 +1774,6 @@
     <string name="settings_ai_clear_confirm_msg">Usuwa to wszystkie znalezione osoby i wszystkie dane twarzy. Twoje zdjęcia pozostają nienaruszone. Twarze zostaną wykryte ponownie przy następnym indeksowaniu.</string>
     <string name="gallery_add_to_person">Dodaj do osoby</string>
     <string name="people_search_hint">Szukaj osób</string>
-    <string name="people_card_subtitle">Przeglądaj zdjęcia według osób</string>
     <string name="person_set_cover">Ustaw jako okładkę</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>

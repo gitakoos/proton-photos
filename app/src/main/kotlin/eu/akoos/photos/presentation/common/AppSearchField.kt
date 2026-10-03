@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.common
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +34,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -53,11 +56,17 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.theme.AppColors
 
@@ -83,6 +92,9 @@ internal fun AppSearchField(
     // A field whose keyboard key does something (a picker committing the typed name) passes its own.
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
+    // What already narrows the results, shown as removable pills ahead of the text; Backspace on an
+    // empty field takes the last one away.
+    terms: List<SearchFieldTerm> = emptyList(),
 ) {
     val colors = AppColors.current
     val focusRequester = remember { FocusRequester() }
@@ -99,7 +111,7 @@ internal fun AppSearchField(
             .background(background)
             .border(
                 1.dp,
-                if (query.isNotEmpty()) colors.accent else colors.line,
+                if (query.isNotEmpty() || terms.isNotEmpty()) colors.accent else colors.line,
                 RoundedCornerShape(14.dp),
             )
             .padding(start = 12.dp, end = 6.dp),
@@ -112,8 +124,17 @@ internal fun AppSearchField(
             tint = colors.fgDim,
             modifier = Modifier.size(iconSize),
         )
-        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-            if (query.isEmpty()) {
+        if (terms.isNotEmpty()) {
+            Row(
+                modifier = Modifier.widthIn(max = 200.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                terms.forEach { term -> SearchTermPill(term) }
+            }
+        }
+        Box(modifier = Modifier.weight(1f).widthIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty() && terms.isEmpty()) {
                 Text(text = placeholder, color = colors.fgMute, maxLines = 1, fontSize = textSize)
             }
             BasicTextField(
@@ -127,7 +148,17 @@ internal fun AppSearchField(
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
-                    .onFocusChanged { onFocusChanged(it.isFocused) },
+                    .onFocusChanged { onFocusChanged(it.isFocused) }
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace &&
+                            query.isEmpty() && terms.isNotEmpty()
+                        ) {
+                            terms.last().onRemove()
+                            true
+                        } else {
+                            false
+                        }
+                    },
             )
         }
         if (query.isNotEmpty()) {
@@ -146,5 +177,26 @@ internal fun AppSearchField(
                 )
             }
         }
+    }
+}
+
+/** One thing that narrows a search, shown as a pill in the field: its [label] and what removes it. */
+internal data class SearchFieldTerm(val label: String, val onRemove: () -> Unit)
+
+@Composable
+private fun SearchTermPill(term: SearchFieldTerm) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier
+            .height(30.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.accent.copy(alpha = 0.18f))
+            .clickable { term.onRemove() }
+            .padding(start = 10.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(term.label, color = colors.accent, fontSize = 13.sp, maxLines = 1)
+        Icon(Icons.Filled.Close, contentDescription = null, tint = colors.accent, modifier = Modifier.size(14.dp))
     }
 }

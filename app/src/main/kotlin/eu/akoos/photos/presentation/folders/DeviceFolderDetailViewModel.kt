@@ -66,6 +66,8 @@ import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.stripForShareOrOriginal
 import eu.akoos.photos.presentation.albums.AlbumPhotoGrouping
 import eu.akoos.photos.presentation.albums.AlbumPhotoSortMode
+import eu.akoos.photos.presentation.albums.PhotoViewChoiceStore
+import eu.akoos.photos.presentation.albums.PhotoViewChoices
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.addToAlbumOutcome
 import eu.akoos.photos.presentation.common.MoveToFolderController
@@ -261,33 +263,34 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Direction this folder lists its photos in, read straight from preferences so a change lands
      *  on the grid without a reload. Shares the album's type: the choice is the same two directions
      *  over the same capture time, and a second enum would fork the labels and icons with it. */
-    private val sortModeFlow = context.settingsDataStore.data
-        .map { AlbumPhotoSortMode.fromOrdinal(it[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE]) }
+    private val sortModeFlow = combine(context.settingsDataStore.data, bucketName) { prefs, name ->
+        PhotoViewChoices.from(prefs).sortOfFolder(name)
+    }.distinctUntilChanged()
 
     /** The same value for the actions sheet, which only has to say which direction is ticked. */
     val sortMode: StateFlow<AlbumPhotoSortMode> = sortModeFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumPhotoSortMode.Default)
 
-    /** Persist a direction. Every folder shares the one choice, matching how the album stores its. */
+    /** Persist a direction for this folder alone. */
     fun setSortMode(mode: AlbumPhotoSortMode) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.DEVICE_FOLDER_PHOTO_SORT_MODE] = mode.ordinal }
-        }
+        val name = bucketName.value
+        viewModelScope.launch { PhotoViewChoiceStore.setFolderSort(context, name, mode) }
     }
 
     /** The span of dates each header on this screen gathers. Held here rather than read by the
      *  screen: back from the viewer, the grid restores its scroll as an item index, so from the first
      *  frame the headers have to be the ones it was saved under. This value outlives that trip, where
      *  a screen-level read would start again from the default. */
-    val grouping: StateFlow<AlbumPhotoGrouping> = context.settingsDataStore.data
-        .map { AlbumPhotoGrouping.fromOrdinal(it[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING]) }
+    val grouping: StateFlow<AlbumPhotoGrouping> =
+        combine(context.settingsDataStore.data, bucketName) { prefs, name ->
+            PhotoViewChoices.from(prefs).groupingOfFolder(name)
+        }.distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumPhotoGrouping.Default)
 
-    /** Persist a grouping. Every folder shares the one choice, the same way as [setSortMode]. */
+    /** Persist a grouping for this folder alone, the same way as [setSortMode]. */
     fun setGrouping(grouping: AlbumPhotoGrouping) {
-        viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.DEVICE_FOLDER_PHOTO_GROUPING] = grouping.ordinal }
-        }
+        val name = bucketName.value
+        viewModelScope.launch { PhotoViewChoiceStore.setFolderGrouping(context, name, grouping) }
     }
 
     /** The photo this folder's cover is pinned to, or null while it follows the first photo of the

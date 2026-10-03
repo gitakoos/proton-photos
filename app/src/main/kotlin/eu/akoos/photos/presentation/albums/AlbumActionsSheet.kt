@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.presentation.albums
 
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.GridOff
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -103,6 +106,8 @@ internal fun AlbumActionsSheet(
     /** True while this album's photos are kept out of the main feed. About the photos, which [onHide]
      *  is not: that one takes the album itself out of every list. */
     isHiddenFromTimeline: Boolean,
+    /** True while the album's card is off the grid, which turns [onToggleExcludedFromGrid]'s row into its way back. */
+    isExcludedFromGrid: Boolean = false,
     onDismiss: () -> Unit,
     onAddPhotos: () -> Unit,
     onShareOrInfo: () -> Unit,
@@ -111,6 +116,9 @@ internal fun AlbumActionsSheet(
     onRename: () -> Unit,
     onToggleHiddenFromTimeline: () -> Unit,
     onHide: () -> Unit,
+    onToggleExcludedFromGrid: () -> Unit = {},
+    /** Null drops the delete row, which an owner alone has. */
+    onDelete: (() -> Unit)? = null,
     onSlideshow: () -> Unit,
     onSortSelected: (AlbumPhotoSortMode) -> Unit,
     /** Null drops the grouping row. */
@@ -216,32 +224,54 @@ internal fun AlbumActionsSheet(
                 )
             }
 
-            // Both hides are on every album, so this group is never empty; rename is the owner's alone.
-            ActionSheetSectionHeading(stringResource(R.string.action_sheet_settings_heading))
+            // These settings are the owner's: an album shared with the user has its photos on the
+            // sharer's side, so they are neither in the user's timeline nor a card on the user's Albums
+            // grid, and there is nothing here for a guest to hide or exclude.
             if (!isSharedWithMe) {
+                ActionSheetSectionHeading(stringResource(R.string.action_sheet_settings_heading))
                 ActionSheetRow(
                     icon = Icons.Default.Edit,
                     title = stringResource(R.string.album_rename),
                     onClick = { close(onRename) },
                 )
                 Spacer(Modifier.height(8.dp))
+                // The weaker of the two hides, and the one that carries a tick: it writes the same
+                // per-album key the Albums grid's drawer and the Settings picker do, so the state is the
+                // current one wherever it was set. The row below is the stronger action and stays a
+                // one-way choice.
+                ActionSheetRow(
+                    icon = Icons.Default.HideImage,
+                    title = stringResource(R.string.device_folder_hide_from_timeline),
+                    onClick = { close(onToggleHiddenFromTimeline) },
+                    showCheck = isHiddenFromTimeline,
+                )
+                Spacer(Modifier.height(8.dp))
+                ActionSheetRow(
+                    icon = Icons.Default.VisibilityOff,
+                    title = stringResource(R.string.albums_hide_album),
+                    onClick = { close(onHide) },
+                )
+                Spacer(Modifier.height(8.dp))
+                ActionSheetRow(
+                    icon = if (isExcludedFromGrid) Icons.Default.GridOn else Icons.Default.GridOff,
+                    title = stringResource(
+                        if (isExcludedFromGrid) R.string.albums_show_in_albums else R.string.albums_exclude_from_albums,
+                    ),
+                    onClick = { close(onToggleExcludedFromGrid) },
+                )
             }
-            // The weaker of the two hides, and the one that carries a tick: it writes the same
-            // per-album key the Albums grid's drawer and the Settings picker do, so the state is the
-            // current one wherever it was set. The row below is the stronger action and stays a
-            // one-way choice.
-            ActionSheetRow(
-                icon = Icons.Default.HideImage,
-                title = stringResource(R.string.device_folder_hide_from_timeline),
-                onClick = { close(onToggleHiddenFromTimeline) },
-                showCheck = isHiddenFromTimeline,
-            )
-            Spacer(Modifier.height(8.dp))
-            ActionSheetRow(
-                icon = Icons.Default.VisibilityOff,
-                title = stringResource(R.string.albums_hide_album),
-                onClick = { close(onHide) },
-            )
+
+            if (!isSharedWithMe && onDelete != null) {
+                // Deleting takes the album off Drive, so it keeps the rule above it and the red
+                // treatment it carries on the Albums grid's own drawer.
+                HorizontalDivider(color = Line2, modifier = Modifier.padding(vertical = 16.dp))
+                ActionSheetRow(
+                    icon = Icons.Default.DeleteOutline,
+                    title = stringResource(R.string.delete_button_permanently),
+                    onClick = { close(onDelete) },
+                    destructive = true,
+                )
+            }
 
             if (isSharedWithMe) {
                 // Leaving drops the album out of the library, so it keeps the rule above it and the

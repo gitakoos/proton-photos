@@ -238,6 +238,14 @@ data class AlbumDetailUiState(
     /** True while this album's photos are kept out of the main feed. About the photos alone, which
      *  [hideAlbumDone]'s action is not: that one takes the album out of every list. */
     val isHiddenFromTimeline: Boolean = false,
+    /** True while this album's card is off the Albums grid, which the drawer's row turns into its way back. */
+    val isExcludedFromGrid: Boolean = false,
+    /** Set true once the album is deleted from Drive, so the screen pops back off an album that is gone.
+     *  Same contract as [leaveAlbumDone]: the ViewModel never navigates on its own. */
+    val deleteAlbumDone: Boolean = false,
+    /** True after the server refused a plain delete because the album holds the only copy of some
+     *  photos: the screen asks whether to delete those photos too. */
+    val deleteWouldLosePhotos: Boolean = false,
     /** True when this is a shared-with-me album the sharer granted edit rights on. */
     val sharedAlbumIsEditable: Boolean = false,
     /** Photos queued to upload and then join this album, counted from the upload queue. Falls as each
@@ -408,12 +416,14 @@ class AlbumDetailViewModel @Inject constructor(
                     }
                 }
         }
-        // Newest-first or oldest-first, from the one global preference. Re-orders what is already on
+        // Newest-first or oldest-first, this album's own choice. Re-orders what is already on
         // screen so the choice lands immediately instead of waiting for a reload, and holds the value
         // the cache read, the server list and the DB observe each sort by.
         viewModelScope.launch {
-            context.settingsDataStore.data
-                .map { AlbumPhotoSortMode.fromOrdinal(it[SettingsKeys.ALBUM_PHOTO_SORT_MODE]) }
+            combine(
+                _uiState.map { it.albumLinkId }.distinctUntilChanged(),
+                context.settingsDataStore.data,
+            ) { linkId, prefs -> PhotoViewChoices.from(prefs).sortOfAlbum(linkId) }
                 .distinctUntilChanged()
                 .collect { mode ->
                     photoSortMode.value = mode
@@ -442,6 +452,18 @@ class AlbumDetailViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .catch { emit(false) }
                 .collect { excluded -> _uiState.update { it.copy(isHiddenFromTimeline = excluded) } }
+        }
+        // The same for the album's card on the Albums grid, which the drawer's exclude row ticks.
+        viewModelScope.launch {
+            combine(
+                _uiState.map { it.albumLinkId }.distinctUntilChanged(),
+                context.settingsDataStore.data
+                    .map { it[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet() }
+                    .distinctUntilChanged(),
+            ) { linkId, excluded -> AlbumsGridExclusion.isAlbumExcluded(excluded, linkId) }
+                .distinctUntilChanged()
+                .catch { emit(false) }
+                .collect { excluded -> _uiState.update { it.copy(isExcludedFromGrid = excluded) } }
         }
         // Resolve the owner email once for the share-sheet "owner" row; failures are silent.
         viewModelScope.launch {
@@ -2027,6 +2049,63 @@ class AlbumDetailViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Take this album's card off the Albums grid, or put it back. Grid only: the album, its photos and
+     * every other list stay exactly as they are, and this screen stays open.
+     */
+    fun toggleExcludedFromGrid() {
+        val albumLinkId = _uiState.value.albumLinkId
+        if (albumLinkId.isBlank()) return
+        val exclude = !_uiState.value.isExcludedFromGrid
+        viewModelScope.launch {
+            runCatching {
+                context.settingsDataStore.edit { prefs ->
+                    prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] = AlbumsGridExclusion.withAlbum(
+                        prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet(), albumLinkId, exclude,
+                    )
+                }
+            }.onFailure { e ->
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.e("AlbumDetailVM", "toggleExcludedFromGrid failed", e)
+            }
+        }
+    }
+
+    /**
+     * Delete this album from Drive. [deletePhotosToo] false is the safe first attempt: the server refuses
+     * it when the album holds the only copy of some photos, and that refusal is raised as a question
+     * (the delete-would-lose-photos flag) rather than an error. Passing true is that decision,
+     * made knowingly. The pop-back signal goes up once the delete has landed.
+     */
+    fun deleteAlbum(deletePhotosToo: Boolean = false) {
+        val albumLinkId = _uiState.value.albumLinkId
+        if (albumLinkId.isBlank()) return
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            try {
+                driveRepo.deleteAlbum(userId, albumLinkId, deletePhotosToo)
+                albumListEvents.notifyChanged()
+                _uiState.update { it.copy(deleteWouldLosePhotos = false, deleteAlbumDone = true) }
+            } catch (e: eu.akoos.photos.domain.entity.AlbumDeleteWouldLosePhotos) {
+                _uiState.update { it.copy(deleteWouldLosePhotos = true) }
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _uiState.update {
+                    it.copy(
+                        deleteWouldLosePhotos = false,
+                        error = context.getString(
+                            R.string.albums_delete_failed,
+                            e.message?.let { m -> eu.akoos.photos.util.sanitizeErrorMessage(m) }
+                                ?: context.getString(R.string.viewer_unknown_error),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissDeleteWouldLosePhotos() = _uiState.update { it.copy(deleteWouldLosePhotos = false) }
 
     /** Recipient-side "Leave album": resolve the user's membership + POST the delete, then signal a pop-back. */
     fun leaveSharedAlbum() {

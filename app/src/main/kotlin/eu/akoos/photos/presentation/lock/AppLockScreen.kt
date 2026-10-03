@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.lock
 
+import androidx.compose.ui.input.pointer.changedToUp
 import android.view.Window
 import android.view.WindowManager
 import androidx.compose.foundation.background
@@ -77,12 +78,30 @@ fun AppLockScreen(onUnlocked: () -> Unit, unlockFocusRequester: FocusRequester? 
     LaunchedEffect(Unit) {
         showAppLockPrompt(context, onSuccess = onUnlocked)
     }
+    // The system drops the prompt when the app goes to the background; closing it here as well resets
+    // its state, so the Unlock button brings a fresh one up on return.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) cancelAppLockPrompt()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            cancelAppLockPrompt()
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Bg0)
-            .swallowPointerInput(),
+            // A press anywhere on the lock asks again, besides the button's own: the prompt must always
+            // be one tap away once it has been dismissed, and nothing about the button's own handling
+            // may stand in its way.
+            .swallowPointerInput(
+                onTap = { showAppLockPrompt(context, onSuccess = onUnlocked) },
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -148,8 +167,15 @@ fun AppLockCover() {
  * to the content behind it. A child's own clicks (the unlock button) still run first, so this only
  * swallows presses on the empty backdrop.
  */
-private fun Modifier.swallowPointerInput(): Modifier = pointerInput(Unit) {
-    awaitPointerEventScope { while (true) { awaitPointerEvent().changes.forEach { it.consume() } } }
+private fun Modifier.swallowPointerInput(onTap: (() -> Unit)? = null): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            val event = awaitPointerEvent()
+            // A release nothing below has handled is a tap on the backdrop.
+            if (onTap != null && event.changes.any { it.changedToUp() && !it.isConsumed }) onTap()
+            event.changes.forEach { it.consume() }
+        }
+    }
 }
 
 /** FLAG_SECURE while the lock shows, put back on exit the way the lock found it ([SecureFlagHold]). */

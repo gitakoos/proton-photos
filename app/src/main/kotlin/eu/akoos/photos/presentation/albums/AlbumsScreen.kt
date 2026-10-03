@@ -22,6 +22,31 @@
 
 package eu.akoos.photos.presentation.albums
 
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import kotlinx.coroutines.flow.map
+import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.SettingsKeys
+import androidx.annotation.StringRes
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.outlined.OfflinePin
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.Face
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.horizontalScroll
 import android.app.Activity
 import android.net.Uri
 import androidx.activity.compose.BackHandler
@@ -328,6 +353,18 @@ fun AlbumsScreen(
      *  The host reads the folder, asks first and runs the delete, so the user stays on the grid. */
     onDeleteDeviceFolder: (bucketName: String) -> Unit = {},
     onMemoriesClick: () -> Unit = {},
+    /** The other ways to browse the library, as small tiles beside the Collection: the map, the
+     *  calendar, and People and Offline photos, which are null while they have nothing to open. */
+    onMapClick: () -> Unit = {},
+    onCalendarClick: () -> Unit = {},
+    onPeopleClick: (() -> Unit)? = null,
+    onOfflineClick: (() -> Unit)? = null,
+    /** Opens the Shared page; null for a guest, who has none. [sharedBadge] puts a dot on its tile
+     *  while an invitation waits for an answer. */
+    onSharedClick: (() -> Unit)? = null,
+    sharedBadge: Boolean = false,
+    /** Opens the hidden photos, behind the device's lock. */
+    onHiddenClick: (() -> Unit)? = null,
     /** Increments each time the Albums-tab header "New album" pill is tapped; opens the create
      *  dialog. The in-grid New album row opens it directly, so 0 (no external trigger) is fine. */
     createRequestSignal: Int = 0,
@@ -782,12 +819,18 @@ fun AlbumsScreen(
                         // while a query is present, and it stays off the grid while its switch on
                         // the Albums settings page is off or the Excluded view is up.
                         if (collectionCardShown) {
-                            item {
-                                if (listView) {
-                                    MemoriesPinnedRow(onClick = onMemoriesClick)
-                                } else {
-                                    MemoriesPinnedCard(onClick = onMemoriesClick)
-                                }
+                            item(key = "library_views", span = { GridItemSpan(maxLineSpan) }) {
+                                LibraryViewsRow(
+                                    padded = listView,
+                                    onMemoriesClick = onMemoriesClick,
+                                    onMapClick = onMapClick,
+                                    onCalendarClick = onCalendarClick,
+                                    onPeopleClick = onPeopleClick,
+                                    onOfflineClick = onOfflineClick,
+                                    onSharedClick = onSharedClick,
+                                    sharedBadge = sharedBadge,
+                                    onHiddenClick = onHiddenClick,
+                                )
                             }
                         }
                         // A row has room for its own options button, which opens the sheet a long
@@ -1058,8 +1101,8 @@ fun AlbumsScreen(
         CloudAlbumActionSheet(
             album = album,
             sheetState = cloudAlbumSheetState,
-            sortMode = state.albumPhotoSortMode,
-            grouping = state.albumPhotoGrouping,
+            sortMode = state.viewChoices.sortOfAlbum(album.linkId),
+            grouping = state.viewChoices.groupingOfAlbum(album.linkId),
             isHiddenFromTimeline = AlbumTimelineHide.isExcluded(state.timelineExcludedAlbumIds, album.linkId),
             isExcludedFromGrid = excludedFromGrid,
             onDismiss = { cloudAlbumSheetFor = null },
@@ -1071,8 +1114,8 @@ fun AlbumsScreen(
             // Arranging works on the cards the normal views show, so the Excluded view leaves it out.
             onReorder = if (albumsArrangeOffered(displayFilter)) ({ reorderMode = true }) else null,
             onDelete = { albumToDelete = album },
-            onSortSelected = viewModel::setAlbumPhotoSortMode,
-            onGroupingSelected = viewModel::setAlbumPhotoGrouping,
+            onSortSelected = { mode -> viewModel.setAlbumPhotoSortMode(album.linkId, mode) },
+            onGroupingSelected = { grouping -> viewModel.setAlbumPhotoGrouping(album.linkId, grouping) },
             onOpenAction = { action -> onAlbumActionClick(album, action) },
         )
     }
@@ -1099,8 +1142,8 @@ fun AlbumsScreen(
             // same folder from an earlier hide.
             isHiddenCard = false,
             isSignedIn = isSignedIn,
-            sortMode = state.folderPrefs.sortMode,
-            grouping = state.folderPrefs.grouping,
+            sortMode = state.viewChoices.sortOfFolder(folder.name),
+            grouping = state.viewChoices.groupingOfFolder(folder.name),
             onDismiss = { deviceFolderSheetFor = null },
             onBackUp = { asMirror ->
                 onDeviceFolderActionClick(
@@ -1114,8 +1157,8 @@ fun AlbumsScreen(
             onToggleExcludedFromBackup = { viewModel.toggleFolderExcludedFromBackup(folder.name) },
             onToggleHiddenFromTimeline = { viewModel.toggleFolderHiddenFromTimeline(folder.name) },
             onToggleHiddenCard = { onHideDeviceFolder(folder.name) },
-            onSortSelected = viewModel::setDeviceFolderSortMode,
-            onGroupingSelected = viewModel::setDeviceFolderGrouping,
+            onSortSelected = { mode -> viewModel.setDeviceFolderSortMode(folder.name, mode) },
+            onGroupingSelected = { grouping -> viewModel.setDeviceFolderGrouping(folder.name, grouping) },
             // Held to a logged-out session inside the sheet, where there is no Drive album to rename.
             onRename = { deviceFolderRenameFor = folder },
             isExcludedFromGrid = excludedFromGrid,
@@ -1448,51 +1491,169 @@ private fun CloudAlbumRow(
 }
 
 /**
- * First cell in the album grid while [albumsCollectionCardShown] holds. Mirrors [UnifiedAlbumCard]'s
- * shape, corner radius and title typography, but with a neutral cover holding a single centred
- * Collections glyph: a normal album card labelled "Collection" that opens the Collection screen.
+ * The row of small tiles that opens the Collection and the other ways to browse the library, first in
+ * the album grid while [albumsCollectionCardShown] holds. It is one full-width item, so the albums
+ * after it keep their place whatever the number of tiles. [padded] adds the page's side margin for the
+ * list view, whose rows carry their own.
  */
 @Composable
-private fun MemoriesPinnedCard(onClick: () -> Unit) {
-    Column(
+private fun LibraryViewsRow(
+    padded: Boolean,
+    onMemoriesClick: () -> Unit,
+    onMapClick: () -> Unit,
+    onCalendarClick: () -> Unit,
+    onPeopleClick: (() -> Unit)?,
+    onOfflineClick: (() -> Unit)?,
+    onSharedClick: (() -> Unit)?,
+    sharedBadge: Boolean,
+    onHiddenClick: (() -> Unit)?,
+) {
+    val context = LocalContext.current
+    // People needs face grouping switched on, the same gate the category bar's People chip uses.
+    val faceEnabled by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.FACE_ENABLED] ?: false }
+    }.collectAsState(initial = false)
+    val savedOrder by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_TILE_ORDER] }
+    }.collectAsState(initial = null)
+    val hidden by remember {
+        context.settingsDataStore.data.map { it[SettingsKeys.ALBUMS_TILE_HIDDEN] ?: emptySet() }
+    }.collectAsState(initial = emptySet())
+    val tiles = remember(savedOrder, hidden, faceEnabled, onPeopleClick, onOfflineClick, onSharedClick, onHiddenClick) {
+        resolveTileOrder(savedOrder).filter { tile ->
+            tile.name !in hidden && when (tile) {
+                LibraryTile.People -> faceEnabled && onPeopleClick != null
+                LibraryTile.Offline -> onOfflineClick != null
+                LibraryTile.Shared -> onSharedClick != null
+                LibraryTile.Hidden -> onHiddenClick != null
+                else -> true
+            }
+        }
+    }
+    // A swipe along the strip belongs to the strip. When the tiles all fit it turns nothing; when they
+    // overflow, a drag that is scrolling them stays with the strip even once it reaches an end, so the
+    // tab behind does not follow it, and only a fresh drag from that end turns the tab.
+    val scrollState = rememberScrollState()
+    val stripOwnsDrag = remember(scrollState) {
+        object : NestedScrollConnection {
+            private var scrolled = false
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (consumed.x != 0f) scrolled = true
+                return if (scrolled) Offset(available.x, 0f) else Offset.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                val owned = scrolled
+                scrolled = false
+                return if (owned) available else Velocity.Zero
+            }
+        }
+    }
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
+            .nestedScroll(stripOwnsDrag)
+            .pointerInput(scrollState) {
+                detectHorizontalDragGestures { change, dragAmount ->
+                    val overflows = scrollState.maxValue > 0
+                    val canMove = (dragAmount < 0 && scrollState.canScrollForward) ||
+                        (dragAmount > 0 && scrollState.canScrollBackward)
+                    if (!overflows || canMove) change.consume()
+                }
+            },
+    ) {
+        val gap = 12.dp
+        val sidePad = if (padded) 20.dp else 0.dp
+        // With more tiles than fit, they are sized so the last one shows only in part and fades out,
+        // which says the strip scrolls. Few enough tiles keep their plain size.
+        val tileWidth = if (tiles.size > 4) (maxWidth - sidePad * 2 - gap * 3) / 3.5f else 72.dp
+        val fadeColor = AppColors.current.bg0
+        val scrolledAway by remember { derivedStateOf { scrollState.value > 0 } }
+        val moreAhead by remember { derivedStateOf { scrollState.value < scrollState.maxValue } }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(scrollState)
+                .padding(horizontal = sidePad)
+                .padding(bottom = if (padded) 12.dp else 0.dp),
+            horizontalArrangement = Arrangement.spacedBy(gap),
+        ) {
+            tiles.forEach { tile ->
+                val onClick = when (tile) {
+                    LibraryTile.Collection -> onMemoriesClick
+                    LibraryTile.Shared -> onSharedClick ?: {}
+                    LibraryTile.Hidden -> onHiddenClick ?: {}
+                    LibraryTile.Map -> onMapClick
+                    LibraryTile.Calendar -> onCalendarClick
+                    LibraryTile.People -> onPeopleClick ?: {}
+                    LibraryTile.Offline -> onOfflineClick ?: {}
+                }
+                ViewTile(tile.icon, tile.label, onClick, badge = tile == LibraryTile.Shared && sharedBadge, width = tileWidth)
+            }
+        }
+        if (moreAhead) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(44.dp)
+                    .fillMaxHeight()
+                    .background(Brush.horizontalGradient(listOf(Color.Transparent, fadeColor))),
+            )
+        }
+        if (scrolledAway) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .width(44.dp)
+                    .fillMaxHeight()
+                    .background(Brush.horizontalGradient(listOf(fadeColor, Color.Transparent))),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ViewTile(
+    icon: ImageVector,
+    @StringRes label: Int,
+    onClick: () -> Unit,
+    badge: Boolean = false,
+    width: Dp = 72.dp,
+) {
+    Column(
+        modifier = Modifier
+            .width(width)
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
+                .size(64.dp)
                 .clip(RoundedCornerShape(14.dp))
                 .background(Bg2),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                Icons.Outlined.Collections,
-                contentDescription = null,
-                tint = FgDim,
-                modifier = Modifier.size(36.dp),
-            )
+            Icon(icon, contentDescription = null, tint = FgDim, modifier = Modifier.size(26.dp))
+            if (badge) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .size(10.dp)
+                        .background(Accent, CircleShape),
+                )
+            }
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
-            text = stringResource(R.string.memories_title),
+            text = stringResource(label),
             color = FgPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
+            fontSize = 12.sp,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
         )
     }
-}
-
-/** [MemoriesPinnedCard] as the first row of the album list, its glyph standing in for a cover. */
-@Composable
-private fun MemoriesPinnedRow(onClick: () -> Unit) {
-    UnifiedAlbumRow(
-        coverModel = null,
-        glyph = Icons.Outlined.Collections,
-        title = stringResource(R.string.memories_title),
-        onClick = onClick,
-    )
 }

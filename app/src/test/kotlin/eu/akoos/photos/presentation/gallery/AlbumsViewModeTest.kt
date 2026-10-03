@@ -79,6 +79,7 @@ class AlbumsViewModeTest {
                 AlbumsSettingsRow.DefaultFilter,
                 AlbumsSettingsRow.RememberLast,
                 AlbumsSettingsRow.ShowCollection,
+                AlbumsSettingsRow.Shortcuts,
             ),
             albumsSettingsRows(AlbumsViewMode.Grid),
         )
@@ -91,6 +92,7 @@ class AlbumsViewModeTest {
                 AlbumsSettingsRow.DefaultFilter,
                 AlbumsSettingsRow.RememberLast,
                 AlbumsSettingsRow.ShowCollection,
+                AlbumsSettingsRow.Shortcuts,
             ),
             albumsSettingsRows(AlbumsViewMode.List),
         )

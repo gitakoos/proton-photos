@@ -410,7 +410,6 @@
     <string name="new_folder_create">Create</string>
     <string name="offline_make_available">Make available offline</string>
     <string name="offline_remove">Remove from offline</string>
-    <string name="offline_card_subtitle">Photos saved for offline viewing</string>
     <string name="offline_available">Available offline</string>
     <string name="offline_removed">Removed from offline</string>
     <string name="offline_failed">Couldn\'t save for offline</string>
@@ -1262,6 +1261,8 @@
     <string name="share_all">All</string>
     <string name="share_shared_with_me">Shared with me</string>
     <string name="share_shared_by_me">Shared by me</string>
+    <string name="share_scope_with_me">With me</string>
+    <string name="share_scope_by_me">By me</string>
     <string name="share_filter_account">Filter by account</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
@@ -1355,9 +1356,6 @@
     <!-- Map -->
     <string name="map_title">Map</string>
     <string name="map_vector_title">World map</string>
-    <string name="map_card_title">Map</string>
-    <string name="map_card_subtitle_empty">No located photos yet</string>
-    <string name="map_card_calendar_subtitle">A calendar view of your photos</string>
     <string name="map_search_places">Search places</string>
     <string name="map_search_no_places">No places yet</string>
     <!-- Places -->
@@ -1409,7 +1407,6 @@
     <string name="people_review_title">People to name</string>
     <string name="people_review_empty">No unnamed people right now. As your photos are scanned, clusters to name and merge show up here.</string>
     <string name="people_search_hint">Search people</string>
-    <string name="people_card_subtitle">Browse your photos by person</string>
     <string name="person_set_cover">Set as cover</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
@@ -1783,8 +1780,8 @@
     <string name="albums_filter_sheet_title">Album filter</string>
     <string name="albums_filter_default_heading">Default when opening</string>
     <string name="albums_filter_remember_last">Remember last-used filter</string>
-    <string name="albums_show_collection">Show Collection</string>
-    <string name="albums_show_collection_summary">People, places and On this day stay in Search</string>
+    <string name="albums_show_collection">Show the shortcuts row</string>
+    <string name="albums_shortcuts_heading">Shortcuts</string>
     <string name="albums_filter_excluded">Excluded</string>
     <string name="albums_excluded_empty">No excluded albums or folders</string>
     <string name="albums_exclude_from_albums">Exclude from Albums</string>

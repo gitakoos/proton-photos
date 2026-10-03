@@ -690,6 +690,8 @@
     <string name="share_all">Összes</string>
     <string name="share_shared_with_me">Velem megosztva</string>
     <string name="share_shared_by_me">Általam megosztva</string>
+    <string name="share_scope_with_me">Velem</string>
+    <string name="share_scope_by_me">Általam</string>
     <string name="share_filter_account">Szűrés fiók szerint</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
@@ -966,9 +968,6 @@
     <string name="search_section_recent">Legutóbbi</string>
     <string name="map_title">Térkép</string>
     <string name="map_vector_title">Világtérkép</string>
-    <string name="map_card_title">Térkép</string>
-    <string name="map_card_subtitle_empty">Még nincs helyhez kötött fénykép</string>
-    <string name="map_card_calendar_subtitle">A képeid naptár nézetben</string>
     <string name="map_search_places">Helyek keresése</string>
     <string name="places_title">Helyek</string>
     <string name="map_search_no_places">Még nincsenek helyek</string>
@@ -1107,8 +1106,8 @@
     <string name="albums_filter_sheet_title">Albumszűrő</string>
     <string name="albums_filter_default_heading">Alapértelmezett megnyitáskor</string>
     <string name="albums_filter_remember_last">Utoljára használt szűrő megjegyzése</string>
-    <string name="albums_show_collection">Gyűjtemény megjelenítése</string>
-    <string name="albums_show_collection_summary">Az emberek, a helyek és az „Ezen a napon” továbbra is elérhetők a keresésben</string>
+    <string name="albums_show_collection">Gyorsparancs-sor mutatása</string>
+    <string name="albums_shortcuts_heading">Gyorsparancsok</string>
     <string name="albums_filter_excluded">Kizárt</string>
     <string name="albums_excluded_empty">Nincs kizárt album vagy mappa</string>
     <string name="albums_exclude_from_albums">Kizárás az Albumokból</string>
@@ -1495,7 +1494,6 @@
     <string name="thanks_2_5_0_website">Weboldal</string>
     <string name="thanks_2_5_0_coffee">Hívj meg egy kávéra</string>
     <string name="thanks_2_5_0_dismiss">Bezárás</string>
-    <string name="offline_card_subtitle">Offline megtekintésre mentett fotók</string>
     <string name="duplicates_filter_identical">Azonos</string>
     <string name="duplicates_filter_similar">Hasonló</string>
     <string name="duplicates_filter_match_label">Egyezés</string>
@@ -1689,7 +1687,6 @@
     <string name="settings_ai_clear_confirm_msg">Ez eltávolít minden megtalált embert és az összes arcadatot. A fotóidat nem érinti. Az arcokat a következő indexeléskor újra megtalálja.</string>
     <string name="gallery_add_to_person">Hozzáadás emberhez</string>
     <string name="people_search_hint">Emberek keresése</string>
-    <string name="people_card_subtitle">Fotóid böngészése emberek szerint</string>
     <string name="person_set_cover">Beállítás borítóként</string>
     <string name="person_set_cover_confirm_title">Beállítod borítónak?</string>
     <string name="person_set_cover_confirm_body">Ez a kép legyen a személy borítója.</string>

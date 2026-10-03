@@ -172,6 +172,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 sealed class Screen(val route: String) {
     data object Gallery : Screen("gallery")
     data object Settings : Screen("settings")
+    data object Shared : Screen("shared")
     data object MoreSettings : Screen("more_settings")
     data object SyncSettings : Screen("sync_settings")
     data object BackupProcessing : Screen("backup_processing")
@@ -803,6 +804,16 @@ fun NavGraph(
                 onSearchClick = { navController.navigate(Screen.Search.route) },
                 onCalendarClick = { navController.navigate(Screen.Calendar.route) },
                 onMemoriesClick = { navController.navigate(Screen.Memories.route) },
+                onOpenMap = {
+                    if (!mapStylePrompted) {
+                        showMapStyleChooser = true
+                    } else {
+                        navController.navigate(if (mapStyleOsm) Screen.Map.route else Screen.CustomMap.route)
+                    }
+                },
+                onOpenPeople = { navController.navigate(Screen.People.route) },
+                onOpenOffline = { navController.navigate(Screen.Offline.route) },
+                onOpenShared = { navController.navigate(Screen.Shared.route) },
                 onOpenTimelineFilter = { navController.navigate(Screen.TimelineFilter.route) },
                 onOpenAlbumsSettings = { navController.navigate(Screen.AlbumsSettings.route) },
                 onEditMetadata = { selection ->
@@ -1534,6 +1545,23 @@ fun NavGraph(
         composable(Screen.Settings.route) { settingsPage(false) }
         composable(Screen.MoreSettings.route) { settingsPage(true) }
 
+        composable(Screen.Shared.route) { entry ->
+            // The gallery has loaded the shared list already, so the page reads that one instead of
+            // loading it again behind a skeleton.
+            val galleryEntry = remember(entry) { navController.getBackStackEntry(Screen.Gallery.route) }
+            val sharedViewModel: eu.akoos.photos.presentation.shared.SharedViewModel = hiltViewModel(galleryEntry)
+            eu.akoos.photos.presentation.shared.SharedPage(
+                viewModel = sharedViewModel,
+                onBack = { navController.popBackStack() },
+                onAlbumClick = { album ->
+                    selectedAlbum = album
+                    albumOpenedToShare = false
+                    albumOpenAction = null
+                    navController.navigate(Screen.AlbumDetail.route)
+                },
+            )
+        }
+
         composable(Screen.Permissions.route) {
             eu.akoos.photos.presentation.settings.PermissionsScreen(onBack = { navController.popBackStack() })
         }
@@ -1885,21 +1913,6 @@ fun NavGraph(
                     viewerTrashMode = false
                     navController.navigate(Screen.Viewer.route)
                 },
-                onOpenMap = {
-                    if (!mapStylePrompted) {
-                        showMapStyleChooser = true
-                    } else {
-                        navController.navigate(if (mapStyleOsm) Screen.Map.route else Screen.CustomMap.route)
-                    }
-                },
-                onOpenCalendar = {
-                    navController.navigate(Screen.Calendar.route) {
-                        popUpTo(Screen.Search.route) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                },
-                onOpenOffline = { navController.navigate(Screen.Offline.route) },
-                onOpenPeople = { navController.navigate(Screen.People.route) },
                 onEditMetadata = { selection ->
                     // Search runs over the user's own library, never an album someone shared with
                     // them, so the editor's own per-item rules decide what is writable.

@@ -53,20 +53,25 @@ import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
 import eu.akoos.photos.presentation.settings.components.ToggleRow
 import kotlinx.coroutines.flow.map
+import eu.akoos.photos.presentation.albums.LibraryTileReorderList
 import kotlinx.coroutines.launch
 
 /** One row of the Albums settings page. */
-internal enum class AlbumsSettingsRow { CoverSize, DefaultFilter, RememberLast, ShowCollection }
+internal enum class AlbumsSettingsRow { CoverSize, DefaultFilter, RememberLast, ShowCollection, Shortcuts }
 
 /**
  * The rows the Albums settings page lays out, top to bottom, for the tab's [viewMode]. The cover size
  * is there for the grid alone: a list row's cover has one size.
  */
-internal fun albumsSettingsRows(viewMode: AlbumsViewMode): List<AlbumsSettingsRow> = buildList {
+internal fun albumsSettingsRows(
+    viewMode: AlbumsViewMode,
+    shortcutsShown: Boolean = true,
+): List<AlbumsSettingsRow> = buildList {
     if (viewMode == AlbumsViewMode.Grid) add(AlbumsSettingsRow.CoverSize)
     add(AlbumsSettingsRow.DefaultFilter)
     add(AlbumsSettingsRow.RememberLast)
     add(AlbumsSettingsRow.ShowCollection)
+    if (shortcutsShown) add(AlbumsSettingsRow.Shortcuts)
 }
 
 /**
@@ -91,7 +96,7 @@ fun AlbumsSettingsScreen(onBack: () -> Unit) {
     }.collectAsState(initial = false)
 
     SettingsSubPageScaffold(title = stringResource(R.string.gallery_tab_albums), onBack = onBack) {
-        albumsSettingsRows(viewMode).forEachIndexed { index, row ->
+        albumsSettingsRows(viewMode, shortcutsShown = showCollection).forEachIndexed { index, row ->
             key(row) {
                 if (index > 0) Spacer(Modifier.height(20.dp))
                 when (row) {
@@ -163,11 +168,15 @@ fun AlbumsSettingsScreen(onBack: () -> Unit) {
                             )
                         }
 
+                    AlbumsSettingsRow.Shortcuts ->
+                        CollapsibleSection(label = stringResource(R.string.albums_shortcuts_heading)) {
+                            SettingsCard { LibraryTileReorderList() }
+                        }
+
                     AlbumsSettingsRow.ShowCollection ->
                         SettingsCard {
                             ToggleRow(
                                 label = stringResource(R.string.albums_show_collection),
-                                description = stringResource(R.string.albums_show_collection_summary),
                                 checked = showCollection,
                                 onCheckedChange = { on ->
                                     scope.launch {

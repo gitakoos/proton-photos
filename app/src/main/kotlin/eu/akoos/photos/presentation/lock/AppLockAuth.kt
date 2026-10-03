@@ -25,6 +25,8 @@ package eu.akoos.photos.presentation.lock
 import android.app.KeyguardManager
 import android.content.Context
 import android.os.Build
+import android.os.CancellationSignal
+import androidx.annotation.RequiresApi
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_STRONG
 import androidx.biometric.BiometricManager.Authenticators.BIOMETRIC_WEAK
@@ -100,6 +102,9 @@ internal fun appLockWizardWrite(current: AppLockSettings, chosen: AppLockSetting
  * availability check fails, since its credential can still answer it.
  */
 internal fun showAppLockPrompt(context: Context, onSuccess: () -> Unit) {
+    // A prompt the system dropped while the app was away can leave the library believing one is still up,
+    // which makes a new request do nothing; the old one is closed first so the Unlock button always works.
+    cancelAppLockPrompt()
     // The composition's context is wrapped for the in-app language, so the activity is found by walking it.
     val activity = context.findFragmentActivity() ?: return
     val authenticators = appLockAuthenticators(Build.VERSION.SDK_INT)
@@ -109,15 +114,27 @@ internal fun showAppLockPrompt(context: Context, onSuccess: () -> Unit) {
         onSuccess()
         return
     }
+    // From Android 11 the system's own prompt is asked directly: every request is a fresh one, with no
+    // wrapper state a dismissed prompt could leave behind, so the Unlock button brings it up each time.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        showSystemPrompt(activity, authenticators, onSuccess)
+        return
+    }
     val prompt = BiometricPrompt(
         activity,
         ContextCompat.getMainExecutor(activity),
         object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                activePrompt = null
                 onSuccess()
+            }
+
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                activePrompt = null
             }
         },
     )
+    activePrompt = prompt
     // A prompt the platform refuses to build or start fails closed: onSuccess never runs.
     runCatching {
         prompt.authenticate(
@@ -128,4 +145,50 @@ internal fun showAppLockPrompt(context: Context, onSuccess: () -> Unit) {
                 .build(),
         )
     }
+}
+
+/** The prompt on screen, if any, so a later request or the app going away can close it. */
+private var activePrompt: BiometricPrompt? = null
+
+/** The system prompt on screen, if any, so a later request or the app going away can close it. */
+private var activeSignal: CancellationSignal? = null
+
+/** Closes the app lock prompt if one is up. */
+internal fun cancelAppLockPrompt() {
+    activeSignal?.let { signal ->
+        activeSignal = null
+        runCatching { signal.cancel() }
+    }
+    val prompt = activePrompt ?: return
+    activePrompt = null
+    runCatching { prompt.cancelAuthentication() }
+}
+
+/** The platform's biometric prompt, asked for directly. Like the library path, a cancelled prompt or an
+ *  error runs nothing, and one the platform refuses to build or start fails closed. */
+@RequiresApi(Build.VERSION_CODES.R)
+private fun showSystemPrompt(context: Context, authenticators: Int, onSuccess: () -> Unit) {
+    val signal = CancellationSignal()
+    activeSignal = signal
+    runCatching {
+        val prompt = android.hardware.biometrics.BiometricPrompt.Builder(context)
+            .setTitle(context.getString(R.string.app_name))
+            .setDescription(context.getString(R.string.app_lock_authenticate_prompt))
+            .setAllowedAuthenticators(authenticators)
+            .build()
+        prompt.authenticate(
+            signal,
+            ContextCompat.getMainExecutor(context),
+            object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult?) {
+                    if (activeSignal === signal) activeSignal = null
+                    onSuccess()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
+                    if (activeSignal === signal) activeSignal = null
+                }
+            },
+        )
+    }.onFailure { if (activeSignal === signal) activeSignal = null }
 }

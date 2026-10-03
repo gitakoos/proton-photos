@@ -705,6 +705,8 @@
     <string name="share_all">Alle</string>
     <string name="share_shared_with_me">Met mij gedeeld</string>
     <string name="share_shared_by_me">Door mij gedeeld</string>
+    <string name="share_scope_with_me">Met mij</string>
+    <string name="share_scope_by_me">Door mij</string>
     <string name="share_filter_account">Filteren op account</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
@@ -789,9 +791,6 @@
     <string name="search_section_recent">Recent</string>
     <string name="map_title">Kaart</string>
     <string name="map_vector_title">Wereldkaart</string>
-    <string name="map_card_title">Kaart</string>
-    <string name="map_card_subtitle_empty">Nog geen gelokaliseerde foto\'s</string>
-    <string name="map_card_calendar_subtitle">Je afbeeldingen in kalenderweergave</string>
     <string name="map_search_places">Plaatsen zoeken</string>
     <string name="places_title">Plaatsen</string>
     <string name="map_search_no_places">Nog geen plaatsen</string>
@@ -1100,8 +1099,8 @@
     <string name="albums_filter_sheet_title">Albumfilter</string>
     <string name="albums_filter_default_heading">Standaard bij openen</string>
     <string name="albums_filter_remember_last">Laatst gebruikte filter onthouden</string>
-    <string name="albums_show_collection">Collectie tonen</string>
-    <string name="albums_show_collection_summary">Personen, plaatsen en \"Op deze dag\" blijven beschikbaar via Zoeken</string>
+    <string name="albums_show_collection">Rij met snelkoppelingen tonen</string>
+    <string name="albums_shortcuts_heading">Snelkoppelingen</string>
     <string name="albums_filter_excluded">Uitgesloten</string>
     <string name="albums_excluded_empty">Geen uitgesloten albums of mappen</string>
     <string name="albums_exclude_from_albums">Uitsluiten van Albums</string>
@@ -1485,7 +1484,6 @@
     <string name="thanks_2_5_0_website">Website</string>
     <string name="thanks_2_5_0_coffee">Trakteer me op een koffie</string>
     <string name="thanks_2_5_0_dismiss">Sluiten</string>
-    <string name="offline_card_subtitle">Foto\'s opgeslagen voor offline weergave</string>
     <string name="duplicates_filter_identical">Identiek</string>
     <string name="duplicates_filter_similar">Vergelijkbaar</string>
     <string name="duplicates_filter_match_label">Overeenkomst</string>
@@ -1717,7 +1715,6 @@
     <string name="settings_ai_clear_confirm_msg">Dit verwijdert alle gevonden personen en alle gezichtsgegevens. Je foto\'s blijven ongemoeid. Gezichten worden opnieuw gedetecteerd bij de volgende indexering.</string>
     <string name="gallery_add_to_person">Aan persoon toevoegen</string>
     <string name="people_search_hint">Personen zoeken</string>
-    <string name="people_card_subtitle">Blader door je foto\'s per persoon</string>
     <string name="person_set_cover">Als omslag instellen</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>

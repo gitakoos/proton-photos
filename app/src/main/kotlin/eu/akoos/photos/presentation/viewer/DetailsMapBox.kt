@@ -76,7 +76,7 @@ import eu.akoos.photos.presentation.map.vector.WorldMapData
 import eu.akoos.photos.presentation.map.vector.appendBorder
 import eu.akoos.photos.presentation.map.vector.appendFill
 import eu.akoos.photos.presentation.map.vector.cosCentral
-import eu.akoos.photos.presentation.search.components.darkTileFilter
+import eu.akoos.photos.presentation.map.darkTileFilter
 import eu.akoos.photos.presentation.theme.AppColors
 import kotlinx.coroutines.flow.map
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory

@@ -352,6 +352,12 @@ fun GalleryScreen(
     onCalendarClick: () -> Unit = {},
     /** Opens the Memories screen — reached from the pinned card at the top of the Albums tab. */
     onMemoriesClick: () -> Unit = {},
+    /** Opens the Shared page, from the Albums tab's Shared tile. */
+    onOpenShared: () -> Unit = {},
+    /** The Albums tab's tiles for the map, People and Offline photos. */
+    onOpenMap: () -> Unit = {},
+    onOpenPeople: () -> Unit = {},
+    onOpenOffline: () -> Unit = {},
     /** Opens the Timeline filter screen — reached from the Albums tab's filter button now that
      *  the obsolete All/Backed-up album filter is gone (device + cloud albums show together). */
     onOpenTimelineFilter: () -> Unit = {},
@@ -389,6 +395,12 @@ fun GalleryScreen(
     val albumsState by albumsViewModel.uiState.collectAsStateWithLifecycle()
     val sharedViewModel: SharedViewModel = hiltViewModel()
     val sharedUiState by sharedViewModel.uiState.collectAsStateWithLifecycle()
+    // The Shared tile's dot follows the invitations, so they are read again whenever the gallery comes
+    // back to the front.
+    androidx.lifecycle.compose.LifecycleResumeEffect(state.isSignedIn) {
+        if (state.isSignedIn) sharedViewModel.refreshInvitations()
+        onPauseOrDispose { }
+    }
     // Live view of the app-scoped cloud-metadata-save batch. Null once nothing is running or the
     // drawer was sent to the background, so the sheet below mounts only while there is progress to show.
     val cloudSaveVm: CloudSaveDrawerViewModel = hiltViewModel()
@@ -423,10 +435,10 @@ fun GalleryScreen(
     }
     val albumsGridState = rememberLazyGridState()
     val tabScope = rememberCoroutineScope()
-    // Three top-level tabs (Photos / Albums / Shared), hosted in a pager so they can be swiped
-    // between as well as tapped. Seeded from the saved tab so a config change restores the page.
-    // A local-only session (no account) drops the cloud-only Shared page, leaving Photos + Albums.
-    val pagerState = rememberPagerState(initialPage = selectedTab) { if (state.isSignedIn) 3 else 2 }
+    // Two top-level tabs (Photos / Albums), hosted in a pager so they can be swiped between as well as
+    // tapped. Seeded from the saved tab so a config change restores the page. Shared is a page of its
+    // own, opened from the Albums tab.
+    val pagerState = rememberPagerState(initialPage = selectedTab.coerceIn(0, 1)) { 2 }
     // Two-way sync between the pager and [selectedTab] (which drives the header rail + dock highlight).
     // Settling on a page — by swipe or by the dock's animateScrollToPage — adopts it as the active tab;
     // a tap path updates selectedTab and animates the pager below.
@@ -443,7 +455,7 @@ fun GalleryScreen(
         if (landingTabApplied) return@LaunchedEffect
         landingTabApplied = true
         val landing = context.settingsDataStore.data
-            .map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, if (state.isSignedIn) 2 else 1) }
+            .map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, 1) }
             .first()
         if (landing != selectedTab) {
             selectedTab = landing
@@ -455,11 +467,8 @@ fun GalleryScreen(
     // has to stay current, so picking another landing tab in Settings retargets back straight away
     // rather than at the next start. Initial 0 matches the seeding default.
     val landingTab by remember {
-        context.settingsDataStore.data.map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, if (state.isSignedIn) 2 else 1) }
+        context.settingsDataStore.data.map { (it[SettingsKeys.LANDING_TAB] ?: 0).coerceIn(0, 1) }
     }.collectAsState(initial = 0)
-    // Saved, like [activeEmailFilter] below, so the gallery rebuilt when a shared album pops comes back
-    // on the scope and sender it showed rather than on "Shared with me" with the sender dropped.
-    var sharedFilter by rememberSaveable { mutableStateOf(SharedFilter.SharedWithMe) }
     // The Albums view filter, and whether it is decided for the current stay on the Albums page (by
     // the entry effect below, or by a pick). Both are saved, so the gallery rebuilt when a pushed screen
     // pops (an album, a folder, Settings) comes back on the filter it showed, with no pass through All.
@@ -535,8 +544,6 @@ fun GalleryScreen(
     }
     var showAlbumsFilterSheet by remember { mutableStateOf(false) }
     val albumsFilterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var activeEmailFilter by rememberSaveable { mutableStateOf<String?>(null) }
-    var showEmailFilterSheet by remember { mutableStateOf(false) }
     // Bump to ask AlbumsScreen to open its create-album dialog (the Albums-tab "New album" pill).
     var albumCreateSignal by remember { mutableIntStateOf(0) }
 
@@ -1262,6 +1269,14 @@ fun GalleryScreen(
                 onHideDeviceFolder = viewModel::requestHideFolder,
                 onDeleteDeviceFolder = viewModel::requestDeleteFolder,
                 onMemoriesClick = onMemoriesClick,
+                onMapClick = onOpenMap,
+                onCalendarClick = onCalendarClick,
+                onPeopleClick = onOpenPeople,
+                // Only cloud photos can be pinned for offline, so a guest has no tile for them.
+                onOfflineClick = if (state.isSignedIn) onOpenOffline else null,
+                onSharedClick = if (state.isSignedIn) onOpenShared else null,
+                onHiddenClick = onHiddenAlbumClick,
+                sharedBadge = sharedUiState.pendingInvitations.isNotEmpty(),
                 createRequestSignal = albumCreateSignal,
                 displayFilter = albumFilter,
                 query = albumQuery,
@@ -1270,12 +1285,6 @@ fun GalleryScreen(
                     // Search and arrange cannot share the rail; opening arrange closes an open search.
                     if (active) { albumSearchActive = false; albumQuery = "" }
                 },
-            )
-            2 -> SharedScreen(
-                topPadding = headerHeightDp,
-                filter = sharedFilter,
-                activeEmailFilter = activeEmailFilter,
-                onAlbumClick = onAlbumClick,
             )
         }
         }
@@ -1322,14 +1331,10 @@ fun GalleryScreen(
                         selectedTab = page,
                         galleryState = state,
                         albumsState = albumsState,
-                        sharedFilter = sharedFilter,
-                        activeEmailFilter = activeEmailFilter,
                         isOnlineNow = isOnlineNow,
                         onFilterSelected = viewModel::onFilterSelected,
-                        onSearchClick = onSearchClick,
                         onCalendarClick = onCalendarClick,
                         onClearContentFilter = { viewModel.setContentFilter(ContentFilter()) },
-                        onHiddenAlbumClick = onHiddenAlbumClick,
                         // The Photos-tab filter icon opens the content-filter drawer (sync status
                         // + date), the same sheet the Search screen shows.
                         onShowAlbumsFilterSheet = { showFilterSheet = true },
@@ -1354,11 +1359,6 @@ fun GalleryScreen(
                         onAlbumSearchActiveChange = { albumSearchActive = it },
                         // Arranging owns the whole rail, so entering it closes any open search first.
                         albumReorderActive = albumReorderActive,
-                        onSharedFilterSelected = { filter ->
-                            sharedFilter = filter
-                            activeEmailFilter = null
-                        },
-                        onShowSharedEmailSheet = { showEmailFilterSheet = true },
                         onSettingsClick = onSettingsClick,
                         onOpenUploads = onOpenUploads,
                         onOpenDownloads = onOpenDownloads,
@@ -1532,8 +1532,7 @@ fun GalleryScreen(
             BottomDock(
                 // The live fractional page position drives the sliding highlight, so it follows a swipe.
                 position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
-                // A local-only session has no account, so the cloud-only Shared tab is omitted.
-                showShared = state.isSignedIn,
+                onSearchClick = onSearchClick,
                 onTabSelected = { tab ->
                     // Re-tapping the active tab always returns it to the visual top (item 0). Switching
                     // to a different tab also resets to the top, unless "keep place when switching tabs"
@@ -1614,17 +1613,6 @@ fun GalleryScreen(
                 onOpenTimelineSettings = onOpenTimelineFilter,
             )
         }
-    }
-    if (showEmailFilterSheet) {
-        GallerySharedEmailFilterDialog(
-            availableEmails = sharedUiState.availableEmails,
-            activeEmailFilter = activeEmailFilter,
-            onEmailSelected = { picked ->
-                activeEmailFilter = picked
-                showEmailFilterSheet = false
-            },
-            onDismiss = { showEmailFilterSheet = false },
-        )
     }
     if (showAlbumsFilterSheet) {
         AlbumsFilterSheet(

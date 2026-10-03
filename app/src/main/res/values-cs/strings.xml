@@ -879,6 +879,8 @@
     <string name="share_all">Vše</string>
     <string name="share_shared_with_me">Sdíleno se mnou</string>
     <string name="share_shared_by_me">Sdíleno mnou</string>
+    <string name="share_scope_with_me">Se mnou</string>
+    <string name="share_scope_by_me">Moje</string>
     <string name="share_filter_account">Filtrovat podle účtu</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
@@ -968,9 +970,6 @@
     <!-- Map -->
     <string name="map_title">Mapa</string>
     <string name="map_vector_title">Mapa světa</string>
-    <string name="map_card_title">Mapa</string>
-    <string name="map_card_subtitle_empty">Zatím žádné lokalizované fotky</string>
-    <string name="map_card_calendar_subtitle">Vaše fotky v zobrazení kalendáře</string>
     <string name="map_search_places">Hledat místa</string>
     <string name="places_title">Místa</string>
     <string name="map_search_no_places">Zatím žádná místa</string>
@@ -1313,8 +1312,8 @@
     <string name="albums_filter_sheet_title">Filtr alb</string>
     <string name="albums_filter_default_heading">Výchozí při otevření</string>
     <string name="albums_filter_remember_last">Zapamatovat naposledy použitý filtr</string>
-    <string name="albums_show_collection">Zobrazovat Sbírku</string>
-    <string name="albums_show_collection_summary">Lidé, místa a „V tento den“ zůstávají v hledání</string>
+    <string name="albums_show_collection">Zobrazit řádek zkratek</string>
+    <string name="albums_shortcuts_heading">Zkratky</string>
     <string name="albums_filter_excluded">Vyloučené</string>
     <string name="albums_excluded_empty">Žádná vyloučená alba ani složky</string>
     <string name="albums_exclude_from_albums">Vyloučit z Alb</string>
@@ -1548,7 +1547,6 @@
     <string name="thanks_2_5_0_website">Webová stránka</string>
     <string name="thanks_2_5_0_coffee">Kup mi kávu</string>
     <string name="thanks_2_5_0_dismiss">Zavřít</string>
-    <string name="offline_card_subtitle">Fotky uložené pro offline prohlížení</string>
     <string name="duplicates_filter_identical">Stejné</string>
     <string name="duplicates_filter_similar">Podobné</string>
     <string name="duplicates_filter_match_label">Shoda</string>
@@ -1784,7 +1782,6 @@
     <string name="settings_ai_clear_confirm_msg">Tímto se odstraní všechny nalezené osoby a veškerá data obličejů. Vaše fotografie zůstanou nedotčené. Obličeje se znovu rozpoznají při příštím indexování.</string>
     <string name="gallery_add_to_person">Přidat k osobě</string>
     <string name="people_search_hint">Hledat osoby</string>
-    <string name="people_card_subtitle">Procházejte fotky podle osob</string>
     <string name="person_set_cover">Nastavit jako obálku</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>

@@ -352,14 +352,13 @@ enum class ThemePalette(val storageKey: String, val labelRes: Int) {
 
 /**
  * Top-level gallery tab the app opens on at start. [index] matches the pager page
- * (0 = Photos, 1 = Albums, 2 = Shared) so it maps straight to the saved [SettingsKeys.LANDING_TAB]
+ * (0 = Photos, 1 = Albums) so it maps straight to the saved [SettingsKeys.LANDING_TAB]
  * int and the [androidx.compose.foundation.pager.PagerState] without a lookup table. Labels reuse
  * the existing gallery tab strings.
  */
 enum class LandingTab(val index: Int, val labelRes: Int) {
     Photos(0, eu.akoos.photos.R.string.gallery_tab_photos),
-    Albums(1, eu.akoos.photos.R.string.gallery_tab_albums),
-    Shared(2, eu.akoos.photos.R.string.gallery_tab_shared);
+    Albums(1, eu.akoos.photos.R.string.gallery_tab_albums);
 
     companion object {
         fun fromIndex(index: Int?): LandingTab = entries.firstOrNull { it.index == index } ?: Photos

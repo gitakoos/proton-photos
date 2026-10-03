@@ -101,9 +101,7 @@ object SettingsKeys {
     /** Direction the photos inside a device folder are listed in, an AlbumPhotoSortMode ordinal
      *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order a folder opens on. Its
      *  own key rather than [ALBUM_PHOTO_SORT_MODE]: a folder and an album are browsed for different
-     *  reasons, so a direction chosen in one has no claim on the other. One global choice every
-     *  folder shares, since a per-folder key would grow with the device's bucket list and rewrite
-     *  the whole preferences file on each change. */
+     *  reasons, so a direction chosen in one has no claim on the other. The default a folder with no choice of its own follows; a choice made on one folder is kept apart, per folder. */
     val DEVICE_FOLDER_PHOTO_SORT_MODE = intPreferencesKey("device_folder_photo_sort_mode")
 
     /** Span of dates each header inside an album gathers, an AlbumPhotoGrouping ordinal
@@ -115,10 +113,21 @@ object SettingsKeys {
     /** Span of dates each header inside a device folder gathers, an AlbumPhotoGrouping ordinal
      *  (0 = Month, 1 = Day, 2 = Year). Absent = Month, the headers a folder has always shown. Its
      *  own key rather than [ALBUM_PHOTO_GROUPING]: a folder and an album are browsed for different
-     *  reasons, so a grouping chosen in one has no claim on the other. One global choice every
-     *  folder shares, since a per-folder key would grow with the device's bucket list and rewrite
-     *  the whole preferences file on each change. */
+     *  reasons, so a grouping chosen in one has no claim on the other. The default a folder with no choice of its own follows; a choice made on one folder is kept apart, per folder. */
     val DEVICE_FOLDER_PHOTO_GROUPING = intPreferencesKey("device_folder_photo_grouping")
+
+    /** The albums whose photo direction was chosen on that album, entries "ordinal:linkId". Only the
+     *  albums that differ from [ALBUM_PHOTO_SORT_MODE] have one. */
+    val ALBUM_PHOTO_SORT_OVERRIDES = stringSetPreferencesKey("album_photo_sort_overrides")
+
+    /** The albums whose header span was chosen on that album, entries "ordinal:linkId". */
+    val ALBUM_PHOTO_GROUPING_OVERRIDES = stringSetPreferencesKey("album_photo_grouping_overrides")
+
+    /** The device folders whose photo direction was chosen on that folder, entries "ordinal:folderName". */
+    val DEVICE_FOLDER_PHOTO_SORT_OVERRIDES = stringSetPreferencesKey("device_folder_photo_sort_overrides")
+
+    /** The device folders whose header span was chosen on that folder, entries "ordinal:folderName". */
+    val DEVICE_FOLDER_PHOTO_GROUPING_OVERRIDES = stringSetPreferencesKey("device_folder_photo_grouping_overrides")
 
     /** The user's own Albums-grid arrangement, a '|'-separated list of album linkIds, read only
      *  when [ALBUMS_SORT_MODE] is Custom. Absent or empty = no arrangement yet, which Custom
@@ -245,6 +254,14 @@ object SettingsKeys {
     /** GalleryFilter enum names the user has hidden from the timeline category rail, toggled with
      *  the eye button on the Timeline filter screen. Absent / empty = every category shows. */
     val CATEGORY_RAIL_HIDDEN = stringSetPreferencesKey("category_rail_hidden")
+
+    /** User's order for the shortcut tiles on the Albums tab, a CSV of LibraryTile enum names. Absent =
+     *  the default order. */
+    val ALBUMS_TILE_ORDER = stringPreferencesKey("albums_tile_order")
+
+    /** LibraryTile enum names the user has hidden from the Albums tab's shortcut row. Absent / empty =
+     *  every tile shows. */
+    val ALBUMS_TILE_HIDDEN = stringSetPreferencesKey("albums_tile_hidden")
 
     val LANGUAGE = stringPreferencesKey("language")
 

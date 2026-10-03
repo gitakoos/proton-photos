@@ -880,6 +880,8 @@
     <string name="share_all">Vse</string>
     <string name="share_shared_with_me">V skupni rabi z menoj</string>
     <string name="share_shared_by_me">V skupni rabi z moje strani</string>
+    <string name="share_scope_with_me">Z mano</string>
+    <string name="share_scope_by_me">Od mene</string>
     <string name="share_filter_account">Filtriraj po računu</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
@@ -969,9 +971,6 @@
     <!-- Map -->
     <string name="map_title">Zemljevid</string>
     <string name="map_vector_title">Zemljevid sveta</string>
-    <string name="map_card_title">Zemljevid</string>
-    <string name="map_card_subtitle_empty">Še ni lociranih fotografij</string>
-    <string name="map_card_calendar_subtitle">Koledarski pogled vaših fotografij</string>
     <string name="map_search_places">Iskanje krajev</string>
     <string name="places_title">Kraji</string>
     <string name="map_search_no_places">Še ni krajev</string>
@@ -1314,8 +1313,8 @@
     <string name="albums_filter_sheet_title">Filter albumov</string>
     <string name="albums_filter_default_heading">Privzeto ob odpiranju</string>
     <string name="albums_filter_remember_last">Zapomni si nazadnje uporabljeni filter</string>
-    <string name="albums_show_collection">Prikaži Zbirko</string>
-    <string name="albums_show_collection_summary">Osebe, kraji in „Na ta dan“ ostanejo na voljo v iskanju</string>
+    <string name="albums_show_collection">Pokaži vrstico bližnjic</string>
+    <string name="albums_shortcuts_heading">Bližnjice</string>
     <string name="albums_filter_excluded">Izključeni</string>
     <string name="albums_excluded_empty">Ni izključenih albumov ali map</string>
     <string name="albums_exclude_from_albums">Izključi iz Albumov</string>
@@ -1549,7 +1548,6 @@
     <string name="thanks_2_5_0_website">Spletna stran</string>
     <string name="thanks_2_5_0_coffee">Kupi mi kavo</string>
     <string name="thanks_2_5_0_dismiss">Zapri</string>
-    <string name="offline_card_subtitle">Fotografije, shranjene za ogled brez povezave</string>
     <string name="duplicates_filter_identical">Enake</string>
     <string name="duplicates_filter_similar">Podobne</string>
     <string name="duplicates_filter_match_label">Ujemanje</string>
@@ -1783,7 +1781,6 @@
     <string name="settings_ai_clear_confirm_msg">To odstrani vse najdene osebe in vse podatke obrazov. Vaše fotografije ostanejo nedotaknjene. Obrazi bodo znova zaznani ob naslednjem indeksiranju.</string>
     <string name="gallery_add_to_person">Dodaj k osebi</string>
     <string name="people_search_hint">Iskanje oseb</string>
-    <string name="people_card_subtitle">Prebrskajte fotografije po osebah</string>
     <string name="person_set_cover">Nastavi kot naslovnico</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>

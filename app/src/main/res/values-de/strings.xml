@@ -667,6 +667,8 @@
     <string name="share_all">Alle</string>
     <string name="share_shared_with_me">Mit mir geteilt</string>
     <string name="share_shared_by_me">Von mir geteilt</string>
+    <string name="share_scope_with_me">Mit mir</string>
+    <string name="share_scope_by_me">Von mir</string>
     <string name="share_filter_account">Nach Konto filtern</string>
 
     <!-- Share sheet, redesigned to mirror the Drive web dialog -->
@@ -943,9 +945,6 @@
     <string name="search_section_recent">Zuletzt</string>
     <string name="map_title">Karte</string>
     <string name="map_vector_title">Weltkarte</string>
-    <string name="map_card_title">Karte</string>
-    <string name="map_card_subtitle_empty">Noch keine verorteten Fotos</string>
-    <string name="map_card_calendar_subtitle">Deine Fotos in der Kalenderansicht</string>
     <string name="map_search_places">Orte suchen</string>
     <string name="places_title">Orte</string>
     <string name="map_search_no_places">Noch keine Orte</string>
@@ -1084,8 +1083,8 @@
     <string name="albums_filter_sheet_title">Albumfilter</string>
     <string name="albums_filter_default_heading">Standard beim Öffnen</string>
     <string name="albums_filter_remember_last">Zuletzt verwendeten Filter merken</string>
-    <string name="albums_show_collection">Sammlung anzeigen</string>
-    <string name="albums_show_collection_summary">Personen, Orte und „An diesem Tag“ bleiben in der Suche</string>
+    <string name="albums_show_collection">Zeile mit Verknüpfungen anzeigen</string>
+    <string name="albums_shortcuts_heading">Verknüpfungen</string>
     <string name="albums_filter_excluded">Ausgeschlossen</string>
     <string name="albums_excluded_empty">Keine ausgeschlossenen Alben oder Ordner</string>
     <string name="albums_exclude_from_albums">Aus Alben ausschließen</string>
@@ -1470,7 +1469,6 @@
     <string name="thanks_2_5_0_website">Website</string>
     <string name="thanks_2_5_0_coffee">Spendier mir einen Kaffee</string>
     <string name="thanks_2_5_0_dismiss">Schließen</string>
-    <string name="offline_card_subtitle">Für die Offline-Ansicht gespeicherte Fotos</string>
     <string name="duplicates_filter_identical">Identisch</string>
     <string name="duplicates_filter_similar">Ähnlich</string>
     <string name="duplicates_filter_match_label">Übereinstimmung</string>
@@ -1690,7 +1688,6 @@
     <string name="settings_ai_clear_confirm_msg">Dies entfernt alle gefundenen Personen und alle Gesichtsdaten. Deine Fotos sind nicht betroffen. Gesichter werden beim nächsten Indexieren erneut erkannt.</string>
     <string name="gallery_add_to_person">Zu Person hinzufügen</string>
     <string name="people_search_hint">Personen suchen</string>
-    <string name="people_card_subtitle">Durchstöbere deine Fotos nach Person</string>
     <string name="person_set_cover">Als Titelbild festlegen</string>
     <string name="person_set_cover_confirm_title">Set as cover?</string>
     <string name="person_set_cover_confirm_body">Use this photo as the cover for this person.</string>
