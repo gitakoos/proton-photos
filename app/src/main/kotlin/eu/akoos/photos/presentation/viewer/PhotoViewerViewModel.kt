@@ -1925,8 +1925,9 @@ class PhotoViewerViewModel @Inject constructor(
                         _transientError.value = context.resources.getQuantityString(
                             R.plurals.viewer_add_photos_failed, n, n,
                         )
-                    } else if (targetName.isNotEmpty()) {
-                        _addToAlbumDone.tryEmit(targetName)
+                    } else {
+                        _currentPhotoAlbumIds.value = _currentPhotoAlbumIds.value + albumLinkId
+                        if (targetName.isNotEmpty()) _addToAlbumDone.tryEmit(targetName)
                     }
                 }
                 .onFailure { e ->

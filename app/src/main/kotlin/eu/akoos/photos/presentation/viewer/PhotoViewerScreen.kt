@@ -2795,15 +2795,20 @@ fun PhotoViewerScreen(
                 showAddToAlbumSheet = false
             },
             onCloudAlbumPicked = { albumLinkId ->
-                if (settledItem != null) {
-                    // Tap-to-remove when the photo is already in this album, otherwise add.
-                    if (albumLinkId in currentPhotoAlbumIds) {
-                        viewModel.removeFromAlbum(albumLinkId, settledItem)
-                    } else {
-                        viewModel.addToAlbum(albumLinkId, settledItem)
+                // A backed-up photo's membership is read back after each tap, so the sheet stays open
+                // for the next album. A photo still queued to upload has nothing to read back, so
+                // its sheet closes as before.
+                if (!isAddingToAlbum) {
+                    if (settledItem != null) {
+                        // Tap-to-remove when the photo is already in this album, otherwise add.
+                        if (albumLinkId in currentPhotoAlbumIds) {
+                            viewModel.removeFromAlbum(albumLinkId, settledItem)
+                        } else {
+                            viewModel.addToAlbum(albumLinkId, settledItem)
+                        }
                     }
+                    if (!hasCloud) showAddToAlbumSheet = false
                 }
-                showAddToAlbumSheet = false
             },
         )
     }
