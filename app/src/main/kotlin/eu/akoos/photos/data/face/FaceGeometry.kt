@@ -58,7 +58,15 @@ fun matchRejectedByGeometry(
     boxes: List<ReattachBox>,
     faces: List<ReattachFace>,
     minIou: Float,
-): List<String> {
+): List<String> = bindRejectedBoxes(boxes, faces, minIou).map { it.second }
+
+/** [matchRejectedByGeometry] with each face's box kept: (index into [boxes], re-detected faceId), in the
+ *  same order, so a caller can tell which removed boxes found a face and which are still waiting for one. */
+fun bindRejectedBoxes(
+    boxes: List<ReattachBox>,
+    faces: List<ReattachFace>,
+    minIou: Float,
+): List<Pair<Int, String>> {
     if (boxes.isEmpty() || faces.isEmpty()) return emptyList()
     val facesByPhoto = faces.groupBy { it.photoKey }
     data class Overlap(val faceId: String, val iou: Float, val boxIndex: Int)
@@ -72,12 +80,12 @@ fun matchRejectedByGeometry(
     overlaps.sortWith(compareByDescending<Overlap> { it.iou }.thenBy { it.faceId }.thenBy { it.boxIndex })
     val claimedFace = HashSet<String>()
     val usedBox = HashSet<Int>()
-    val result = ArrayList<String>()
+    val result = ArrayList<Pair<Int, String>>()
     for (o in overlaps) {
         if (o.faceId in claimedFace || o.boxIndex in usedBox) continue
         claimedFace.add(o.faceId)
         usedBox.add(o.boxIndex)
-        result.add(o.faceId)
+        result.add(o.boxIndex to o.faceId)
     }
     return result
 }

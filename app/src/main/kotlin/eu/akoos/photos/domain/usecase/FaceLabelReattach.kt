@@ -115,12 +115,20 @@ fun matchReattachLabels(
     labels: List<ReattachLabel>,
     faces: List<ReattachFace>,
     minIou: Float = REATTACH_MIN_IOU,
-): Map<String, String> {
+): Map<String, String> = bindReattachLabels(labels, faces, minIou).mapValues { it.value.name }
+
+/** [matchReattachLabels] with the whole label kept for each face: local-faceId to the label bound to it, so
+ *  a caller can tell which labels found a face and which are still waiting for one. */
+fun bindReattachLabels(
+    labels: List<ReattachLabel>,
+    faces: List<ReattachFace>,
+    minIou: Float = REATTACH_MIN_IOU,
+): Map<String, ReattachLabel> {
     if (labels.isEmpty() || faces.isEmpty()) return emptyMap()
 
     val facesById = faces.associateBy { it.faceId }
     val facesByPhoto = faces.groupBy { it.photoKey }
-    val assigned = HashMap<String, String>()
+    val assigned = HashMap<String, ReattachLabel>()
     val claimed = HashSet<String>()
 
     // 1. Exact stable-id match, guarded by geometry: an embedder-only swap keeps the detector, so
@@ -134,7 +142,7 @@ fun matchReattachLabels(
         if (face != null && face.faceId !in claimed &&
             idMatchIsSafe(label, face, facesByPhoto[face.photoKey].orEmpty(), minIou)
         ) {
-            assigned[face.faceId] = label.name
+            assigned[face.faceId] = label
             claimed.add(face.faceId)
         } else {
             needGeometry.add(label)
@@ -143,7 +151,7 @@ fun matchReattachLabels(
 
     // 2. Best same-photo overlap for whatever the id pass could not place, strongest pair first so a
     //    contested face goes to its closest label rather than to whichever was visited first.
-    data class Candidate(val faceId: String, val name: String, val iou: Float, val labelFaceId: String)
+    data class Candidate(val faceId: String, val label: ReattachLabel, val iou: Float)
     val candidates = ArrayList<Candidate>()
     for (label in needGeometry) {
         for (face in facesByPhoto[label.photoKey].orEmpty()) {
@@ -152,18 +160,18 @@ fun matchReattachLabels(
                 label.left, label.top, label.right, label.bottom,
                 face.left, face.top, face.right, face.bottom,
             )
-            if (iou >= minIou) candidates.add(Candidate(face.faceId, label.name, iou, label.faceId))
+            if (iou >= minIou) candidates.add(Candidate(face.faceId, label, iou))
         }
     }
     candidates.sortWith(
-        compareByDescending<Candidate> { it.iou }.thenBy { it.faceId }.thenBy { it.labelFaceId },
+        compareByDescending<Candidate> { it.iou }.thenBy { it.faceId }.thenBy { it.label.faceId },
     )
     val usedLabel = HashSet<String>()
     for (c in candidates) {
-        if (c.faceId in claimed || c.labelFaceId in usedLabel) continue
-        assigned[c.faceId] = c.name
+        if (c.faceId in claimed || c.label.faceId in usedLabel) continue
+        assigned[c.faceId] = c.label
         claimed.add(c.faceId)
-        usedLabel.add(c.labelFaceId)
+        usedLabel.add(c.label.faceId)
     }
     return assigned
 }

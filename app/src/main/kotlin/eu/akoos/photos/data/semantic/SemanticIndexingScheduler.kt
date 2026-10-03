@@ -59,6 +59,7 @@ import eu.akoos.photos.util.SourceMiss
 import eu.akoos.photos.util.SourceMissNote
 import eu.akoos.photos.util.SourcePassTally
 import eu.akoos.photos.util.SourceRetryBook
+import eu.akoos.photos.util.WalkRestart
 import eu.akoos.photos.util.WalkRetryKick
 import eu.akoos.photos.util.boundedDetachedRun
 import eu.akoos.photos.util.retryKickDelayMs
@@ -84,6 +85,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import java.io.File
 import java.nio.ByteBuffer
@@ -250,6 +252,8 @@ class SemanticIndexingScheduler @Inject constructor(
     private val galleryItemsProvider: Provider<GetGalleryItemsUseCase>,
     private val deviceHealth: DeviceHealthPolicy,
     private val mlWalkGate: MlWalkGate,
+    // Read only when a walk's tail is about to start another pass, to check the account is still signed in.
+    private val accountManager: Provider<AccountManager>,
 ) {
     /** Own scope so an unpause kick and the settings watcher outlive the caller that triggered them. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -309,12 +313,10 @@ class SemanticIndexingScheduler @Inject constructor(
     /** Set by [reset] to stop a running walk promptly on sign-out; cleared at the start of each walk. */
     @Volatile private var stopRequested = false
 
-    /** A resume asked for while a walk was still winding down: the walk's own tail re-kicks a fresh one
-     *  when it lands, so a pause-then-resume never wedges with nothing running. */
-    @Volatile private var restartRequested = false
-
-    /** The last account a walk ran for, so an unpause can resume without being handed a userId. */
-    @Volatile private var lastUserId: UserId? = null
+    /** A resume asked for while a walk was still winding down, which the walk's own tail honours when it
+     *  lands so a pause-then-resume never wedges with nothing running, and the last account a walk ran for,
+     *  so an unpause can resume without being handed a userId. Both dropped by [reset]. */
+    private val restart = WalkRestart()
 
     private val _progress = MutableStateFlow(SemanticIndexingProgress(SemanticIndexingState.Idle, 0, 0))
     val progress: StateFlow<SemanticIndexingProgress> = _progress.asStateFlow()
@@ -347,7 +349,7 @@ class SemanticIndexingScheduler @Inject constructor(
             var wasUnmetered = networkObserver.isUnmetered.value
             networkObserver.isUnmetered.collect { nowUnmetered ->
                 if (shouldResumeSemanticScanOnUnmetered(wasUnmetered, nowUnmetered)) {
-                    lastUserId?.let { uid -> runCatching { indexAll(uid) } }
+                    restart.lastUserId?.let { uid -> runCatching { indexAll(uid) } }
                 }
                 wasUnmetered = nowUnmetered
             }
@@ -361,7 +363,7 @@ class SemanticIndexingScheduler @Inject constructor(
      * repeatedly; overlapping calls collapse to one walk.
      */
     suspend fun indexAll(userId: UserId?) {
-        lastUserId = userId
+        restart.lastUserId = userId
         val prefs = context.settingsDataStore.data.first()
         aiEnabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.SEMANTIC_ENABLED] == true
         fullresWifiOnly = prefs[SettingsKeys.FULLRES_WIFI_ONLY] ?: true
@@ -370,7 +372,7 @@ class SemanticIndexingScheduler @Inject constructor(
         if (paused) { _progress.value = SemanticIndexingProgress(SemanticIndexingState.Paused, 0, 0); return }
         // A walk is already running: ask the active walk to re-kick when it finishes, so a start requested
         // during a winding-down pass is never lost.
-        if (!running.compareAndSet(false, true)) { restartRequested = true; return }
+        if (!running.compareAndSet(false, true)) { restart.request(); return }
         // This pass supersedes any re-kick an earlier settled pass left for its retries.
         retryKick.cancel()
         stopRequested = false
@@ -510,7 +512,7 @@ class SemanticIndexingScheduler @Inject constructor(
                 paused || stopRequested -> SemanticIndexingProgress(SemanticIndexingState.Paused, indexedNow, libraryTotal)
                 // A re-kick is coming (this pass wrote a row, or a restart is already queued), so stay
                 // Running to match the tail re-kick below and not flap the foreground service.
-                embeddedThisPass.get() > 0 || restartRequested -> SemanticIndexingProgress(SemanticIndexingState.Running, indexedNow, libraryTotal)
+                embeddedThisPass.get() > 0 || restart.isRequested() -> SemanticIndexingProgress(SemanticIndexingState.Running, indexedNow, libraryTotal)
                 // A full pass that embedded nothing and is not paused means the remainder can't be
                 // processed right now (deferred off Wi-Fi, every attempt failed transiently, or every photo
                 // left waits out a retry backoff). There is no immediate re-kick in that case, so settle to
@@ -525,18 +527,27 @@ class SemanticIndexingScheduler @Inject constructor(
             // the library is drained. A pending resume always re-kicks; otherwise re-kick only while the
             // walk is still permitted and wrote at least one row, which stops cleanly at Done, off Wi-Fi,
             // or on pause. A walk that settles with retries still waiting comes back when the earliest is
-            // due.
-            val resume = restartRequested
-            restartRequested = false
+            // due. A resume is for the account last asked for, a continuation for this walk's own, and either
+            // starts only while that account is still the one signed in ([restartIfCurrent]).
+            val resume = restart.take()
             if (resume || (active() && embeddedThisPass.get() > 0)) {
-                scope.launch { runCatching { indexAll(userId) } }
+                val next = if (resume) restart.lastUserId else userId
+                scope.launch { restartIfCurrent(next) }
             } else if (active() && !abandonCap.reached()) {
                 val now = SystemClock.elapsedRealtime()
                 retryKickDelayMs(retryBook.nextDueAfter(now), now)?.let { wait ->
-                    retryKick.schedule(wait) { runCatching { indexAll(userId) } }
+                    retryKick.schedule(wait) { restartIfCurrent(userId) }
                 }
             }
         }
+    }
+
+    /** Starts the pass a walk's tail owes [userId], only while it is still the account last asked for and
+     *  still the signed-in one, or the guest while none is ([WalkRestart.mayRestart]). An account read that
+     *  fails starts nothing. */
+    private suspend fun restartIfCurrent(userId: UserId?) {
+        val primary = runCatching { accountManager.get().getPrimaryUserId().first() }.getOrElse { return }
+        if (restart.mayRestart(userId, primary)) runCatching { indexAll(userId) }
     }
 
     /**
@@ -551,7 +562,7 @@ class SemanticIndexingScheduler @Inject constructor(
             }
         } else {
             stopRequested = false
-            lastUserId?.let { uid -> scope.launch { runCatching { indexAll(uid) } } }
+            restart.lastUserId?.let { uid -> scope.launch { runCatching { indexAll(uid) } } }
         }
     }
 
@@ -565,7 +576,7 @@ class SemanticIndexingScheduler @Inject constructor(
             paused = false
             stopRequested = false
             // If a walk is still winding down, let its tail re-kick a fresh one rather than no-op here.
-            restartRequested = true
+            restart.request()
             runCatching { indexAll(userId) }
         }
     }
@@ -573,13 +584,14 @@ class SemanticIndexingScheduler @Inject constructor(
     /**
      * Stop any running walk and drop this account's embeddings. Called on sign-out just as the other
      * per-account rows are wiped: image embeddings are private derived data, so they leave with the
-     * session rather than lingering for the next account.
+     * session rather than lingering for the next account. A restart held for the walk's tail goes too, so
+     * that tail starts no pass for the account that is leaving.
      */
     suspend fun reset(userId: UserId?) {
         stopRequested = true
         retryKick.cancel()
         retryBook.clear()
-        lastUserId = null
+        restart.reset()
         _progress.value = SemanticIndexingProgress(SemanticIndexingState.Idle, 0, 0)
         SemanticDiagnostics.clear()
         runCatching { imageEmbeddingDao.deleteAllForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }

@@ -75,7 +75,7 @@ class AutoMergePagedLoadDbTest {
     )
 
     private fun useCase(db: AppDatabase) =
-        AutoMergePeopleUseCase(db.faceDao(), db.personDao(), db.notPersonDao(), assignPersonName(db))
+        AutoMergePeopleUseCase(db.faceDao(), db.personDao(), db.notPersonDao(), assignPersonName(db), db)
 
     private fun pack(v: FloatArray): ByteArray {
         val buffer = ByteBuffer.allocate(v.size * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
@@ -303,6 +303,24 @@ class AutoMergePagedLoadDbTest {
         assertEquals(
             before.notPersonDao().allForUser(acct).toSet(),
             after.notPersonDao().allForUser(acct).toSet(),
+        )
+    }
+
+    @Test
+    fun `a pass the fence refuses folds nothing`() = runTest {
+        val refused = newDb()
+        val untouched = newDb()
+        seed(refused)
+        seed(untouched)
+
+        assertEquals(0, useCase(refused)(acct) { false })
+
+        suspend fun faces(db: AppDatabase) = db.faceDao().allFacesByScoreDesc(acct)
+            .map { Triple(it.id, it.personId, it.manualName) to it.rejected }
+        assertEquals(faces(untouched), faces(refused))
+        assertEquals(
+            untouched.personDao().allForUser(acct).sortedBy { it.id },
+            refused.personDao().allForUser(acct).sortedBy { it.id },
         )
     }
 

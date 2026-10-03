@@ -80,16 +80,19 @@ sealed interface ReattachLoad {
     data class Loaded(val data: FaceReattachData) : ReattachLoad
 }
 
+/** Where a snapshot file stands on disk: when it was last written and how long it is. A write moves it. */
+data class ReattachStamp(val modifiedMs: Long, val length: Long)
+
 /** What a model-version migration should do with the reattach snapshot. */
 enum class ReattachMigrationStep { Capture, Resume, Skip }
 
 /**
  * The snapshot step for a migration entered because the stored model marker no longer matches. A snapshot
- * still on disk is un-consumed curation from an earlier wipe whose reattach has not run yet (the reattach
- * clears it as its last act), so it must never be overwritten: capturing over it from a table that does
- * not carry those names yet would lose every one of them. That covers both a wipe interrupted before its
- * marker and a second model bump landing before the first migration's reattach drained. Pure so it is
- * unit tested directly.
+ * still on disk is un-consumed curation from an earlier wipe whose reattach has not placed it yet (the
+ * reattach removes each entry once it is back), so it must never be overwritten: capturing over it from a
+ * table that does not carry those names yet would lose every one of them. That covers both a wipe
+ * interrupted before its marker and a second model bump landing before the first migration's reattach
+ * drained. Pure so it is unit tested directly.
  *
  * - A snapshot already present: [Resume] it, never re-capture over pending curation.
  * - No snapshot and faces still present: [Capture] a fresh one from the live table before the wipe.
@@ -235,14 +238,56 @@ object FaceReattachSnapshot {
         return true
     }
 
+    /**
+     * What of [data] still waits once a reattach has put [applied] back: every name, "not this person" mark
+     * and removed face it did not place, except the ones on a photo in [settledPhotos] (already re-detected
+     * with no face for them, or gone from the library), which no later pass can place. The photos attached
+     * by hand need no face, so they go back at once and never wait. Pure so it is unit tested directly.
+     */
+    fun remainder(data: FaceReattachData, applied: FaceReattachData, settledPhotos: Set<String>): FaceReattachData {
+        val members = applied.members.toHashSet()
+        val nots = applied.nots.toHashSet()
+        val rejected = applied.rejected.toHashSet()
+        return FaceReattachData(
+            members = data.members.filter { it !in members && it.photoKey !in settledPhotos },
+            manual = emptyList(),
+            nots = data.nots.filter { it !in nots && it.photoKey !in settledPhotos },
+            rejected = data.rejected.filter { it !in rejected && it.photoKey !in settledPhotos },
+        )
+    }
+
+    /**
+     * Leaves [remainder] in [file], what is left of [consumed] once a reattach has put part of it back, and
+     * removes the file once nothing is left, but only while it still holds exactly [consumed], so names
+     * written in after [consumed] was read wait whole for the next reattach. Says whether it consumed.
+     */
+    @Synchronized
+    fun consumeIfUnchanged(file: File, consumed: FaceReattachData, remainder: FaceReattachData): Boolean {
+        val current = runCatching { load(file) }.getOrNull()
+        if (current !is ReattachLoad.Loaded || current.data != consumed) return false
+        when {
+            remainder.isEmpty() -> clear(file)
+            remainder != consumed -> write(file, remainder)
+        }
+        return true
+    }
+
     /** Deletes [file] only while it still holds exactly [consumed], so names written in after [consumed]
      *  was read wait for the next reattach instead of going with it. Says whether it deleted. */
     @Synchronized
-    fun clearIfUnchanged(file: File, consumed: FaceReattachData): Boolean {
+    fun clearIfUnchanged(file: File, consumed: FaceReattachData): Boolean =
+        consumeIfUnchanged(file, consumed, FaceReattachData(emptyList(), emptyList(), emptyList()))
+
+    /** Where [file] stands on disk, or null when there is none. */
+    @Synchronized
+    fun stamp(file: File): ReattachStamp? =
+        if (file.isFile) ReattachStamp(file.lastModified(), file.length()) else null
+
+    /** [file]'s [stamp] while it holds exactly [data], else null. */
+    @Synchronized
+    fun stampIfHolds(file: File, data: FaceReattachData): ReattachStamp? {
         val current = runCatching { load(file) }.getOrNull()
-        if (current !is ReattachLoad.Loaded || current.data != consumed) return false
-        clear(file)
-        return true
+        return if (current is ReattachLoad.Loaded && current.data == data) stamp(file) else null
     }
 
     /** Deletes the snapshot and any temp file a write cut short left beside it. */

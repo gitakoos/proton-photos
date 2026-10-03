@@ -22,6 +22,10 @@
 
 package eu.akoos.photos.data.face
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,7 +33,8 @@ import org.junit.Test
 /**
  * Pins the fence that keeps the face indexer's writes off an import: work that took its token before an
  * import started, or while one ran, never writes again, work that starts after it does, and a sign-out or
- * rescan turns away everything already under way.
+ * rescan turns away everything already under way. A grouping step (the auto-merge) runs under the grouping
+ * lock with a token taken once it holds it.
  */
 class FaceWriteFenceTest {
 
@@ -87,5 +92,50 @@ class FaceWriteFenceTest {
         fence.invalidate()
         assertFalse(fence.allows(before))
         assertTrue(fence.allows(fence.token()))
+    }
+
+    @Test
+    fun a_grouping_step_such_as_the_auto_merge_waits_for_the_grouping_lock_and_holds_it() = runTest {
+        val lock = Mutex()
+        val fence = FaceWriteFence()
+        lock.lock()
+        var ran = false
+        val step = async {
+            fencedGroupingStep(lock, fence) { allowed ->
+                ran = true
+                assertTrue("the step runs holding the lock", lock.isLocked)
+                allowed()
+            }
+        }
+        yield()
+        assertFalse("a regroup holding the lock keeps the step out", ran)
+        lock.unlock()
+        assertTrue(step.await())
+        assertTrue(ran)
+        assertFalse("the step lets the lock go", lock.isLocked)
+    }
+
+    @Test
+    fun a_grouping_step_writes_nothing_once_an_import_or_a_sign_out_moves_the_fence() = runTest {
+        val fence = FaceWriteFence()
+        assertFalse(fencedGroupingStep(Mutex(), fence) { allowed -> fence.enterImport(); allowed() })
+        fence.exitImport()
+        assertFalse(fencedGroupingStep(Mutex(), fence) { allowed -> fence.invalidate(); allowed() })
+        assertTrue(fencedGroupingStep(Mutex(), fence) { allowed -> allowed() })
+    }
+
+    @Test
+    fun a_grouping_step_takes_its_token_once_it_holds_the_lock() = runTest {
+        // An import that ended while the step queued for the lock does not turn it away: the step reads the
+        // face data as the import left it.
+        val lock = Mutex()
+        val fence = FaceWriteFence()
+        lock.lock()
+        val step = async { fencedGroupingStep(lock, fence) { allowed -> allowed() } }
+        yield()
+        fence.enterImport()
+        fence.exitImport()
+        lock.unlock()
+        assertTrue(step.await())
     }
 }

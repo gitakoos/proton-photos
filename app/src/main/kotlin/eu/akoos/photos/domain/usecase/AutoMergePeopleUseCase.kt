@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import androidx.room.withTransaction
+import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonDao
@@ -84,9 +86,18 @@ class AutoMergePeopleUseCase @Inject constructor(
     private val personDao: PersonDao,
     private val notPersonDao: NotPersonDao,
     private val assignPersonName: AssignPersonNameUseCase,
+    private val appDatabase: AppDatabase,
 ) {
-    /** Folds the chosen candidates and returns how many clusters were merged (0 when nothing qualifies). */
-    suspend operator fun invoke(account: String): Int = withContext(Dispatchers.Default) {
+    /**
+     * Folds the chosen candidates and returns how many clusters were merged (0 when nothing qualifies). The
+     * folds land in one transaction and only while [writeAllowed] holds, asked inside it, so nothing the
+     * caller fences against (an import, a sign-out) can commit between the check and the folds; a refused
+     * pass folds nothing and returns 0.
+     */
+    suspend operator fun invoke(
+        account: String,
+        writeAllowed: () -> Boolean = { true },
+    ): Int = withContext(Dispatchers.Default) {
         val named = personDao.namedPeopleForUser(account).filter { !it.displayName.isNullOrBlank() }
         if (named.isEmpty()) return@withContext 0
         val namedIds = named.mapTo(HashSet()) { it.id }
@@ -96,12 +107,16 @@ class AutoMergePeopleUseCase @Inject constructor(
         val otherId = personDao.otherPersonId(account) ?: -1L
 
         val pairs = pickAutoMergePairs(input.centroids, namedIds, otherId, input.rejectedPairs, FACE_SUGGEST_THRESHOLD)
-        for (pair in pairs) {
-            val name = nameById[pair.toPersonId] ?: continue
-            // Fold the candidate into the named person (by name); the surviving side is the named person.
-            assignPersonName(account, pair.fromClusterId, name)
+        if (pairs.isEmpty()) return@withContext 0
+        appDatabase.withTransaction {
+            if (!writeAllowed()) return@withTransaction 0
+            for (pair in pairs) {
+                val name = nameById[pair.toPersonId] ?: continue
+                // Fold the candidate into the named person (by name); the surviving side is the named person.
+                assignPersonName(account, pair.fromClusterId, name)
+            }
+            pairs.size
         }
-        pairs.size
     }
 
     /**

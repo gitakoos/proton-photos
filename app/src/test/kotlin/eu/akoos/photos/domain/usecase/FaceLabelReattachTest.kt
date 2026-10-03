@@ -163,6 +163,17 @@ class FaceLabelReattachTest {
     }
 
     @Test
+    fun `binding names the label each face took, so the unplaced ones can keep waiting`() {
+        val anna = label("p1#0", "p1", 0.10f, 0.10f, 0.30f, 0.30f, "Anna")
+        val bob = label("p1#1", "p1", 0.60f, 0.60f, 0.80f, 0.80f, "Bob")
+        val cid = label("p9#0", "p9", 0.10f, 0.10f, 0.30f, 0.30f, "Cid")
+        val faces = listOf(face("p1#4", "p1", 0.11f, 0.11f, 0.31f, 0.31f), face("p1#1", "p1", 0.61f, 0.61f, 0.81f, 0.81f))
+        val bound = bindReattachLabels(listOf(anna, bob, cid), faces)
+        assertEquals(mapOf("p1#4" to anna, "p1#1" to bob), bound)
+        assertEquals(bound.mapValues { it.value.name }, matchReattachLabels(listOf(anna, bob, cid), faces))
+    }
+
+    @Test
     fun `iou is zero when boxes do not overlap`() {
         assertEquals(0f, boxIou(0f, 0f, 0.2f, 0.2f, 0.5f, 0.5f, 0.7f, 0.7f), 0f)
     }

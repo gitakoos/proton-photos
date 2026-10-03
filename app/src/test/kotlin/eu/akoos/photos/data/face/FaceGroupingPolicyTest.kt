@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.face
 
+import eu.akoos.photos.util.SourceRetryBook
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -31,8 +32,10 @@ import org.junit.Test
 /**
  * Pins the pure rules that decide when a finished walk pass groups the account's faces into people, and
  * when that grouping goes on to a full regroup. Grouping follows the faces still waiting, not the ones a
- * single pass found, so a library whose scan never drains still gets its people, but never while names
- * wait to be reattached, and a forced regroup skips only the walk's own gate, never that one. A settled
+ * single pass found, so a library whose scan never drains still gets its people. While names wait to be
+ * reattached the incremental placement still runs but no full regroup does, a forced one only once the
+ * names have waited past their grace; a pass puts the names back once no never-tried photo is left, and a
+ * library read that failed or came back empty with face data about is never taken for drained. A settled
  * walk mirrors the drained branch (a full regroup for whatever the incremental path left unplaced), both
  * regroup only for faces beyond what the last regroup left ungrouped on purpose, a full regroup that
  * recently timed out or threw is held back until its backoff passes, and full regroups are spaced by what
@@ -141,23 +144,84 @@ class FaceGroupingPolicyTest {
     }
 
     @Test
-    fun names_waiting_to_be_reattached_hold_every_pass_end_grouping() {
-        // The faces carry no names until the drained walk reattaches them, so grouping them earlier would
-        // rebuild every named person unnamed, whether the walk settles or goes on.
-        assertFalse(group(willContinue = false, ungrouped = 12, reattachPending = true))
-        assertFalse(group(willContinue = true, ungrouped = 12, sinceLastGroup = INTERVAL * 10, reattachPending = true))
-        assertTrue(group(willContinue = false, ungrouped = 12, reattachPending = false))
+    fun names_waiting_to_be_reattached_leave_the_incremental_placement_running() {
+        // The placement only adds new faces to the people already there; the full regroup that would
+        // rebuild them unnamed is held back by regroupAllowed alone, so a library whose names never go back
+        // still places its new faces.
+        assertTrue(group(willContinue = false, ungrouped = 12))
+        assertTrue(group(willContinue = true, ungrouped = 12, sinceLastGroup = INTERVAL * 10))
+        assertFalse(regroupAllowed(force = false, active = true, reattachPending = true))
     }
 
     @Test
-    fun names_waiting_to_be_reattached_hold_every_regroup_forced_or_not() {
+    fun names_waiting_to_be_reattached_hold_every_regroup_forced_or_not_within_their_grace() {
         // A forced regroup (a user naming or merging, an import handing its faces back, the viewer's scan)
         // skips the walk's own gate but not this one: the faces do not carry the names yet, and what the
-        // user confirms meanwhile is stored for the regroup the drained walk runs once they are back.
+        // user confirms meanwhile is stored for the regroup that follows the reattach.
         assertFalse(regroupAllowed(force = true, active = true, reattachPending = true))
         assertFalse(regroupAllowed(force = true, active = false, reattachPending = true))
         assertFalse(regroupAllowed(force = false, active = true, reattachPending = true))
         assertFalse(regroupAllowed(force = false, active = false, reattachPending = true))
+    }
+
+    @Test
+    fun a_forced_regroup_runs_once_the_names_have_waited_past_their_grace() {
+        // A paused walk, Wi-Fi-only off Wi-Fi or a halted walk may never reach the reattach: after the grace
+        // a forced regroup stops waiting for it, even while the walk is paused, and the file stays.
+        assertTrue(regroupAllowed(force = true, active = true, reattachPending = true, reattachOverdue = true))
+        assertTrue(regroupAllowed(force = true, active = false, reattachPending = true, reattachOverdue = true))
+        // The walk's own regroups keep waiting for the reattach.
+        assertFalse(regroupAllowed(force = false, active = true, reattachPending = true, reattachOverdue = true))
+        assertFalse(regroupAllowed(force = false, active = false, reattachPending = true, reattachOverdue = true))
+    }
+
+    @Test
+    fun the_grace_counts_from_when_the_names_were_last_written() {
+        assertFalse(reattachOverdue(writtenAtMs = 1_000L, nowMs = 1_000L + GRACE - 1, graceMs = GRACE))
+        assertTrue(reattachOverdue(writtenAtMs = 1_000L, nowMs = 1_000L + GRACE, graceMs = GRACE))
+        // No file (a zero stamp), and a clock set back behind the write, never count as overdue.
+        assertFalse(reattachOverdue(writtenAtMs = 0L, nowMs = GRACE * 10, graceMs = GRACE))
+        assertFalse(reattachOverdue(writtenAtMs = GRACE * 10, nowMs = 1_000L, graceMs = GRACE))
+    }
+
+    @Test
+    fun names_a_reattach_has_run_over_hold_no_grouping_back() {
+        val tried = ReattachStamp(modifiedMs = 5_000L, length = 120L)
+        // What the last reattach left waits only for photos not scanned yet, on no face.
+        assertFalse(reattachHoldsGrouping(onDisk = tried, tried = tried))
+        // Names written in since, and a new process that has run no reattach yet, hold it back.
+        assertTrue(reattachHoldsGrouping(onDisk = ReattachStamp(6_000L, 180L), tried = tried))
+        assertTrue(reattachHoldsGrouping(onDisk = tried, tried = null))
+        assertFalse(reattachHoldsGrouping(onDisk = null, tried = tried))
+        assertFalse(reattachHoldsGrouping(onDisk = null, tried = null))
+    }
+
+    @Test
+    fun a_pass_puts_names_back_once_no_never_tried_photo_is_left() {
+        val retries = SourceRetryBook()
+        retries.recordFailure("b", nowMs = 0L)
+        retries.recordFailure("c", nowMs = 0L)
+        // Every planned photo reached: the ones left pending were deferred or back off, so it is due.
+        assertTrue(reattachDueBeforeDrain(listOf("a", "b", "c"), reached = 3, keyOf = { it }, retries = retries, overBudget = 0))
+        // Unreached photos that are all retries waiting out a backoff still leave it due.
+        assertTrue(reattachDueBeforeDrain(listOf("a", "b", "c"), reached = 1, keyOf = { it }, retries = retries, overBudget = 0))
+        // An unreached photo never tried, or one left over the budget, waits for the next pass.
+        assertFalse(reattachDueBeforeDrain(listOf("b", "c", "d"), reached = 2, keyOf = { it }, retries = retries, overBudget = 0))
+        assertFalse(reattachDueBeforeDrain(listOf("a"), reached = 1, keyOf = { it }, retries = retries, overBudget = 4))
+        // A halted walk reaches nothing, so fresh photos keep it waiting; a reach past the end counts as all.
+        assertFalse(reattachDueBeforeDrain(listOf("d", "b"), reached = 0, keyOf = { it }, retries = retries, overBudget = 0))
+        assertTrue(reattachDueBeforeDrain(listOf("d"), reached = 7, keyOf = { it }, retries = retries, overBudget = 0))
+        assertTrue(reattachDueBeforeDrain(emptyList<String>(), reached = 0, keyOf = { it }, retries = retries, overBudget = 0))
+    }
+
+    @Test
+    fun a_failed_or_unknown_library_read_is_never_taken_for_drained() {
+        assertEquals(LibraryRead.Failed, libraryReadVerdict(readFailed = true, empty = true, holdsFaceData = false))
+        assertEquals(LibraryRead.Failed, libraryReadVerdict(readFailed = true, empty = false, holdsFaceData = true))
+        // Empty while the account holds scan markers or faces: a listing not loaded yet looks the same.
+        assertEquals(LibraryRead.Unknown, libraryReadVerdict(readFailed = false, empty = true, holdsFaceData = true))
+        assertEquals(LibraryRead.Complete, libraryReadVerdict(readFailed = false, empty = true, holdsFaceData = false))
+        assertEquals(LibraryRead.Complete, libraryReadVerdict(readFailed = false, empty = false, holdsFaceData = true))
     }
 
     @Test
@@ -230,11 +294,9 @@ class FaceGroupingPolicyTest {
         willContinue: Boolean,
         ungrouped: Int,
         sinceLastGroup: Long = 0L,
-        reattachPending: Boolean = false,
     ): Boolean = shouldGroupAtPassEnd(
         active = active,
         willContinue = willContinue,
-        reattachPending = reattachPending,
         ungrouped = ungrouped,
         msSinceLastGroup = sinceLastGroup,
         minIntervalMs = INTERVAL,
@@ -281,5 +343,6 @@ class FaceGroupingPolicyTest {
         const val INTERVAL = 60_000L
         const val BACKOFF = 1_800_000L
         const val DUTY = 9L
+        const val GRACE = 86_400_000L
     }
 }

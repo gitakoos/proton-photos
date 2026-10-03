@@ -96,6 +96,17 @@ class FaceGeometryTest {
     }
 
     @Test
+    fun `binding names the removed box each face took, so the unplaced ones can keep waiting`() {
+        val removed = listOf(
+            box("p1", 0.05f, 0.05f, 0.25f, 0.25f),
+            box("p2", 0.60f, 0.60f, 0.85f, 0.85f),
+        )
+        val redetected = listOf(face("p1#3", "p1", 0.06f, 0.06f, 0.26f, 0.26f))
+        assertEquals(listOf(0 to "p1#3"), bindRejectedBoxes(removed, redetected, 0.5f))
+        assertEquals(listOf("p1#3"), matchRejectedByGeometry(removed, redetected, 0.5f))
+    }
+
+    @Test
     fun `empty inputs yield nothing`() {
         assertTrue(matchRejectedByGeometry(emptyList(), listOf(face("p1#0", "p1", 0f, 0f, 1f, 1f)), 0.5f).isEmpty())
         assertTrue(matchRejectedByGeometry(listOf(box("p1", 0f, 0f, 1f, 1f)), emptyList(), 0.5f).isEmpty())

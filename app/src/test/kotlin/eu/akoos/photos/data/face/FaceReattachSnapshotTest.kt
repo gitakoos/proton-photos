@@ -298,6 +298,98 @@ class FaceReattachSnapshotTest {
         assertFalse(file.exists())
     }
 
+    @Test
+    fun `a partial reattach keeps the labels that found no face and lets the placed ones go`() {
+        val waiting = data(
+            members = listOf(label("p1", 0.1f, "Ann"), label("p2", 0.1f, "Bob"), label("p3", 0.1f, "Cid")),
+            manual = listOf(ReattachManual("Ann", "p9")),
+            nots = listOf(label("p1", 0.4f, "Bob"), label("p4", 0.1f, "Ann")),
+            rejected = listOf(box("p2", 0.5f), box("p5", 0.1f)),
+        )
+        val applied = data(
+            members = listOf(label("p1", 0.1f, "Ann")),
+            manual = waiting.manual,
+            nots = listOf(label("p1", 0.4f, "Bob")),
+            rejected = listOf(box("p2", 0.5f)),
+        )
+        val left = FaceReattachSnapshot.remainder(waiting, applied, settledPhotos = emptySet())
+        // The photos attached by hand need no face, so they never wait.
+        assertEquals(
+            data(
+                members = listOf(label("p2", 0.1f, "Bob"), label("p3", 0.1f, "Cid")),
+                nots = listOf(label("p4", 0.1f, "Ann")),
+                rejected = listOf(box("p5", 0.1f)),
+            ),
+            left,
+        )
+    }
+
+    @Test
+    fun `an unmatched label goes only once its photo can never place it`() {
+        // p2 was re-detected with no face for Bob, or is gone from the library; p3 is still to be scanned.
+        val waiting = data(
+            members = listOf(label("p2", 0.1f, "Bob"), label("p3", 0.1f, "Cid")),
+            nots = listOf(label("p2", 0.4f, "Ann")),
+            rejected = listOf(box("p2", 0.5f), box("p3", 0.5f)),
+        )
+        val left = FaceReattachSnapshot.remainder(waiting, data(), settledPhotos = setOf("p2"))
+        assertEquals(data(members = listOf(label("p3", 0.1f, "Cid")), rejected = listOf(box("p3", 0.5f))), left)
+    }
+
+    @Test
+    fun `a reattach over a failed or empty read lets no waiting name go`() {
+        // Nothing found a face and no photo could be checked: every name, mark and removal waits.
+        val left = FaceReattachSnapshot.remainder(OLD, data(manual = OLD.manual), settledPhotos = emptySet())
+        assertEquals(OLD.copy(manual = emptyList()), left)
+
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        assertTrue(FaceReattachSnapshot.consumeIfUnchanged(file, OLD, left))
+        assertEquals(ReattachLoad.Loaded(left), FaceReattachSnapshot.load(file))
+    }
+
+    @Test
+    fun `a consume leaves the remainder on disk and removes the file once nothing is left`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        val left = data(members = OLD.members)
+        assertTrue(FaceReattachSnapshot.consumeIfUnchanged(file, OLD, left))
+        assertEquals(ReattachLoad.Loaded(left), FaceReattachSnapshot.load(file))
+
+        assertTrue(FaceReattachSnapshot.consumeIfUnchanged(file, left, data()))
+        assertFalse(file.exists())
+    }
+
+    @Test
+    fun `a consume never lands over names merged in after the read`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        FaceReattachSnapshot.update(file) { waiting -> FaceReattachSnapshot.merge(under = waiting!!, over = NEW) }
+        assertFalse(FaceReattachSnapshot.consumeIfUnchanged(file, OLD, data()))
+        assertEquals(ReattachLoad.Loaded(FaceReattachSnapshot.merge(OLD, NEW)), FaceReattachSnapshot.load(file))
+    }
+
+    @Test
+    fun `a consume that changes nothing leaves the file and its stamp as they were`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        FaceReattachSnapshot.write(file, OLD)
+        val before = FaceReattachSnapshot.stamp(file)
+        assertTrue(FaceReattachSnapshot.consumeIfUnchanged(file, OLD, OLD))
+        assertEquals(before, FaceReattachSnapshot.stamp(file))
+        assertEquals(before, FaceReattachSnapshot.stampIfHolds(file, OLD))
+    }
+
+    @Test
+    fun `a stamp is read only while the file holds what the reattach left`() {
+        val file = FaceReattachSnapshot.file(tmp.root)
+        assertNull(FaceReattachSnapshot.stamp(file))
+        FaceReattachSnapshot.write(file, OLD)
+        assertEquals(ReattachStamp(file.lastModified(), file.length()), FaceReattachSnapshot.stampIfHolds(file, OLD))
+        assertNull(FaceReattachSnapshot.stampIfHolds(file, NEW))
+        FaceReattachSnapshot.clear(file)
+        assertNull(FaceReattachSnapshot.stampIfHolds(file, OLD))
+    }
+
     private fun label(photoKey: String, at: Float, name: String) =
         ReattachLabel("$photoKey#0", photoKey, at, at, at + 0.2f, at + 0.2f, name)
 
