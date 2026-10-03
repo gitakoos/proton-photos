@@ -641,7 +641,9 @@
     <string name="settings_hidden_photos">Skryté fotky</string>
     <string name="settings_hidden_photos_desc">Fotky skryté z hlavní galerie, odemykané biometrikou nebo PINem zařízení</string>
     <string name="settings_appearance">Vzhled a jazyk</string>
-    <string name="settings_appearance_desc">Motiv, paleta, jazyk aplikace</string>
+    <string name="settings_appearance_desc">Motiv, jazyk, časová osa a alba</string>
+    <string name="settings_section_look">Vzhled</string>
+    <string name="settings_section_library">Knihovna</string>
     <string name="settings_landing_tab">Úvodní karta</string>
     <string name="settings_landing_tab_desc">Která karta se otevře při spuštění aplikace</string>
     <string name="settings_strip_customize">Přizpůsobit, co se odstraňuje</string>

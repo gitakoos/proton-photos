@@ -419,7 +419,9 @@
     <string name="settings_hidden_photos">Rejtett fotók</string>
     <string name="settings_hidden_photos_desc">A főgalériából elrejtett fotók, az eszköz biometriájával vagy PIN-jével feloldva</string>
     <string name="settings_appearance">Megjelenés és nyelv</string>
-    <string name="settings_appearance_desc">Téma, paletta, alkalmazás nyelve</string>
+    <string name="settings_appearance_desc">Téma, nyelv, idővonal és albumok</string>
+    <string name="settings_section_look">Megjelenés</string>
+    <string name="settings_section_library">Fotótár</string>
     <string name="settings_landing_tab">Kezdő fül</string>
     <string name="settings_landing_tab_desc">Melyik fül nyíljon meg az alkalmazás indításakor</string>
     <string name="settings_strip_customize">Eltávolítandó mezők testreszabása</string>

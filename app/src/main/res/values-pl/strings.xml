@@ -641,7 +641,9 @@
     <string name="settings_hidden_photos">Ukryte zdjęcia</string>
     <string name="settings_hidden_photos_desc">Zdjęcia ukryte z głównej galerii, odblokowywane danymi biometrycznymi lub PIN-em urządzenia</string>
     <string name="settings_appearance">Wygląd i język</string>
-    <string name="settings_appearance_desc">Motyw, paleta, język aplikacji</string>
+    <string name="settings_appearance_desc">Motyw, język, oś czasu i albumy</string>
+    <string name="settings_section_look">Wygląd</string>
+    <string name="settings_section_library">Biblioteka</string>
     <string name="settings_landing_tab">Karta startowa</string>
     <string name="settings_landing_tab_desc">Która karta otwiera się po uruchomieniu aplikacji</string>
     <string name="settings_strip_customize">Dostosuj, co jest usuwane</string>

@@ -57,6 +57,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
+import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
 import eu.akoos.photos.presentation.settings.components.ToggleRow
@@ -75,8 +76,11 @@ fun AppearanceSettingsScreen(
     onLanguageClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
     onAlbumsSettingsClick: () -> Unit = {},
+    onLandingTabClick: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
+        SectionLabel(stringResource(R.string.settings_section_look))
+        Spacer(Modifier.height(8.dp))
         SettingsCard {
             NavRow(
                 label = stringResource(R.string.settings_theme_palette),
@@ -87,23 +91,31 @@ fun AppearanceSettingsScreen(
                 label = stringResource(R.string.language_section),
                 onClick = onLanguageClick,
             )
-            RowDivider()
-            // Photos timeline page: the single home for the timeline display settings
-            // (layout, category bar, albums, device folders, and the landing tab).
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        // The photo library's own settings: the timeline's display (layout, category bar, albums,
+        // device folders), the Albums tab's page and the tab the app opens on.
+        SectionLabel(stringResource(R.string.settings_section_library))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
             NavRow(
                 label = stringResource(R.string.settings_timeline),
                 onClick = onTimelineFilterClick,
             )
             RowDivider()
-            // The Albums tab's page: cover size, the filter it opens on and the Collection card, the
-            // same page the tab's filter sheet opens.
             NavRow(
                 label = stringResource(R.string.gallery_tab_albums),
                 onClick = onAlbumsSettingsClick,
             )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.settings_landing_tab),
+                onClick = onLandingTabClick,
+            )
         }
-    }
-}
+    }}
 
 /** Theme mode (System / Light / Dark) plus the colour palette. */
 @Composable

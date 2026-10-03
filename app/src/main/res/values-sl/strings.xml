@@ -642,7 +642,9 @@
     <string name="settings_hidden_photos">Skrite fotografije</string>
     <string name="settings_hidden_photos_desc">Fotografije, skrite iz glavne galerije, odklenjene z biometrijo ali PIN-om naprave</string>
     <string name="settings_appearance">Videz in jezik</string>
-    <string name="settings_appearance_desc">Tema, paleta, jezik aplikacije</string>
+    <string name="settings_appearance_desc">Tema, jezik, časovnica in albumi</string>
+    <string name="settings_section_look">Videz</string>
+    <string name="settings_section_library">Knjižnica</string>
     <string name="settings_landing_tab">Začetni zavihek</string>
     <string name="settings_landing_tab_desc">Kateri zavihek se odpre ob zagonu aplikacije</string>
     <string name="settings_strip_customize">Prilagodi, kaj se odstrani</string>

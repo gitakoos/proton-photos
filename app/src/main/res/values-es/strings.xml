@@ -400,7 +400,9 @@
     <string name="settings_hidden_photos">Fotos ocultas</string>
     <string name="settings_hidden_photos_desc">Fotos ocultas de la galería principal, se desbloquean con la biometría o el PIN del dispositivo</string>
     <string name="settings_appearance">Apariencia e idioma</string>
-    <string name="settings_appearance_desc">Tema, paleta, idioma de la app</string>
+    <string name="settings_appearance_desc">Tema, idioma, línea de tiempo y álbumes</string>
+    <string name="settings_section_look">Aspecto</string>
+    <string name="settings_section_library">Biblioteca</string>
     <string name="settings_landing_tab">Pestaña inicial</string>
     <string name="settings_landing_tab_desc">Qué pestaña se abre al iniciar la app</string>
     <string name="settings_strip_customize">Qué metadatos eliminar</string>

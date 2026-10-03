@@ -101,7 +101,6 @@ fun TimelineFilterScreen(
     onOpenCategories: () -> Unit = {},
     onOpenAlbums: () -> Unit = {},
     onOpenDeviceFolders: () -> Unit = {},
-    onOpenLandingTab: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_timeline), onBack = onBack) {
         SettingsCard {
@@ -119,8 +118,6 @@ fun TimelineFilterScreen(
                 RowDivider()
             }
             NavRow(label = stringResource(R.string.device_folders_section), onClick = onOpenDeviceFolders)
-            RowDivider()
-            NavRow(label = stringResource(R.string.settings_landing_tab), onClick = onOpenLandingTab)
         }
     }
 }

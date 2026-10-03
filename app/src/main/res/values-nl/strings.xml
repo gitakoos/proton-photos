@@ -483,7 +483,9 @@
     <string name="settings_hidden_photos">Verborgen foto\'s</string>
     <string name="settings_hidden_photos_desc">Foto\'s verborgen uit de hoofdgalerij, ontgrendeld met je apparaatbiometrie of pincode</string>
     <string name="settings_appearance">Weergave &amp; taal</string>
-    <string name="settings_appearance_desc">Thema, palet, app-taal</string>
+    <string name="settings_appearance_desc">Thema, taal, tijdlijn en albums</string>
+    <string name="settings_section_look">Uiterlijk</string>
+    <string name="settings_section_library">Bibliotheek</string>
     <string name="settings_landing_tab">Starttabblad</string>
     <string name="settings_landing_tab_desc">Welk tabblad opent bij het starten van de app</string>
     <string name="settings_strip_customize">Aanpassen wat wordt verwijderd</string>

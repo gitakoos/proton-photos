@@ -396,7 +396,9 @@
     <string name="settings_hidden_photos">Photos masquées</string>
     <string name="settings_hidden_photos_desc">Photos masquées de la galerie principale, déverrouillées par la biométrie ou le code de l\'appareil</string>
     <string name="settings_appearance">Apparence &amp; langue</string>
-    <string name="settings_appearance_desc">Thème, palette, langue de l\'app</string>
+    <string name="settings_appearance_desc">Thème, langue, fil et albums</string>
+    <string name="settings_section_look">Apparence</string>
+    <string name="settings_section_library">Bibliothèque</string>
     <string name="settings_landing_tab">Onglet de démarrage</string>
     <string name="settings_landing_tab_desc">Quel onglet s\'ouvre au lancement de l\'app</string>
     <string name="settings_strip_customize">Métadonnées à supprimer</string>

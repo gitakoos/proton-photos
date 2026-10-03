@@ -975,7 +975,9 @@
     <string name="settings_hidden_photos">Hidden Photos</string>
     <string name="settings_hidden_photos_desc">Photos hidden from the main gallery, unlocked with your device biometrics or PIN</string>
     <string name="settings_appearance">Appearance &amp; Language</string>
-    <string name="settings_appearance_desc">Theme, palette, app language</string>
+    <string name="settings_appearance_desc">Theme, language, timeline and albums</string>
+    <string name="settings_section_look">Look</string>
+    <string name="settings_section_library">Library</string>
     <string name="settings_landing_tab">Landing tab</string>
     <string name="settings_landing_tab_desc">Which tab opens when you start the app</string>
     <string name="settings_strip_customize">Customize what gets stripped</string>

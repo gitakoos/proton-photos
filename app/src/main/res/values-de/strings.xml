@@ -396,7 +396,9 @@
     <string name="settings_hidden_photos">Versteckte Fotos</string>
     <string name="settings_hidden_photos_desc">Aus der Hauptgalerie ausgeblendete Fotos, entsperrt per Gerätebiometrie oder PIN</string>
     <string name="settings_appearance">Darstellung &amp; Sprache</string>
-    <string name="settings_appearance_desc">Design, Palette, App-Sprache</string>
+    <string name="settings_appearance_desc">Design, Sprache, Verlauf und Alben</string>
+    <string name="settings_section_look">Darstellung</string>
+    <string name="settings_section_library">Bibliothek</string>
     <string name="settings_landing_tab">Startseite</string>
     <string name="settings_landing_tab_desc">Welcher Tab beim Start der App geöffnet wird</string>
     <string name="settings_strip_customize">Welche Metadaten entfernt werden</string>

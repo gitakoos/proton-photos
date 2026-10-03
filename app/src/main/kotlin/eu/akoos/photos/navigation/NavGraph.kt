@@ -1558,6 +1558,7 @@ fun NavGraph(
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
                 onAlbumsSettingsClick = { navController.navigate(Screen.AlbumsSettings.route) },
+                onLandingTabClick = { navController.navigate(Screen.LandingTab.route) },
             )
         }
 
@@ -1792,7 +1793,6 @@ fun NavGraph(
                 onOpenCategories = { navController.navigate(Screen.TimelineCategories.route) },
                 onOpenAlbums = { navController.navigate(Screen.TimelineAlbums.route) },
                 onOpenDeviceFolders = { navController.navigate(Screen.TimelineDeviceFolders.route) },
-                onOpenLandingTab = { navController.navigate(Screen.LandingTab.route) },
             )
         }
 
