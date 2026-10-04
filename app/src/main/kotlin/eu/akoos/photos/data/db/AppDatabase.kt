@@ -129,6 +129,7 @@ import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.dao.PhotoLabelDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
@@ -152,6 +153,9 @@ import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelNameEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelStateEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
@@ -194,6 +198,9 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         PersonCoverEntity::class,
         ClusterSummaryEntity::class,
         ImageEmbeddingEntity::class,
+        PhotoLabelEntity::class,
+        PhotoLabelNameEntity::class,
+        PhotoLabelStateEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -233,7 +240,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 41,
+    version = 44,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -276,6 +283,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun personCoverDao(): PersonCoverDao
     abstract fun clusterSummaryDao(): ClusterSummaryDao
     abstract fun imageEmbeddingDao(): ImageEmbeddingDao
+    abstract fun photoLabelDao(): PhotoLabelDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

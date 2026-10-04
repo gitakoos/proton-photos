@@ -67,6 +67,7 @@ import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -109,6 +110,7 @@ class SearchViewModel @Inject constructor(
     private val driveRepo: DrivePhotoRepository,
     private val cloudAlbumDao: CloudAlbumDao,
     private val localMediaRepo: LocalMediaRepository,
+    private val labelRepo: PhotoLabelRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -243,6 +245,19 @@ class SearchViewModel @Inject constructor(
         .distinctUntilChanged()
         .flowOn(Dispatchers.Default)
 
+    /** Every labelled photo's labels for the current account (a guest's own when signed out), folded
+     *  once per change so the per-item match only appends them. A vaulted photo's labels are dropped
+     *  when it goes into the vault, and a hidden one never reaches the match, so neither is found. */
+    private val foldedLabels: Flow<Map<String, String>> = labelRepo.observeLabelsByPhoto()
+        .map { SearchFilter.foldLabels(it) }
+        .distinctUntilChanged()
+        .catch { emit(emptyMap()) }
+        .flowOn(Dispatchers.Default)
+
+    /** The typed side of the keyword match: the settled query, and the localized names and folded
+     *  labels it is matched against, travelling as one value to keep the combine within its arity. */
+    private data class TypedInput(val q: String, val text: LocalizedText, val labels: Map<String, String>)
+
     /** The keyword + metadata matches, the search path that has always been here: the merged library
      *  narrowed by the typed query, the content filter, the category chip and the People rail. Folded
      *  into [results] first and unchanged, so a semantic-off session sees exactly this. */
@@ -252,7 +267,7 @@ class SearchViewModel @Inject constructor(
                 else getGalleryItems.invoke(userId)
             combine(
                 libraryFlow,
-                combine(debouncedQuery, localizedText) { q, text -> q to text },
+                combine(debouncedQuery, localizedText, foldedLabels) { q, text, labels -> TypedInput(q, text, labels) },
                 _contentFilter,
                 // Category, the two local id sets the chips read, and the selected person's photo keys
                 // travel together so the later sources stay within the typed combine arity; the Offline
@@ -260,10 +275,10 @@ class SearchViewModel @Inject constructor(
                 // People rail on the person keys, all in applyAll.
                 chipState,
                 hiddenUrisFlow,
-            ) { all, (q, text), filter, chip, hidden ->
+            ) { all, typed, filter, chip, hidden ->
                 applyAll(
-                    all.dropHidden(hidden), q, text, filter,
-                    chip.category, chip.pins, chip.hearts, chip.personKeys,
+                    all.dropHidden(hidden), typed.q, typed.text, filter,
+                    chip.category, chip.pins, chip.hearts, chip.personKeys, typed.labels,
                 )
             }
         }
@@ -686,6 +701,7 @@ class SearchViewModel @Inject constructor(
         offlinePinIds: Set<String> = emptySet(),
         favoriteIds: Set<String> = emptySet(),
         personPhotoKeys: Set<String>? = null,
+        foldedLabels: Map<String, String> = emptyMap(),
     ): List<GalleryItem> = SearchFilter.apply(
         items = items,
         q = q,
@@ -696,6 +712,7 @@ class SearchViewModel @Inject constructor(
         personPhotoKeys = personPhotoKeys,
         foldedMonths = text.months,
         foldedCategoryNames = text.categoryNames,
+        foldedLabels = foldedLabels,
     )
 
     /** Category chip → pre-folded name in [locale], so "screenshot" / "selfie" etc. match. The names

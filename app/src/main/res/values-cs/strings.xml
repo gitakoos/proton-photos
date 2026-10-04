@@ -2277,4 +2277,81 @@
     <string name="person_move_confirm_body">Přesunout vybrané fotky k %1$s?</string>
     <string name="person_move_confirm">Přesunout</string>
     <string name="settings_face_auto_merge">Automaticky slučovat pravděpodobné shody</string>
+
+    <string name="label_section_title">Štítky</string>
+    <string name="label_add_hint">Přidat štítek</string>
+    <string name="label_add_chip">Přidat štítek</string>
+    <string name="label_remove_cd">Odebrat štítek %1$s</string>
+    <string name="label_full_hint">%1$d z %2$d štítků</string>
+    <string name="label_feedback_full">Fotka může mít nejvýše %1$d štítků</string>
+    <string name="label_first_use_note">Štítky se ukládají jen v aplikaci. Proton Drive vlastní štítky nemá.</string>
+    <string name="label_bulk_action">Přidat štítky</string>
+    <string name="label_bulk_hint">Štítky oddělené čárkami</string>
+    <string name="label_bulk_confirm">Přidat</string>
+    <plurals name="label_bulk_added">
+        <item quantity="one">Štítky přidány k %d fotce.</item>
+        <item quantity="few">Štítky přidány k %d fotkám.</item>
+        <item quantity="many">Štítky přidány k %d fotkám.</item>
+        <item quantity="other">Štítky přidány k %d fotkám.</item>
+    </plurals>
+    <plurals name="label_bulk_limited">
+        <item quantity="one">%1$d fotka dosáhla limitu %2$d štítků.</item>
+        <item quantity="few">%1$d fotky dosáhly limitu %2$d štítků.</item>
+        <item quantity="many">%1$d fotek dosáhlo limitu %2$d štítků.</item>
+        <item quantity="other">%1$d fotek dosáhlo limitu %2$d štítků.</item>
+    </plurals>
+    <string name="label_bulk_nothing_new">Vybrané fotky už tyto štítky mají.</string>
+    <string name="label_bulk_failed">Štítky se nepodařilo přidat.</string>
+    <string name="label_settings_desc">Přejmenovat, sloučit nebo odebrat štítky</string>
+    <string name="label_settings_empty">Zatím žádné štítky. Přidejte je v podrobnostech fotky.</string>
+    <string name="label_sync_channel_name">Zálohování štítků</string>
+    <string name="label_sync_channel_desc">Zobrazuje průběh ukládání štítků na Proton Drive nebo jejich obnovy.</string>
+    <string name="label_sync_save_title">Ukládání štítků na Drive…</string>
+    <string name="label_sync_restore_title">Obnovování štítků z Drive…</string>
+    <string name="label_backup_step_encrypting">Šifrování štítků…</string>
+    <string name="label_backup_step_uploading">Nahrávání štítků…</string>
+    <string name="label_backup_step_looking">Hledání uložených štítků…</string>
+    <string name="label_backup_step_downloading">Stahování uložených štítků…</string>
+    <string name="label_backup_step_downloading_n">Stahování uložených štítků (%1$d z %2$d)…</string>
+    <string name="label_backup_step_merging">Slučování štítků…</string>
+    <string name="label_input_hint">Hledejte nebo přidejte štítek</string>
+    <string name="label_create_row">Vytvořit \"%1$s\"</string>
+    <string name="label_locked">Štítky nelze měnit, dokud se ukládají na Drive nebo obnovují.</string>
+    <string name="label_no_photos">Žádné fotky</string>
+    <string name="label_add_photos">Přidat fotky</string>
+    <string name="label_picker_title">Přidat fotky ke štítku \"%1$s\"</string>
+    <string name="label_backup_section">Štítky na Drive</string>
+    <string name="label_backup_save_desc">Uchovejte šifrovanou kopii svých štítků na Drive</string>
+    <string name="label_backup_restore_desc">Sloučí štítky uložené tímto nebo jiným zařízením</string>
+    <string name="label_backup_working_save">Ukládání štítků…</string>
+    <string name="label_backup_working_restore">Obnovování štítků…</string>
+    <string name="label_backup_folder_message">Uložením se v části Moje soubory vytvoří složka \"Photos for Proton/Labels\". Štítky v ní jsou koncově šifrované stejně jako vaše fotky a zabírají místo ve vašem úložišti Drive.</string>
+    <string name="label_backup_nothing_message">Žádná fotka zatím nemá štítky. Nejdřív nějaký štítek k fotce přidejte.</string>
+    <string name="label_backup_nothing_restore_title">Není co obnovit</string>
+    <string name="label_backup_restore_empty">Na Drive zatím nejsou uložené žádné štítky. Na zařízení, které je má, použijte \"Uložit na Drive\" a pak to zkuste znovu.</string>
+    <string name="label_backup_up_to_date">Vaše štítky jsou již aktuální.</string>
+    <plurals name="label_backup_saved_count">
+        <item quantity="one">Uloženy štítky z %d fotky.</item>
+        <item quantity="few">Uloženy štítky z %d fotek.</item>
+        <item quantity="many">Uloženy štítky z %d fotky.</item>
+        <item quantity="other">Uloženy štítky z %d fotek.</item>
+    </plurals>
+    <plurals name="label_backup_restored_count">
+        <item quantity="one">Štítky aktualizovány u %d fotky.</item>
+        <item quantity="few">Štítky aktualizovány u %d fotek.</item>
+        <item quantity="many">Štítky aktualizovány u %d fotky.</item>
+        <item quantity="other">Štítky aktualizovány u %d fotek.</item>
+    </plurals>
+    <string name="label_rename_title">Přejmenovat štítek</string>
+    <string name="label_rename_merge_note">Štítek s názvem %1$s už existuje. Uložením se oba sloučí do jednoho štítku.</string>
+    <string name="label_rename_save">Uložit</string>
+    <string name="label_rename_merge">Sloučit</string>
+    <string name="label_delete_action">Smazat štítek</string>
+    <plurals name="label_delete_confirm_title">
+        <item quantity="one">Odebrat tento štítek z %d fotky?</item>
+        <item quantity="few">Odebrat tento štítek z %d fotek?</item>
+        <item quantity="many">Odebrat tento štítek z %d fotek?</item>
+        <item quantity="other">Odebrat tento štítek z %d fotek?</item>
+    </plurals>
+    <string name="label_delete_confirm">Odebrat</string>
 </resources>

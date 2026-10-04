@@ -211,6 +211,7 @@ fun SettingsScreen(
     onPrivacySecurityClick: () -> Unit = {},
     onPermissionsClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
+    onLabelsClick: () -> Unit = {},
     onRecentlyDeletedClick: () -> Unit = {},
     onFindDuplicatesClick: () -> Unit = {},
     onImportClick: () -> Unit = {},
@@ -742,6 +743,14 @@ fun SettingsScreen(
                     label = stringResource(R.string.settings_ai_section),
                     description = stringResource(R.string.settings_ai_nav_desc),
                     onClick = onAiClick,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            SettingsCard {
+                NavRow(
+                    label = stringResource(R.string.label_section_title),
+                    description = stringResource(R.string.label_settings_desc),
+                    onClick = onLabelsClick,
                 )
             }
             Spacer(Modifier.height(12.dp))

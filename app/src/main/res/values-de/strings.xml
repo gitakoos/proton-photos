@@ -2167,4 +2167,71 @@
     <string name="person_move_confirm_body">Die ausgewählten Fotos zu %1$s verschieben?</string>
     <string name="person_move_confirm">Verschieben</string>
     <string name="settings_face_auto_merge">Wahrscheinliche Übereinstimmungen automatisch zusammenführen</string>
+
+    <string name="label_section_title">Labels</string>
+    <string name="label_add_hint">Label hinzufügen</string>
+    <string name="label_add_chip">Label hinzufügen</string>
+    <string name="label_remove_cd">Label %1$s entfernen</string>
+    <string name="label_full_hint">%1$d von %2$d Labels</string>
+    <string name="label_feedback_full">Ein Foto kann bis zu %1$d Labels haben</string>
+    <string name="label_first_use_note">Labels werden nur in der App gespeichert. Proton Drive hat keine eigenen Labels.</string>
+    <string name="label_bulk_action">Labels hinzufügen</string>
+    <string name="label_bulk_hint">Labels, durch Kommas getrennt</string>
+    <string name="label_bulk_confirm">Hinzufügen</string>
+    <plurals name="label_bulk_added">
+        <item quantity="one">Labels zu %d Foto hinzugefügt.</item>
+        <item quantity="other">Labels zu %d Fotos hinzugefügt.</item>
+    </plurals>
+    <plurals name="label_bulk_limited">
+        <item quantity="one">%1$d Foto hat das Limit von %2$d Labels erreicht.</item>
+        <item quantity="other">%1$d Fotos haben das Limit von %2$d Labels erreicht.</item>
+    </plurals>
+    <string name="label_bulk_nothing_new">Die ausgewählten Fotos haben diese Labels bereits.</string>
+    <string name="label_bulk_failed">Die Labels konnten nicht hinzugefügt werden.</string>
+    <string name="label_settings_desc">Labels umbenennen, zusammenführen oder entfernen</string>
+    <string name="label_settings_empty">Noch keine Labels. Füge sie in den Details eines Fotos hinzu.</string>
+    <string name="label_sync_channel_name">Label-Sicherung</string>
+    <string name="label_sync_channel_desc">Zeigt den Fortschritt, während Labels in Proton Drive gespeichert oder daraus wiederhergestellt werden.</string>
+    <string name="label_sync_save_title">Labels werden in Drive gespeichert…</string>
+    <string name="label_sync_restore_title">Labels werden aus Drive wiederhergestellt…</string>
+    <string name="label_backup_step_encrypting">Labels werden verschlüsselt…</string>
+    <string name="label_backup_step_uploading">Labels werden hochgeladen…</string>
+    <string name="label_backup_step_looking">Gespeicherte Labels werden gesucht…</string>
+    <string name="label_backup_step_downloading">Gespeicherte Labels werden heruntergeladen…</string>
+    <string name="label_backup_step_downloading_n">Gespeicherte Labels werden heruntergeladen (%1$d von %2$d)…</string>
+    <string name="label_backup_step_merging">Labels werden zusammengeführt…</string>
+    <string name="label_input_hint">Labels suchen oder hinzufügen</string>
+    <string name="label_create_row">„%1$s“ erstellen</string>
+    <string name="label_locked">Labels lassen sich nicht ändern, solange sie in Drive gespeichert oder daraus wiederhergestellt werden.</string>
+    <string name="label_no_photos">Keine Fotos</string>
+    <string name="label_add_photos">Fotos hinzufügen</string>
+    <string name="label_picker_title">Fotos zu „%1$s“ hinzufügen</string>
+    <string name="label_backup_section">Labels auf Drive</string>
+    <string name="label_backup_save_desc">Eine verschlüsselte Kopie deiner Labels in Drive aufbewahren</string>
+    <string name="label_backup_restore_desc">Labels zusammenführen, die dieses oder ein anderes Gerät gespeichert hat</string>
+    <string name="label_backup_working_save">Labels werden gespeichert…</string>
+    <string name="label_backup_working_restore">Labels werden wiederhergestellt…</string>
+    <string name="label_backup_folder_message">Beim Speichern wird unter Meine Dateien der Ordner „Photos for Proton/Labels“ erstellt. Die Labels darin sind wie deine Fotos Ende-zu-Ende-verschlüsselt und belegen Speicherplatz in deinem Drive.</string>
+    <string name="label_backup_nothing_message">Noch kein Foto hat Labels. Füge zuerst einem Foto ein Label hinzu.</string>
+    <string name="label_backup_nothing_restore_title">Nichts wiederherzustellen</string>
+    <string name="label_backup_restore_empty">Auf Drive sind noch keine Labels gespeichert. Tippe auf dem Gerät, das sie hat, auf „Auf Drive speichern“ und versuche es dann erneut.</string>
+    <string name="label_backup_up_to_date">Deine Labels sind bereits auf dem neuesten Stand.</string>
+    <plurals name="label_backup_saved_count">
+        <item quantity="one">Labels von %d Foto gespeichert.</item>
+        <item quantity="other">Labels von %d Fotos gespeichert.</item>
+    </plurals>
+    <plurals name="label_backup_restored_count">
+        <item quantity="one">Labels bei %d Foto aktualisiert.</item>
+        <item quantity="other">Labels bei %d Fotos aktualisiert.</item>
+    </plurals>
+    <string name="label_rename_title">Label umbenennen</string>
+    <string name="label_rename_merge_note">Ein Label namens %1$s existiert bereits. Beim Speichern werden beide zu einem Label zusammengeführt.</string>
+    <string name="label_rename_save">Speichern</string>
+    <string name="label_rename_merge">Zusammenführen</string>
+    <string name="label_delete_action">Label löschen</string>
+    <plurals name="label_delete_confirm_title">
+        <item quantity="one">Dieses Label von %d Foto entfernen?</item>
+        <item quantity="other">Dieses Label von %d Fotos entfernen?</item>
+    </plurals>
+    <string name="label_delete_confirm">Entfernen</string>
 </resources>

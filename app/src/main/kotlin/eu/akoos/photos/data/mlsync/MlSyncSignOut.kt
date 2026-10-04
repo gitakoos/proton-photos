@@ -30,6 +30,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachSnapshot
 import eu.akoos.photos.data.sdk.SdkDriveClientProvider
+import eu.akoos.photos.worker.LabelSyncWorker
 import eu.akoos.photos.worker.MlSyncWorker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -87,7 +88,9 @@ class MlSyncSignOut @Inject constructor(
         // Cancelled in WorkManager first, so the job is not started again once its run ends.
         try {
             withTimeoutOrNull(CANCEL_TIMEOUT_MS) {
-                WorkManager.getInstance(context).cancelUniqueWork(MlSyncWorker.UNIQUE_WORK_NAME).await()
+                val work = WorkManager.getInstance(context)
+                work.cancelUniqueWork(MlSyncWorker.UNIQUE_WORK_NAME).await()
+                work.cancelUniqueWork(LabelSyncWorker.UNIQUE_WORK_NAME).await()
             }
         } catch (e: CancellationException) {
             throw e

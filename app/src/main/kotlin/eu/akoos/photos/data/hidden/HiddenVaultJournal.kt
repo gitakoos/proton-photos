@@ -35,6 +35,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
+import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncState
@@ -73,6 +74,7 @@ class HiddenVaultJournal @Inject constructor(
     private val uploadAlbumTargetDao: UploadAlbumTargetDao,
     private val syncStateRepo: SyncStateRepository,
     private val accountManager: AccountManager,
+    private val photoLabels: PhotoLabelRepository,
 ) {
 
     /**
@@ -241,6 +243,7 @@ class HiddenVaultJournal @Inject constructor(
                             .filterNot { it.substringBefore('|') in publish }
                             .toSet()
                 }
+                dropLabelsOf(publish, sourceByVaultUri)
             }
             HiddenVaultDiagnostics.confirmed(
                 published = publish.size,
@@ -258,6 +261,25 @@ class HiddenVaultJournal @Inject constructor(
             inFlightLock.withLock { inFlight -= privateUris.toSet() }
         }
         return survivorsKept
+    }
+
+    /**
+     * Drops the labels of the photos just published as hidden, under both the device uri each was
+     * hidden from and the Drive linkId it was paired with, so nothing about a hidden photo stays
+     * searchable. A failure is logged and never fails the hide.
+     */
+    private suspend fun dropLabelsOf(vaultUris: Collection<String>, sourceByVaultUri: Map<String, String>) {
+        try {
+            val wanted = vaultUris.toHashSet()
+            val cloudIds = (context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
+                .mapNotNull { entry ->
+                    entry.substringAfter('|', "").takeIf { it.isNotBlank() && entry.substringBefore('|') in wanted }
+                }
+            photoLabels.deleteForPhotos(vaultUris.mapNotNull { sourceByVaultUri[it] } + cloudIds)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.w(TAG, "dropping labels of ${vaultUris.size} hidden photo(s) failed: ${e.message}")
+        }
     }
 
     /**
@@ -477,6 +499,7 @@ class HiddenVaultJournal @Inject constructor(
                 val dropped = (discard + forget).toSet()
                 if (dropped.isNotEmpty()) pruneMaps(p, dropped)
             }
+            if (confirm.isNotEmpty()) dropLabelsOf(confirm, journal)
             HiddenVaultDiagnostics.reconciled(
                 confirm = confirm.size,
                 adopt = adopt.size,

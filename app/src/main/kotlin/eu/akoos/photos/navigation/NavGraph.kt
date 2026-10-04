@@ -76,6 +76,7 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.setContinueWithoutAccount
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.presentation.common.LocalViewerReturnKey
+import eu.akoos.photos.presentation.common.resolve
 import eu.akoos.photos.presentation.common.MapStyleChooserDialog
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import androidx.compose.runtime.CompositionLocalProvider
@@ -231,6 +232,8 @@ sealed class Screen(val route: String) {
 
     /** The Albums tab's settings page, from the tab's filter sheet and from Appearance. */
     data object AlbumsSettings : Screen("albums_settings")
+    data object LabelsSettings : Screen("labels_settings")
+    data object LabelPhotoPicker : Screen("label_photo_picker")
     data object Search : Screen("search")
 
     /** The classic map. Entry points navigate to the plain route; the destination registers [PATTERN],
@@ -454,6 +457,8 @@ fun NavGraph(
     var collageItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     // Photos the in-app picker returned to add to the open collage.
     var collagePicked by remember { mutableStateOf<List<GalleryItem>?>(null) }
+    // The label the photo picker opened from the Labels settings adds the picked photos to.
+    var labelPickerTarget by remember { mutableStateOf<String?>(null) }
     // The source manager's confirmed selection returned to the open video editor. Null (the initial and
     // post-consume value) is the no-pick sentinel; a non-null list is a real return, so an empty one still
     // removes every deselected source rather than reading as "nothing picked".
@@ -1124,6 +1129,7 @@ fun NavGraph(
                     metadataEditorRequest = MetadataEditorRequest(listOf(item), readOnlyAlbum)
                     navController.navigate(Screen.MetadataEditor.route)
                 },
+                onOpenLabelsSettings = { navController.navigate(Screen.LabelsSettings.route) },
                 onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
                 // The map in the user's style, centred on the photo's place. Before a style has ever been
                 // picked the one-time chooser comes first and carries the place through to the chosen map.
@@ -1529,6 +1535,7 @@ fun NavGraph(
                 onPrivacySecurityClick    = { navController.navigate(Screen.PrivacySecuritySettings.route) },
                 onPermissionsClick        = { navController.navigate(Screen.Permissions.route) },
                 onNotificationsClick      = { navController.navigate(Screen.NotificationSettings.route) },
+                onLabelsClick             = { navController.navigate(Screen.LabelsSettings.route) },
                 onRecentlyDeletedClick    = { navController.navigate(Screen.Trash.route) },
                 onFindDuplicatesClick     = { navController.navigate(Screen.DuplicateFinder.route) },
                 onImportClick             = { navController.navigate(Screen.Import.route) },
@@ -1588,6 +1595,46 @@ fun NavGraph(
                 onAlbumsSettingsClick = { navController.navigate(Screen.AlbumsSettings.route) },
                 onLandingTabClick = { navController.navigate(Screen.LandingTab.route) },
             )
+        }
+
+        composable(Screen.LabelsSettings.route) {
+            eu.akoos.photos.presentation.settings.LabelsSettingsScreen(
+                onBack = { navController.popBackStack() },
+                onAddPhotos = { label ->
+                    labelPickerTarget = label
+                    navController.navigate(Screen.LabelPhotoPicker.route)
+                },
+            )
+        }
+
+        composable(Screen.LabelPhotoPicker.route) {
+            // The album picker in "return" mode: it hands the picked photos to the label chosen in the Labels
+            // settings, leaving out the photos that already carry it. It closes once the labels are written.
+            val label = labelPickerTarget
+            if (label == null) {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            } else {
+                val labelsVm = hiltViewModel<eu.akoos.photos.presentation.common.AddLabelsViewModel>()
+                val pickerContext = LocalContext.current
+                var alreadyLabelled by remember(label) { mutableStateOf<Set<String>>(emptySet()) }
+                LaunchedEffect(label) { alreadyLabelled = labelsVm.photoKeysOf(label) }
+                AlbumPhotoPickerScreen(
+                    title = pickerContext.getString(R.string.label_picker_title, label),
+                    showUnfiledFilter = false,
+                    excludeKeys = alreadyLabelled,
+                    onBack = { navController.popBackStack() },
+                    onPick = { picked ->
+                        labelsVm.add(picked, listOf(label)) { result ->
+                            val message = eu.akoos.photos.presentation.common.labelBulkMessage(result)
+                                .resolve(pickerContext.resources)
+                            android.widget.Toast.makeText(pickerContext, message, android.widget.Toast.LENGTH_SHORT).show()
+                            if (navController.currentDestination?.route == Screen.LabelPhotoPicker.route) {
+                                navController.popBackStack()
+                            }
+                        }
+                    },
+                )
+            }
         }
 
         composable(Screen.LandingTab.route) {

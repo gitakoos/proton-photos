@@ -97,6 +97,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.albums.AlbumPhotoGrouping
 import eu.akoos.photos.presentation.albums.AlbumRenameInput
+import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.AddToAlbumMessage
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.EditFieldSheet
@@ -772,6 +773,14 @@ fun DeviceFolderDetailScreen(
         val selectAllCount = selectAllCountFor(total = selectableUris.size, selected = selectedUris.size)
         val anyDeviceOnlySelected = selectedDeviceItems.any { it is GalleryItem.LocalOnly }
         var showStripPicker by remember { mutableStateOf(false) }
+        // A vaulted photo keeps no labels, so a selection holding one offers none.
+        val addLabelsAction = rememberAddLabelsAction(
+            items = if (anyVaultedSelected) emptyList() else selectedDeviceItems,
+            onDone = { msg ->
+                scope.launch { snackbarHostState.showSnackbar(msg) }
+                viewModel.clearSelection()
+            },
+        )
         val folderSelectionActions = buildList {
             // Share selected to other apps - device files share their URI directly, no download.
             if (selectedDeviceItems.isNotEmpty()) {
@@ -822,6 +831,7 @@ fun DeviceFolderDetailScreen(
                     onClick = { viewModel.toggleSelectedFavorite() },
                 )
             )
+            addLabelsAction?.let(::add)
             // Back up selected to Drive. Shown only when the selection holds a device-only photo
             // that still needs backing up; an all-Synced selection is already on Drive, so the
             // action would upload nothing. A snackbar confirms either way since the progress

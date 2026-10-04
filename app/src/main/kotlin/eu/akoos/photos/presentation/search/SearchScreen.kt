@@ -128,6 +128,7 @@ import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.SearchFieldTerm
 import eu.akoos.photos.presentation.common.IconBubble
@@ -848,6 +849,13 @@ fun SearchScreen(
             offlineTurnsOn(offlinePinnableLinkIds(selectedItems), offlinePinIds)
         }
         val sharing = shareState as? SelectionShareState.Working
+        val addLabelsAction = rememberAddLabelsAction(
+            items = remember(selectedItems) { selectedItems.toList() },
+            onDone = { msg ->
+                scope.launch { snackbarHostState.showSnackbar(msg) }
+                vm.clearSelection()
+            },
+        )
         val searchSelectionActions = buildList {
             // Rings while cloud originals download for the chooser and takes no second tap meanwhile.
             add(
@@ -907,6 +915,7 @@ fun SearchScreen(
                     onClick = { vm.toggleSelectedFavorite() },
                 )
             )
+            addLabelsAction?.let(::add)
             // Back up the not-yet-uploaded (LocalOnly) photos in the selection. Needs a Drive
             // destination, so it stays behind a signed-in session.
             if (isSignedIn && anyLocalOnly(selectedItems)) {

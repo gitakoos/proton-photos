@@ -94,6 +94,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
+import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.CloudMetadataSaveDrawer
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -968,6 +969,14 @@ fun AlbumDetailScreen(
                 )
             }
         }
+        // Labels are the user's own notes on their own photos, so a shared-with-me album offers none.
+        val addLabelsAction = rememberAddLabelsAction(
+            items = if (state.isSharedWithMe) emptyList() else selectedAlbumItems,
+            onDone = { msg ->
+                scope.launch { snackbarHostState.showSnackbar(msg) }
+                viewModel.clearSelection()
+            },
+        )
         val albumSelectionActions = buildList {
             add(
                 SelectionAction(
@@ -1019,6 +1028,7 @@ fun AlbumDetailScreen(
                     )
                 )
             }
+            addLabelsAction?.let(::add)
             // Download selected. While the worker runs this row becomes the cancel control: a
             // determinate ring tracks progress and the label reads "Cancel".
             if (canTakeCopies && (anyCloudOnlySelected || isDownloadingSel)) {

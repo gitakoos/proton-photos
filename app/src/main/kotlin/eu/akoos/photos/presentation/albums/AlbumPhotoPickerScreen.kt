@@ -83,6 +83,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.gallery.GridZoom
 import eu.akoos.photos.presentation.gallery.PhotoCell
@@ -140,6 +141,11 @@ fun AlbumPhotoPickerScreen(
     // Header title when nothing is picked yet. Defaults to the "Add to album" wording; a return-mode
     // caller (collage, person) passes its own so the picker reads for its context.
     titleRes: Int = R.string.album_picker_title,
+    // A title built at the call site (the label picker names its label); wins over [titleRes] while nothing is picked.
+    title: String? = null,
+    // The unfiled-only toggle keeps photos no album holds, which only helps a caller adding to an album; one
+    // that picks for something else (a label) leaves it out.
+    showUnfiledFilter: Boolean = true,
     viewModel: AlbumPhotoPickerViewModel = hiltViewModel(),
 ) {
     val appColors = AppColors.current
@@ -351,53 +357,29 @@ fun AlbumPhotoPickerScreen(
             )
         }
 
-        // Top bar — the compact floating back-pill recipe shared by Map / Calendar / Search: a
-        // small circular back button at top-start with its own title pill beside it, instead of a
-        // full-width filled bar. The title pill is single-line (title + folded-in selected count);
-        // the album name rides in its own pill pushed to the right end of the row.
-        Row(
-            modifier = Modifier
-                .statusBarsPadding()
-                .fillMaxWidth()
-                .padding(start = 12.dp, top = 8.dp, end = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            IconBubble(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.close),
-                onClick = onBack,
-                diameter = 40.dp,
-                iconSize = 18.dp,
-                background = PillBg,
-                borderColor = PillBorder,
-                tint = appColors.fgPrimary,
-            )
-            Text(
-                if (selected.isEmpty()) stringResource(titleRes)
-                else stringResource(R.string.album_picker_selected, selected.size),
-                color = FgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(PillBg, RoundedCornerShape(20.dp))
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                albumName,
-                color = FgMute, fontSize = 13.sp,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .widthIn(max = 160.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(PillBg, RoundedCornerShape(20.dp))
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-            )
-        }
+        // The shared floating page header: back at the start, the title in a pill (the picked count once
+        // something is picked), and the album name in its own pill at the end when there is an album.
+        FloatingHeader(
+            title = if (selected.isEmpty()) title ?: stringResource(titleRes)
+            else stringResource(R.string.album_picker_selected, selected.size),
+            onBack = onBack,
+            trailing = if (albumName.isBlank()) null else {
+                {
+                    Text(
+                        albumName,
+                        color = FgMute, fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .widthIn(max = 160.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(PillBg, RoundedCornerShape(20.dp))
+                            .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
+            },
+        )
 
         // Type filter — a centered segmented control: All / Cloud / Device inside one pill, each
         // its own segment, so a big mixed library can be narrowed to one source. Sits just below the
@@ -433,7 +415,7 @@ fun AlbumPhotoPickerScreen(
                 // Its own pill rather than a fourth segment: the control beside it picks a SOURCE, while
                 // this picks a filed status. They are independent axes, so folding them into one
                 // one-of-N control would make a combination like "cloud AND unfiled" unexpressible.
-                PickerUnfiledToggle(unfiledOnly) { unfiledOnly = !unfiledOnly }
+                if (showUnfiledFilter) PickerUnfiledToggle(unfiledOnly) { unfiledOnly = !unfiledOnly }
             }
         }
 

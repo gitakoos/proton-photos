@@ -23,6 +23,7 @@
 package eu.akoos.photos.domain.usecase
 
 import android.content.Context
+import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.mockk.every
 import io.mockk.mockk
@@ -30,12 +31,15 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.db.dao.TestDatabase
+import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.CloudPhoto
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -61,6 +65,8 @@ class WriteCloudPhotoMetadataUseCaseTest {
     private lateinit var accountManager: AccountManager
     private lateinit var rewriter: RecordingExifRewriter
     private lateinit var useCase: WriteCloudPhotoMetadataUseCase
+    private lateinit var labelDb: TestDatabase
+    private lateinit var labels: PhotoLabelRepository
 
     @Before
     fun setUp() {
@@ -69,8 +75,16 @@ class WriteCloudPhotoMetadataUseCaseTest {
         accountManager = mockk()
         every { accountManager.getPrimaryUserId() } returns flowOf(userId)
         rewriter = RecordingExifRewriter()
-        useCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, rewriter)
+        labelDb = Room.inMemoryDatabaseBuilder(context, TestDatabase::class.java)
+            .allowMainThreadQueries()
+            .setQueryExecutor { it.run() }
+            .build()
+        labels = PhotoLabelRepository(labelDb.photoLabelDao(), accountManager)
+        useCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, rewriter, labels)
     }
+
+    @After
+    fun tearDown() = labelDb.close()
 
     private fun cloudPhoto(linkId: String, captureSec: Long = 1_600_000_000L) = CloudPhoto(
         linkId = linkId,
@@ -141,6 +155,34 @@ class WriteCloudPhotoMetadataUseCaseTest {
         assertTrue("membership must not have landed", cloud.albumMembers("albumA").isEmpty())
         // The upload itself still happened (a recoverable duplicate is acceptable).
         assertEquals(1, cloud.uploadedItems.size)
+    }
+
+    @Test
+    fun `a completed correction moves the original's labels to the new link`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+        labels.setLabels("orig", listOf("Beach", "family"))
+
+        val result = useCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
+
+        assertEquals(WriteCloudPhotoMetadataUseCase.Result.Success, result)
+        val newLinkId = cloud.uploadedLinkIds.single()
+        assertEquals(listOf("Beach", "family"), labelDb.photoLabelDao().labelsOfPhoto(userId.id, newLinkId).map { it.label })
+        assertTrue(labelDb.photoLabelDao().labelsOfPhoto(userId.id, "orig").isEmpty())
+    }
+
+    @Test
+    fun `a correction that keeps the original keeps its labels on it`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+        cloud.albumIdsByPhoto = mapOf("orig" to setOf("albumA"))
+        cloud.failAddPhotosOnce = true
+        labels.setLabels("orig", listOf("Beach"))
+
+        val result = useCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
+
+        assertTrue(result is WriteCloudPhotoMetadataUseCase.Result.Failed)
+        assertEquals(listOf("Beach"), labelDb.photoLabelDao().labelsOfPhoto(userId.id, "orig").map { it.label })
     }
 
     @Test
@@ -311,7 +353,7 @@ class WriteCloudPhotoMetadataUseCaseTest {
         val videoRewriter = RecordingExifRewriter(
             UploadXAttrMetadata(displayWidth = 1920, displayHeight = 1080, durationMillis = 5_000L),
         )
-        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter)
+        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter, labels)
         val newCaptureMs = 1_700_000_000_000L
 
         val result = videoUseCase(original, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
@@ -343,7 +385,7 @@ class WriteCloudPhotoMetadataUseCaseTest {
         // The rewriter's xAttr carries no duration (the probe found none), so the item duration falls back
         // to the video's already-known cloud duration rather than landing at 0.
         val videoRewriter = RecordingExifRewriter(UploadXAttrMetadata(displayWidth = 1280, displayHeight = 720))
-        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter)
+        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter, labels)
 
         val result = videoUseCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
 

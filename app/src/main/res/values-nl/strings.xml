@@ -2194,4 +2194,71 @@
     <string name="person_move_confirm_body">De selectie naar %1$s verplaatsen?</string>
     <string name="person_move_confirm">Verplaatsen</string>
     <string name="settings_face_auto_merge">Waarschijnlijke overeenkomsten automatisch samenvoegen</string>
+
+    <string name="label_section_title">Labels</string>
+    <string name="label_add_hint">Label toevoegen</string>
+    <string name="label_add_chip">Label toevoegen</string>
+    <string name="label_remove_cd">Label %1$s verwijderen</string>
+    <string name="label_full_hint">%1$d van %2$d labels</string>
+    <string name="label_feedback_full">Een foto kan maximaal %1$d labels hebben</string>
+    <string name="label_first_use_note">Labels worden alleen in de app opgeslagen. Proton Drive heeft geen eigen labels.</string>
+    <string name="label_bulk_action">Labels toevoegen</string>
+    <string name="label_bulk_hint">Labels, gescheiden door komma\'s</string>
+    <string name="label_bulk_confirm">Toevoegen</string>
+    <plurals name="label_bulk_added">
+        <item quantity="one">Labels toegevoegd aan %d foto.</item>
+        <item quantity="other">Labels toegevoegd aan %d foto\'s.</item>
+    </plurals>
+    <plurals name="label_bulk_limited">
+        <item quantity="one">%1$d foto heeft de limiet van %2$d labels bereikt.</item>
+        <item quantity="other">%1$d foto\'s hebben de limiet van %2$d labels bereikt.</item>
+    </plurals>
+    <string name="label_bulk_nothing_new">De geselecteerde foto\'s hebben deze labels al.</string>
+    <string name="label_bulk_failed">Kan de labels niet toevoegen.</string>
+    <string name="label_settings_desc">Je labels hernoemen, samenvoegen of verwijderen</string>
+    <string name="label_settings_empty">Nog geen labels. Voeg ze toe via de details van een foto.</string>
+    <string name="label_sync_channel_name">Labels back-uppen</string>
+    <string name="label_sync_channel_desc">Toont de voortgang terwijl labels in Proton Drive worden opgeslagen of hersteld.</string>
+    <string name="label_sync_save_title">Labels opslaan in Drive…</string>
+    <string name="label_sync_restore_title">Labels herstellen vanuit Drive…</string>
+    <string name="label_backup_step_encrypting">Labels versleutelen…</string>
+    <string name="label_backup_step_uploading">Labels uploaden…</string>
+    <string name="label_backup_step_looking">Opgeslagen labels zoeken…</string>
+    <string name="label_backup_step_downloading">Opgeslagen labels downloaden…</string>
+    <string name="label_backup_step_downloading_n">Opgeslagen labels downloaden (%1$d van %2$d)…</string>
+    <string name="label_backup_step_merging">Labels samenvoegen…</string>
+    <string name="label_input_hint">Zoek of voeg een label toe</string>
+    <string name="label_create_row">\"%1$s\" maken</string>
+    <string name="label_locked">Labels kunnen niet worden gewijzigd terwijl ze in Drive worden opgeslagen of hersteld.</string>
+    <string name="label_no_photos">Geen foto\'s</string>
+    <string name="label_add_photos">Foto\'s toevoegen</string>
+    <string name="label_picker_title">Foto\'s toevoegen aan \"%1$s\"</string>
+    <string name="label_backup_section">Labels op Drive</string>
+    <string name="label_backup_save_desc">Bewaar een versleutelde kopie van je labels in Drive</string>
+    <string name="label_backup_restore_desc">Voeg de labels samen die dit of een ander apparaat heeft opgeslagen</string>
+    <string name="label_backup_working_save">Labels opslaan…</string>
+    <string name="label_backup_working_restore">Labels herstellen…</string>
+    <string name="label_backup_folder_message">Bij het opslaan wordt de map \"Photos for Proton/Labels\" gemaakt in Mijn bestanden. De labels daarin zijn end-to-end versleuteld, net als je foto\'s, en nemen ruimte in je Drive in.</string>
+    <string name="label_backup_nothing_message">Nog geen enkele foto heeft labels. Voeg eerst een label toe aan een foto.</string>
+    <string name="label_backup_nothing_restore_title">Niets om te herstellen</string>
+    <string name="label_backup_restore_empty">Er zijn nog geen labels opgeslagen op Drive. Gebruik op het apparaat dat ze heeft \"Opslaan in Drive\" en probeer het opnieuw.</string>
+    <string name="label_backup_up_to_date">Je labels zijn al up-to-date.</string>
+    <plurals name="label_backup_saved_count">
+        <item quantity="one">Labels van %d foto opgeslagen.</item>
+        <item quantity="other">Labels van %d foto\'s opgeslagen.</item>
+    </plurals>
+    <plurals name="label_backup_restored_count">
+        <item quantity="one">Labels bijgewerkt op %d foto.</item>
+        <item quantity="other">Labels bijgewerkt op %d foto\'s.</item>
+    </plurals>
+    <string name="label_rename_title">Naam van label wijzigen</string>
+    <string name="label_rename_merge_note">Er bestaat al een label met de naam %1$s. Bij opslaan worden de twee samengevoegd tot één label.</string>
+    <string name="label_rename_save">Opslaan</string>
+    <string name="label_rename_merge">Samenvoegen</string>
+    <string name="label_delete_action">Label verwijderen</string>
+    <plurals name="label_delete_confirm_title">
+        <item quantity="one">Dit label van %d foto verwijderen?</item>
+        <item quantity="other">Dit label van %d foto\'s verwijderen?</item>
+    </plurals>
+    <string name="label_delete_confirm">Verwijderen</string>
 </resources>

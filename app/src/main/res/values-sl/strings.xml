@@ -2271,4 +2271,81 @@
     <string name="person_move_confirm_body">Premakniti izbrane fotografije k %1$s?</string>
     <string name="person_move_confirm">Premakni</string>
     <string name="settings_face_auto_merge">Samodejno združi verjetna ujemanja</string>
+
+    <string name="label_section_title">Oznake</string>
+    <string name="label_add_hint">Dodaj oznako</string>
+    <string name="label_add_chip">Dodaj oznako</string>
+    <string name="label_remove_cd">Odstrani oznako %1$s</string>
+    <string name="label_full_hint">%1$d od %2$d oznak</string>
+    <string name="label_feedback_full">Fotografija ima lahko največ %1$d oznak</string>
+    <string name="label_first_use_note">Oznake so shranjene samo v aplikaciji. Proton Drive nima lastnih oznak.</string>
+    <string name="label_bulk_action">Dodaj oznake</string>
+    <string name="label_bulk_hint">Oznake, ločene z vejicami</string>
+    <string name="label_bulk_confirm">Dodaj</string>
+    <plurals name="label_bulk_added">
+        <item quantity="one">Oznake dodane %d fotografiji.</item>
+        <item quantity="two">Oznake dodane %d fotografijama.</item>
+        <item quantity="few">Oznake dodane %d fotografijam.</item>
+        <item quantity="other">Oznake dodane %d fotografijam.</item>
+    </plurals>
+    <plurals name="label_bulk_limited">
+        <item quantity="one">%1$d fotografija je dosegla omejitev %2$d oznak.</item>
+        <item quantity="two">%1$d fotografiji sta dosegli omejitev %2$d oznak.</item>
+        <item quantity="few">%1$d fotografije so dosegle omejitev %2$d oznak.</item>
+        <item quantity="other">%1$d fotografij je doseglo omejitev %2$d oznak.</item>
+    </plurals>
+    <string name="label_bulk_nothing_new">Izbrane fotografije že imajo te oznake.</string>
+    <string name="label_bulk_failed">Oznak ni bilo mogoče dodati.</string>
+    <string name="label_settings_desc">Preimenujte, združite ali odstranite svoje oznake</string>
+    <string name="label_settings_empty">Še ni oznak. Dodajte jih v podrobnostih fotografije.</string>
+    <string name="label_sync_channel_name">Varnostna kopija oznak</string>
+    <string name="label_sync_channel_desc">Prikazuje potek shranjevanja oznak v Proton Drive ali njihove obnovitve.</string>
+    <string name="label_sync_save_title">Shranjevanje oznak v Drive…</string>
+    <string name="label_sync_restore_title">Obnavljanje oznak iz Drive…</string>
+    <string name="label_backup_step_encrypting">Šifriranje oznak…</string>
+    <string name="label_backup_step_uploading">Nalaganje oznak…</string>
+    <string name="label_backup_step_looking">Iskanje shranjenih oznak…</string>
+    <string name="label_backup_step_downloading">Prenašanje shranjenih oznak…</string>
+    <string name="label_backup_step_downloading_n">Prenašanje shranjenih oznak (%1$d od %2$d)…</string>
+    <string name="label_backup_step_merging">Združevanje oznak…</string>
+    <string name="label_input_hint">Poiščite ali dodajte oznako</string>
+    <string name="label_create_row">Ustvari »%1$s«</string>
+    <string name="label_locked">Oznak ni mogoče spreminjati, medtem ko se shranjujejo v Drive ali obnavljajo.</string>
+    <string name="label_no_photos">Brez fotografij</string>
+    <string name="label_add_photos">Dodaj fotografije</string>
+    <string name="label_picker_title">Dodaj fotografije oznaki »%1$s«</string>
+    <string name="label_backup_section">Oznake v Drive</string>
+    <string name="label_backup_save_desc">Shranite šifrirano kopijo svojih oznak v Drive</string>
+    <string name="label_backup_restore_desc">Združi oznake, ki jih je shranila ta ali druga naprava</string>
+    <string name="label_backup_working_save">Shranjevanje oznak…</string>
+    <string name="label_backup_working_restore">Obnavljanje oznak…</string>
+    <string name="label_backup_folder_message">Shranjevanje ustvari mapo »Photos for Proton/Labels« v razdelku Moje datoteke. Oznake v njej so šifrirane od konca do konca, tako kot vaše fotografije, in zasedajo prostor v vašem Drive.</string>
+    <string name="label_backup_nothing_message">Nobena fotografija še nima oznak. Najprej dodajte oznako fotografiji.</string>
+    <string name="label_backup_nothing_restore_title">Ni ničesar za obnovitev</string>
+    <string name="label_backup_restore_empty">V Drive še ni shranjenih oznak. V napravi, ki jih ima, uporabite »Shrani v Drive« in poskusite znova.</string>
+    <string name="label_backup_up_to_date">Vaše oznake so že posodobljene.</string>
+    <plurals name="label_backup_saved_count">
+        <item quantity="one">Shranjene oznake za %d fotografijo.</item>
+        <item quantity="two">Shranjene oznake za %d fotografiji.</item>
+        <item quantity="few">Shranjene oznake za %d fotografije.</item>
+        <item quantity="other">Shranjene oznake za %d fotografij.</item>
+    </plurals>
+    <plurals name="label_backup_restored_count">
+        <item quantity="one">Oznake posodobljene pri %d fotografiji.</item>
+        <item quantity="two">Oznake posodobljene pri %d fotografijah.</item>
+        <item quantity="few">Oznake posodobljene pri %d fotografijah.</item>
+        <item quantity="other">Oznake posodobljene pri %d fotografijah.</item>
+    </plurals>
+    <string name="label_rename_title">Preimenuj oznako</string>
+    <string name="label_rename_merge_note">Oznaka z imenom %1$s že obstaja. S shranjevanjem se obe združita v eno oznako.</string>
+    <string name="label_rename_save">Shrani</string>
+    <string name="label_rename_merge">Združi</string>
+    <string name="label_delete_action">Izbriši oznako</string>
+    <plurals name="label_delete_confirm_title">
+        <item quantity="one">Želite to oznako odstraniti z %d fotografije?</item>
+        <item quantity="two">Želite to oznako odstraniti z %d fotografij?</item>
+        <item quantity="few">Želite to oznako odstraniti z %d fotografij?</item>
+        <item quantity="other">Želite to oznako odstraniti z %d fotografij?</item>
+    </plurals>
+    <string name="label_delete_confirm">Odstrani</string>
 </resources>

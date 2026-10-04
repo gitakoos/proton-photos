@@ -47,6 +47,7 @@ import me.proton.core.network.data.ApiProvider
 import androidx.datastore.preferences.core.edit
 import kotlinx.coroutines.flow.first
 import eu.akoos.photos.data.api.DriveApiService
+import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.PhotoTagDetector
@@ -251,6 +252,7 @@ class PhotoUploadService @Inject constructor(
     // Injected lazily because CloudTrashService itself depends on this service: the favourite is
     // carried by its setCloudFavorite, and a direct reference would close the graph into a cycle.
     private val cloudTrashService: dagger.Lazy<CloudTrashService>,
+    private val photoLabels: PhotoLabelRepository,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -1054,6 +1056,10 @@ class PhotoUploadService @Inject constructor(
                     volumeId = volumeId,
                     revisionId = revisionId,
                 )
+                // Labels put on the device photo follow it to its Drive identity, the key its Synced
+                // item carries from now on.
+                runCatching { photoLabels.rekeyFor(userId, item.uri, fileId) }
+                    .onFailure { Log.w(TAG, "uploadFile: moving labels to fileId=$fileId failed: ${it.message}") }
             }
             Log.d(TAG, "uploadFile: completed fileId=$fileId, persisted to DB")
             // Success: wipe tempDir now that the bytes are committed to the CDN. Done

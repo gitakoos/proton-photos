@@ -95,6 +95,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.albums.components.StickyAlbumHeader
 import eu.akoos.photos.presentation.albums.components.rememberHeroScrolledAway
@@ -543,6 +544,13 @@ fun LocationPhotosContent(
             offlineTurnsOn(offlinePinnableLinkIds(selectedItems), offlinePinIds)
         }
         val sharing = shareState as? SelectionShareState.Working
+        val addLabelsAction = rememberAddLabelsAction(
+            items = remember(selectedItems) { selectedItems.toList() },
+            onDone = { msg ->
+                scope.launch { snackbarHostState.showSnackbar(msg) }
+                viewModel.clearSelection()
+            },
+        )
         val locationSelectionActions = buildList {
             // Rings while cloud originals download for the chooser and takes no second tap meanwhile.
             add(
@@ -589,6 +597,7 @@ fun LocationPhotosContent(
                     onClick = { viewModel.toggleSelectedFavorite() },
                 )
             )
+            addLabelsAction?.let(::add)
             // Back up the not-yet-uploaded (LocalOnly) photos in the selection. Needs a Drive
             // destination, so it stays behind a signed-in session.
             if (isSignedIn && anyLocalOnly(selectedItems)) {

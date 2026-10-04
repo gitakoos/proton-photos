@@ -2271,4 +2271,81 @@
     <string name="person_move_confirm_body">Przenieść wybrane zdjęcia do %1$s?</string>
     <string name="person_move_confirm">Przenieś</string>
     <string name="settings_face_auto_merge">Automatycznie łącz prawdopodobne dopasowania</string>
+
+    <string name="label_section_title">Etykiety</string>
+    <string name="label_add_hint">Dodaj etykietę</string>
+    <string name="label_add_chip">Dodaj etykietę</string>
+    <string name="label_remove_cd">Usuń etykietę %1$s</string>
+    <string name="label_full_hint">%1$d z %2$d etykiet</string>
+    <string name="label_feedback_full">Zdjęcie może mieć maksymalnie %1$d etykiet</string>
+    <string name="label_first_use_note">Etykiety są zapisywane tylko w aplikacji. Proton Drive nie ma własnych etykiet.</string>
+    <string name="label_bulk_action">Dodaj etykiety</string>
+    <string name="label_bulk_hint">Etykiety oddzielone przecinkami</string>
+    <string name="label_bulk_confirm">Dodaj</string>
+    <plurals name="label_bulk_added">
+        <item quantity="one">Dodano etykiety do %d zdjęcia.</item>
+        <item quantity="few">Dodano etykiety do %d zdjęć.</item>
+        <item quantity="many">Dodano etykiety do %d zdjęć.</item>
+        <item quantity="other">Dodano etykiety do %d zdjęć.</item>
+    </plurals>
+    <plurals name="label_bulk_limited">
+        <item quantity="one">%1$d zdjęcie osiągnęło limit %2$d etykiet.</item>
+        <item quantity="few">%1$d zdjęcia osiągnęły limit %2$d etykiet.</item>
+        <item quantity="many">%1$d zdjęć osiągnęło limit %2$d etykiet.</item>
+        <item quantity="other">%1$d zdjęć osiągnęło limit %2$d etykiet.</item>
+    </plurals>
+    <string name="label_bulk_nothing_new">Wybrane zdjęcia mają już te etykiety.</string>
+    <string name="label_bulk_failed">Nie udało się dodać etykiet.</string>
+    <string name="label_settings_desc">Zmień nazwy, scal lub usuń swoje etykiety</string>
+    <string name="label_settings_empty">Brak etykiet. Dodaj je w szczegółach zdjęcia.</string>
+    <string name="label_sync_channel_name">Kopia etykiet</string>
+    <string name="label_sync_channel_desc">Pokazuje postęp zapisywania etykiet w Proton Drive lub ich przywracania.</string>
+    <string name="label_sync_save_title">Zapisywanie etykiet w Drive…</string>
+    <string name="label_sync_restore_title">Przywracanie etykiet z Drive…</string>
+    <string name="label_backup_step_encrypting">Szyfrowanie etykiet…</string>
+    <string name="label_backup_step_uploading">Wysyłanie etykiet…</string>
+    <string name="label_backup_step_looking">Szukanie zapisanych etykiet…</string>
+    <string name="label_backup_step_downloading">Pobieranie zapisanych etykiet…</string>
+    <string name="label_backup_step_downloading_n">Pobieranie zapisanych etykiet (%1$d z %2$d)…</string>
+    <string name="label_backup_step_merging">Scalanie etykiet…</string>
+    <string name="label_input_hint">Szukaj lub dodaj etykietę</string>
+    <string name="label_create_row">Utwórz „%1$s”</string>
+    <string name="label_locked">Etykiet nie można zmieniać, dopóki są zapisywane w Drive lub przywracane.</string>
+    <string name="label_no_photos">Brak zdjęć</string>
+    <string name="label_add_photos">Dodaj zdjęcia</string>
+    <string name="label_picker_title">Dodaj zdjęcia do etykiety „%1$s”</string>
+    <string name="label_backup_section">Etykiety w Drive</string>
+    <string name="label_backup_save_desc">Przechowuj zaszyfrowaną kopię swoich etykiet w Drive</string>
+    <string name="label_backup_restore_desc">Scal etykiety zapisane przez to lub inne urządzenie</string>
+    <string name="label_backup_working_save">Zapisywanie etykiet…</string>
+    <string name="label_backup_working_restore">Przywracanie etykiet…</string>
+    <string name="label_backup_folder_message">Zapisanie utworzy folder „Photos for Proton/Labels” w sekcji Moje pliki. Etykiety w nim są szyfrowane od końca do końca, tak jak Twoje zdjęcia, i zajmują miejsce w Twoim Drive.</string>
+    <string name="label_backup_nothing_message">Żadne zdjęcie nie ma jeszcze etykiet. Najpierw dodaj etykietę do zdjęcia.</string>
+    <string name="label_backup_nothing_restore_title">Nie ma czego przywracać</string>
+    <string name="label_backup_restore_empty">W Drive nie ma jeszcze zapisanych etykiet. Na urządzeniu, które je ma, użyj opcji „Zapisz w Drive”, a potem spróbuj ponownie.</string>
+    <string name="label_backup_up_to_date">Twoje etykiety są już aktualne.</string>
+    <plurals name="label_backup_saved_count">
+        <item quantity="one">Zapisano etykiety z %d zdjęcia.</item>
+        <item quantity="few">Zapisano etykiety z %d zdjęć.</item>
+        <item quantity="many">Zapisano etykiety z %d zdjęć.</item>
+        <item quantity="other">Zapisano etykiety z %d zdjęć.</item>
+    </plurals>
+    <plurals name="label_backup_restored_count">
+        <item quantity="one">Zaktualizowano etykiety przy %d zdjęciu.</item>
+        <item quantity="few">Zaktualizowano etykiety przy %d zdjęciach.</item>
+        <item quantity="many">Zaktualizowano etykiety przy %d zdjęciach.</item>
+        <item quantity="other">Zaktualizowano etykiety przy %d zdjęciach.</item>
+    </plurals>
+    <string name="label_rename_title">Zmień nazwę etykiety</string>
+    <string name="label_rename_merge_note">Etykieta o nazwie %1$s już istnieje. Zapisanie połączy obie w jedną etykietę.</string>
+    <string name="label_rename_save">Zapisz</string>
+    <string name="label_rename_merge">Scal</string>
+    <string name="label_delete_action">Usuń etykietę</string>
+    <plurals name="label_delete_confirm_title">
+        <item quantity="one">Usunąć tę etykietę z %d zdjęcia?</item>
+        <item quantity="few">Usunąć tę etykietę z %d zdjęć?</item>
+        <item quantity="many">Usunąć tę etykietę z %d zdjęć?</item>
+        <item quantity="other">Usunąć tę etykietę z %d zdjęć?</item>
+    </plurals>
+    <string name="label_delete_confirm">Usuń</string>
 </resources>

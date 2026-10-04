@@ -157,6 +157,13 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         Screen.FaceRecognition.route,
     ),
 
+    // ── Labels ─────────────────────────────────────────────────────────────────
+    SettingsSearchEntry(
+        R.string.label_section_title, R.string.settings_more_title,
+        listOf("labels", "label", "rename", "merge", "keywords", "címke", "címkék", "átnevezés"),
+        Screen.LabelsSettings.route,
+    ),
+
     // ── Privacy & security ─────────────────────────────────────────────────────
     SettingsSearchEntry(
         R.string.settings_privacy_security, R.string.settings_title,

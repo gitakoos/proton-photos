@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.search
 
+import eu.akoos.photos.data.label.LabelKeyReconciler
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.presentation.gallery.ContentFilter
@@ -81,7 +82,8 @@ internal object SearchFilter {
      * then the category chip. [foldedMonths] and [foldedCategoryNames] are pre-folded localized text
      * the query is matched against; [offlinePinIds] backs the Offline chip, which is a local pin set
      * rather than a server tag, and [favoriteIds] backs the Favourites chip for the photos whose
-     * heart lives on the device rather than in Drive.
+     * heart lives on the device rather than in Drive. [foldedLabels] holds each labelled photo's
+     * labels, pre-folded by [foldLabels], so a typed word finds a photo by its label too.
      */
     fun apply(
         items: List<GalleryItem>,
@@ -93,6 +95,7 @@ internal object SearchFilter {
         personPhotoKeys: Set<String>? = null,
         foldedMonths: List<String>,
         foldedCategoryNames: Map<Int, String>,
+        foldedLabels: Map<String, String> = emptyMap(),
     ): List<GalleryItem> {
         val qTrimmed = q.trim()
         if (nothingAsked(qTrimmed, filter, category, personSelected = personPhotoKeys != null)) {
@@ -114,7 +117,7 @@ internal object SearchFilter {
                 needleWords.all { word ->
                     foldedName.contains(word) || run {
                         val full = haystack
-                            ?: searchHaystack(item, cal, foldedMonths, foldedCategoryNames)
+                            ?: searchHaystack(item, cal, foldedMonths, foldedCategoryNames, foldedLabels)
                                 .also { haystack = it }
                         full.contains(word)
                     }
@@ -208,12 +211,14 @@ internal object SearchFilter {
      *  type + file extension + category names), so the search box finds photos by metadata, not just
      *  the file name. Month/category names arrive pre-folded; only the per-item name is folded here.
      *  The categories are the ones the category rail files the item under ([CategorizeItem.classify]),
-     *  so a user-picked or device-detected category is findable by name as well as a server tag. */
+     *  so a user-picked or device-detected category is findable by name as well as a server tag. The
+     *  photo's own labels close it, read under every key they may sit under ([labelsOf]). */
     fun searchHaystack(
         item: GalleryItem,
         cal: Calendar,
         foldedMonths: List<String>,
         foldedCategoryNames: Map<Int, String>,
+        foldedLabels: Map<String, String> = emptyMap(),
     ): String {
         cal.timeInMillis = item.captureTimeMs
         val mime = mimeOf(item)
@@ -226,6 +231,22 @@ internal object SearchFilter {
             append(if (mime.startsWith("video/")) " video" else " photo")
             if (ext.isNotEmpty()) { append(' '); append(ext) }
             tags.forEach { id -> foldedCategoryNames[id]?.let { append(' '); append(it) } }
+            labelsOf(item, foldedLabels)?.let { append(' '); append(it) }
         }
+    }
+
+    /** Each photo key's labels folded and joined by single spaces, built once per label change rather
+     *  than per item and keystroke. */
+    fun foldLabels(byKey: Map<String, List<String>>): Map<String, String> =
+        byKey.mapValues { (_, labels) -> labels.joinToString(" ") { fold(it) } }
+
+    /** [item]'s folded labels from [foldedLabels]: those under its stableId and, for a backed-up photo,
+     *  those still under its device uri from before the backup. Null when it carries none. */
+    fun labelsOf(item: GalleryItem, foldedLabels: Map<String, String>): String? {
+        if (foldedLabels.isEmpty()) return null
+        val keys = LabelKeyReconciler.keysFor(item)
+        val primary = foldedLabels[keys[0]]
+        val secondary = keys.getOrNull(1)?.let { foldedLabels[it] } ?: return primary
+        return if (primary == null) secondary else "$primary $secondary"
     }
 }

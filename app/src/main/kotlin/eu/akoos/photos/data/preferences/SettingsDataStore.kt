@@ -679,6 +679,10 @@ object SettingsKeys {
      *  (not account-scoped): it is never cleared on sign-out. */
     val THANKS_2_5_0_SEEN = booleanPreferencesKey("thanks_2_5_0_seen")
 
+    /** True once the user has added a label for the first time. Until then the details panel's
+     *  Labels section says where labels are kept. Device-wide, so a sign-out does not bring it back. */
+    val LABELS_NOTE_SEEN = booleanPreferencesKey("labels_note_seen")
+
     /** Off switch for the news feed. Absent reads as on. When off, the feed is not fetched and the
      *  unread dot never shows, so a user who does not want it pays nothing for it. */
     val NEWS_ENABLED = booleanPreferencesKey("news_enabled")

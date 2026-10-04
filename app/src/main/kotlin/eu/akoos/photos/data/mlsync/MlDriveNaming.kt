@@ -22,6 +22,19 @@
 
 package eu.akoos.photos.data.mlsync
 
+/** The folders inside the app's Drive folder, with how each names a file's writing install. */
+enum class DriveDataFolder(val folderName: String, private val parseDeviceId: (String) -> String?) {
+    /** The face and search snapshots. */
+    ML(MlDriveNaming.ML_FOLDER_NAME, { MlDriveNaming.parse(it)?.deviceId }),
+
+    /** The labels. */
+    LABELS(MlDriveNaming.LABELS_FOLDER_NAME, { LabelDriveNaming.parse(it) }),
+    ;
+
+    /** The install id [fileName] carries, or null for a name this folder does not write. */
+    fun deviceIdOf(fileName: String): String? = parseDeviceId(fileName)
+}
+
 /** The two snapshot files every install keeps in the Drive "ML data" folder. */
 enum class MlDriveFileKind(val prefix: String) {
     /** The face-recognition snapshot. */
@@ -72,6 +85,9 @@ object MlDriveNaming {
 
     /** The folder inside [APP_FOLDER_NAME] that holds every install's snapshots. */
     const val ML_FOLDER_NAME = "ML data"
+
+    /** The folder inside [APP_FOLDER_NAME] that holds every install's labels. */
+    const val LABELS_FOLDER_NAME = "Labels"
 
     /** Extension of a snapshot file. */
     const val FILE_EXTENSION = ".pfpml"

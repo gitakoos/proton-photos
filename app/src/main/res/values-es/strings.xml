@@ -2204,4 +2204,71 @@
     <string name="person_move_confirm_body">¿Mover las fotos seleccionadas a %1$s?</string>
     <string name="person_move_confirm">Mover</string>
     <string name="settings_face_auto_merge">Combinar coincidencias probables automáticamente</string>
+
+    <string name="label_section_title">Etiquetas</string>
+    <string name="label_add_hint">Añadir una etiqueta</string>
+    <string name="label_add_chip">Añadir etiqueta</string>
+    <string name="label_remove_cd">Quitar la etiqueta %1$s</string>
+    <string name="label_full_hint">%1$d de %2$d etiquetas</string>
+    <string name="label_feedback_full">Una foto puede tener hasta %1$d etiquetas</string>
+    <string name="label_first_use_note">Las etiquetas se guardan solo en la app. Proton Drive no tiene etiquetas propias.</string>
+    <string name="label_bulk_action">Añadir etiquetas</string>
+    <string name="label_bulk_hint">Etiquetas separadas por comas</string>
+    <string name="label_bulk_confirm">Añadir</string>
+    <plurals name="label_bulk_added">
+        <item quantity="one">Etiquetas añadidas a %d foto.</item>
+        <item quantity="other">Etiquetas añadidas a %d fotos.</item>
+    </plurals>
+    <plurals name="label_bulk_limited">
+        <item quantity="one">%1$d foto alcanzó el límite de %2$d etiquetas.</item>
+        <item quantity="other">%1$d fotos alcanzaron el límite de %2$d etiquetas.</item>
+    </plurals>
+    <string name="label_bulk_nothing_new">Las fotos seleccionadas ya tienen estas etiquetas.</string>
+    <string name="label_bulk_failed">No se pudieron añadir las etiquetas.</string>
+    <string name="label_settings_desc">Cambia el nombre, combina o quita tus etiquetas</string>
+    <string name="label_settings_empty">Aún no hay etiquetas. Añádelas desde los detalles de una foto.</string>
+    <string name="label_sync_channel_name">Copia de etiquetas</string>
+    <string name="label_sync_channel_desc">Muestra el progreso mientras las etiquetas se guardan en Proton Drive o se restauran desde él.</string>
+    <string name="label_sync_save_title">Guardando etiquetas en Drive…</string>
+    <string name="label_sync_restore_title">Restaurando etiquetas desde Drive…</string>
+    <string name="label_backup_step_encrypting">Cifrando etiquetas…</string>
+    <string name="label_backup_step_uploading">Subiendo etiquetas…</string>
+    <string name="label_backup_step_looking">Buscando etiquetas guardadas…</string>
+    <string name="label_backup_step_downloading">Descargando etiquetas guardadas…</string>
+    <string name="label_backup_step_downloading_n">Descargando etiquetas guardadas (%1$d de %2$d)…</string>
+    <string name="label_backup_step_merging">Combinando etiquetas…</string>
+    <string name="label_input_hint">Busca o añade una etiqueta</string>
+    <string name="label_create_row">Crear «%1$s»</string>
+    <string name="label_locked">Las etiquetas no se pueden cambiar mientras se guardan en Drive o se restauran desde él.</string>
+    <string name="label_no_photos">Sin fotos</string>
+    <string name="label_add_photos">Añadir fotos</string>
+    <string name="label_picker_title">Añadir fotos a «%1$s»</string>
+    <string name="label_backup_section">Etiquetas en Drive</string>
+    <string name="label_backup_save_desc">Guarda una copia cifrada de tus etiquetas en Drive</string>
+    <string name="label_backup_restore_desc">Combina las etiquetas guardadas por este u otro dispositivo</string>
+    <string name="label_backup_working_save">Guardando etiquetas…</string>
+    <string name="label_backup_working_restore">Restaurando etiquetas…</string>
+    <string name="label_backup_folder_message">Al guardar se crea la carpeta «Photos for Proton/Labels» en Mis archivos. Las etiquetas que contiene están cifradas de extremo a extremo, como tus fotos, y ocupan espacio en tu Drive.</string>
+    <string name="label_backup_nothing_message">Ninguna foto tiene etiquetas todavía. Añade primero una etiqueta a una foto.</string>
+    <string name="label_backup_nothing_restore_title">Nada que restaurar</string>
+    <string name="label_backup_restore_empty">Todavía no hay etiquetas guardadas en Drive. En el dispositivo que las tiene, usa «Guardar en Drive» y vuelve a intentarlo.</string>
+    <string name="label_backup_up_to_date">Tus etiquetas ya están al día.</string>
+    <plurals name="label_backup_saved_count">
+        <item quantity="one">Etiquetas de %d foto guardadas.</item>
+        <item quantity="other">Etiquetas de %d fotos guardadas.</item>
+    </plurals>
+    <plurals name="label_backup_restored_count">
+        <item quantity="one">Etiquetas actualizadas en %d foto.</item>
+        <item quantity="other">Etiquetas actualizadas en %d fotos.</item>
+    </plurals>
+    <string name="label_rename_title">Cambiar nombre de la etiqueta</string>
+    <string name="label_rename_merge_note">Ya existe una etiqueta llamada %1$s. Al guardar, las dos se combinarán en una sola etiqueta.</string>
+    <string name="label_rename_save">Guardar</string>
+    <string name="label_rename_merge">Combinar</string>
+    <string name="label_delete_action">Eliminar etiqueta</string>
+    <plurals name="label_delete_confirm_title">
+        <item quantity="one">¿Quitar esta etiqueta de %d foto?</item>
+        <item quantity="other">¿Quitar esta etiqueta de %d fotos?</item>
+    </plurals>
+    <string name="label_delete_confirm">Quitar</string>
 </resources>

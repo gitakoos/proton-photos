@@ -2166,4 +2166,71 @@
     <string name="person_move_confirm_body">Áthelyezed a kijelölt fotókat ide: %1$s?</string>
     <string name="person_move_confirm">Áthelyezés</string>
     <string name="settings_face_auto_merge">Valószínű egyezések automatikus összevonása</string>
+
+    <string name="label_section_title">Címkék</string>
+    <string name="label_add_hint">Címke hozzáadása</string>
+    <string name="label_add_chip">Címke hozzáadása</string>
+    <string name="label_remove_cd">%1$s címke eltávolítása</string>
+    <string name="label_full_hint">%1$d / %2$d címke</string>
+    <string name="label_feedback_full">Egy fotón legfeljebb %1$d címke lehet</string>
+    <string name="label_first_use_note">A címkék csak az alkalmazásban tárolódnak. A Proton Drive-nak nincsenek saját címkéi.</string>
+    <string name="label_bulk_action">Címkék hozzáadása</string>
+    <string name="label_bulk_hint">Címkék, vesszővel elválasztva</string>
+    <string name="label_bulk_confirm">Hozzáadás</string>
+    <plurals name="label_bulk_added">
+        <item quantity="one">Címkék hozzáadva %d fotóhoz.</item>
+        <item quantity="other">Címkék hozzáadva %d fotóhoz.</item>
+    </plurals>
+    <plurals name="label_bulk_limited">
+        <item quantity="one">%1$d fotó elérte a maximum %2$d címkét.</item>
+        <item quantity="other">%1$d fotó elérte a maximum %2$d címkét.</item>
+    </plurals>
+    <string name="label_bulk_nothing_new">A kijelölt fotókon már rajta vannak ezek a címkék.</string>
+    <string name="label_bulk_failed">Nem sikerült hozzáadni a címkéket.</string>
+    <string name="label_settings_desc">Címkék átnevezése, összevonása vagy eltávolítása</string>
+    <string name="label_settings_empty">Még nincsenek címkék. Egy fotó részleteinél adhatsz hozzá.</string>
+    <string name="label_sync_channel_name">Címkék mentése</string>
+    <string name="label_sync_channel_desc">Megmutatja a folyamatot, amíg a címkék a Proton Drive-ra mentődnek vagy onnan visszaállnak.</string>
+    <string name="label_sync_save_title">Címkék mentése a Drive-ra…</string>
+    <string name="label_sync_restore_title">Címkék visszaállítása a Drive-ról…</string>
+    <string name="label_backup_step_encrypting">Címkék titkosítása…</string>
+    <string name="label_backup_step_uploading">Címkék feltöltése…</string>
+    <string name="label_backup_step_looking">Mentett címkék keresése…</string>
+    <string name="label_backup_step_downloading">Mentett címkék letöltése…</string>
+    <string name="label_backup_step_downloading_n">Mentett címkék letöltése (%1$d/%2$d)…</string>
+    <string name="label_backup_step_merging">Címkék egyesítése…</string>
+    <string name="label_input_hint">Címkék keresése vagy új hozzáadása</string>
+    <string name="label_create_row">„%1$s” létrehozása</string>
+    <string name="label_locked">A címkék nem módosíthatók, amíg a Drive-ra mentés vagy visszaállítás tart.</string>
+    <string name="label_no_photos">Nincs fotó</string>
+    <string name="label_add_photos">Fotók hozzáadása</string>
+    <string name="label_picker_title">Fotók hozzáadása: „%1$s”</string>
+    <string name="label_backup_section">Címkék a Drive-on</string>
+    <string name="label_backup_save_desc">Titkosított másolat a címkéidről a Drive-ban</string>
+    <string name="label_backup_restore_desc">Az ezen vagy egy másik eszközön mentett címkék egyesítése</string>
+    <string name="label_backup_working_save">Címkék mentése…</string>
+    <string name="label_backup_working_restore">Címkék visszaállítása…</string>
+    <string name="label_backup_folder_message">A mentés létrehozza a „Photos for Proton/Labels” mappát a Saját fájlok között. A benne lévő címkék a fotóidhoz hasonlóan végpontok közötti titkosítással tárolódnak, és beleszámítanak a Drive-tárhelyedbe.</string>
+    <string name="label_backup_nothing_message">Még egyetlen fotónak sincs címkéje. Előbb adj hozzá egyet egy fotóhoz.</string>
+    <string name="label_backup_nothing_restore_title">Nincs mit visszaállítani</string>
+    <string name="label_backup_restore_empty">Még nincsenek mentett címkék a Drive-on. Azon az eszközön, amelyiken vannak, válaszd a „Mentés a Drive-ra” lehetőséget, majd próbáld újra.</string>
+    <string name="label_backup_up_to_date">A címkéid már naprakészek.</string>
+    <plurals name="label_backup_saved_count">
+        <item quantity="one">%d fotó címkéi elmentve.</item>
+        <item quantity="other">%d fotó címkéi elmentve.</item>
+    </plurals>
+    <plurals name="label_backup_restored_count">
+        <item quantity="one">Címkék frissítve %d fotón.</item>
+        <item quantity="other">Címkék frissítve %d fotón.</item>
+    </plurals>
+    <string name="label_rename_title">Címke átnevezése</string>
+    <string name="label_rename_merge_note">Már létezik %1$s nevű címke. Mentéskor a kettő egy címkévé olvad össze.</string>
+    <string name="label_rename_save">Mentés</string>
+    <string name="label_rename_merge">Összevonás</string>
+    <string name="label_delete_action">Címke törlése</string>
+    <plurals name="label_delete_confirm_title">
+        <item quantity="one">Eltávolítod ezt a címkét %d fotóról?</item>
+        <item quantity="other">Eltávolítod ezt a címkét %d fotóról?</item>
+    </plurals>
+    <string name="label_delete_confirm">Eltávolítás</string>
 </resources>

@@ -195,6 +195,7 @@ fun rememberGallerySelectionActions(
     onCreateCollage: () -> Unit,
     onCreateGif: () -> Unit,
     onRequestMoveToFolder: () -> Unit = {},
+    addLabelsAction: SelectionAction? = null,
 ): List<SelectionAction> {
     val sharing = multiShareState as? MultiShareState.Working
     val isAddingToAlbum = addToAlbumState is AddToAlbumState.Working
@@ -252,6 +253,7 @@ fun rememberGallerySelectionActions(
                 onClick = onToggleFavorite,
             )
         )
+        addLabelsAction?.let(::add)
         // Collage takes device or cloud PHOTOS (a video's full res is the whole file, so videos are
         // skipped). Offered when the photo count is in 2..COLLAGE_MAX_PHOTOS.
         if (selectedItems.count { !it.isVideo() } in COLLAGE_MIN_PHOTOS..COLLAGE_MAX_PHOTOS) {

@@ -44,6 +44,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -74,6 +76,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.DeletePhotoUseCase
+import eu.akoos.photos.data.db.dao.LabelUsage
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
@@ -84,6 +87,8 @@ import eu.akoos.photos.data.hidden.HiddenVaultDiagnostics
 import eu.akoos.photos.data.hidden.HiddenVaultJournal
 import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
+import eu.akoos.photos.data.label.LabelKeyReconciler
+import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.presentation.util.formatBytes
 import eu.akoos.photos.data.ocr.OcrModelManager
 import eu.akoos.photos.data.offline.OfflineStorageManager
@@ -92,6 +97,7 @@ import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
 import eu.akoos.photos.util.ExifHelper
+import eu.akoos.photos.util.LabelNormalizer
 import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.StripResult
 import eu.akoos.photos.util.MetadataStripConfig
@@ -225,6 +231,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val thumbnailUrlStore: eu.akoos.photos.data.repository.drive.ThumbnailUrlStore,
     private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
     private val moveController: MoveToFolderController,
+    private val labelRepo: PhotoLabelRepository,
 ) : ViewModel() {
 
     private companion object {
@@ -1480,6 +1487,72 @@ class PhotoViewerViewModel @Inject constructor(
             }
             val ok = cloudRepo.setCloudTag(userId, cloudPhoto, tagId, add)
             if (!ok) _currentPhotoTags.value = previous
+        }
+    }
+
+    /** The photo on screen whose labels the Labels section and the Add labels sheet read, null until set. */
+    private val labelTarget = MutableStateFlow<GalleryItem?>(null)
+
+    /** [labelTarget]'s labels, live, read under both keys a backed-up photo's labels may sit under. */
+    val currentLabels: StateFlow<List<String>> = labelTarget
+        .flatMapLatest { item ->
+            if (item == null) flowOf(emptyList())
+            else labelRepo.observeLabelsByPhoto().map { LabelKeyReconciler.labelsFor(item, it) }
+        }
+        .distinctUntilChanged()
+        .catch { emit(emptyList()) }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Every label of the account with its photo count, most used first. */
+    private val labelUsage: StateFlow<List<LabelUsage>> = labelRepo.observeLabelUsage()
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Whether the Labels section still says where labels are kept: until the first label is ever added. */
+    val showLabelsNote: StateFlow<Boolean> = combine(
+        context.settingsDataStore.data.map { it[SettingsKeys.LABELS_NOTE_SEEN] == true },
+        labelUsage,
+    ) { seen, usage -> !seen && usage.isEmpty() }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** True while the labels are saved to or restored from Drive, when they cannot be edited. */
+    val labelsLocked: StateFlow<Boolean> = labelRepo.observeLocked()
+        .catch { emit(false) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Serialises label writes, each of which re-reads the list it replaces. */
+    private val labelWriteLock = Mutex()
+
+    /** Points [currentLabels] at [item], moving any labels still under its device uri onto its linkId. */
+    fun loadLabels(item: GalleryItem) {
+        labelTarget.value = item
+        viewModelScope.launch {
+            runCatching { labelRepo.labelsFor(item) }
+                .onFailure { Log.w("PhotoViewerVM", "label read failed: ${it.message}") }
+        }
+    }
+
+    /** Takes [label] off [item]. */
+    fun removeLabel(item: GalleryItem, label: String) = writeLabels(item) { current ->
+        val key = LabelNormalizer.fold(label)
+        current.filterNot { LabelNormalizer.fold(it) == key }.takeIf { it.size != current.size }
+    }
+
+    /** Runs one label change on a fresh read of [item]'s list; [next] returns null to write nothing. */
+    private fun writeLabels(item: GalleryItem, next: (List<String>) -> List<String>?) {
+        viewModelScope.launch {
+            labelWriteLock.withLock {
+                runCatching {
+                    val current = labelRepo.labelsFor(item)
+                    val labels = next(current) ?: return@runCatching
+                    labelRepo.setLabels(item, labels)
+                    if (labels.size > current.size) {
+                        context.settingsDataStore.edit { it[SettingsKeys.LABELS_NOTE_SEEN] = true }
+                    }
+                }.onFailure { Log.w("PhotoViewerVM", "label write failed: ${it.message}") }
+            }
         }
     }
 

@@ -181,10 +181,15 @@ internal fun AppSearchField(
 }
 
 /** One thing that narrows a search, shown as a pill in the field: its [label] and what removes it. */
-internal data class SearchFieldTerm(val label: String, val onRemove: () -> Unit)
+internal data class SearchFieldTerm(
+    val label: String,
+    val removeDescription: String? = null,
+    val onRemove: () -> Unit,
+)
 
+/** A [SearchFieldTerm] as a pill; a tap anywhere on it removes it. Shared with the Add labels field. */
 @Composable
-private fun SearchTermPill(term: SearchFieldTerm) {
+internal fun SearchTermPill(term: SearchFieldTerm) {
     val colors = AppColors.current
     Row(
         modifier = Modifier
@@ -197,6 +202,6 @@ private fun SearchTermPill(term: SearchFieldTerm) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(term.label, color = colors.accent, fontSize = 13.sp, maxLines = 1)
-        Icon(Icons.Filled.Close, contentDescription = null, tint = colors.accent, modifier = Modifier.size(14.dp))
+        Icon(Icons.Filled.Close, contentDescription = term.removeDescription, tint = colors.accent, modifier = Modifier.size(14.dp))
     }
 }

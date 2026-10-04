@@ -193,6 +193,7 @@ import eu.akoos.photos.domain.usecase.AlbumSortMode
 import eu.akoos.photos.domain.usecase.CategorizeItem
 import eu.akoos.photos.domain.usecase.CloudMetadataSaveController
 import eu.akoos.photos.domain.usecase.CloudSavePhase
+import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.AddToAlbumMessage
 import eu.akoos.photos.presentation.common.AlbumMembership
 import eu.akoos.photos.presentation.common.ConfirmDialog
@@ -1415,6 +1416,13 @@ fun GalleryScreen(
             onCreateCollage = { onCreateCollage(state.selectedItems.toList()) },
             onCreateGif = { state.selectedItems.singleOrNull()?.let(onCreateGif) },
             onRequestMoveToFolder = { showMoveToFolderSheet = true },
+            addLabelsAction = rememberAddLabelsAction(
+                items = remember(state.selectedItems) { state.selectedItems.toList() },
+                onDone = { msg ->
+                    tabScope.launch { snackbarHostState.showSnackbar(msg) }
+                    viewModel.clearSelection()
+                },
+            ),
         )
         // Select all stands in the drawer's header and takes in every photo the filtered timeline
         // shows.

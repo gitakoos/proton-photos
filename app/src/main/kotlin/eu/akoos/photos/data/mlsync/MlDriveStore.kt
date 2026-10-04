@@ -75,7 +75,7 @@ sealed interface MlDriveResult<out T> {
     /** The Drive SDK cannot run on this device (older Android or an unsupported ABI). */
     data object NotCapable : MlDriveResult<Nothing>
 
-    /** The ML data folder does not exist; only [MlDriveStore.folder] ever creates it. */
+    /** The Drive data folder does not exist; only [MlDriveStore.folder] ever creates it. */
     data object FolderMissing : MlDriveResult<Nothing>
 
     /**
@@ -90,7 +90,7 @@ sealed interface MlDriveResult<out T> {
             /** A node of the wrong type (a file where a folder belongs, or the reverse) holds the name. */
             const val NAME_TAKEN = "NameTaken"
 
-            /** The name is not one of this install's own snapshot names. */
+            /** The name is not one of this install's own file names. */
             const val FOREIGN_NAME = "ForeignName"
 
             /** The local file to upload does not exist. */
@@ -102,17 +102,18 @@ sealed interface MlDriveResult<out T> {
     }
 }
 
-/** The ML data folder. [nodeUid] is a My files node: never store it in sync_state or photo_listing. */
+/** A Drive data folder. [nodeUid] is a My files node: never store it in sync_state or photo_listing. */
 data class MlDriveFolder(val nodeUid: String)
 
 /** A finished upload: the file's node, its new active revision, and whether the file was created. */
 data class MlDriveUpload(val nodeUid: String, val revisionUid: String, val createdFile: Boolean)
 
 /**
- * The signed-in user's Drive copy of the machine-learning data, kept under My files /
- * [MlDriveNaming.APP_FOLDER_NAME] / [MlDriveNaming.ML_FOLDER_NAME] through the Proton Drive SDK.
+ * The signed-in user's Drive copy of the app's own data, kept under My files /
+ * [MlDriveNaming.APP_FOLDER_NAME] / a [DriveDataFolder] through the Proton Drive SDK: the machine-learning
+ * data in "ML data", the labels in "Labels".
  *
- * Each install writes only its own two files (named by [MlDriveNaming.fileName] with [deviceId]) and
+ * Each install writes only its own files (named with its [deviceId], see [DriveDataFolder.deviceIdOf]) and
  * replaces them as new revisions of the same node, so a name never changes; every install of the
  * account can list and download all of them. The folders are created only by [folder] with
  * `createIfMissing`, which callers reach after the user agreed; every other call treats a missing
@@ -131,7 +132,7 @@ class MlDriveStore @Inject constructor(
     private val folderMutex = Mutex()
     private val uploadMutex = Mutex()
     private val deviceIdMutex = Mutex()
-    private val knownFolders = HashMap<UserId, KnownFolders>()
+    private val knownFolders = HashMap<Pair<UserId, DriveDataFolder>, KnownFolders>()
 
     @Volatile
     private var cachedDeviceId: String? = null
@@ -161,13 +162,17 @@ class MlDriveStore @Inject constructor(
     }
 
     /**
-     * The ML data folder, or `Ok(null)` when it does not exist and [createIfMissing] is false. With
+     * The [area] folder, or `Ok(null)` when it does not exist and [createIfMissing] is false. With
      * [createIfMissing], whichever of the two folders is missing is created. `Failed(NAME_TAKEN)` when
      * a file already holds one of the folder names.
      */
-    suspend fun folder(userId: UserId, createIfMissing: Boolean): MlDriveResult<MlDriveFolder?> =
+    suspend fun folder(
+        userId: UserId,
+        createIfMissing: Boolean,
+        area: DriveDataFolder = DriveDataFolder.ML,
+    ): MlDriveResult<MlDriveFolder?> =
         sdkCall("folder", userId) { client ->
-            when (val lookup = mlFolder(client, userId, createIfMissing)) {
+            when (val lookup = dataFolder(client, userId, area, createIfMissing)) {
                 is Lookup.Found -> MlDriveResult.Ok(MlDriveFolder(lookup.uid.value))
                 Lookup.Missing -> MlDriveResult.Ok(null)
                 Lookup.NameTaken -> MlDriveResult.Failed(MlDriveResult.Failed.NAME_TAKEN)
@@ -175,35 +180,36 @@ class MlDriveStore @Inject constructor(
         }
 
     /**
-     * Every live file in the ML data folder, whatever its name, or an empty list when the folder does
+     * Every live file in the [area] folder, whatever its name, or an empty list when the folder does
      * not exist. [MlDriveNaming.selectForImport] picks the snapshots to restore from it.
      */
-    suspend fun list(userId: UserId): MlDriveResult<List<MlDriveFile>> =
+    suspend fun list(userId: UserId, area: DriveDataFolder = DriveDataFolder.ML): MlDriveResult<List<MlDriveFile>> =
         sdkCall("list", userId) { client ->
-            when (val lookup = mlFolder(client, userId, create = false)) {
+            when (val lookup = dataFolder(client, userId, area, create = false)) {
                 is Lookup.Found -> MlDriveResult.Ok(filesIn(client, lookup.uid))
                 Lookup.Missing, Lookup.NameTaken -> MlDriveResult.Ok(emptyList())
             }
         }
 
     /**
-     * Stores [localFile] as [name] in the ML data folder: a new file the first time, afterwards a new
+     * Stores [localFile] as [name] in the [area] folder: a new file the first time, afterwards a new
      * revision of the existing file based on the active revision it has right now, which the server
      * accepts only if nothing replaced that revision meanwhile. [name] must be one of this install's
-     * own snapshot names, so one install never overwrites another's file. Uploads run one at a time.
+     * own file names, so one install never overwrites another's file. Uploads run one at a time.
      */
     suspend fun upload(
         userId: UserId,
         name: String,
         localFile: File,
         mediaType: String,
+        area: DriveDataFolder = DriveDataFolder.ML,
     ): MlDriveResult<MlDriveUpload> = sdkCall("upload", userId) { client ->
-        if (MlDriveNaming.parse(name)?.deviceId != deviceId()) {
+        if (area.deviceIdOf(name) != deviceId()) {
             return@sdkCall MlDriveResult.Failed(MlDriveResult.Failed.FOREIGN_NAME)
         }
         if (!localFile.isFile) return@sdkCall MlDriveResult.Failed(MlDriveResult.Failed.NO_LOCAL_FILE)
         uploadMutex.withLock {
-            val folderUid = when (val lookup = mlFolder(client, userId, create = false)) {
+            val folderUid = when (val lookup = dataFolder(client, userId, area, create = false)) {
                 is Lookup.Found -> lookup.uid
                 Lookup.Missing, Lookup.NameTaken -> return@sdkCall MlDriveResult.FolderMissing
             }
@@ -294,12 +300,17 @@ class MlDriveStore @Inject constructor(
         }
     }
 
-    /** Resolves the ML data folder, through the in-memory record while it still checks out. */
-    private suspend fun mlFolder(client: ProtonDriveClient, userId: UserId, create: Boolean): Lookup =
+    /** Resolves the [area] folder, through the in-memory record while it still checks out. */
+    private suspend fun dataFolder(
+        client: ProtonDriveClient,
+        userId: UserId,
+        area: DriveDataFolder,
+        create: Boolean,
+    ): Lookup =
         folderMutex.withLock {
-            knownFolders[userId]?.let { known ->
-                if (stillInPlace(client, known)) return@withLock Lookup.Found(NodeUid(known.mlFolderUid))
-                knownFolders.remove(userId)
+            knownFolders[userId to area]?.let { known ->
+                if (stillInPlace(client, known, area)) return@withLock Lookup.Found(NodeUid(known.dataFolderUid))
+                knownFolders.remove(userId to area)
             }
             if (!create && !hasMyFiles(userId)) return@withLock Lookup.Missing
             val myFilesUid = client.getMyFilesFolder().uid
@@ -308,21 +319,21 @@ class MlDriveStore @Inject constructor(
                     is Lookup.Found -> lookup.uid
                     else -> return@withLock lookup
                 }
-            val mlFolderUid =
-                when (val lookup = childFolder(client, appFolderUid, MlDriveNaming.ML_FOLDER_NAME, create)) {
+            val dataFolderUid =
+                when (val lookup = childFolder(client, appFolderUid, area.folderName, create)) {
                     is Lookup.Found -> lookup.uid
                     else -> return@withLock lookup
                 }
-            knownFolders[userId] = KnownFolders(myFilesUid.value, appFolderUid.value, mlFolderUid.value)
-            Lookup.Found(mlFolderUid)
+            knownFolders[userId to area] = KnownFolders(myFilesUid.value, appFolderUid.value, dataFolderUid.value)
+            Lookup.Found(dataFolderUid)
         }
 
     /** Whether both remembered folders are still live, named as expected, and where they were. */
-    private suspend fun stillInPlace(client: ProtonDriveClient, known: KnownFolders): Boolean {
+    private suspend fun stillInPlace(client: ProtonDriveClient, known: KnownFolders, area: DriveDataFolder): Boolean {
         val appFolder = client.getNode(NodeUid(known.appFolderUid))
         if (!appFolder.isLiveFolder(MlDriveNaming.APP_FOLDER_NAME, known.myFilesUid)) return false
-        val mlFolder = client.getNode(NodeUid(known.mlFolderUid))
-        return mlFolder.isLiveFolder(MlDriveNaming.ML_FOLDER_NAME, known.appFolderUid)
+        val dataFolder = client.getNode(NodeUid(known.dataFolderUid))
+        return dataFolder.isLiveFolder(area.folderName, known.appFolderUid)
     }
 
     private fun Node?.isLiveFolder(expectedName: String, expectedParentUid: String): Boolean =
@@ -353,7 +364,7 @@ class MlDriveStore @Inject constructor(
         }
         return try {
             Lookup.Found(client.createFolder(parentUid, name).uid).also {
-                Log.i(TAG, "created a folder for the ML data")
+                Log.i(TAG, "created a Drive data folder")
             }
         } catch (t: Throwable) {
             if (!isConflict(t)) throw t
@@ -500,7 +511,7 @@ class MlDriveStore @Inject constructor(
     private data class KnownFolders(
         val myFilesUid: String,
         val appFolderUid: String,
-        val mlFolderUid: String,
+        val dataFolderUid: String,
     )
 
     private companion object {

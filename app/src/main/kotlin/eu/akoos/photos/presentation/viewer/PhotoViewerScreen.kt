@@ -118,6 +118,7 @@ import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.anyMetadataEditable
+import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.gallery.MetadataStripPickerDialog
 import eu.akoos.photos.presentation.gallery.MoveToFolderHost
 import eu.akoos.photos.presentation.common.SecureScreenEffect
@@ -364,6 +365,8 @@ fun PhotoViewerScreen(
     /** Opens the date + place metadata editor for the current item. Suppressed for a shared-with-me
      *  album (the sheet hides the affordance), mirroring the rename gate. */
     onEditMetadata: (GalleryItem) -> Unit = {},
+    /** Opens the Labels settings page, from the title of the details panel's Labels section. */
+    onOpenLabelsSettings: () -> Unit = {},
     /** Opens the page of the person the face index grouped, from the "people in this photo" bar. */
     onOpenPerson: (Long) -> Unit = {},
     /** Opens the full map centred on the photo's place, from the map box in the details panel. */
@@ -546,6 +549,12 @@ fun PhotoViewerScreen(
     LaunchedEffect(Unit) { viewModel.loadAlbums() }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    // The same Add labels sheet the selection drawer opens, held here so it outlives the menu and the
+    // details panel that open it, and adds to the photo on screen, its current labels counting to the cap.
+    LaunchedEffect(gatedItem) { gatedItem?.let { viewModel.loadLabels(it) } }
+    val addLabelsAction = rememberAddLabelsAction(listOfNotNull(gatedItem)) { message ->
+        scope.launch { snackbarHostState.showSnackbar(message) }
+    }
 
     val transientError by viewModel.transientError.collectAsStateWithLifecycle()
     LaunchedEffect(transientError) {
@@ -2053,6 +2062,28 @@ fun PhotoViewerScreen(
                                     showMetadata = true
                                 },
                             )
+                            // Add labels opens the selection drawer's sheet for the photo on screen.
+                            // Offered where the details sheet shows the labels box: not on a vaulted,
+                            // hidden or shared photo.
+                            val menuLinkId = when (val s = settledItem) {
+                                is GalleryItem.CloudOnly -> s.cloud.linkId
+                                is GalleryItem.Synced -> s.cloud.linkId
+                                else -> null
+                            }
+                            if (addLabelsAction != null && !trashMode && !isReadOnlyAlbum && !secure &&
+                                !isVaultedItem && !isHidden &&
+                                (menuLinkId == null || menuLinkId !in hiddenCloudLinkIds)
+                            ) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(addLabelsAction.label, color = FgPrimary) },
+                                    leadingIcon = { Icon(addLabelsAction.icon, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        addLabelsAction.onClick()
+                                    },
+                                )
+                            }
                             // Edit the capture date and place. Offered when the item is editable (a
                             // device photo, a cloud or backed-up image the corrected-copy replace can
                             // rewrite, or a cloud / synced video whose capture date it can change) outside
@@ -2699,6 +2730,16 @@ fun PhotoViewerScreen(
                     !anyMetadataEditable(listOf(item))
                 ) null else {
                     { showMetadata = false; onEditMetadata(item) }
+                },
+                // Labels are the user's own: none on a vaulted or hidden photo, nor on someone else's.
+                // The details sheet closes first, so neither the Add labels sheet nor the settings
+                // page opens over it.
+                labelsBox = {
+                    if (item != null && !detailsPrivate && !isReadOnlyAlbum) DetailsLabels(
+                        viewModel, item,
+                        onAddLabels = addLabelsAction?.let { add -> { showMetadata = false; add.onClick() } },
+                        onOpenSettings = { showMetadata = false; onOpenLabelsSettings() },
+                    )
                 },
                 peopleBox = {
                     if (showPeopleBox) {

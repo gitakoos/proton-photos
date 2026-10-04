@@ -101,6 +101,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val personCoverDao: eu.akoos.photos.data.db.dao.PersonCoverDao,
     private val personManualPhotoDao: eu.akoos.photos.data.db.dao.PersonManualPhotoDao,
     private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
+    private val photoLabels: eu.akoos.photos.data.label.PhotoLabelRepository,
     private val photoListingDao: PhotoListingDao,
     private val listingSweepSnapshotDao: ListingSweepSnapshotDao,
     private val syncStateDao: SyncStateDao,
@@ -507,6 +508,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { personCoverDao.clearForUser(userId.id) }
         runCatching { personManualPhotoDao.clearForUser(userId.id) }
         runCatching { clusterSummaryDao.clearForUser(userId.id) }
+        // The account's photo labels are its own private notes about its photos and leave with it.
+        runCatching { photoLabels.clearForUser(userId) }
         // The plaintext an ML sync import or export passes through, left behind by a run killed part
         // way, and the names still waiting to be put back on detected faces go with the face rows.
         runCatching { mlSyncSignOut.wipePlaintext() }

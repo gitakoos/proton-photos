@@ -121,6 +121,8 @@ internal fun PhotoMetadataSheet(
     hasCloudCopy: Boolean = false,
     /** The People box, drawn first under the title. Emitting nothing leaves it out, gap included. */
     peopleBox: @Composable () -> Unit = {},
+    /** The Labels section, drawn above the categories. Emitting nothing leaves it out, gap included. */
+    labelsBox: @Composable () -> Unit = {},
     /** Whether the Map box may show under the People box. The caller turns it off for a photo whose
      *  place stays private, since the classic style fetches map tiles around the spot. */
     showMapBox: Boolean = false,
@@ -244,6 +246,7 @@ internal fun PhotoMetadataSheet(
                 }
             }
 
+            labelsBox()
             CategoryEditor(tags = photoTags, onToggle = onToggleTag)
 
             // The Date row is the capture moment the app itself works with and the one the pencil

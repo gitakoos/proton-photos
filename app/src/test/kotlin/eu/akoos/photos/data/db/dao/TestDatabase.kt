@@ -28,6 +28,9 @@ import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.ListingSweepSnapshotEntity
 import eu.akoos.photos.data.db.entity.LocalTagEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelNameEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelStateEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
@@ -41,6 +44,9 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         ListingSweepSnapshotEntity::class,
         LocalTagEntity::class,
         PhotoLocationEntity::class,
+        PhotoLabelEntity::class,
+        PhotoLabelNameEntity::class,
+        PhotoLabelStateEntity::class,
     ],
     version = 1,
     exportSchema = false,
@@ -53,4 +59,5 @@ abstract class TestDatabase : RoomDatabase() {
     abstract fun listingSweepSnapshotDao(): ListingSweepSnapshotDao
     abstract fun localTagDao(): LocalTagDao
     abstract fun photoLocationDao(): PhotoLocationDao
+    abstract fun photoLabelDao(): PhotoLabelDao
 }

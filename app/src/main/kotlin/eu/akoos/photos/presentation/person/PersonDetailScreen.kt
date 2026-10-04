@@ -78,6 +78,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.IconBubble
@@ -189,6 +190,14 @@ fun PersonDetailScreen(
 
     // Bulk actions for the current photo selection. They ride in the top header while selecting (the same
     // place the review list puts its whole-cluster actions), instead of a separate bottom bar.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val addLabelsAction = rememberAddLabelsAction(
+        items = remember(state.items, selection) { state.items.filter { it.stableId in selection } },
+        onDone = { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            selection = emptySet()
+        },
+    )
     val personSelectionActions = buildList {
         // Choosing a cover needs exactly one photo picked AND a named person (the cover is stored against
         // the name); an unnamed cluster has nowhere to keep it.
@@ -214,6 +223,7 @@ fun PersonDetailScreen(
                 },
             ),
         )
+        addLabelsAction?.let(::add)
         // Removing photos only makes sense for a named person; an unnamed cluster has no person to keep
         // the photos off of.
         if (state.personName != null) {

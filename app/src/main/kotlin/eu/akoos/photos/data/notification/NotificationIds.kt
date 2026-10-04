@@ -90,6 +90,10 @@ object NotificationIds {
      *  restored from Proton Drive. */
     const val ML_SYNC = 4257
 
+    /** The label sync worker's foreground progress notification, while labels are saved to or restored from
+     *  Proton Drive. */
+    const val LABEL_SYNC = 4258
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

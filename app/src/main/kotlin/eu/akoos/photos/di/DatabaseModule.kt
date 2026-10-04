@@ -68,6 +68,7 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.dao.PhotoLabelDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
@@ -125,6 +126,9 @@ abstract class DatabaseModule {
 
     @Binds
     abstract fun bindTelemetryDatabase(db: AppDatabase): TelemetryDatabase
+
+    @Binds
+    abstract fun bindLabelWriteGate(gate: eu.akoos.photos.data.label.WorkLabelWriteGate): eu.akoos.photos.data.label.LabelWriteGate
 
     companion object {
 
@@ -237,5 +241,9 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun provideImageEmbeddingDao(db: AppDatabase): ImageEmbeddingDao = db.imageEmbeddingDao()
+
+        @Provides
+        @Singleton
+        fun providePhotoLabelDao(db: AppDatabase): PhotoLabelDao = db.photoLabelDao()
     }
 }
