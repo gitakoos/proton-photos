@@ -30,6 +30,7 @@ import eu.akoos.photos.data.label.LabelBackupOutcome
 import eu.akoos.photos.data.label.LabelBackupProgress
 import eu.akoos.photos.data.label.LabelBackupResult
 import eu.akoos.photos.data.label.LabelBackupState
+import eu.akoos.photos.data.label.LabelCount
 import eu.akoos.photos.data.label.LabelBackupStep
 
 /*
@@ -82,20 +83,27 @@ internal fun labelBackupHeadline(operation: LabelBackupOperation): Int = when (o
 /** The line under the running row's title: a string and what fills it. */
 internal data class LabelBackupStepText(@StringRes val res: Int, val args: List<Any> = emptyList())
 
-/** What the running job says it is doing. A restore with several saved copies counts them. */
+/** What the running job says it is doing. */
 internal fun labelBackupStepText(progress: LabelBackupProgress): LabelBackupStepText = when (progress.step) {
     LabelBackupStep.PREPARING -> LabelBackupStepText(R.string.settings_ml_drive_step_preparing)
     LabelBackupStep.ENCRYPTING -> LabelBackupStepText(R.string.label_backup_step_encrypting)
     LabelBackupStep.UPLOADING -> LabelBackupStepText(R.string.label_backup_step_uploading)
-    LabelBackupStep.LOOKING -> LabelBackupStepText(R.string.label_backup_step_looking)
-    LabelBackupStep.DOWNLOADING ->
-        if (progress.total > 1) {
-            LabelBackupStepText(R.string.label_backup_step_downloading_n, listOf(progress.done + 1, progress.total))
-        } else {
-            LabelBackupStepText(R.string.label_backup_step_downloading)
-        }
+    LabelBackupStep.DOWNLOADING -> LabelBackupStepText(R.string.label_backup_step_downloading)
     LabelBackupStep.MERGING -> LabelBackupStepText(R.string.label_backup_step_merging)
 }
+
+/** How many labels a picked saved copy lists in the restore drawer before the rest go behind "Show all". */
+internal const val RESTORE_PREVIEW_LABELS = 5
+
+/** The first [shown] labels of a saved copy that has [total] of them. */
+internal data class LabelCopyPreview(val shown: List<LabelCount>, val total: Int) {
+    /** True when labels are left out of [shown]. */
+    val hasMore: Boolean get() = total > shown.size
+}
+
+/** A saved copy's labels cut to the first [limit], most used first as the copy lists them. */
+internal fun labelCopyPreview(labels: List<LabelCount>, limit: Int = RESTORE_PREVIEW_LABELS): LabelCopyPreview =
+    LabelCopyPreview(labels.take(limit), labels.size)
 
 /** What opens over the section. */
 internal sealed interface LabelBackupNotice {
@@ -151,8 +159,6 @@ internal fun labelBackupNotice(outcome: LabelBackupOutcome): LabelBackupNotice.M
                 outcome.newLabels > 0 -> LabelBackupNotice.Message(R.string.settings_ml_drive_restored)
                 else -> LabelBackupNotice.Message(R.string.settings_ml_drive_restored, line = R.string.label_backup_up_to_date)
             }
-        LabelBackupResult.NOTHING_TO_RESTORE ->
-            LabelBackupNotice.Message(R.string.label_backup_nothing_restore_title, line = R.string.label_backup_restore_empty)
         LabelBackupResult.NOT_CAPABLE -> LabelBackupNotice.Message(R.string.settings_ml_drive_not_capable)
         LabelBackupResult.WRONG_ACCOUNT ->
             LabelBackupNotice.Message(failedTitle, line = R.string.settings_ml_drive_wrong_account)

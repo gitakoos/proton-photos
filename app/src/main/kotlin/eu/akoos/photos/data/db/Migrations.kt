@@ -708,5 +708,46 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40, MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44)
+    /** v44 to v45: `photo_label_name.deletedAt`, set when a label created without a photo is deleted or renamed, so
+     *  the Drive copy of the labels does not bring it back. Null for every existing row, which is live. */
+    val MIGRATION_44_45 = object : Migration(44, 45) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            val hasColumn = db.query("PRAGMA table_info(`photo_label_name`)").use { cur ->
+                val nameIndex = cur.getColumnIndex("name")
+                var found = false
+                while (cur.moveToNext()) if (cur.getString(nameIndex) == "deletedAt") found = true
+                found
+            }
+            if (!hasColumn) db.execSQL("ALTER TABLE `photo_label_name` ADD COLUMN `deletedAt` INTEGER")
+        }
+    }
+
+    /** v45 to v46: drops `photo_label_state` and `photo_label_name.deletedAt`. The Drive copy of the labels
+     *  restores a saved copy as it was, so it needs neither per-photo change times nor deleted-label markers.
+     *  A name row marked deleted is dropped with the column; every other row is kept as it is. */
+    val MIGRATION_45_46 = object : Migration(45, 46) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS `photo_label_state`")
+            val hasDeletedAt = db.query("PRAGMA table_info(`photo_label_name`)").use { cur ->
+                val nameIndex = cur.getColumnIndex("name")
+                var found = false
+                while (cur.moveToNext()) if (cur.getString(nameIndex) == "deletedAt") found = true
+                found
+            }
+            if (!hasDeletedAt) return
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `photo_label_name_new` (`userId` TEXT NOT NULL, " +
+                    "`labelKey` TEXT NOT NULL, `label` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `labelKey`))"
+            )
+            db.execSQL(
+                "INSERT OR IGNORE INTO `photo_label_name_new` (`userId`, `labelKey`, `label`, `createdAt`) " +
+                    "SELECT `userId`, `labelKey`, `label`, `createdAt` FROM `photo_label_name` WHERE `deletedAt` IS NULL"
+            )
+            db.execSQL("DROP TABLE `photo_label_name`")
+            db.execSQL("ALTER TABLE `photo_label_name_new` RENAME TO `photo_label_name`")
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40, MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45, MIGRATION_45_46)
 }

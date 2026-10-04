@@ -2171,8 +2171,14 @@
     <string name="label_add_hint">Címke hozzáadása</string>
     <string name="label_add_chip">Címke hozzáadása</string>
     <string name="label_remove_cd">%1$s címke eltávolítása</string>
-    <string name="label_full_hint">%1$d / %2$d címke</string>
-    <string name="label_feedback_full">Egy fotón legfeljebb %1$d címke lehet</string>
+    <plurals name="label_full_hint">
+        <item quantity="one">%1$d / %2$d címke</item>
+        <item quantity="other">%1$d / %2$d címke</item>
+    </plurals>
+    <plurals name="label_feedback_full">
+        <item quantity="one">Egy fotón legfeljebb %1$d címke lehet</item>
+        <item quantity="other">Egy fotón legfeljebb %1$d címke lehet</item>
+    </plurals>
     <string name="label_first_use_note">A címkék csak az alkalmazásban tárolódnak. A Proton Drive-nak nincsenek saját címkéi.</string>
     <string name="label_bulk_action">Címkék hozzáadása</string>
     <string name="label_bulk_hint">Címkék, vesszővel elválasztva</string>
@@ -2197,7 +2203,6 @@
     <string name="label_backup_step_uploading">Címkék feltöltése…</string>
     <string name="label_backup_step_looking">Mentett címkék keresése…</string>
     <string name="label_backup_step_downloading">Mentett címkék letöltése…</string>
-    <string name="label_backup_step_downloading_n">Mentett címkék letöltése (%1$d/%2$d)…</string>
     <string name="label_backup_step_merging">Címkék egyesítése…</string>
     <string name="label_input_hint">Címkék keresése vagy új hozzáadása</string>
     <string name="label_create_row">„%1$s” létrehozása</string>
@@ -2205,14 +2210,24 @@
     <string name="label_no_photos">Nincs fotó</string>
     <string name="label_add_photos">Fotók hozzáadása</string>
     <string name="label_picker_title">Fotók hozzáadása: „%1$s”</string>
+    <string name="label_picker_title_many">Fotók hozzáadása a kijelölt címkékhez</string>
+    <string name="label_delete_selected">Címkék törlése</string>
+    <string name="label_delete_selected_title">Törlöd a kijelölt címkéket?</string>
+    <string name="label_delete_selected_message">Minden fotóról lekerülnek, amin rajta vannak.</string>
+    <string name="label_leave_selection_title">Kilépsz a címkék oldaláról?</string>
+    <string name="label_leave_selection_message">A kijelölés törlődik.</string>
+    <string name="label_leave_selection_confirm">Kilépés</string>
     <string name="label_backup_section">Címkék a Drive-on</string>
     <string name="label_backup_save_desc">Titkosított másolat a címkéidről a Drive-ban</string>
     <string name="label_backup_restore_desc">Az ezen vagy egy másik eszközön mentett címkék egyesítése</string>
+    <string name="label_backup_restore_note">Visszahozza az akkor mentett címkéket, az azóta törölteket is. Az azóta hozzáadott címkék megmaradnak.</string>
+    <string name="label_backup_show_all">Mind megjelenítése (%1$d)</string>
+    <string name="label_backup_save_confirm_title">Mented a címkéket a Drive-ra?</string>
+    <string name="label_backup_save_confirm_message">Az ezen az eszközön korábban mentett másolat lecserélődik. A címkék a fotóidhoz hasonlóan végpontok közötti titkosítással tárolódnak.</string>
     <string name="label_backup_working_save">Címkék mentése…</string>
     <string name="label_backup_working_restore">Címkék visszaállítása…</string>
     <string name="label_backup_folder_message">A mentés létrehozza a „Photos for Proton/Labels” mappát a Saját fájlok között. A benne lévő címkék a fotóidhoz hasonlóan végpontok közötti titkosítással tárolódnak, és beleszámítanak a Drive-tárhelyedbe.</string>
     <string name="label_backup_nothing_message">Még egyetlen fotónak sincs címkéje. Előbb adj hozzá egyet egy fotóhoz.</string>
-    <string name="label_backup_nothing_restore_title">Nincs mit visszaállítani</string>
     <string name="label_backup_restore_empty">Még nincsenek mentett címkék a Drive-on. Azon az eszközön, amelyiken vannak, válaszd a „Mentés a Drive-ra” lehetőséget, majd próbáld újra.</string>
     <string name="label_backup_up_to_date">A címkéid már naprakészek.</string>
     <plurals name="label_backup_saved_count">

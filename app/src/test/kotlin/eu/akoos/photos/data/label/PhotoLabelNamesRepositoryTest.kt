@@ -150,6 +150,28 @@ class PhotoLabelNamesRepositoryTest {
     }
 
     @Test
+    fun `several labels are deleted together, with and without photos`() = runTest {
+        repo.setLabels(LINK, listOf("One", "Two", "Keep"))
+        repo.setLabels(LINK_2, listOf("One"))
+        repo.createLabel("Empty")
+
+        val removed = repo.deleteLabels(listOf("One", "TWO", "empty"))
+
+        assertEquals(3, removed)
+        assertEquals(mapOf("Keep" to 1), usage())
+        assertEquals(listOf("Keep"), dao.labelsOfPhoto(ACCOUNT.id, LINK).map { it.label })
+    }
+
+    @Test
+    fun `deleting several labels is refused while the labels are locked`() = runTest {
+        repo.setLabels(LINK, listOf("One"))
+        lock.value = true
+
+        assertLocked { repo.deleteLabels(listOf("One")) }
+        assertEquals(listOf("One"), dao.labelsOfPhoto(ACCOUNT.id, LINK).map { it.label })
+    }
+
+    @Test
     fun `the photo count of one label is the photos that carry it`() = runTest {
         repo.setLabels(LINK, listOf("Beach"))
         repo.setLabels(LINK_2, listOf("Beach", "Sun"))
@@ -224,7 +246,7 @@ class PhotoLabelNamesRepositoryTest {
             ACCOUNT,
             LabelSnapshot(
                 deviceId = OTHER_DEVICE, deviceLabel = "Phone", createdAtMillis = 1L,
-                photos = listOf(LabelSnapshotPhoto(LINK_2, 4_000L, listOf("Sun"))),
+                photos = listOf(LabelSnapshotPhoto(LINK_2, listOf("Sun"))),
             ),
             OWN, now = 5_000L,
         )

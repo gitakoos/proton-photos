@@ -27,8 +27,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.Configuration
-import androidx.work.WorkManager
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.mockk.verify
@@ -76,6 +74,7 @@ import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.AlbumListEventBus
 import eu.akoos.photos.util.NetworkObserver
+import eu.akoos.photos.util.WorkManagerTestSetup
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -132,15 +131,7 @@ class UploadPipelineIntegrationTest {
         // SyncWorker.runNow(context) can enqueue without throwing. A synchronous executor keeps it
         // deterministic; the enqueued worker carries a CONNECTED network constraint that is never
         // satisfied in this JVM, so its body never runs and cannot perturb the DB we assert on.
-        runCatching {
-            WorkManager.initialize(
-                context,
-                Configuration.Builder()
-                    .setExecutor { it.run() }
-                    .setTaskExecutor { it.run() }
-                    .build(),
-            )
-        }
+        WorkManagerTestSetup.initialize(context)
 
         // Start each test from an empty settings DataStore so gate keys never leak in from a
         // prior test (the delegate caches one instance per file name across the JVM).

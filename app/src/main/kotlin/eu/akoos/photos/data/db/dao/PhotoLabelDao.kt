@@ -30,7 +30,6 @@ import androidx.room.Transaction
 import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.PhotoLabelEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelNameEntity
-import eu.akoos.photos.data.db.entity.PhotoLabelStateEntity
 import eu.akoos.photos.util.LabelNormalizer
 import eu.akoos.photos.util.SQL_CHUNK_SIZE
 import eu.akoos.photos.util.flatMapSqlChunks
@@ -94,6 +93,10 @@ interface PhotoLabelDao {
     suspend fun labelsForKeys(userId: String, photoKeys: Collection<String>): List<PhotoLabelEntity> =
         photoKeys.distinct().flatMapSqlChunks { labelsForKeysChunk(userId, it) }
 
+    /** Every label row of the account, each photo's labels in display order. */
+    @Query("SELECT * FROM photo_label WHERE userId = :userId ORDER BY photoKey, updatedAt, rowid")
+    suspend fun allLabelsForUser(userId: String): List<PhotoLabelEntity>
+
     /** Keeps [row] as a label with no photo yet, unless the account already has that label. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertName(row: PhotoLabelNameEntity): Long
@@ -133,45 +136,6 @@ interface PhotoLabelDao {
     )
     suspend fun copyNames(fromUser: String, toUser: String)
 
-    /** Stamps [photoKey]'s label list as changed at [at], whether or not it still holds labels. */
-    @Query("INSERT OR REPLACE INTO photo_label_state (userId, photoKey, changedAt) VALUES (:userId, :photoKey, :at)")
-    suspend fun touch(userId: String, photoKey: String, at: Long)
-
-    /** Stamps every photo of [photoKeys] as changed at [at]. */
-    suspend fun touchAll(userId: String, photoKeys: Collection<String>, at: Long) {
-        for (key in photoKeys.distinct()) touch(userId, key, at)
-    }
-
-    /** When each labelled or once-labelled photo of the account last changed its list. */
-    @Query("SELECT * FROM photo_label_state WHERE userId = :userId")
-    suspend fun statesForUser(userId: String): List<PhotoLabelStateEntity>
-
-    /** One slice of [statesForKeys]; callers go through that, which bounds the list. */
-    @Query("SELECT * FROM photo_label_state WHERE userId = :userId AND photoKey IN (:photoKeys)")
-    suspend fun statesForKeysChunk(userId: String, photoKeys: List<String>): List<PhotoLabelStateEntity>
-
-    /** The change times of the photos in [photoKeys] that have one, queried in slices under the host-variable limit. */
-    suspend fun statesForKeys(userId: String, photoKeys: Collection<String>): List<PhotoLabelStateEntity> =
-        photoKeys.distinct().flatMapSqlChunks { statesForKeysChunk(userId, it) }
-
-    /** Every label row of the account, each photo's labels in display order. */
-    @Query("SELECT * FROM photo_label WHERE userId = :userId ORDER BY photoKey, updatedAt, rowid")
-    suspend fun allLabelsForUser(userId: String): List<PhotoLabelEntity>
-
-    @Query("DELETE FROM photo_label_state WHERE userId = :userId")
-    suspend fun deleteStatesForUser(userId: String): Int
-
-    /**
-     * Sets [photoKey]'s list to [rows] and its change time to [changedAt], for a list taken from the Drive
-     * copy: the time is the one the list was written with, not the time of this write.
-     */
-    @Transaction
-    suspend fun applyRemoteList(userId: String, photoKey: String, rows: List<PhotoLabelEntity>, changedAt: Long) {
-        deleteAllOfPhoto(userId, photoKey)
-        if (rows.isNotEmpty()) insertIgnore(rows)
-        touch(userId, photoKey, changedAt)
-    }
-
     @Upsert
     suspend fun upsert(row: PhotoLabelEntity)
 
@@ -189,14 +153,6 @@ interface PhotoLabelDao {
     @Query("DELETE FROM photo_label WHERE userId = :userId AND photoKey = :photoKey AND labelKey = :labelKey")
     suspend fun deleteLabelOfPhoto(userId: String, photoKey: String, labelKey: String): Int
 
-    /** [deleteLabelOfPhoto] that also stamps the photo's list as changed. True when the label was there. */
-    @Transaction
-    suspend fun removeLabelOfPhoto(userId: String, photoKey: String, labelKey: String): Boolean {
-        val removed = deleteLabelOfPhoto(userId, photoKey, labelKey) > 0
-        if (removed) touch(userId, photoKey, System.currentTimeMillis())
-        return removed
-    }
-
     @Query("DELETE FROM photo_label WHERE userId = :userId AND photoKey = :photoKey")
     suspend fun deleteAllOfPhoto(userId: String, photoKey: String): Int
 
@@ -204,25 +160,13 @@ interface PhotoLabelDao {
     @Query("DELETE FROM photo_label WHERE photoKey IN (:photoKeys)")
     suspend fun deleteForPhotoKeysChunk(photoKeys: List<String>): Int
 
-    /** Stamps every owner's list of the photos in [photoKeys] as changed at [at], one slice. */
-    @Query(
-        "INSERT OR REPLACE INTO photo_label_state (userId, photoKey, changedAt) " +
-            "SELECT DISTINCT userId, photoKey, :at FROM photo_label WHERE photoKey IN (:photoKeys)",
-    )
-    suspend fun touchLabelledChunk(photoKeys: List<String>, at: Long)
-
     /**
      * Drops every label of the photos in [photoKeys] under every owner, guest included, so a photo
      * leaving view (hidden into the vault) keeps nothing searchable whichever session wrote it.
      */
-    @Transaction
     suspend fun deleteForPhotoKeys(photoKeys: Collection<String>): Int {
         var deleted = 0
-        val at = System.currentTimeMillis()
-        photoKeys.distinct().forEachSqlChunk {
-            touchLabelledChunk(it, at)
-            deleted += deleteForPhotoKeysChunk(it)
-        }
+        photoKeys.distinct().forEachSqlChunk { deleted += deleteForPhotoKeysChunk(it) }
         return deleted
     }
 
@@ -231,7 +175,6 @@ interface PhotoLabelDao {
     suspend fun replaceLabelsOfPhoto(userId: String, photoKey: String, rows: List<PhotoLabelEntity>) {
         deleteAllOfPhoto(userId, photoKey)
         if (rows.isNotEmpty()) insertIgnore(rows)
-        touch(userId, photoKey, System.currentTimeMillis())
     }
 
     /**
@@ -252,22 +195,17 @@ interface PhotoLabelDao {
         for (chunk in photoKeys.distinct().chunked(SQL_CHUNK_SIZE)) {
             val existing = labelsForKeysChunk(userId, chunk).groupBy { it.photoKey }
             val rows = mutableListOf<PhotoLabelEntity>()
-            val touched = mutableListOf<String>()
             for (key in chunk) {
                 val current = existing[key].orEmpty()
                 val incoming = labels.map { PhotoLabelEntity(userId, key, it, LabelNormalizer.fold(it), now) }
                 val fit = rowsThatFit(current, incoming)
                 val currentKeys = current.mapTo(HashSet()) { it.labelKey }
                 val wanted = incoming.count { it.labelKey !in currentKeys }
-                if (fit.isNotEmpty()) {
-                    changed++
-                    touched += key
-                }
+                if (fit.isNotEmpty()) changed++
                 if (fit.size < wanted) capped++
                 rows += fit
             }
             if (rows.isNotEmpty()) insertIgnore(rows)
-            touchAll(userId, touched, now)
         }
         return LabelBulkResult(changed, capped)
     }
@@ -289,10 +227,9 @@ interface PhotoLabelDao {
     @Query("SELECT photoKey FROM photo_label WHERE userId = :userId AND labelKey = :labelKey")
     suspend fun photoKeysOfLabel(userId: String, labelKey: String): List<String>
 
-    /** [deleteLabelEverywhere] that also stamps every photo that lost the label. Returns how many did. */
+    /** [deleteLabelEverywhere] that also forgets the label's name. Returns how many photos lost it. */
     @Transaction
     suspend fun removeLabelEverywhere(userId: String, labelKey: String): Int {
-        touchAll(userId, photoKeysOfLabel(userId, labelKey), System.currentTimeMillis())
         deleteName(userId, labelKey)
         return deleteLabelEverywhere(userId, labelKey)
     }
@@ -305,7 +242,6 @@ interface PhotoLabelDao {
      */
     @Transaction
     suspend fun renameLabel(userId: String, fromKey: String, toKey: String, toLabel: String): Int {
-        touchAll(userId, photoKeysOfLabel(userId, fromKey) + photoKeysOfLabel(userId, toKey), System.currentTimeMillis())
         if (fromKey == toKey) {
             setSpelling(userId, toKey, toLabel)
             setNameSpelling(userId, toKey, toLabel)
@@ -364,9 +300,6 @@ interface PhotoLabelDao {
             val fit = rowsThatFit(labelsOfPhoto(userId, newKey), moving.map { it.copy(photoKey = newKey) })
             if (fit.isNotEmpty()) insertIgnore(fit)
             deleteAllOfPhoto(userId, oldKey)
-            val at = System.currentTimeMillis()
-            touch(userId, oldKey, at)
-            touch(userId, newKey, at)
             moved += fit.size
         }
         return moved
@@ -388,13 +321,12 @@ interface PhotoLabelDao {
     /**
      * Adopts the labels of [fromUser] (the guest) into [toUser] (the account signing in). A photo the
      * account has not labelled moves over whole; on one both have labelled, the account's labels win
-     * and the guest's join behind them up to [LabelNormalizer.MAX_LABELS]. Nothing is left under
-     * [fromUser]. Returns how many rows the account gained.
+     * and the guest's join behind them up to [LabelNormalizer.MAX_LABELS]. The guest's labels without a
+     * photo come along. Nothing is left under [fromUser]. Returns how many rows the account gained.
      */
     @Transaction
     suspend fun adoptUserRows(fromUser: String, toUser: String): Int {
         if (fromUser == toUser) return 0
-        touchAll(toUser, photoKeysForUser(fromUser), System.currentTimeMillis())
         copyNames(fromUser, toUser)
         var adopted = moveRowsWherePhotoFree(fromUser, toUser)
         for (key in photoKeysForUser(fromUser)) {
@@ -410,10 +342,9 @@ interface PhotoLabelDao {
     @Query("DELETE FROM photo_label WHERE userId = :userId")
     suspend fun deleteLabelRowsForUser(userId: String): Int
 
-    /** Removes every label of the account and the change times that go with them, for the sign-out wipe. */
+    /** Removes every label of the account, the ones without a photo included, for the sign-out wipe. */
     @Transaction
     suspend fun deleteAllForUser(userId: String): Int {
-        deleteStatesForUser(userId)
         deleteNamesForUser(userId)
         return deleteLabelRowsForUser(userId)
     }

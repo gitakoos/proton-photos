@@ -2276,8 +2276,18 @@
     <string name="label_add_hint">Dodaj oznako</string>
     <string name="label_add_chip">Dodaj oznako</string>
     <string name="label_remove_cd">Odstrani oznako %1$s</string>
-    <string name="label_full_hint">%1$d od %2$d oznak</string>
-    <string name="label_feedback_full">Fotografija ima lahko največ %1$d oznak</string>
+    <plurals name="label_full_hint">
+        <item quantity="one">%1$d od %2$d oznake</item>
+        <item quantity="two">%1$d od %2$d oznak</item>
+        <item quantity="few">%1$d od %2$d oznak</item>
+        <item quantity="other">%1$d od %2$d oznak</item>
+    </plurals>
+    <plurals name="label_feedback_full">
+        <item quantity="one">Fotografija ima lahko največ %1$d oznako</item>
+        <item quantity="two">Fotografija ima lahko največ %1$d oznaki</item>
+        <item quantity="few">Fotografija ima lahko največ %1$d oznake</item>
+        <item quantity="other">Fotografija ima lahko največ %1$d oznak</item>
+    </plurals>
     <string name="label_first_use_note">Oznake so shranjene samo v aplikaciji. Proton Drive nima lastnih oznak.</string>
     <string name="label_bulk_action">Dodaj oznake</string>
     <string name="label_bulk_hint">Oznake, ločene z vejicami</string>
@@ -2306,7 +2316,6 @@
     <string name="label_backup_step_uploading">Nalaganje oznak…</string>
     <string name="label_backup_step_looking">Iskanje shranjenih oznak…</string>
     <string name="label_backup_step_downloading">Prenašanje shranjenih oznak…</string>
-    <string name="label_backup_step_downloading_n">Prenašanje shranjenih oznak (%1$d od %2$d)…</string>
     <string name="label_backup_step_merging">Združevanje oznak…</string>
     <string name="label_input_hint">Poiščite ali dodajte oznako</string>
     <string name="label_create_row">Ustvari »%1$s«</string>
@@ -2314,14 +2323,24 @@
     <string name="label_no_photos">Brez fotografij</string>
     <string name="label_add_photos">Dodaj fotografije</string>
     <string name="label_picker_title">Dodaj fotografije oznaki »%1$s«</string>
+    <string name="label_picker_title_many">Dodaj fotografije izbranim oznakam</string>
+    <string name="label_delete_selected">Izbriši oznake</string>
+    <string name="label_delete_selected_title">Želite izbrisati izbrane oznake?</string>
+    <string name="label_delete_selected_message">Odstranjene bodo z vseh fotografij, na katerih so.</string>
+    <string name="label_leave_selection_title">Želite zapustiti oznake?</string>
+    <string name="label_leave_selection_message">Vaša izbira bo razveljavljena.</string>
+    <string name="label_leave_selection_confirm">Zapusti</string>
     <string name="label_backup_section">Oznake v Drive</string>
     <string name="label_backup_save_desc">Shranite šifrirano kopijo svojih oznak v Drive</string>
     <string name="label_backup_restore_desc">Združi oznake, ki jih je shranila ta ali druga naprava</string>
+    <string name="label_backup_restore_note">Obnovi oznake, shranjene takrat, tudi tiste, ki ste jih od takrat izbrisali. Oznake, dodane od takrat, ostanejo.</string>
+    <string name="label_backup_show_all">Pokaži vse (%1$d)</string>
+    <string name="label_backup_save_confirm_title">Želite shraniti oznake v Drive?</string>
+    <string name="label_backup_save_confirm_message">Kopija, ki jo je ta naprava shranila prej, bo zamenjana. Oznake so šifrirane od konca do konca, tako kot vaše fotografije.</string>
     <string name="label_backup_working_save">Shranjevanje oznak…</string>
     <string name="label_backup_working_restore">Obnavljanje oznak…</string>
     <string name="label_backup_folder_message">Shranjevanje ustvari mapo »Photos for Proton/Labels« v razdelku Moje datoteke. Oznake v njej so šifrirane od konca do konca, tako kot vaše fotografije, in zasedajo prostor v vašem Drive.</string>
     <string name="label_backup_nothing_message">Nobena fotografija še nima oznak. Najprej dodajte oznako fotografiji.</string>
-    <string name="label_backup_nothing_restore_title">Ni ničesar za obnovitev</string>
     <string name="label_backup_restore_empty">V Drive še ni shranjenih oznak. V napravi, ki jih ima, uporabite »Shrani v Drive« in poskusite znova.</string>
     <string name="label_backup_up_to_date">Vaše oznake so že posodobljene.</string>
     <plurals name="label_backup_saved_count">

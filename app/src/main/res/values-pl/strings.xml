@@ -2276,8 +2276,18 @@
     <string name="label_add_hint">Dodaj etykietę</string>
     <string name="label_add_chip">Dodaj etykietę</string>
     <string name="label_remove_cd">Usuń etykietę %1$s</string>
-    <string name="label_full_hint">%1$d z %2$d etykiet</string>
-    <string name="label_feedback_full">Zdjęcie może mieć maksymalnie %1$d etykiet</string>
+    <plurals name="label_full_hint">
+        <item quantity="one">%1$d z %2$d etykiety</item>
+        <item quantity="few">%1$d z %2$d etykiet</item>
+        <item quantity="many">%1$d z %2$d etykiet</item>
+        <item quantity="other">%1$d z %2$d etykiet</item>
+    </plurals>
+    <plurals name="label_feedback_full">
+        <item quantity="one">Zdjęcie może mieć maksymalnie %1$d etykietę</item>
+        <item quantity="few">Zdjęcie może mieć maksymalnie %1$d etykiety</item>
+        <item quantity="many">Zdjęcie może mieć maksymalnie %1$d etykiet</item>
+        <item quantity="other">Zdjęcie może mieć maksymalnie %1$d etykiety</item>
+    </plurals>
     <string name="label_first_use_note">Etykiety są zapisywane tylko w aplikacji. Proton Drive nie ma własnych etykiet.</string>
     <string name="label_bulk_action">Dodaj etykiety</string>
     <string name="label_bulk_hint">Etykiety oddzielone przecinkami</string>
@@ -2306,7 +2316,6 @@
     <string name="label_backup_step_uploading">Wysyłanie etykiet…</string>
     <string name="label_backup_step_looking">Szukanie zapisanych etykiet…</string>
     <string name="label_backup_step_downloading">Pobieranie zapisanych etykiet…</string>
-    <string name="label_backup_step_downloading_n">Pobieranie zapisanych etykiet (%1$d z %2$d)…</string>
     <string name="label_backup_step_merging">Scalanie etykiet…</string>
     <string name="label_input_hint">Szukaj lub dodaj etykietę</string>
     <string name="label_create_row">Utwórz „%1$s”</string>
@@ -2314,14 +2323,24 @@
     <string name="label_no_photos">Brak zdjęć</string>
     <string name="label_add_photos">Dodaj zdjęcia</string>
     <string name="label_picker_title">Dodaj zdjęcia do etykiety „%1$s”</string>
+    <string name="label_picker_title_many">Dodaj zdjęcia do wybranych etykiet</string>
+    <string name="label_delete_selected">Usuń etykiety</string>
+    <string name="label_delete_selected_title">Usunąć wybrane etykiety?</string>
+    <string name="label_delete_selected_message">Zostaną usunięte ze wszystkich zdjęć, na których są.</string>
+    <string name="label_leave_selection_title">Opuścić etykiety?</string>
+    <string name="label_leave_selection_message">Twoje zaznaczenie zostanie wyczyszczone.</string>
+    <string name="label_leave_selection_confirm">Opuść</string>
     <string name="label_backup_section">Etykiety w Drive</string>
     <string name="label_backup_save_desc">Przechowuj zaszyfrowaną kopię swoich etykiet w Drive</string>
     <string name="label_backup_restore_desc">Scal etykiety zapisane przez to lub inne urządzenie</string>
+    <string name="label_backup_restore_note">Przywraca etykiety zapisane wtedy, także te usunięte od tamtej pory. Etykiety dodane od tamtej pory zostają.</string>
+    <string name="label_backup_show_all">Pokaż wszystkie (%1$d)</string>
+    <string name="label_backup_save_confirm_title">Zapisać etykiety w Drive?</string>
+    <string name="label_backup_save_confirm_message">Kopia zapisana wcześniej przez to urządzenie zostanie zastąpiona. Etykiety są szyfrowane od końca do końca, tak jak Twoje zdjęcia.</string>
     <string name="label_backup_working_save">Zapisywanie etykiet…</string>
     <string name="label_backup_working_restore">Przywracanie etykiet…</string>
     <string name="label_backup_folder_message">Zapisanie utworzy folder „Photos for Proton/Labels” w sekcji Moje pliki. Etykiety w nim są szyfrowane od końca do końca, tak jak Twoje zdjęcia, i zajmują miejsce w Twoim Drive.</string>
     <string name="label_backup_nothing_message">Żadne zdjęcie nie ma jeszcze etykiet. Najpierw dodaj etykietę do zdjęcia.</string>
-    <string name="label_backup_nothing_restore_title">Nie ma czego przywracać</string>
     <string name="label_backup_restore_empty">W Drive nie ma jeszcze zapisanych etykiet. Na urządzeniu, które je ma, użyj opcji „Zapisz w Drive”, a potem spróbuj ponownie.</string>
     <string name="label_backup_up_to_date">Twoje etykiety są już aktualne.</string>
     <plurals name="label_backup_saved_count">

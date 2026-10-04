@@ -84,9 +84,11 @@ class MlSyncSignOutTest {
         val ended = signOut.stopFor(UserId("user"))
         events += "sign-out goes on"
 
+        // The wait ends when the tracked run, its hand-back included, has finished. The job's own completion
+        // follows a moment later, so it is joined rather than asserted.
         assertTrue(ended)
-        assertTrue(run.isCompleted)
         assertEquals(listOf("client closed", "run handed back", "sign-out goes on"), events.toList())
+        run.join()
     }
 
     @Test

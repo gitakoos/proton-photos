@@ -25,6 +25,7 @@ package eu.akoos.photos.data.label
 import androidx.work.Data
 import androidx.work.WorkInfo
 import androidx.work.workDataOf
+import eu.akoos.photos.data.mlsync.MlDriveNaming
 
 /*
  * The contract between the label sync worker and the controller the Labels settings read it through: what a
@@ -60,17 +61,15 @@ enum class LabelBackupStep {
 
     UPLOADING,
 
-    /** Listing what Drive holds. */
-    LOOKING,
-
+    /** Downloading the saved copy a restore was asked for. */
     DOWNLOADING,
 
-    /** Merging a downloaded copy into the labels here. */
+    /** Bringing the downloaded copy's labels back. */
     MERGING,
 }
 
-/** How far a running job has come: its [step], and for a restore [done] of [total] saved copies handled. */
-data class LabelBackupProgress(val step: LabelBackupStep, val done: Int = 0, val total: Int = 0) {
+/** How far a running job has come: the [step] it is on. */
+data class LabelBackupProgress(val step: LabelBackupStep) {
     companion object {
         /** A job WorkManager has not started yet. */
         val QUEUED = LabelBackupProgress(LabelBackupStep.PREPARING)
@@ -87,9 +86,6 @@ enum class LabelBackupResult {
 
     /** The saved labels are merged in. */
     RESTORED,
-
-    /** Drive holds no saved labels. */
-    NOTHING_TO_RESTORE,
 
     NOT_SIGNED_IN,
 
@@ -125,6 +121,20 @@ data class LabelBackupOutcome(
     val newLabels: Int = 0,
 )
 
+/**
+ * One saved copy of the labels in Drive, as the restore drawer lists it: which install saved it ([deviceLabel] is
+ * its model name, [isThisDevice] says it is this one), when, the Drive revision a restore reads, and the labels it
+ * would bring with the number of photos each is on.
+ */
+data class LabelSavedCopy(
+    val deviceId: String,
+    val deviceLabel: String,
+    val isThisDevice: Boolean,
+    val savedAtMillis: Long,
+    val revisionUid: String,
+    val labels: List<LabelCount>,
+)
+
 /** What the Labels settings page shows about the one running or finished job. */
 sealed interface LabelBackupState {
     data object Idle : LabelBackupState
@@ -148,8 +158,12 @@ sealed interface LabelSyncRequest {
         override val operation: LabelBackupOperation get() = LabelBackupOperation.SAVE
     }
 
-    /** Merge every install's saved labels into this one. */
-    data class Restore(override val userId: String) : LabelSyncRequest {
+    /** Bring back the labels in the saved copy of install [deviceId], the Drive revision [revisionUid]. */
+    data class Restore(
+        override val userId: String,
+        val deviceId: String,
+        val revisionUid: String,
+    ) : LabelSyncRequest {
         override val operation: LabelBackupOperation get() = LabelBackupOperation.RESTORE
     }
 }
@@ -199,9 +213,10 @@ object LabelSyncWorkData {
     internal const val KEY_USER_ID = "userId"
     internal const val KEY_CREATE_FOLDER = "createFolder"
 
+    internal const val KEY_DEVICE_ID = "deviceId"
+    internal const val KEY_REVISION = "revision"
+
     internal const val KEY_STEP = "step"
-    internal const val KEY_DONE = "done"
-    internal const val KEY_TOTAL = "total"
 
     internal const val KEY_RESULT = "result"
     internal const val KEY_PHOTOS = "photos"
@@ -219,18 +234,25 @@ object LabelSyncWorkData {
         is LabelSyncRequest.Restore -> workDataOf(
             KEY_OPERATION to request.operation.name,
             KEY_USER_ID to request.userId,
+            KEY_DEVICE_ID to request.deviceId,
+            KEY_REVISION to request.revisionUid,
         )
     }
 
     /**
-     * The request in [data], or null when it cannot be run: an unknown operation or no account id. A missing
-     * folder answer reads as not confirmed, so a misread request never creates a folder unasked.
+     * The request in [data], or null when it cannot be run: an unknown operation, no account id, or a restore
+     * without a well-formed install id and a revision. A missing folder answer reads as not confirmed, so a
+     * misread request never creates a folder unasked.
      */
     fun request(data: Data): LabelSyncRequest? {
         val userId = data.getString(KEY_USER_ID)?.takeIf { it.isNotBlank() } ?: return null
         return when (operation(data)) {
             LabelBackupOperation.SAVE -> LabelSyncRequest.Save(userId, data.getBoolean(KEY_CREATE_FOLDER, false))
-            LabelBackupOperation.RESTORE -> LabelSyncRequest.Restore(userId)
+            LabelBackupOperation.RESTORE -> {
+                val deviceId = data.getString(KEY_DEVICE_ID)?.takeIf { MlDriveNaming.isDeviceId(it) } ?: return null
+                val revision = data.getString(KEY_REVISION)?.takeIf { it.isNotBlank() } ?: return null
+                LabelSyncRequest.Restore(userId, deviceId, revision)
+            }
             null -> null
         }
     }
@@ -242,19 +264,11 @@ object LabelSyncWorkData {
     fun progress(operation: LabelBackupOperation, progress: LabelBackupProgress): Data = workDataOf(
         KEY_OPERATION to operation.name,
         KEY_STEP to progress.step.name,
-        KEY_DONE to progress.done,
-        KEY_TOTAL to progress.total,
     )
 
-    /** The progress in [data]; an unknown step reads as [LabelBackupStep.PREPARING], and done never exceeds the total. */
-    fun progress(data: Data): LabelBackupProgress {
-        val total = data.getInt(KEY_TOTAL, 0).coerceAtLeast(0)
-        return LabelBackupProgress(
-            step = enumOrNull<LabelBackupStep>(data.getString(KEY_STEP)) ?: LabelBackupStep.PREPARING,
-            done = data.getInt(KEY_DONE, 0).coerceIn(0, total),
-            total = total,
-        )
-    }
+    /** The progress in [data]; an unknown step reads as [LabelBackupStep.PREPARING]. */
+    fun progress(data: Data): LabelBackupProgress =
+        LabelBackupProgress(enumOrNull<LabelBackupStep>(data.getString(KEY_STEP)) ?: LabelBackupStep.PREPARING)
 
     /** The output data of a run that ended in [outcome]. */
     fun output(outcome: LabelBackupOutcome): Data = workDataOf(

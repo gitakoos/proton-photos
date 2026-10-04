@@ -457,8 +457,8 @@ fun NavGraph(
     var collageItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
     // Photos the in-app picker returned to add to the open collage.
     var collagePicked by remember { mutableStateOf<List<GalleryItem>?>(null) }
-    // The label the photo picker opened from the Labels settings adds the picked photos to.
-    var labelPickerTarget by remember { mutableStateOf<String?>(null) }
+    // The labels the photo picker opened from the Labels settings adds the picked photos to.
+    var labelPickerTargets by remember { mutableStateOf<List<String>>(emptyList()) }
     // The source manager's confirmed selection returned to the open video editor. Null (the initial and
     // post-consume value) is the no-pick sentinel; a non-null list is a real return, so an empty one still
     // removes every deselected source rather than reading as "nothing picked".
@@ -1600,31 +1600,39 @@ fun NavGraph(
         composable(Screen.LabelsSettings.route) {
             eu.akoos.photos.presentation.settings.LabelsSettingsScreen(
                 onBack = { navController.popBackStack() },
-                onAddPhotos = { label ->
-                    labelPickerTarget = label
+                onAddPhotos = { labelNames ->
+                    labelPickerTargets = labelNames
                     navController.navigate(Screen.LabelPhotoPicker.route)
                 },
             )
         }
 
         composable(Screen.LabelPhotoPicker.route) {
-            // The album picker in "return" mode: it hands the picked photos to the label chosen in the Labels
-            // settings, leaving out the photos that already carry it. It closes once the labels are written.
-            val label = labelPickerTarget
-            if (label == null) {
+            // The album picker in "return" mode: it hands the picked photos to the labels chosen in the Labels
+            // settings, leaving out the photos that already carry all of them. It closes once the labels are written.
+            val targets = labelPickerTargets
+            if (targets.isEmpty()) {
                 LaunchedEffect(Unit) { navController.popBackStack() }
             } else {
                 val labelsVm = hiltViewModel<eu.akoos.photos.presentation.common.AddLabelsViewModel>()
                 val pickerContext = LocalContext.current
-                var alreadyLabelled by remember(label) { mutableStateOf<Set<String>>(emptySet()) }
-                LaunchedEffect(label) { alreadyLabelled = labelsVm.photoKeysOf(label) }
+                var alreadyLabelled by remember(targets) { mutableStateOf<Set<String>>(emptySet()) }
+                LaunchedEffect(targets) {
+                    alreadyLabelled = eu.akoos.photos.presentation.settings.photosCarryingAll(
+                        targets.map { labelsVm.photoKeysOf(it) },
+                    )
+                }
                 AlbumPhotoPickerScreen(
-                    title = pickerContext.getString(R.string.label_picker_title, label),
+                    title = if (targets.size == 1) {
+                        pickerContext.getString(R.string.label_picker_title, targets.single())
+                    } else {
+                        pickerContext.getString(R.string.label_picker_title_many)
+                    },
                     showUnfiledFilter = false,
                     excludeKeys = alreadyLabelled,
                     onBack = { navController.popBackStack() },
                     onPick = { picked ->
-                        labelsVm.add(picked, listOf(label)) { result ->
+                        labelsVm.add(picked, targets) { result ->
                             val message = eu.akoos.photos.presentation.common.labelBulkMessage(result)
                                 .resolve(pickerContext.resources)
                             android.widget.Toast.makeText(pickerContext, message, android.widget.Toast.LENGTH_SHORT).show()

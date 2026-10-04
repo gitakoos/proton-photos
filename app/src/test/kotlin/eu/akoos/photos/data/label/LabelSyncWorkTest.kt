@@ -44,10 +44,28 @@ class LabelSyncWorkTest {
     }
 
     @Test
-    fun `a restore request survives the trip`() {
-        val request = LabelSyncRequest.Restore("user-1")
+    fun `a restore request survives the trip with the copy it names`() {
+        val request = LabelSyncRequest.Restore("user-1", DEVICE, "revision-9")
 
         assertEquals(request, LabelSyncWorkData.request(LabelSyncWorkData.input(request)))
+    }
+
+    @Test
+    fun `a restore without a well-formed install id or a revision cannot be read`() {
+        fun restore(device: String?, revision: String?) = LabelSyncWorkData.request(
+            androidx.work.Data.Builder()
+                .putString(LabelSyncWorkData.KEY_OPERATION, "RESTORE")
+                .putString(LabelSyncWorkData.KEY_USER_ID, "u")
+                .putString(LabelSyncWorkData.KEY_DEVICE_ID, device)
+                .putString(LabelSyncWorkData.KEY_REVISION, revision)
+                .build(),
+        )
+
+        assertEquals(LabelSyncRequest.Restore("u", DEVICE, "r"), restore(DEVICE, "r"))
+        assertNull(restore(null, "r"))
+        assertNull(restore("not-a-device", "r"))
+        assertNull(restore(DEVICE, null))
+        assertNull(restore(DEVICE, "  "))
     }
 
     @Test
@@ -69,12 +87,12 @@ class LabelSyncWorkTest {
     }
 
     @Test
-    fun `progress survives the trip and never counts past its total`() {
-        val progress = LabelBackupProgress(LabelBackupStep.DOWNLOADING, done = 1, total = 3)
+    fun `progress survives the trip`() {
+        for (step in LabelBackupStep.entries) {
+            val progress = LabelBackupProgress(step)
 
-        assertEquals(progress, LabelSyncWorkData.progress(LabelSyncWorkData.progress(LabelBackupOperation.RESTORE, progress)))
-        val overshoot = workDataOf(LabelSyncWorkData.KEY_DONE to 9, LabelSyncWorkData.KEY_TOTAL to 2)
-        assertEquals(2, LabelSyncWorkData.progress(overshoot).done)
+            assertEquals(progress, LabelSyncWorkData.progress(LabelSyncWorkData.progress(LabelBackupOperation.RESTORE, progress)))
+        }
     }
 
     @Test
@@ -105,6 +123,10 @@ class LabelSyncWorkTest {
 
         assertEquals(LabelBackupOperation.SAVE, LabelSyncWorkData.operationFromTags(listOf("other", tag)))
         assertNull(LabelSyncWorkData.operationFromTags(listOf("other")))
+    }
+
+    private companion object {
+        const val DEVICE = "0b5f3c2e-1111-4a4a-9c9c-123456789abc"
     }
 
     private fun work(

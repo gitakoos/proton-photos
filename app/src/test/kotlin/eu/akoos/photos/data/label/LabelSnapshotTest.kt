@@ -30,27 +30,23 @@ import org.junit.Test
 
 class LabelSnapshotTest {
 
-    private fun snapshot(deviceId: String, vararg photos: LabelSnapshotPhoto) =
-        LabelSnapshot(deviceId = deviceId, deviceLabel = "Phone", createdAtMillis = 1L, photos = photos.toList())
+    private fun snapshot(deviceId: String, vararg photos: LabelSnapshotPhoto, names: List<String> = emptyList()) =
+        LabelSnapshot(deviceId = deviceId, deviceLabel = "Phone", createdAtMillis = 1L, photos = photos.toList(), names = names)
 
-    private fun photo(key: String, at: Long, vararg labels: String) = LabelSnapshotPhoto(key, at, labels.toList())
+    private fun photo(key: String, vararg labels: String) = LabelSnapshotPhoto(key, labels.toList())
 
     @Test
     fun `a snapshot survives the round trip through its plaintext form`() {
-        val original = snapshot(OWN, photo(LINK, 5L, "Café", "beach"), photo(LINK_2, 6L))
+        val original = snapshot(OWN, photo(LINK, "Café", "beach"), photo(LINK_2), names = listOf("Empty", "Café"))
 
-        val decoded = LabelSnapshotCodec.decode(LabelSnapshotCodec.encode(original))
-
-        assertEquals(original, decoded)
+        assertEquals(original, LabelSnapshotCodec.decode(LabelSnapshotCodec.encode(original)))
     }
 
     @Test
-    fun `the labels without a photo survive the round trip, and an older file without them reads as none`() {
-        val original = snapshot(OWN, photo(LINK, 5L, "a")).copy(names = listOf("Empty", "Café"))
+    fun `a snapshot without labels that have no photo reads as having none`() {
+        val bytes = """{"v":1,"d":"$OWN","n":"x","c":1,"p":[]}""".toByteArray()
 
-        assertEquals(original, LabelSnapshotCodec.decode(LabelSnapshotCodec.encode(original)))
-        val old = """{"v":1,"d":"$OWN","n":"x","c":1,"p":[]}""".toByteArray()
-        assertEquals(emptyList<String>(), LabelSnapshotCodec.decode(old)?.names)
+        assertEquals(emptyList<String>(), LabelSnapshotCodec.decode(bytes)?.names)
     }
 
     @Test
@@ -76,84 +72,77 @@ class LabelSnapshotTest {
     }
 
     @Test
-    fun `a photo changed after the held list is taken, an older or equal one is not`() {
-        val remote = snapshot(
-            OTHER_DEVICE,
-            photo("newer", 20L, "a"),
-            photo("equal", 10L, "b"),
-            photo("older", 5L, "c"),
-        )
-
-        val plan = LabelSnapshotMerge.plan(remote, OWN, local = mapOf("newer" to 10L, "equal" to 10L, "older" to 10L), now = 100L)
-
-        assertEquals(listOf("newer"), plan.map { it.key })
+    fun `only a link id is portable between devices`() {
+        assertTrue(LabelSnapshotMerge.isPortableKey(LINK))
+        assertFalse(LabelSnapshotMerge.isPortableKey(URI))
+        assertFalse(LabelSnapshotMerge.isPortableKey("file:///sdcard/a.jpg"))
+        assertFalse(LabelSnapshotMerge.isPortableKey(""))
     }
 
     @Test
-    fun `a photo nothing is held for is taken, an empty list included`() {
-        val remote = snapshot(OTHER_DEVICE, photo("new", 3L, "a"), photo("gone", 4L))
+    fun `a device key is restored only from the copy this install saved itself`() {
+        val photos = arrayOf(photo(URI, "a"), photo(LINK, "b"))
 
-        val plan = LabelSnapshotMerge.plan(remote, OWN, local = emptyMap(), now = 100L)
-
-        assertEquals(listOf("new", "gone"), plan.map { it.key })
-        assertTrue(plan.last().labels.isEmpty())
-    }
-
-    @Test
-    fun `a removal saved later outranks an older list held here`() {
-        val remote = snapshot(OTHER_DEVICE, photo("p", 50L))
-
-        val plan = LabelSnapshotMerge.plan(remote, OWN, local = mapOf("p" to 40L), now = 100L)
-
-        assertEquals(1, plan.size)
-        assertTrue(plan.single().labels.isEmpty())
-    }
-
-    @Test
-    fun `a device key is taken only from the snapshot this install wrote`() {
-        val photos = arrayOf(photo(URI, 5L, "a"), photo(LINK, 5L, "b"))
-
-        val fromOther = LabelSnapshotMerge.plan(snapshot(OTHER_DEVICE, *photos), OWN, emptyMap(), now = 100L)
-        val fromOwn = LabelSnapshotMerge.plan(snapshot(OWN, *photos), OWN, emptyMap(), now = 100L)
+        val fromOther = LabelSnapshotMerge.usablePhotos(snapshot(OTHER_DEVICE, *photos), OWN)
+        val fromOwn = LabelSnapshotMerge.usablePhotos(snapshot(OWN, *photos), OWN)
 
         assertEquals(listOf(LINK), fromOther.map { it.key })
         assertEquals(listOf(URI, LINK), fromOwn.map { it.key })
     }
 
     @Test
-    fun `lists are cleaned and capped like a label write`() {
-        val remote = snapshot(
+    fun `a photo without a key is never restored`() {
+        assertTrue(LabelSnapshotMerge.usablePhotos(snapshot(OWN, photo("", "a")), OWN).isEmpty())
+    }
+
+    @Test
+    fun `the saved labels come first and the labels added since stay while there is room`() {
+        assertEquals(listOf("a", "b", "c"), LabelSnapshotMerge.restoredList(listOf("a", "b"), listOf("c")))
+        assertEquals(listOf("a", "b"), LabelSnapshotMerge.restoredList(listOf("a", "b"), listOf("B", "A")))
+        assertEquals(listOf("a"), LabelSnapshotMerge.restoredList(listOf("a"), emptyList()))
+        assertEquals(listOf("kept"), LabelSnapshotMerge.restoredList(emptyList(), listOf("kept")))
+    }
+
+    @Test
+    fun `a restored list never goes past the limit and the saved labels win the room`() {
+        val restored = LabelSnapshotMerge.restoredList(listOf("s1", "s2", "s3"), listOf("n1", "n2", "n3"))
+
+        assertEquals(listOf("s1", "s2", "s3", "n1", "n2"), restored)
+    }
+
+    @Test
+    fun `lists are cleaned like a label write`() {
+        assertEquals(
+            listOf("summer trip", "a"),
+            LabelSnapshotMerge.restoredList(listOf(" summer   trip ", "Summer Trip", "", "a"), emptyList()),
+        )
+    }
+
+    @Test
+    fun `the drawer counts each label's usable photos, most used first, and lists the empty ones last`() {
+        val saved = snapshot(
             OTHER_DEVICE,
-            photo("p", 5L, " summer   trip ", "Summer Trip", "", "a", "b", "c", "d", "e"),
+            photo(LINK, "Beach", "sun"),
+            photo(LINK_2, "BEACH"),
+            photo(URI, "device only"),
+            names = listOf("Empty", "beach"),
         )
 
-        val labels = LabelSnapshotMerge.plan(remote, OWN, emptyMap(), now = 100L).single().labels
+        val counts = LabelSnapshotMerge.counts(saved, OWN)
 
-        assertEquals(listOf("summer trip", "a", "b", "c", "d"), labels)
+        assertEquals(listOf(LabelCount("Beach", 2), LabelCount("sun", 1), LabelCount("Empty", 0)), counts)
     }
 
     @Test
-    fun `a time in the future counts as now`() {
-        val remote = snapshot(OTHER_DEVICE, photo("p", 9_999_999L, "a"))
+    fun `the copy this install saved counts its device photos too`() {
+        val saved = snapshot(OWN, photo(URI, "trip"), photo(LINK, "trip"))
 
-        val plan = LabelSnapshotMerge.plan(remote, OWN, emptyMap(), now = 100L)
-
-        assertEquals(100L, plan.single().changedAt)
+        assertEquals(listOf(LabelCount("trip", 2)), LabelSnapshotMerge.counts(saved, OWN))
     }
 
     @Test
-    fun `a photo without a key is skipped`() {
-        val remote = snapshot(OTHER_DEVICE, photo("", 5L, "a"))
-
-        assertTrue(LabelSnapshotMerge.plan(remote, OWN, emptyMap(), now = 100L).isEmpty())
-    }
-
-    @Test
-    fun `only a link id is portable between devices`() {
-        assertTrue(LabelSnapshotMerge.isPortableKey(LINK))
-        assertFalse(LabelSnapshotMerge.isPortableKey(URI))
-        assertFalse(LabelSnapshotMerge.isPortableKey("file:///sdcard/a.jpg"))
-        assertFalse(LabelSnapshotMerge.isPortableKey(""))
+    fun `a copy with nothing in it counts nothing`() {
+        assertTrue(LabelSnapshotMerge.counts(snapshot(OWN), OWN).isEmpty())
     }
 
     private companion object {

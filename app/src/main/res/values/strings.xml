@@ -1856,8 +1856,14 @@
     <string name="label_add_hint">Add a label</string>
     <string name="label_add_chip">Add label</string>
     <string name="label_remove_cd">Remove label %1$s</string>
-    <string name="label_full_hint">%1$d of %2$d labels</string>
-    <string name="label_feedback_full">A photo can have up to %1$d labels</string>
+    <plurals name="label_full_hint">
+        <item quantity="one">%1$d of %2$d label</item>
+        <item quantity="other">%1$d of %2$d labels</item>
+    </plurals>
+    <plurals name="label_feedback_full">
+        <item quantity="one">A photo can have up to %1$d label</item>
+        <item quantity="other">A photo can have up to %1$d labels</item>
+    </plurals>
     <string name="label_first_use_note">Labels are saved inside the app. Proton Drive has no labels of its own.</string>
     <string name="label_bulk_action">Add labels</string>
     <string name="label_bulk_hint">Labels, separated by commas</string>
@@ -1882,7 +1888,6 @@
     <string name="label_backup_step_uploading">Uploading labels…</string>
     <string name="label_backup_step_looking">Looking for saved labels…</string>
     <string name="label_backup_step_downloading">Downloading saved labels…</string>
-    <string name="label_backup_step_downloading_n">Downloading saved labels (%1$d of %2$d)…</string>
     <string name="label_backup_step_merging">Merging labels…</string>
     <string name="label_input_hint">Search or add a label</string>
     <string name="label_create_row">Create \"%1$s\"</string>
@@ -1890,14 +1895,24 @@
     <string name="label_no_photos">No photos</string>
     <string name="label_add_photos">Add photos</string>
     <string name="label_picker_title">Add photos to \"%1$s\"</string>
+    <string name="label_picker_title_many">Add photos to the selected labels</string>
+    <string name="label_delete_selected">Delete labels</string>
+    <string name="label_delete_selected_title">Delete the selected labels?</string>
+    <string name="label_delete_selected_message">They are removed from every photo they are on.</string>
+    <string name="label_leave_selection_title">Leave the Labels page?</string>
+    <string name="label_leave_selection_message">Your selection will be cleared.</string>
+    <string name="label_leave_selection_confirm">Leave</string>
     <string name="label_backup_section">Labels on Drive</string>
     <string name="label_backup_save_desc">Keep an encrypted copy of your labels in Drive</string>
     <string name="label_backup_restore_desc">Merge the labels saved by this or another device</string>
+    <string name="label_backup_restore_note">Brings back the labels saved then, including ones you have deleted since. Labels you added since stay.</string>
+    <string name="label_backup_show_all">Show all (%1$d)</string>
+    <string name="label_backup_save_confirm_title">Save labels to Drive?</string>
+    <string name="label_backup_save_confirm_message">The copy this device saved earlier is replaced. The labels are end-to-end encrypted, like your photos.</string>
     <string name="label_backup_working_save">Saving labels…</string>
     <string name="label_backup_working_restore">Restoring labels…</string>
     <string name="label_backup_folder_message">Saving creates the \"Photos for Proton/Labels\" folder in My files. The labels in it are end-to-end encrypted, like your photos, and count toward your Drive storage.</string>
     <string name="label_backup_nothing_message">No photo has labels yet. Add a label to a photo first.</string>
-    <string name="label_backup_nothing_restore_title">Nothing to restore</string>
     <string name="label_backup_restore_empty">No labels are saved on Drive yet. Use \"Save to Drive\" on the device that has them, then try again.</string>
     <string name="label_backup_up_to_date">Your labels are already up to date.</string>
     <plurals name="label_backup_saved_count">

@@ -43,8 +43,8 @@ class LabelSnapshotSealingTest {
         deviceLabel = "Phone",
         createdAtMillis = 12L,
         photos = listOf(
-            LabelSnapshotPhoto("link-1", 5L, listOf("Café", "beach")),
-            LabelSnapshotPhoto("link-2", 6L, emptyList()),
+            LabelSnapshotPhoto("link-1", listOf("Café", "beach")),
+            LabelSnapshotPhoto("link-2", emptyList()),
         ),
     )
 

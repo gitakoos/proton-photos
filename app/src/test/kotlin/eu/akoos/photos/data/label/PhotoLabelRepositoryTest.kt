@@ -209,6 +209,76 @@ class PhotoLabelRepositoryTest {
     }
 
     @Test
+    fun `signing out wipes the account's labels and created labels and nobody else's`() = runTest {
+        primary.value = ACCOUNT
+        repo.setLabels(URI, listOf("mine"))
+        repo.createLabel("Empty")
+        dao.insertIgnore(listOf(eu.akoos.photos.data.db.entity.PhotoLabelEntity("other", URI, "theirs", "theirs", 1L)))
+        dao.insertName(eu.akoos.photos.data.db.entity.PhotoLabelNameEntity("other", "kept", "Kept", 1L))
+
+        repo.clearForUser(ACCOUNT)
+
+        assertTrue(dao.allLabelsForUser(ACCOUNT.id).isEmpty())
+        assertTrue(dao.namesForUser(ACCOUNT.id).isEmpty())
+        assertEquals(listOf("theirs"), dao.labelsOfPhoto("other", URI).map { it.label })
+        assertEquals(listOf("Kept"), dao.namesForUser("other").map { it.label })
+    }
+
+    @Test
+    fun `after a sign-out the guest's labels are adopted again by the next account`() = runTest {
+        primary.value = ACCOUNT
+        repo.setLabels(LINK, listOf("first"))
+        repo.clearForUser(ACCOUNT)
+        primary.value = null
+        repo.setLabels(URI_2, listOf("guest"))
+        primary.value = ACCOUNT
+
+        repo.setLabels(LINK, listOf("second"))
+
+        assertEquals(listOf("guest"), labels(URI_2, ACCOUNT.id))
+        assertEquals(listOf("second"), labels(LINK, ACCOUNT.id))
+    }
+
+    @Test
+    fun `a photo hidden into the vault loses its labels under both keys whoever wrote them`() = runTest {
+        primary.value = ACCOUNT
+        repo.setLabels(URI, listOf("a"))
+        repo.setLabels(LINK, listOf("b"))
+        repo.setLabels(LINK_2, listOf("kept"))
+        dao.insertIgnore(listOf(eu.akoos.photos.data.db.entity.PhotoLabelEntity("local", URI, "guest", "guest", 1L)))
+
+        repo.deleteForPhotos(listOf(URI, LINK))
+
+        assertTrue(labels(URI, ACCOUNT.id).isEmpty())
+        assertTrue(labels(LINK, ACCOUNT.id).isEmpty())
+        assertTrue(labels(URI, GUEST).isEmpty())
+        assertEquals(listOf("kept"), labels(LINK_2, ACCOUNT.id))
+    }
+
+    @Test
+    fun `the labels put on a device photo follow it to its Drive identity when it is uploaded`() = runTest {
+        primary.value = ACCOUNT
+        repo.setLabels(URI, listOf("trip", "sun"))
+
+        repo.rekeyFor(ACCOUNT, URI, LINK)
+
+        assertTrue(labels(URI, ACCOUNT.id).isEmpty())
+        assertEquals(listOf("trip", "sun"), labels(LINK, ACCOUNT.id))
+        assertEquals(listOf("trip", "sun"), repo.labelsFor(GalleryItem.Synced(cloud(LINK), local(URI))))
+    }
+
+    @Test
+    fun `a Synced photo whose upload never moved its labels still reads and keeps them`() = runTest {
+        primary.value = ACCOUNT
+        repo.setLabels(URI, listOf("trip"))
+        val synced = GalleryItem.Synced(cloud(LINK), local(URI))
+
+        assertEquals(listOf("trip"), repo.labelsFor(synced))
+        assertEquals(listOf("trip"), labels(LINK, ACCOUNT.id))
+        assertTrue(labels(URI, ACCOUNT.id).isEmpty())
+    }
+
+    @Test
     fun `deleting for photos and clearing an account remove the rows`() = runTest {
         primary.value = ACCOUNT
         repo.setLabels(URI, listOf("a"))
@@ -229,5 +299,6 @@ class PhotoLabelRepositoryTest {
         const val URI = "content://media/external/images/media/1"
         const val URI_2 = "content://media/external/images/media/2"
         const val LINK = "link-1"
+        const val LINK_2 = "link-2"
     }
 }

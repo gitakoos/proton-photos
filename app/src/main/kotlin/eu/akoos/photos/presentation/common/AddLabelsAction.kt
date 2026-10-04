@@ -78,6 +78,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -393,9 +394,11 @@ private fun AddLabelsSheet(
     val focus = remember { FocusRequester() }
     val confirm = { if (canConfirm) onConfirm(result) }
     val hint = when {
-        full -> stringResource(R.string.label_feedback_full, LabelNormalizer.MAX_LABELS)
+        full -> pluralStringResource(R.plurals.label_feedback_full, LabelNormalizer.MAX_LABELS, LabelNormalizer.MAX_LABELS)
         editing && input.pills.isNotEmpty() ->
-            stringResource(R.string.label_full_hint, input.pills.size, LabelNormalizer.MAX_LABELS)
+            pluralStringResource(
+                R.plurals.label_full_hint, LabelNormalizer.MAX_LABELS, input.pills.size, LabelNormalizer.MAX_LABELS,
+            )
         else -> null
     }
 

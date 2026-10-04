@@ -155,7 +155,6 @@ import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelNameEntity
-import eu.akoos.photos.data.db.entity.PhotoLabelStateEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
@@ -200,7 +199,6 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         ImageEmbeddingEntity::class,
         PhotoLabelEntity::class,
         PhotoLabelNameEntity::class,
-        PhotoLabelStateEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -240,7 +238,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 44,
+    version = 46,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),

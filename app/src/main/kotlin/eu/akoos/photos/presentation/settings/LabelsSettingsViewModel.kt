@@ -28,11 +28,14 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.akoos.photos.data.db.dao.LabelUsage
 import eu.akoos.photos.data.label.LabelBackupController
+import eu.akoos.photos.data.label.LabelBackupRunner
 import eu.akoos.photos.data.label.LabelBackupStart
 import eu.akoos.photos.data.label.LabelBackupState
 import eu.akoos.photos.data.label.LabelCreation
+import eu.akoos.photos.data.label.LabelSavedCopy
 import eu.akoos.photos.data.label.PhotoLabelRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -40,6 +43,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -48,6 +52,23 @@ import javax.inject.Inject
 
 /** Whether the Drive section may show: an account ([signedIn]) on a device the Drive copy runs on. */
 internal data class LabelBackupAccess(val signedIn: Boolean, val driveAvailable: Boolean)
+
+/** The restore drawer: the listing, then the pick of one saved copy. */
+internal sealed interface LabelRestoreSheet {
+    data object Hidden : LabelRestoreSheet
+
+    /** The Labels folder is being listed and each copy opened. */
+    data object Loading : LabelRestoreSheet
+
+    /** The saved copies, newest first, and the install whose copy is picked. */
+    data class Pick(val copies: List<LabelSavedCopy>, val selectedId: String?) : LabelRestoreSheet
+
+    /** Nothing is saved yet. */
+    data object Empty : LabelRestoreSheet
+
+    /** The listing failed, or no copy could be read. */
+    data object Failed : LabelRestoreSheet
+}
 
 /**
  * The Settings Labels page: the account's labels with their photo counts, create / rename / merge / delete, and
@@ -118,10 +139,63 @@ class LabelsSettingsViewModel @Inject constructor(
         backup.dismissResult()
     }
 
-    /** Merges every install's saved labels into this one. */
-    fun restoreFromDrive() = launchBackup {
-        val userId = currentUser() ?: return@launchBackup
-        backup.restore(userId)
+    private val _restoreSheet = MutableStateFlow<LabelRestoreSheet>(LabelRestoreSheet.Hidden)
+    internal val restoreSheet: StateFlow<LabelRestoreSheet> = _restoreSheet.asStateFlow()
+
+    private var listing: Job? = null
+
+    /** Opens the restore drawer and lists the saved copies, each with when it was saved and what it holds. */
+    fun openRestore() {
+        listing?.cancel()
+        _restoreSheet.value = LabelRestoreSheet.Loading
+        listing = viewModelScope.launch {
+            val sheet = try {
+                val userId = currentUser()
+                if (userId == null) {
+                    LabelRestoreSheet.Hidden
+                } else {
+                    when (val copies = backup.listCopies(userId)) {
+                        is LabelBackupRunner.Copies.Found ->
+                            LabelRestoreSheet.Pick(copies.copies, copies.copies.firstOrNull()?.deviceId)
+                        LabelBackupRunner.Copies.Empty -> LabelRestoreSheet.Empty
+                        LabelBackupRunner.Copies.NotCapable, LabelBackupRunner.Copies.Failed -> LabelRestoreSheet.Failed
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "listing failed: ${e.javaClass.simpleName}")
+                LabelRestoreSheet.Failed
+            }
+            if (_restoreSheet.value == LabelRestoreSheet.Loading) _restoreSheet.value = sheet
+        }
+    }
+
+    fun selectCopy(deviceId: String) {
+        _restoreSheet.update { sheet ->
+            if (sheet is LabelRestoreSheet.Pick && sheet.copies.any { it.deviceId == deviceId }) {
+                sheet.copy(selectedId = deviceId)
+            } else {
+                sheet
+            }
+        }
+    }
+
+    /** Restores the picked copy. The drawer has already slid away. */
+    fun restoreSelected() {
+        val pick = _restoreSheet.value as? LabelRestoreSheet.Pick
+        _restoreSheet.value = LabelRestoreSheet.Hidden
+        val copy = pick?.copies?.firstOrNull { it.deviceId == pick.selectedId } ?: return
+        launchBackup {
+            val userId = currentUser() ?: return@launchBackup
+            backup.restore(userId, copy)
+        }
+    }
+
+    fun closeRestore() {
+        listing?.cancel()
+        listing = null
+        _restoreSheet.value = LabelRestoreSheet.Hidden
     }
 
     /** Stops the running save or restore. */
@@ -149,6 +223,9 @@ class LabelsSettingsViewModel @Inject constructor(
 
     /** Takes [label] off every photo and forgets it. */
     fun delete(label: String) = write { labelRepo.deleteLabel(label) }
+
+    /** Takes every label of [labels] off every photo and forgets them. */
+    fun deleteMany(labels: Collection<String>) = write { labelRepo.deleteLabels(labels) }
 
     /** Runs [block], one tap at a time. */
     private fun launchBackup(block: suspend () -> Unit) {

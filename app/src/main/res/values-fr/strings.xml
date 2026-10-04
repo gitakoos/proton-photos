@@ -2174,8 +2174,14 @@
     <string name="label_add_hint">Ajouter une étiquette</string>
     <string name="label_add_chip">Ajouter une étiquette</string>
     <string name="label_remove_cd">Retirer l\'étiquette %1$s</string>
-    <string name="label_full_hint">%1$d sur %2$d étiquettes</string>
-    <string name="label_feedback_full">Une photo peut avoir jusqu\'à %1$d étiquettes</string>
+    <plurals name="label_full_hint">
+        <item quantity="one">%1$d sur %2$d étiquette</item>
+        <item quantity="other">%1$d sur %2$d étiquettes</item>
+    </plurals>
+    <plurals name="label_feedback_full">
+        <item quantity="one">Une photo peut avoir jusqu\'à %1$d étiquette</item>
+        <item quantity="other">Une photo peut avoir jusqu\'à %1$d étiquettes</item>
+    </plurals>
     <string name="label_first_use_note">Les étiquettes sont enregistrées uniquement dans l\'application. Proton Drive n\'a pas d\'étiquettes propres.</string>
     <string name="label_bulk_action">Ajouter des étiquettes</string>
     <string name="label_bulk_hint">Étiquettes séparées par des virgules</string>
@@ -2200,7 +2206,6 @@
     <string name="label_backup_step_uploading">Envoi des étiquettes…</string>
     <string name="label_backup_step_looking">Recherche des étiquettes enregistrées…</string>
     <string name="label_backup_step_downloading">Téléchargement des étiquettes enregistrées…</string>
-    <string name="label_backup_step_downloading_n">Téléchargement des étiquettes enregistrées (%1$d sur %2$d)…</string>
     <string name="label_backup_step_merging">Fusion des étiquettes…</string>
     <string name="label_input_hint">Rechercher ou ajouter une étiquette</string>
     <string name="label_create_row">Créer « %1$s »</string>
@@ -2208,14 +2213,24 @@
     <string name="label_no_photos">Aucune photo</string>
     <string name="label_add_photos">Ajouter des photos</string>
     <string name="label_picker_title">Ajouter des photos à « %1$s »</string>
+    <string name="label_picker_title_many">Ajouter des photos aux étiquettes sélectionnées</string>
+    <string name="label_delete_selected">Supprimer les étiquettes</string>
+    <string name="label_delete_selected_title">Supprimer les étiquettes sélectionnées ?</string>
+    <string name="label_delete_selected_message">Elles sont retirées de toutes les photos où elles se trouvent.</string>
+    <string name="label_leave_selection_title">Quitter les étiquettes ?</string>
+    <string name="label_leave_selection_message">Votre sélection sera effacée.</string>
+    <string name="label_leave_selection_confirm">Quitter</string>
     <string name="label_backup_section">Étiquettes sur Drive</string>
     <string name="label_backup_save_desc">Conservez une copie chiffrée de vos étiquettes dans Drive</string>
     <string name="label_backup_restore_desc">Fusionnez les étiquettes enregistrées par cet appareil ou un autre</string>
+    <string name="label_backup_restore_note">Restaure les étiquettes enregistrées à ce moment-là, y compris celles supprimées depuis. Les étiquettes ajoutées depuis sont conservées.</string>
+    <string name="label_backup_show_all">Tout afficher (%1$d)</string>
+    <string name="label_backup_save_confirm_title">Enregistrer les étiquettes sur Drive ?</string>
+    <string name="label_backup_save_confirm_message">La copie enregistrée plus tôt par cet appareil est remplacée. Les étiquettes sont chiffrées de bout en bout, comme vos photos.</string>
     <string name="label_backup_working_save">Enregistrement des étiquettes…</string>
     <string name="label_backup_working_restore">Restauration des étiquettes…</string>
     <string name="label_backup_folder_message">L\'enregistrement crée le dossier « Photos for Proton/Labels » dans Mes fichiers. Les étiquettes qu\'il contient sont chiffrées de bout en bout, comme vos photos, et occupent de l\'espace dans votre Drive.</string>
     <string name="label_backup_nothing_message">Aucune photo n\'a encore d\'étiquette. Ajoutez d\'abord une étiquette à une photo.</string>
-    <string name="label_backup_nothing_restore_title">Rien à restaurer</string>
     <string name="label_backup_restore_empty">Aucune étiquette n\'est encore enregistrée sur Drive. Sur l\'appareil qui les a, utilisez « Enregistrer sur Drive », puis réessayez.</string>
     <string name="label_backup_up_to_date">Vos étiquettes sont déjà à jour.</string>
     <plurals name="label_backup_saved_count">

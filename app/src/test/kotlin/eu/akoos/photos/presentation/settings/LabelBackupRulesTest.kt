@@ -28,9 +28,12 @@ import eu.akoos.photos.data.label.LabelBackupOutcome
 import eu.akoos.photos.data.label.LabelBackupProgress
 import eu.akoos.photos.data.label.LabelBackupResult
 import eu.akoos.photos.data.label.LabelBackupState
+import eu.akoos.photos.data.label.LabelCount
 import eu.akoos.photos.data.label.LabelBackupStep
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LabelBackupRulesTest {
@@ -110,23 +113,39 @@ class LabelBackupRulesTest {
             labelBackupStepText(LabelBackupProgress(LabelBackupStep.UPLOADING)).res,
         )
         assertEquals(
-            R.string.label_backup_step_looking,
-            labelBackupStepText(LabelBackupProgress(LabelBackupStep.LOOKING)).res,
+            R.string.label_backup_step_downloading,
+            labelBackupStepText(LabelBackupProgress(LabelBackupStep.DOWNLOADING)).res,
         )
         assertEquals(
             R.string.label_backup_step_merging,
-            labelBackupStepText(LabelBackupProgress(LabelBackupStep.MERGING, done = 0, total = 2)).res,
+            labelBackupStepText(LabelBackupProgress(LabelBackupStep.MERGING)).res,
         )
     }
 
     @Test
-    fun `a restore of several saved copies counts them while it downloads`() {
-        val one = labelBackupStepText(LabelBackupProgress(LabelBackupStep.DOWNLOADING, done = 0, total = 1))
-        val second = labelBackupStepText(LabelBackupProgress(LabelBackupStep.DOWNLOADING, done = 1, total = 3))
+    fun `a picked copy lists its first five labels and counts the rest behind Show all`() {
+        val labels = (1..100).map { LabelCount("label $it", it) }
 
-        assertEquals(R.string.label_backup_step_downloading, one.res)
-        assertEquals(R.string.label_backup_step_downloading_n, second.res)
-        assertEquals(listOf(2, 3), second.args)
+        val preview = labelCopyPreview(labels)
+
+        assertEquals(labels.take(5), preview.shown)
+        assertEquals(100, preview.total)
+        assertTrue(preview.hasMore)
+    }
+
+    @Test
+    fun `a copy of five labels or fewer shows them all with no Show all`() {
+        val five = (1..5).map { LabelCount("label $it", 1) }
+
+        assertFalse(labelCopyPreview(five).hasMore)
+        assertEquals(five, labelCopyPreview(five).shown)
+        assertFalse(labelCopyPreview(emptyList()).hasMore)
+        assertTrue(labelCopyPreview(five + LabelCount("six", 1)).hasMore)
+    }
+
+    @Test
+    fun `every step has a line`() {
+        for (step in LabelBackupStep.entries) labelBackupStepText(LabelBackupProgress(step))
     }
 
     @Test
@@ -148,12 +167,10 @@ class LabelBackupRulesTest {
     }
 
     @Test
-    fun `an empty Drive is told apart from a failure`() {
-        val empty = labelBackupNotice(LabelBackupOutcome(LabelBackupOperation.RESTORE, LabelBackupResult.NOTHING_TO_RESTORE))
+    fun `nothing to save is told apart from a failure`() {
         val none = labelBackupNotice(LabelBackupOutcome(LabelBackupOperation.SAVE, LabelBackupResult.NOTHING_TO_SAVE))
 
-        assertEquals(R.string.label_backup_nothing_restore_title, empty.title)
-        assertEquals(R.string.label_backup_restore_empty, empty.line)
+        assertEquals(R.string.settings_ml_drive_nothing_title, none.title)
         assertEquals(R.string.label_backup_nothing_message, none.line)
     }
 

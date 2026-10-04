@@ -38,6 +38,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
@@ -65,8 +68,8 @@ import eu.akoos.photos.presentation.theme.AppColors
  *
  * Save uploads this device's labels, sealed to the account, into My files / Photos for Proton / Labels; the
  * first save finds no such folder and only asks before creating it. Restore merges what every device of the
- * account saved there, newest change winning per photo. Both run in the background with a notification. While
- * one runs, its own row turns into the running job, with the step it is on and a Cancel, and the other row is
+ * account saved there: Restore opens a drawer that lists the saved copies, and one picked copy comes back. Both
+ * run in the background with a notification. While one runs, its own row turns into the running job, with the step it is on and a Cancel, and the other row is
  * held back until it ends; a finished job says what it did until closed.
  *
  * Account-only, as the file lives in the account's Drive and is sealed to its key: the section is absent for a
@@ -78,6 +81,7 @@ internal fun LabelBackupSection(viewModel: LabelsSettingsViewModel) {
     val jobState by viewModel.backupState.collectAsStateWithLifecycle()
     val preparingSave by viewModel.preparingSave.collectAsStateWithLifecycle()
     val folderPrompt by viewModel.folderPrompt.collectAsStateWithLifecycle()
+    var confirmSave by rememberSaveable { mutableStateOf(false) }
     val state = labelBackupShownState(jobState, preparingSave)
     val mode = labelBackupMode(access.signedIn, access.driveAvailable, state)
     if (mode == LabelBackupMode.HIDDEN) return
@@ -95,7 +99,7 @@ internal fun LabelBackupSection(viewModel: LabelsSettingsViewModel) {
                     label = stringResource(R.string.settings_ml_drive_save),
                     description = stringResource(R.string.label_backup_save_desc),
                     icon = Icons.Default.CloudUpload,
-                    onClick = viewModel::saveToDrive,
+                    onClick = { confirmSave = true },
                     enabled = actionsEnabled,
                 )
             }
@@ -107,7 +111,7 @@ internal fun LabelBackupSection(viewModel: LabelsSettingsViewModel) {
                     label = stringResource(R.string.settings_ml_drive_restore),
                     description = stringResource(R.string.label_backup_restore_desc),
                     icon = Icons.Default.CloudDownload,
-                    onClick = viewModel::restoreFromDrive,
+                    onClick = viewModel::openRestore,
                     enabled = actionsEnabled,
                 )
             }
@@ -118,6 +122,30 @@ internal fun LabelBackupSection(viewModel: LabelsSettingsViewModel) {
     // window of its own that would open above the app lock. Under the lock none is composed; each keeps its
     // state in the view model and shows on the unlock.
     if (LocalAppLock.current.isLocked) return
+
+    if (confirmSave) {
+        ConfirmSheet(
+            title = stringResource(R.string.label_backup_save_confirm_title),
+            message = stringResource(R.string.label_backup_save_confirm_message),
+            confirmLabel = stringResource(R.string.settings_ml_drive_save),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                confirmSave = false
+                viewModel.saveToDrive()
+            },
+            onDismiss = { confirmSave = false },
+        )
+    }
+
+    val restoreSheet by viewModel.restoreSheet.collectAsStateWithLifecycle()
+    if (restoreSheet != LabelRestoreSheet.Hidden) {
+        LabelRestoreDrawer(
+            sheet = restoreSheet,
+            onSelect = viewModel::selectCopy,
+            onRestore = viewModel::restoreSelected,
+            onClose = viewModel::closeRestore,
+        )
+    }
 
     when (val notice = labelBackupSheet(folderPrompt, state)) {
         null -> Unit

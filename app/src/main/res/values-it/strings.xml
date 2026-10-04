@@ -2211,8 +2211,14 @@
     <string name="label_add_hint">Aggiungi un\'etichetta</string>
     <string name="label_add_chip">Aggiungi etichetta</string>
     <string name="label_remove_cd">Rimuovi l\'etichetta %1$s</string>
-    <string name="label_full_hint">%1$d di %2$d etichette</string>
-    <string name="label_feedback_full">Una foto può avere fino a %1$d etichette</string>
+    <plurals name="label_full_hint">
+        <item quantity="one">%1$d di %2$d etichetta</item>
+        <item quantity="other">%1$d di %2$d etichette</item>
+    </plurals>
+    <plurals name="label_feedback_full">
+        <item quantity="one">Una foto può avere fino a %1$d etichetta</item>
+        <item quantity="other">Una foto può avere fino a %1$d etichette</item>
+    </plurals>
     <string name="label_first_use_note">Le etichette vengono salvate solo nell\'app. Proton Drive non ha etichette proprie.</string>
     <string name="label_bulk_action">Aggiungi etichette</string>
     <string name="label_bulk_hint">Etichette separate da virgole</string>
@@ -2237,7 +2243,6 @@
     <string name="label_backup_step_uploading">Caricamento delle etichette…</string>
     <string name="label_backup_step_looking">Ricerca delle etichette salvate…</string>
     <string name="label_backup_step_downloading">Download delle etichette salvate…</string>
-    <string name="label_backup_step_downloading_n">Download delle etichette salvate (%1$d di %2$d)…</string>
     <string name="label_backup_step_merging">Unione delle etichette…</string>
     <string name="label_input_hint">Cerca o aggiungi un\'etichetta</string>
     <string name="label_create_row">Crea \"%1$s\"</string>
@@ -2245,14 +2250,24 @@
     <string name="label_no_photos">Nessuna foto</string>
     <string name="label_add_photos">Aggiungi foto</string>
     <string name="label_picker_title">Aggiungi foto a \"%1$s\"</string>
+    <string name="label_picker_title_many">Aggiungi foto alle etichette selezionate</string>
+    <string name="label_delete_selected">Elimina etichette</string>
+    <string name="label_delete_selected_title">Eliminare le etichette selezionate?</string>
+    <string name="label_delete_selected_message">Vengono rimosse da tutte le foto su cui si trovano.</string>
+    <string name="label_leave_selection_title">Uscire dalle etichette?</string>
+    <string name="label_leave_selection_message">La selezione verrà annullata.</string>
+    <string name="label_leave_selection_confirm">Esci</string>
     <string name="label_backup_section">Etichette su Drive</string>
     <string name="label_backup_save_desc">Conserva una copia crittografata delle tue etichette in Drive</string>
     <string name="label_backup_restore_desc">Unisci le etichette salvate da questo o da un altro dispositivo</string>
+    <string name="label_backup_restore_note">Ripristina le etichette salvate allora, comprese quelle eliminate da allora. Le etichette aggiunte da allora restano.</string>
+    <string name="label_backup_show_all">Mostra tutte (%1$d)</string>
+    <string name="label_backup_save_confirm_title">Salvare le etichette su Drive?</string>
+    <string name="label_backup_save_confirm_message">La copia salvata in precedenza da questo dispositivo viene sostituita. Le etichette sono crittografate end-to-end, come le tue foto.</string>
     <string name="label_backup_working_save">Salvataggio delle etichette…</string>
     <string name="label_backup_working_restore">Ripristino delle etichette…</string>
     <string name="label_backup_folder_message">Il salvataggio crea la cartella \"Photos for Proton/Labels\" nella sezione I miei file. Le etichette al suo interno sono crittografate end-to-end, come le tue foto, e occupano spazio nel tuo Drive.</string>
     <string name="label_backup_nothing_message">Nessuna foto ha ancora etichette. Aggiungi prima un\'etichetta a una foto.</string>
-    <string name="label_backup_nothing_restore_title">Niente da ripristinare</string>
     <string name="label_backup_restore_empty">Non ci sono ancora etichette salvate su Drive. Sul dispositivo che le ha, usa \"Salva su Drive\" e riprova.</string>
     <string name="label_backup_up_to_date">Le tue etichette sono già aggiornate.</string>
     <plurals name="label_backup_saved_count">

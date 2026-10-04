@@ -182,7 +182,7 @@ class PhotoLabelRepository @Inject constructor(
     /** Removes [label] from the photo under [photoKey]. Returns true when it was there. */
     suspend fun removeLabel(photoKey: String, label: String): Boolean {
         ensureUnlocked()
-        return dao.removeLabelOfPhoto(writableUserKey(), photoKey, LabelNormalizer.fold(label))
+        return dao.deleteLabelOfPhoto(writableUserKey(), photoKey, LabelNormalizer.fold(label)) > 0
     }
 
     /**
@@ -196,30 +196,25 @@ class PhotoLabelRepository @Inject constructor(
         return true
     }
 
+    /** Deletes every label of [labels] as [deleteLabel] does. Returns how many photos lost a label, counting a photo once per label. */
+    suspend fun deleteLabels(labels: Collection<String>): Int {
+        ensureUnlocked()
+        val user = writableUserKey()
+        return labels.sumOf { dao.removeLabelEverywhere(user, LabelNormalizer.fold(it)) }
+    }
+
     /** Removes [label] from every photo of the account. Returns how many photos lost it. */
     suspend fun deleteLabel(label: String): Int {
         ensureUnlocked()
         return dao.removeLabelEverywhere(writableUserKey(), LabelNormalizer.fold(label))
     }
 
-    /**
-     * [userId]'s labels as the Drive copy stores them: every photo that has labels or lost its last one, with
-     * the time its list last changed. A photo without a recorded time reads as the newest write among its labels.
-     */
+    /** [userId]'s labelled photos as the Drive copy stores them: each photo's key and its labels in order. */
     suspend fun snapshotPhotos(userId: UserId): List<LabelSnapshotPhoto> {
         val user = keyFor(userId)
         ensureAdopted(user)
-        val times = dao.statesForUser(user).associate { it.photoKey to it.changedAt }
-        val labels = dao.allLabelsForUser(user).groupBy { it.photoKey }
-        val keys = LinkedHashSet<String>().apply { addAll(times.keys); addAll(labels.keys) }
-        return keys.map { key ->
-            val rows = labels[key].orEmpty()
-            LabelSnapshotPhoto(
-                key = key,
-                changedAt = times[key] ?: rows.maxOfOrNull { it.updatedAt } ?: 0L,
-                labels = rows.map { it.label },
-            )
-        }
+        return dao.allLabelsForUser(user).groupBy({ it.photoKey }, { it.label })
+            .map { (key, labels) -> LabelSnapshotPhoto(key, labels) }
     }
 
     /** The labels [userId] created without a photo and has not put on one since, as the Drive copy stores them. */
@@ -231,20 +226,28 @@ class PhotoLabelRepository @Inject constructor(
     }
 
     /**
-     * Takes from [snapshot] the photos whose list changed after the one held here ([LabelSnapshotMerge.plan]) into
-     * [userId]'s labels, each under the time it was written, and the labels it holds without a photo that this
-     * account does not have yet. Returns how many of each came in.
+     * Brings the saved [snapshot] back into [userId]'s labels: each photo it lists that this install may restore
+     * ([LabelSnapshotMerge.usablePhotos]) gets the saved labels first and keeps the ones it has now while there is
+     * room ([LabelSnapshotMerge.restoredList]), so a label deleted since returns and a label added since stays.
+     * The saved labels with no photo come back too, when the account has no label of that name. Returns how many
+     * photos changed and how many labels without a photo were added.
      */
     suspend fun applySnapshot(userId: UserId, snapshot: LabelSnapshot, ownDeviceId: String, now: Long): LabelRestoreCounts {
         val user = keyFor(userId)
         ensureAdopted(user)
-        val local = dao.statesForKeys(user, snapshot.photos.map { it.key }).associate { it.photoKey to it.changedAt }
-        val plan = LabelSnapshotMerge.plan(snapshot, ownDeviceId, local, now)
-        for (photo in plan) {
-            val rows = canonical(user, photo.labels).map {
-                PhotoLabelEntity(user, photo.key, it, LabelNormalizer.fold(it), photo.changedAt)
+        var photos = 0
+        for (chunk in LabelSnapshotMerge.usablePhotos(snapshot, ownDeviceId).chunked(RESTORE_CHUNK)) {
+            val current = dao.labelsForKeys(user, chunk.map { it.key }).groupBy({ it.photoKey }, { it.label })
+            for (photo in chunk) {
+                val held = current[photo.key].orEmpty()
+                val restored = LabelSnapshotMerge.restoredList(photo.labels, held)
+                if (restored.map { LabelNormalizer.fold(it) } == held.map { LabelNormalizer.fold(it) }) continue
+                val rows = canonical(user, restored).map {
+                    PhotoLabelEntity(user, photo.key, it, LabelNormalizer.fold(it), now)
+                }
+                dao.replaceLabelsOfPhoto(user, photo.key, rows)
+                photos++
             }
-            dao.applyRemoteList(user, photo.key, rows, photo.changedAt)
         }
         var names = 0
         for (name in snapshot.names) {
@@ -254,7 +257,7 @@ class PhotoLabelRepository @Inject constructor(
             dao.insertName(PhotoLabelNameEntity(user, key, clean, now))
             names++
         }
-        return LabelRestoreCounts(photos = plan.size, names = names)
+        return LabelRestoreCounts(photos = photos, names = names)
     }
 
     /** Moves the current account's labels from [oldKey] to [newKey]. */
@@ -327,6 +330,9 @@ class PhotoLabelRepository @Inject constructor(
 
     private companion object {
         const val TAG = "PhotoLabelRepository"
+
+        /** Photos a restore reads and writes per slice, under the host-variable limit. */
+        const val RESTORE_CHUNK = 500
     }
 }
 

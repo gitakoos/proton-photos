@@ -23,6 +23,23 @@
 package eu.akoos.photos.presentation.settings
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.outlined.RadioButtonUnchecked
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.LaunchedEffect
+import eu.akoos.photos.presentation.common.SearchFieldTerm
+import eu.akoos.photos.presentation.common.SearchTermPill
+import eu.akoos.photos.presentation.settings.components.ActionRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -89,6 +106,7 @@ import eu.akoos.photos.data.db.dao.LabelUsage
 import eu.akoos.photos.presentation.common.ActionSheetRow
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.settings.components.RowDivider
@@ -162,7 +180,7 @@ internal fun renameFieldText(text: String): String {
 @Composable
 fun LabelsSettingsScreen(
     onBack: () -> Unit,
-    onAddPhotos: (String) -> Unit,
+    onAddPhotos: (List<String>) -> Unit,
     viewModel: LabelsSettingsViewModel = hiltViewModel(),
 ) {
     val labels by viewModel.labels.collectAsStateWithLifecycle()
@@ -172,8 +190,17 @@ fun LabelsSettingsScreen(
     var editing by remember { mutableStateOf<LabelUsage?>(null) }
     var deleting by remember { mutableStateOf<LabelUsage?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
+    var picked by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var deletingPicked by remember { mutableStateOf(false) }
+    val selecting = picked.isNotEmpty()
     val shown = remember(labels, query) { labels?.let { filterLabelsForManager(it, query) } }
-    val toCreate = remember(labels, query) { labels?.let { labelToCreate(query, it) } }
+    // Creating is left out while labels are picked, so the list only offers what can be picked.
+    val toCreate = remember(labels, query, selecting) { if (selecting) null else labels?.let { labelToCreate(query, it) } }
+    // A picked label that is deleted or renamed meanwhile leaves the selection.
+    LaunchedEffect(labels) { labels?.let { all -> picked = prunedLabelSelection(picked, all) } }
+    // Back, by the header or by the system, asks before it drops a selection.
+    var confirmLeave by remember { mutableStateOf(false) }
+    BackHandler(enabled = selecting) { confirmLeave = true }
     val whenLocked = { Toast.makeText(context, R.string.label_locked, Toast.LENGTH_SHORT).show() }
     val create: (String) -> Unit = { text ->
         if (locked) whenLocked() else viewModel.create(text) { result -> if (result != null) query = "" }
@@ -193,13 +220,41 @@ fun LabelsSettingsScreen(
                 toCreate = toCreate,
                 locked = locked,
                 onCreate = create,
-                onClick = { usage -> if (locked) whenLocked() else editing = usage },
+                picked = picked,
+                onClick = { usage ->
+                    when {
+                        locked -> whenLocked()
+                        selecting -> picked = toggledLabelSelection(picked, usage.labelKey)
+                        else -> editing = usage
+                    }
+                },
+                onLongClick = { usage ->
+                    if (locked) whenLocked() else picked = toggledLabelSelection(picked, usage.labelKey)
+                },
                 modifier = Modifier.weight(1f),
             )
-            LabelBackupSection(viewModel)
+            if (selecting) {
+                LabelSelectionPanel(
+                    labels = selectedLabels(picked, labels.orEmpty()),
+                    locked = locked,
+                    onDeselect = { key -> picked = toggledLabelSelection(picked, key) },
+                    onAddPhotos = {
+                        val names = selectedLabels(picked, labels.orEmpty()).map { it.label }
+                        picked = emptyList()
+                        onAddPhotos(names)
+                    },
+                    onDelete = { deletingPicked = true },
+                    onClose = { picked = emptyList() },
+                )
+            } else {
+                LabelBackupSection(viewModel)
+            }
         }
 
-        FloatingHeader(title = stringResource(R.string.label_section_title), onBack = onBack)
+        FloatingHeader(
+            title = stringResource(R.string.label_section_title),
+            onBack = { if (selecting) confirmLeave = true else onBack() },
+        )
     }
 
     editing?.let { usage ->
@@ -218,8 +273,39 @@ fun LabelsSettingsScreen(
             },
             onAddPhotos = {
                 editing = null
-                onAddPhotos(usage.label)
+                onAddPhotos(listOf(usage.label))
             },
+        )
+    }
+
+    if (confirmLeave) {
+        ConfirmSheet(
+            title = stringResource(R.string.label_leave_selection_title),
+            message = stringResource(R.string.label_leave_selection_message),
+            confirmLabel = stringResource(R.string.label_leave_selection_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                confirmLeave = false
+                picked = emptyList()
+                onBack()
+            },
+            onDismiss = { confirmLeave = false },
+        )
+    }
+
+    if (deletingPicked) {
+        ConfirmDialog(
+            title = stringResource(R.string.label_delete_selected_title),
+            message = stringResource(R.string.label_delete_selected_message),
+            confirmLabel = stringResource(R.string.label_delete_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                deletingPicked = false
+                viewModel.deleteMany(selectedLabels(picked, labels.orEmpty()).map { it.label })
+                picked = emptyList()
+            },
+            onDismiss = { deletingPicked = false },
+            destructive = true,
         )
     }
 
@@ -251,7 +337,9 @@ private fun LabelsCard(
     toCreate: String?,
     locked: Boolean,
     onCreate: (String) -> Unit,
+    picked: List<String>,
     onClick: (LabelUsage) -> Unit,
+    onLongClick: (LabelUsage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = AppColors.current
@@ -300,7 +388,14 @@ private fun LabelsCard(
                         }
                     }
                     items(labels, key = { it.labelKey }) { usage ->
-                        LabelRow(usage = usage, locked = locked, onClick = { onClick(usage) })
+                        LabelRow(
+                            usage = usage,
+                            locked = locked,
+                            selecting = picked.isNotEmpty(),
+                            selected = usage.labelKey in picked,
+                            onClick = { onClick(usage) },
+                            onLongClick = { onLongClick(usage) },
+                        )
                         if (usage !== labels.last()) RowDivider()
                     }
                 }
@@ -339,17 +434,35 @@ private fun CreateRow(name: String, locked: Boolean, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun LabelRow(usage: LabelUsage, locked: Boolean, onClick: () -> Unit) {
+private fun LabelRow(
+    usage: LabelUsage,
+    locked: Boolean,
+    selecting: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     val colors = AppColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(if (locked) 0.5f else 1f)
-            .clickable(onClick = onClick)
+            .background(if (selected) colors.accent.copy(alpha = 0.12f) else Color.Transparent)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selecting) {
+            Icon(
+                if (selected) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+                contentDescription = null,
+                tint = if (selected) colors.accent else colors.fgMute,
+                modifier = Modifier.size(22.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+        }
         Text(
             usage.label,
             color = colors.fgPrimary,
@@ -368,6 +481,72 @@ private fun LabelRow(usage: LabelUsage, locked: Boolean, onClick: () -> Unit) {
             },
             color = colors.fgMute,
             fontSize = 12.5.sp,
+        )
+    }
+}
+
+/**
+ * The panel that takes the Drive section's place while labels are picked: the picked labels as pills in one field
+ * (a tap on a pill takes that label out of the selection), then Add photos and Delete labels for all of them, and a
+ * close at the end of the field. It sits under the list rather than over it, so the list stays in reach to pick
+ * more. The pills scroll when many are picked.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LabelSelectionPanel(
+    labels: List<LabelUsage>,
+    locked: Boolean,
+    onDeselect: (String) -> Unit,
+    onAddPhotos: () -> Unit,
+    onDelete: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val colors = AppColors.current
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp)
+            .background(colors.cardBg, shape)
+            .border(0.5.dp, colors.cardBorder, shape),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            FlowRow(
+                modifier = Modifier.weight(1f).heightIn(max = 112.dp).verticalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                labels.forEach { usage ->
+                    SearchTermPill(
+                        SearchFieldTerm(
+                            label = usage.label,
+                            onRemove = { onDeselect(usage.labelKey) },
+                            removeDescription = stringResource(R.string.label_remove_cd, usage.label),
+                        ),
+                    )
+                }
+            }
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.close), tint = colors.fgDim)
+            }
+        }
+        RowDivider()
+        ActionRow(
+            label = stringResource(R.string.label_add_photos),
+            icon = Icons.Default.AddPhotoAlternate,
+            onClick = onAddPhotos,
+            enabled = !locked,
+        )
+        RowDivider()
+        ActionRow(
+            label = stringResource(R.string.label_delete_selected),
+            icon = Icons.Default.Delete,
+            onClick = onDelete,
+            destructive = true,
+            enabled = !locked,
         )
     }
 }

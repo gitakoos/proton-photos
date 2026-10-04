@@ -555,7 +555,7 @@ private fun deviceSummary(device: MlRemoteDevice): String {
  * When the set was saved, to the minute, in the locale's own date order and on a 12 or 24 hour clock: the
  * phone's own setting when the user picked one, otherwise the app language's usual clock.
  */
-private fun formatSavedAt(ms: Long, locale: Locale, is24Hour: Boolean): String {
+internal fun formatSavedAt(ms: Long, locale: Locale, is24Hour: Boolean): String {
     val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, if (is24Hour) "yMMMdHm" else "yMMMdhma")
     return SimpleDateFormat(pattern, locale).format(Date(ms))
 }

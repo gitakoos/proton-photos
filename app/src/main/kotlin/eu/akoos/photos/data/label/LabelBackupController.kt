@@ -48,8 +48,9 @@ import javax.inject.Singleton
 
 /**
  * The Labels settings page's way into the Drive copy of the labels, kept under My files / Photos for Proton /
- * Labels: one sealed file per install, replaced on every save, and a restore that merges every install's file
- * newest-wins per photo ([LabelSnapshotMerge]). A save or restore runs as the one [LabelSyncWorker] job, in the
+ * Labels: one sealed file per install, replaced on every save. [listCopies] opens each install's saved copy so the
+ * user can see when it was saved and what it holds, and a restore brings one chosen copy back
+ * ([LabelSnapshotMerge.restoredList]). A save or restore runs as the one [LabelSyncWorker] job, in the
  * background with an ongoing notification and a Cancel, and [state] follows it.
  *
  * Account-only, as the file lives in the account's Drive and is sealed to its key: [isAvailable] is false for a
@@ -64,6 +65,7 @@ class LabelBackupController @Inject constructor(
     private val accountManager: AccountManager,
     private val sdkGate: SdkGate,
     private val driveStore: MlDriveStore,
+    private val runner: LabelBackupRunner,
     @AppScope private val appScope: CoroutineScope,
 ) {
     private val workManager: WorkManager
@@ -108,13 +110,21 @@ class LabelBackupController @Inject constructor(
         return start(LabelSyncRequest.Save(userId.id, createFolderConfirmed))
     }
 
-    /** Starts a restore of every install's saved labels into this one. */
-    suspend fun restore(userId: UserId): LabelBackupStart {
-        blocked(userId)?.let { return it }
-        return start(LabelSyncRequest.Restore(userId.id))
+    /** The saved copies the restore drawer lists, newest first; nothing is written. */
+    suspend fun listCopies(userId: UserId): LabelBackupRunner.Copies {
+        if (!isAvailable(userId) || accountManager.getPrimaryUserId().first() != userId) {
+            return LabelBackupRunner.Copies.Failed
+        }
+        return runner.listCopies(userId)
     }
 
-    /** Stops the job. A restore keeps the copies it has merged; a save leaves the copy in Drive as it was. */
+    /** Starts the restore of [copy], one of [listCopies]. */
+    suspend fun restore(userId: UserId, copy: LabelSavedCopy): LabelBackupStart {
+        blocked(userId)?.let { return it }
+        return start(LabelSyncRequest.Restore(userId.id, copy.deviceId, copy.revisionUid))
+    }
+
+    /** Stops the job. A cancelled restore keeps what it has already brought back; a save leaves the copy in Drive as it was. */
     fun cancel() {
         workManager.cancelUniqueWork(LabelSyncWorker.UNIQUE_WORK_NAME)
     }

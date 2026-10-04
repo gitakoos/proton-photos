@@ -1461,6 +1461,73 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v44_to_v45_addsDeletedAt_existingNamesStayLive() {
+        Migrations.MIGRATION_43_44.migrate(db)
+        db.execSQL("INSERT INTO photo_label_name (userId, labelKey, label, createdAt) VALUES ('u1', 'cafe', 'Café', 1)")
+
+        Migrations.MIGRATION_44_45.migrate(db)
+
+        db.query("SELECT deletedAt FROM photo_label_name WHERE labelKey = 'cafe'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertTrue("an existing name is live", cur.isNull(0))
+        }
+        db.execSQL("UPDATE photo_label_name SET deletedAt = 7 WHERE labelKey = 'cafe'")
+        // Re-running the migration on an already-migrated database is harmless and keeps the value.
+        Migrations.MIGRATION_44_45.migrate(db)
+        db.query("SELECT deletedAt FROM photo_label_name WHERE labelKey = 'cafe'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(7L, cur.getLong(0))
+        }
+    }
+
+    @Test
+    fun migrate_v45_to_v46_dropsStateTable_keepsLiveNamesAndDropsDeletedOnes() {
+        Migrations.MIGRATION_41_42.migrate(db)
+        Migrations.MIGRATION_42_43.migrate(db)
+        db.execSQL("INSERT INTO photo_label_state (userId, photoKey, changedAt) VALUES ('u1', 'link-1', 5)")
+        Migrations.MIGRATION_43_44.migrate(db)
+        Migrations.MIGRATION_44_45.migrate(db)
+        db.execSQL("INSERT INTO photo_label_name (userId, labelKey, label, createdAt, deletedAt) VALUES ('u1', 'live', 'Live', 1, NULL)")
+        db.execSQL("INSERT INTO photo_label_name (userId, labelKey, label, createdAt, deletedAt) VALUES ('u1', 'gone', 'Gone', 2, 9)")
+
+        Migrations.MIGRATION_45_46.migrate(db)
+
+        db.query("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'photo_label_state'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("the change times are gone", 0, cur.getInt(0))
+        }
+        db.query("SELECT labelKey, label, createdAt FROM photo_label_name ORDER BY labelKey").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("live", cur.getString(0))
+            assertEquals("Live", cur.getString(1))
+            assertEquals(1L, cur.getLong(2))
+            assertEquals("a deleted label is dropped", 1, cur.count)
+        }
+        db.query("PRAGMA table_info(`photo_label_name`)").use { cur ->
+            val nameIndex = cur.getColumnIndex("name")
+            val columns = buildList { while (cur.moveToNext()) add(cur.getString(nameIndex)) }
+            assertEquals(listOf("userId", "labelKey", "label", "createdAt"), columns)
+        }
+
+        // Re-running the migration on an already-migrated database is harmless.
+        Migrations.MIGRATION_45_46.migrate(db)
+        db.query("SELECT COUNT(*) FROM photo_label_name").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(1, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrations_registerTheV45ToV46Step() {
+        assertTrue(Migrations.ALL.any { it.startVersion == 45 && it.endVersion == 46 })
+    }
+
+    @Test
+    fun migrations_registerTheV44ToV45Step() {
+        assertTrue(Migrations.ALL.any { it.startVersion == 44 && it.endVersion == 45 })
+    }
+
+    @Test
     fun migrations_registerTheV43ToV44Step() {
         assertTrue(Migrations.ALL.any { it.startVersion == 43 && it.endVersion == 44 })
     }

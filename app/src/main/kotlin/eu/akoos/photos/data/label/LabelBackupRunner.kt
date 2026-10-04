@@ -68,7 +68,49 @@ class LabelBackupRunner @Inject constructor(
         report: suspend (LabelBackupProgress) -> Unit,
     ): LabelBackupOutcome = when (request) {
         is LabelSyncRequest.Save -> save(userId, request.createFolderConfirmed, report)
-        is LabelSyncRequest.Restore -> restore(userId, report)
+        is LabelSyncRequest.Restore -> restore(userId, request, report)
+    }
+
+    /** What the restore drawer shows: the saved copies of every install, newest first. See [listCopies]. */
+    sealed interface Copies {
+        data class Found(val copies: List<LabelSavedCopy>) : Copies
+
+        /** Drive holds no saved labels. */
+        data object Empty : Copies
+
+        data object NotCapable : Copies
+
+        data object Failed : Copies
+    }
+
+    /**
+     * The saved copies in the Drive Labels folder, each downloaded and opened so the drawer can say when it was
+     * saved, by which install, and which labels it holds with their photo counts. A copy that cannot be read
+     * (damaged, another account's, from a newer version) is left out; when none can be, the answer is
+     * [Copies.Failed]. The files are small, and nothing is written.
+     */
+    suspend fun listCopies(userId: UserId): Copies {
+        val listed = when (val result = driveStore.list(userId, DriveDataFolder.LABELS)) {
+            is MlDriveResult.Ok -> result.value
+            MlDriveResult.NotCapable -> return Copies.NotCapable
+            MlDriveResult.FolderMissing -> emptyList()
+            MlDriveResult.Conflict, is MlDriveResult.Failed -> return Copies.Failed
+        }
+        val files = LabelDriveNaming.selectForRestore(listed)
+        if (files.isEmpty()) return Copies.Empty
+        val ownDeviceId = driveStore.deviceId()
+        val copies = files.mapNotNull { file ->
+            val read = readSnapshot(userId, file) as? LabelRead.Snapshot ?: return@mapNotNull null
+            LabelSavedCopy(
+                deviceId = file.deviceId,
+                deviceLabel = read.value.deviceLabel,
+                isThisDevice = file.deviceId == ownDeviceId,
+                savedAtMillis = read.value.createdAtMillis,
+                revisionUid = file.file.activeRevisionUid,
+                labels = LabelSnapshotMerge.counts(read.value, ownDeviceId),
+            )
+        }
+        return if (copies.isEmpty()) Copies.Failed else Copies.Found(copies.sortedByDescending { it.savedAtMillis })
     }
 
     private suspend fun save(
@@ -137,40 +179,31 @@ class LabelBackupRunner @Inject constructor(
         }
     }
 
-    private suspend fun restore(userId: UserId, report: suspend (LabelBackupProgress) -> Unit): LabelBackupOutcome {
+    private suspend fun restore(
+        userId: UserId,
+        request: LabelSyncRequest.Restore,
+        report: suspend (LabelBackupProgress) -> Unit,
+    ): LabelBackupOutcome {
         fun outcome(result: LabelBackupResult, photos: Int = 0, newLabels: Int = 0) =
             LabelBackupOutcome(LabelBackupOperation.RESTORE, result, photos, newLabels)
-        report(LabelBackupProgress(LabelBackupStep.LOOKING))
+        report(LabelBackupProgress(LabelBackupStep.DOWNLOADING))
         if (signOut.isSigningOut(userId)) return outcome(LabelBackupResult.NOT_SIGNED_IN)
-        val listed = when (val result = driveStore.list(userId, DriveDataFolder.LABELS)) {
-            is MlDriveResult.Ok -> result.value
-            MlDriveResult.NotCapable -> return outcome(LabelBackupResult.NOT_CAPABLE)
-            MlDriveResult.FolderMissing -> emptyList()
-            MlDriveResult.Conflict, is MlDriveResult.Failed -> return outcome(LabelBackupResult.FAILED)
+        val read = readSnapshot(userId, request.deviceId, request.revisionUid, sizeBytes = 0L)
+        val snapshot = when (read) {
+            is LabelRead.Failed -> return outcome(read.result)
+            is LabelRead.Snapshot -> read.value
         }
-        val files = LabelDriveNaming.selectForRestore(listed)
-        if (files.isEmpty()) return outcome(LabelBackupResult.NOTHING_TO_RESTORE)
-
-        val ownDeviceId = driveStore.deviceId()
-        var photos = 0
-        var newLabels = 0
-        var restored = 0
-        var failure: LabelBackupResult? = null
-        for ((index, file) in files.withIndex()) {
-            if (signOut.isSigningOut(userId)) return outcome(LabelBackupResult.NOT_SIGNED_IN)
-            report(LabelBackupProgress(LabelBackupStep.DOWNLOADING, done = index, total = files.size))
-            when (val read = readSnapshot(userId, file)) {
-                is LabelRead.Failed -> if (failure == null) failure = read.result
-                is LabelRead.Snapshot -> {
-                    report(LabelBackupProgress(LabelBackupStep.MERGING, done = index, total = files.size))
-                    val counts = labels.applySnapshot(userId, read.value, ownDeviceId, System.currentTimeMillis())
-                    photos += counts.photos
-                    newLabels += counts.names
-                    restored++
-                }
-            }
+        if (signOut.isSigningOut(userId)) return outcome(LabelBackupResult.NOT_SIGNED_IN)
+        report(LabelBackupProgress(LabelBackupStep.MERGING))
+        return try {
+            val counts = labels.applySnapshot(userId, snapshot, driveStore.deviceId(), System.currentTimeMillis())
+            outcome(LabelBackupResult.RESTORED, counts.photos, counts.names)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "label restore failed: ${e.javaClass.simpleName}")
+            outcome(LabelBackupResult.FAILED)
         }
-        return if (restored > 0) outcome(LabelBackupResult.RESTORED, photos, newLabels) else outcome(failure ?: LabelBackupResult.FAILED)
     }
 
     private sealed interface LabelRead {
@@ -179,12 +212,19 @@ class LabelBackupRunner @Inject constructor(
         data class Failed(val result: LabelBackupResult) : LabelRead
     }
 
-    /** Downloads [file] and opens it, or says why it could not be read. The snapshot must name the install its file name does. */
-    private suspend fun readSnapshot(userId: UserId, file: LabelDriveFile): LabelRead {
-        if (file.file.sizeBytes > MAX_SNAPSHOT_BYTES) return LabelRead.Failed(LabelBackupResult.DAMAGED)
+    private suspend fun readSnapshot(userId: UserId, file: LabelDriveFile): LabelRead =
+        readSnapshot(userId, file.deviceId, file.file.activeRevisionUid, file.file.sizeBytes)
+
+    /**
+     * Downloads revision [revisionUid] and opens it, or says why it could not be read. The snapshot must name
+     * the install [deviceId] its file name does. A [sizeBytes] of the Drive listing over [MAX_SNAPSHOT_BYTES] is
+     * refused before the download; 0 when the size is not known.
+     */
+    private suspend fun readSnapshot(userId: UserId, deviceId: String, revisionUid: String, sizeBytes: Long): LabelRead {
+        if (sizeBytes > MAX_SNAPSHOT_BYTES) return LabelRead.Failed(LabelBackupResult.DAMAGED)
         val scratch = withContext(Dispatchers.IO) { newScratchFile("labels-restore-") }
         try {
-            when (val download = driveStore.download(userId, file.file.activeRevisionUid, scratch)) {
+            when (val download = driveStore.download(userId, revisionUid, scratch)) {
                 is MlDriveResult.Ok -> Unit
                 MlDriveResult.NotCapable -> return LabelRead.Failed(LabelBackupResult.NOT_CAPABLE)
                 is MlDriveResult.Failed -> return LabelRead.Failed(
@@ -198,7 +238,7 @@ class LabelBackupRunner @Inject constructor(
             if (opened == LabelSnapshotOpened.WrongKey) opened = open(userId, scratch, refreshAddresses = true)
             return when (opened) {
                 is LabelSnapshotOpened.Snapshot ->
-                    if (opened.value.deviceId == file.deviceId) LabelRead.Snapshot(opened.value)
+                    if (opened.value.deviceId == deviceId) LabelRead.Snapshot(opened.value)
                     else LabelRead.Failed(LabelBackupResult.DAMAGED)
                 LabelSnapshotOpened.WrongKey -> LabelRead.Failed(LabelBackupResult.WRONG_ACCOUNT)
                 LabelSnapshotOpened.TooNew -> LabelRead.Failed(LabelBackupResult.TOO_NEW)

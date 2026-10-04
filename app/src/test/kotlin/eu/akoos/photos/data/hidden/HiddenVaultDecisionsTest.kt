@@ -688,6 +688,39 @@ class HiddenVaultDecisionsTest {
     }
 
     @Test
+    fun `a hide drops the labels under the device uri and the Drive link id of each hidden photo`() {
+        val keys = HiddenVaultDecisions.labelKeysOfHidden(
+            vaultUris = listOf("file:///v/1", "file:///v/2", "file:///v/3"),
+            sourceByVaultUri = mapOf("file:///v/1" to "content://media/1", "file:///v/2" to "content://media/2"),
+            cloudIdEntries = listOf("file:///v/1|link-1", "file:///v/9|link-9", "file:///v/3|link-3"),
+        )
+
+        assertEquals(listOf("content://media/1", "content://media/2", "link-1", "link-3"), keys)
+    }
+
+    @Test
+    fun `a hidden photo with no recorded source or pairing adds no key, and blank ids are ignored`() {
+        val keys = HiddenVaultDecisions.labelKeysOfHidden(
+            vaultUris = listOf("file:///v/1"),
+            sourceByVaultUri = emptyMap(),
+            cloudIdEntries = listOf("file:///v/1|", "file:///v/1"),
+        )
+
+        assertTrue(keys.isEmpty())
+    }
+
+    @Test
+    fun `the keys of a hide are listed once`() {
+        val keys = HiddenVaultDecisions.labelKeysOfHidden(
+            vaultUris = listOf("file:///v/1", "file:///v/2"),
+            sourceByVaultUri = mapOf("file:///v/1" to "link-1", "file:///v/2" to "content://media/2"),
+            cloudIdEntries = listOf("file:///v/1|link-1"),
+        )
+
+        assertEquals(listOf("link-1", "content://media/2"), keys)
+    }
+
+    @Test
     fun `nothing to confirm splits into nothing`() {
         val split = HiddenVaultDecisions.confirmSplit(emptyList(), mapOf("v1" to "s1")) { true }
         assertTrue(split.publish.isEmpty())

@@ -162,7 +162,7 @@ class LabelSyncWorker @AssistedInject constructor(
         val output = LabelSyncWorkData.output(outcome)
         return when (outcome.result) {
             LabelBackupResult.SAVED, LabelBackupResult.RESTORED, LabelBackupResult.NOTHING_TO_SAVE,
-            LabelBackupResult.NOTHING_TO_RESTORE, LabelBackupResult.FOLDER_MISSING -> Result.success(output)
+            LabelBackupResult.FOLDER_MISSING -> Result.success(output)
             else -> Result.failure(output)
         }
     }

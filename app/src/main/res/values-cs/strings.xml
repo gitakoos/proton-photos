@@ -2282,8 +2282,18 @@
     <string name="label_add_hint">Přidat štítek</string>
     <string name="label_add_chip">Přidat štítek</string>
     <string name="label_remove_cd">Odebrat štítek %1$s</string>
-    <string name="label_full_hint">%1$d z %2$d štítků</string>
-    <string name="label_feedback_full">Fotka může mít nejvýše %1$d štítků</string>
+    <plurals name="label_full_hint">
+        <item quantity="one">%1$d z %2$d štítku</item>
+        <item quantity="few">%1$d z %2$d štítků</item>
+        <item quantity="many">%1$d z %2$d štítků</item>
+        <item quantity="other">%1$d z %2$d štítků</item>
+    </plurals>
+    <plurals name="label_feedback_full">
+        <item quantity="one">Fotka může mít nejvýše %1$d štítek</item>
+        <item quantity="few">Fotka může mít nejvýše %1$d štítky</item>
+        <item quantity="many">Fotka může mít nejvýše %1$d štítku</item>
+        <item quantity="other">Fotka může mít nejvýše %1$d štítků</item>
+    </plurals>
     <string name="label_first_use_note">Štítky se ukládají jen v aplikaci. Proton Drive vlastní štítky nemá.</string>
     <string name="label_bulk_action">Přidat štítky</string>
     <string name="label_bulk_hint">Štítky oddělené čárkami</string>
@@ -2312,7 +2322,6 @@
     <string name="label_backup_step_uploading">Nahrávání štítků…</string>
     <string name="label_backup_step_looking">Hledání uložených štítků…</string>
     <string name="label_backup_step_downloading">Stahování uložených štítků…</string>
-    <string name="label_backup_step_downloading_n">Stahování uložených štítků (%1$d z %2$d)…</string>
     <string name="label_backup_step_merging">Slučování štítků…</string>
     <string name="label_input_hint">Hledejte nebo přidejte štítek</string>
     <string name="label_create_row">Vytvořit \"%1$s\"</string>
@@ -2320,14 +2329,24 @@
     <string name="label_no_photos">Žádné fotky</string>
     <string name="label_add_photos">Přidat fotky</string>
     <string name="label_picker_title">Přidat fotky ke štítku \"%1$s\"</string>
+    <string name="label_picker_title_many">Přidat fotky k vybraným štítkům</string>
+    <string name="label_delete_selected">Smazat štítky</string>
+    <string name="label_delete_selected_title">Smazat vybrané štítky?</string>
+    <string name="label_delete_selected_message">Odeberou se ze všech fotek, na kterých jsou.</string>
+    <string name="label_leave_selection_title">Opustit štítky?</string>
+    <string name="label_leave_selection_message">Váš výběr bude zrušen.</string>
+    <string name="label_leave_selection_confirm">Opustit</string>
     <string name="label_backup_section">Štítky na Drive</string>
     <string name="label_backup_save_desc">Uchovejte šifrovanou kopii svých štítků na Drive</string>
     <string name="label_backup_restore_desc">Sloučí štítky uložené tímto nebo jiným zařízením</string>
+    <string name="label_backup_restore_note">Obnoví štítky uložené tehdy, i ty, které jste od té doby smazali. Štítky přidané od té doby zůstanou.</string>
+    <string name="label_backup_show_all">Zobrazit vše (%1$d)</string>
+    <string name="label_backup_save_confirm_title">Uložit štítky na Drive?</string>
+    <string name="label_backup_save_confirm_message">Kopie, kterou toto zařízení uložilo dříve, bude nahrazena. Štítky jsou koncově šifrované stejně jako vaše fotky.</string>
     <string name="label_backup_working_save">Ukládání štítků…</string>
     <string name="label_backup_working_restore">Obnovování štítků…</string>
     <string name="label_backup_folder_message">Uložením se v části Moje soubory vytvoří složka \"Photos for Proton/Labels\". Štítky v ní jsou koncově šifrované stejně jako vaše fotky a zabírají místo ve vašem úložišti Drive.</string>
     <string name="label_backup_nothing_message">Žádná fotka zatím nemá štítky. Nejdřív nějaký štítek k fotce přidejte.</string>
-    <string name="label_backup_nothing_restore_title">Není co obnovit</string>
     <string name="label_backup_restore_empty">Na Drive zatím nejsou uložené žádné štítky. Na zařízení, které je má, použijte \"Uložit na Drive\" a pak to zkuste znovu.</string>
     <string name="label_backup_up_to_date">Vaše štítky jsou již aktuální.</string>
     <plurals name="label_backup_saved_count">

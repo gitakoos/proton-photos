@@ -27,7 +27,6 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.dao.PhotoLabelDao
 import eu.akoos.photos.data.db.dao.TestDatabase
-import eu.akoos.photos.data.db.entity.PhotoLabelEntity
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +42,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-/** What the Drive copy reads from and writes into the label tables. */
+/** What the Drive copy reads from and writes into the label tables: a saved copy comes back as it was. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class PhotoLabelSnapshotRepositoryTest {
@@ -71,106 +70,92 @@ class PhotoLabelSnapshotRepositoryTest {
 
     private suspend fun labels(key: String) = dao.labelsOfPhoto(ACCOUNT.id, key).map { it.label }
 
-    private fun snapshot(deviceId: String, vararg photos: LabelSnapshotPhoto) =
-        LabelSnapshot(deviceId = deviceId, deviceLabel = "Phone", createdAtMillis = 1L, photos = photos.toList())
+    private fun saved(deviceId: String, vararg photos: LabelSnapshotPhoto, names: List<String> = emptyList()) =
+        LabelSnapshot(deviceId = deviceId, deviceLabel = "Phone", createdAtMillis = 1L, photos = photos.toList(), names = names)
 
-    private fun photo(key: String, at: Long, vararg labels: String) = LabelSnapshotPhoto(key, at, labels.toList())
+    private fun photo(key: String, vararg labels: String) = LabelSnapshotPhoto(key, labels.toList())
+
+    private suspend fun restore(snapshot: LabelSnapshot, from: String = OTHER_DEVICE) =
+        repo.applySnapshot(ACCOUNT, snapshot.copy(deviceId = from), ownDeviceId = OWN, now = 5_000L)
 
     @Test
     fun `the snapshot lists every labelled photo with its labels in order`() = runTest {
         repo.setLabels(LINK, listOf("zebra", "apple"))
         repo.setLabels(LINK_2, listOf("mango"))
 
-        val photos = repo.snapshotPhotos(ACCOUNT).associateBy { it.key }
+        val photos = repo.snapshotPhotos(ACCOUNT).associate { it.key to it.labels }
 
-        assertEquals(listOf("zebra", "apple"), photos.getValue(LINK).labels)
-        assertEquals(listOf("mango"), photos.getValue(LINK_2).labels)
-        assertTrue(photos.getValue(LINK).changedAt > 0L)
+        assertEquals(mapOf(LINK to listOf("zebra", "apple"), LINK_2 to listOf("mango")), photos)
     }
 
     @Test
-    fun `a photo whose last label was removed stays in the snapshot as an empty list`() = runTest {
+    fun `a photo that lost its last label is not in the snapshot`() = runTest {
         repo.setLabels(LINK, listOf("a"))
         repo.removeLabel(LINK, "a")
-
-        val photo = repo.snapshotPhotos(ACCOUNT).single()
-
-        assertEquals(LINK, photo.key)
-        assertTrue(photo.labels.isEmpty())
-    }
-
-    @Test
-    fun `a labelled photo without a recorded time reads as its newest label write`() = runTest {
-        dao.insertIgnore(
-            listOf(
-                PhotoLabelEntity(ACCOUNT.id, LINK, "a", "a", 100L),
-                PhotoLabelEntity(ACCOUNT.id, LINK, "b", "b", 300L),
-            ),
-        )
-
-        assertEquals(300L, repo.snapshotPhotos(ACCOUNT).single().changedAt)
-    }
-
-    @Test
-    fun `another account's labels are not in the snapshot`() = runTest {
-        dao.insertIgnore(listOf(PhotoLabelEntity("someone-else", LINK, "x", "x", 1L)))
-        dao.touch("someone-else", LINK, 1L)
 
         assertTrue(repo.snapshotPhotos(ACCOUNT).isEmpty())
     }
 
     @Test
-    fun `a newer saved list replaces the held one and keeps its time`() = runTest {
-        repo.setLabels(LINK, listOf("old"))
-
-        val changed = repo.applySnapshot(
-            ACCOUNT,
-            snapshot(OTHER_DEVICE, photo(LINK, FUTURE, "fresh", "beach")),
-            ownDeviceId = OWN,
-            now = FUTURE,
+    fun `another account's labels are not in the snapshot`() = runTest {
+        dao.insertIgnore(
+            listOf(eu.akoos.photos.data.db.entity.PhotoLabelEntity("someone-else", LINK, "x", "x", 1L)),
         )
 
-        assertEquals(1, changed.photos)
-        assertEquals(listOf("fresh", "beach"), labels(LINK))
-        assertEquals(FUTURE, dao.statesForUser(ACCOUNT.id).single().changedAt)
+        assertTrue(repo.snapshotPhotos(ACCOUNT).isEmpty())
     }
 
     @Test
-    fun `an older saved list leaves the held one alone`() = runTest {
-        repo.setLabels(LINK, listOf("mine"))
+    fun `a restore brings back a label that was removed from a photo since`() = runTest {
+        repo.setLabels(LINK, listOf("keep", "lost"))
+        val copy = saved(OTHER_DEVICE, photo(LINK, "keep", "lost"))
+        repo.removeLabel(LINK, "lost")
 
-        val changed = repo.applySnapshot(ACCOUNT, snapshot(OTHER_DEVICE, photo(LINK, 1L, "theirs")), OWN, now = 5_000L)
+        val counts = restore(copy)
 
-        assertEquals(0, changed.photos)
-        assertEquals(listOf("mine"), labels(LINK))
+        assertEquals(1, counts.photos)
+        assertEquals(listOf("keep", "lost"), labels(LINK))
     }
 
     @Test
-    fun `a saved removal that is newer clears the held labels`() = runTest {
-        repo.setLabels(LINK, listOf("a"))
+    fun `a restore keeps a label added since while there is room`() = runTest {
+        repo.setLabels(LINK, listOf("saved", "added since"))
 
-        repo.applySnapshot(ACCOUNT, snapshot(OTHER_DEVICE, photo(LINK, FUTURE)), OWN, now = FUTURE)
+        restore(saved(OTHER_DEVICE, photo(LINK, "saved")))
 
-        assertTrue(labels(LINK).isEmpty())
+        assertEquals(listOf("saved", "added since"), labels(LINK))
     }
 
     @Test
-    fun `restoring twice changes nothing the second time`() = runTest {
-        val saved = snapshot(OTHER_DEVICE, photo(LINK, 4_000L, "a"), photo(LINK_2, 4_000L))
+    fun `a restore leaves photos the copy does not list alone`() = runTest {
+        repo.setLabels(LINK_2, listOf("mine"))
 
-        assertEquals(2, repo.applySnapshot(ACCOUNT, saved, OWN, now = 5_000L).photos)
-        assertEquals(0, repo.applySnapshot(ACCOUNT, saved, OWN, now = 5_000L).photos)
+        restore(saved(OTHER_DEVICE, photo(LINK, "a")))
+
+        assertEquals(listOf("mine"), labels(LINK_2))
+        assertEquals(listOf("a"), labels(LINK))
     }
 
     @Test
-    fun `device keys come back only from this install's own file`() = runTest {
-        val photos = arrayOf(photo(URI, 4_000L, "a"), photo(LINK, 4_000L, "b"))
+    fun `restoring the same copy twice changes nothing the second time`() = runTest {
+        val copy = saved(OTHER_DEVICE, photo(LINK, "a"), photo(LINK_2, "b"), names = listOf("Empty"))
 
-        repo.applySnapshot(ACCOUNT, snapshot(OTHER_DEVICE, *photos), OWN, now = 5_000L)
+        val first = restore(copy)
+        val second = restore(copy)
+
+        assertEquals(LabelRestoreCounts(photos = 2, names = 1), first)
+        assertEquals(LabelRestoreCounts(photos = 0, names = 0), second)
+    }
+
+    @Test
+    fun `device keys come back only from this install's own copy`() = runTest {
+        val photos = arrayOf(photo(URI, "a"), photo(LINK, "b"))
+
+        restore(saved(OTHER_DEVICE, *photos), from = OTHER_DEVICE)
         assertTrue(labels(URI).isEmpty())
         assertEquals(listOf("b"), labels(LINK))
 
-        repo.applySnapshot(ACCOUNT, snapshot(OWN, *photos), OWN, now = 5_000L)
+        restore(saved(OWN, *photos), from = OWN)
         assertEquals(listOf("a"), labels(URI))
     }
 
@@ -178,25 +163,46 @@ class PhotoLabelSnapshotRepositoryTest {
     fun `a restored label takes the spelling the account already uses`() = runTest {
         repo.setLabels(LINK, listOf("Beach"))
 
-        repo.applySnapshot(ACCOUNT, snapshot(OTHER_DEVICE, photo(LINK_2, 4_000L, "BEACH")), OWN, now = 5_000L)
+        restore(saved(OTHER_DEVICE, photo(LINK_2, "BEACH")))
 
         assertEquals(listOf("Beach"), labels(LINK_2))
     }
 
     @Test
-    fun `labels written before signing in are adopted before a restore merges`() = runTest {
+    fun `labels written before signing in are adopted before a restore`() = runTest {
         primary.value = null
         repo.setLabels(LINK, listOf("guest label"))
         primary.value = ACCOUNT
 
-        repo.applySnapshot(ACCOUNT, snapshot(OTHER_DEVICE, photo(LINK_2, 4_000L, "x")), OWN, now = 5_000L)
+        restore(saved(OTHER_DEVICE, photo(LINK_2, "x")))
 
         assertEquals(listOf("guest label"), labels(LINK))
     }
 
+    @Test
+    fun `a restore brings back a label created without a photo that was deleted since`() = runTest {
+        repo.createLabel("Empty")
+        val copy = saved(OTHER_DEVICE, names = repo.snapshotNames(ACCOUNT))
+        repo.deleteLabel("Empty")
+
+        val counts = restore(copy)
+
+        assertEquals(1, counts.names)
+        assertEquals(listOf("Empty"), dao.namesForUser(ACCOUNT.id).map { it.label })
+    }
+
+    @Test
+    fun `a restore does not duplicate a label the account already has`() = runTest {
+        repo.setLabels(LINK, listOf("Beach"))
+        repo.createLabel("Sun")
+
+        val counts = restore(saved(OTHER_DEVICE, names = listOf("beach", "SUN")))
+
+        assertEquals(0, counts.names)
+    }
+
     private companion object {
         val ACCOUNT = UserId("account-1")
-        val FUTURE = System.currentTimeMillis() + 60_000L
         const val OWN = "0b5f3c2e-1111-4a4a-9c9c-123456789abc"
         const val OTHER_DEVICE = "7d1e9a40-2222-4b4b-8d8d-abcdefabcdef"
         const val LINK = "link-1"

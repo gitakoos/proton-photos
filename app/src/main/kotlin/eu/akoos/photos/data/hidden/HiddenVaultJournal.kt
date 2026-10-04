@@ -270,12 +270,8 @@ class HiddenVaultJournal @Inject constructor(
      */
     private suspend fun dropLabelsOf(vaultUris: Collection<String>, sourceByVaultUri: Map<String, String>) {
         try {
-            val wanted = vaultUris.toHashSet()
-            val cloudIds = (context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
-                .mapNotNull { entry ->
-                    entry.substringAfter('|', "").takeIf { it.isNotBlank() && entry.substringBefore('|') in wanted }
-                }
-            photoLabels.deleteForPhotos(vaultUris.mapNotNull { sourceByVaultUri[it] } + cloudIds)
+            val entries = context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
+            photoLabels.deleteForPhotos(HiddenVaultDecisions.labelKeysOfHidden(vaultUris, sourceByVaultUri, entries))
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.w(TAG, "dropping labels of ${vaultUris.size} hidden photo(s) failed: ${e.message}")

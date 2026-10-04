@@ -102,6 +102,24 @@ enum class VaultedRowFix {
 object HiddenVaultDecisions {
 
     /**
+     * The photo keys a published hide drops the labels of: for each of [vaultUris] the device uri it was hidden
+     * from ([sourceByVaultUri]) and, when it was paired with a Drive photo, that photo's link id. [cloudIdEntries]
+     * are the stored `vaultUri|linkId` pairs. A hidden photo may be labelled under either key, so both go, and a
+     * vault uri with no recorded source or pairing adds nothing.
+     */
+    fun labelKeysOfHidden(
+        vaultUris: Collection<String>,
+        sourceByVaultUri: Map<String, String>,
+        cloudIdEntries: Collection<String>,
+    ): List<String> {
+        val wanted = vaultUris.toHashSet()
+        val cloudIds = cloudIdEntries.mapNotNull { entry ->
+            entry.substringAfter('|', "").takeIf { it.isNotBlank() && entry.substringBefore('|') in wanted }
+        }
+        return (vaultUris.mapNotNull { sourceByVaultUri[it] } + cloudIds).distinct()
+    }
+
+    /**
      * Whether a vault copy is provably the whole photo. [expectedBytes] is what the source states it
      * holds, negative when it states nothing; [copiedBytes] is what the copy reported writing, and
      * [storedBytes] what the vault file holds once the write has reached the disk.

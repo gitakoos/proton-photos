@@ -30,19 +30,14 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/**
- * One photo's labels in a Drive snapshot. [key] is the photo's gallery identity, [changedAt] the time its list
- * last changed, and an empty [labels] a photo whose last label was removed, which is what lets the removal
- * outrank an older list saved elsewhere.
- */
+/** One photo's labels in a Drive snapshot, under the photo's gallery key. */
 @Serializable
 data class LabelSnapshotPhoto(
     @SerialName("k") val key: String,
-    @SerialName("t") val changedAt: Long,
     @SerialName("l") val labels: List<String>,
 )
 
-/** What one install saves of its labels: who wrote it, when, and every photo's list. */
+/** What one install saves of its labels: who wrote it, when, every labelled photo, and the labels with no photo. */
 @Serializable
 data class LabelSnapshot(
     @SerialName("v") val version: Int = VERSION,
@@ -79,6 +74,9 @@ object LabelSnapshotCodec {
             ?.takeIf { it.version == LabelSnapshot.VERSION }
 }
 
+/** One label of a saved copy and how many of its photos carry it, as the restore drawer lists it. */
+data class LabelCount(val label: String, val photos: Int)
+
 /** What a restore takes from a snapshot. Pure, so it runs in a plain JVM test. */
 object LabelSnapshotMerge {
 
@@ -89,25 +87,42 @@ object LabelSnapshotMerge {
     fun isPortableKey(photoKey: String): Boolean = photoKey.isNotEmpty() && "://" !in photoKey
 
     /**
-     * The photos of [remote] to write here: those whose list changed after the one held here ([local], the
-     * change time per key; absent means nothing is held). A tie keeps the local list. A device key is taken
-     * only from the snapshot this install wrote itself ([ownDeviceId]). Each list is cleaned and capped as a
-     * label write would, and a time later than [now] counts as [now], so one phone with a wrong clock cannot
-     * outrank every later change.
+     * The photos of [snapshot] a restore on this install may put back: a Drive link id from any copy, a device
+     * key only from the copy this install wrote itself ([ownDeviceId]), since the same URI names another photo
+     * on another phone.
      */
-    fun plan(
-        remote: LabelSnapshot,
-        ownDeviceId: String,
-        local: Map<String, Long>,
-        now: Long,
-    ): List<LabelSnapshotPhoto> {
-        val own = remote.deviceId == ownDeviceId
-        return remote.photos.mapNotNull { photo ->
-            if (photo.key.isEmpty() || (!own && !isPortableKey(photo.key))) return@mapNotNull null
-            val changedAt = photo.changedAt.coerceAtMost(now)
-            val heldAt = local[photo.key]
-            if (heldAt != null && changedAt <= heldAt) return@mapNotNull null
-            LabelSnapshotPhoto(photo.key, changedAt, LabelNormalizer.normalize(photo.labels).labels)
+    fun usablePhotos(snapshot: LabelSnapshot, ownDeviceId: String): List<LabelSnapshotPhoto> {
+        val own = snapshot.deviceId == ownDeviceId
+        return snapshot.photos.filter { it.key.isNotEmpty() && (own || isPortableKey(it.key)) }
+    }
+
+    /**
+     * A photo's labels once a saved list comes back: the saved ones first, then the labels it has now that the
+     * saved list does not, each label once (case and accents aside) and at most [LabelNormalizer.MAX_LABELS].
+     * What was saved always returns, and a label added since is kept while there is room.
+     */
+    fun restoredList(saved: List<String>, current: List<String>): List<String> =
+        LabelNormalizer.normalize(saved + current).labels
+
+    /**
+     * The labels of [snapshot] a restore would bring, each with the number of its usable photos
+     * ([usablePhotos]), most used first; a saved label with no photo counts none. The first spelling seen wins.
+     */
+    fun counts(snapshot: LabelSnapshot, ownDeviceId: String): List<LabelCount> {
+        val byKey = LinkedHashMap<String, Pair<String, Int>>()
+        for (photo in usablePhotos(snapshot, ownDeviceId)) {
+            for (label in LabelNormalizer.normalize(photo.labels).labels) {
+                val key = LabelNormalizer.fold(label)
+                val seen = byKey[key]
+                byKey[key] = (seen?.first ?: label) to ((seen?.second ?: 0) + 1)
+            }
         }
+        for (name in snapshot.names) {
+            val clean = LabelNormalizer.clean(name) ?: continue
+            byKey.putIfAbsent(LabelNormalizer.fold(clean), clean to 0)
+        }
+        return byKey.entries
+            .sortedWith(compareByDescending<Map.Entry<String, Pair<String, Int>>> { it.value.second }.thenBy { it.key })
+            .map { LabelCount(it.value.first, it.value.second) }
     }
 }
