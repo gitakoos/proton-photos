@@ -23,7 +23,9 @@
 package eu.akoos.photos.worker
 
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.util.Log
@@ -334,7 +336,15 @@ class MetadataEditWorker @AssistedInject constructor(
     private fun buildForegroundInfo(done: Int, total: Int): ForegroundInfo {
         ensureChannel(context)
 
-        val cancelIntent = WorkManager.getInstance(context).createCancelPendingIntent(id)
+        // The receiver cancels the drain and empties the queue, so a cancelled batch is not resumed by a
+        // later one; a plain WorkManager cancel would leave its rows behind.
+        val cancelIntent = PendingIntent.getBroadcast(
+            context,
+            0,
+            Intent(context, MetadataEditCancelReceiver::class.java)
+                .setAction(MetadataEditCancelReceiver.ACTION_CANCEL_METADATA_EDIT),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val title = context.getString(R.string.metadata_edit_notification_title)
         val content = context.getString(R.string.metadata_edit_notification_progress, done, total)
         val cancelLabel = context.getString(R.string.cancel)
@@ -349,8 +359,8 @@ class MetadataEditWorker @AssistedInject constructor(
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            // Cancel action: WorkManager.createCancelPendingIntent(id) cooperatively cancels THIS worker
-            // by its UUID, so doWork's CancellationException catch handles teardown.
+            // Cancel action: cancels this worker and clears the queue, so doWork's CancellationException
+            // catch handles teardown of the run itself.
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 cancelLabel,

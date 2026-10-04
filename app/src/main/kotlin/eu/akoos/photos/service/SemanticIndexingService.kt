@@ -90,8 +90,25 @@ class SemanticIndexingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
+        // First, ahead of injection: see startForegroundEarly.
+        promoteEarly()
         super.onCreate()
         ensureChannel(this)
+    }
+
+    private fun promoteEarly() {
+        ensureChannel(this)
+        startForegroundEarly(
+            NOTIFICATION_ID,
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle(getString(R.string.semantic_index_service_title))
+                .setOngoing(true)
+                .setShowWhen(false)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setProgress(0, 0, true)
+                .build(),
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
