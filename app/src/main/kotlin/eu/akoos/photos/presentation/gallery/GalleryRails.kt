@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.gallery
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.datastore.preferences.core.edit
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -49,6 +50,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -89,6 +91,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
@@ -772,20 +775,29 @@ private fun resolveCategoryOrder(savedCsv: String?): List<GalleryFilter> {
     return saved + DEFAULT_CATEGORY_ORDER.filterNot { it in saved }
 }
 
-@Composable
-internal fun categoryLabel(filter: GalleryFilter): String = when (filter) {
-    GalleryFilter.Favorites   -> stringResource(R.string.gallery_filter_favorites)
-    GalleryFilter.Screenshots -> stringResource(R.string.gallery_filter_screenshots)
-    GalleryFilter.Videos      -> stringResource(R.string.filter_type_videos)
-    GalleryFilter.LivePhotos  -> stringResource(R.string.gallery_filter_live_photos)
-    GalleryFilter.Selfies     -> stringResource(R.string.gallery_filter_selfies)
-    GalleryFilter.Portraits   -> stringResource(R.string.gallery_filter_portraits)
-    GalleryFilter.Bursts      -> stringResource(R.string.gallery_filter_bursts)
-    GalleryFilter.Panoramas   -> stringResource(R.string.gallery_filter_panoramas)
-    GalleryFilter.Raw         -> stringResource(R.string.gallery_filter_raw)
-    GalleryFilter.Offline     -> stringResource(R.string.filter_offline)
-    else -> filter.name
+/** The chips the category rail shows, in its order: the saved arrangement minus the hidden ones. */
+internal fun visibleCategories(savedCsv: String?, hidden: Set<String>): List<GalleryFilter> =
+    resolveCategoryOrder(savedCsv).filterNot { it.name in hidden }
+
+/** The string a category is named by, or null for [GalleryFilter.All]. */
+internal fun categoryLabelRes(filter: GalleryFilter): Int? = when (filter) {
+    GalleryFilter.Favorites    -> R.string.gallery_filter_favorites
+    GalleryFilter.Screenshots  -> R.string.gallery_filter_screenshots
+    GalleryFilter.Videos       -> R.string.filter_type_videos
+    GalleryFilter.LivePhotos   -> R.string.gallery_filter_live_photos
+    GalleryFilter.MotionPhotos -> R.string.gallery_filter_motion_photos
+    GalleryFilter.Selfies      -> R.string.gallery_filter_selfies
+    GalleryFilter.Portraits    -> R.string.gallery_filter_portraits
+    GalleryFilter.Bursts       -> R.string.gallery_filter_bursts
+    GalleryFilter.Panoramas    -> R.string.gallery_filter_panoramas
+    GalleryFilter.Raw          -> R.string.gallery_filter_raw
+    GalleryFilter.Offline      -> R.string.filter_offline
+    GalleryFilter.All          -> null
 }
+
+@Composable
+internal fun categoryLabel(filter: GalleryFilter): String =
+    categoryLabelRes(filter)?.let { stringResource(it) } ?: filter.name
 
 /**
  * Horizontally scrollable row of category chips under the timeline's top rail (Favorites,
@@ -810,9 +822,7 @@ internal fun CategoryRail(
     val hidden by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet() }
     }.collectAsState(initial = emptySet())
-    val order = remember(savedCsv, hidden) {
-        resolveCategoryOrder(savedCsv).filterNot { it.name in hidden }
-    }
+    val order = remember(savedCsv, hidden) { visibleCategories(savedCsv, hidden) }
 
     // A category hidden while it was the active filter would leave the timeline filtered with no
     // chip left to clear it, so fall back to All.
@@ -822,8 +832,22 @@ internal fun CategoryRail(
         }
     }
 
+    // A chip selected from outside the rail (a category name typed into Search) may sit off screen,
+    // so bring it into view; a chip already fully shown stays where it is.
+    val listState = rememberLazyListState()
+    LaunchedEffect(selectedFilter, order) {
+        val index = order.indexOf(selectedFilter)
+        if (index < 0) return@LaunchedEffect
+        val info = snapshotFlow { listState.layoutInfo }.first { it.totalItemsCount > 0 }
+        val shown = info.visibleItemsInfo.firstOrNull { it.index == index }
+        val fullyShown = shown != null &&
+            shown.offset >= info.viewportStartOffset && shown.offset + shown.size <= info.viewportEndOffset
+        if (!fullyShown) listState.animateScrollToItem(index)
+    }
+
     Column(modifier = modifier) {
         LazyRow(
+            state = listState,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 20.dp),
         ) {

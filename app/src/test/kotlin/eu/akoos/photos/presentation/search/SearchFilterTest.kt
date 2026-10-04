@@ -78,10 +78,11 @@ class SearchFilterTest {
         uri: String = "content://media/$name",
         bucket: String? = null,
         tags: Set<Int> = emptySet(),
+        userTags: Set<Int> = emptySet(),
     ) = GalleryItem.LocalOnly(
         LocalMediaItem(
             uri = uri, dateTaken = at, displayName = name, mimeType = mime,
-            sizeBytes = 1_000L, bucketName = bucket, tags = tags,
+            sizeBytes = 1_000L, bucketName = bucket, tags = tags, userTags = userTags,
         ),
     )
 
@@ -294,9 +295,39 @@ class SearchFilterTest {
     }
 
     @Test
-    fun `a device-only photo has no category words to be found by`() {
-        // Its detected tags are not part of the haystack, only a cloud photo's server tags are.
-        assertTrue(search(listOf(local("a.jpg", tags = setOf(8))), q = "panoramas").isEmpty())
+    fun `a device-only photo is findable by the category the device detected`() {
+        val items = listOf(local("a.jpg", tags = setOf(8)), local("b.jpg"))
+        assertEquals(listOf("a.jpg"), namesFrom(search(items, q = "panoramas")))
+    }
+
+    @Test
+    fun `a device-only photo is findable by a category the user picked for it`() {
+        val items = listOf(local("a.jpg", userTags = setOf(5)), local("b.jpg"))
+        assertEquals(listOf("a.jpg"), namesFrom(search(items, q = "selfies")))
+    }
+
+    @Test
+    fun `a user-picked category set replaces the detected one in the words, as on the rail`() {
+        val item = local("a.jpg", tags = setOf(8), userTags = setOf(1))
+        assertTrue(search(listOf(item), q = "panoramas").isEmpty())
+        assertEquals(listOf("a.jpg"), namesFrom(search(listOf(item), q = "screenshots")))
+    }
+
+    @Test
+    fun `a category the rail derives from the folder is findable by name`() {
+        val items = listOf(local("IMG_1.jpg", bucket = "Burst"), local("IMG_2.jpg"))
+        assertEquals(listOf("IMG_1.jpg"), namesFrom(search(items, q = "bursts")))
+    }
+
+    @Test
+    fun `a typed category name matches with accents folded and as a part of the word`() {
+        val names = categoryNames + (5 to SearchFilter.fold("Szelfik"))
+        val items = listOf(local("a.jpg", userTags = setOf(5)), local("b.jpg"))
+        val out = SearchFilter.apply(
+            items = items, q = "SZÉLF", filter = ContentFilter(), category = GalleryFilter.All,
+            foldedMonths = englishMonths, foldedCategoryNames = names,
+        )
+        assertEquals(listOf("a.jpg"), namesFrom(out))
     }
 
     // ── the media-type filter ───────────────────────────────────────────────────────────────────
@@ -581,6 +612,129 @@ class SearchFilterTest {
         assertTrue(search(emptyList(), q = "beach").isEmpty())
         assertTrue(search(emptyList(), filter = ContentFilter(year = 2024)).isEmpty())
         assertTrue(search(emptyList(), category = GalleryFilter.Videos).isEmpty())
+    }
+
+    // ── the facets alone, what the content-search matches pass through ──────────────────────────
+
+    private fun facets(
+        items: List<GalleryItem>,
+        filter: ContentFilter = ContentFilter(),
+        category: GalleryFilter = GalleryFilter.All,
+        offlinePinIds: Set<String> = emptySet(),
+        favoriteIds: Set<String> = emptySet(),
+        personPhotoKeys: Set<String>? = null,
+    ): List<String> = namesFrom(
+        SearchFilter.applyFacets(items, filter, category, offlinePinIds, favoriteIds, personPhotoKeys),
+    )
+
+    @Test
+    fun `with no facet set every content match passes through in rank order`() {
+        val items = listOf(local("c.jpg"), cloud("a.jpg"), synced("b.jpg"))
+        assertEquals(listOf("c.jpg", "a.jpg", "b.jpg"), facets(items))
+    }
+
+    @Test
+    fun `the media type facet narrows content matches`() {
+        val items = listOf(local("a.jpg"), local("clip.mp4", mime = "video/mp4"))
+        assertEquals(listOf("clip.mp4"), facets(items, filter = ContentFilter(mediaType = MediaType.VideosOnly)))
+        assertEquals(listOf("a.jpg"), facets(items, filter = ContentFilter(mediaType = MediaType.PhotosOnly)))
+    }
+
+    @Test
+    fun `the sync status facet narrows content matches`() {
+        val items = listOf(local("a.jpg"), synced("b.jpg"), cloud("c.jpg"))
+        assertEquals(listOf("a.jpg"), facets(items, filter = ContentFilter(syncStatus = SyncStatusFilter.LocalOnly)))
+        assertEquals(listOf("b.jpg"), facets(items, filter = ContentFilter(syncStatus = SyncStatusFilter.BackedUp)))
+        assertEquals(listOf("c.jpg"), facets(items, filter = ContentFilter(syncStatus = SyncStatusFilter.CloudOnly)))
+    }
+
+    @Test
+    fun `the date facet narrows content matches by year and by month`() {
+        val items = listOf(local("a.jpg", at = juneDay), local("b.jpg", at = julyDay), local("c.jpg", at = lastJune))
+        assertEquals(listOf("a.jpg", "b.jpg"), facets(items, filter = ContentFilter(year = 2024)))
+        assertEquals(listOf("a.jpg", "c.jpg"), facets(items, filter = ContentFilter(month = 6)))
+        assertEquals(listOf("a.jpg"), facets(items, filter = ContentFilter(year = 2024, month = 6)))
+    }
+
+    @Test
+    fun `the category facet narrows content matches through every category source`() {
+        val items = listOf(
+            cloud("server.jpg", tags = setOf(1)),
+            local("detected.jpg", tags = setOf(1)),
+            local("picked.jpg", userTags = setOf(1)),
+            local("Screenshot_1.png", mime = "image/png"),
+            local("plain.jpg"),
+        )
+        assertEquals(
+            listOf("server.jpg", "detected.jpg", "picked.jpg", "Screenshot_1.png"),
+            facets(items, category = GalleryFilter.Screenshots),
+        )
+    }
+
+    @Test
+    fun `the offline and favourites facets read their local sets for content matches`() {
+        val pinned = cloud("p.jpg", linkId = "pin")
+        val hearted = local("h.jpg", uri = "content://media/h")
+        val plain = local("x.jpg")
+        val items = listOf(pinned, hearted, plain)
+        assertEquals(listOf("p.jpg"), facets(items, category = GalleryFilter.Offline, offlinePinIds = setOf("pin")))
+        assertEquals(
+            listOf("h.jpg"),
+            facets(items, category = GalleryFilter.Favorites, favoriteIds = setOf("content://media/h")),
+        )
+    }
+
+    @Test
+    fun `the person facet keeps only the selected person's content matches`() {
+        val a = cloud("a.jpg"); val b = local("b.jpg"); val c = synced("c.jpg")
+        assertEquals(listOf("a.jpg", "c.jpg"), facets(listOf(a, b, c), personPhotoKeys = setOf(a.stableId, c.stableId)))
+        assertTrue(facets(listOf(a, b, c), personPhotoKeys = emptySet()).isEmpty())
+    }
+
+    @Test
+    fun `every facet narrows content matches together`() {
+        val stranger = local("stranger.mp4", mime = "video/mp4", at = juneDay)
+        val items = listOf(
+            local("keep.mp4", mime = "video/mp4", at = juneDay),
+            local("photo.jpg", at = juneDay),
+            local("old.mp4", mime = "video/mp4", at = lastJune),
+            cloud("cloud.mp4", mime = "video/mp4", at = juneDay),
+            stranger,
+        )
+        val out = facets(
+            items,
+            filter = ContentFilter(mediaType = MediaType.VideosOnly, syncStatus = SyncStatusFilter.LocalOnly, year = 2024),
+            category = GalleryFilter.Videos,
+            personPhotoKeys = (items - stranger).map { it.stableId }.toSet(),
+        )
+        assertEquals(listOf("keep.mp4"), out)
+    }
+
+    @Test
+    fun `the keyword path and the facets agree once the query has matched`() {
+        val items = listOf(local("beach.mp4", mime = "video/mp4"), local("beach.jpg"), cloud("beach2.mp4", mime = "video/mp4"))
+        val filter = ContentFilter(mediaType = MediaType.VideosOnly, syncStatus = SyncStatusFilter.LocalOnly)
+        assertEquals(namesFrom(search(items, q = "beach", filter = filter)), facets(items, filter = filter))
+    }
+
+    // ── whether the page asks for anything ──────────────────────────────────────────────────────
+
+    @Test
+    fun `an untouched page asks for nothing`() {
+        assertTrue(SearchFilter.nothingAsked("", ContentFilter(), GalleryFilter.All, personSelected = false))
+        assertTrue(SearchFilter.nothingAsked("   ", ContentFilter(), GalleryFilter.All, personSelected = false))
+    }
+
+    @Test
+    fun `a selected person alone means the page asks for something`() {
+        assertFalse(SearchFilter.nothingAsked("", ContentFilter(), GalleryFilter.All, personSelected = true))
+    }
+
+    @Test
+    fun `a query, a filter or a chip each mean the page asks for something`() {
+        assertFalse(SearchFilter.nothingAsked("a", ContentFilter(), GalleryFilter.All, personSelected = false))
+        assertFalse(SearchFilter.nothingAsked("", ContentFilter(year = 2024), GalleryFilter.All, personSelected = false))
+        assertFalse(SearchFilter.nothingAsked("", ContentFilter(), GalleryFilter.Videos, personSelected = false))
     }
 
     // ── the month names the view model hands over ───────────────────────────────────────────────

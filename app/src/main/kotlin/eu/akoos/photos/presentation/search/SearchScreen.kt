@@ -232,6 +232,10 @@ fun SearchScreen(
     val isSignedIn by vm.isSignedIn.collectAsStateWithLifecycle()
     val faceEnabled by vm.faceEnabled.collectAsStateWithLifecycle()
 
+    // Typed month and category names match in the language the page is drawn in.
+    val screenLocale = appLocale()
+    LaunchedEffect(screenLocale) { vm.setLocale(screenLocale) }
+
     val isSelectionMode = selectedItems.isNotEmpty()
     // In selection mode the back button cancels the selection instead of leaving the screen.
     BackHandler(enabled = isSelectionMode) { vm.clearSelection() }
@@ -425,7 +429,7 @@ fun SearchScreen(
       val headerPad = with(density) { headerHeightPx.toDp() }
 
       Box(modifier = Modifier.fillMaxSize()) {
-        val isIdle = query.isBlank() && filter == ContentFilter() && selectedCategory == GalleryFilter.All
+        val isIdle = SearchFilter.nothingAsked(query, filter, selectedCategory, personSelected = selectedPersonId != null)
         if (results.isEmpty() && isIdle) {
             // Idle empty state — surface "On this day" memories + a month-jump grid
             // so the page is useful without typing anything. Both sections live inside

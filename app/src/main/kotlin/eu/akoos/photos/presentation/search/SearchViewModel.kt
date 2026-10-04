@@ -25,6 +25,7 @@
 package eu.akoos.photos.presentation.search
 
 import android.content.Context
+import android.content.res.Configuration
 import android.net.Uri
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
@@ -63,7 +64,6 @@ import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.transfer.TransferCenter
-import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
@@ -88,9 +88,12 @@ import eu.akoos.photos.presentation.gallery.ContentFilter
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.PersonUi
+import eu.akoos.photos.presentation.gallery.categoryLabelRes
+import eu.akoos.photos.presentation.gallery.visibleCategories
 import eu.akoos.photos.util.FolderCoverMap
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.retryOnDbTear
+import java.util.Locale
 import javax.inject.Inject
 
 /** Backs the Search screen. Filters the merged gallery by displayName substring + ContentFilter. */
@@ -146,13 +149,17 @@ class SearchViewModel @Inject constructor(
         .map { it != null }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    /** The AI master + face toggles both on, the one gate [faceEnabled], [people] and
+     *  [peopleSuggestions] share. */
+    private val faceSwitchesOn: Flow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
+        .distinctUntilChanged()
+
     /** Whether on-device face grouping is switched on (the AI master + face toggles). Drives the
      *  People entry card and the selection's Add to person, both independent of sign-in, so a
      *  local-only guest can reach, name and add to their people too. Defaults off so neither flashes
      *  before the switches resolve. */
-    val faceEnabled: StateFlow<Boolean> = context.settingsDataStore.data
-        .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-        .distinctUntilChanged()
+    val faceEnabled: StateFlow<Boolean> = faceSwitchesOn
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private val _query = MutableStateFlow("")
@@ -207,6 +214,35 @@ class SearchViewModel @Inject constructor(
         val personKeys: Set<String>?,
     )
 
+    private val chipState: Flow<ChipState> = combine(
+        _selectedCategory,
+        offlinePinIdsFlow,
+        favoriteIdsFlow,
+        _personSelection.map { if (it.id != null) it.keys else null },
+    ) { category, pins, hearts, personKeys ->
+        ChipState(category, pins, hearts, personKeys)
+    }
+
+    /** The app's language, as the screen resolves it with appLocale(), so typed month and category
+     *  names match in the language the page is drawn in, a per-app language included. Seeded from the
+     *  application resources until the screen hands it over. */
+    private val _locale = MutableStateFlow<Locale>(context.resources.configuration.locales[0] ?: Locale.getDefault())
+
+    /** The localized text a typed query is matched against, pre-folded once per language: the category
+     *  names both per chip ([filterNames]) and per PhotoTag id ([categoryNames]). */
+    private data class LocalizedText(
+        val months: List<String>,
+        val filterNames: Map<GalleryFilter, String>,
+    ) {
+        val categoryNames: Map<Int, String> =
+            filterNames.entries.mapNotNull { (filter, name) -> filter.tagId?.let { it to name } }.toMap()
+    }
+
+    private val localizedText: Flow<LocalizedText> = _locale
+        .map { LocalizedText(SearchFilter.foldedMonthNames(it), foldedFilterNames(it)) }
+        .distinctUntilChanged()
+        .flowOn(Dispatchers.Default)
+
     /** The keyword + metadata matches, the search path that has always been here: the merged library
      *  narrowed by the typed query, the content filter, the category chip and the People rail. Folded
      *  into [results] first and unchanged, so a semantic-off session sees exactly this. */
@@ -216,24 +252,17 @@ class SearchViewModel @Inject constructor(
                 else getGalleryItems.invoke(userId)
             combine(
                 libraryFlow,
-                debouncedQuery,
+                combine(debouncedQuery, localizedText) { q, text -> q to text },
                 _contentFilter,
                 // Category, the two local id sets the chips read, and the selected person's photo keys
                 // travel together so the later sources stay within the typed combine arity; the Offline
                 // chip filters on the pinned linkIds, the Favourites chip on the device hearts, and the
                 // People rail on the person keys, all in applyAll.
-                combine(
-                    _selectedCategory,
-                    offlinePinIdsFlow,
-                    favoriteIdsFlow,
-                    _personSelection.map { if (it.id != null) it.keys else null },
-                ) { category, pins, hearts, personKeys ->
-                    ChipState(category, pins, hearts, personKeys)
-                },
+                chipState,
                 hiddenUrisFlow,
-            ) { all, q, filter, chip, hidden ->
+            ) { all, (q, text), filter, chip, hidden ->
                 applyAll(
-                    all.dropHidden(hidden), q, filter,
+                    all.dropHidden(hidden), q, text, filter,
                     chip.category, chip.pins, chip.hearts, chip.personKeys,
                 )
             }
@@ -289,15 +318,21 @@ class SearchViewModel @Inject constructor(
     /**
      * The resolved content matches plus the live loading flag. Each ranked key is resolved to the
      * [GalleryItem] it names in the merged library, in rank order, dropping any key no longer in the
-     * feed. Held so both [results] and [semanticSearching] read one consistent value.
+     * feed, then narrowed by the same content filter, category chip and person the keyword matches
+     * answer to ([SearchFilter.applyFacets]). Held so both [results] and [semanticSearching] read one
+     * consistent value.
      */
     private val semanticFeed: StateFlow<SemanticFeed> =
-        combine(rankedKeys, allItems) { (loading, keys), library ->
+        combine(rankedKeys, allItems, _contentFilter, chipState) { (loading, keys), library, filter, chip ->
             if (keys.isEmpty()) {
                 SemanticFeed(loading, emptyList())
             } else {
                 val byKey = library.associateBy { it.stableId }
-                SemanticFeed(loading, keys.mapNotNull { byKey[it] })
+                val hits = keys.mapNotNull { byKey[it] }
+                SemanticFeed(
+                    loading,
+                    SearchFilter.applyFacets(hits, filter, chip.category, chip.pins, chip.hearts, chip.personKeys),
+                )
             }
         }
             .flowOn(Dispatchers.Default)
@@ -333,11 +368,16 @@ class SearchViewModel @Inject constructor(
     /**
      * Named people whose name matches the typed query, so a name search reaches a person and their
      * photos even when no filename matches the text. Diacritics are folded both ways, so "akos" finds
-     * "Ákos". Empty while the query is blank or nothing matches.
+     * "Ákos". Empty while the query is blank or nothing matches, and while the AI or face switch is
+     * off, like [people].
      */
-    val peopleSuggestions: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
-        .flatMapLatest { userId ->
-            combine(observePeopleUseCase(userId, allItems), debouncedQuery) { people, q ->
+    val peopleSuggestions: StateFlow<List<PersonUi>> = combine(
+        faceSwitchesOn,
+        accountManager.getPrimaryUserId(),
+    ) { faceOn, userId -> faceOn to userId }
+        .flatMapLatest { (faceOn, userId) ->
+            if (!faceOn) flowOf(emptyList())
+            else combine(observePeopleUseCase(userId, allItems), debouncedQuery) { people, q ->
                 val needle = foldForMatch(q)
                 if (needle.isBlank()) emptyList()
                 else people
@@ -353,9 +393,7 @@ class SearchViewModel @Inject constructor(
      *  independent of the query. Gated on the AI + face flags, so an ML-off session shows no chip; a
      *  local-only session surfaces its own named people. Mirrors the timeline's people rail. */
     val people: StateFlow<List<PersonUi>> = combine(
-        context.settingsDataStore.data
-            .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
-            .distinctUntilChanged(),
+        faceSwitchesOn,
         accountManager.getPrimaryUserId(),
     ) { aiOn, userId -> aiOn to userId }
         .flatMapLatest { (aiOn, userId) ->
@@ -492,7 +530,11 @@ class SearchViewModel @Inject constructor(
         _query.value = ""
         _contentFilter.value = ContentFilter()
         _selectedCategory.value = GalleryFilter.All
+        _personSelection.value = PersonSelection()
     }
+
+    /** The app's language as the screen resolves it, so the typed month and category names follow it. */
+    fun setLocale(locale: Locale) { _locale.value = locale }
 
     /** The years the library has photos from, newest first: what a typed month is offered with. */
     private val availableYears: StateFlow<List<Int>> = allItems
@@ -511,17 +553,38 @@ class SearchViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Dates the end of the typed query could mean, to pick as a filter instead of matching as text. */
-    val dateSuggestions: StateFlow<List<DateSuggestion>> = combine(_query, availableYears) { q, years ->
-        DateSuggestions.suggest(q, foldedMonths, years)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val dateSuggestions: StateFlow<List<DateSuggestion>> =
+        combine(_query, availableYears, localizedText) { q, years, text ->
+            DateSuggestions.suggest(q, text.months, years)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Takes a suggested date: the words that spelled it leave the text and it becomes the date filter. */
     fun applyDateSuggestion(suggestion: DateSuggestion) {
-        val words = _query.value.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-        _query.value = words.dropLast(suggestion.consumedTokens).joinToString(" ")
+        _query.value = SearchFilter.dropLastWords(_query.value, suggestion.consumedTokens)
         _contentFilter.value = _contentFilter.value.copy(
             year = suggestion.year, month = suggestion.month, day = null, dayEnd = null,
         )
+    }
+
+    /** The chips the category rail shows, in its order, so only a chip the page offers is selected. */
+    private val railCategories: Flow<List<GalleryFilter>> = context.settingsDataStore.data
+        .map { visibleCategories(it[SettingsKeys.CATEGORY_RAIL_ORDER], it[SettingsKeys.CATEGORY_RAIL_HIDDEN] ?: emptySet()) }
+        .distinctUntilChanged()
+
+    init {
+        // A query that settles on a category's whole name selects that chip, exactly as a tap on the
+        // rail would, and the words that spelled it leave the text. Only while no chip is picked, and
+        // only for the text still in the field, so clearing the pill never brings it back.
+        viewModelScope.launch {
+            combine(_query.debounce(CATEGORY_SETTLE_MS), localizedText, railCategories) { q, text, rail ->
+                val names = rail.mapNotNull { filter -> text.filterNames[filter]?.let { filter to it } }.toMap()
+                q to CategorySuggestions.match(q, names, _selectedCategory.value)
+            }.collect { (q, match) ->
+                if (match == null || q != _query.value || _selectedCategory.value != GalleryFilter.All) return@collect
+                _query.value = SearchFilter.dropLastWords(q, match.consumedTokens)
+                onCategorySelected(match.filter)
+            }
+        }
     }
 
     // ── Multi-select ──────────────────────────────────────────────────────────────────────────────
@@ -617,6 +680,7 @@ class SearchViewModel @Inject constructor(
     private fun applyAll(
         items: List<GalleryItem>,
         q: String,
+        text: LocalizedText,
         filter: ContentFilter,
         category: GalleryFilter,
         offlinePinIds: Set<String> = emptySet(),
@@ -630,29 +694,18 @@ class SearchViewModel @Inject constructor(
         offlinePinIds = offlinePinIds,
         favoriteIds = favoriteIds,
         personPhotoKeys = personPhotoKeys,
-        foldedMonths = foldedMonths,
-        foldedCategoryNames = foldedCategoryNames,
+        foldedMonths = text.months,
+        foldedCategoryNames = text.categoryNames,
     )
 
-    /** Localized month names, pre-folded once, so a "june" / "június" query matches by capture month. */
-    private val foldedMonths: List<String> by lazy {
-        SearchFilter.foldedMonthNames(java.util.Locale.getDefault())
-    }
-
-    /** PhotoTag id → pre-folded localized category name, so "screenshot" / "selfie" etc. match. */
-    private val foldedCategoryNames: Map<Int, String> by lazy {
-        mapOf(
-            0 to R.string.gallery_filter_favorites,
-            1 to R.string.gallery_filter_screenshots,
-            2 to R.string.filter_type_videos,
-            3 to R.string.gallery_filter_live_photos,
-            4 to R.string.gallery_filter_motion_photos,
-            5 to R.string.gallery_filter_selfies,
-            6 to R.string.gallery_filter_portraits,
-            7 to R.string.gallery_filter_bursts,
-            8 to R.string.gallery_filter_panoramas,
-            9 to R.string.gallery_filter_raw,
-        ).mapValues { SearchFilter.fold(context.getString(it.value)) }
+    /** Category chip → pre-folded name in [locale], so "screenshot" / "selfie" etc. match. The names
+     *  are the rail's own labels, from a context localized the way the screen's own is. */
+    private fun foldedFilterNames(locale: Locale): Map<GalleryFilter, String> {
+        val config = Configuration(context.resources.configuration).apply { setLocale(locale) }
+        val localized = context.createConfigurationContext(config)
+        return GalleryFilter.entries
+            .mapNotNull { filter -> categoryLabelRes(filter)?.let { filter to SearchFilter.fold(localized.getString(it)) } }
+            .toMap()
     }
 
     private companion object {
@@ -664,5 +717,9 @@ class SearchViewModel @Inject constructor(
          *  a touch, since the CLIP embed is far dearer than the per-item filter. A superseded query cancels
          *  the wait through flatMapLatest, so only the query typing settles on is ever embedded. */
         const val SEMANTIC_DEBOUNCE_MS = 300L
+
+        /** Settle delay before a typed category name selects its chip, long enough that the plural 's'
+         *  typed right after "screenshot" lands first. */
+        const val CATEGORY_SETTLE_MS = 500L
     }
 }

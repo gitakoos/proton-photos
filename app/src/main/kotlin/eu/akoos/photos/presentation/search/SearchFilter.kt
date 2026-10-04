@@ -42,6 +42,7 @@ internal object SearchFilter {
 
     /** Combining (nonspacing) marks left behind by NFD decomposition. */
     private val MARK_REGEX = Regex("\\p{Mn}+")
+    private val SPACES = Regex("\\s+")
 
     /** Lower-cases and strips diacritics so an ASCII query ("jose") matches accented names
      *  ("josé"). NFD decomposes each accented letter into base + combining mark, then the
@@ -49,6 +50,11 @@ internal object SearchFilter {
     fun fold(text: String): String =
         Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD)
             .replace(MARK_REGEX, "")
+
+    /** [q] without its last [count] words, the rest joined by single spaces: what a picked suggestion
+     *  leaves of the text that spelled it. */
+    fun dropLastWords(q: String, count: Int): String =
+        q.trim().split(SPACES).filter { it.isNotEmpty() }.dropLast(count).joinToString(" ")
 
     /** The twelve month names of [locale], pre-folded once, so a "june" / "június" query matches by
      *  capture month. */
@@ -89,11 +95,7 @@ internal object SearchFilter {
         foldedCategoryNames: Map<Int, String>,
     ): List<GalleryItem> {
         val qTrimmed = q.trim()
-        // A selected person is itself a filter, so an otherwise-untouched page still narrows to their
-        // photos instead of falling through to the empty "nothing asked for" result.
-        if (qTrimmed.isEmpty() && filter == ContentFilter() && category == GalleryFilter.All &&
-            personPhotoKeys == null
-        ) {
+        if (nothingAsked(qTrimmed, filter, category, personSelected = personPhotoKeys != null)) {
             return emptyList()
         }
         var out = items
@@ -119,11 +121,33 @@ internal object SearchFilter {
                 }
             }
         }
-        out = applyContentFilter(out, filter)
+        return applyFacets(out, filter, category, offlinePinIds, favoriteIds, personPhotoKeys)
+    }
+
+    /** True when the page asks for nothing: no query, no filter, no category chip and no person. A
+     *  selected person is itself a filter, so it narrows an otherwise-untouched page to their photos
+     *  rather than leaving it on the idle page. */
+    fun nothingAsked(q: String, filter: ContentFilter, category: GalleryFilter, personSelected: Boolean): Boolean =
+        q.isBlank() && filter == ContentFilter() && category == GalleryFilter.All && !personSelected
+
+    /**
+     * Everything but the query: the content filter, the category chip and the People rail, in that
+     * order and keeping the input order. The keyword matches pass through it inside [apply], and the
+     * content-search matches pass through it on their own, so both answer to the same chips.
+     */
+    fun applyFacets(
+        items: List<GalleryItem>,
+        filter: ContentFilter,
+        category: GalleryFilter,
+        offlinePinIds: Set<String> = emptySet(),
+        favoriteIds: Set<String> = emptySet(),
+        personPhotoKeys: Set<String>? = null,
+    ): List<GalleryItem> {
+        var out = applyContentFilter(items, filter)
         if (category != GalleryFilter.All) {
             out = when (category) {
                 // Live Photos (tag 3) and Motion Photos (tag 4) are the same concept on iOS/Android
-                // and share one chip, so either tag matches both — mirror the gallery filter.
+                // and share one chip, so either tag matches both, mirroring the gallery filter.
                 GalleryFilter.LivePhotos, GalleryFilter.MotionPhotos ->
                     out.filter { CategorizeItem.belongsTo(it, 3) || CategorizeItem.belongsTo(it, 4) }
                 // Offline = the cloud photos pinned for offline; not a server tag, so it filters on
@@ -180,9 +204,11 @@ internal object SearchFilter {
         return out
     }
 
-    /** Folded text a typed query matches against — file name + capture year + month name + media
-     *  type + file extension + category names — so the search box finds photos by metadata, not just
-     *  the file name. Month/category names arrive pre-folded; only the per-item name is folded here. */
+    /** Folded text a typed query matches against (file name + capture year + month name + media
+     *  type + file extension + category names), so the search box finds photos by metadata, not just
+     *  the file name. Month/category names arrive pre-folded; only the per-item name is folded here.
+     *  The categories are the ones the category rail files the item under ([CategorizeItem.classify]),
+     *  so a user-picked or device-detected category is findable by name as well as a server tag. */
     fun searchHaystack(
         item: GalleryItem,
         cal: Calendar,
@@ -192,11 +218,7 @@ internal object SearchFilter {
         cal.timeInMillis = item.captureTimeMs
         val mime = mimeOf(item)
         val ext = mime.substringAfterLast('/', "")
-        val tags = when (item) {
-            is GalleryItem.Synced    -> item.cloud.tags
-            is GalleryItem.CloudOnly -> item.cloud.tags
-            is GalleryItem.LocalOnly -> emptySet()
-        }
+        val tags = CategorizeItem.classify(item)
         return buildString {
             append(fold(displayNameOf(item)))
             append(' ').append(cal.get(Calendar.YEAR))
