@@ -53,4 +53,8 @@ interface ImportAlbumMemberDao {
     /** Drops every membership edge of one run, for a caller that finished or abandoned it. */
     @Query("DELETE FROM import_album_member WHERE runId = :runId")
     suspend fun clearForRun(runId: String)
+
+    /** Remove every album membership of every run, for the sign-out that ends the account they belong to. */
+    @Query("DELETE FROM import_album_member")
+    suspend fun deleteAll()
 }

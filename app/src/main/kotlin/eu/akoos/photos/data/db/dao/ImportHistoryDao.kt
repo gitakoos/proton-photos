@@ -60,4 +60,8 @@ interface ImportHistoryDao {
      *  only removes the local record, never a photo. */
     @Query("DELETE FROM import_history WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    /** Remove the whole import history, for the sign-out that ends the account it belongs to. */
+    @Query("DELETE FROM import_history")
+    suspend fun deleteAll()
 }

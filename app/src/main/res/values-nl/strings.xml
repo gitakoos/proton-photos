@@ -313,6 +313,11 @@
     <string name="sign_out_dialog_item_vault">Verborgen foto\'s</string>
     <string name="sign_out_dialog_confirm">Afmelden</string>
     <string name="sign_out_dialog_cancel">Annuleren</string>
+    <string name="sign_out_vault_heading">Verborgen foto\'s zonder kopie in Drive</string>
+    <string name="sign_out_vault_move">Naar de galerij verplaatsen</string>
+    <string name="sign_out_vault_move_desc">Ze komen in de map %1$s en blijven op deze telefoon.</string>
+    <string name="sign_out_vault_delete">Verwijderen</string>
+    <string name="sign_out_vault_delete_desc">Er bestaat geen andere kopie, dus ze zijn voorgoed weg.</string>
     <string name="settings_account_storage">Drive-opslag</string>
     <string name="settings_account_links">Snelkoppelingen</string>
     <string name="settings_account_link_manage">Account beheren</string>
@@ -1086,6 +1091,10 @@
     <string name="notifications_update_available">Nieuwe versie beschikbaar</string>
     <string name="update_channel_name">App-updates</string>
     <string name="update_channel_desc">Meldt wanneer er een nieuwere versie van de app beschikbaar is.</string>
+    <string name="vault_rescue_channel_name">Meldingen over afmelden</string>
+    <string name="vault_rescue_channel_desc">Laat het weten wanneer een afmelding die je niet zelf hebt gevraagd je verborgen foto\'s terug in de galerij heeft gezet.</string>
+    <string name="vault_rescue_title">Je bent afgemeld</string>
+    <string name="vault_rescue_text">Je verborgen foto\'s zonder kopie in Drive zijn terug in de galerij gezet, in de map %1$s, zodat er geen verloren gaat.</string>
     <string name="update_notification_text">Tik om versie %1$s te installeren.</string>
     <string name="settings_backup_how_section">Hoe back-up verloopt</string>
     <string name="settings_theme_palette">Thema &amp; palet</string>

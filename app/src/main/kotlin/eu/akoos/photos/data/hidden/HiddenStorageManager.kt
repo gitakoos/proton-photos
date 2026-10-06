@@ -71,10 +71,17 @@ class HiddenStorageManager @Inject constructor(
     private val hiddenDir: File
         get() = File(context.filesDir, "hidden").also { it.mkdirs() }
 
-    /** Deletes every blob in the vault. Used on sign-out, after the hidden index is cleared, so the
-     *  now-orphaned decrypted photos do not linger on disk for the next account on this device. */
-    fun clearVault() {
-        hiddenDir.deleteRecursively()
+    /** Deletes the blobs in the vault, except the files [keep] names. Used on sign-out, so the
+     *  now-orphaned photos do not linger on disk for the next account on this device; [keep] is the
+     *  files a sign-out could not take back to the device and so must not destroy. */
+    fun clearVault(keep: Set<String> = emptySet()) {
+        if (keep.isEmpty()) {
+            hiddenDir.deleteRecursively()
+            return
+        }
+        hiddenDir.listFiles()?.forEach { file ->
+            if (Uri.fromFile(file).toString() !in keep) file.deleteRecursively()
+        }
     }
 
     /** Every blob the vault currently holds, as `file://` URIs — the same form the index and the

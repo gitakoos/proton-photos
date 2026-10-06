@@ -86,8 +86,12 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
+import eu.akoos.photos.data.hidden.HiddenVaultRestorer
+import eu.akoos.photos.data.hidden.VaultRescueNotifier
+import eu.akoos.photos.data.hidden.VaultSignOutPolicy
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.NewsRepository
+import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.settings.FreeUpInterval
@@ -160,6 +164,21 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var updateInstaller: UpdateInstaller
     @Inject lateinit var installSessionEvents: InstallSessionEvents
     @Inject lateinit var newsRepository: NewsRepository
+    @Inject lateinit var hiddenVaultRestorer: HiddenVaultRestorer
+    @Inject lateinit var vaultRescueNotifier: VaultRescueNotifier
+
+    private val vaultSignOut by lazy {
+        VaultSignOutPolicy(
+            rescue = { hiddenVaultRestorer.rescueDeviceOnly() },
+            notifyMoved = { vaultRescueNotifier.notifyMoved() },
+        )
+    }
+
+    /** Disables an account whose sign-in gave up before it made a session; the vault stays. */
+    private suspend fun disableUnfinishedSignIn(userId: UserId) {
+        vaultSignOut.markUnfinishedSignIn(userId.id)
+        accountManager.disableAccount(userId)
+    }
 
     /** The app lock over the whole screen; see [AppLockGate]. */
     private val lockGate by lazy { AppLockGateState(lockSession) }
@@ -193,15 +212,15 @@ class MainActivity : AppCompatActivity() {
         accountManager.observe(this.lifecycle, Lifecycle.State.CREATED)
             .onAccountTwoPassModeNeeded { authOrchestrator.startTwoPassModeWorkflow(it) }
             .onAccountTwoPassModeFailed {
-                lifecycleScope.launch { accountManager.disableAccount(it.userId) }
+                lifecycleScope.launch { disableUnfinishedSignIn(it.userId) }
             }
             .onAccountCreateAddressNeeded { authOrchestrator.startChooseAddressWorkflow(it) }
             .onAccountCreateAddressFailed {
-                lifecycleScope.launch { accountManager.disableAccount(it.userId) }
+                lifecycleScope.launch { disableUnfinishedSignIn(it.userId) }
             }
             .onSessionSecondFactorNeeded { authOrchestrator.startSecondFactorWorkflow(it) }
             .onSessionSecondFactorFailed {
-                lifecycleScope.launch { accountManager.disableAccount(it.userId) }
+                lifecycleScope.launch { disableUnfinishedSignIn(it.userId) }
             }
             .onSessionForceLogout {
                 lifecycleScope.launch { accountManager.disableAccount(it.userId) }
@@ -222,10 +241,17 @@ class MainActivity : AppCompatActivity() {
                 // folder selection, album mapping, hidden folder names and queued Drive cleanups are
                 // preferences, and they stayed for whoever signed in next.
                 lifecycleScope.launch {
-                    runCatching { driveRepo.clearCacheForSignOut(it.userId) }
+                    eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(this@MainActivity, workManager)
+                    val vault = vaultSignOut.afterSignOut(it.userId.id)
+                    runCatching { driveRepo.clearCacheForSignOut(it.userId, vault) }
                     runCatching {
                         eu.akoos.photos.data.preferences.AccountScopedPreferences
                             .clear(this@MainActivity, it.userId)
+                    }
+                    runCatching {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            eu.akoos.photos.util.SignOutCleanup.clearDecryptedCaches(this@MainActivity)
+                        }
                     }
                 }
             }

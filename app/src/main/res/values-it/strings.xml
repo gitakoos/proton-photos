@@ -229,6 +229,11 @@
     <string name="sign_out_dialog_item_vault">Foto nascoste</string>
     <string name="sign_out_dialog_confirm">Esci</string>
     <string name="sign_out_dialog_cancel">Annulla</string>
+    <string name="sign_out_vault_heading">Foto nascoste senza copia su Drive</string>
+    <string name="sign_out_vault_move">Spostale nella galleria</string>
+    <string name="sign_out_vault_move_desc">Vanno nella cartella %1$s e restano su questo telefono.</string>
+    <string name="sign_out_vault_delete">Eliminale</string>
+    <string name="sign_out_vault_delete_desc">Non esiste un\'altra copia, quindi vanno perse per sempre.</string>
     <string name="settings_account_storage">Spazio Drive</string>
     <string name="settings_account_links">Collegamenti rapidi</string>
     <string name="settings_account_link_manage">Gestisci account</string>
@@ -1085,6 +1090,10 @@
     <string name="notifications_update_available">Nuova versione disponibile</string>
     <string name="update_channel_name">Aggiornamenti dell\'app</string>
     <string name="update_channel_desc">Segnala quando è disponibile una versione più recente dell\'app.</string>
+    <string name="vault_rescue_channel_name">Avvisi di disconnessione</string>
+    <string name="vault_rescue_channel_desc">Ti avvisa quando una disconnessione che non hai richiesto ha riportato le foto nascoste nella galleria.</string>
+    <string name="vault_rescue_title">La tua sessione è terminata</string>
+    <string name="vault_rescue_text">Le tue foto nascoste senza copia su Drive sono state riportate nella galleria, nella cartella %1$s, così nessuna va persa.</string>
     <string name="update_notification_text">Tocca per installare la versione %1$s.</string>
     <string name="settings_backup_how_section">Come funziona il backup</string>
     <string name="settings_theme_palette">Tema e tavolozza</string>

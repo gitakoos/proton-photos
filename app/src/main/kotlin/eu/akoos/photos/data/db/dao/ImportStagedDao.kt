@@ -134,4 +134,8 @@ interface ImportStagedDao {
     /** Drops staged rows left behind before a cutoff, for a run a user picked but never finished. */
     @Query("DELETE FROM import_staged WHERE stagedAt < :cutoffMs")
     suspend fun deleteOlderThan(cutoffMs: Long)
+
+    /** Remove every staged entry, for the sign-out that ends the account they were staged for. */
+    @Query("DELETE FROM import_staged")
+    suspend fun deleteAll()
 }

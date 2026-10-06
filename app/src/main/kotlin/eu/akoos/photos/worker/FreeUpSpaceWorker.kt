@@ -79,7 +79,7 @@ class FreeUpSpaceWorker @AssistedInject constructor(
         return try {
             // The automatic sweep protects copies the user placed on the device (downloads, undone
             // deletes); only the manual button reclaims those.
-            when (val result = freeUpSpace(userId, olderThanMs, protectDownloaded = true)) {
+            when (val result = freeUpSpace.sweepConfirmed(userId, olderThanMs, protectDownloaded = true)) {
                 is FreeUpSpaceUseCase.FreeUpResult.Done ->
                     Log.d(TAG, "Sweep reclaimed ${result.freed} photo(s)")
                 is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {

@@ -83,7 +83,7 @@ import eu.akoos.photos.presentation.theme.AppColors
 @Composable
 fun AccountScreen(
     onBack: () -> Unit,
-    onSignOut: () -> Unit,
+    onSignOut: (eu.akoos.photos.data.hidden.SignOutVaultChoice) -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -215,25 +215,38 @@ fun AccountScreen(
             val faceItem = stringResource(R.string.sign_out_dialog_item_faces)
             val dayNotesItem = stringResource(R.string.sign_out_dialog_item_day_notes)
             val vaultItem = stringResource(R.string.sign_out_dialog_item_vault)
+            // A hidden photo with no Drive copy exists nowhere else, so its fate is the user's to pick.
+            val deviceOnlyVault = (state.vaultedPhotoCount - state.vaultedCloudBackedCount).coerceAtLeast(0)
             val items = buildList {
                 if (state.faceEnabled) add(faceItem)
                 add(dayNotesItem)
-                if (state.vaultedPhotoCount > 0) add(vaultItem)
+                if (state.vaultedPhotoCount > 0 && deviceOnlyVault == 0) add(vaultItem)
             }
             val signOutMessage = stringResource(R.string.sign_out_dialog_message) +
                 items.joinToString(separator = "\n", prefix = "\n") { "· " + it }
-            ConfirmDialog(
-                title = stringResource(R.string.sign_out_dialog_title),
-                message = signOutMessage,
-                confirmLabel = stringResource(R.string.sign_out_dialog_confirm),
-                dismissLabel = stringResource(R.string.sign_out_dialog_cancel),
-                onConfirm = {
-                    showSignOutDialog = false
-                    onSignOut()
-                },
-                onDismiss = { showSignOutDialog = false },
-                destructive = true,
-            )
+            if (deviceOnlyVault > 0) {
+                SignOutVaultSheet(
+                    message = signOutMessage,
+                    onConfirm = { choice ->
+                        showSignOutDialog = false
+                        onSignOut(choice)
+                    },
+                    onDismiss = { showSignOutDialog = false },
+                )
+            } else {
+                ConfirmDialog(
+                    title = stringResource(R.string.sign_out_dialog_title),
+                    message = signOutMessage,
+                    confirmLabel = stringResource(R.string.sign_out_dialog_confirm),
+                    dismissLabel = stringResource(R.string.sign_out_dialog_cancel),
+                    onConfirm = {
+                        showSignOutDialog = false
+                        onSignOut(eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE)
+                    },
+                    onDismiss = { showSignOutDialog = false },
+                    destructive = true,
+                )
+            }
         }
     }
 }

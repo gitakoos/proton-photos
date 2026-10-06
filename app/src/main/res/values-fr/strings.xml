@@ -228,6 +228,11 @@
     <string name="sign_out_dialog_item_vault">Photos masquées</string>
     <string name="sign_out_dialog_confirm">Se déconnecter</string>
     <string name="sign_out_dialog_cancel">Annuler</string>
+    <string name="sign_out_vault_heading">Photos masquées sans copie dans Drive</string>
+    <string name="sign_out_vault_move">Les déplacer dans la galerie</string>
+    <string name="sign_out_vault_move_desc">Elles vont dans le dossier %1$s et restent sur ce téléphone.</string>
+    <string name="sign_out_vault_delete">Les supprimer</string>
+    <string name="sign_out_vault_delete_desc">Aucune autre copie n\'existe, elles sont perdues définitivement.</string>
     <string name="settings_account_storage">Stockage Drive</string>
     <string name="settings_account_links">Accès rapides</string>
     <string name="settings_account_link_manage">Gérer le compte</string>
@@ -1072,6 +1077,10 @@
     <string name="notifications_update_available">Nouvelle version disponible</string>
     <string name="update_channel_name">Mises à jour de l\'application</string>
     <string name="update_channel_desc">Vous avertit quand une version plus récente de l\'application est disponible.</string>
+    <string name="vault_rescue_channel_name">Avis de déconnexion</string>
+    <string name="vault_rescue_channel_desc">Vous prévient lorsqu\'une déconnexion que vous n\'avez pas demandée a remis vos photos masquées dans la galerie.</string>
+    <string name="vault_rescue_title">Votre session a pris fin</string>
+    <string name="vault_rescue_text">Vos photos masquées sans copie dans Drive ont été remises dans la galerie, dans le dossier %1$s, pour qu\'aucune ne soit perdue.</string>
     <string name="update_notification_text">Appuyez pour installer la version %1$s.</string>
     <string name="settings_backup_how_section">Déroulement de la sauvegarde</string>
     <string name="settings_theme_palette">Thème et palette</string>

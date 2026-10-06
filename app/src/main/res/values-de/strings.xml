@@ -228,6 +228,11 @@
     <string name="sign_out_dialog_item_vault">Versteckte Fotos</string>
     <string name="sign_out_dialog_confirm">Abmelden</string>
     <string name="sign_out_dialog_cancel">Abbrechen</string>
+    <string name="sign_out_vault_heading">Versteckte Fotos ohne Kopie in Drive</string>
+    <string name="sign_out_vault_move">In die Galerie verschieben</string>
+    <string name="sign_out_vault_move_desc">Sie landen im Ordner %1$s und bleiben auf diesem Telefon.</string>
+    <string name="sign_out_vault_delete">Löschen</string>
+    <string name="sign_out_vault_delete_desc">Es gibt keine weitere Kopie, sie sind endgültig weg.</string>
     <string name="settings_account_storage">Drive Speicher</string>
     <string name="settings_account_links">Schnellzugriffe</string>
     <string name="settings_account_link_manage">Konto verwalten</string>
@@ -1070,6 +1075,10 @@
     <string name="notifications_update_available">Neue Version verfügbar</string>
     <string name="update_channel_name">App-Updates</string>
     <string name="update_channel_desc">Meldet, wenn eine neuere Version der App verfügbar ist.</string>
+    <string name="vault_rescue_channel_name">Hinweise zur Abmeldung</string>
+    <string name="vault_rescue_channel_desc">Meldet, wenn eine Abmeldung, die du nicht ausgelöst hast, deine versteckten Fotos zurück in die Galerie verschoben hat.</string>
+    <string name="vault_rescue_title">Du wurdest abgemeldet</string>
+    <string name="vault_rescue_text">Deine versteckten Fotos ohne Kopie in Drive wurden zurück in die Galerie verschoben, in den Ordner %1$s, damit keines verloren geht.</string>
     <string name="update_notification_text">Tippen, um Version %1$s zu installieren.</string>
     <string name="settings_backup_how_section">Wie gesichert wird</string>
     <string name="settings_theme_palette">Design &amp; Palette</string>

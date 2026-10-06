@@ -108,9 +108,9 @@ class FreeUpSpaceUseCase @Inject constructor(
      * [onProgress] is called with (done, total) as the sweep advances, so a caller can show movement
      * over a run that takes minutes on a large library. It is called from the IO context this runs on.
      *
-     * Selects the candidates and reclaims them in one call, for the scheduled sweep that has no cloud
-     * check to run first. The manual button splits the two: it verifies the candidates with
-     * [verifyActiveBackups] and hands only the confirmed set to [reclaimCandidates].
+     * Selects the candidates and reclaims them in one call, with no cloud check. A caller that deletes
+     * on a schedule uses [sweepConfirmed]; the manual button splits the two itself, verifying the
+     * candidates with [verifyActiveBackups] and handing only the confirmed set to [reclaimCandidates].
      */
     suspend operator fun invoke(
         userId: UserId,
@@ -119,6 +119,25 @@ class FreeUpSpaceUseCase @Inject constructor(
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): FreeUpResult =
         reclaimCandidates(candidates(userId, olderThanMs, protectDownloaded), onProgress)
+
+    /**
+     * The scheduled sweep: [candidates], narrowed to the rows [verifyActiveBackups] confirms against
+     * Drive right now, then reclaimed.
+     *
+     * The sync state alone is not enough to delete on. Reconcile stamps the cloud state as checked
+     * whether or not a listing walk ran before it, which a Wi-Fi-only backup on mobile data skips, so
+     * a photo already gone from Drive can still read SYNCED, and its device copy would be the last
+     * one. A lookup that fails throws, so a batch that could not be confirmed deletes nothing.
+     */
+    suspend fun sweepConfirmed(
+        userId: UserId,
+        olderThanMs: Long,
+        protectDownloaded: Boolean = false,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): FreeUpResult = reclaimCandidates(
+        verifyActiveBackups(userId, candidates(userId, olderThanMs, protectDownloaded)),
+        onProgress,
+    )
 
     /**
      * Deletes the device copy of each row in [candidates], in order, committing each on its own, and

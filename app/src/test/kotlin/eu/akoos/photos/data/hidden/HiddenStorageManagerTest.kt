@@ -192,4 +192,37 @@ class HiddenStorageManagerTest {
         assertEquals(captureMs, HiddenCaptureTime.parse(fileOf(restamped).name))
         assertEquals(1, vaultNames().size)
     }
+
+    // ── an involuntary sign-out emptying the vault ───────────────────────────────────────────────
+
+    @Test
+    fun `clearing the vault except named files keeps those untouched and removes the rest`() = runBlocking {
+        val kept = vaultFile(bytes = byteArrayOf(7, 7))
+        vaultFile(bytes = byteArrayOf(1))
+        vaultFile(bytes = byteArrayOf(2))
+
+        storage.clearVault(keep = setOf(kept))
+
+        assertEquals(listOf(fileOf(kept).name), vaultNames())
+        assertArrayEquals(byteArrayOf(7, 7), fileOf(kept).readBytes())
+    }
+
+    @Test
+    fun `clearing the vault with nothing to keep empties it`() = runBlocking {
+        vaultFile()
+        vaultFile(bytes = byteArrayOf(5))
+
+        storage.clearVault()
+
+        assertTrue(vaultNames().isEmpty())
+    }
+
+    @Test
+    fun `a kept uri the vault does not hold spares nothing else`() = runBlocking {
+        vaultFile()
+
+        storage.clearVault(keep = setOf("file:///data/missing.jpg"))
+
+        assertTrue(vaultNames().isEmpty())
+    }
 }

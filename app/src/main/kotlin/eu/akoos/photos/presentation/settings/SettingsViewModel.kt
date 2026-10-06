@@ -177,6 +177,7 @@ class SettingsViewModel @Inject constructor(
     private val offlineStore: OfflineStorageManager,
     private val hiddenStorage: eu.akoos.photos.data.hidden.HiddenStorageManager,
     private val hiddenVaultJournal: HiddenVaultJournal,
+    private val hiddenVaultRestorer: eu.akoos.photos.data.hidden.HiddenVaultRestorer,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val deviceHealth: DeviceHealthPolicy,
     private val personDao: PersonDao,
@@ -2044,7 +2045,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     @OptIn(coil.annotation.ExperimentalCoilApi::class)
-    fun signOut() {
+    fun signOut(vault: eu.akoos.photos.data.hidden.SignOutVaultChoice = eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE) {
         viewModelScope.launch {
             accountManager.getPrimaryUserId().firstOrNull()?.let { userId ->
                 // 0. Before anything else, and awaited: stop an ML sync save or restore. It calls into
@@ -2057,17 +2058,27 @@ class SettingsViewModel @Inject constructor(
                 runCatching { PhotoWidgetUpdateWorker.cancelAll(context) }
                 // 1. Stop anything that could re-decrypt content back into the caches we are about
                 //    to wipe, and stop the persistent process-keeper service.
-                runCatching {
-                    SyncWorker.cancel(workManager)
-                    workManager.cancelUniqueWork(SyncWorker.NAME_ONESHOT)
-                    workManager.cancelUniqueWork(SyncWorker.NAME_CONTENT_OBSERVER)
-                    workManager.cancelAllWorkByTag(eu.akoos.photos.worker.AlbumDownloadWorker.TAG)
-                    eu.akoos.photos.service.BackgroundSyncService.stop(context)
-                }
+                eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(context, workManager)
                 // 2. Wipe plaintext key material + this user's cached cloud rows BEFORE the account
                 //    token disappears (heap can't recover keys; the re-login starts from a clean
                 //    fetch instead of replaying stale rows that showed up with black thumbnails).
-                cloudRepo.clearCacheForSignOut(userId)
+                // The photos the user chose to keep go to the gallery before the vault is emptied; the
+                // wipe then spares any that could not be moved.
+                val vaultFiles = runCatching { hiddenStorage.vaultBlobUris().size }.getOrDefault(0)
+                var vaultNote = "vault deleted ($vaultFiles files)"
+                val vaultWipe = when (vault) {
+                    eu.akoos.photos.data.hidden.SignOutVaultChoice.DELETE -> eu.akoos.photos.domain.repository.VaultWipe.All
+                    eu.akoos.photos.data.hidden.SignOutVaultChoice.MOVE_OUT -> {
+                        val rescued = runCatching {
+                            hiddenVaultRestorer.rescueDeviceOnly(
+                                eu.akoos.photos.data.hidden.HiddenRescue.SIGN_OUT_FOLDER,
+                            )
+                        }.getOrNull()
+                        vaultNote = eu.akoos.photos.data.hidden.VaultSignOutPolicy.vaultNote(rescued)
+                        eu.akoos.photos.data.hidden.VaultSignOutPolicy.wipeAfterRescue(rescued)
+                    }
+                }
+                cloudRepo.clearCacheForSignOut(userId, vaultWipe)
                 // 3. Delete the decrypted on-disk caches + Coil's caches so no decrypted photo or
                 //    thumbnail of the signed-out user stays readable, and drop the diagnostics
                 //    buffers, which are process-lifetime and would otherwise carry into a sign-in as
@@ -2077,12 +2088,7 @@ class SettingsViewModel @Inject constructor(
                 //    and the encrypted in-flight upload spill are left alone.
                 runCatching {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        listOf("thumbnails", "fullres", "fullres-session", "editor", "video_editor", "motion")
-                            .forEach { File(context.cacheDir, it).deleteRecursively() }
-                        context.cacheDir.listFiles { f -> f.name.startsWith("album_dl_") }?.forEach { it.delete() }
-                        val loader = context.imageLoader
-                        loader.memoryCache?.clear()
-                        loader.diskCache?.clear()
+                        eu.akoos.photos.util.SignOutCleanup.clearDecryptedCaches(context)
                         eu.akoos.photos.util.SyncDiagnostics.clear()
                         eu.akoos.photos.util.PerfDiagnostics.clear()
                         eu.akoos.photos.util.ImportDiagnostics.clear()
@@ -2094,6 +2100,10 @@ class SettingsViewModel @Inject constructor(
                 //    ids, or favourite list. We keep UI preferences (theme, palette, language) and
                 //    machine-level flags (onboarding-complete, app-lock, update throttle).
                 runCatching { AccountScopedPreferences.clear(context, userId) }
+                // The line goes in after the buffers were emptied above, so it opens the next session's log.
+                eu.akoos.photos.util.SyncDiagnostics.log("sign-out: by user, $vaultNote")
+                // The handler every sign-out reaches must know this one was asked for.
+                eu.akoos.photos.data.hidden.UserSignOut.mark(userId.id)
                 // End the app lock's post-unlock grace in AppLockSession, which holds the lock
                 // timestamps, BEFORE disableAccount triggers the route change, so the stop and
                 // start of the sign-in flow is judged by the lock timeout alone.

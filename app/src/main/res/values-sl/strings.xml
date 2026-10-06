@@ -442,6 +442,11 @@
     <string name="sign_out_dialog_item_vault">Skrite fotografije</string>
     <string name="sign_out_dialog_confirm">Odjava</string>
     <string name="sign_out_dialog_cancel">Prekliči</string>
+    <string name="sign_out_vault_heading">Skrite fotografije brez kopije v Drive</string>
+    <string name="sign_out_vault_move">Premakni v galerijo</string>
+    <string name="sign_out_vault_move_desc">Prenesene bodo v mapo %1$s in ostanejo v tem telefonu.</string>
+    <string name="sign_out_vault_delete">Izbriši</string>
+    <string name="sign_out_vault_delete_desc">Druge kopije ni, zato bodo za vedno izgubljene.</string>
     <string name="settings_account_storage">Shramba Drive</string>
     <string name="settings_account_links">Hitre povezave</string>
     <string name="settings_account_link_manage">Upravljanje računa</string>
@@ -1300,6 +1305,10 @@
     <string name="notifications_update_available">Na voljo je nova različica</string>
     <string name="update_channel_name">Posodobitve aplikacije</string>
     <string name="update_channel_desc">Sporoči, ko je na voljo novejša različica aplikacije.</string>
+    <string name="vault_rescue_channel_name">Obvestila o odjavi</string>
+    <string name="vault_rescue_channel_desc">Obvesti, ko so se skrite fotografije po odjavi, ki je niste sprožili, vrnile v galerijo.</string>
+    <string name="vault_rescue_title">Vaša seja se je končala</string>
+    <string name="vault_rescue_text">Vaše skrite fotografije brez kopije v Drive so bile premaknjene nazaj v galerijo, v mapo %1$s, da nobena ne izgine.</string>
     <string name="update_notification_text">Tapnite za namestitev različice %1$s.</string>
     <string name="settings_backup_how_section">Kako poteka varnostno kopiranje</string>
     <string name="settings_theme_palette">Tema in paleta</string>

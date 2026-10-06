@@ -229,6 +229,11 @@
     <string name="sign_out_dialog_item_vault">Fotos ocultas</string>
     <string name="sign_out_dialog_confirm">Cerrar sesión</string>
     <string name="sign_out_dialog_cancel">Cancelar</string>
+    <string name="sign_out_vault_heading">Fotos ocultas sin copia en Drive</string>
+    <string name="sign_out_vault_move">Moverlas a la galería</string>
+    <string name="sign_out_vault_move_desc">Van a la carpeta %1$s y se quedan en este teléfono.</string>
+    <string name="sign_out_vault_delete">Eliminarlas</string>
+    <string name="sign_out_vault_delete_desc">No existe otra copia, así que se pierden para siempre.</string>
     <string name="settings_account_storage">Almacenamiento de Drive</string>
     <string name="settings_account_links">Accesos rápidos</string>
     <string name="settings_account_link_manage">Gestionar cuenta</string>
@@ -1085,6 +1090,10 @@
     <string name="notifications_update_available">Nueva versión disponible</string>
     <string name="update_channel_name">Actualizaciones de la app</string>
     <string name="update_channel_desc">Avisa cuando hay una versión más reciente de la app.</string>
+    <string name="vault_rescue_channel_name">Avisos de cierre de sesión</string>
+    <string name="vault_rescue_channel_desc">Te avisa cuando un cierre de sesión que no pediste devolvió tus fotos ocultas a la galería.</string>
+    <string name="vault_rescue_title">Se cerró tu sesión</string>
+    <string name="vault_rescue_text">Tus fotos ocultas sin copia en Drive se devolvieron a la galería, a la carpeta %1$s, para que no se pierda ninguna.</string>
     <string name="update_notification_text">Toca para instalar la versión %1$s.</string>
     <string name="settings_backup_how_section">Cómo se hace la copia</string>
     <string name="settings_theme_palette">Tema y paleta</string>

@@ -1747,7 +1747,7 @@ fun NavGraph(
             val settingsVm: eu.akoos.photos.presentation.settings.SettingsViewModel = hiltViewModel()
             AccountScreen(
                 onBack = { navController.popBackStack() },
-                onSignOut = { settingsVm.signOut() },
+                onSignOut = { vault -> settingsVm.signOut(vault) },
                 viewModel = settingsVm,
             )
         }

@@ -49,6 +49,19 @@ import javax.inject.Singleton
 /** done/total of a folder-wide move in or out of the vault, so both directions report one shape. */
 data class HiddenFolderProgress(val done: Int, val total: Int, val restoring: Boolean)
 
+/** What an involuntary sign-out took back to the device: how many photos, and which vault files are
+ *  still there because the write failed. */
+data class HiddenRescue(val moved: Int, val stillInVault: Set<String>) {
+    companion object {
+        /** The gallery folder rescued photos land in, apart from every folder the user chose. The suffix
+         *  names why the folder exists, so another cause can later get a folder of its own. */
+        const val FOLDER = "PFPVault_ForcedLogout"
+
+        /** The folder for photos the user chose to take out of the vault when signing out. */
+        const val SIGN_OUT_FOLDER = "PFPVault_SignOut"
+    }
+}
+
 /**
  * Takes photos back out of the vault: one at a time, or a whole device folder at once.
  *
@@ -188,7 +201,8 @@ class HiddenVaultRestorer @Inject constructor(
         uri: String,
         tally: RevealTally,
         fallbackDisplayName: String? = null,
-    ): HiddenRestoreOutcome = runs.forPhoto(uri) { roundTrip(uri, tally, fallbackDisplayName) }
+        folderOverride: String? = null,
+    ): HiddenRestoreOutcome = runs.forPhoto(uri) { roundTrip(uri, tally, fallbackDisplayName, folderOverride) }
 
     /**
      * The round trip for one photo: the file back to the device, then the index entry and the four
@@ -211,6 +225,7 @@ class HiddenVaultRestorer @Inject constructor(
         uri: String,
         tally: RevealTally,
         fallbackDisplayName: String? = null,
+        folderOverride: String? = null,
     ): HiddenRestoreOutcome {
         val ref = HiddenVaultDiagnostics.ref(uri)
         val startedAt = SystemClock.elapsedRealtime()
@@ -224,7 +239,7 @@ class HiddenVaultRestorer @Inject constructor(
         // Source folder and original filename, both recorded at hide time so the file returns to
         // where it came from under the name it had. Absent for entries hidden before those maps
         // existed — restore then keeps its root default and generates a name.
-        val sourceFolder = prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP]
+        val sourceFolder = folderOverride ?: prefs[SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP]
             ?.firstOrNull { it.startsWith("$uri|") }
             ?.substringAfter('|')
         val storedName = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP]
@@ -481,6 +496,44 @@ class HiddenVaultRestorer @Inject constructor(
             HiddenVaultDiagnostics.revealFinished(uris.size - failed, failed, tally)
             failed
         }
+    }
+
+    /**
+     * Take every vault photo with no Drive copy back to the device, into the gallery [folder] of its
+     * own, for a sign-out the user did not ask for.
+     *
+     * A forced logout cannot warn, and for a photo that only ever existed on this device the vault
+     * file is the only copy, the hide having deleted the original. Those come back; the files that
+     * remain are ones Drive can return. A folder of their own keeps them apart from photos the user
+     * took out of hiding, and each keeps the name and capture date it was hidden under.
+     *
+     * Answers how many came back and which vault files are still there because the write failed, so
+     * the caller wipes around them instead of over them. Detached whole, for the reason a single
+     * reveal is: the session ending is also what ends the screen that would otherwise own the run.
+     */
+    suspend fun rescueDeviceOnly(folder: String = HiddenRescue.FOLDER): HiddenRescue = runs.detached {
+        val prefs = context.settingsDataStore.data.first()
+        val paired = HiddenVaultRecords.pairedUris(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet())
+        val targets = HiddenVaultDecisions.deviceOnlyVaultUris(
+            blobUris = withContext(Dispatchers.IO) { hiddenStorage.vaultBlobUris() },
+            pairedUris = paired,
+        )
+        if (targets.isEmpty()) return@detached HiddenRescue(moved = 0, stillInVault = emptySet())
+        val buckets = recordedBucketsOf(targets)
+        val tally = RevealTally()
+        HiddenVaultDiagnostics.revealStarted(targets.size)
+        val kept = mutableSetOf<String>()
+        val stillInVault = mutableSetOf<String>()
+        var moved = 0
+        for (uri in targets) {
+            val outcome = restoreOne(uri, tally, folderOverride = folder)
+            if (!outcome.clearsRecords) kept += uri
+            if (outcome.revealed) moved++ else if (hiddenStorage.hasBlob(uri)) stillInVault += uri
+        }
+        journal.forget(targets - kept)
+        clearEmptiedFolders(buckets)
+        HiddenVaultDiagnostics.revealFinished(moved, targets.size - moved, tally)
+        HiddenRescue(moved = moved, stillInVault = stillInVault)
     }
 
     /**

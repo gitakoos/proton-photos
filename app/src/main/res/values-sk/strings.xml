@@ -441,6 +441,11 @@
     <string name="sign_out_dialog_item_vault">Skryté fotky</string>
     <string name="sign_out_dialog_confirm">Odhlásiť sa</string>
     <string name="sign_out_dialog_cancel">Zrušiť</string>
+    <string name="sign_out_vault_heading">Skryté fotky bez kópie na Drive</string>
+    <string name="sign_out_vault_move">Presunúť do galérie</string>
+    <string name="sign_out_vault_move_desc">Presunú sa do priečinka %1$s a zostanú v tomto telefóne.</string>
+    <string name="sign_out_vault_delete">Odstrániť</string>
+    <string name="sign_out_vault_delete_desc">Neexistuje žiadna iná kópia, takže budú nenávratne preč.</string>
     <string name="settings_account_storage">Úložisko Drive</string>
     <string name="settings_account_links">Rýchle odkazy</string>
     <string name="settings_account_link_manage">Spravovať účet</string>
@@ -1299,6 +1304,10 @@
     <string name="notifications_update_available">Dostupná nová verzia</string>
     <string name="update_channel_name">Aktualizácie aplikácie</string>
     <string name="update_channel_desc">Oznámi, keď je dostupná novšia verzia aplikácie.</string>
+    <string name="vault_rescue_channel_name">Oznámenia o odhlásení</string>
+    <string name="vault_rescue_channel_desc">Upozorní vás na návrat skrytých fotiek do galérie po odhlásení, ktoré ste nevyvolali.</string>
+    <string name="vault_rescue_title">Vaše prihlásenie skončilo</string>
+    <string name="vault_rescue_text">Vaše skryté fotky bez kópie na Drive sa vrátili do galérie, do priečinka %1$s, aby sa žiadna nestratila.</string>
     <string name="update_notification_text">Ťuknutím nainštalujete verziu %1$s.</string>
     <string name="settings_backup_how_section">Ako prebieha zálohovanie</string>
     <string name="settings_theme_palette">Motív a paleta</string>

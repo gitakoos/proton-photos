@@ -41,6 +41,7 @@ import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.VaultWipe
 import java.io.File
 
 /**
@@ -346,7 +347,7 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun loadPendingInvitations(userId: UserId): List<PendingInvitation> = emptyList()
     override suspend fun declineInvitation(userId: UserId, invitationId: String) {}
     override suspend fun acceptInvitation(userId: UserId, invitationId: String) {}
-    override suspend fun clearCacheForSignOut(userId: UserId) {}
+    override suspend fun clearCacheForSignOut(userId: UserId, vault: VaultWipe) {}
     override fun requestThumbnailDecrypt(userId: UserId, linkId: String) {}
     override fun cancelThumbnailDecrypt(linkId: String) {}
     override fun prefetchThumbnailDecrypt(userId: UserId, linkIds: List<String>) {}

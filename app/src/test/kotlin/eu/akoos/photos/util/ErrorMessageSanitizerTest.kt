@@ -124,4 +124,45 @@ class ErrorMessageSanitizerTest {
         assertEquals(sanitizeErrorMessage(raw), redact(raw))
         assertTrue(redact(raw).contains("<email>"))
     }
+
+    @Test
+    fun `a path with spaces is redacted to its end`() {
+        val out = sanitizeErrorMessage("open failed /storage/emulated/0/Pictures/Kovács család/IMG 1.jpg: ENOENT")
+        assertFalse(out.contains("Kovács"))
+        assertFalse(out.contains("család"))
+        assertTrue(out.contains("<path>"))
+        assertTrue(out.contains("ENOENT"))
+    }
+
+    @Test
+    fun `a media relative folder path is redacted`() {
+        val out = sanitizeErrorMessage("could not write Pictures/Anna Kovács/IMG_1.jpg (disk full)")
+        assertFalse(out.contains("Anna"))
+        assertFalse(out.contains("Kovács"))
+        assertTrue(out.contains("disk full"))
+    }
+
+    @Test
+    fun `a file name with spaces and accents is redacted whole`() {
+        val out = sanitizeErrorMessage("failed to encrypt Kovács Anna 2020.jpg before upload")
+        assertFalse(out.contains("Kovács"))
+        assertFalse(out.contains("Anna"))
+        assertTrue(out.contains("failed to encrypt"))
+        assertTrue(out.contains("before upload"))
+    }
+
+    @Test
+    fun `a file name in a non-latin script is redacted`() {
+        val out = sanitizeErrorMessage("decode failed for Árvíztűrő tükörfúrógép.JPG")
+        assertFalse(out.contains("Árvíz"))
+        assertFalse(out.contains("tükör"))
+    }
+
+    @Test
+    fun `a quoted name is redacted`() {
+        val out = sanitizeErrorMessage("album 'Family Kovács' not found, person \"Anna Nagy\" missing")
+        assertFalse(out.contains("Kovács"))
+        assertFalse(out.contains("Nagy"))
+        assertTrue(out.contains("not found"))
+    }
 }

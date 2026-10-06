@@ -54,11 +54,21 @@ fun sanitizeErrorMessage(raw: String?): String {
     // the 20+ char base64 regex would also eat the body of an email or URL we
     // wanted to recognise structurally.
     s = s.replace(Regex("https?://\\S+"), "<url>")
-    s = s.replace(Regex("/storage/[^\\s]+"), "<path>")
-    s = s.replace(Regex("/data/[^\\s]+"), "<path>")
+    // A path is read to its end, not to its first space: the folders of a library are named by people,
+    // and a family name in one is exactly what must not outlive the redaction.
+    s = s.replace(Regex("(?:/storage|/sdcard|/mnt|/data)/[^\\n:()'\"]*"), "<path>")
+    // The same folders reached by their media-relative path, which names no storage root.
+    s = s.replace(Regex("\\b(?:Pictures|DCIM|Movies|Download|Documents|Android)/[^\\n:()'\"]*"), "<path>")
     s = s.replace(Regex("[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}"), "<email>")
+    // Anything quoted is a name somebody chose (an album, a person, a folder).
+    s = s.replace(Regex("'[^'\\n]*'|\"[^\"\\n]*\""), "<text>")
+    // A file name in any script, with the capitalised words before it that a name with spaces carries.
     s = s.replace(
-        Regex("[A-Za-z0-9_-]+\\.(jpg|jpeg|png|webp|heic|gif|mp4|mov|m4v|avi|3gp)\\b", RegexOption.IGNORE_CASE),
+        Regex(
+            "(?:[\\p{Lu}\\p{N}][\\p{L}\\p{N}_()\\-.,]* ){0,3}[\\p{L}\\p{N}_()\\-.,]+" +
+                "\\.(?i:jpg|jpeg|png|webp|heic|heif|gif|mp4|mov|m4v|avi|3gp|mkv|webm)\\b",
+            // Only the extension ignores case; the capital-letter rule before it must not.
+        ),
         "<file>",
     )
     // Opaque base64-ish tokens (Drive linkIds, shareIds). 20-char minimum on the

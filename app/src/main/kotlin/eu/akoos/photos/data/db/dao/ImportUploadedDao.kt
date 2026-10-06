@@ -84,4 +84,8 @@ interface ImportUploadedDao {
      *  or touches the photos on Drive, it just forgets that this run recorded them. */
     @Query("DELETE FROM import_uploaded WHERE runId = :runId")
     suspend fun deleteRun(runId: String)
+
+    /** Remove every uploaded record, for the sign-out that ends the account they belong to. */
+    @Query("DELETE FROM import_uploaded")
+    suspend fun deleteAll()
 }

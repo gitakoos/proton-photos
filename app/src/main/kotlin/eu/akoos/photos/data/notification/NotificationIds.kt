@@ -94,6 +94,10 @@ object NotificationIds {
      *  Proton Drive. */
     const val LABEL_SYNC = 4258
 
+    /** The notice that hidden photos were moved back to the gallery by a sign-out the user did not
+     *  ask for. */
+    const val VAULT_RESCUE = 4259
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

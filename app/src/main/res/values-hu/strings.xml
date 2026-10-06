@@ -246,6 +246,11 @@
     <string name="sign_out_dialog_item_vault">Rejtett fotók</string>
     <string name="sign_out_dialog_confirm">Kijelentkezés</string>
     <string name="sign_out_dialog_cancel">Mégse</string>
+    <string name="sign_out_vault_heading">Rejtett fotók, amelyeknek nincs másolata a Drive-ban</string>
+    <string name="sign_out_vault_move">Mozgatás a galériába</string>
+    <string name="sign_out_vault_move_desc">A(z) %1$s mappába kerülnek, és a telefonon maradnak.</string>
+    <string name="sign_out_vault_delete">Törlés</string>
+    <string name="sign_out_vault_delete_desc">Nincs másik példányuk, ezért végleg elvesznek.</string>
     <string name="settings_account_storage">Drive tárhely</string>
     <string name="settings_account_links">Gyors linkek</string>
     <string name="settings_account_link_manage">Fiók kezelése</string>
@@ -1093,6 +1098,10 @@
     <string name="notifications_update_available">Új verzió érhető el</string>
     <string name="update_channel_name">Alkalmazásfrissítések</string>
     <string name="update_channel_desc">Jelzi, ha elérhető az alkalmazás újabb verziója.</string>
+    <string name="vault_rescue_channel_name">Kijelentkezési értesítések</string>
+    <string name="vault_rescue_channel_desc">Szól, ha egy nem általad kért kijelentkezés visszahelyezte a rejtett fotóidat a galériába.</string>
+    <string name="vault_rescue_title">Ki lettél jelentkeztetve</string>
+    <string name="vault_rescue_text">A Drive-ban másolattal nem rendelkező rejtett fotóid visszakerültek a galériába, a(z) %1$s mappába, így egyik sem veszett el.</string>
     <string name="update_notification_text">Koppints a(z) %1$s verzió telepítéséhez.</string>
     <string name="settings_backup_how_section">A mentés módja</string>
     <string name="settings_theme_palette">Téma és paletta</string>

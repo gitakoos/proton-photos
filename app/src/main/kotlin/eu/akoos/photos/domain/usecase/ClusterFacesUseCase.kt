@@ -46,6 +46,13 @@ import eu.akoos.photos.data.face.sidewaysFromEncoded
 import javax.inject.Inject
 
 /**
+ * The diagnostics line for one rebuilt cluster. It takes whether the cluster is named and never the
+ * name: a tester pastes the copied log into a public issue, and a person's name must not be in it.
+ */
+internal fun clusterLogLine(size: Int, named: Boolean): String =
+    "  cluster: $size faces, " + if (named) "named" else "unnamed"
+
+/**
  * What one full rebuild of the people did. [committed] is false when its write check refused the rewrite,
  * so nothing was written. Otherwise [leftUngrouped] is how many of the faces it read (removed ones aside)
  * it left without a person: those kept out of a named person they were marked as not being, and those
@@ -302,7 +309,7 @@ class ClusterFacesUseCase @Inject constructor(
         )
         if (otherBucketSize > 0) SyncDiagnostics.log("  unsorted bucket: $otherBucketSize faces")
         createdClusters.sortedByDescending { it.first }.take(15).forEach { (size, named) ->
-            SyncDiagnostics.log("  cluster: $size faces, " + if (named) "named" else "unnamed")
+            SyncDiagnostics.log(clusterLogLine(size, named))
         }
         FaceRegroupOutcome(committed = true, leftUngrouped = leftUngrouped)
     }

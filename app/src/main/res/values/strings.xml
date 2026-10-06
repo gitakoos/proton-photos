@@ -620,6 +620,11 @@
     <string name="sign_out_dialog_item_vault">Hidden Photos</string>
     <string name="sign_out_dialog_confirm">Sign out</string>
     <string name="sign_out_dialog_cancel">Cancel</string>
+    <string name="sign_out_vault_heading">Hidden photos with no copy in Drive</string>
+    <string name="sign_out_vault_move">Move them to your gallery</string>
+    <string name="sign_out_vault_move_desc">They go into the %1$s folder and stay on this phone.</string>
+    <string name="sign_out_vault_delete">Delete them</string>
+    <string name="sign_out_vault_delete_desc">No other copy exists, so they are gone for good.</string>
     <string name="settings_account_storage">Drive storage</string>
     <string name="settings_account_links">Quick links</string>
     <string name="settings_account_link_manage">Manage account</string>
@@ -1767,6 +1772,10 @@
     <string name="notifications_update_available">New version available</string>
     <string name="update_channel_name">App updates</string>
     <string name="update_channel_desc">Tells you when a newer version of the app is available.</string>
+    <string name="vault_rescue_channel_name">Sign-out notices</string>
+    <string name="vault_rescue_channel_desc">Tells you when a sign-out you did not ask for moved your hidden photos back to the gallery.</string>
+    <string name="vault_rescue_title">You were signed out</string>
+    <string name="vault_rescue_text">Your hidden photos with no copy in Drive were moved back to the gallery, into the %1$s folder, so none is lost.</string>
     <string name="update_notification_text">Tap to install version %1$s.</string>
     <string name="settings_backup_how_section">How backup runs</string>
     <string name="settings_theme_palette">Theme &amp; palette</string>

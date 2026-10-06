@@ -62,6 +62,7 @@ import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
 import eu.akoos.photos.domain.entity.SharedPhoto
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.VaultWipe
 import eu.akoos.photos.util.combineSqlChunks
 import java.io.File
 import javax.inject.Inject
@@ -113,6 +114,11 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val sdkDriveClientProvider: eu.akoos.photos.data.sdk.SdkDriveClientProvider,
     private val widgetSignOut: eu.akoos.photos.widget.PhotoWidgetSignOut,
     private val mlSyncSignOut: eu.akoos.photos.data.mlsync.MlSyncSignOut,
+    private val pendingMetadataEditDao: eu.akoos.photos.data.db.dao.PendingMetadataEditDao,
+    private val importStagedDao: eu.akoos.photos.data.db.dao.ImportStagedDao,
+    private val importHistoryDao: eu.akoos.photos.data.db.dao.ImportHistoryDao,
+    private val importUploadedDao: eu.akoos.photos.data.db.dao.ImportUploadedDao,
+    private val importAlbumMemberDao: eu.akoos.photos.data.db.dao.ImportAlbumMemberDao,
 ) : DrivePhotoRepository {
 
     // Long-lived scope for fire-and-forget DAO lookups in the thumbnail request path.
@@ -477,7 +483,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun acceptInvitation(userId: UserId, invitationId: String) =
         albumSharingService.acceptInvitation(userId, invitationId)
 
-    override suspend fun clearCacheForSignOut(userId: UserId) {
+    override suspend fun clearCacheForSignOut(userId: UserId, vault: VaultWipe) {
         // FIRST, and awaited, on every sign-out route: an ML sync save or restore calls into this
         // account's Drive SDK client and writes its face data, both of which go below. Its client is
         // closed to new calls, the job cancelled, and its run waited for (bounded), so nothing calls
@@ -510,6 +516,13 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { clusterSummaryDao.clearForUser(userId.id) }
         // The account's photo labels are its own private notes about its photos and leave with it.
         runCatching { photoLabels.clearForUser(userId) }
+        // What the account queued and imported is free text and coordinates (descriptions, places, file
+        // and album names) about a library the next person on this phone does not own.
+        runCatching { pendingMetadataEditDao.clear() }
+        runCatching { importStagedDao.deleteAll() }
+        runCatching { importHistoryDao.deleteAll() }
+        runCatching { importUploadedDao.deleteAll() }
+        runCatching { importAlbumMemberDao.deleteAll() }
         // The plaintext an ML sync import or export passes through, left behind by a run killed part
         // way, and the names still waiting to be put back on detected faces go with the face rows.
         runCatching { mlSyncSignOut.wipePlaintext() }
@@ -551,10 +564,17 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         // keyed by volume-unique linkId (not user-partitioned), so this clears every pin's bytes;
         // a still-signed-in account simply re-downloads its pins on demand.
         runCatching { offlineStore.clearAllAndUnpin() }
-        // Wipe the decrypted Hidden vault blobs as well. The hidden index pref is cleared on the
-        // explicit sign-out, but the converged force-logout / 2FA-fail path only runs this method,
-        // so the vault must be emptied here for every sign-out route to leave no decrypted photos.
-        runCatching { hiddenStore.clearVault() }
+        // Empty the Hidden vault as far as the caller decided. A deliberate sign-out has confirmed it
+        // and takes everything; an involuntary one has first taken the photos with no Drive copy back to
+        // the gallery and spares only what could not be moved, since a vault file is the only copy a
+        // device-only photo has.
+        runCatching {
+            when (vault) {
+                VaultWipe.All -> hiddenStore.clearVault()
+                VaultWipe.None -> Unit
+                is VaultWipe.Except -> hiddenStore.clearVault(keep = vault.uris)
+            }
+        }
         // Drop the cached perceptual fingerprints so one account's near-duplicate prints don't
         // linger for the next signed-in user. Keyed by linkId / uri (not user-partitioned), so
         // this clears every row; the background scheduler refills on demand for whoever is next.

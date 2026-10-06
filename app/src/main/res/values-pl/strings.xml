@@ -441,6 +441,11 @@
     <string name="sign_out_dialog_item_vault">Ukryte zdjęcia</string>
     <string name="sign_out_dialog_confirm">Wyloguj się</string>
     <string name="sign_out_dialog_cancel">Anuluj</string>
+    <string name="sign_out_vault_heading">Ukryte zdjęcia bez kopii na Drive</string>
+    <string name="sign_out_vault_move">Przenieś do galerii</string>
+    <string name="sign_out_vault_move_desc">Trafią do folderu %1$s i zostaną na tym telefonie.</string>
+    <string name="sign_out_vault_delete">Usuń</string>
+    <string name="sign_out_vault_delete_desc">Nie ma innej kopii, więc znikną na zawsze.</string>
     <string name="settings_account_storage">Pamięć Drive</string>
     <string name="settings_account_links">Szybkie linki</string>
     <string name="settings_account_link_manage">Zarządzaj kontem</string>
@@ -1299,6 +1304,10 @@
     <string name="notifications_update_available">Dostępna nowa wersja</string>
     <string name="update_channel_name">Aktualizacje aplikacji</string>
     <string name="update_channel_desc">Informuje, gdy dostępna jest nowsza wersja aplikacji.</string>
+    <string name="vault_rescue_channel_name">Powiadomienia o wylogowaniu</string>
+    <string name="vault_rescue_channel_desc">Informuje o powrocie ukrytych zdjęć do galerii po wylogowaniu, którego nie wywołał użytkownik.</string>
+    <string name="vault_rescue_title">Sesja została zakończona</string>
+    <string name="vault_rescue_text">Ukryte zdjęcia bez kopii na Drive zostały przeniesione z powrotem do galerii, do folderu %1$s, aby żadne nie zginęło.</string>
     <string name="update_notification_text">Dotknij, aby zainstalować wersję %1$s.</string>
     <string name="settings_backup_how_section">Jak działa kopia</string>
     <string name="settings_theme_palette">Motyw i paleta</string>

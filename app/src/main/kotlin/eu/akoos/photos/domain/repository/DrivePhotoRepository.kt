@@ -468,8 +468,10 @@ interface DrivePhotoRepository {
      * Coil caches, and the per-user DataStore anchors are cleared by the caller (it owns the
      * Context + WorkManager). Leaving the cloud rows behind caused stale photos to reappear with
      * black thumbnails and an occasional 404 on re-login (the events anchor pointed at old state).
+     *
+     * [vault] says how much of the hidden vault goes with it; see [VaultWipe].
      */
-    suspend fun clearCacheForSignOut(userId: UserId)
+    suspend fun clearCacheForSignOut(userId: UserId, vault: VaultWipe = VaultWipe.All)
 
     // ── Lazy thumbnail decrypt ────────────────────────────────────────────
     //

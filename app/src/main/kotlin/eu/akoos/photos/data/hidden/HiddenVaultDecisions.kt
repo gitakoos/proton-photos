@@ -197,6 +197,18 @@ object HiddenVaultDecisions {
     fun revealNeedsRowRepair(move: HiddenPairingMove): Boolean = move != HiddenPairingMove.MOVED
 
     /**
+     * The vault files an involuntary sign-out has to take back to the device, from the files on disk
+     * ([blobUris]) and the uris the vault records a Drive copy for ([pairedUris]).
+     *
+     * A paired file is a device copy of a photo Drive still holds, so losing it costs nothing the
+     * account cannot return. Every other file is the only copy of its photo, the hide having deleted
+     * the original, and a file no record names counts here too: it is the safe direction, the same one
+     * [HiddenVaultLeftovers.vaultedUris] takes for the sign-out warning.
+     */
+    fun deviceOnlyVaultUris(blobUris: Set<String>, pairedUris: Set<String>): List<String> =
+        blobUris.filter { it !in pairedUris }.sorted()
+
+    /**
      * The uris a reveal looks its photo's vaulted row up under, in the order they are tried.
      *
      * [sourceUri] is what the photo was hidden from, which is the uri the hide keyed the row on, so it
