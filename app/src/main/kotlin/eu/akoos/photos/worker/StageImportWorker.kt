@@ -27,6 +27,7 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -48,7 +49,12 @@ import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
+import eu.akoos.photos.domain.importer.ImportFailure
+import eu.akoos.photos.domain.importer.ImportFailureKind
 import eu.akoos.photos.domain.usecase.StageImportUseCase
+import eu.akoos.photos.domain.usecase.StagePhase
+import eu.akoos.photos.domain.usecase.StageProgress
+import eu.akoos.photos.util.ImportEventLog
 import java.io.IOException
 import java.util.UUID
 
@@ -99,33 +105,52 @@ class StageImportWorker @AssistedInject constructor(
         // Promote to foreground within the start-of-work window WorkManager allows before it treats the
         // promote call as a timeout. Total 0 shows an indeterminate bar until the zip scan has counted
         // the media entries.
-        runCatching { setForeground(buildForegroundInfo(done = 0, total = 0)) }
+        runCatching { setForeground(buildForegroundInfo(null)) }
             .onFailure { Log.w(TAG, "setForeground initial failed: ${it.message}") }
 
         return try {
+            val zipBytes = zipSize(uri)
             // The use case bridges the synchronous zip callbacks to suspend work via runBlocking, so it
             // MUST run on a background dispatcher.
-            val staged = withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 stageImportUseCase.stage(
                     userId = userId,
                     zipId = zipId,
+                    zipBytes = zipBytes,
                     openZip = {
                         applicationContext.contentResolver.openInputStream(uri)
                             ?: throw IOException("cannot open zip input stream for $uri")
                     },
-                    onProgress = { done, total -> publish(done, total) },
+                    onProgress = { progress -> publish(progress) },
                 )
             }
-            Log.d(TAG, "stage done: $staged")
-            Result.success(workDataOf(KEY_RESULT_STAGED to staged))
+            Log.d(TAG, "stage done: ${result.staged}")
+            Result.success(
+                workDataOf(
+                    KEY_RESULT_STAGED to result.staged,
+                    KEY_RESULT_ENDED_EARLY to result.endedEarly,
+                    KEY_RESULT_READ_PERCENT to result.readPercent,
+                ),
+            )
         } catch (e: CancellationException) {
-            // Cooperative cancellation (the notification's Cancel action). WorkManager records the run as
-            // cancelled; the rows written so far stay, and a re-pick clears and re-stages them.
+            // Cooperative cancellation (the notification's Cancel action, or the system stopping the work).
+            // WorkManager records the run as cancelled; the rows written so far stay and the saved scan
+            // lets the next attempt continue from them.
             Log.d(TAG, "stage cancelled")
+            ImportEventLog.record(context.filesDir, "stage stopped" + stopReasonText())
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "stage failed", e)
-            Result.failure()
+            val kind = ImportFailure.kindOf(e)
+            // The place the zip is read from can come back, and the work continues from what was staged, so
+            // a source that stopped answering gets a couple of further attempts before it is reported.
+            if (kind == ImportFailureKind.SOURCE_UNREADABLE && runAttemptCount < MAX_RETRIES) {
+                ImportEventLog.record(context.filesDir, "stage retry attempt=${runAttemptCount + 1}")
+                Result.retry()
+            } else {
+                ImportEventLog.record(context.filesDir, "stage gave up kind=${kind.name}")
+                Result.failure(workDataOf(KEY_FAILURE_KIND to kind.name))
+            }
         } finally {
             // WorkManager auto-dismisses the foreground notification when the worker exits, but some OEMs
             // leave the ongoing post behind; clear it.
@@ -133,43 +158,85 @@ class StageImportWorker @AssistedInject constructor(
         }
     }
 
+    /** The archive's size in bytes when the provider reports it, else -1. */
+    private fun zipSize(uri: Uri): Long = runCatching {
+        applicationContext.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { row ->
+            if (!row.moveToFirst()) return@use -1L
+            val idx = row.getColumnIndex(OpenableColumns.SIZE)
+            if (idx >= 0 && !row.isNull(idx)) row.getLong(idx) else -1L
+        }
+    }.getOrNull() ?: -1L
+
+    /** Why the system stopped this work, where the platform says (API 31+), as a short log suffix. */
+    private fun stopReasonText(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) " reason=$stopReason" else ""
+
     /**
-     * Publishes one (done, total) tick to WorkManager (for a ViewModel observing
-     * [androidx.work.WorkInfo]) and refreshes the notification. The first and last ticks always publish
-     * so start and completion are seen; the middle ones are throttled to [PROGRESS_THROTTLE_MS]. Uses the
-     * non-suspend `*Async` variants so a call made from inside the use case's runBlocking bridge does not
-     * block that thread.
+     * Publishes one progress tick to WorkManager (for a ViewModel observing [androidx.work.WorkInfo]) and
+     * refreshes the notification. The first and last ticks always publish so start and completion are
+     * seen; the middle ones are throttled to [PROGRESS_THROTTLE_MS]. Uses the non-suspend `*Async`
+     * variants so a call made from inside the use case's runBlocking bridge does not block that thread.
      */
-    private fun publish(done: Int, total: Int) {
+    private fun publish(progress: StageProgress) {
         val now = System.currentTimeMillis()
-        val boundary = done <= 0 || done >= total
+        val boundary = progress.phase == StagePhase.STAGE && (progress.done <= 0 || progress.done >= progress.total)
         if (!boundary && now - lastPublishMs < PROGRESS_THROTTLE_MS) return
         lastPublishMs = now
 
-        runCatching { setProgressAsync(workDataOf(KEY_DONE to done, KEY_TOTAL to total)) }
-        runCatching { setForegroundAsync(buildForegroundInfo(done = done, total = total)) }
+        runCatching {
+            setProgressAsync(
+                workDataOf(
+                    KEY_DONE to progress.done,
+                    KEY_TOTAL to progress.total,
+                    KEY_PHASE to progress.phase.name,
+                    KEY_BYTES_DONE to progress.bytesDone,
+                    KEY_BYTES_TOTAL to progress.bytesTotal,
+                ),
+            )
+        }
+        runCatching { setForegroundAsync(buildForegroundInfo(progress)) }
     }
 
-    override suspend fun getForegroundInfo(): ForegroundInfo = buildForegroundInfo(done = 0, total = 0)
+    override suspend fun getForegroundInfo(): ForegroundInfo = buildForegroundInfo(null)
 
     /**
      * Builds the [ForegroundInfo] with the stage notification at the current progress. Idempotently
      * registers the notification channel on Android 8+.
      */
-    private fun buildForegroundInfo(done: Int, total: Int): ForegroundInfo {
+    private fun buildForegroundInfo(progress: StageProgress?): ForegroundInfo {
         ensureChannel(context)
 
         val cancelIntent = WorkManager.getInstance(context).createCancelPendingIntent(id)
         val title = context.getString(R.string.import_stage_notification_title)
-        val content = context.getString(R.string.import_stage_progress, done, total)
+        val phase = progress?.phase ?: StagePhase.SCAN
+        val bytesKnown = progress != null && progress.bytesTotal > 0
+        val bytesPercent = if (bytesKnown) {
+            (progress!!.bytesDone * 100 / progress.bytesTotal).toInt().coerceIn(0, 100)
+        } else {
+            0
+        }
+        val content = when (phase) {
+            StagePhase.SCAN ->
+                if (bytesKnown) context.getString(R.string.import_scan_notification, bytesPercent)
+                else context.getString(R.string.import_scanning)
+            StagePhase.CATCH_UP -> context.getString(R.string.import_resuming)
+            StagePhase.STAGE -> context.getString(R.string.import_stage_progress, progress?.done ?: 0, progress?.total ?: 0)
+        }
         val cancelLabel = context.getString(R.string.cancel)
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(title)
             .setContentText(content)
-            // Indeterminate while the zip scan has not counted the entries yet; determinate afterwards.
-            .setProgress(total.coerceAtLeast(1), done.coerceAtMost(total), total <= 0)
+        // Determinate by bytes while reading the archive, by entries while staging; indeterminate until
+        // there is something to measure.
+        when {
+            phase == StagePhase.STAGE && (progress?.total ?: 0) > 0 ->
+                builder.setProgress(progress!!.total, progress.done.coerceAtMost(progress.total), false)
+            phase != StagePhase.STAGE && bytesKnown -> builder.setProgress(100, bytesPercent, false)
+            else -> builder.setProgress(0, 0, true)
+        }
+        val notification = builder
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -202,9 +269,24 @@ class StageImportWorker @AssistedInject constructor(
         // WorkManager progress data keys, read by an in-app staging progress surface.
         const val KEY_DONE = "done"
         const val KEY_TOTAL = "total"
+        const val KEY_PHASE = "phase"
+        const val KEY_BYTES_DONE = "bytesDone"
+        const val KEY_BYTES_TOTAL = "bytesTotal"
 
         /** Output: how many entries the pass staged, carried on a successful result. */
         const val KEY_RESULT_STAGED = "resultStaged"
+
+        /** Output: true when the archive stopped being readable partway and only its readable part was staged. */
+        const val KEY_RESULT_ENDED_EARLY = "resultEndedEarly"
+
+        /** Output: how far into the archive the read got, in percent, when it ended early. */
+        const val KEY_RESULT_READ_PERCENT = "resultReadPercent"
+
+        /** Output on failure: the [ImportFailureKind] name, so the screen can say what went wrong. */
+        const val KEY_FAILURE_KIND = "failureKind"
+
+        /** Further attempts after the zip's source stops answering, before the failure is reported. */
+        private const val MAX_RETRIES = 2
 
         // How often the per-entry ticks refresh progress; the first and last tick bypass this.
         private const val PROGRESS_THROTTLE_MS = 500L

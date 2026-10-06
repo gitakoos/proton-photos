@@ -25,6 +25,7 @@ package eu.akoos.photos.util
 import android.content.Context
 import androidx.work.WorkManager
 import coil.imageLoader
+import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.domain.usecase.StageImportUseCase
 import eu.akoos.photos.service.BackgroundSyncService
 import eu.akoos.photos.worker.AlbumDownloadWorker
@@ -53,6 +54,7 @@ object SignOutCleanup {
         "video_editor",
         "motion",
         StageImportUseCase.THUMB_DIR,
+        ImportScanCache.DIR_NAME,
     )
 
     /** Stop everything scheduled against the account: backup, album downloads, an import, queued

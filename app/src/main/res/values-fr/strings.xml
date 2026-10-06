@@ -585,6 +585,17 @@
     <string name="import_done_button">Terminé</string>
     <string name="import_failed_title">Échec de l\'import</string>
     <string name="import_failed_msg">Une erreur s\'est produite pendant l\'import. Sélectionnez le fichier et réessayez.</string>
+    <string name="import_reason_storage">L\'appareil n\'a plus d\'espace de stockage libre.</string>
+    <string name="import_reason_source">Le fichier n\'a pas pu être lu à son emplacement.</string>
+    <string name="import_reason_archive">Le zip semble endommagé ou incomplet.</string>
+    <string name="import_reason_other">Une erreur s\'est produite pendant la lecture du zip.</string>
+    <string name="import_failed_hint_resume">Sélectionnez de nouveau le fichier. Il reprend là où il s\'était arrêté.</string>
+    <string name="import_failed_hint_archive">Essayez de télécharger à nouveau cette partie de l\'export.</string>
+    <string name="import_review_partial">%1$s Seule une partie de l\'archive est listée ci-dessous. Importez ces éléments, puis sélectionnez de nouveau le zip pour ajouter le reste.</string>
+    <string name="import_scan_bytes">Lecture de l\'export : %1$s sur %2$s</string>
+    <string name="import_scan_notification">Lecture de l\'export : %1$d %%</string>
+    <string name="import_resuming">Reprise là où l\'import s\'était arrêté</string>
+    <string name="import_catchup_bytes">Reprise là où l\'import s\'était arrêté : %1$s sur %2$s</string>
     <!-- Import review queue. -->
     <string name="import_staging_title">Préparation de l\'import</string>
     <string name="import_uploading_title">Envoi des photos</string>

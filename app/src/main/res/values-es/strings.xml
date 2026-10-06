@@ -589,6 +589,17 @@
     <string name="import_done_button">Hecho</string>
     <string name="import_failed_title">Error al importar</string>
     <string name="import_failed_msg">Algo salió mal durante la importación. Elige el archivo e inténtalo de nuevo.</string>
+    <string name="import_reason_storage">El dispositivo se ha quedado sin espacio libre.</string>
+    <string name="import_reason_source">No se pudo leer el archivo desde donde está guardado.</string>
+    <string name="import_reason_archive">El zip parece dañado o incompleto.</string>
+    <string name="import_reason_other">Algo salió mal al leer el zip.</string>
+    <string name="import_failed_hint_resume">Elige el archivo de nuevo. Continúa donde se quedó.</string>
+    <string name="import_failed_hint_archive">Prueba a descargar de nuevo esa parte de la exportación.</string>
+    <string name="import_review_partial">%1$s Abajo solo aparece una parte del archivo. Importa estas fotos y vuelve a elegir el zip para añadir el resto.</string>
+    <string name="import_scan_bytes">Leyendo la exportación: %1$s de %2$s</string>
+    <string name="import_scan_notification">Leyendo la exportación: %1$d %%</string>
+    <string name="import_resuming">Continuando donde se quedó</string>
+    <string name="import_catchup_bytes">Continuando donde se quedó: %1$s de %2$s</string>
     <!-- Import review queue. -->
     <string name="import_staging_title">Preparando la importación</string>
     <string name="import_uploading_title">Subiendo fotos</string>

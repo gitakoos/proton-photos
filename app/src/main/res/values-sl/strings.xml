@@ -795,6 +795,17 @@
     <string name="import_done_button">Končano</string>
     <string name="import_failed_title">Uvoz ni uspel</string>
     <string name="import_failed_msg">Med uvozom je prišlo do napake. Izberite datoteko in poskusite znova.</string>
+    <string name="import_reason_storage">Na napravi je zmanjkalo prostega prostora.</string>
+    <string name="import_reason_source">Datoteke ni bilo mogoče prebrati z mesta, kjer je shranjena.</string>
+    <string name="import_reason_archive">Datoteka zip je videti poškodovana ali nepopolna.</string>
+    <string name="import_reason_other">Pri branju datoteke zip je prišlo do napake.</string>
+    <string name="import_failed_hint_resume">Znova izberite datoteko. Nadaljuje tam, kjer se je ustavila.</string>
+    <string name="import_failed_hint_archive">Poskusite znova prenesti ta del izvoza.</string>
+    <string name="import_review_partial">%1$s Spodaj je prikazan le del arhiva. Uvozite te elemente in nato znova izberite zip, da dodate preostanek.</string>
+    <string name="import_scan_bytes">Branje izvoza: %1$s od %2$s</string>
+    <string name="import_scan_notification">Branje izvoza: %1$d %%</string>
+    <string name="import_resuming">Nadaljevanje tam, kjer se je ustavilo</string>
+    <string name="import_catchup_bytes">Nadaljevanje tam, kjer se je ustavilo: %1$s od %2$s</string>
     <!-- Import review queue. -->
     <string name="import_staging_title">Pripravljanje uvoza</string>
     <string name="import_uploading_title">Nalaganje fotografij</string>

@@ -607,6 +607,17 @@
     <string name="import_done_button">Kész</string>
     <string name="import_failed_title">Az importálás sikertelen</string>
     <string name="import_failed_msg">Hiba történt az importálás során. Válaszd ki a fájlt, és próbáld újra.</string>
+    <string name="import_reason_storage">Elfogyott a szabad tárhely az eszközön.</string>
+    <string name="import_reason_source">A fájlt nem sikerült beolvasni a tárolási helyéről.</string>
+    <string name="import_reason_archive">A zip sérültnek vagy hiányosnak tűnik.</string>
+    <string name="import_reason_other">Hiba történt a zip beolvasása közben.</string>
+    <string name="import_failed_hint_resume">Válaszd ki újra a fájlt. Ott folytatódik, ahol megállt.</string>
+    <string name="import_failed_hint_archive">Próbáld meg újra letölteni az export ezen részét.</string>
+    <string name="import_review_partial">%1$s Lent az archívumnak csak egy része látható. Importáld ezeket, majd válaszd ki újra a zipet a többi hozzáadásához.</string>
+    <string name="import_scan_bytes">Export beolvasása: %1$s / %2$s</string>
+    <string name="import_scan_notification">Export beolvasása: %1$d%%</string>
+    <string name="import_resuming">Folytatás ott, ahol megállt</string>
+    <string name="import_catchup_bytes">Folytatás ott, ahol megállt: %1$s / %2$s</string>
     <!-- Import review queue. -->
     <string name="import_staging_title">Az importálás előkészítése</string>
     <string name="import_uploading_title">Fotók feltöltése</string>

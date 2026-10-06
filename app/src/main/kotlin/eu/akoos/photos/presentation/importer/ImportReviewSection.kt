@@ -95,6 +95,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import eu.akoos.photos.domain.importer.ImportFailureKind
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.ImportAlbumCount
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
@@ -272,6 +273,25 @@ fun ImportReviewSection(
                     albumSummary = albumSummary,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
+            }
+            // The read stopped before the end of the archive, so what follows is only part of it.
+            state.incomplete?.let { kind ->
+                item(span = { GridItemSpan(maxLineSpan) }, key = "incomplete") {
+                    val reason = stringResource(
+                        when (kind) {
+                            ImportFailureKind.STORAGE_FULL -> R.string.import_reason_storage
+                            ImportFailureKind.SOURCE_UNREADABLE -> R.string.import_reason_source
+                            ImportFailureKind.ARCHIVE_DAMAGED -> R.string.import_reason_archive
+                            ImportFailureKind.OTHER -> R.string.import_reason_other
+                        },
+                    )
+                    Text(
+                        text = stringResource(R.string.import_review_partial, reason),
+                        color = colors.fgDim,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
             }
             items(rows, key = { it.entryName }) { row ->
                 ImportReviewCell(

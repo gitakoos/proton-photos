@@ -63,6 +63,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.domain.usecase.StagePhase
+import eu.akoos.photos.domain.importer.ImportFailureKind
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.entity.ImportHistoryEntity
 import eu.akoos.photos.presentation.common.ConfirmDialog
@@ -177,6 +179,9 @@ fun ImportScreen(
                     total = s.total,
                     titleRes = R.string.import_staging_title,
                     onCancel = viewModel::cancelImport,
+                    phase = s.phase,
+                    bytesDone = s.bytesDone,
+                    bytesTotal = s.bytesTotal,
                 )
 
                 is ImportUiState.Uploading -> ImportProgressCard(
@@ -273,7 +278,7 @@ fun ImportScreen(
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                text = stringResource(R.string.import_failed_msg),
+                                text = importFailureMessage(s.kind),
                                 color = colors.fgDim,
                                 fontSize = 13.5.sp,
                             )
@@ -323,8 +328,20 @@ fun ImportScreen(
  * the entry count is known, then a determinate bar with the running `done / total`.
  */
 @Composable
-private fun ImportProgressCard(done: Int, total: Int, titleRes: Int, onCancel: () -> Unit) {
+private fun ImportProgressCard(
+    done: Int,
+    total: Int,
+    titleRes: Int,
+    onCancel: () -> Unit,
+    phase: StagePhase? = null,
+    bytesDone: Long = 0L,
+    bytesTotal: Long = 0L,
+) {
     val colors = AppColors.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // While the archive itself is being read, the figure that moves is how much of the file is behind
+    // us, not an entry count (which is not known until the first read ends).
+    val readingBytes = phase != null && phase != StagePhase.STAGE && bytesTotal > 0
     SettingsCard {
         Column(Modifier.padding(16.dp)) {
             Text(
@@ -334,7 +351,27 @@ private fun ImportProgressCard(done: Int, total: Int, titleRes: Int, onCancel: (
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(12.dp))
-            if (total <= 0) {
+            if (readingBytes) {
+                LinearProgressIndicator(
+                    progress = { (bytesDone.toFloat() / bytesTotal).coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = colors.accent,
+                    trackColor = colors.trackBg,
+                )
+                Spacer(Modifier.height(10.dp))
+                val done = android.text.format.Formatter.formatShortFileSize(context, bytesDone)
+                val whole = android.text.format.Formatter.formatShortFileSize(context, bytesTotal)
+                Text(
+                    text = stringResource(
+                        if (phase == StagePhase.CATCH_UP) R.string.import_catchup_bytes else R.string.import_scan_bytes,
+                        done,
+                        whole,
+                    ),
+                    color = colors.fgPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            } else if (total <= 0) {
                 LinearProgressIndicator(
                     modifier = Modifier.fillMaxWidth(),
                     color = colors.accent,
@@ -475,4 +512,16 @@ private fun ImportHistoryRow(
             )
         }
     }
+}
+
+/** The plain-language account of why an import stopped, by what kind of failure it was. */
+@Composable
+private fun importFailureMessage(kind: ImportFailureKind): String = when (kind) {
+    ImportFailureKind.STORAGE_FULL ->
+        stringResource(R.string.import_reason_storage) + " " + stringResource(R.string.import_failed_hint_resume)
+    ImportFailureKind.SOURCE_UNREADABLE ->
+        stringResource(R.string.import_reason_source) + " " + stringResource(R.string.import_failed_hint_resume)
+    ImportFailureKind.ARCHIVE_DAMAGED ->
+        stringResource(R.string.import_reason_archive) + " " + stringResource(R.string.import_failed_hint_archive)
+    ImportFailureKind.OTHER -> stringResource(R.string.import_failed_msg)
 }

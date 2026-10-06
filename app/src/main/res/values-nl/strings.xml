@@ -634,6 +634,17 @@
     <string name="import_done_button">Klaar</string>
     <string name="import_failed_title">Import mislukt</string>
     <string name="import_failed_msg">Er is iets misgegaan tijdens het importeren. Kies het bestand en probeer het opnieuw.</string>
+    <string name="import_reason_storage">Het apparaat heeft geen vrije opslagruimte meer.</string>
+    <string name="import_reason_source">Het bestand kon niet worden gelezen vanaf de plek waar het staat.</string>
+    <string name="import_reason_archive">De zip lijkt beschadigd of onvolledig.</string>
+    <string name="import_reason_other">Er is iets misgegaan bij het lezen van de zip.</string>
+    <string name="import_failed_hint_resume">Kies het bestand opnieuw. Het gaat verder waar het gebleven was.</string>
+    <string name="import_failed_hint_archive">Probeer dat deel van de export opnieuw te downloaden.</string>
+    <string name="import_review_partial">%1$s Hieronder staat maar een deel van het archief. Importeer deze foto\'s en kies de zip daarna opnieuw om de rest toe te voegen.</string>
+    <string name="import_scan_bytes">Export lezen: %1$s van %2$s</string>
+    <string name="import_scan_notification">Export lezen: %1$d%%</string>
+    <string name="import_resuming">Verder waar het gebleven was</string>
+    <string name="import_catchup_bytes">Verder waar het gebleven was: %1$s van %2$s</string>
     <!-- Import review queue. -->
     <string name="import_staging_title">Import wordt voorbereid</string>
     <string name="import_uploading_title">Foto\'s uploaden</string>

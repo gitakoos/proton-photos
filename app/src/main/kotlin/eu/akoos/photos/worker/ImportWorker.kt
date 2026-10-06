@@ -52,6 +52,10 @@ import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.domain.importer.ImportAlbumMode
+import eu.akoos.photos.domain.importer.ImportFailure
+import eu.akoos.photos.domain.importer.ImportFailureKind
+import eu.akoos.photos.util.ImportDiagnostics
+import eu.akoos.photos.util.ImportEventLog
 import eu.akoos.photos.domain.usecase.ImportProgress
 import eu.akoos.photos.domain.usecase.ImportSummary
 import eu.akoos.photos.domain.usecase.ImportTakeoutUseCase
@@ -127,6 +131,7 @@ class ImportWorker @AssistedInject constructor(
             .onFailure { Log.w(TAG, "setForeground initial failed: ${it.message}") }
 
         var terminalPosted = false
+        ImportEventLog.record(context.filesDir, "upload ${if (runAttemptCount > 0) "retry attempt=$runAttemptCount" else "start"}")
         return try {
             // The use case bridges the synchronous zip callbacks to suspend work via runBlocking, so it
             // MUST run on a background dispatcher, never the main-safe worker default alone.
@@ -152,6 +157,11 @@ class ImportWorker @AssistedInject constructor(
             importStagedDao.clearResolved(zipId)
 
             Log.d(TAG, "import done: $summary")
+            ImportEventLog.record(
+                context.filesDir,
+                "upload done total=${summary.total} imported=${summary.imported} already=${summary.alreadyInDrive} " +
+                    "skipped=${summary.skipped} failed=${summary.failed}",
+            )
             postDone(summary)
             terminalPosted = true
             Result.success(
@@ -172,13 +182,26 @@ class ImportWorker @AssistedInject constructor(
             // row off the cancellable path so the stopped run still shows in Recent imports with the photos
             // it managed to send, tappable and undoable, rather than disappearing.
             Log.d(TAG, "import cancelled")
+            ImportEventLog.record(
+                context.filesDir,
+                "upload stopped" + if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) " reason=$stopReason" else "",
+            )
             withContext(NonCancellable) {
                 runCatching { importTakeoutUseCase.recordPartialHistory(runId, zipId, resolveFileName(uri)) }
             }
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "import failed", e)
-            Result.failure()
+            val kind = ImportFailure.kindOf(e)
+            ImportEventLog.record(context.filesDir, "upload failed ${ImportFailure.describe(e)}")
+            ImportDiagnostics.recordError(e.javaClass.simpleName)
+            // The ledger resumes an upload from the entries still pending, so a source that stopped
+            // answering gets a couple of further attempts before the failure is reported.
+            if (kind == ImportFailureKind.SOURCE_UNREADABLE && runAttemptCount < MAX_RETRIES) {
+                Result.retry()
+            } else {
+                Result.failure(workDataOf(KEY_FAILURE_KIND to kind.name))
+            }
         } finally {
             // WorkManager auto-dismisses the foreground notification when the worker exits, but some
             // OEMs leave the ongoing post behind; clear it unless a terminal summary already replaced it.
@@ -335,6 +358,12 @@ class ImportWorker @AssistedInject constructor(
         const val KEY_RESULT_ALBUMS = "resultAlbums"
         const val KEY_RESULT_ADDED = "resultAdded"
         const val KEY_RESULT_RUN_ID = "resultRunId"
+
+        /** Output on failure: the [ImportFailureKind] name, so the screen can say what went wrong. */
+        const val KEY_FAILURE_KIND = "failureKind"
+
+        /** Further attempts after the zip's source stops answering, before the failure is reported. */
+        private const val MAX_RETRIES = 2
 
         // How often the mid-upload byte ticks refresh progress; entry boundaries bypass this.
         private const val PROGRESS_THROTTLE_MS = 500L

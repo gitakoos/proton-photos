@@ -335,9 +335,12 @@ fun SettingsScreen(
                     if (isNotEmpty()) append("\n\n")
                     append("Semantic:\n").append(eu.akoos.photos.util.SemanticDiagnostics.snapshot())
                 }
-                if (eu.akoos.photos.util.ImportDiagnostics.hasData()) {
+                // The step-by-step record lives in a file, so it is there after a process kill too.
+                val importLog = runCatching { eu.akoos.photos.util.ImportEventLog.text(context.filesDir) }.getOrDefault("")
+                if (eu.akoos.photos.util.ImportDiagnostics.hasData() || importLog.isNotBlank()) {
                     if (isNotEmpty()) append("\n\n")
                     append("Import:\n").append(eu.akoos.photos.util.ImportDiagnostics.snapshot())
+                    if (importLog.isNotBlank()) append("\nlog:\n").append(importLog)
                 }
                 if (crashLog.isNotBlank()) {
                     if (isNotEmpty()) append("\n\n")

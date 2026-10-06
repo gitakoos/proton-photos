@@ -42,8 +42,11 @@ import eu.akoos.photos.data.db.entity.ImportHistoryEntity
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
 import eu.akoos.photos.data.db.entity.ImportUploadedEntity
 import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.domain.importer.ImportAlbumMode
+import eu.akoos.photos.domain.importer.ImportFailureKind
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.usecase.StagePhase
 import eu.akoos.photos.domain.usecase.UndoImportUseCase
 import eu.akoos.photos.domain.usecase.UndoResult
 import eu.akoos.photos.worker.ImportWorker
@@ -77,8 +80,17 @@ sealed interface ImportUiState {
     data object Idle : ImportUiState
 
     /** The picked zip is being staged into the review queue. [total] is 0 until the zip scan has
-     *  counted its media entries, so the screen shows an indeterminate bar in that window. */
-    data class Staging(val done: Int, val total: Int) : ImportUiState
+     *  counted its media entries, so the screen shows an indeterminate bar in that window. [phase] says
+     *  whether the archive is being read for the first time, caught up to where an earlier attempt
+     *  stopped, or staged, and [bytesDone] of [bytesTotal] (0 when unknown) is how far into the file
+     *  the read is. */
+    data class Staging(
+        val done: Int,
+        val total: Int,
+        val phase: StagePhase? = null,
+        val bytesDone: Long = 0L,
+        val bytesTotal: Long = 0L,
+    ) : ImportUiState
 
     /** The zip has staged rows waiting for review. [rows] is the whole set (excluded entries kept in
      *  the list so they can be brought back), [includedCount] is how many would upload on confirm. */
@@ -86,6 +98,7 @@ sealed interface ImportUiState {
         val zipId: String,
         val rows: List<ImportStagedEntity>,
         val includedCount: Int,
+        val incomplete: ImportFailureKind? = null,
     ) : ImportUiState
 
     /** The confirmed set is uploading. Driven by the upload worker's live progress; the shape mirrors
@@ -108,8 +121,9 @@ sealed interface ImportUiState {
         val runId: String,
     ) : ImportUiState
 
-    /** Staging ended in an error; the screen offers to pick a zip again. */
-    data object Failed : ImportUiState
+    /** Staging or the upload ended in an error of the given [kind]; the screen says what went wrong and
+     *  offers to pick the zip again. */
+    data class Failed(val kind: ImportFailureKind = ImportFailureKind.OTHER) : ImportUiState
 }
 
 /**
@@ -427,6 +441,7 @@ class ImportViewModel @Inject constructor(
                 path?.let { runCatching { File(it).delete() } }
             }
             importStagedDao.clearForZip(zipId)
+            ImportScanCache(File(context.cacheDir, ImportScanCache.DIR_NAME)).delete(zipId)
         }
     }
 
@@ -548,7 +563,7 @@ class ImportViewModel @Inject constructor(
                             runId = out.getString(ImportWorker.KEY_RESULT_RUN_ID) ?: "",
                         )
                     }
-                WorkInfo.State.FAILED -> return ImportUiState.Failed
+                WorkInfo.State.FAILED -> return ImportUiState.Failed(failureKindOf(terminalUpload.outputData))
                 // The active states returned above; a cancelled upload falls through so the still-pending
                 // rows can be reviewed and confirmed again.
                 else -> Unit
@@ -562,14 +577,36 @@ class ImportViewModel @Inject constructor(
             return ImportUiState.Staging(
                 done = p.getInt(StageImportWorker.KEY_DONE, 0),
                 total = p.getInt(StageImportWorker.KEY_TOTAL, 0),
+                phase = p.getString(StageImportWorker.KEY_PHASE)
+                    ?.let { name -> StagePhase.entries.firstOrNull { it.name == name } },
+                bytesDone = p.getLong(StageImportWorker.KEY_BYTES_DONE, 0L),
+                bytesTotal = p.getLong(StageImportWorker.KEY_BYTES_TOTAL, 0L),
             )
         }
-        if (rows.isNotEmpty()) return ImportUiState.Review(zipId, rows, included)
-        return when (stageInfos.lastOrNull()?.state) {
-            WorkInfo.State.FAILED -> ImportUiState.Failed
+        val lastStage = stageInfos.lastOrNull()
+        if (rows.isNotEmpty()) {
+            // A stage that did not read the whole archive still leaves what it staged to review; the
+            // review says it is partial and why, so a short list is not mistaken for the whole export.
+            val incomplete = when {
+                lastStage?.state == WorkInfo.State.FAILED -> failureKindOf(lastStage?.outputData)
+                lastStage?.state == WorkInfo.State.SUCCEEDED &&
+                    lastStage?.outputData?.getBoolean(StageImportWorker.KEY_RESULT_ENDED_EARLY, false) == true ->
+                    ImportFailureKind.ARCHIVE_DAMAGED
+                else -> null
+            }
+            return ImportUiState.Review(zipId, rows, included, incomplete)
+        }
+        return when (lastStage?.state) {
+            WorkInfo.State.FAILED -> ImportUiState.Failed(failureKindOf(lastStage?.outputData))
             WorkInfo.State.SUCCEEDED, WorkInfo.State.CANCELLED -> ImportUiState.Idle
             // No work visible yet: hold the optimistic scanning state from a fresh pick, else idle.
             else -> if (fallback is ImportUiState.Staging) fallback else ImportUiState.Idle
         }
     }
+
+    /** The failure kind a worker recorded on its failed result, or [ImportFailureKind.OTHER] when it did
+     *  not record one (a failure from before the kind was reported). */
+    private fun failureKindOf(data: androidx.work.Data?): ImportFailureKind =
+        runCatching { ImportFailureKind.valueOf(data?.getString(StageImportWorker.KEY_FAILURE_KIND).orEmpty()) }
+            .getOrDefault(ImportFailureKind.OTHER)
 }

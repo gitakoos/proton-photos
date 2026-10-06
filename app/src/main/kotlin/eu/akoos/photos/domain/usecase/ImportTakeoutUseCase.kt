@@ -43,6 +43,7 @@ import eu.akoos.photos.data.repository.drive.UploadPhase
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.importer.ImportAlbumMode
+import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.presentation.metadata.FilenameDate
@@ -268,8 +269,12 @@ class ImportTakeoutUseCase @Inject constructor(
                         temp.delete()
                         throw e
                     } catch (e: Exception) {
-                        Log.w(TAG, "prepare failed for $name: ${e.message}")
                         temp.delete()
+                        // A fault about the entry's own bytes skips it; one about the storage or the place the
+                        // zip is read from would fail every entry after it, so it stops the run instead and the
+                        // rows still pending are sent when it is retried.
+                        if (e is java.io.IOException && !ImportFailure.isArchiveFault(e)) throw e
+                        Log.w(TAG, "prepare failed for $name: ${e.message}")
                         val done = processedCount.incrementAndGet()
                         onProgress(ImportProgress(done, total, name, null, 0L, 0L))
                         return@runBlocking
