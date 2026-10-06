@@ -2383,4 +2383,9 @@
         <item quantity="other">Odstrániť tento štítok z %d fotiek?</item>
     </plurals>
     <string name="label_delete_confirm">Odstrániť</string>
+    <string name="edit_upload_failed_channel_name">Oznámenia o nahrávaní úprav</string>
+    <string name="edit_upload_failed_channel_desc">Upozorní vás, keď sa úpravu fotky alebo videa nepodarilo nahrať na Drive.</string>
+    <string name="edit_upload_failed_title">Vaša úprava sa nenahrala</string>
+    <string name="edit_upload_failed_text_kept">Drive nebol dostupný, upravená kópia sa preto uložila do vašej galérie.</string>
+    <string name="edit_upload_failed_text_lost">Drive nebol dostupný a upravenú kópiu sa nepodarilo uložiť. Otvorte originál a upravte ho znova.</string>
 </resources>

@@ -31,6 +31,7 @@ import android.os.Build
 import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.exifinterface.media.ExifInterface
+import eu.akoos.photos.data.upload.LocalOverwriteGuard
 import java.io.File
 import java.io.FileDescriptor
 import java.io.FileOutputStream
@@ -435,76 +436,79 @@ object ExifHelper {
     fun stripFieldsInPlace(context: Context, uri: String, config: MetadataStripConfig): StripResult {
         if (config.isNoOp) return StripResult.Failed
         return try {
-            val fd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
-                ?: return StripResult.Failed
-            fd.use {
-                val exif = ExifInterface(it.fileDescriptor)
-                if (config.stripGps) {
-                    exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE_REF, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_TIMESTAMP, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_DATESTAMP, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_SPEED, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_SPEED_REF, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_TRACK, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_TRACK_REF, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_DOP, null)
-                    // Keep this GPS set identical to [stripToTempFile]: the user-facing in-place
-                    // "clean" path calls THIS method, so any GPS tag missing here (compass bearing,
-                    // map datum, positioning error) would survive a manual wipe yet get stripped on
-                    // upload, leaking location context on a photo the user believes is cleaned.
-                    exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION_REF, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING_REF, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_MAP_DATUM, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_AREA_INFORMATION, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_H_POSITIONING_ERROR, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_VERSION_ID, null)
-                    exif.setAttribute(ExifInterface.TAG_GPS_DIFFERENTIAL, null)
+            // The save rewrites the file in place, so it runs behind a backup that is put back when it fails.
+            LocalOverwriteGuard(context).run(uri) {
+                val fd = context.contentResolver.openFileDescriptor(Uri.parse(uri), "rw")
+                    ?: throw java.io.IOException("could not open $uri")
+                fd.use {
+                    val exif = ExifInterface(it.fileDescriptor)
+                    if (config.stripGps) {
+                        exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_ALTITUDE_REF, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_TIMESTAMP, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_DATESTAMP, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_SPEED, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_SPEED_REF, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_TRACK, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_TRACK_REF, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_DOP, null)
+                        // Keep this GPS set identical to [stripToTempFile]: the user-facing in-place
+                        // "clean" path calls THIS method, so any GPS tag missing here (compass bearing,
+                        // map datum, positioning error) would survive a manual wipe yet get stripped on
+                        // upload, leaking location context on a photo the user believes is cleaned.
+                        exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_IMG_DIRECTION_REF, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_DEST_BEARING_REF, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_MAP_DATUM, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_AREA_INFORMATION, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_H_POSITIONING_ERROR, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_VERSION_ID, null)
+                        exif.setAttribute(ExifInterface.TAG_GPS_DIFFERENTIAL, null)
+                    }
+                    if (config.stripCameraInfo) {
+                        // Keep this set in sync with [stripToTempFile] — the user-facing UI
+                        // ("Strip camera info" button) calls THIS path, so any tag missing here
+                        // survives a manual wipe but gets stripped on upload, which would be a
+                        // confusing privacy gap. Aperture-value / ISO-ratings / white-balance /
+                        // exposure-mode must be wiped here to match `stripToTempFile`.
+                        exif.setAttribute(ExifInterface.TAG_MAKE, null)
+                        exif.setAttribute(ExifInterface.TAG_MODEL, null)
+                        exif.setAttribute(ExifInterface.TAG_LENS_MAKE, null)
+                        exif.setAttribute(ExifInterface.TAG_LENS_MODEL, null)
+                        exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, null)
+                        exif.setAttribute(ExifInterface.TAG_F_NUMBER, null)
+                        exif.setAttribute(ExifInterface.TAG_APERTURE_VALUE, null)
+                        exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, null)
+                        exif.setAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, null)
+                        exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, null)
+                        exif.setAttribute(ExifInterface.TAG_FLASH, null)
+                        exif.setAttribute(ExifInterface.TAG_WHITE_BALANCE, null)
+                        exif.setAttribute(ExifInterface.TAG_EXPOSURE_MODE, null)
+                    }
+                    if (config.stripTimestamp) {
+                        exif.setAttribute(ExifInterface.TAG_DATETIME, null)
+                        exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, null)
+                        exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, null)
+                    }
+                    if (config.stripSoftwareInfo) {
+                        exif.setAttribute(ExifInterface.TAG_SOFTWARE, null)
+                        exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
+                    }
+                    // Artist / copyright are their own flag: a caller that drops the editing tool can
+                    // still keep the credit the user put on the photo. Keep the tag set identical to
+                    // [stripToTempFile] so a manual wipe and an upload strip remove the same fields.
+                    if (config.stripAuthorship) {
+                        exif.setAttribute(ExifInterface.TAG_ARTIST, null)
+                        exif.setAttribute(ExifInterface.TAG_COPYRIGHT, null)
+                    }
+                    exif.saveAttributes()
                 }
-                if (config.stripCameraInfo) {
-                    // Keep this set in sync with [stripToTempFile] — the user-facing UI
-                    // ("Strip camera info" button) calls THIS path, so any tag missing here
-                    // survives a manual wipe but gets stripped on upload, which would be a
-                    // confusing privacy gap. Aperture-value / ISO-ratings / white-balance /
-                    // exposure-mode must be wiped here to match `stripToTempFile`.
-                    exif.setAttribute(ExifInterface.TAG_MAKE, null)
-                    exif.setAttribute(ExifInterface.TAG_MODEL, null)
-                    exif.setAttribute(ExifInterface.TAG_LENS_MAKE, null)
-                    exif.setAttribute(ExifInterface.TAG_LENS_MODEL, null)
-                    exif.setAttribute(ExifInterface.TAG_FOCAL_LENGTH, null)
-                    exif.setAttribute(ExifInterface.TAG_F_NUMBER, null)
-                    exif.setAttribute(ExifInterface.TAG_APERTURE_VALUE, null)
-                    exif.setAttribute(ExifInterface.TAG_EXPOSURE_TIME, null)
-                    exif.setAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY, null)
-                    exif.setAttribute(ExifInterface.TAG_ISO_SPEED_RATINGS, null)
-                    exif.setAttribute(ExifInterface.TAG_FLASH, null)
-                    exif.setAttribute(ExifInterface.TAG_WHITE_BALANCE, null)
-                    exif.setAttribute(ExifInterface.TAG_EXPOSURE_MODE, null)
-                }
-                if (config.stripTimestamp) {
-                    exif.setAttribute(ExifInterface.TAG_DATETIME, null)
-                    exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, null)
-                    exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, null)
-                }
-                if (config.stripSoftwareInfo) {
-                    exif.setAttribute(ExifInterface.TAG_SOFTWARE, null)
-                    exif.setAttribute(ExifInterface.TAG_USER_COMMENT, null)
-                }
-                // Artist / copyright are their own flag: a caller that drops the editing tool can
-                // still keep the credit the user put on the photo. Keep the tag set identical to
-                // [stripToTempFile] so a manual wipe and an upload strip remove the same fields.
-                if (config.stripAuthorship) {
-                    exif.setAttribute(ExifInterface.TAG_ARTIST, null)
-                    exif.setAttribute(ExifInterface.TAG_COPYRIGHT, null)
-                }
-                exif.saveAttributes()
             }
             StripResult.Stripped
         } catch (e: SecurityException) {

@@ -2376,4 +2376,9 @@
         <item quantity="other">Želite to oznako odstraniti z %d fotografij?</item>
     </plurals>
     <string name="label_delete_confirm">Odstrani</string>
+    <string name="edit_upload_failed_channel_name">Obvestila o nalaganju urejanj</string>
+    <string name="edit_upload_failed_channel_desc">Obvesti, ko urejanja fotografije ali videa ni bilo mogoče naložiti v Drive.</string>
+    <string name="edit_upload_failed_title">Vaše urejanje ni bilo naloženo</string>
+    <string name="edit_upload_failed_text_kept">Drive ni bil dosegljiv, zato je bila urejena kopija shranjena v vašo galerijo.</string>
+    <string name="edit_upload_failed_text_lost">Drive ni bil dosegljiv in urejene kopije ni bilo mogoče shraniti. Odprite izvirnik in ga uredite znova.</string>
 </resources>

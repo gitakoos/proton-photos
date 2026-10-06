@@ -98,6 +98,9 @@ object NotificationIds {
      *  ask for. */
     const val VAULT_RESCUE = 4259
 
+    /** The notice that an edit of a cloud-only photo or video could not be uploaded to Proton Drive. */
+    const val EDIT_UPLOAD_FAILED = 4260
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

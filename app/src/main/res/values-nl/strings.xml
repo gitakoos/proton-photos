@@ -2285,4 +2285,9 @@
         <item quantity="other">Dit label van %d foto\'s verwijderen?</item>
     </plurals>
     <string name="label_delete_confirm">Verwijderen</string>
+    <string name="edit_upload_failed_channel_name">Meldingen over geüploade bewerkingen</string>
+    <string name="edit_upload_failed_channel_desc">Laat het weten wanneer de bewerking van een foto of video niet naar Drive kon worden geüpload.</string>
+    <string name="edit_upload_failed_title">Je bewerking is niet geüpload</string>
+    <string name="edit_upload_failed_text_kept">Drive was niet bereikbaar, dus de bewerkte kopie is in plaats daarvan in je galerij opgeslagen.</string>
+    <string name="edit_upload_failed_text_lost">Drive was niet bereikbaar en de bewerkte kopie kon niet worden opgeslagen. Open het origineel en bewerk het opnieuw.</string>
 </resources>

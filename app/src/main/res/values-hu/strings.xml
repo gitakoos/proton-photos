@@ -2257,4 +2257,9 @@
         <item quantity="other">Eltávolítod ezt a címkét %d fotóról?</item>
     </plurals>
     <string name="label_delete_confirm">Eltávolítás</string>
+    <string name="edit_upload_failed_channel_name">Szerkesztésfeltöltési értesítések</string>
+    <string name="edit_upload_failed_channel_desc">Szól, ha egy fotó vagy videó szerkesztését nem sikerült feltölteni a Drive-ra.</string>
+    <string name="edit_upload_failed_title">A szerkesztés nem lett feltöltve</string>
+    <string name="edit_upload_failed_text_kept">A Drive nem volt elérhető, ezért a szerkesztett másolat a galériádba lett mentve.</string>
+    <string name="edit_upload_failed_text_lost">A Drive nem volt elérhető, és a szerkesztett másolatot sem sikerült elmenteni. Nyisd meg az eredetit, és szerkeszd újra.</string>
 </resources>

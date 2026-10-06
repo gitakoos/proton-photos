@@ -2297,4 +2297,9 @@
         <item quantity="other">Rimuovere questa etichetta da %d foto?</item>
     </plurals>
     <string name="label_delete_confirm">Rimuovi</string>
+    <string name="edit_upload_failed_channel_name">Avvisi di caricamento delle modifiche</string>
+    <string name="edit_upload_failed_channel_desc">Ti avvisa quando la modifica di una foto o di un video non è stata caricata su Drive.</string>
+    <string name="edit_upload_failed_title">La tua modifica non è stata caricata</string>
+    <string name="edit_upload_failed_text_kept">Drive non era raggiungibile, quindi la copia modificata è stata salvata nella tua galleria.</string>
+    <string name="edit_upload_failed_text_lost">Drive non era raggiungibile e la copia modificata non è stata salvata. Apri l\'originale e modificalo di nuovo.</string>
 </resources>

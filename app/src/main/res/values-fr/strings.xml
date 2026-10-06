@@ -2260,4 +2260,9 @@
         <item quantity="other">Retirer cette étiquette de %d photos ?</item>
     </plurals>
     <string name="label_delete_confirm">Retirer</string>
+    <string name="edit_upload_failed_channel_name">Avis d\'envoi des modifications</string>
+    <string name="edit_upload_failed_channel_desc">Vous prévient lorsque la modification d\'une photo ou d\'une vidéo n\'a pas pu être envoyée vers Drive.</string>
+    <string name="edit_upload_failed_title">Votre modification n\'a pas été envoyée</string>
+    <string name="edit_upload_failed_text_kept">Drive était injoignable, la copie modifiée a donc été enregistrée dans votre galerie.</string>
+    <string name="edit_upload_failed_text_lost">Drive était injoignable et la copie modifiée n\'a pas pu être enregistrée. Ouvrez l\'original et modifiez-le à nouveau.</string>
 </resources>

@@ -2295,4 +2295,9 @@
         <item quantity="other">¿Quitar esta etiqueta de %d fotos?</item>
     </plurals>
     <string name="label_delete_confirm">Quitar</string>
+    <string name="edit_upload_failed_channel_name">Avisos de subida de ediciones</string>
+    <string name="edit_upload_failed_channel_desc">Te avisa cuando no se pudo subir a Drive la edición de una foto o un vídeo.</string>
+    <string name="edit_upload_failed_title">Tu edición no se subió</string>
+    <string name="edit_upload_failed_text_kept">No se pudo acceder a Drive, así que la copia editada se guardó en tu galería.</string>
+    <string name="edit_upload_failed_text_lost">No se pudo acceder a Drive y tampoco se pudo guardar la copia editada. Abre el original y edítalo de nuevo.</string>
 </resources>

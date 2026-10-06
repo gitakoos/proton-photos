@@ -2258,4 +2258,9 @@
         <item quantity="other">Dieses Label von %d Fotos entfernen?</item>
     </plurals>
     <string name="label_delete_confirm">Entfernen</string>
+    <string name="edit_upload_failed_channel_name">Hinweise zu Bearbeitungs-Uploads</string>
+    <string name="edit_upload_failed_channel_desc">Meldet, wenn die Bearbeitung eines Fotos oder Videos in Drive nicht hochgeladen werden konnte.</string>
+    <string name="edit_upload_failed_title">Deine Bearbeitung wurde nicht hochgeladen</string>
+    <string name="edit_upload_failed_text_kept">Drive war nicht erreichbar, deshalb wurde die bearbeitete Kopie stattdessen in deiner Galerie gespeichert.</string>
+    <string name="edit_upload_failed_text_lost">Drive war nicht erreichbar und die bearbeitete Kopie konnte nicht gespeichert werden. Öffne das Original und bearbeite es erneut.</string>
 </resources>

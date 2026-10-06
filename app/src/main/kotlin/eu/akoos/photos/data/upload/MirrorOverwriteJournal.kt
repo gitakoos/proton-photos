@@ -171,6 +171,9 @@ class MirrorOverwriteJournal(private val dir: File) {
         return baks to uris
     }
 
+    /** The original could not be backed up, so the edit was not started and the file is as it was. */
+    class StagingFailedException : java.io.IOException("could not back up the file before rewriting it")
+
     /** How a guarded overwrite ended. [STRANDED] is the only state that leaves a journal entry behind. */
     enum class Outcome { SKIPPED, WRITTEN, ROLLED_BACK, STRANDED }
 
@@ -211,6 +214,48 @@ class MirrorOverwriteJournal(private val dir: File) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 if (restored) Outcome.ROLLED_BACK else Outcome.STRANDED
             }
+        }
+
+        /**
+         * The same protection for an in-place edit whose caller needs the outcome back: it runs [mutate]
+         * behind a staged backup and either returns its result or throws what [mutate] threw, with the
+         * file already put right.
+         *
+         * [stage] must return an entry only once the backup is durable; without one the file is never
+         * touched and [StagingFailedException] is thrown, because an edit that cannot be undone is not
+         * started. When [mutate] throws, [untouched] says whether the file still holds the original bytes
+         * (a write the OS refused before it opened anything), which needs no restore; otherwise [restore]
+         * puts the staged bytes back. The entry is dropped once the original is certain to be in place,
+         * and kept when it is not, so the next launch replays it. A result that [verify] rejects is
+         * treated exactly like a throw, so a write that finished but left an unreadable file is rolled
+         * back too.
+         */
+        fun <E : Any, T> guardedMutation(
+            stage: () -> E?,
+            mutate: () -> T,
+            untouched: (E) -> Boolean,
+            restore: (E) -> Boolean,
+            commit: (E) -> Unit,
+            verify: () -> Boolean = { true },
+        ): T {
+            val entry = stage() ?: throw StagingFailedException()
+            var result: T? = null
+            val failure: Throwable? = try {
+                result = mutate()
+                if (runCatching { verify() }.getOrDefault(false)) null
+                else java.io.IOException("the rewritten file did not verify")
+            } catch (e: Throwable) {
+                e
+            }
+            if (failure == null) {
+                commit(entry)
+                @Suppress("UNCHECKED_CAST")
+                return result as T
+            }
+            val original = runCatching { untouched(entry) }.getOrDefault(false) ||
+                runCatching { restore(entry) }.getOrDefault(false)
+            if (original) commit(entry)
+            throw failure
         }
 
         /** Subdirectory of filesDir that holds the journal. filesDir, never cacheDir. */

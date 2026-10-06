@@ -74,6 +74,7 @@ import eu.akoos.photos.data.face.FaceModelManager
 import eu.akoos.photos.data.face.FaceModelPreparation
 import eu.akoos.photos.data.hidden.HiddenVaultRecords
 import eu.akoos.photos.data.transfer.TransferCenter
+import eu.akoos.photos.data.upload.LocalOverwriteGuard
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -480,6 +481,8 @@ class PhotoEditorViewModel @Inject constructor(
     // Fast pre-check for a cloud edit's save: validated internet, so an offline save fails at once
     // instead of starting an upload that hangs on a connected-but-dead network.
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
+    // Tells the user when the upload of a cloud-only edit fails after the editor already closed.
+    private val editUploadNotifier: eu.akoos.photos.data.notification.EditUploadFailedNotifier,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(EditorUiState())
@@ -2464,14 +2467,19 @@ class PhotoEditorViewModel @Inject constructor(
                         val thumbUri = "file://" + File(context.cacheDir, "thumbnails/thumb_${source.photo.linkId}.jpg").absolutePath
                         val tid = transferCenter.start(TransferCenter.Kind.UPLOAD, total = 1, items = listOf(thumbUri))
                         try {
-                            val ok = runCatching {
+                            val failure = runCatching {
                                 saveCloud(bitmap, source, effectiveMode, quality, editTimestampMs, originalCaptureMs)
-                            }.isSuccess
+                            }.exceptionOrNull()
+                            if (failure is kotlinx.coroutines.CancellationException) throw failure
                             transferCenter.progress(tid, 1)
-                            if (ok) transferCenter.log(
-                                TransferCenter.Kind.UPLOAD, count = 1,
-                                name = context.getString(R.string.activity_hist_edited), uris = listOf(thumbUri),
-                            )
+                            if (failure == null) {
+                                transferCenter.log(
+                                    TransferCenter.Kind.UPLOAD, count = 1,
+                                    name = context.getString(R.string.activity_hist_edited), uris = listOf(thumbUri),
+                                )
+                            } else {
+                                keepFailedCloudEdit(bitmap, source, quality, editTimestampMs, originalCaptureMs)
+                            }
                         } finally {
                             transferCenter.finish(tid)
                         }
@@ -2883,17 +2891,22 @@ class PhotoEditorViewModel @Inject constructor(
         // so it can be re-injected onto the edited bytes below. The local copy always keeps the full
         // original EXIF (strip-on-upload governs only the uploaded cloud copy, not the on-device file).
         val originalExif = ExifHelper.readExifSnapshot(context, source.uri)
-        context.contentResolver.openOutputStream(srcUri, "wt")?.use { out ->
-            bitmap.compress(format, quality, out)
-        } ?: error("openOutputStream returned null for $srcUri")
-        // Re-inject the original's EXIF onto the just-written file, forcing NORMAL orientation and the
-        // edited pixel size. Never fails the save (the helper swallows unsupported-format / IO errors).
-        if (originalExif != null) {
-            runCatching {
-                context.contentResolver.openFileDescriptor(srcUri, "rw")?.use { pfd ->
-                    ExifHelper.copyExifPreservingOrientation(
-                        originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
-                    )
+        // The write empties the original before it fills it, so it runs behind a backup that is put
+        // back when the write fails or leaves an unreadable image; a kill part way is replayed from the
+        // same backup on the next launch.
+        LocalOverwriteGuard(context).run(source.uri, expectedSize = bitmap.width to bitmap.height) {
+            context.contentResolver.openOutputStream(srcUri, "wt")?.use { out ->
+                bitmap.compress(format, quality, out)
+            } ?: error("openOutputStream returned null for $srcUri")
+            // Re-inject the original's EXIF onto the just-written file, forcing NORMAL orientation and the
+            // edited pixel size. Never fails the save (the helper swallows unsupported-format / IO errors).
+            if (originalExif != null) {
+                runCatching {
+                    context.contentResolver.openFileDescriptor(srcUri, "rw")?.use { pfd ->
+                        ExifHelper.copyExifPreservingOrientation(
+                            originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
+                        )
+                    }
                 }
             }
         }
@@ -3093,6 +3106,34 @@ class PhotoEditorViewModel @Inject constructor(
         } finally {
             tempFile.delete()
         }
+    }
+
+    /**
+     * The upload of a cloud-only edit failed after the editor reported it saved, and the edit exists nowhere
+     * else. The edited copy goes into the gallery, where the normal backup uploads it like any new photo, and
+     * the user is told either way.
+     */
+    private suspend fun keepFailedCloudEdit(
+        bitmap: Bitmap,
+        source: EditorSource.Cloud,
+        quality: Int,
+        editTimestampMs: Long,
+        originalCaptureMs: Long,
+    ) {
+        val kept = runCatching {
+            withContext(Dispatchers.IO) {
+                // The cached original, when it is still there, lends its EXIF to the copy.
+                val exifSource = cloudOriginalFilePath?.let { Uri.fromFile(File(it)).toString() }.orEmpty()
+                insertLocalCopy(
+                    bitmap = bitmap,
+                    source = EditorSource.Local(exifSource, source.photo.displayName, "image/jpeg"),
+                    quality = quality,
+                    editTimestampMs = editTimestampMs,
+                    dateTakenMs = originalCaptureMs,
+                ) != null
+            }
+        }.getOrDefault(false)
+        editUploadNotifier.notifyFailed(kept)
     }
 
     /**

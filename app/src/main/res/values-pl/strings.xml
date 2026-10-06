@@ -2376,4 +2376,9 @@
         <item quantity="other">Usunąć tę etykietę z %d zdjęć?</item>
     </plurals>
     <string name="label_delete_confirm">Usuń</string>
+    <string name="edit_upload_failed_channel_name">Powiadomienia o przesyłaniu edycji</string>
+    <string name="edit_upload_failed_channel_desc">Informuje, gdy edycji zdjęcia lub filmu nie udało się przesłać na Drive.</string>
+    <string name="edit_upload_failed_title">Twoja edycja nie została przesłana</string>
+    <string name="edit_upload_failed_text_kept">Drive był niedostępny, więc edytowaną kopię zapisano w galerii.</string>
+    <string name="edit_upload_failed_text_lost">Drive był niedostępny i nie udało się zapisać edytowanej kopii. Otwórz oryginał i edytuj go ponownie.</string>
 </resources>

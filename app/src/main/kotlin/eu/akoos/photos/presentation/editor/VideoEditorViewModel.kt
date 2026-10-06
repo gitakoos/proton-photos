@@ -589,6 +589,8 @@ class VideoEditorViewModel @Inject constructor(
     // Fast pre-check for a cloud edit's save: validated internet, so an offline save fails at once
     // instead of re-encoding and starting an upload that hangs on a connected-but-dead network.
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
+    // Tells the user when the upload of a cloud-only edit fails after the editor already closed.
+    private val editUploadNotifier: eu.akoos.photos.data.notification.EditUploadFailedNotifier,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(VideoEditorUiState())
@@ -1866,6 +1868,14 @@ class VideoEditorViewModel @Inject constructor(
                             // appScope is long-lived; a cancellation here is scope teardown, not a
                             // save failure, so re-throw it rather than swallowing.
                             if (t is kotlinx.coroutines.CancellationException) throw t
+                            // The edit exists nowhere else, so the muxed copy goes into the gallery, where
+                            // the normal backup uploads it, and the user is told either way.
+                            val kept = runCatching {
+                                withContext(Dispatchers.IO) {
+                                    insertReencodedCopy(cloudTempFile, cloudPhoto.displayName, s.mimeType, editTimestampMs) != null
+                                }
+                            }.getOrDefault(false)
+                            editUploadNotifier.notifyFailed(kept)
                         } finally {
                             transferCenter.finish(tid)
                             cloudTempFile.delete()

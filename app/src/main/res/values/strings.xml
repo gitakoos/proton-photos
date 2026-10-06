@@ -2294,4 +2294,9 @@
     <string name="person_move_confirm_body">Move the selected photos to %1$s?</string>
     <string name="person_move_confirm">Move</string>
     <string name="settings_face_auto_merge">Merge likely matches automatically</string>
+    <string name="edit_upload_failed_channel_name">Edit upload notices</string>
+    <string name="edit_upload_failed_channel_desc">Tells you when the edit of a photo or video in Drive could not be uploaded.</string>
+    <string name="edit_upload_failed_title">Your edit was not uploaded</string>
+    <string name="edit_upload_failed_text_kept">Drive could not be reached, so the edited copy was saved to your gallery instead.</string>
+    <string name="edit_upload_failed_text_lost">Drive could not be reached and the edited copy could not be saved. Open the original and edit it again.</string>
 </resources>

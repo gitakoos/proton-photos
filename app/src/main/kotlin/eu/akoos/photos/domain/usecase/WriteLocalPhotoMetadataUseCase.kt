@@ -32,6 +32,7 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.exifinterface.media.ExifInterface
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.upload.LocalOverwriteGuard
 import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
@@ -273,12 +274,15 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
     private fun editExifViaFd(uri: String, mutate: (ExifInterface) -> Unit): MetadataWriteResult =
         try {
             val parsed = Uri.parse(uri)
-            val pfd = context.contentResolver.openFileDescriptor(parsed, "rw")
-                ?: return MetadataWriteResult.Failed("could not open $uri")
-            pfd.use {
-                val exif = ExifInterface(it.fileDescriptor)
-                mutate(exif)
-                exif.saveAttributes()
+            // The save rewrites the file in place, so it runs behind a backup that is put back when it fails.
+            LocalOverwriteGuard(context).run(uri) {
+                val pfd = context.contentResolver.openFileDescriptor(parsed, "rw")
+                    ?: throw java.io.IOException("could not open $uri")
+                pfd.use {
+                    val exif = ExifInterface(it.fileDescriptor)
+                    mutate(exif)
+                    exif.saveAttributes()
+                }
             }
             MetadataWriteResult.Success
         } catch (e: CancellationException) {

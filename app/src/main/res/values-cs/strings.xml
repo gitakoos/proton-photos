@@ -2382,4 +2382,9 @@
         <item quantity="other">Odebrat tento štítek z %d fotek?</item>
     </plurals>
     <string name="label_delete_confirm">Odebrat</string>
+    <string name="edit_upload_failed_channel_name">Oznámení o nahrání úprav</string>
+    <string name="edit_upload_failed_channel_desc">Upozorní vás, když se úprava fotky nebo videa na Drive nepodařila nahrát.</string>
+    <string name="edit_upload_failed_title">Vaše úprava nebyla nahrána</string>
+    <string name="edit_upload_failed_text_kept">Drive nebyl dostupný, upravená kopie se proto uložila do vaší galerie.</string>
+    <string name="edit_upload_failed_text_lost">Drive nebyl dostupný a upravenou kopii se nepodařilo uložit. Otevřete originál a upravte ho znovu.</string>
 </resources>
