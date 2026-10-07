@@ -389,6 +389,15 @@ class UploadPendingUseCase @Inject constructor(
             .toSet()
         val hasExplicitBypass = explicitBypassUris.isNotEmpty()
 
+        // Nothing selected for backup (onboarding's "Nothing for now") and nothing queued by hand: end
+        // here, before the Wi-Fi and listing deferrals, which would otherwise report "Waiting for
+        // Wi-Fi" or "Preparing backup" for a backup that isn't set up.
+        if (!backupEverything && (selectedFolders == null || selectedFolders.isEmpty()) && !hasExplicitBypass) {
+            Log.d(UPLOAD_TAG, "No backup folders configured — skipping upload")
+            _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
+            return@withLock Result(attempted = 0, successCount = 0)
+        }
+
         // Wi-Fi-only enforcement for the auto-sync drain (absent key = ON, matching the rest of the
         // app). ANY-Wi-Fi semantics: a metered Wi-Fi (hotspot, some routers) is still allowed, but
         // mobile data is not. Centralised here so the inline callers (pull-to-refresh, Settings sync,
@@ -418,12 +427,6 @@ class UploadPendingUseCase @Inject constructor(
         if ((!initialListingComplete || !pairingSettled) && !hasExplicitBypass) {
             Log.d(UPLOAD_TAG, "Cloud listing/pairing not settled yet — deferring bulk upload to avoid duplicates")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.PreparingBackup, 0, 0))
-            return@withLock Result(attempted = 0, successCount = 0)
-        }
-
-        if (!backupEverything && (selectedFolders == null || selectedFolders.isEmpty()) && !hasExplicitBypass) {
-            Log.d(UPLOAD_TAG, "No backup folders configured — skipping upload")
-            _progress.tryEmit(UploadProgress("", "", UploadStatus.Idle, 0, 0))
             return@withLock Result(attempted = 0, successCount = 0)
         }
 

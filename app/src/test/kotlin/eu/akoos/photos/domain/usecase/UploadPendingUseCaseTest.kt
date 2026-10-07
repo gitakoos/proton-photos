@@ -342,6 +342,21 @@ class UploadPendingUseCaseTest {
     }
 
     @Test
+    fun `with nothing selected for backup the run ends idle instead of waiting`() = runTest {
+        // Onboarding's "Nothing for now": no folders and nothing queued by hand. The run must not
+        // report that it waits for Wi-Fi or the cloud listing, since there is no backup to wait for.
+        every { mockPrefsRef[SettingsKeys.SYNC_FOLDER_NAMES] } returns emptySet()
+        every { mockPrefsRef[SettingsKeys.pairingSettledKey(userId.id)] } returns false
+        every { mockPrefsRef[SettingsKeys.SYNC_WIFI_ONLY] } returns true
+        coEvery { networkObserver.currentlyOnWifi() } returns false
+        every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
+
+        useCase(userId)
+
+        assertEquals(UploadStatus.Idle, useCase.progress.replayCache.last().status)
+    }
+
+    @Test
     fun `successful upload transitions status to SYNCED`() = runTest {
         val state = syncState("uri://1", SyncStatus.LOCAL_ONLY)
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(state))
