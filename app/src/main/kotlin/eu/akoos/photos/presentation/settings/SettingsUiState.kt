@@ -260,6 +260,8 @@ data class SettingsUiState(
     val uploadDoneCount: Int = 0,
     /** Total files in the current batch (0 when idle). */
     val uploadTotalCount: Int = 0,
+    /** Files of the current batch that failed. They count toward [uploadDoneCount] too. */
+    val uploadFailedCount: Int = 0,
     /** Per-file status feed for the expandable list. Most recent activity last. */
     val uploadEvents: List<UploadEvent> = emptyList(),
     /** Running bytes-per-second for the current batch. Null when no batch is active

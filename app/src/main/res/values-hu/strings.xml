@@ -197,6 +197,7 @@
     <string name="sync_photo_count_singular">1 fotó</string>
     <string name="sync_progress_completed">%1$d%% kész</string>
     <string name="sync_progress_x_of_n">%1$d / %2$d</string>
+    <string name="sync_progress_failed">Sikertelen: %1$d</string>
     <string name="sync_progress_show_files">Fájlok mutatása</string>
     <string name="sync_progress_hide_files">Fájlok elrejtése</string>
 

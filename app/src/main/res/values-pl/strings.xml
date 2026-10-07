@@ -351,6 +351,7 @@
     <!-- Sync progress (Settings card) -->
     <string name="sync_progress_completed">Ukończono %1$d%%</string>
     <string name="sync_progress_x_of_n">%1$d z %2$d</string>
+    <string name="sync_progress_failed">Nieudane: %1$d</string>
     <string name="sync_progress_show_files">Pokaż pliki</string>
     <string name="sync_progress_hide_files">Ukryj pliki</string>
     <!-- Delete after backup consent notification -->

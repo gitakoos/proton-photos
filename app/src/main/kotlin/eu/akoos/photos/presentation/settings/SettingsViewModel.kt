@@ -715,9 +715,13 @@ class SettingsViewModel @Inject constructor(
                                 (totalLiveBytes * 1000L / elapsedMs)
                             } else null
 
+                            val failedCount = (if (isNewBatch) 0 else current.uploadFailedCount) +
+                                if (evt.status == UploadStatus.Failed) 1 else 0
+
                             current.copy(
                                 uploadDoneCount = evt.doneIdx,
                                 uploadTotalCount = evt.totalCount,
+                                uploadFailedCount = failedCount,
                                 uploadEvents = nextEvents,
                                 uploadBytesPerSecond = bps,
                                 uploadDeferReason = null,

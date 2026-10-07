@@ -178,6 +178,7 @@
     <string name="sync_photo_count_singular">1 foto</string>
     <string name="sync_progress_completed">%1$d%% completato</string>
     <string name="sync_progress_x_of_n">%1$d di %2$d</string>
+    <string name="sync_progress_failed">Non riusciti: %1$d</string>
     <string name="sync_progress_show_files">Mostra file</string>
     <string name="sync_progress_hide_files">Nascondi file</string>
 
