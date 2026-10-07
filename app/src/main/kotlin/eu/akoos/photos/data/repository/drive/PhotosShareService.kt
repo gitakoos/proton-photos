@@ -24,14 +24,20 @@ package eu.akoos.photos.data.repository.drive
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import me.proton.core.crypto.common.context.CryptoContext
 import me.proton.core.domain.entity.UserId
 import me.proton.core.network.data.ApiProvider
+import me.proton.core.network.domain.ApiException
+import me.proton.core.network.domain.ApiManager
+import me.proton.core.network.domain.ApiResult
 import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.api.dto.BatchLinksRequest
+import eu.akoos.photos.data.api.dto.PhotosShareResponse
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import eu.akoos.photos.domain.entity.DriveNotFoundException
 import javax.inject.Inject
@@ -57,6 +63,9 @@ class PhotosShareService @Inject constructor(
      * doesn't compete with network parallelism for the same 4 slots.
      */
     val networkSemaphore = Semaphore(4)
+
+    /** One Photos volume creation at a time, so concurrent first calls don't each create one. */
+    private val volumeCreation = Mutex()
 
     @Volatile private var cachedPhotosVolumeId: String? = null
     @Volatile private var cachedPhotosShareId: String? = null
@@ -179,7 +188,7 @@ class PhotosShareService @Inject constructor(
         networkSemaphore.withPermit {
             cachedPhotosVolumeId?.let { return@withPermit it }
             val manager = apiProvider.get<DriveApiService>(userId)
-            val response = manager.invoke { getPhotosShare() }.valueOrThrow
+            val response = getPhotosShareCreatingVolume(userId, manager)
             val shareId = response.share.shareId
             Log.d(TAG, "getPhotosShare: volumeId=${response.volume.volumeId} shareId=$shareId linkId=${response.share.linkId} hasKey=${response.share.key != null} hasPassphrase=${response.share.passphrase != null}")
             cachedUserId = userId.id
@@ -256,6 +265,37 @@ class PhotosShareService @Inject constructor(
             response.volume.volumeId
         }
     }
+
+    /**
+     * The Photos share, creating the account's Photos volume first when there is none: a new account
+     * has no Photos volume until a client creates one, and until then every Photos call fails with
+     * 2501. Called with a [networkSemaphore] permit held.
+     */
+    private suspend fun getPhotosShareCreatingVolume(
+        userId: UserId,
+        manager: ApiManager<out DriveApiService>,
+    ): PhotosShareResponse {
+        try {
+            return manager.invoke { getPhotosShare() }.valueOrThrow
+        } catch (e: ApiException) {
+            if (protonCode(e) != VOLUME_NOT_FOUND) throw e
+        }
+        volumeCreation.withLock {
+            // A concurrent caller may have created it while this one waited for the lock.
+            runCatching { manager.invoke { getPhotosShare() }.valueOrThrow }.getOrNull()?.let { return it }
+            Log.d(TAG, "getVolumeId: no Photos volume yet, creating one")
+            // The primary address signs: the volume-owner lookup goes back through getVolumeId.
+            val body = photosVolumeBootstrap.build(userId, cryptoHelper.getPrimaryAddressSigningKey(userId))
+            try {
+                manager.invoke { createOrGetPhotosVolume(body) }.valueOrThrow
+            } catch (e: ApiException) {
+                if (protonCode(e) != ALREADY_EXISTS) throw e
+            }
+        }
+        return manager.invoke { getPhotosShare() }.valueOrThrow
+    }
+
+    private fun protonCode(e: ApiException): Int? = (e.error as? ApiResult.Error.Http)?.proton?.code
 
     suspend fun getShareId(userId: UserId, volumeId: String): String = withContext(Dispatchers.IO) {
         cachedPhotosShareId?.let { return@withContext it }
@@ -566,5 +606,9 @@ class PhotosShareService @Inject constructor(
          * the official Proton Drive Android client (see VolumeDto.kt companion object).
          */
         const val VOLUME_TYPE_PHOTO = 2
+
+        /** Proton body codes for a missing volume and for one that already exists. */
+        const val VOLUME_NOT_FOUND = 2501
+        const val ALREADY_EXISTS = 2500
     }
 }
