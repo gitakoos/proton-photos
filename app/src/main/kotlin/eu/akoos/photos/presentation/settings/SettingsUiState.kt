@@ -24,6 +24,8 @@ package eu.akoos.photos.presentation.settings
 
 import androidx.annotation.StringRes
 import eu.akoos.photos.domain.entity.UploadCompressionTier
+import eu.akoos.photos.domain.entity.compression.EncoderCapabilities
+import eu.akoos.photos.domain.entity.compression.VideoCodecChoice
 
 data class SettingsUiState(
     val autoSync: Boolean = true,
@@ -197,6 +199,9 @@ data class SettingsUiState(
     /** Which quality tier the VIDEO upload compression uses when [compressVideosOnUpload] is on, the
      *  video-only counterpart of [compressTier]. Reuses the same [labelRes] / [descRes] mapping. */
     val compressTierVideo: UploadCompressionTier = UploadCompressionTier.BALANCED,
+    val videoCodec: VideoCodecChoice = VideoCodecChoice.AUTO,
+    /** This device's video encoders, for the codec chips; null until the one-off scan finishes. */
+    val encoderCapabilities: EncoderCapabilities? = null,
     val mirrorStripToLocal: Boolean = false,
     /** When true, the lighter re-encode also overwrites the on-device original (all-files access
      *  required), so the local file matches the compressed upload. Persisted only for now. */
@@ -288,9 +293,18 @@ data class UploadEvent(
     /** Live plaintext bytes processed for THIS file's current phase (encrypt or upload); 0
      *  outside those phases. Drives the per-photo progress bar in the Activity monitor. */
     val doneBytes: Long = 0L,
+    /** [UploadEventStatus.Compressing] only: see [eu.akoos.photos.domain.usecase.UploadProgress]. */
+    val compressFraction: Float = 0f,
+    val compressCodecMime: String? = null,
+    val compressSpeedX: Float? = null,
 )
 
-enum class UploadEventStatus { Uploading, Queued, Encrypting, Done, Failed }
+enum class UploadEventStatus {
+    Uploading, Queued, Compressing, Encrypting, Done, Failed;
+
+    /** Being compressed, encrypted or uploaded right now. */
+    val inFlight: Boolean get() = this == Uploading || this == Compressing || this == Encrypting
+}
 
 /**
  * Which Copy text model drawer the AI settings panel is showing, if any. [Download] asks to fetch the
@@ -369,9 +383,9 @@ enum class LandingTab(val index: Int, val labelRes: Int) {
 @get:StringRes
 val UploadCompressionTier.labelRes: Int
     get() = when (this) {
-        UploadCompressionTier.LIGHT -> eu.akoos.photos.R.string.settings_compress_tier_light
-        UploadCompressionTier.BALANCED -> eu.akoos.photos.R.string.settings_compress_tier_balanced
-        UploadCompressionTier.SPACE_SAVER -> eu.akoos.photos.R.string.settings_compress_tier_space_saver
+        UploadCompressionTier.LIGHT -> eu.akoos.photos.R.string.compression_preset_high
+        UploadCompressionTier.BALANCED -> eu.akoos.photos.R.string.compression_preset_balanced
+        UploadCompressionTier.SPACE_SAVER -> eu.akoos.photos.R.string.compression_preset_small
     }
 
 /** One-line tradeoff description shown under an [UploadCompressionTier]'s picker label. */
@@ -381,6 +395,15 @@ val UploadCompressionTier.descRes: Int
         UploadCompressionTier.LIGHT -> eu.akoos.photos.R.string.settings_compress_tier_light_desc
         UploadCompressionTier.BALANCED -> eu.akoos.photos.R.string.settings_compress_tier_balanced_desc
         UploadCompressionTier.SPACE_SAVER -> eu.akoos.photos.R.string.settings_compress_tier_space_saver_desc
+    }
+
+/** The video counterpart of [descRes], which also names the resolution and frame-rate caps. */
+@get:StringRes
+val UploadCompressionTier.videoDescRes: Int
+    get() = when (this) {
+        UploadCompressionTier.LIGHT -> eu.akoos.photos.R.string.compression_preset_high_desc
+        UploadCompressionTier.BALANCED -> eu.akoos.photos.R.string.compression_preset_balanced_desc
+        UploadCompressionTier.SPACE_SAVER -> eu.akoos.photos.R.string.compression_preset_small_desc
     }
 
 /**

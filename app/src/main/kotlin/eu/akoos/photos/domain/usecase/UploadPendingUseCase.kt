@@ -50,12 +50,19 @@ import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.preferences.CompressionPreferences
 import eu.akoos.photos.data.upload.MirrorOverwriteJournal
+import eu.akoos.photos.data.upload.UploadImageCompressor
+import eu.akoos.photos.data.upload.VideoUploadCompressor
+import eu.akoos.photos.data.upload.compression.VideoUploadCompression
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.StorageFullException
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.entity.UploadCompressionTier
+import eu.akoos.photos.domain.entity.compression.CompressionOutcome
+import eu.akoos.photos.domain.entity.compression.CompressionSkipReason
+import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -97,8 +104,15 @@ private val STALE_UPLOAD_TEMP_MS = java.util.concurrent.TimeUnit.DAYS.toMillis(3
  * hardware video encoder, so two concurrent transcodes (possible with [UPLOAD_PARALLELISM]
  * in-flight uploads) would fail or thrash. File-level so the limit holds across every upload
  * coroutine and batch regardless of how many use-case instances exist.
+ *
+ * A video hands its upload slot back while it waits for and runs the transcode (see [releasedWhile]),
+ * so photos keep uploading behind a long transcode.
  */
 private val videoTranscodeGate = Semaphore(1)
+
+/** Compressible videos per batch allowed past the video lane at once, which bounds the temp copies on
+ *  disk. Taken before the upload slot, so a video waiting here holds nothing a photo needs. */
+private const val VIDEO_PIPELINE_DEPTH = 2
 
 /**
  * Per-batch upload parallelism. Three concurrent uploads matches the inner CDN-block
@@ -112,7 +126,9 @@ private const val UPLOAD_PARALLELISM = 3
 /**
  * Per-file upload event surfaced to UI (Settings sync progress).
  *
- * Status transitions per file: `Queued` → `Encrypting` → `Uploading` → (`Done` | `Failed`).
+ * Status transitions per file: `Queued` → `Encrypting` → `Uploading` → (`Done` | `Failed`). A video
+ * that is compressed goes `Queued` while it waits for the transcode, `Compressing` while it runs, and
+ * `Queued` again until it gets an upload slot back.
  * `done` and `total` are batch-level counters so the UI can render a single linear bar without
  * keeping its own state.
  *
@@ -132,7 +148,7 @@ private const val UPLOAD_PARALLELISM = 3
  * closing `Idle` frame rather than preceding it, because `Idle` is what observers clear the panel
  * on, and a reason wiped in the same breath would leave the backup looking merely finished.
  */
-enum class UploadStatus { Queued, Encrypting, Uploading, Done, Failed, Idle, WaitingForWifi, PreparingBackup, StorageFull }
+enum class UploadStatus { Queued, Compressing, Encrypting, Uploading, Done, Failed, Idle, WaitingForWifi, PreparingBackup, StorageFull }
 
 data class UploadProgress(
     val uri: String,
@@ -149,6 +165,11 @@ data class UploadProgress(
      * meter updates DURING a single large upload instead of only ticking on file completion.
      */
     val doneBytes: Long = 0L,
+    /** `Compressing` only: the transcode's 0..1 progress, the codec MIME type it produces, and its
+     *  speed in seconds of video per second. */
+    val compressFraction: Float = 0f,
+    val compressCodecMime: String? = null,
+    val compressSpeedX: Float? = null,
 )
 
 @Singleton
@@ -163,6 +184,7 @@ class UploadPendingUseCase @Inject constructor(
     private val pendingMetadataEditDao: eu.akoos.photos.data.db.dao.PendingMetadataEditDao,
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
     private val structuralStripper: UploadStructuralStripper,
+    private val videoCompression: VideoUploadCompression,
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) {
@@ -332,8 +354,7 @@ class UploadPendingUseCase @Inject constructor(
         val compressTier = UploadCompressionTier
             .fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: -1)
         // #108: the video path re-encodes at its own tier, seeded from the shared value on upgrade.
-        val videoCompressTier = UploadCompressionTier
-            .fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] ?: -1)
+        val videoProfile = CompressionPreferences.videoProfile(prefs)
         val mirrorStripToLocal = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
         val mirrorCompressToLocal = prefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] ?: false
         val compressVideosOnUpload = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false
@@ -528,9 +549,13 @@ class UploadPendingUseCase @Inject constructor(
         // from a folder the user just turned off keep uploading until the queue drains, so the
         // backup looks like it ignores the toggle. bucketName lives on LocalMediaItem, not
         // SyncState, so one MediaStore query mapped by URI resolves each pending row's folder.
+        // The same listing gives each pending row's MIME type, so the batch knows which videos queue
+        // for the video lane.
+        var mimeByUri: Map<String, String> = emptyMap()
         if (pending.isNotEmpty()) {
-            val bucketByUri: Map<String, String?> = localRepo.observeLocalMedia().first()
-                .associate { it.uri to it.bucketName }
+            val listing = localRepo.observeLocalMedia().first()
+            mimeByUri = listing.associate { it.uri to it.mimeType }
+            val bucketByUri: Map<String, String?> = listing.associate { it.uri to it.bucketName }
             val before = pending.size
             pending = pending.filter { state ->
                 // A photo queued by an explicit user action (manual "back up now" or album-add) always
@@ -604,6 +629,8 @@ class UploadPendingUseCase @Inject constructor(
         // the CDN-block parallelism inside PhotoUploadService so a single batch fully uses the
         // pipe without over-subscribing it.
         val uploadSemaphore = Semaphore(UPLOAD_PARALLELISM)
+        // Compressible videos take this before an upload slot (see [VIDEO_PIPELINE_DEPTH]).
+        val videoLane = Semaphore(VIDEO_PIPELINE_DEPTH)
         // Album-cache mutations (read-check-create-publish) race when multiple uploads target
         // the same new album. Guard cache reads/writes + the DataStore persist with this mutex
         // so two parallel uploads of "Camera" photos don't both call createDriveAlbum.
@@ -619,6 +646,8 @@ class UploadPendingUseCase @Inject constructor(
         // Source URIs of the photos that upload cleanly, for the History thumbnails. Thread-safe
         // because the parallel tasks add to it concurrently.
         val successUris = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        // What compression saved on the files that uploaded, for the History entry.
+        val savedBytes = AtomicLong(0L)
 
         try {
             coroutineScope {
@@ -633,7 +662,9 @@ class UploadPendingUseCase @Inject constructor(
                         coroutineContext.ensureActive()
                         if (stopRequested.get() || storageFullHit.get()) return@async
 
-                        uploadSemaphore.withPermit {
+                        val transcodes = compressVideosOnUpload &&
+                            mimeByUri[state.localUri]?.startsWith("video/") == true
+                        suspend fun upload() = uploadSemaphore.withPermit {
                             // Re-check after acquiring the permit — earlier tasks may have set
                             // storageFullHit / stopRequested while we were queued.
                             coroutineContext.ensureActive()
@@ -649,7 +680,7 @@ class UploadPendingUseCase @Inject constructor(
                                 stripOnUpload = stripOnUpload,
                                 compressOnUpload = compressOnUpload,
                                 compressTier = compressTier,
-                                videoCompressTier = videoCompressTier,
+                                videoProfile = videoProfile,
                                 mirrorStripToLocal = mirrorStripToLocal,
                                 mirrorCompressToLocal = mirrorCompressToLocal,
                                 compressVideosOnUpload = compressVideosOnUpload,
@@ -663,8 +694,11 @@ class UploadPendingUseCase @Inject constructor(
                                 successUris = successUris,
                                 finishedCount = finishedCount,
                                 onStorageFull = { storageFullHit.set(true) },
+                                uploadSlot = uploadSemaphore,
+                                savedBytes = savedBytes,
                             )
                         }
+                        if (transcodes) videoLane.withPermit { upload() } else upload()
                     }
                 }
                 // awaitAll surfaces the first thrown exception (and cancels the siblings).
@@ -690,6 +724,7 @@ class UploadPendingUseCase @Inject constructor(
         transferCenter.log(
             eu.akoos.photos.data.transfer.TransferCenter.Kind.UPLOAD, finalSuccess,
             uris = successUris.toList(),
+            savedBytes = savedBytes.get(),
         )
         // Refresh the consent notification with the latest pending queue. Same
         // call MainActivity.onResume fires so an externally deleted file (file
@@ -728,7 +763,7 @@ class UploadPendingUseCase @Inject constructor(
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
         compressTier: UploadCompressionTier,
-        videoCompressTier: UploadCompressionTier,
+        videoProfile: VideoCompressionProfile,
         mirrorStripToLocal: Boolean,
         mirrorCompressToLocal: Boolean,
         compressVideosOnUpload: Boolean,
@@ -742,12 +777,18 @@ class UploadPendingUseCase @Inject constructor(
         successUris: MutableCollection<String>,
         finishedCount: AtomicInteger,
         onStorageFull: () -> Unit,
+        /** The batch's upload slots; this item holds one and hands it back while it transcodes. */
+        uploadSlot: Semaphore,
+        savedBytes: AtomicLong,
     ) {
         var strippedFile: File? = null
         var compressedFile: File? = null
         // A temp holding a timestamp-floored copy of an uncompressed video (Fix: backup video mvhd
         // floor). Tracked alongside the other temps so it is cleaned up on both success and failure.
         var tsFloorFile: File? = null
+        // The format a re-encode wrote when it changed the file's format: JPEG from photo compression
+        // or the HEIC strip transcode, MP4 from a video transcode. The upload's name and type follow it.
+        var producedMime: String? = null
         try {
             val rawLocalItem = localRepo.queryByUri(state.localUri)
             if (rawLocalItem == null) {
@@ -993,6 +1034,7 @@ class UploadPendingUseCase @Inject constructor(
                             .transcodeStrippedJpeg(context, state.localUri, stripConfig)
                         if (transcoded != null) {
                             strippedFile = transcoded
+                            producedMime = UploadImageCompressor.JPEG_MIME
                             Log.d(UPLOAD_TAG, "Stripped JPEG transcoded for ${localItem.displayName} (unwritable container)")
                             android.net.Uri.fromFile(transcoded).toString()
                         } else {
@@ -1046,6 +1088,7 @@ class UploadPendingUseCase @Inject constructor(
                 structuralStripper.isMotionPhotoUpload(strippedUploadUri)
             if (compressIsMotionPhoto) {
                 Log.d(UPLOAD_TAG, "Skipping image compression for motion photo ${localItem.displayName}; motion preserved")
+                logCompression(state.localUri, "photo", CompressionOutcome.SKIPPED, CompressionSkipReason.MOTION_PHOTO, localItem.sizeBytes)
             }
             // An Ultra HDR still is the same story with a gain map in place of a clip: the compressor
             // decodes only the primary frame, so re-encoding drops the appended gain map and the photo
@@ -1059,6 +1102,7 @@ class UploadPendingUseCase @Inject constructor(
                 )
             if (compressHasGainMap) {
                 Log.d(UPLOAD_TAG, "Skipping image compression for Ultra HDR ${localItem.displayName}; gain map preserved")
+                logCompression(state.localUri, "photo", CompressionOutcome.SKIPPED, CompressionSkipReason.ULTRA_HDR, localItem.sizeBytes)
             }
             val uploadUri: String = if (compressOnUpload && !compressIsMotionPhoto && !compressHasGainMap &&
                 localItem.mimeType.startsWith("image/")
@@ -1070,10 +1114,12 @@ class UploadPendingUseCase @Inject constructor(
                 // the effective config so those groups are dropped; a no-op when strip-on-upload is off,
                 // so a non-stripping upload still carries the full EXIF byte-for-byte as before.
                 val compressStripConfig = if (stripOnUpload) stripConfig else MetadataStripConfig()
-                val compressed = eu.akoos.photos.data.upload.UploadImageCompressor
-                    .compressToTemp(context, strippedUploadUri, compressTier, compressStripConfig)
+                val outcome = UploadImageCompressor.compress(context, strippedUploadUri, compressTier, compressStripConfig)
+                logCompression(state.localUri, "photo", outcome.outcome, outcome.reason, outcome.sourceBytes, outcome.file?.length())
+                val compressed = outcome.file
                 if (compressed != null) {
                     compressedFile = compressed
+                    producedMime = UploadImageCompressor.JPEG_MIME
                     // The stripped temp (if any) is now superseded by the compressed copy, so delete
                     // it so a strip+compress pass doesn't leak the intermediate. The compressed file is
                     // the only temp we still need, tracked for cleanup in the finally below.
@@ -1085,23 +1131,50 @@ class UploadPendingUseCase @Inject constructor(
                     strippedUploadUri
                 }
             } else if (compressVideosOnUpload && localItem.mimeType.startsWith("video/")) {
-                // Transcode behind the process-wide gate so only one hardware encode runs at a time.
-                // The transcode is a suspend call inside this upload coroutine, so a stopped worker
-                // cancels it. On ANY failure / unsupported / not-smaller / over-ceiling the
-                // compressor returns null and the upload proceeds with the original bytes.
-                val compressed = videoTranscodeGate.withPermit {
-                    eu.akoos.photos.data.upload.VideoUploadCompressor.compressToTemp(
-                        context,
-                        android.net.Uri.parse(strippedUploadUri),
-                        videoCompressionParamsFor(videoCompressTier),
-                        localItem.dateTaken,
+                // Probe, plan and transcode behind the process-wide gate, with this item's upload slot
+                // handed back meanwhile so photos keep uploading. A stopped worker cancels the
+                // transcode. Without a file the original uploads; the diagnostics line says why.
+                fun emitPhase(status: UploadStatus, sizeBytes: Long, compress: VideoUploadCompressor.Progress? = null) {
+                    _progress.tryEmit(
+                        UploadProgress(
+                            uri = state.localUri,
+                            displayName = localItem.displayName,
+                            status = status,
+                            doneIdx = finishedCount.get(),
+                            totalCount = totalCount,
+                            sizeBytes = sizeBytes,
+                            compressFraction = compress?.fraction ?: 0f,
+                            compressCodecMime = compress?.codec?.mimeType,
+                            compressSpeedX = compress?.speedX,
+                        )
                     )
                 }
+                val attempt = uploadSlot.releasedWhile {
+                    emitPhase(UploadStatus.Queued, localItem.sizeBytes)
+                    videoTranscodeGate.withPermit {
+                        videoCompression.compress(
+                            sourceUri = strippedUploadUri,
+                            profile = videoProfile,
+                            captureDateMs = localItem.dateTaken,
+                            onPlanned = { plan ->
+                                emitPhase(UploadStatus.Compressing, localItem.sizeBytes, VideoUploadCompressor.Progress(0f, plan.codec, null))
+                            },
+                            onProgress = { emitPhase(UploadStatus.Compressing, localItem.sizeBytes, it) },
+                        )
+                    }.also { emitPhase(UploadStatus.Queued, it.file?.length() ?: localItem.sizeBytes) }
+                }
+                // Back to the pre-network phase for the encrypt that follows.
+                emitPhase(UploadStatus.Encrypting, attempt.file?.length() ?: localItem.sizeBytes)
+                logCompression(
+                    state.localUri, "video", attempt.outcome, attempt.reason,
+                    attempt.sourceBytes ?: localItem.sizeBytes, attempt.outputBytes, attempt.codecMime, attempt.detail,
+                )
+                val compressed = attempt.file
                 if (compressed != null) {
                     compressedFile = compressed
+                    producedMime = UploadFormatNaming.MP4
                     strippedFile?.delete()
                     strippedFile = null
-                    Log.d(UPLOAD_TAG, "Compressed video ${localItem.displayName} for upload (tier=${videoCompressTier.name})")
                     android.net.Uri.fromFile(compressed).toString()
                 } else {
                     strippedUploadUri
@@ -1182,10 +1255,17 @@ class UploadPendingUseCase @Inject constructor(
             // when compression produced one (strippedFile was cleared to it above), the stripped temp
             // otherwise, else the original. Keeps sizeBytes / progress / xAttr aligned with the wire.
             val uploadTempFile = compressedFile ?: strippedFile
-            val uploadItem = if (uploadTempFile != null)
+            // Kept for the batch's savings, since compressedFile is deleted below.
+            val compressedSize = compressedFile?.length() ?: 0L
+            val sizedItem = if (uploadTempFile != null)
                 localItem.copy(sizeBytes = uploadTempFile.length())
             else
                 localItem
+            // After a re-encode the name and MIME type follow the bytes; the device file keeps its own.
+            val (uploadName, uploadMime) = UploadFormatNaming.forProducedFormat(
+                sizedItem.displayName, sizedItem.mimeType, producedMime,
+            )
+            val uploadItem = sizedItem.copy(displayName = uploadName, mimeType = uploadMime)
 
             // Throttled progress relay. PhotoUploadService already debounces to ~250 ms per
             // phase, but a single batch can have multiple uploads in flight (UPLOAD_PARALLELISM
@@ -1314,7 +1394,11 @@ class UploadPendingUseCase @Inject constructor(
             // Safe to mirror when the local content matches that temp: strip mirrored (both stripped) or
             // strip-upload off (neither stripped).
             if (compressVideosOnUpload && mirrorCompressToLocal && localItem.mimeType.startsWith("video/")) {
-                if (mirrorStripToLocal || !stripOnUpload) {
+                if (!UploadFormatNaming.isMp4(localItem.mimeType)) {
+                    // The transcode always writes MP4, so a .mov, .3gp or .webm original would end up with
+                    // bytes that contradict its name and MediaStore type. Leave it untouched.
+                    Log.d(UPLOAD_TAG, "Mirror compress skipped for ${localItem.displayName}: ${localItem.mimeType} cannot hold an MP4")
+                } else if (mirrorStripToLocal || !stripOnUpload) {
                     compressedFile?.let { local ->
                         if (overwriteLocalInPlace(state.localUri, local)) {
                             Log.d(UPLOAD_TAG, "Mirror compress: on-device video compressed for ${localItem.displayName}")
@@ -1420,6 +1504,7 @@ class UploadPendingUseCase @Inject constructor(
 
             successCount.incrementAndGet()
             successUris.add(state.localUri)
+            if (compressedSize > 0L) savedBytes.addAndGet((localItem.sizeBytes - compressedSize).coerceAtLeast(0L))
             val doneNow = finishedCount.incrementAndGet()
             Log.d(UPLOAD_TAG, "Upload OK: ${localItem.displayName} → cloudId=$cloudId")
             _progress.tryEmit(
@@ -1988,14 +2073,38 @@ internal fun uploadDefersForWifiOnly(queueSource: String?, wifiOnly: Boolean, on
         queueSource != QueueSource.ALBUM_ADD
 
 /**
- * #108: the video-transcode knobs the upload path derives from a compression [tier]: the short-edge
- * cap and target bitrate the VIDEO path re-encodes at. The photo path hands the tier straight to the
- * image compressor, so it has no equivalent.
+ * One name-free diagnostics line per compression decision, so release builds (where `Log` is
+ * stripped) still record it, e.g. `compress <ref> video SKIPPED ALREADY_EFFICIENT 24.3MB`. The ref is
+ * the same non-reversible URI hash the other upload lines use.
  */
-internal fun videoCompressionParamsFor(
-    tier: UploadCompressionTier,
-): eu.akoos.photos.data.upload.VideoUploadCompressor.VideoCompressionParams =
-    eu.akoos.photos.data.upload.VideoUploadCompressor.VideoCompressionParams(
-        tier.videoMaxShortEdgePx,
-        tier.videoBitrateBps,
-    )
+private fun logCompression(
+    localUri: String,
+    kind: String,
+    outcome: CompressionOutcome,
+    reason: CompressionSkipReason?,
+    sourceBytes: Long,
+    outputBytes: Long? = null,
+    codec: String? = null,
+    detail: String? = null,
+) {
+    val mb = { b: Long -> "%.1fMB".format(Locale.US, b / 1_000_000.0) }
+    val sizes = if (outputBytes != null && outputBytes > 0L) mb(sourceBytes) + "->" + mb(outputBytes) else mb(sourceBytes)
+    val line = listOfNotNull(
+        "compress", eu.akoos.photos.util.uploadLogRef(localUri), kind, outcome.name, reason?.name, codec, sizes, detail,
+    ).joinToString(" ")
+    Log.d(UPLOAD_TAG, line)
+    eu.akoos.photos.util.SyncDiagnostics.log(line)
+}
+
+/**
+ * Runs [block] with one held permit handed back. The re-acquire can't be cancelled, because the
+ * enclosing `withPermit` releases one on the way out whatever happens.
+ */
+internal suspend fun <T> Semaphore.releasedWhile(block: suspend () -> T): T {
+    release()
+    try {
+        return block()
+    } finally {
+        withContext(NonCancellable) { acquire() }
+    }
+}

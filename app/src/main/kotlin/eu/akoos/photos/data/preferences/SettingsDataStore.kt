@@ -507,6 +507,10 @@ object SettingsKeys {
      *  upgrading install keeps its level on both paths, then flips this true so the seed never
      *  re-runs. */
     val COMPRESS_TIER_SPLIT_MIGRATED = booleanPreferencesKey("compress_tier_split_migrated")
+    /** Video compression codec, a [eu.akoos.photos.domain.entity.compression.VideoCodecChoice] key. */
+    val COMPRESS_VIDEO_CODEC = stringPreferencesKey("compress_video_codec")
+    /** One-shot flag for the video codec migration in `App.kt`. */
+    val COMPRESS_CODEC_MIGRATED = booleanPreferencesKey("compress_codec_migrated")
     /** When true, "strip on upload" also wipes the on-device original (with MANAGE_MEDIA), so the
      *  backed-up copy and the local file stay byte-identical and pair by content hash. */
     val MIRROR_STRIP_TO_LOCAL = booleanPreferencesKey("mirror_strip_to_local")

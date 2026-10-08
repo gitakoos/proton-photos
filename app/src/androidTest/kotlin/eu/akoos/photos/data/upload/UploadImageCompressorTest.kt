@@ -29,6 +29,7 @@ import androidx.exifinterface.media.ExifInterface
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import eu.akoos.photos.domain.entity.UploadCompressionTier
+import eu.akoos.photos.domain.entity.compression.CompressionSkipReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -95,6 +96,22 @@ class UploadImageCompressorTest {
             }
         } finally {
             src.delete()
+        }
+    }
+
+    @Test
+    fun a_transparent_png_is_skipped_with_its_reason() {
+        val bmp = Bitmap.createBitmap(800, 600, Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(0x00000000)
+        val png = File.createTempFile("src_", ".png", context.cacheDir)
+        FileOutputStream(png).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bmp.recycle()
+        try {
+            val outcome = UploadImageCompressor.compress(context, "file://${png.absolutePath}", UploadCompressionTier.BALANCED)
+            assertEquals(null, outcome.file)
+            assertEquals(CompressionSkipReason.TRANSPARENT, outcome.reason)
+        } finally {
+            png.delete()
         }
     }
 

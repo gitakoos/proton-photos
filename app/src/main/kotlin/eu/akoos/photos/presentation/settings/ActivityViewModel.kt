@@ -140,6 +140,10 @@ class ActivityViewModel @Inject constructor(
             uploadDone = 1,
             uploadTotal = 3,
             uploadEvents = listOf(
+                UploadEvent(
+                    uri = "sample://compressing/1", displayName = "VID_0001.mp4", status = UploadEventStatus.Compressing,
+                    sizeBytes = 120_000_000L, compressFraction = 0.42f, compressCodecMime = "video/hevc", compressSpeedX = 1.8f,
+                ),
                 UploadEvent(uri = "sample://uploading/1", displayName = "IMG_0001.jpg", status = UploadEventStatus.Encrypting),
                 UploadEvent(uri = "sample://uploading/2", displayName = "IMG_0002.jpg", status = UploadEventStatus.Uploading, sizeBytes = 4_000_000L, doneBytes = 1_500_000L),
             ),
@@ -158,6 +162,7 @@ class ActivityViewModel @Inject constructor(
                     kind = TransferCenter.Kind.UPLOAD.name, count = 12,
                     at = System.currentTimeMillis() - 2 * 60_000L,
                     uris = listOf("sample://h/1", "sample://h/2", "sample://h/3"),
+                    savedBytes = 412_000_000L,
                 ),
                 TransferCenter.HistoryEntry(
                     kind = TransferCenter.Kind.DOWNLOAD.name, name = "Summer 2026", count = 8,
@@ -196,6 +201,7 @@ class ActivityViewModel @Inject constructor(
                         else -> {
                             val uiStatus = when (evt.status) {
                                 UploadStatus.Uploading -> UploadEventStatus.Uploading
+                                UploadStatus.Compressing -> UploadEventStatus.Compressing
                                 UploadStatus.Encrypting -> UploadEventStatus.Encrypting
                                 UploadStatus.Done -> UploadEventStatus.Done
                                 UploadStatus.Failed -> UploadEventStatus.Failed
@@ -203,7 +209,8 @@ class ActivityViewModel @Inject constructor(
                                 else -> UploadEventStatus.Done
                             }
                             val firstPerFile = evt.status == UploadStatus.Uploading ||
-                                evt.status == UploadStatus.Encrypting
+                                evt.status == UploadStatus.Encrypting ||
+                                evt.status == UploadStatus.Compressing
                             val isNewBatch = firstPerFile && s.uploadTotal > 0 && s.uploadDone >= s.uploadTotal
                             val carry = if (isNewBatch) emptyList() else s.uploadEvents
                             val next = (carry.filter { it.uri != evt.uri } + UploadEvent(
@@ -212,6 +219,9 @@ class ActivityViewModel @Inject constructor(
                                 status = uiStatus,
                                 sizeBytes = evt.sizeBytes,
                                 doneBytes = evt.doneBytes,
+                                compressFraction = evt.compressFraction,
+                                compressCodecMime = evt.compressCodecMime,
+                                compressSpeedX = evt.compressSpeedX,
                             )).takeLast(30)
                             // A real per-file event means a batch is genuinely uploading again, so a
                             // prior stop no longer applies: let the queued rows show once more.

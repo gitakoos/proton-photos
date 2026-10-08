@@ -87,7 +87,8 @@ class TransferCenter @Inject constructor(
 
     /** One finished transfer, persisted for the History tab. [at] is epoch millis, newest first.
      *  [uris] are a few thumbnails of the photos involved (device content URIs or offline blob
-     *  paths), so a row can expand to show which photos it covered. */
+     *  paths), so a row can expand to show which photos it covered. [savedBytes] is what upload
+     *  compression saved on a backup. */
     @Serializable
     data class HistoryEntry(
         val kind: String,
@@ -95,6 +96,7 @@ class TransferCenter @Inject constructor(
         val count: Int,
         val at: Long,
         val uris: List<String> = emptyList(),
+        val savedBytes: Long = 0L,
     )
 
     private val ids = AtomicLong(0L)
@@ -163,9 +165,15 @@ class TransferCenter @Inject constructor(
         context.transferHistoryDataStore.data.map { prefs -> decode(prefs[KEY_LOG]) }
 
     /** Append a finished transfer to the log. No-op for an empty batch. */
-    suspend fun log(kind: Kind, count: Int, name: String? = null, uris: List<String> = emptyList()) {
+    suspend fun log(
+        kind: Kind,
+        count: Int,
+        name: String? = null,
+        uris: List<String> = emptyList(),
+        savedBytes: Long = 0L,
+    ) {
         if (count <= 0) return
-        val entry = HistoryEntry(kind.name, name, count, System.currentTimeMillis(), uris.take(MAX_THUMBS))
+        val entry = HistoryEntry(kind.name, name, count, System.currentTimeMillis(), uris.take(MAX_THUMBS), savedBytes)
         context.transferHistoryDataStore.edit { prefs ->
             val next = (listOf(entry) + decode(prefs[KEY_LOG])).take(MAX_ENTRIES)
             prefs[KEY_LOG] = json.encodeToString(next)

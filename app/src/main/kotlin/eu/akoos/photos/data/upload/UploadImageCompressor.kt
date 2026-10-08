@@ -29,6 +29,8 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Log
 import eu.akoos.photos.domain.entity.UploadCompressionTier
+import eu.akoos.photos.domain.entity.compression.CompressionOutcome
+import eu.akoos.photos.domain.entity.compression.CompressionSkipReason
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import java.io.File
@@ -50,9 +52,35 @@ private const val TAG = "UploadImageCompressor"
  */
 object UploadImageCompressor {
 
+    /** One photo compression: the smaller [JPEG_MIME] temp (caller-owned), or null and the [reason]. */
+    data class Outcome(
+        val file: File?,
+        val reason: CompressionSkipReason?,
+        val sourceBytes: Long,
+    ) {
+        val outcome: CompressionOutcome
+            get() = when {
+                file != null -> CompressionOutcome.COMPRESSED
+                reason == CompressionSkipReason.ENCODER_ERROR -> CompressionOutcome.FAILED
+                else -> CompressionOutcome.SKIPPED
+            }
+    }
+
     /**
      * Recompress the image at [sourceUri] according to [tier] and return the temp [File], or null
-     * when it can't (or shouldn't) be recompressed:
+     * when it can't (or shouldn't) be recompressed. A thin wrapper over [compress] for callers that
+     * only need the file.
+     */
+    fun compressToTemp(
+        context: Context,
+        sourceUri: String,
+        tier: UploadCompressionTier,
+        stripConfig: MetadataStripConfig = MetadataStripConfig(),
+    ): File? = compress(context, sourceUri, tier, stripConfig).file
+
+    /**
+     * Recompress the image at [sourceUri] according to [tier] and report the [Outcome]. The file is
+     * set only when the result is genuinely smaller:
      *
      *  - Decode failure, OOM, or an unreadable source → null (upload the original).
      *  - A format that a single-frame JPEG would silently damage → null (upload the original):
@@ -77,18 +105,20 @@ object UploadImageCompressor {
      * including one whose container ExifInterface cannot rewrite in place (for example HEIC). The
      * default config strips nothing, keeping the full-metadata behaviour when strip-on-upload is off.
      */
-    fun compressToTemp(
+    fun compress(
         context: Context,
         sourceUri: String,
         tier: UploadCompressionTier,
         stripConfig: MetadataStripConfig = MetadataStripConfig(),
-    ): File? {
-        val parsed = runCatching { Uri.parse(sourceUri) }.getOrNull() ?: return null
+    ): Outcome {
+        val parsed = runCatching { Uri.parse(sourceUri) }.getOrNull()
+            ?: return Outcome(null, CompressionSkipReason.UNREADABLE, 0L)
 
         // Size of the source bytes, to enforce the never-inflate rule below. If it can't be read we
         // treat compression as not worthwhile rather than risk shipping a bigger file.
         val sourceSize = readSourceSize(context, parsed)
-        if (sourceSize <= 0L) return null
+        if (sourceSize <= 0L) return Outcome(null, CompressionSkipReason.UNREADABLE, 0L)
+        fun skip(reason: CompressionSkipReason) = Outcome(null, reason, sourceSize)
 
         var decoded: Bitmap? = null
         var oriented: Bitmap? = null
@@ -101,11 +131,12 @@ object UploadImageCompressor {
             // In bounds-only mode decodeStream returns null by design (it only fills outWidth and
             // outHeight), so the null-guard must be on the stream opening, NOT on the decode result,
             // otherwise the dimensions are never read and every image falls back to the original.
-            val boundsStream = context.contentResolver.openInputStream(parsed) ?: return null
+            val boundsStream = context.contentResolver.openInputStream(parsed)
+                ?: return skip(CompressionSkipReason.UNREADABLE)
             boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
             val srcW = bounds.outWidth
             val srcH = bounds.outHeight
-            if (srcW <= 0 || srcH <= 0) return null
+            if (srcW <= 0 || srcH <= 0) return skip(CompressionSkipReason.UNREADABLE)
 
             // Type-safety guard, cheap checks first. The bounds pass already resolved the source mime;
             // fall back to the content resolver when it's null. GIFs may be animated (a JPEG would keep
@@ -115,11 +146,11 @@ object UploadImageCompressor {
             val mimeLower = mime?.lowercase(Locale.ROOT)
             if (mimeLower == "image/gif") {
                 Log.d(TAG, "compress skipped, GIF may be animated: $sourceUri")
-                return null
+                return skip(CompressionSkipReason.ANIMATED)
             }
             if (isAnimatedWebp(context, parsed)) {
                 Log.d(TAG, "compress skipped, animated WebP: $sourceUri")
-                return null
+                return skip(CompressionSkipReason.ANIMATED)
             }
 
             val cap = tier.maxLongEdgePx
@@ -128,7 +159,7 @@ object UploadImageCompressor {
             }
             decoded = context.contentResolver.openInputStream(parsed)?.use {
                 BitmapFactory.decodeStream(it, null, opts)
-            } ?: return null
+            } ?: return skip(CompressionSkipReason.UNREADABLE)
 
             // Transparency guard, reusing the decode just done (no second decode). BitmapFactory sets
             // hasAlpha from the source's alpha channel, so an opaque RGB PNG/WebP decodes hasAlpha=false
@@ -136,7 +167,7 @@ object UploadImageCompressor {
             // JPEG would drop the transparency, so skip and let the caller upload the original.
             if (decoded.hasAlpha()) {
                 Log.d(TAG, "compress skipped, transparent image: $sourceUri")
-                return null
+                return skip(CompressionSkipReason.TRANSPARENT)
             }
 
             // BitmapFactory ignores the EXIF orientation tag; bake it into the pixels so the encoded
@@ -155,7 +186,7 @@ object UploadImageCompressor {
             }
             if (!encoded) {
                 out.delete()
-                return null
+                return skip(CompressionSkipReason.ENCODER_ERROR)
             }
 
             // Re-inject the original EXIF (capture time, GPS, camera make/model, software, ISO, lens,
@@ -173,17 +204,17 @@ object UploadImageCompressor {
             // it and let the caller upload the original untouched.
             if (out.length() in 1 until sourceSize) {
                 Log.d(TAG, "compressed $sourceSize -> ${out.length()} bytes (q${tier.quality}, cap ${tier.maxLongEdgePx}, ${srcW}x${srcH})")
-                return out
+                return Outcome(file = out, reason = null, sourceBytes = sourceSize)
             }
             Log.d(TAG, "compress skipped, not smaller: src=$sourceSize out=${out.length()} (q${tier.quality}, cap ${tier.maxLongEdgePx}, ${srcW}x${srcH})")
             out.delete()
-            return null
+            return skip(CompressionSkipReason.NOT_SMALLER)
         } catch (e: Throwable) {
             // Catch Throwable so an OutOfMemoryError on a huge bitmap also falls back to the original
             // instead of propagating and failing the upload.
             Log.w(TAG, "Compression failed for $sourceUri; uploading original: ${e.message}")
             out?.delete()
-            return null
+            return skip(CompressionSkipReason.ENCODER_ERROR)
         } finally {
             // Free every intermediate bitmap. scaled may alias oriented (cap == 0), and oriented may
             // alias decoded (NORMAL orientation), so recycle each distinct instance once.
@@ -229,7 +260,10 @@ object UploadImageCompressor {
         return normalized in JPEG_MIMES
     }
 
-    private val JPEG_MIMES = setOf("image/jpeg", "image/jpg")
+    /** The MIME type of every file this compressor (and the strip transcode) writes. */
+    const val JPEG_MIME = "image/jpeg"
+
+    private val JPEG_MIMES = setOf(JPEG_MIME, "image/jpg")
 
     fun needsStripTranscode(
         mimeType: String,
@@ -408,10 +442,9 @@ object UploadImageCompressor {
 
     /** Source byte count in O(1) from the asset file descriptor, falling back to a full stream read
      *  only when the descriptor length is unavailable. [AssetFileDescriptor.UNKNOWN_LENGTH] is -1, so
-     *  the > 0L filter drops it (and a zero-length descriptor) into the stream count. Mirrors the same
-     *  helper in [VideoUploadCompressor]. Any read error yields 0 (compression treated as not
-     *  worthwhile). */
-    private fun readSourceSize(context: Context, uri: Uri): Long = runCatching {
+     *  the > 0L filter drops it (and a zero-length descriptor) into the stream count. Also used by the
+     *  video probe. Any read error yields 0 (compression treated as not worthwhile). */
+    internal fun readSourceSize(context: Context, uri: Uri): Long = runCatching {
         context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
             ?.takeIf { it > 0L }
             ?: context.contentResolver.openInputStream(uri)?.use { input ->

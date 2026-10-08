@@ -25,8 +25,8 @@ package eu.akoos.photos.domain.entity
 /**
  * Quality tier for opt-in upload compression, shared by the photo and the video toggles. Each value
  * carries the JPEG quality plus longest-edge cap the photo path re-encodes at ([maxLongEdgePx] of 0
- * means keep the original dimensions), and the short-edge cap plus target bitrate the video path
- * transcodes at ([videoMaxShortEdgePx] of 0 means keep the source resolution). The ordinal is what
+ * means keep the original dimensions), and the short-edge and frame-rate caps the video path
+ * transcodes at (0 and null keep the source's). The ordinal is what
  * gets persisted in [eu.akoos.photos.data.preferences.SettingsKeys.COMPRESS_UPLOAD_TIER], so keep
  * the declaration order stable: reordering silently repoints every saved setting at a different
  * tier. Picker labels and descriptions map to string resources in the settings UI layer.
@@ -35,11 +35,11 @@ enum class UploadCompressionTier(
     val quality: Int,
     val maxLongEdgePx: Int,
     val videoMaxShortEdgePx: Int,
-    val videoBitrateBps: Int,
+    val videoMaxFps: Float?,
 ) {
-    LIGHT(90, 0, 0, 12_000_000),
-    BALANCED(80, 4096, 1080, 8_000_000),
-    SPACE_SAVER(70, 2560, 720, 4_000_000);
+    LIGHT(90, 0, 0, null),
+    BALANCED(80, 4096, 1080, null),
+    SPACE_SAVER(70, 2560, 720, 30f);
 
     companion object {
         fun fromOrdinalOrDefault(ordinal: Int): UploadCompressionTier =

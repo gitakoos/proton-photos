@@ -865,11 +865,8 @@
     <string name="settings_compress_photos">Compress photos</string>
     <string name="settings_compress_videos">Compress videos</string>
     <string name="settings_compress_videos_desc">Transcodes videos to a smaller size before upload. The original on your device is never changed.</string>
-    <string name="settings_compress_tier_light">Light</string>
     <string name="settings_compress_tier_light_desc">Barely visible quality loss, modest space saving</string>
-    <string name="settings_compress_tier_balanced">Balanced</string>
     <string name="settings_compress_tier_balanced_desc">Good quality with a solid space saving</string>
-    <string name="settings_compress_tier_space_saver">Space saver</string>
     <string name="settings_compress_tier_space_saver_desc">Smallest uploads, more visible quality loss</string>
     <string name="settings_app_lock">App Lock</string>
     <string name="settings_app_lock_desc">Require biometric or PIN when opening the app</string>
@@ -1740,6 +1737,8 @@
     <string name="viewer_meta_row_file">File</string>
     <string name="viewer_meta_row_date">Date</string>
     <string name="viewer_meta_row_size">Size</string>
+    <string name="viewer_meta_row_size_device">Size on device</string>
+    <string name="viewer_meta_row_size_drive">Size in Proton Drive</string>
     <string name="viewer_meta_row_type">Type</string>
     <string name="viewer_meta_row_resolution">Resolution</string>
     <string name="viewer_meta_row_duration">Duration</string>
@@ -2137,4 +2136,31 @@
     <string name="person_move_confirm">Move</string>
     <string name="settings_face_auto_merge">Merge likely matches automatically</string>
     <string name="settings_face_auto_merge_desc">When a scan finds a group very likely to be someone you already named, add it to them without asking. Merges cannot be undone, so leave this off to confirm each one yourself.</string>
+    <string name="codec_name_avc" translatable="false">H.264</string>
+    <string name="codec_name_hevc" translatable="false">H.265</string>
+    <string name="codec_name_av1" translatable="false">AV1</string>
+    <string name="compression_speed_x" translatable="false">%1$s×</string>
+    <string name="upload_status_compressing_percent">Compressing %1$d%%</string>
+    <string name="sync_worker_notification_compressing">Compressing video (%1$d%%)</string>
+    <string name="compression_badge_hardware">Hardware</string>
+    <string name="compression_badge_software">Software</string>
+    <string name="activity_hist_saved">saved %1$s</string>
+    <string name="compression_preset_high">High</string>
+    <string name="compression_preset_balanced">Balanced</string>
+    <string name="compression_preset_small">Small</string>
+    <string name="compression_quality">Quality</string>
+    <string name="compression_preset_high_desc">Close to the original, modest saving</string>
+    <string name="compression_preset_balanced_desc">Good quality, solid saving, up to 1080p</string>
+    <string name="compression_preset_small_desc">Smallest files, 720p at 30 fps, more visible loss</string>
+    <string name="compression_codec">Codec</string>
+    <string name="compression_codec_auto">Auto</string>
+    <string name="compression_codec_keep">Same as original</string>
+    <string name="compression_badge_needs_hardware">Needs a hardware encoder</string>
+    <string name="compression_badge_not_supported">Not supported on this phone</string>
+    <string name="compression_hint_avc">H.264 plays everywhere: older phones, TVs and every browser.</string>
+    <string name="compression_hint_hevc">H.265 is about a third smaller than H.264. iPhone, Mac and most Android phones play it; Proton Drive in Firefox, or in Chrome or Edge without hardware support, may not preview it.</string>
+    <string name="compression_hint_av1">AV1 gives the smallest files. Chrome, Firefox and Edge play it; on Apple devices only iPhone 15 Pro, M3 Macs and newer.</string>
+    <string name="compression_hint_keep">Each video keeps its own codec; one this phone cannot encode becomes H.264.</string>
+    <string name="compression_estimate">About %1$s per minute of %2$dp video</string>
+    <string name="compression_unavailable_fallback">%1$s is not available on this phone, so videos use %2$s.</string>
 </resources>

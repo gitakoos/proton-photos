@@ -1437,6 +1437,7 @@ fun NavGraph(
                 onNotificationsClick      = { navController.navigate(Screen.NotificationSettings.route) },
                 onRecentlyDeletedClick    = { navController.navigate(Screen.Trash.route) },
                 onFindDuplicatesClick     = { navController.navigate(Screen.DuplicateFinder.route) },
+                onDebugNavigate           = { route -> navController.navigate(route) },
                 onImportClick             = { navController.navigate(Screen.Import.route) },
                 onAppearanceClick         = { navController.navigate(Screen.AppearanceSettings.route) },
                 onLanguageClick           = { navController.navigate(Screen.LanguageSettings.route) },

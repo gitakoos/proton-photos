@@ -23,159 +23,188 @@
 package eu.akoos.photos.data.upload
 
 import android.content.Context
+import android.media.MediaCodecInfo
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.InAppMp4Muxer
 import androidx.media3.transformer.ProgressHolder
+import androidx.media3.transformer.TransformationRequest
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
+import eu.akoos.photos.data.upload.compression.TranscodeAcceptance
+import eu.akoos.photos.domain.entity.compression.CompressionOutcome
+import eu.akoos.photos.domain.entity.compression.CompressionSkipReason
+import eu.akoos.photos.domain.entity.compression.HdrHandling
+import eu.akoos.photos.domain.entity.compression.VideoCodec
+import eu.akoos.photos.domain.entity.compression.VideoCompressionPlan
+import eu.akoos.photos.domain.entity.compression.VideoSourceInfo
+import eu.akoos.photos.util.Mp4CreationTime
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
-import eu.akoos.photos.util.Mp4CreationTime
 import java.io.File
 import kotlin.coroutines.resume
 
 private const val TAG = "VideoUploadCompressor"
 
-/** Sources longer than this are left untouched (a very long transcode risks the foreground budget
- *  and rarely saves enough to be worth the wall-clock cost). About twenty minutes. */
-private const val MAX_INPUT_DURATION_MS = 20L * 60L * 1000L
-
-/** Sources larger than this are left untouched. About four gigabytes; guards a pathological input. */
-private const val MAX_INPUT_BYTES = 4L * 1024L * 1024L * 1024L
-
-/** Sources whose longest edge exceeds this (8K and up) are left untouched: decoding frames that
- *  large spikes memory past the app heap and risks an out-of-memory crash. 4K and below transcode
- *  fine, so only the very largest frames upload as the untouched original. */
-private const val MAX_INPUT_LONG_EDGE = 4096
-
-/** Clips shorter than this are not worth re-encoding (and probe results get unreliable). One second. */
-private const val MIN_INPUT_DURATION_MS = 1000L
-
 /** How often the export progress is polled off the transcode thread, in milliseconds. */
 private const val PROGRESS_POLL_MS = 250L
 
+/** The muxer gives up after 10 s without a sample; a software encoder on a warm phone can take longer. */
+private const val SOFTWARE_MUXER_WATCHDOG_MS = 60_000L
+
 /**
- * Opt-in upload compression for VIDEOS ONLY. Transcodes the source clip to a smaller cache temp file
- * with Media3 Transformer so a lighter copy reaches Drive while the on-device original is never
- * touched. The caller decides image-vs-video and only calls this for a video; stills go through
- * [UploadImageCompressor].
+ * Opt-in upload compression for VIDEOS ONLY. Carries out a [VideoCompressionPlan.Transcode] with
+ * Media3 Transformer into a cache temp, so a lighter copy reaches Drive while the on-device original
+ * is never touched. Stills go through [UploadImageCompressor].
  *
- * The safety contract mirrors the image path: every failure mode returns null so the caller uploads
- * the untouched original. Compression must never fail (or block) an upload, and this must never emit
- * a partial or corrupt file. Rotation, creation time, audio, and HDR are preserved as far as the
- * platform allows: the source video codec is kept by default (H264 in stays H264 out, HEVC stays
- * HEVC) and HDR uses Transformer's default keep-or-tone-map behaviour.
+ * Every failure is an [Outcome] without a file, so the caller uploads the untouched original:
+ * compression must never fail an upload or emit a partial, corrupt or larger file. [InAppMp4Muxer]
+ * is used because it writes AV1 below Android 14, where the framework muxer can't.
  */
 object VideoUploadCompressor {
 
-    /** Explicit knobs so this has no dependency on the settings layer. [maxShortEdgePx] caps the
-     *  output's SHORT edge (the "1080p/720p" dimension, aspect ratio and orientation preserved,
-     *  never upscaled); [targetBitrateBps] is the requested video bitrate for the encoder. */
-    data class VideoCompressionParams(
-        val maxShortEdgePx: Int,
-        val targetBitrateBps: Int,
+    /** One progress tick: 0..1 done, the codec being produced, and seconds of video encoded per second. */
+    data class Progress(
+        val fraction: Float,
+        val codec: VideoCodec,
+        val speedX: Float?,
     )
 
     /**
-     * Transcode the video at [sourceUri] under [params] and return the temp [File], or null when it
-     * can't (or shouldn't) be transcoded:
-     *
-     *  - No video track, unreadable, shorter than ~1s, longer than [MAX_INPUT_DURATION_MS], bigger
-     *    than [MAX_INPUT_BYTES], or a frame larger than [MAX_INPUT_LONG_EDGE] (8K) → null (upload the
-     *    original).
-     *  - Any Transformer error, any throwable, or a cancelled upload → the partial temp is deleted and
-     *    null is returned.
-     *  - The produced file is missing, zero-length, or not strictly smaller than the source → deleted,
-     *    null, so a transcode that would inflate the file never ships a larger copy.
-     *
-     * [onProgress] receives a 0..1 fraction while encoding (best-effort). A cancellation of the
-     * calling coroutine cancels the transcode and cleans up the temp.
+     * The result of one [transcode]. [file] is set only for a kept output; the caller owns it.
+     * [outputMime] and [outputBytes] describe the last finished export, kept or not.
+     */
+    data class Outcome(
+        val file: File?,
+        val outcome: CompressionOutcome,
+        val reason: CompressionSkipReason?,
+        val outputMime: String? = null,
+        val outputBytes: Long? = null,
+        val detail: String? = null,
+    )
+
+    /**
+     * Carry out [plan] on the clip at [sourceUri], already probed as [source]. [sourceDateEpochMs],
+     * when positive, is written into the output's container timestamps. A cancellation of the calling
+     * coroutine cancels the export, deletes the temp and propagates.
      */
     @OptIn(UnstableApi::class)
-    suspend fun compressToTemp(
+    suspend fun transcode(
         context: Context,
         sourceUri: Uri,
-        params: VideoCompressionParams,
+        source: VideoSourceInfo,
+        plan: VideoCompressionPlan.Transcode,
         sourceDateEpochMs: Long = 0L,
-        onProgress: ((Float) -> Unit)? = null,
-    ): File? {
+        tempDir: File = context.applicationContext.cacheDir,
+        onProgress: ((Progress) -> Unit)? = null,
+    ): Outcome {
         val appContext = context.applicationContext
+        suspend fun export(hdrMode: Int, cbr: Boolean) =
+            runAttempt(appContext, sourceUri, source, plan, hdrMode, cbr, tempDir, onProgress)
 
-        // Source size drives the never-inflate rule and the input-ceiling check. If it can't be read
-        // treat the transcode as not worthwhile rather than risk shipping a bigger file.
-        val sourceSize = readSourceSize(appContext, sourceUri)
-        if (sourceSize <= 0L || sourceSize > MAX_INPUT_BYTES) {
-            Log.d(TAG, "skip: source size $sourceSize out of range (uri=$sourceUri)")
-            return null
+        val toneMaps = plan.hdr == HdrHandling.TONE_MAP_TO_SDR
+        var hdrMode = if (toneMaps) Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL else Composition.HDR_MODE_KEEP_HDR
+        var attempt = export(hdrMode, cbr = false)
+        if (attempt.file == null && toneMaps && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // OpenGL tone-mapping needs 10-bit GL, which some GPUs (and the emulator) lack. The decoder
+            // can often tone-map instead.
+            Log.d(TAG, "OpenGL tone-map failed (${attempt.error}); retrying with MediaCodec tone-mapping")
+            hdrMode = Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC
+            attempt = export(hdrMode, cbr = false)
         }
-
-        val probe = probe(appContext, sourceUri) ?: run {
-            Log.d(TAG, "skip: probe failed (uri=$sourceUri)")
-            return null
-        }
-        if (!probe.hasVideo ||
-            probe.durationMs < MIN_INPUT_DURATION_MS ||
-            probe.durationMs > MAX_INPUT_DURATION_MS ||
-            probe.width <= 0 ||
-            probe.height <= 0
-        ) {
-            Log.d(TAG, "skip: unsuitable input $probe (uri=$sourceUri)")
-            return null
-        }
-        // An 8K frame decodes to hundreds of MB and, on top of everything already resident, tips the
-        // app over its heap limit. Leave the very largest frames untouched (upload the original).
-        if (maxOf(probe.width, probe.height) > MAX_INPUT_LONG_EDGE) {
-            Log.d(TAG, "skip: frame too large ${probe.width}x${probe.height} (uri=$sourceUri)")
-            return null
+        var verdict = attempt.verdict(source.sizeBytes)
+        if (attempt.file != null && TranscodeAcceptance.shouldRetryWithCbr(verdict)) {
+            Log.d(TAG, "VBR output ${attempt.file?.length()} vs source ${source.sizeBytes}: retrying once in CBR")
+            attempt.file?.delete()
+            attempt = export(hdrMode, cbr = true)
+            verdict = attempt.verdict(source.sizeBytes)
         }
 
+        val produced = attempt.file
+            ?: return Outcome(null, CompressionOutcome.FAILED, CompressionSkipReason.ENCODER_ERROR, detail = attempt.error)
+        val outputMime = attempt.outputMime ?: plan.codec.mimeType
+        val outputBytes = produced.length()
+        if (verdict != TranscodeAcceptance.Verdict.ACCEPT) {
+            Log.d(TAG, "discarding output: $verdict (src=${source.sizeBytes} out=$outputBytes)")
+            produced.delete()
+            return Outcome(null, CompressionOutcome.SKIPPED, TranscodeAcceptance.reasonFor(verdict), outputMime, outputBytes)
+        }
+        // The capture date the upload uses can differ from the source container's creation time, which
+        // InAppMp4Muxer copies, so stamp it explicitly. Then read the file back: a muxer or stamp problem
+        // must never reach Drive.
+        if (sourceDateEpochMs > 0L) Mp4CreationTime.stamp(produced, sourceDateEpochMs)
+        if (!probeReadable(produced)) {
+            Log.w(TAG, "transcoded file does not read back; uploading original instead")
+            produced.delete()
+            return Outcome(null, CompressionOutcome.FAILED, CompressionSkipReason.ENCODER_ERROR, outputMime, outputBytes, "UNREADABLE")
+        }
+        val fellBack = plan.plannedFallback != null || VideoCodec.fromMime(outputMime) != plan.codec
+        return Outcome(
+            file = produced,
+            outcome = if (fellBack) CompressionOutcome.FELL_BACK else CompressionOutcome.COMPRESSED,
+            reason = null,
+            outputMime = outputMime,
+            outputBytes = outputBytes,
+        )
+    }
+
+    /** One export: the finished temp (not yet judged) and its codec, or the [error] that stopped it. */
+    private class Attempt(val file: File?, val outputMime: String?, val error: String?) {
+        fun verdict(sourceBytes: Long): TranscodeAcceptance.Verdict =
+            TranscodeAcceptance.judge(file?.length() ?: 0L, sourceBytes)
+    }
+
+    @OptIn(UnstableApi::class)
+    private suspend fun runAttempt(
+        context: Context,
+        sourceUri: Uri,
+        source: VideoSourceInfo,
+        plan: VideoCompressionPlan.Transcode,
+        hdrMode: Int,
+        cbr: Boolean,
+        tempDir: File,
+        onProgress: ((Progress) -> Unit)?,
+    ): Attempt {
         // A dedicated Looper thread: Transformer must be built, started, progress-polled, and
         // cancelled on one thread whose Looper drives its callbacks.
         val thread = HandlerThread("video-compress").apply { start() }
         val handler = Handler(thread.looper)
         var outFile: File? = null
-
         try {
-            outFile = File.createTempFile("videocompress_", ".mp4", appContext.cacheDir)
+            outFile = File.createTempFile("videocompress_", ".mp4", tempDir)
             val target = outFile
-
-            // The cancellation handler is registered once, inside startTransform, where the Transformer
-            // reference exists; it cancels the transcode and deletes the temp on the Looper thread.
-            val transcoded = suspendCancellableCoroutine<File?> { cont ->
+            return suspendCancellableCoroutine { cont ->
                 handler.post {
-                    startTransform(appContext, sourceUri, params, probe, sourceSize, target, handler, onProgress, cont)
+                    startTransform(context, sourceUri, source, plan, hdrMode, cbr, target, handler, onProgress, cont)
                 }
-            }
-            // Media3's muxer stamps the output with the transcode time and drops the source capture
-            // date. Write the original capture date back into the container timestamps so the
-            // compressed FILE keeps it (Drive's timeline date comes from the upload metadata either
-            // way, but a later download of the file then also carries the right date).
-            return if (transcoded != null && sourceDateEpochMs > 0L) {
-                stampCreationTime(transcoded, sourceDateEpochMs)
-            } else {
-                transcoded
             }
         } catch (ce: kotlin.coroutines.cancellation.CancellationException) {
             outFile?.delete()
             throw ce
         } catch (t: Throwable) {
-            Log.w(TAG, "compress failed for $sourceUri; uploading original: ${t.message}")
+            Log.w(TAG, "transcode failed; uploading original: ${t.message}")
             outFile?.delete()
-            return null
+            return Attempt(null, null, t::class.java.simpleName)
         } finally {
             thread.quitSafely()
         }
@@ -185,13 +214,14 @@ object VideoUploadCompressor {
     private fun startTransform(
         context: Context,
         sourceUri: Uri,
-        params: VideoCompressionParams,
-        probe: Probe,
-        sourceSize: Long,
+        source: VideoSourceInfo,
+        plan: VideoCompressionPlan.Transcode,
+        hdrMode: Int,
+        cbr: Boolean,
         outFile: File,
         handler: Handler,
-        onProgress: ((Float) -> Unit)?,
-        cont: CancellableContinuation<File?>,
+        onProgress: ((Progress) -> Unit)?,
+        cont: CancellableContinuation<Attempt>,
     ) {
         // The coroutine may have been cancelled between the handler.post and now; do not build a
         // transformer that would then never be cancelled.
@@ -199,42 +229,47 @@ object VideoUploadCompressor {
             runCatching { outFile.delete() }
             return
         }
+        // The codec Media3 fell back to at run time, if any. Touched only on this Looper thread.
+        var fallbackMime: String? = null
         try {
-            // Cap the SHORT side (the "1080p/720p" dimension). createForShortSide scales the frame
-            // uniformly with its aspect ratio AND orientation preserved, so a rotated portrait clip
-            // stays portrait; a fixed width/height box built from the raw pre-rotation dimensions
-            // would pillar-box a portrait clip into a landscape box (black bars, tiny content). The
-            // short side is rotation-invariant. Only downscale, never upscale: skip when already small.
-            val shortSide = minOf(probe.width, probe.height)
+            // Frame drop first, so fewer frames reach the downscale. createForShortSide keeps the aspect
+            // ratio and orientation, so a rotated portrait clip stays portrait.
             val effects = buildList<Effect> {
-                if (params.maxShortEdgePx in 1 until shortSide) {
-                    add(Presentation.createForShortSide(params.maxShortEdgePx))
-                }
+                plan.frameRateCap?.let { add(FrameDropEffect.createDefaultFrameDropEffect(it)) }
+                if (plan.scaleToShortSide > 0) add(Presentation.createForShortSide(plan.scaleToShortSide))
             }
-
             val editedMediaItem = EditedMediaItem.Builder(MediaItem.fromUri(sourceUri))
                 .setEffects(Effects(emptyList(), effects))
                 .build()
+            val composition = Composition.Builder(EditedMediaItemSequence.Builder(editedMediaItem).build())
+                .setHdrMode(hdrMode)
+                .build()
 
-            val encoderFactory = DefaultEncoderFactory.Builder(context)
-                .setRequestedVideoEncoderSettings(
-                    VideoEncoderSettings.Builder()
-                        .setBitrate(params.targetBitrateBps)
-                        .build()
+            val encoderSettings = VideoEncoderSettings.Builder()
+                .setBitrate(plan.targetBitrate)
+                .setBitrateMode(
+                    if (cbr) MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
+                    else MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
                 )
+                // Background work: let the codec run at its natural pace, not its maximum operating rate.
+                .setEncoderPerformanceParameters(VideoEncoderSettings.RATE_UNSET, VideoEncoderSettings.RATE_UNSET)
+                .build()
+            val encoderFactory = DefaultEncoderFactory.Builder(context)
+                .setRequestedVideoEncoderSettings(encoderSettings)
                 .build()
 
             val transformer = Transformer.Builder(context)
-                // No forced video MIME type: keep the source codec for compatibility. Audio is
-                // passthrough (no audio effects). HDR stays on the default (keep HDR, or tone-map to
-                // SDR on a device that cannot edit HDR) rather than the experimental force-SDR flag.
+                .setVideoMimeType(plan.codec.mimeType)
+                // AAC passes through; anything else (Opus, Vorbis, AMR) is converted. AAC plays in every
+                // MP4 player, and InAppMp4Muxer 1.8.0 writes an Opus header nothing can read back.
+                .setAudioMimeType(MimeTypes.AUDIO_AAC)
                 .setEncoderFactory(encoderFactory)
+                .setMuxerFactory(InAppMp4Muxer.Factory())
+                .apply { if (!plan.hardware) setMaxDelayBetweenMuxerSamplesMs(SOFTWARE_MUXER_WATCHDOG_MS) }
                 .addListener(object : Transformer.Listener {
                     override fun onCompleted(composition: Composition, result: ExportResult) {
                         handler.removeCallbacksAndMessages(null)
-                        // Never-inflate guard applied here so compressToTemp only ever returns a temp
-                        // that is genuinely smaller and non-empty; anything else is deleted and null.
-                        if (cont.isActive) cont.resume(acceptIfSmaller(outFile, sourceSize))
+                        if (cont.isActive) cont.resume(Attempt(outFile, result.videoMimeType, null))
                     }
 
                     override fun onError(
@@ -243,33 +278,47 @@ object VideoUploadCompressor {
                         exception: ExportException,
                     ) {
                         handler.removeCallbacksAndMessages(null)
-                        Log.w(TAG, "transform error for $sourceUri: ${exception.message}")
+                        Log.w(TAG, "transform error ${exception.errorCodeName}: ${exception.message}")
                         runCatching { outFile.delete() }
-                        if (cont.isActive) cont.resume(null)
+                        if (cont.isActive) cont.resume(Attempt(null, null, exception.errorCodeName))
+                    }
+
+                    override fun onFallbackApplied(
+                        composition: Composition,
+                        originalTransformationRequest: TransformationRequest,
+                        fallbackTransformationRequest: TransformationRequest,
+                    ) {
+                        fallbackMime = fallbackTransformationRequest.videoMimeType
+                        Log.d(TAG, "fallback applied: $originalTransformationRequest -> $fallbackTransformationRequest")
                     }
                 })
                 .build()
 
             // Register the cancellation bridge before starting so a cancel that arrives during start
-            // still tears the transcode down. cancel() and delete run on this Looper thread.
+            // still tears the transcode down. A cancel that already happened runs the handler right
+            // here, on the Looper thread, where a post could land after the Looper has quit.
             cont.invokeOnCancellation {
-                handler.post {
+                val cancel = Runnable {
                     handler.removeCallbacksAndMessages(null)
                     runCatching { transformer.cancel() }
                     runCatching { outFile.delete() }
                 }
+                if (Looper.myLooper() == handler.looper) cancel.run() else handler.post(cancel)
             }
+            if (!cont.isActive) return
 
-            transformer.start(editedMediaItem, outFile.absolutePath)
+            transformer.start(composition, outFile.absolutePath)
 
             if (onProgress != null) {
-                pollProgress(transformer, handler, onProgress, cont)
+                pollProgress(transformer, handler, onProgress, cont, source.durationMs) {
+                    VideoCodec.fromMime(fallbackMime) ?: plan.codec
+                }
             }
         } catch (t: Throwable) {
             handler.removeCallbacksAndMessages(null)
-            Log.w(TAG, "transform start failed for $sourceUri: ${t.message}")
+            Log.w(TAG, "transform start failed: ${t.message}")
             runCatching { outFile.delete() }
-            if (cont.isActive) cont.resume(null)
+            if (cont.isActive) cont.resume(Attempt(null, null, t::class.java.simpleName))
         }
     }
 
@@ -277,16 +326,22 @@ object VideoUploadCompressor {
     private fun pollProgress(
         transformer: Transformer,
         handler: Handler,
-        onProgress: (Float) -> Unit,
-        cont: CancellableContinuation<File?>,
+        onProgress: (Progress) -> Unit,
+        cont: CancellableContinuation<Attempt>,
+        durationMs: Long,
+        producing: () -> VideoCodec,
     ) {
         val holder = ProgressHolder()
+        val startedAt = SystemClock.elapsedRealtime()
         handler.postDelayed(object : Runnable {
             override fun run() {
                 if (!cont.isActive) return
                 val state = runCatching { transformer.getProgress(holder) }.getOrDefault(Transformer.PROGRESS_STATE_NOT_STARTED)
                 if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
-                    onProgress((holder.progress.coerceIn(0, 100)) / 100f)
+                    val fraction = holder.progress.coerceIn(0, 100) / 100f
+                    val elapsedMs = SystemClock.elapsedRealtime() - startedAt
+                    val speedX = if (fraction > 0f && elapsedMs > 0L) fraction * durationMs / elapsedMs else null
+                    onProgress(Progress(fraction, producing(), speedX))
                 }
                 if (state != Transformer.PROGRESS_STATE_NOT_STARTED) {
                     handler.postDelayed(this, PROGRESS_POLL_MS)
@@ -295,88 +350,17 @@ object VideoUploadCompressor {
         }, PROGRESS_POLL_MS)
     }
 
-    /**
-     * Final guard on the produced temp. Applied on completion so [compressToTemp] never returns a
-     * transcode that inflated the clip (or emitted an empty file). Returns the file when it is
-     * genuinely smaller and non-empty, otherwise deletes it and returns null.
-     */
-    private fun acceptIfSmaller(candidate: File?, sourceSizeBytes: Long): File? {
-        if (candidate == null) return null
-        val length = candidate.length()
-        if (length in 1 until sourceSizeBytes) {
-            Log.d(TAG, "compressed $sourceSizeBytes -> $length bytes")
-            return candidate
-        }
-        Log.d(TAG, "compress skipped, not smaller: src=$sourceSizeBytes out=$length")
-        candidate.delete()
-        return null
-    }
-
-    /**
-     * Best-effort: write [captureEpochMs] into the transcoded MP4's mvhd/tkhd/mdhd timestamps so the
-     * compressed FILE keeps the original capture date rather than the transcode time. The file is
-     * re-probed afterwards and, if it somehow no longer decodes, deleted so the caller falls back to
-     * the original. Returns the file to upload, or null.
-     */
-    private fun stampCreationTime(file: File, captureEpochMs: Long): File? {
-        Mp4CreationTime.stamp(file, captureEpochMs)
-        if (probeReadable(file)) return file
-        Log.w(TAG, "creation-time stamp left the file unreadable; uploading original instead")
-        file.delete()
-        return null
-    }
-
+    /** Whether the file reads back as a video with a duration. */
     private fun probeReadable(file: File): Boolean {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(file.absolutePath)
-            (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) > 0L
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes" &&
+                (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) > 0L
         } catch (t: Throwable) {
             false
         } finally {
             runCatching { retriever.release() }
         }
     }
-
-    private fun readSourceSize(context: Context, uri: Uri): Long = runCatching {
-        context.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
-            ?.takeIf { it > 0L }
-            ?: context.contentResolver.openInputStream(uri)?.use { input ->
-                var total = 0L
-                val buffer = ByteArray(64 * 1024)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    total += read
-                }
-                total
-            }
-            ?: 0L
-    }.getOrDefault(0L)
-
-    private fun probe(context: Context, uri: Uri): Probe? {
-        val retriever = MediaMetadataRetriever()
-        return try {
-            retriever.setDataSource(context, uri)
-            val hasVideo = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) == "yes"
-            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-            // Rotation is not read: the transcode scales by the SHORT side (createForShortSide), which is
-            // rotation-invariant, and Transformer carries the source rotation through to the output.
-            Probe(hasVideo, duration, width, height)
-        } catch (t: Throwable) {
-            Log.d(TAG, "probe threw: ${t.message}")
-            null
-        } finally {
-            runCatching { retriever.release() }
-        }
-    }
-
-    private data class Probe(
-        val hasVideo: Boolean,
-        val durationMs: Long,
-        val width: Int,
-        val height: Int,
-    )
 }

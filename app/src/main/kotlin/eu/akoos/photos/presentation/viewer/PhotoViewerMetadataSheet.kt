@@ -183,7 +183,14 @@ internal fun PhotoMetadataSheet(
 
             MetadataSection(stringResource(R.string.viewer_meta_section_file_info)) {
                 MetaRow(rowFile, localMedia?.displayName ?: cloud?.displayName ?: "", onEdit = onRenameClick)
-                MetaRow(rowSize, if (sizeBytes > 0) formatBytes(sizeBytes) else "—")
+                // A compressed or stripped upload differs from the phone's copy, so name both sizes.
+                val driveSizeBytes = (item as? GalleryItem.Synced)?.cloud?.sizeBytes ?: 0L
+                if (sizeBytes > 0 && driveSizeBytes > 0 && formatBytes(driveSizeBytes) != formatBytes(sizeBytes)) {
+                    MetaRow(stringResource(R.string.viewer_meta_row_size_device), formatBytes(sizeBytes))
+                    MetaRow(stringResource(R.string.viewer_meta_row_size_drive), formatBytes(driveSizeBytes))
+                } else {
+                    MetaRow(rowSize, if (sizeBytes > 0) formatBytes(sizeBytes) else "—")
+                }
                 MetaRow(rowType, mimeType)
                 (localFolder ?: localMedia?.bucketName)?.takeIf { it.isNotBlank() }?.let {
                     MetaRow(stringResource(R.string.viewer_meta_row_local_folder), it)

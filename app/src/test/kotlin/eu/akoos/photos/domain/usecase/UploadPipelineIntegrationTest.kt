@@ -166,6 +166,7 @@ class UploadPipelineIntegrationTest {
             pendingMetadataEditDao = db.pendingMetadataEditDao(),
             photoLocationDao = db.photoLocationDao(),
             structuralStripper = UploadStructuralStripper(context),
+            videoCompression = mockk(relaxed = true),
             context = context,
             appScope = appScope,
         )

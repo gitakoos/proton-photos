@@ -80,6 +80,7 @@ class ReconcileSyncStateUseCaseTest {
         // Compression off in the base fixture; a boolean key must be stubbed explicitly because the
         // relaxed mock otherwise hands back a raw Object that fails the Boolean cast.
         every { mockPrefs[SettingsKeys.COMPRESS_ON_UPLOAD] } returns false
+        every { mockPrefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns false
         every { mockPrefs[SettingsKeys.PENDING_ALBUM_ADDS] } returns emptySet()
         // No ever-complete flag → the content-hash recompute path is skipped; the name/size and
         // cloud-linkId matchers still run, which is what these tests exercise.
@@ -488,6 +489,79 @@ class ReconcileSyncStateUseCaseTest {
                 userId,
             )
         }
+    }
+
+    @Test
+    fun `name and date DOES pair a hashed cloud video when video compression is on`() = runTest {
+        // A compressed video can't hash-match its cloud copy, so the video switch alone makes the
+        // name/date match trusted.
+        every { mockPrefsRef[SettingsKeys.STRIP_ON_UPLOAD] } returns false
+        every { mockPrefsRef[SettingsKeys.COMPRESS_ON_UPLOAD] } returns false
+        every { mockPrefsRef[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns true
+        val local = LocalMediaItem(
+            uri = "uri://v",
+            dateTaken = 2000L,
+            displayName = "VID_0001.mp4",
+            mimeType = "video/mp4",
+            sizeBytes = 40_960L,
+            bucketName = "Camera",
+        )
+        val cloud = cloudPhoto("link-video", name = "VID_0001.mp4", size = 2L, captureTime = 2L, contentHash = "SMALLERHASH")
+        every { localRepo.observeLocalMedia() } returns flowOf(listOf(local))
+        every { cloudRepo.observeCloudPhotos(userId) } returns flowOf(listOf(cloud))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
+        coEvery { syncStateRepo.getByUri(any()) } returns null
+
+        useCase(userId).toList()
+
+        coVerify {
+            syncStateRepo.upsertAll(
+                match { states ->
+                    states.any { it.localUri == "uri://v" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-video" }
+                },
+                userId,
+            )
+        }
+    }
+
+    @Test
+    fun `a compressed mov pairs with its mp4 copy on Drive after a reinstall`() = runTest {
+        every { mockPrefsRef[SettingsKeys.STRIP_ON_UPLOAD] } returns false
+        every { mockPrefsRef[SettingsKeys.COMPRESS_ON_UPLOAD] } returns false
+        every { mockPrefsRef[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns true
+        val local = LocalMediaItem(
+            uri = "uri://mov",
+            dateTaken = 2000L,
+            displayName = "IMG_0001.MOV",
+            mimeType = "video/quicktime",
+            sizeBytes = 40_960L,
+            bucketName = "Camera",
+        )
+        val cloud = cloudPhoto("link-mp4", name = "IMG_0001.MP4", size = 2L, captureTime = 2L, contentHash = "SMALLERHASH")
+        every { localRepo.observeLocalMedia() } returns flowOf(listOf(local))
+        every { cloudRepo.observeCloudPhotos(userId) } returns flowOf(listOf(cloud))
+        every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
+        coEvery { syncStateRepo.getByUri(any()) } returns null
+
+        useCase(userId).toList()
+
+        coVerify {
+            syncStateRepo.upsertAll(
+                match { states ->
+                    states.any { it.localUri == "uri://mov" && it.status == SyncStatus.SYNCED && it.cloudFileId == "link-mp4" }
+                },
+                userId,
+            )
+        }
+    }
+
+    @Test
+    fun `the byte-rewrite gate keeps photo and video compression apart`() {
+        assertTrue(uploadRewritesBytes("video/mp4", stripOnUpload = false, compressPhotosOnUpload = false, compressVideosOnUpload = true))
+        assertFalse(uploadRewritesBytes("video/mp4", stripOnUpload = false, compressPhotosOnUpload = true, compressVideosOnUpload = false))
+        assertTrue(uploadRewritesBytes("image/jpeg", stripOnUpload = false, compressPhotosOnUpload = true, compressVideosOnUpload = false))
+        assertFalse(uploadRewritesBytes("image/jpeg", stripOnUpload = false, compressPhotosOnUpload = false, compressVideosOnUpload = true))
+        assertTrue(uploadRewritesBytes("image/jpeg", stripOnUpload = true, compressPhotosOnUpload = false, compressVideosOnUpload = false))
     }
 
     @Test

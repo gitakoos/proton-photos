@@ -458,6 +458,7 @@ class GalleryViewModel @Inject constructor(
                 // Idle / Done / Failed all flip it back off.
                 val syncing = when (evt.status) {
                     eu.akoos.photos.domain.usecase.UploadStatus.Queued -> true
+                    eu.akoos.photos.domain.usecase.UploadStatus.Compressing -> true
                     eu.akoos.photos.domain.usecase.UploadStatus.Encrypting -> true
                     eu.akoos.photos.domain.usecase.UploadStatus.Uploading -> true
                     eu.akoos.photos.domain.usecase.UploadStatus.Done -> false
