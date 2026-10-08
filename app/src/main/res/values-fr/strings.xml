@@ -2296,6 +2296,7 @@
     <string name="compression_hint_hevc">Le H.265 est environ un tiers plus léger que le H.264. iPhone, Mac et la plupart des téléphones Android le lisent ; Proton Drive dans Firefox, ou dans Chrome et Edge sans prise en charge matérielle, peut ne pas l’afficher.</string>
     <string name="compression_hint_av1">L’AV1 donne les fichiers les plus légers. Chrome, Firefox et Edge le lisent ; chez Apple, seulement l’iPhone 15 Pro, les Mac M3 et plus récents.</string>
     <string name="compression_hint_keep">Chaque vidéo garde son codec ; celui que ce téléphone ne peut pas encoder devient du H.264.</string>
+    <string name="compression_codec_info_title">À propos des codecs vidéo</string>
     <string name="compression_codec_desc_auto">Choisit le meilleur codage que ce téléphone sait faire</string>
     <string name="compression_codec_desc_avc">Se lit partout : anciens téléphones, téléviseurs et tous les navigateurs</string>
     <string name="compression_codec_desc_hevc">Environ un tiers plus petit que le H.264 ; certains navigateurs ne l\'affichent pas</string>
