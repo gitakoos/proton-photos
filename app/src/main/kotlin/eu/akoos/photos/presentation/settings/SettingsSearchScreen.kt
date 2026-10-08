@@ -220,7 +220,7 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
     ),
     SettingsSearchEntry(
         R.string.language_section, R.string.settings_appearance,
-        listOf("language", "locale", "nyelv"),
+        listOf("language", "locale", "nyelv", "dil"),
         Screen.LanguageSettings.route,
     ),
     SettingsSearchEntry(

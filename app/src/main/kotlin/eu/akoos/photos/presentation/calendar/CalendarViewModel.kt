@@ -216,7 +216,7 @@ class CalendarViewModel @Inject constructor(
 
     /**
      * Computes the flat list of [DayBucket]s matching [query] across:
-     *  - day-meta description text (case-insensitive contains),
+     *  - day-meta description text (case- and accent-insensitive contains),
      *  - the day's ISO date (e.g. "2024-05" or "2024-05-03"),
      *  - the day's localized month + year string (e.g. "may 2024", "march 5").
      *
@@ -227,8 +227,7 @@ class CalendarViewModel @Inject constructor(
         months: List<MonthBucket>,
         query: String,
     ): List<DayBucket> {
-        val needle = query.lowercase(Locale.getDefault())
-        val terms = needle.split(Regex("\\s+")).filter { it.isNotBlank() }
+        val terms = calendarSearchTerms(query)
         if (terms.isEmpty()) return emptyList()
 
         // Pull EVERY DayMeta row so each annotated day's description is in the haystack below.
@@ -250,22 +249,19 @@ class CalendarViewModel @Inject constructor(
         for (month in months) {
             // Cheap per-month label that all of its day buckets can reuse.
             cal.set(month.year, month.month - 1, 1, 0, 0, 0)
-            val monthLabel = monthLabelFmt.format(cal.time).lowercase(Locale.getDefault())
+            val monthLabel = monthLabelFmt.format(cal.time)
 
             for ((dayNum, dayBucket) in month.days) {
                 cal.set(month.year, month.month - 1, dayNum, 0, 0, 0)
-                val dayLabel = dayLabelFmt.format(cal.time).lowercase(Locale.getDefault())
+                val dayLabel = dayLabelFmt.format(cal.time)
                 val meta = metaByDate[dayBucket.date]
-                val haystack = buildString {
-                    append(dayBucket.date.lowercase(Locale.getDefault()))
-                    append(' ')
-                    append(monthLabel)
-                    append(' ')
-                    append(dayLabel)
-                    append(' ')
-                    append(month.year.toString())
-                    meta?.description?.let { append(' '); append(it.lowercase(Locale.getDefault())) }
-                }
+                val haystack = calendarSearchHaystack(
+                    date = dayBucket.date,
+                    monthLabel = monthLabel,
+                    dayLabel = dayLabel,
+                    year = month.year,
+                    description = meta?.description,
+                )
                 if (terms.all { haystack.contains(it) }) {
                     results += dayBucket
                 }

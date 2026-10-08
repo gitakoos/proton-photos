@@ -42,11 +42,11 @@ Run these and make sure they pass:
 
 ## Localization
 
-Every user-facing string lives in `app/src/main/res/values/strings.xml` and must be translated in all ten locale folders, or the release build fails:
+Every user-facing string lives in `app/src/main/res/values/strings.xml` and must be translated in all eleven locale folders, or the release build fails:
 
-`values-cs`, `values-de`, `values-es`, `values-fr`, `values-hu`, `values-it`, `values-nl`, `values-pl`, `values-sk`, `values-sl`
+`values-cs`, `values-de`, `values-es`, `values-fr`, `values-hu`, `values-it`, `values-nl`, `values-pl`, `values-sk`, `values-sl`, `values-tr`
 
-- Add the string to the base `values/strings.xml` first, then to all ten locales.
+- Add the string to the base `values/strings.xml` first, then to all eleven locales.
 - Never hardcode a user-facing string in Kotlin; always reference `R.string.*`.
 - Escape an apostrophe inside a value as `\'`.
 

@@ -63,6 +63,7 @@ import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
 import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.paletteAccent
+import eu.akoos.photos.presentation.util.AppLanguages
 
 /**
  * Appearance hub — menu rows to the theme/palette and language sub-pages, plus the photo
@@ -214,7 +215,7 @@ fun LanguageSettingsScreen(
     val colors = AppColors.current
 
     SettingsSubPageScaffold(title = stringResource(R.string.language_section), onBack = onBack) {
-        val options = remember_languageOptions()
+        val options = AppLanguages.all
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -234,24 +235,6 @@ fun LanguageSettingsScreen(
         }
     }
 }
-
-private data class LanguageOption(val tag: String, val labelRes: Int)
-
-@Composable
-private fun remember_languageOptions(): List<LanguageOption> = listOf(
-    LanguageOption("system", R.string.settings_language_system),
-    LanguageOption("en",     R.string.language_en),
-    LanguageOption("de",     R.string.language_de),
-    LanguageOption("es",     R.string.language_es),
-    LanguageOption("fr",     R.string.language_fr),
-    LanguageOption("hu",     R.string.language_hu),
-    LanguageOption("it",     R.string.language_it),
-    LanguageOption("nl",     R.string.language_nl),
-    LanguageOption("pl",     R.string.language_pl),
-    LanguageOption("sk",     R.string.language_sk),
-    LanguageOption("sl",     R.string.language_sl),
-    LanguageOption("cs",     R.string.language_cs),
-)
 
 @Composable
 private fun ThemeModePill(

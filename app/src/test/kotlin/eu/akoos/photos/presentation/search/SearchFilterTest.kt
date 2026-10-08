@@ -209,6 +209,34 @@ class SearchFilterTest {
     }
 
     @Test
+    fun `the Turkish letters fold to their bare letters, the dotless i included`() {
+        assertEquals("kizilay", SearchFilter.fold("Kızılay"))
+        assertEquals("istanbul", SearchFilter.fold("İstanbul"))
+        assertEquals("isik", SearchFilter.fold("Işık"))
+        assertEquals("cigkofte sogus gulsun", SearchFilter.fold("Çiğköfte Söğüş Gülşün"))
+    }
+
+    @Test
+    fun `folding does not depend on the device language, a Turkish device included`() {
+        val previous = Locale.getDefault()
+        Locale.setDefault(Locale.forLanguageTag("tr"))
+        try {
+            assertEquals("instagram", SearchFilter.fold("INSTAGRAM"))
+            assertEquals("isik", SearchFilter.fold("IŞIK"))
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    @Test
+    fun `a name with the dotless i is found by the plain-letter query and the other way round`() {
+        val items = listOf(local("Kızılay.jpg"), local("other.jpg"))
+        assertEquals(listOf("Kızılay.jpg"), namesFrom(search(items, q = "kizilay")))
+        assertEquals(listOf("Kızılay.jpg"), namesFrom(search(items, q = "KIZILAY")))
+        assertEquals(listOf("kizilay.jpg"), namesFrom(search(listOf(local("kizilay.jpg")), q = "Kızılay")))
+    }
+
+    @Test
     fun `folding is case-insensitive in both directions`() {
         assertEquals(listOf("BEACH.JPG"), namesFrom(search(listOf(local("BEACH.JPG")), q = "beach")))
         assertEquals(listOf("beach.jpg"), namesFrom(search(listOf(local("beach.jpg")), q = "BEACH")))

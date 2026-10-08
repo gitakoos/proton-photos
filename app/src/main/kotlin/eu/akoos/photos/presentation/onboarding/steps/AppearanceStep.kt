@@ -57,6 +57,7 @@ import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.paletteAccent
+import eu.akoos.photos.presentation.util.AppLanguages
 
 @Composable
 internal fun AppearanceStep(
@@ -151,27 +152,18 @@ internal fun AppearanceStep(
                 .background(colors.cardBg, RoundedCornerShape(12.dp))
                 .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp)),
         ) {
-            val options = listOf(
-                "system" to R.string.settings_language_system,
-                "en" to R.string.language_en,
-                "de" to R.string.language_de,
-                "es" to R.string.language_es,
-                "fr" to R.string.language_fr,
-                "hu" to R.string.language_hu,
-                "it" to R.string.language_it,
-                "nl" to R.string.language_nl,
-            )
-            options.forEachIndexed { idx, (tag, labelRes) ->
-                val selected = language == tag
+            val options = AppLanguages.all
+            options.forEachIndexed { idx, option ->
+                val selected = language == option.tag
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onLanguage(tag) }
+                        .clickable { onLanguage(option.tag) }
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        stringResource(labelRes),
+                        stringResource(option.labelRes),
                         color = colors.fgPrimary,
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium,

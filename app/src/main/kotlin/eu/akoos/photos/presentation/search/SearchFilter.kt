@@ -47,10 +47,12 @@ internal object SearchFilter {
 
     /** Lower-cases and strips diacritics so an ASCII query ("jose") matches accented names
      *  ("josé"). NFD decomposes each accented letter into base + combining mark, then the
-     *  `\p{Mn}` (Mark, nonspacing) class removes the marks, leaving the bare letter. */
+     *  `\p{Mn}` (Mark, nonspacing) class removes the marks, leaving the bare letter. The Turkish
+     *  dotless "ı" has no decomposition, so it is mapped to "i" by hand ("kizilay" finds "Kızılay"). */
     fun fold(text: String): String =
         Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD)
             .replace(MARK_REGEX, "")
+            .replace('\u0131', 'i')
 
     /** [q] without its last [count] words, the rest joined by single spaces: what a picked suggestion
      *  leaves of the text that spelled it. */
