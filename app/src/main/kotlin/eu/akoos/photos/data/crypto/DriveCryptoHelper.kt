@@ -407,6 +407,15 @@ class DriveCryptoHelper @Inject constructor(
      * address that may differ from the current primary — the backend rejects invitations whose
      * `InviterAddressID` doesn't match the share's owner.
      */
+    /** The mail-primary address's signing key, for creating a Photos volume, which has no owner yet. */
+    suspend fun getPrimaryAddressSigningKey(userId: UserId): AddressSigningKey {
+        val address = userAddressRepository.getAddresses(userId, false)
+            .filter { it.enabled && it.keys.isNotEmpty() }
+            .minByOrNull { it.order }
+            ?: error("No active address for userId=${userId.id}")
+        return unlockAddressAsSigningKey(address)
+    }
+
     suspend fun getAddressSigningKeyById(userId: UserId, addressId: String): AddressSigningKey {
         val addresses = userAddressRepository.getAddresses(userId, false)
         val address = addresses.firstOrNull { it.addressId.id == addressId && it.enabled && it.keys.isNotEmpty() }

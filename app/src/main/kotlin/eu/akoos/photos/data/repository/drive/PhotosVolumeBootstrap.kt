@@ -28,6 +28,7 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.api.dto.CreatePhotosVolumeRequest
 import eu.akoos.photos.data.api.dto.PhotosVolumeLink
 import eu.akoos.photos.data.api.dto.PhotosVolumeShare
+import eu.akoos.photos.data.crypto.AddressSigningKey
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -65,15 +66,15 @@ class PhotosVolumeBootstrap @Inject constructor(
      * never reuse the result. Designed to be idempotent on the server: a second call
      * with different keys still succeeds, the server just returns the existing volume.
      */
-    suspend fun build(userId: UserId): CreatePhotosVolumeRequest {
-        val signingKey = cryptoHelper.getAddressSigningKey(userId)
+    suspend fun build(userId: UserId, signingKey: AddressSigningKey? = null): CreatePhotosVolumeRequest {
+        val key = signingKey ?: cryptoHelper.getAddressSigningKey(userId)
         // The crypto-heavy block from here down is wrapped under one withCryptoLock call —
         // first-launch volume bootstrap generates two PGP key pairs, performs unlocks, and
         // encrypts the hash seed via direct cryptoContext.pgpCrypto.* calls that would
         // otherwise race the same Go signal handlers cryptoHelper's own methods are
         // already protected against. ReentrantLock is re-entrant so the nested
         // cryptoHelper.encrypt/sign calls cost nothing extra.
-        return cryptoHelper.withCryptoLock { buildCryptoBlock(signingKey) }
+        return cryptoHelper.withCryptoLock { buildCryptoBlock(key) }
     }
 
     private fun buildCryptoBlock(signingKey: eu.akoos.photos.data.crypto.AddressSigningKey): CreatePhotosVolumeRequest {
