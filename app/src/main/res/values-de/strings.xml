@@ -2294,6 +2294,10 @@
     <string name="compression_hint_hevc">H.265 ist etwa ein Drittel kleiner als H.264. iPhone, Mac und die meisten Android-Telefone spielen es ab; Proton Drive in Firefox oder in Chrome und Edge ohne Hardware-Unterstützung zeigt es eventuell nicht an.</string>
     <string name="compression_hint_av1">AV1 liefert die kleinsten Dateien. Chrome, Firefox und Edge spielen es ab; bei Apple nur iPhone 15 Pro, Macs mit M3 und neuer.</string>
     <string name="compression_hint_keep">Jedes Video behält seinen Codec; einer, den dieses Telefon nicht kodieren kann, wird zu H.264.</string>
+    <string name="compression_codec_desc_auto">Wählt das Beste, was dieses Handy kodieren kann</string>
+    <string name="compression_codec_desc_avc">Läuft überall: ältere Handys, Fernseher und jeder Browser</string>
+    <string name="compression_codec_desc_hevc">Etwa ein Drittel kleiner als H.264; manche Browser zeigen es nicht an</string>
+    <string name="compression_codec_desc_av1">Kleinste Dateien; ältere Geräte und manche Browser spielen es nicht ab</string>
     <string name="compression_estimate">Etwa %1$s pro Minute %2$dp-Video</string>
     <string name="compression_unavailable_fallback">%1$s ist auf diesem Telefon nicht verfügbar, Videos verwenden daher %2$s.</string>
 </resources>

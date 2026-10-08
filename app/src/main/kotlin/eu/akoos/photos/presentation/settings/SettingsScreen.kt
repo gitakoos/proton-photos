@@ -2100,7 +2100,7 @@ fun BackupProcessingScreen(
                     selected = state.compressTier,
                     onSelect = viewModel::setCompressTier,
                     descriptionRes = { it.descRes },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    modifier = Modifier.padding(vertical = 14.dp),
                 )
                 RowDivider()
                 ToggleRow(
@@ -2119,7 +2119,7 @@ fun BackupProcessingScreen(
             )
             if (state.compressVideosOnUpload) {
                 RowDivider()
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                Column(modifier = Modifier.padding(vertical = 14.dp)) {
                     CodecPicker(
                         selected = state.videoCodec,
                         capabilities = state.encoderCapabilities,
@@ -2132,7 +2132,11 @@ fun BackupProcessingScreen(
                         descriptionRes = { it.videoDescRes },
                     )
                     Spacer(Modifier.height(10.dp))
-                    EstimateLine(state.encoderCapabilities, VideoCompressionProfile(state.videoCodec, state.compressTierVideo))
+                    EstimateLine(
+                        state.encoderCapabilities,
+                        VideoCompressionProfile(state.videoCodec, state.compressTierVideo),
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
                 }
             }
         }
