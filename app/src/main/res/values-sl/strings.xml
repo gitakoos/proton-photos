@@ -352,6 +352,7 @@
     <!-- Sync progress (Settings card) -->
     <string name="sync_progress_completed">%1$d %% končano</string>
     <string name="sync_progress_x_of_n">%1$d od %2$d</string>
+    <string name="sync_progress_failed">Ni uspelo: %1$d</string>
     <string name="sync_progress_show_files">Pokaži datoteke</string>
     <string name="sync_progress_hide_files">Skrij datoteke</string>
     <!-- Delete after backup consent notification -->

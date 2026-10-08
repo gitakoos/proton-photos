@@ -223,6 +223,7 @@
     <!-- Sync progress (Settings card) -->
     <string name="sync_progress_completed">%1$d%% voltooid</string>
     <string name="sync_progress_x_of_n">%1$d van %2$d</string>
+    <string name="sync_progress_failed">Mislukt: %1$d</string>
     <string name="sync_progress_show_files">Bestanden tonen</string>
     <string name="sync_progress_hide_files">Bestanden verbergen</string>
     <!-- Delete after backup consent notification -->

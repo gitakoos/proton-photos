@@ -665,6 +665,7 @@ fun SettingsScreen(
                     SyncProgressPanel(
                         done = state.uploadDoneCount,
                         total = displayTotal,
+                        failed = state.uploadFailedCount,
                         events = state.uploadEvents,
                         bytesPerSecond = state.uploadBytesPerSecond,
                     )
@@ -2359,6 +2360,7 @@ fun PrivacySecuritySettingsScreen(
 internal fun SyncProgressPanel(
     done: Int,
     total: Int,
+    failed: Int,
     events: List<UploadEvent>,
     bytesPerSecond: Long?,
     initiallyExpanded: Boolean = false,
@@ -2408,6 +2410,14 @@ internal fun SyncProgressPanel(
                 stringResource(R.string.sync_progress_x_of_n, done, total),
                 color = colors.fgMute, fontSize = 11.5.sp,
             )
+            // Failed files count as done too, so "100%" alone would read as a clean backup.
+            if (failed > 0) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.sync_progress_failed, failed),
+                    color = colors.errorColor, fontSize = 11.5.sp,
+                )
+            }
             if (bytesPerSecond != null && bytesPerSecond > 0L) {
                 Spacer(Modifier.width(8.dp))
                 Text(
