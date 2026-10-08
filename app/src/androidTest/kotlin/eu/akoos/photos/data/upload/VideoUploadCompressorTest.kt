@@ -30,7 +30,11 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import eu.akoos.photos.data.upload.compression.VideoEncoderCapabilities
+import eu.akoos.photos.data.upload.compression.VideoUploadCompression
 import eu.akoos.photos.domain.entity.UploadCompressionTier
+import eu.akoos.photos.domain.entity.compression.VideoCodecChoice
+import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -133,17 +137,15 @@ class VideoUploadCompressorTest {
 
         // Space saver forces a downscale even on a 1080p clip (short-side cap 720), so the
         // orientation-preserving scale path is actually exercised rather than a bitrate-only re-encode.
-        val params = VideoUploadCompressor.VideoCompressionParams(
-            UploadCompressionTier.SPACE_SAVER.videoMaxShortEdgePx,
-            UploadCompressionTier.SPACE_SAVER.videoBitrateBps,
-        )
+        val compression = VideoUploadCompression(context, VideoEncoderCapabilities())
+        val profile = VideoCompressionProfile(VideoCodecChoice.KEEP_SOURCE, UploadCompressionTier.SPACE_SAVER)
         var exercised = 0
 
         for ((uri, sourceSize, dateTakenMs) in videos) {
             val source = probe(uri) ?: continue
             Log.i(TAG, "SOURCE $uri  $source  ${sourceSize}B  dateTaken=$dateTakenMs")
 
-            val output = VideoUploadCompressor.compressToTemp(context, uri, params, dateTakenMs)
+            val output = compression.compress(uri.toString(), profile, dateTakenMs).file
 
             val longEdge = maxOf(source.width, source.height)
             if (longEdge > MAX_SAFE_LONG_EDGE) {

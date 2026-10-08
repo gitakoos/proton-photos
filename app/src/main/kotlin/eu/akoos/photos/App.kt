@@ -52,6 +52,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import eu.akoos.photos.data.image.UltraHdrDecoder
+import eu.akoos.photos.data.preferences.CompressionPreferences
 import eu.akoos.photos.data.preferences.LanguagePrefsBoot
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
@@ -156,6 +157,7 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         seedAlbumOptInFromBucketMap()
         migrateOcrConsentToAiFeatures()
         migrateCompressTierSplit()
+        migrateVideoCodec()
         importPendingAlbumAdds()
         recoverMirrorOverwrites()
         registerCacheCleanupOnBackground()
@@ -324,6 +326,11 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 }
             }
         }
+    }
+
+    /** One-shot: pins the video codec for an install that predates the codec choice (see [CompressionPreferences]). */
+    private fun migrateVideoCodec() {
+        appScope.launch { runCatching { settingsDataStore.edit { CompressionPreferences.migrate(it) } } }
     }
 
     /**

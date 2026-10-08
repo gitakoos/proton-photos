@@ -88,6 +88,7 @@ import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SectionLabel
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.settings.compression.compressingLabel
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgMute
@@ -95,6 +96,7 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.presentation.theme.PillBorder
+import eu.akoos.photos.presentation.util.formatBytes
 
 enum class ActivityTab { Uploads, Downloads, History }
 
@@ -119,7 +121,7 @@ fun ActivityScreen(
     // The photos in flight right now, so the queue grid below the progress panel doesn't repeat
     // a photo that the panel is already showing as uploading.
     val activeUploadUris = state.uploadEvents
-        .filter { it.status == UploadEventStatus.Uploading || it.status == UploadEventStatus.Encrypting }
+        .filter { it.status.inFlight }
         .map { it.uri }
         .toSet()
     // After a user stop the still-pending photos are suppressed from the active-transfer card (they
@@ -172,9 +174,7 @@ fun ActivityScreen(
                 // One row per photo: thumbnail on the left, a status pill saying what is happening to
                 // the file, and a live bar, all in this screen's card style. The ones encrypting or
                 // uploading come first, then the ones still waiting; each drops out as it finishes.
-                val activeUploads = state.uploadEvents.filter {
-                    it.status == UploadEventStatus.Uploading || it.status == UploadEventStatus.Encrypting
-                }
+                val activeUploads = state.uploadEvents.filter { it.status.inFlight }
                 // Why nothing is moving, above the queue rather than below it. The upload workers
                 // require the battery not to be low, so under that floor the system never starts
                 // them and no progress is reported at all: this screen is where the photos are
@@ -224,15 +224,17 @@ fun ActivityScreen(
                                     )
                                     RowDivider()
                                     activeUploads.forEachIndexed { i, evt ->
-                                        val frac = if (evt.sizeBytes > 0L) {
-                                            (evt.doneBytes.toFloat() / evt.sizeBytes).coerceIn(0f, 1f)
-                                        } else {
-                                            null
+                                        val frac = when {
+                                            evt.status == UploadEventStatus.Compressing -> evt.compressFraction
+                                            evt.sizeBytes > 0L -> (evt.doneBytes.toFloat() / evt.sizeBytes).coerceIn(0f, 1f)
+                                            else -> null
                                         }
-                                        val label = if (evt.status == UploadEventStatus.Encrypting) {
-                                            stringResource(R.string.upload_status_encrypting)
-                                        } else {
-                                            stringResource(R.string.upload_status_uploading)
+                                        val label = when (evt.status) {
+                                            UploadEventStatus.Compressing -> compressingLabel(
+                                                evt.compressFraction, evt.compressCodecMime, evt.compressSpeedX,
+                                            )
+                                            UploadEventStatus.Encrypting -> stringResource(R.string.upload_status_encrypting)
+                                            else -> stringResource(R.string.upload_status_uploading)
                                         }
                                         TransferPhotoRow(uri = evt.uri, stateLabel = label, progress = frac)
                                         if (i < activeUploads.lastIndex || queuedUris.isNotEmpty()) RowDivider()
@@ -566,15 +568,24 @@ private fun HistoryRow(e: TransferCenter.HistoryEntry) {
         ) {
             Icon(icon, contentDescription = null, tint = FgMute, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(12.dp))
-            Text(
-                label,
-                color = FgPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(end = 8.dp),
-            )
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(
+                    label,
+                    color = FgPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                // On its own line, so the label's ellipsis never hides it.
+                if (e.kind == TransferCenter.Kind.UPLOAD.name && e.savedBytes > 0L) {
+                    Text(
+                        stringResource(R.string.activity_hist_saved, formatBytes(e.savedBytes)),
+                        color = colors.fgDim,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
             Text(ago, color = FgMute, fontSize = 12.sp)
             if (canExpand) {
                 Icon(

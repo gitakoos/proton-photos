@@ -129,6 +129,9 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // file that merely shares a name (Drive allows that) can't be taken for a backup.
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
         val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
+        // Videos have their own compression switch; reading only the photo one left a compressed
+        // video unable to re-pair after a reinstall (its bytes no longer hash-match the original).
+        val compressVideosOnUpload = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false
 
         // A scan begun after this pass: the demotions and the gone-file drop below act on what the
         // device no longer holds, which a list kept from before could still show. Those steps also
@@ -174,7 +177,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
         val recorded = pairAndRecord(
             userId, allLocalItems, localItems, initialListingComplete, stripOnUpload, compressOnUpload,
-            scan.complete, scanStartMs,
+            compressVideosOnUpload, scan.complete, scanStartMs,
         )
         clearQueue(userId, recorded.allLocalUris, recorded.inScopeUris, scan.complete, scanStartMs)
 
@@ -215,13 +218,14 @@ class ReconcileSyncStateUseCase @Inject constructor(
         initialListingComplete: Boolean,
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
+        compressVideosOnUpload: Boolean,
         scanComplete: Boolean,
         scanStartMs: Long,
     ): Recorded {
         // Unpacked, so the snapshot and the cloud rows can go after their last use below (the partition
         // and the demotion loop) instead of living through every write.
         val (total, newStates, freshAutoFolderUris, pairedSyncedUris, existingByUri, cloudByLinkId) =
-            matchLocals(userId, localItems, initialListingComplete, stripOnUpload, compressOnUpload)
+            matchLocals(userId, localItems, initialListingComplete, stripOnUpload, compressOnUpload, compressVideosOnUpload)
         PerfDiagnostics.mark("reconcile:end", localItems.size)
 
         // Previously SYNCED entries whose cloud counterpart was deleted → LOCAL_ONLY (still on device,
@@ -344,6 +348,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         initialListingComplete: Boolean,
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
+        compressVideosOnUpload: Boolean,
     ): Matched {
         // Cloud DB was already refreshed by the caller (GalleryViewModel.refresh / doSync).
         // Avoid calling refreshCloudPhotosIncremental here: it can replay old "add" events
@@ -437,7 +442,14 @@ class ReconcileSyncStateUseCase @Inject constructor(
 
             // captureTime in the cloud listing is Unix seconds; LocalMediaItem.dateTaken is ms.
             val localCaptureTimeSec = local.dateTaken / 1000L
+            // A compressed or strip-transcoded photo went up as JPEG (IMG.heic as IMG.jpg), a compressed
+            // video as MP4 (clip.mov as clip.mp4), so while that rewrite is on, look for that name too.
+            val rewritesFormat =
+                if (local.mimeType.startsWith("video/")) compressVideosOnUpload else compressOnUpload || stripOnUpload
             val nameDateTwin = cloudByNameAndDate[NameKey(local.displayName, localCaptureTimeSec)]
+                ?: UploadFormatNaming.reencodedName(local.displayName, local.mimeType)
+                    ?.takeIf { rewritesFormat }
+                    ?.let { cloudByNameAndDate[NameKey(it, localCaptureTimeSec)] }
             val nameCandidate = nameDateTwin
                 ?: cloudByNameSize[NameKey(local.displayName, local.sizeBytes)]?.takeIf { it.sizeBytes > 0 }
             // Trust a name+date / name+size match ONLY when a content hash can't settle it: the cloud
@@ -449,7 +461,8 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // uploaded. (No name-only fallback either: a recurring camera name like IMG_0001.jpg must
             // never pair on its own.)
             val byNameUnverifiable = nameCandidate?.takeIf {
-                it.contentHash.isNullOrEmpty() || stripOnUpload || compressOnUpload
+                it.contentHash.isNullOrEmpty() ||
+                    uploadRewritesBytes(local.mimeType, stripOnUpload, compressOnUpload, compressVideosOnUpload)
             }
             // Last resort, downloads-only: re-pair to a still-present cloud twin by name + EXACT capture
             // second even when that twin HAS a hash. A download stamps the twin's own capture time into
@@ -633,6 +646,18 @@ class ReconcileSyncStateUseCase @Inject constructor(
 /** A display name with a capture second or a byte size: the name matchers' lookup key. Equal exactly
  *  when both parts are, as a Pair of the two is, without boxing the number. */
 private data class NameKey(val name: String, val value: Long)
+
+/**
+ * Whether the upload may have rewritten this file's bytes, so its cloud copy can't hash-match the
+ * local original and a name match has to be trusted. Photos and videos have separate compression switches.
+ */
+internal fun uploadRewritesBytes(
+    mimeType: String,
+    stripOnUpload: Boolean,
+    compressPhotosOnUpload: Boolean,
+    compressVideosOnUpload: Boolean,
+): Boolean = stripOnUpload ||
+    if (mimeType.startsWith("video/")) compressVideosOnUpload else compressPhotosOnUpload
 
 /**
  * Pure gate for reconcile's downloads-only name+date re-pair. Returns the cloud twin's linkId to

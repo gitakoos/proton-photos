@@ -83,6 +83,8 @@ class SyncWorker @AssistedInject constructor(
      */
     @Volatile private var doneCount = 0
     @Volatile private var totalCount = 0
+    /** Last whole percent the notification showed for a running transcode, null outside one. */
+    @Volatile private var lastCompressPercent: Int? = null
 
     override suspend fun doWork(): Result = coroutineScope {
         // Promote to foreground IMMEDIATELY so the run survives the app being swiped from Recents
@@ -119,9 +121,19 @@ class SyncWorker @AssistedInject constructor(
                 } else {
                     doneCount = evt.doneIdx
                     totalCount = evt.totalCount
-                    runCatching {
-                        setForeground(buildForegroundInfo(doneCount, totalCount))
-                    }.onFailure { /* swallow — worker may already be cancelling */ }
+                    // A long transcode would otherwise read as a stuck "3 of 10". Re-posted on whole
+                    // percents only, not on every progress tick.
+                    val compressing = if (evt.status == UploadStatus.Compressing) {
+                        (evt.compressFraction * 100).toInt().coerceIn(0, 100)
+                    } else {
+                        null
+                    }
+                    if (compressing == null || compressing != lastCompressPercent) {
+                        lastCompressPercent = compressing
+                        runCatching {
+                            setForeground(buildForegroundInfo(doneCount, totalCount, compressing))
+                        }.onFailure { /* swallow — worker may already be cancelling */ }
+                    }
                 }
             }
         }
@@ -247,7 +259,7 @@ class SyncWorker @AssistedInject constructor(
      * Builds a ForegroundInfo with the photo-backup notification at the current progress.
      * Idempotently registers the channel on Android 8+ via [ensureChannel].
      */
-    private fun buildForegroundInfo(done: Int, total: Int): ForegroundInfo {
+    private fun buildForegroundInfo(done: Int, total: Int, compressPercent: Int? = null): ForegroundInfo {
         ensureChannel(context)
 
         // Route the notification's "Stop" to a COOPERATIVE stop, not a WorkManager cancel of this
@@ -273,10 +285,10 @@ class SyncWorker @AssistedInject constructor(
         } else {
             context.getString(R.string.sync_worker_notification_title)
         }
-        val content = if (checking) {
-            ""
-        } else {
-            context.getString(R.string.sync_worker_notification_progress, done, total)
+        val content = when {
+            checking -> ""
+            compressPercent != null -> context.getString(R.string.sync_worker_notification_compressing, compressPercent)
+            else -> context.getString(R.string.sync_worker_notification_progress, done, total)
         }
         val cancelLabel = context.getString(R.string.sync_worker_notification_cancel)
 

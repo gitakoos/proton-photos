@@ -134,6 +134,12 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         cloud = true,
     ),
     SettingsSearchEntry(
+        R.string.compression_codec, R.string.settings_metadata,
+        listOf("codec", "h.264", "h264", "avc", "h.265", "h265", "hevc", "av1", "hdr", "kodek"),
+        Screen.BackupProcessing.route,
+        cloud = true,
+    ),
+    SettingsSearchEntry(
         R.string.settings_compress_videos, R.string.settings_metadata,
         listOf("video", "compress", "compression", "quality", "resolution", "bitrate", "1080p", "4k", "videó", "tömörítés", "minőség", "felbontás"),
         Screen.BackupProcessing.route,
