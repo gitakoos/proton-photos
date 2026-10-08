@@ -124,6 +124,7 @@ class ReconcileSingleFlightTest {
         every { prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] } returns emptySet()
         every { prefs[SettingsKeys.STRIP_ON_UPLOAD] } returns false
         every { prefs[SettingsKeys.COMPRESS_ON_UPLOAD] } returns false
+        every { prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns false
         every { prefs.asMap() } returns emptyMap()
     }
 

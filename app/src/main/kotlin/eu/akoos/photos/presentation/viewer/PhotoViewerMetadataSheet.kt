@@ -212,7 +212,7 @@ internal fun PhotoMetadataSheet(
                     MetaRow(stringResource(R.string.viewer_meta_row_size_device), formatBytes(sizeBytes))
                     MetaRow(stringResource(R.string.viewer_meta_row_size_drive), formatBytes(driveSizeBytes))
                 } else {
-                    MetaRow(rowSize, if (sizeBytes > 0) formatBytes(sizeBytes) else "—")
+                    MetaRow(rowSize, if (sizeBytes > 0) formatBytes(sizeBytes) else "-")
                 }
                 MetaRow(rowType, mimeType)
                 (localFolder ?: localMedia?.bucketName)?.takeIf { it.isNotBlank() }?.let {

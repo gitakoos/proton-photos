@@ -657,7 +657,7 @@ class UploadPendingUseCaseTest {
             mockk<Uri> { every { this@mockk.toString() } returns "file://" + firstArg<java.io.File>().path }
         }
         mockkObject(UploadImageCompressor) {
-            every { UploadImageCompressor.skipsCompressionForGainMap(any(), any(), any()) } returns false
+            every { UploadImageCompressor.skipsCompressionForGainMap(any(), any(), any(), any()) } returns false
             every { UploadImageCompressor.compress(any(), any(), any(), any()) } returns
                 UploadImageCompressor.Outcome(temp, null, 4096L)
             useCase(userId)
@@ -675,7 +675,7 @@ class UploadPendingUseCaseTest {
         every { mockPrefsRef[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns true
         val mov = videoItem("uri://mov").copy(displayName = "IMG_0001.MOV", mimeType = "video/quicktime")
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(syncState("uri://mov", SyncStatus.LOCAL_ONLY)))
-        every { localRepo.observeLocalMedia() } returns flowOf(listOf(mov))
+        coEvery { localRepo.freshMedia() } returns listOf(mov)
         coEvery { localRepo.queryByUri("uri://mov") } returns mov
         val sent = slot<LocalMediaItem>()
         coEvery { cloudRepo.uploadFile(userId, capture(sent), any(), any(), any(), any()) } returns "cloud-id"
@@ -702,7 +702,7 @@ class UploadPendingUseCaseTest {
         every { mockPrefsRef[SettingsKeys.COMPRESS_UPLOAD_TIER] } returns UploadCompressionTier.LIGHT.ordinal
         every { mockPrefsRef[SettingsKeys.COMPRESS_UPLOAD_TIER_VIDEO] } returns UploadCompressionTier.SPACE_SAVER.ordinal
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(syncState("uri://vid", SyncStatus.LOCAL_ONLY)))
-        every { localRepo.observeLocalMedia() } returns flowOf(listOf(videoItem("uri://vid")))
+        coEvery { localRepo.freshMedia() } returns listOf(videoItem("uri://vid"))
         coEvery { localRepo.queryByUri("uri://vid") } returns videoItem("uri://vid")
         coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
         val profile = slot<VideoCompressionProfile>()
@@ -725,7 +725,7 @@ class UploadPendingUseCaseTest {
         val uris = listOf("uri://v1", "uri://v2", "uri://p1", "uri://p2", "uri://p3")
         every { syncStateRepo.observeAll(userId) } returns flowOf(uris.map { syncState(it, SyncStatus.LOCAL_ONLY) })
         val items = uris.map { if (it.startsWith("uri://v")) videoItem(it) else localItem(it) }
-        every { localRepo.observeLocalMedia() } returns flowOf(items)
+        coEvery { localRepo.freshMedia() } returns items
         coEvery { localRepo.queryByUri(any()) } answers { items.first { it.uri == firstArg<String>() } }
 
         val transcodeRelease = CompletableDeferred<Unit>()
@@ -759,7 +759,7 @@ class UploadPendingUseCaseTest {
     fun `a compressed video is queued around its transcode and then encrypts`() = runTest {
         every { mockPrefsRef[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] } returns true
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(syncState("uri://vid", SyncStatus.LOCAL_ONLY)))
-        every { localRepo.observeLocalMedia() } returns flowOf(listOf(videoItem("uri://vid")))
+        coEvery { localRepo.freshMedia() } returns listOf(videoItem("uri://vid"))
         coEvery { localRepo.queryByUri("uri://vid") } returns videoItem("uri://vid")
         coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
         val temp = java.io.File.createTempFile("videocompress_", ".mp4").apply { writeBytes(ByteArray(10)) }

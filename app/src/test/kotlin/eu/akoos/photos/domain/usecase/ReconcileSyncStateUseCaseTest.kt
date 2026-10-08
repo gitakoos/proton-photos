@@ -809,8 +809,8 @@ class ReconcileSyncStateUseCaseTest {
             bucketName = "Camera",
         )
         val cloud = cloudPhoto("link-video", name = "VID_0001.mp4", size = 2L, captureTime = 2L, contentHash = "SMALLERHASH")
-        every { localRepo.observeLocalMedia() } returns flowOf(listOf(local))
-        every { cloudRepo.observeCloudPhotos(userId) } returns flowOf(listOf(cloud))
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
         coEvery { syncStateRepo.getByUri(any()) } returns null
 
@@ -840,8 +840,8 @@ class ReconcileSyncStateUseCaseTest {
             bucketName = "Camera",
         )
         val cloud = cloudPhoto("link-mp4", name = "IMG_0001.MP4", size = 2L, captureTime = 2L, contentHash = "SMALLERHASH")
-        every { localRepo.observeLocalMedia() } returns flowOf(listOf(local))
-        every { cloudRepo.observeCloudPhotos(userId) } returns flowOf(listOf(cloud))
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(listOf(cloud))
         every { syncStateRepo.observeAll(userId) } returns flowOf(emptyList())
         coEvery { syncStateRepo.getByUri(any()) } returns null
 

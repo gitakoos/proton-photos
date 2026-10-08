@@ -132,7 +132,7 @@ class SyncWorker @AssistedInject constructor(
                         lastCompressPercent = compressing
                         runCatching {
                             setForeground(buildForegroundInfo(doneCount, totalCount, compressing))
-                        }.onFailure { /* swallow — worker may already be cancelling */ }
+                        }.onFailure { /* swallow: the worker may already be cancelling */ }
                     }
                 }
             }
