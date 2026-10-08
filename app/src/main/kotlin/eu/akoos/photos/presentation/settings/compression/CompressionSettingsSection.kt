@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -257,6 +258,12 @@ private fun ChoiceRow(
     }
 }
 
+/** The thin line between two options of a list; left out beside the chosen option, whose card has its own border. */
+@Composable
+private fun ChoiceDivider() {
+    HorizontalDivider(thickness = 0.5.dp, color = AppColors.current.cardBorder)
+}
+
 /** The hardware or software dot and label under a codec, or the reason it is unavailable. */
 @Composable
 private fun codecDetail(option: CodecOption): @Composable (() -> Unit)? {
@@ -348,7 +355,7 @@ fun CodecPicker(
             if (listOpen) {
                 ChoiceSheet(title = stringResource(R.string.compression_codec), onDismiss = { listOpen = false }) {
                     Column(modifier = Modifier.selectableGroup()) {
-                        options.forEach { option ->
+                        options.forEachIndexed { index, option ->
                             ChoiceRow(
                                 selected = option.choice == selected,
                                 enabled = option.selectable,
@@ -360,6 +367,9 @@ fun CodecPicker(
                                     onSelect(option.choice)
                                 },
                             )
+                            if (index < options.lastIndex && option.choice != selected && options[index + 1].choice != selected) {
+                                ChoiceDivider()
+                            }
                         }
                     }
                 }
@@ -367,22 +377,25 @@ fun CodecPicker(
         }
         if (infoOpen) {
             ChoiceSheet(title = stringResource(R.string.compression_codec_info_title), onDismiss = { infoOpen = false }) {
-                listOf(
+                val choices = listOf(
                     VideoCodecChoice.AUTO,
                     VideoCodecChoice.AVC,
                     VideoCodecChoice.HEVC,
                     VideoCodecChoice.AV1,
                     VideoCodecChoice.KEEP_SOURCE,
-                ).forEach { choice ->
-                    Text(
-                        codecChoiceLabel(choice),
-                        color = colors.fgPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(codecInfo(choice), color = colors.fgDim, fontSize = 13.5.sp, lineHeight = 19.sp)
-                    Spacer(Modifier.height(16.dp))
+                )
+                choices.forEachIndexed { index, choice ->
+                    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                        Text(
+                            codecChoiceLabel(choice),
+                            color = colors.fgPrimary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(codecInfo(choice), color = colors.fgDim, fontSize = 13.5.sp, lineHeight = 19.sp)
+                    }
+                    if (index < choices.lastIndex) ChoiceDivider()
                 }
             }
         }
@@ -410,7 +423,8 @@ fun PresetPicker(
         if (listOpen) {
             ChoiceSheet(title = stringResource(R.string.compression_quality), onDismiss = { listOpen = false }) {
                 Column(modifier = Modifier.selectableGroup()) {
-                    UploadCompressionTier.entries.forEach { tier ->
+                    val tiers = UploadCompressionTier.entries
+                    tiers.forEachIndexed { index, tier ->
                         ChoiceRow(
                             selected = tier == selected,
                             enabled = true,
@@ -422,6 +436,7 @@ fun PresetPicker(
                                 onSelect(tier)
                             },
                         )
+                        if (index < tiers.lastIndex && tier != selected && tiers[index + 1] != selected) ChoiceDivider()
                     }
                 }
             }
