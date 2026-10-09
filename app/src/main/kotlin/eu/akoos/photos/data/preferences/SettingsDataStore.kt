@@ -763,6 +763,10 @@ object SettingsKeys {
      *  modified on Drive, so a hidden album stays intact and reappears on unhide. */
     val HIDDEN_ALBUM_IDS = stringSetPreferencesKey("hidden_album_ids")
 
+    /** The duplicate groups the user ignores, one entry per group: its copies' ids sorted and joined by a
+     *  bar. Device-wide rather than per account, so a guest keeps them and a sign-out does not lose them. */
+    val DUPLICATE_IGNORED_GROUPS = stringSetPreferencesKey("duplicate_ignored_groups")
+
     /** Cloud photo linkIds individually hidden, client-side only (Proton has no custom tags). Holds
      *  single CloudOnly photos the user hid one by one, the per-photo companion to [HIDDEN_ALBUM_IDS].
      *  Folded into the same hidden-linkId set the gallery choke point drops, so a hidden cloud photo

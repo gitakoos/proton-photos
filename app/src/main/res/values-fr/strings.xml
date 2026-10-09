@@ -1458,7 +1458,7 @@
     <!-- Duplicate finder -->
     <string name="settings_find_duplicates">Trouver les doublons</string>
     <string name="settings_find_duplicates_desc">Vérifier et supprimer les copies identiques ou similaires</string>
-    <string name="duplicates_title">Trouver les doublons</string>
+    <string name="duplicates_title">Doublons</string>
     <string name="duplicates_section_device">Sur cet appareil</string>
     <string name="duplicates_section_cloud">Dans votre cloud</string>
     <string name="duplicates_empty">Aucune photo en double trouvée</string>
@@ -1526,6 +1526,12 @@
     <string name="thanks_2_5_0_dismiss">Fermer</string>
     <string name="duplicates_filter_identical">Identiques</string>
     <string name="duplicates_filter_similar">Similaires</string>
+    <string name="duplicates_ignore_group">Ignorer</string>
+    <string name="duplicates_unignore_group">Ne plus ignorer</string>
+    <string name="duplicates_filter_ignored_label">Groupes ignorés</string>
+    <string name="duplicates_filter_ignored">Afficher les ignorés</string>
+    <string name="duplicates_ignored_hint">Ces groupes sont absents de la liste. Touchez Ne plus ignorer pour en rétablir un.</string>
+    <string name="duplicates_ignored_empty">Aucun groupe ignoré</string>
     <string name="duplicates_filter_match_label">Correspondance</string>
     <string name="duplicates_badge_cloud">Cloud</string>
     <string name="duplicates_badge_device">Appareil</string>

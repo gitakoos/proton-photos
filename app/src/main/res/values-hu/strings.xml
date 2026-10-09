@@ -1479,7 +1479,7 @@
     <!-- Duplicate finder -->
     <string name="settings_find_duplicates">Duplikátumok keresése</string>
     <string name="settings_find_duplicates_desc">Azonos vagy hasonló másolatok átnézése és törlése</string>
-    <string name="duplicates_title">Duplikátumok keresése</string>
+    <string name="duplicates_title">Duplikátumok</string>
     <string name="duplicates_section_device">Ezen az eszközön</string>
     <string name="duplicates_section_cloud">A felhőben</string>
     <string name="duplicates_badge_device">Eszköz</string>
@@ -1549,6 +1549,12 @@
     <string name="thanks_2_5_0_dismiss">Bezárás</string>
     <string name="duplicates_filter_identical">Azonos</string>
     <string name="duplicates_filter_similar">Hasonló</string>
+    <string name="duplicates_ignore_group">Kihagyás</string>
+    <string name="duplicates_unignore_group">Visszahozás</string>
+    <string name="duplicates_filter_ignored_label">Kihagyott csoportok</string>
+    <string name="duplicates_filter_ignored">Kihagyottak mutatása</string>
+    <string name="duplicates_ignored_hint">Ezek a csoportok kimaradnak a listából. Koppints a Visszahozásra, és újra megjelennek.</string>
+    <string name="duplicates_ignored_empty">Nincs kihagyott csoport</string>
     <string name="duplicates_filter_match_label">Egyezés</string>
 
     <!-- Album műveletek + megosztás -->

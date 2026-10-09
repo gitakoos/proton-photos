@@ -68,6 +68,8 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PhotoAlbum
 import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -176,6 +178,10 @@ fun DuplicateFinderScreen(
 
         var filter by rememberSaveable { mutableStateOf(DupFilter.ALL) }
         var scope by rememberSaveable { mutableStateOf(DupScope.ALL) }
+        // The ignored groups are left out of the list; this switch shows only them, to bring one back.
+        var showIgnored by rememberSaveable { mutableStateOf(false) }
+        val ignoredKeys by viewModel.ignoredGroups.collectAsStateWithLifecycle()
+        val ignoredIndex = remember(ignoredKeys) { IgnoredDuplicateGroups(ignoredKeys.orEmpty()) }
         var showFilterSheet by remember { mutableStateOf(false) }
         val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         val listState = rememberLazyListState()
@@ -198,10 +204,20 @@ fun DuplicateFinderScreen(
         // library in memory and blow the heap on large libraries, so never do that here.
         val showDevice = scope != DupScope.CLOUD
         val showCloud = scope != DupScope.DEVICE
-        val deviceGroups = if (showDevice) state.deviceGroups else emptyList()
-        val cloudGroups = if (showCloud) state.cloudGroups else emptyList()
-        val similarDeviceGroups = if (showDevice) state.similarDeviceGroups else emptyList()
-        val similarCloudGroups = if (showCloud) state.similarCloudGroups else emptyList()
+        // Ignored groups are the other half of the same lists: the list shows the ones that are not, or with
+        // the Ignored switch on, only the ones that are.
+        val deviceGroups = remember(state.deviceGroups, showDevice, ignoredIndex, showIgnored) {
+            if (showDevice) state.deviceGroups.filter { ignoredIndex.contains(it) == showIgnored } else emptyList()
+        }
+        val cloudGroups = remember(state.cloudGroups, showCloud, ignoredIndex, showIgnored) {
+            if (showCloud) state.cloudGroups.filter { ignoredIndex.contains(it) == showIgnored } else emptyList()
+        }
+        val similarDeviceGroups = remember(state.similarDeviceGroups, showDevice, ignoredIndex, showIgnored) {
+            if (showDevice) state.similarDeviceGroups.filter { ignoredIndex.contains(it) == showIgnored } else emptyList()
+        }
+        val similarCloudGroups = remember(state.similarCloudGroups, showCloud, ignoredIndex, showIgnored) {
+            if (showCloud) state.similarCloudGroups.filter { ignoredIndex.contains(it) == showIgnored } else emptyList()
+        }
         // ALL (the default) shows both kinds; the other two narrow the list to one kind.
         val showExact = filter != DupFilter.SIMILAR
         val showSim = filter != DupFilter.IDENTICAL
@@ -233,6 +249,15 @@ fun DuplicateFinderScreen(
         val selectAllButFirstListed: () -> Unit = {
             groupSelections.putAll(selectAllButFirstInUnpicked(listedGroups, groupSelections))
         }
+        // Ignoring a group drops any ticks in it; restoring one from the Ignored list needs none.
+        val toggleIgnore: (DuplicateGroup) -> Unit = { group ->
+            if (showIgnored) {
+                viewModel.restoreGroup(group)
+            } else {
+                groupSelections.remove(duplicateGroupKey(group))
+                viewModel.ignoreGroup(group)
+            }
+        }
         // Whether Select all has anything left to tick: a listed group of two or more copies with no pick.
         val canSelectMore = listedGroups.any {
             it.items.size > 1 && groupSelections[duplicateGroupKey(it)].isNullOrEmpty()
@@ -246,7 +271,7 @@ fun DuplicateFinderScreen(
         BackHandler(enabled = selectedItems.isNotEmpty()) { showLeaveConfirm = true }
 
         when {
-            state.isLoading -> Box(
+            state.isLoading || ignoredKeys == null -> Box(
                 Modifier.fillMaxSize().padding(top = contentTopPad),
                 contentAlignment = Alignment.Center,
             ) {
@@ -276,10 +301,17 @@ fun DuplicateFinderScreen(
                 if (!exactVisible && !similarVisible) {
                     item("empty") {
                         EmptyState(
-                            title = stringResource(R.string.duplicates_empty),
+                            title = stringResource(
+                                if (showIgnored) R.string.duplicates_ignored_empty else R.string.duplicates_empty,
+                            ),
                             icon = Icons.Default.ContentCopy,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
                         )
+                    }
+                }
+                if (showIgnored && (exactVisible || similarVisible)) {
+                    item("hint-ignored") {
+                        Text(stringResource(R.string.duplicates_ignored_hint), color = FgMute, fontSize = 12.sp)
                     }
                 }
                 if (showExact) {
@@ -294,6 +326,8 @@ fun DuplicateFinderScreen(
                                 albumNames = albumNames,
                                 selected = groupSelections[key].orEmpty(),
                                 onSelectionChange = { groupSelections[key] = it },
+                                ignored = showIgnored,
+                                onToggleIgnore = { toggleIgnore(group) },
                                 onOpenReviewAt = { idx ->
                                     reviewGroup = group
                                     reviewInitialIndex = idx
@@ -314,6 +348,8 @@ fun DuplicateFinderScreen(
                                 albumNames = albumNames,
                                 selected = groupSelections[key].orEmpty(),
                                 onSelectionChange = { groupSelections[key] = it },
+                                ignored = showIgnored,
+                                onToggleIgnore = { toggleIgnore(group) },
                                 onOpenReviewAt = { idx ->
                                     reviewGroup = group
                                     reviewInitialIndex = idx
@@ -342,6 +378,8 @@ fun DuplicateFinderScreen(
                                 albumNames = albumNames,
                                 selected = groupSelections[key].orEmpty(),
                                 onSelectionChange = { groupSelections[key] = it },
+                                ignored = showIgnored,
+                                onToggleIgnore = { toggleIgnore(group) },
                                 onOpenReviewAt = { idx ->
                                     reviewGroup = group
                                     reviewInitialIndex = idx
@@ -359,6 +397,8 @@ fun DuplicateFinderScreen(
                                 albumNames = albumNames,
                                 selected = groupSelections[key].orEmpty(),
                                 onSelectionChange = { groupSelections[key] = it },
+                                ignored = showIgnored,
+                                onToggleIgnore = { toggleIgnore(group) },
                                 onOpenReviewAt = { idx ->
                                     reviewGroup = group
                                     reviewInitialIndex = idx
@@ -388,8 +428,9 @@ fun DuplicateFinderScreen(
         // and match-type sheet; it carries the accent outline when a non-default filter is active. While
         // any group is listed, the bubble before it ticks every copy but the first of each group with no
         // pick yet.
-        val filtersActive = scope != DupScope.ALL || filter != DupFilter.ALL
-        val showSelectAllButFirst = listedGroups.isNotEmpty()
+        val filtersActive = scope != DupScope.ALL || filter != DupFilter.ALL || showIgnored
+        // Ticking all but the first of groups the user chose to leave alone would work against that choice.
+        val showSelectAllButFirst = listedGroups.isNotEmpty() && !showIgnored
         FloatingHeader(
             title = stringResource(R.string.duplicates_title),
             onBack = confirmedOnBack,
@@ -445,7 +486,7 @@ fun DuplicateFinderScreen(
             modifier = Modifier.align(Alignment.BottomCenter),
             // Select all runs the header button's rule on the groups with no pick yet. No count is handed
             // in, so it selects at once exactly as that button does; the delete keeps its own confirmation.
-            onSelectAll = if (canSelectMore) selectAllButFirstListed else null,
+            onSelectAll = if (canSelectMore && !showIgnored) selectAllButFirstListed else null,
         )
         if (showBatchConfirm) {
             // A backed-up (Synced) copy carries its device file with it, so the message says so, exactly
@@ -524,8 +565,10 @@ fun DuplicateFinderScreen(
                 DuplicateFilterSheet(
                     scope = scope,
                     filter = filter,
+                    showIgnored = showIgnored,
                     onScopeChange = { scope = it },
                     onFilterChange = { filter = it },
+                    onShowIgnoredChange = { showIgnored = it },
                 )
             }
         }
@@ -605,15 +648,18 @@ internal fun duplicatesFreedBytes(items: List<GalleryItem>): Long = items.sumOf 
  * The duplicate-list filter sheet, opened from the header filter bubble: a sync-status section (on
  * device / cloud only, the same chips and vocabulary the timeline sync filter uses) and a match-type
  * section (identical / similar). Both are two-chip toggles with no explicit All chip, matching the
- * timeline sheet: tapping the active chip clears back to ALL. State is screen-level and narrows the
- * list at render time, so no view-model round trip is involved.
+ * timeline sheet: tapping the active chip clears back to ALL. A last section switches the list to the groups
+ * the user ignores. State is screen-level and narrows the list at render time, so no view-model round trip
+ * is involved.
  */
 @Composable
 private fun DuplicateFilterSheet(
     scope: DupScope,
     filter: DupFilter,
+    showIgnored: Boolean,
     onScopeChange: (DupScope) -> Unit,
     onFilterChange: (DupFilter) -> Unit,
+    onShowIgnoredChange: (Boolean) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -660,6 +706,15 @@ private fun DuplicateFilterSheet(
                 onClick = { onFilterChange(if (filter == DupFilter.SIMILAR) DupFilter.ALL else DupFilter.SIMILAR) },
             )
         }
+        FilterSectionLabel(stringResource(R.string.duplicates_filter_ignored_label))
+        FilterChip(
+            label = stringResource(R.string.duplicates_filter_ignored),
+            selected = showIgnored,
+            accentWhenSelected = true,
+            trailingClear = true,
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { onShowIgnoredChange(!showIgnored) },
+        )
     }
 }
 
@@ -684,7 +739,8 @@ private fun ScanningRow() {
  * action below can then only ever delete a STRICT subset of the group, never all of it, because it
  * sends the view model the complement (the keepers) and stays disabled while nothing is ticked. The
  * selection's key follows the group's membership, so pruning a deleted copy re-seeds it and the
- * removal set can never name a copy the group no longer holds.
+ * removal set can never name a copy the group no longer holds. A pill at the bottom leaves the group out of
+ * the list ([ignored] false) or brings it back from the Ignored list ([ignored] true).
  */
 @Composable
 private fun DuplicateGroupCard(
@@ -693,6 +749,8 @@ private fun DuplicateGroupCard(
     albumNames: Map<String, String>,
     selected: Set<String>,
     onSelectionChange: (Set<String>) -> Unit,
+    ignored: Boolean,
+    onToggleIgnore: () -> Unit,
     onOpenReviewAt: (index: Int) -> Unit,
     requestDecrypt: (String) -> Unit,
     cancelDecrypt: (String) -> Unit,
@@ -750,6 +808,34 @@ private fun DuplicateGroupCard(
                     },
                     requestDecrypt = requestDecrypt,
                     cancelDecrypt = cancelDecrypt,
+                )
+            }
+        }
+        // Leave the group out of the list (or, in the Ignored list, bring it back). One pill on a line of
+        // its own, so a long label in any language has the whole width and never squeezes another control.
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+                    .clickable(onClick = onToggleIgnore)
+                    .padding(horizontal = 12.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    if (ignored) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = null,
+                    tint = if (ignored) Accent else FgDim,
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    stringResource(if (ignored) R.string.duplicates_unignore_group else R.string.duplicates_ignore_group),
+                    color = if (ignored) Accent else FgDim,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

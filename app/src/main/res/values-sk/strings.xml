@@ -1602,6 +1602,12 @@
     <string name="thanks_2_5_0_dismiss">Zavrieť</string>
     <string name="duplicates_filter_identical">Rovnaké</string>
     <string name="duplicates_filter_similar">Podobné</string>
+    <string name="duplicates_ignore_group">Ignorovať</string>
+    <string name="duplicates_unignore_group">Prestať ignorovať</string>
+    <string name="duplicates_filter_ignored_label">Ignorované skupiny</string>
+    <string name="duplicates_filter_ignored">Zobraziť ignorované</string>
+    <string name="duplicates_ignored_hint">Tieto skupiny sa v zozname nezobrazujú. Ťuknutím na Prestať ignorovať ju vrátite.</string>
+    <string name="duplicates_ignored_empty">Žiadne ignorované skupiny</string>
     <string name="duplicates_filter_match_label">Zhoda</string>
 
     <!-- Duplicate-finder source badges -->

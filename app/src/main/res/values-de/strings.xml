@@ -1524,6 +1524,12 @@
     <string name="thanks_2_5_0_dismiss">Schließen</string>
     <string name="duplicates_filter_identical">Identisch</string>
     <string name="duplicates_filter_similar">Ähnlich</string>
+    <string name="duplicates_ignore_group">Ignorieren</string>
+    <string name="duplicates_unignore_group">Nicht mehr ignorieren</string>
+    <string name="duplicates_filter_ignored_label">Ignorierte Gruppen</string>
+    <string name="duplicates_filter_ignored">Ignorierte anzeigen</string>
+    <string name="duplicates_ignored_hint">Diese Gruppen fehlen in der Liste. Tippe auf „Nicht mehr ignorieren“, um eine zurückzuholen.</string>
+    <string name="duplicates_ignored_empty">Keine ignorierten Gruppen</string>
     <string name="duplicates_filter_match_label">Übereinstimmung</string>
     <string name="duplicates_badge_cloud">Cloud</string>
     <string name="duplicates_badge_device">Gerät</string>

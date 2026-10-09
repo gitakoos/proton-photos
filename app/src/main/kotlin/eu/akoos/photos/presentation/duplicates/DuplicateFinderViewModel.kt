@@ -31,6 +31,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -113,6 +115,7 @@ class DuplicateFinderViewModel @Inject constructor(
     private val perceptualHashDao: PerceptualHashDao,
     private val perceptualHashScheduler: PerceptualHashScheduler,
     private val localContentHashFiller: LocalContentHashFiller,
+    private val ignoreStore: DuplicateIgnoreStore,
 ) : ViewModel() {
 
     data class UiState(
@@ -132,6 +135,23 @@ class DuplicateFinderViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+    /** The groups the user ignores, as [duplicateIgnoreKey]s, or null until the stored set has been read,
+     *  so the list never shows an ignored group for the beat before it is known to be one. */
+    val ignoredGroups: StateFlow<Set<String>?> = ignoreStore.keys
+        .map<Set<String>, Set<String>?> { it }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** Leaves [group] out of the list until it is restored. */
+    fun ignoreGroup(group: FindDuplicatesUseCase.DuplicateGroup) {
+        viewModelScope.launch { ignoreStore.add(duplicateIgnoreKey(group)) }
+    }
+
+    /** Brings an ignored [group] back into the list. */
+    fun restoreGroup(group: FindDuplicatesUseCase.DuplicateGroup) {
+        val covering = IgnoredDuplicateGroups(ignoredGroups.value.orEmpty()).keysCovering(group)
+        viewModelScope.launch { ignoreStore.remove(covering) }
+    }
 
     private var primaryUserId: UserId? = null
 

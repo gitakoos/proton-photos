@@ -1539,6 +1539,12 @@
     <string name="thanks_2_5_0_dismiss">Sluiten</string>
     <string name="duplicates_filter_identical">Identiek</string>
     <string name="duplicates_filter_similar">Vergelijkbaar</string>
+    <string name="duplicates_ignore_group">Negeren</string>
+    <string name="duplicates_unignore_group">Niet meer negeren</string>
+    <string name="duplicates_filter_ignored_label">Genegeerde groepen</string>
+    <string name="duplicates_filter_ignored">Genegeerde tonen</string>
+    <string name="duplicates_ignored_hint">Deze groepen staan niet in de lijst. Tik op Niet meer negeren om er een terug te halen.</string>
+    <string name="duplicates_ignored_empty">Geen genegeerde groepen</string>
     <string name="duplicates_filter_match_label">Overeenkomst</string>
 
     <!-- Duplicate badges -->

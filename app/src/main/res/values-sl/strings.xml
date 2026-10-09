@@ -1603,6 +1603,12 @@
     <string name="thanks_2_5_0_dismiss">Zapri</string>
     <string name="duplicates_filter_identical">Enake</string>
     <string name="duplicates_filter_similar">Podobne</string>
+    <string name="duplicates_ignore_group">Ne upoštevaj</string>
+    <string name="duplicates_unignore_group">Upoštevaj znova</string>
+    <string name="duplicates_filter_ignored_label">Neupoštevane skupine</string>
+    <string name="duplicates_filter_ignored">Pokaži neupoštevane</string>
+    <string name="duplicates_ignored_hint">Te skupine niso na seznamu. Tapnite Upoštevaj znova, da jo vrnete.</string>
+    <string name="duplicates_ignored_empty">Ni neupoštevanih skupin</string>
     <string name="duplicates_filter_match_label">Ujemanje</string>
 
     <!-- Duplicate badges (single-word source-of-copy chips) -->

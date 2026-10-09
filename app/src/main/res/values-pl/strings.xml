@@ -1602,6 +1602,12 @@
     <string name="thanks_2_5_0_dismiss">Zamknij</string>
     <string name="duplicates_filter_identical">Identyczne</string>
     <string name="duplicates_filter_similar">Podobne</string>
+    <string name="duplicates_ignore_group">Ignoruj</string>
+    <string name="duplicates_unignore_group">Przestań ignorować</string>
+    <string name="duplicates_filter_ignored_label">Ignorowane grupy</string>
+    <string name="duplicates_filter_ignored">Pokaż ignorowane</string>
+    <string name="duplicates_ignored_hint">Te grupy są pominięte na liście. Stuknij Przestań ignorować, aby jedną przywrócić.</string>
+    <string name="duplicates_ignored_empty">Brak ignorowanych grup</string>
     <string name="duplicates_filter_match_label">Dopasowanie</string>
     <string name="duplicates_badge_cloud">Chmura</string>
     <string name="duplicates_badge_device">Urządzenie</string>

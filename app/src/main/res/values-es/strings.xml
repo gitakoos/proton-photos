@@ -1547,6 +1547,12 @@
     <string name="thanks_2_5_0_dismiss">Cerrar</string>
     <string name="duplicates_filter_identical">Idénticas</string>
     <string name="duplicates_filter_similar">Similares</string>
+    <string name="duplicates_ignore_group">Ignorar</string>
+    <string name="duplicates_unignore_group">Dejar de ignorar</string>
+    <string name="duplicates_filter_ignored_label">Grupos ignorados</string>
+    <string name="duplicates_filter_ignored">Mostrar ignorados</string>
+    <string name="duplicates_ignored_hint">Estos grupos no aparecen en la lista. Toca Dejar de ignorar para recuperar uno.</string>
+    <string name="duplicates_ignored_empty">No hay grupos ignorados</string>
     <string name="duplicates_filter_match_label">Coincidencia</string>
 
     <!-- Duplicate badges -->

@@ -2290,6 +2290,12 @@
     <string name="thanks_2_5_0_dismiss">Dismiss</string>
     <string name="duplicates_filter_identical">Identical</string>
     <string name="duplicates_filter_similar">Similar</string>
+    <string name="duplicates_ignore_group">Ignore</string>
+    <string name="duplicates_unignore_group">Stop ignoring</string>
+    <string name="duplicates_filter_ignored_label">Ignored groups</string>
+    <string name="duplicates_filter_ignored">Show ignored</string>
+    <string name="duplicates_ignored_hint">These groups are left out of the list. Tap Stop ignoring to bring one back.</string>
+    <string name="duplicates_ignored_empty">No ignored groups</string>
     <string name="duplicates_filter_match_label">Match type</string>
     <!-- Collage -->
     <string name="collage_save">Save</string>

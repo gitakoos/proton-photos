@@ -2173,6 +2173,12 @@
     <string name="thanks_2_5_0_dismiss">Kapat</string>
     <string name="duplicates_filter_identical">Birebir aynı</string>
     <string name="duplicates_filter_similar">Benzer</string>
+    <string name="duplicates_ignore_group">Yok say</string>
+    <string name="duplicates_unignore_group">Yok saymayı bırak</string>
+    <string name="duplicates_filter_ignored_label">Yok sayılan gruplar</string>
+    <string name="duplicates_filter_ignored">Yok sayılanları göster</string>
+    <string name="duplicates_ignored_hint">Bu gruplar listede gösterilmiyor. Birini geri getirmek için Yok saymayı bırak\'a dokunun.</string>
+    <string name="duplicates_ignored_empty">Yok sayılan grup yok</string>
     <string name="duplicates_filter_match_label">Eşleşme türü</string>
     <string name="collage_save">Kaydet</string>
     <string name="collage_aspect_original">Orijinal</string>

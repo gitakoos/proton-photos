@@ -57,6 +57,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -131,76 +132,92 @@ fun FloatingHeader(
     val titleShape = RoundedCornerShape(20.dp)
     Box(modifier = modifier.fillMaxWidth()) {
         if (showScrim) FloatingHeaderScrim()
-        // Top alignment (not center) so a title pill that expands into a menu grows downward while the
-        // back button and trailing controls stay pinned to the top of the row.
-        Row(
+        // The back button and the trailing controls keep their full size and the title takes what is left,
+        // shortening with an ellipsis when its words are long (a long translation, two trailing bubbles),
+        // rather than the controls being squeezed. The title stays centered on the screen while it fits
+        // there and otherwise sits as close to it as the free room allows. Everything is top-aligned, so a
+        // title pill that expands into a menu grows downward while the controls stay pinned to the top.
+        Layout(
+            content = {
+                IconBubble(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.onboarding_back),
+                    onClick = debouncedBack,
+                    diameter = 40.dp,
+                    iconSize = 18.dp,
+                    background = colors.pillBg,
+                    borderColor = colors.pillBorder,
+                    tint = colors.fgPrimary,
+                )
+                Column(
+                    modifier = Modifier
+                        .clip(titleShape)
+                        .background(colors.pillBg, titleShape)
+                        .border(0.5.dp, colors.pillBorder, titleShape)
+                        .animateContentSize(),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .then(if (hasMenu) Modifier.clickable { menuExpanded = !menuExpanded } else Modifier)
+                            .padding(start = 16.dp, end = if (hasMenu) 8.dp else 16.dp, top = 9.dp, bottom = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            title,
+                            color = colors.fgPrimary,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 190.dp),
+                        )
+                        if (hasMenu) {
+                            Icon(
+                                if (menuExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                contentDescription = null,
+                                tint = colors.fgPrimary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                    if (hasMenu && menuExpanded) {
+                        menuItems?.forEach { (label, action) ->
+                            Text(
+                                text = label,
+                                color = colors.fgPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .clickable { menuExpanded = false; action() }
+                                    .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
+                            )
+                        }
+                    }
+                }
+                if (trailing != null) Row(verticalAlignment = Alignment.Top) { trailing() }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .padding(start = 12.dp, end = 12.dp, top = 8.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            IconBubble(
-                icon = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.onboarding_back),
-                onClick = debouncedBack,
-                diameter = 40.dp,
-                iconSize = 18.dp,
-                background = colors.pillBg,
-                borderColor = colors.pillBorder,
-                tint = colors.fgPrimary,
-            )
-            // Weight spacers on both sides keep the title optically centered; a trailing control
-            // replaces the right balance spacer so the title stays centered when one is present.
-            Spacer(Modifier.weight(1f))
-            Column(
-                modifier = Modifier
-                    .clip(titleShape)
-                    .background(colors.pillBg, titleShape)
-                    .border(0.5.dp, colors.pillBorder, titleShape)
-                    .animateContentSize(),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .then(if (hasMenu) Modifier.clickable { menuExpanded = !menuExpanded } else Modifier)
-                        .padding(start = 16.dp, end = if (hasMenu) 8.dp else 16.dp, top = 9.dp, bottom = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        title,
-                        color = colors.fgPrimary,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.widthIn(max = 190.dp),
-                    )
-                    if (hasMenu) {
-                        Icon(
-                            if (menuExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
-                            contentDescription = null,
-                            tint = colors.fgPrimary,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-                if (hasMenu && menuExpanded) {
-                    menuItems?.forEach { (label, action) ->
-                        Text(
-                            text = label,
-                            color = colors.fgPrimary,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier
-                                .clickable { menuExpanded = false; action() }
-                                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp),
-                        )
-                    }
-                }
+        ) { measurables, constraints ->
+            val gap = 8.dp.roundToPx()
+            val placeholder = 40.dp.roundToPx()
+            val loose = constraints.copy(minWidth = 0, minHeight = 0)
+            val back = measurables[0].measure(loose)
+            val end = measurables.getOrNull(2)?.measure(loose)
+            val freeStart = back.width + gap
+            val freeEnd = constraints.maxWidth - (end?.width ?: placeholder) - gap
+            val titlePlaceable = measurables[1].measure(loose.copy(maxWidth = (freeEnd - freeStart).coerceAtLeast(0)))
+            val centered = (constraints.maxWidth - titlePlaceable.width) / 2
+            val titleX = centered.coerceIn(freeStart, maxOf(freeStart, freeEnd - titlePlaceable.width))
+            val height = maxOf(back.height, titlePlaceable.height, end?.height ?: 0)
+            layout(constraints.maxWidth, height) {
+                back.placeRelative(0, 0)
+                titlePlaceable.placeRelative(titleX, 0)
+                end?.placeRelative(constraints.maxWidth - end.width, 0)
             }
-            Spacer(Modifier.weight(1f))
-            if (trailing != null) trailing() else Spacer(Modifier.size(40.dp))
         }
     }
 }
