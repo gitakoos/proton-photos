@@ -179,7 +179,9 @@ import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
+import eu.akoos.photos.presentation.albums.LibraryTile
 import eu.akoos.photos.presentation.search.components.AlbumsRow
+import eu.akoos.photos.presentation.search.components.DestinationsRow
 import eu.akoos.photos.presentation.search.components.JumpToMonthHeader
 import eu.akoos.photos.presentation.search.components.MonthTileRow
 import eu.akoos.photos.presentation.search.components.OnThisDayRow
@@ -230,6 +232,8 @@ fun SearchScreen(
     onOpenAlbum: (Album) -> Unit = {},
     /** Opens a device folder by its bucket name, from the same two places. */
     onOpenDeviceFolder: (bucketName: String) -> Unit = {},
+    /** Opens the page of a shortcut tile the typed name matches, from the row above the results. */
+    onOpenDestination: (LibraryTile) -> Unit = {},
     /** Set when the search picks photos for a picker rather than acting on them. */
     pick: SearchPick? = null,
     vm: SearchViewModel = hiltViewModel(),
@@ -238,7 +242,8 @@ fun SearchScreen(
     val query by vm.query.collectAsStateWithLifecycle()
     val peopleSuggestions by vm.peopleSuggestions.collectAsStateWithLifecycle()
     val albumRow by vm.albumRow.collectAsStateWithLifecycle()
-    val albumSuggestions by vm.albumSuggestions.collectAsStateWithLifecycle()
+    val matchedAlbums by vm.albumSuggestions.collectAsStateWithLifecycle()
+    val destinations by vm.destinations.collectAsStateWithLifecycle()
     val rawResults by vm.results.collectAsStateWithLifecycle()
     val searchScope by vm.scope.collectAsStateWithLifecycle()
     // A picker never offers what the target already holds.
@@ -294,7 +299,14 @@ fun SearchScreen(
 
     // The name matches the floating header lists above the results.
     val showPeopleSuggestions = query.isNotBlank() && peopleSuggestions.isNotEmpty()
+    // A picker narrows to the user's own albums, so an album shared with them is not offered there, and
+    // the shortcut tiles lead away from the picker, so none are.
+    val albumSuggestions = remember(matchedAlbums, pick == null) {
+        if (pick == null) matchedAlbums
+        else matchedAlbums.filterNot { it is SearchAlbum.Cloud && it.album.isSharedWithMe }
+    }
     val showAlbumSuggestions = query.isNotBlank() && albumSuggestions.isNotEmpty()
+    val showDestinations = pick == null && query.isNotBlank() && destinations.isNotEmpty()
     val openAlbum: (SearchAlbum) -> Unit = { entry ->
         if (pick != null) {
             // A picker narrows the search to the album, which sits in the field as a pill.
@@ -605,7 +617,7 @@ fun SearchScreen(
         val isIdle = SearchFilter.nothingAsked(query, filter, selectedCategory, personSelected = selectedPersonId != null)
         // The people and albums whose name matches the query are rows of the results, so a name that
         // matched no photo still has something to show.
-        val hasMatches = showPeopleSuggestions || showAlbumSuggestions
+        val hasMatches = showPeopleSuggestions || showAlbumSuggestions || showDestinations
         val phase = when {
             pick != null && results.isEmpty() && isIdle -> 0
             results.isEmpty() && isIdle -> 1
@@ -754,7 +766,8 @@ fun SearchScreen(
         } else {
             Box(modifier = Modifier.fillMaxSize()) {
                 // Full-width rows ahead of the first photo, which the viewer's return position counts.
-                val leadingRows = (if (showPeopleSuggestions) 1 else 0) + (if (showAlbumSuggestions) 1 else 0)
+                val leadingRows = (if (showDestinations) 1 else 0) +
+                    (if (showPeopleSuggestions) 1 else 0) + (if (showAlbumSuggestions) 1 else 0)
                 // Drag-to-select: long-press a cell then drag to sweep a range. Cells key on the
                 // shared keyOf() (LocalOnly/Synced by uri, CloudOnly by linkId); the swept keys map
                 // back to the whole GalleryItem the selection holds.
@@ -799,8 +812,14 @@ fun SearchScreen(
                         .then(if (pick == null) Modifier.navigationBarsPadding() else Modifier)
                         .then(dragSelectModifier),
                 ) {
-                    // People whose name matches, then the albums and folders whose name matches: rows of
-                    // the results, so they scroll with the photos instead of riding the header.
+                    // The shortcut tiles the name matches, then the people whose name matches, then the albums
+                    // and folders whose name matches: rows of the results, so they scroll with the photos
+                    // instead of riding the header.
+                    if (showDestinations) {
+                        item(key = "match_destinations", span = { GridItemSpan(maxLineSpan) }) {
+                            DestinationsRow(tiles = destinations, onOpen = onOpenDestination)
+                        }
+                    }
                     if (showPeopleSuggestions) {
                         item(key = "match_people", span = { GridItemSpan(maxLineSpan) }) {
                             PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = openPerson)

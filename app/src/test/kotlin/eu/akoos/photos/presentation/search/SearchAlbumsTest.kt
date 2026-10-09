@@ -147,6 +147,29 @@ class SearchAlbumsTest {
     }
 
     @Test
+    fun `an album shared with the user is found by name after the rest, but not listed in the row`() {
+        val sharedPets = album("sp", "Pets of a friend", lastActivityTimeMs = 999, sharedByEmail = "friend@example.com")
+        val withShared = source.copy(sharedAlbums = listOf(sharedPets))
+        assertFalse(cloud(sharedPets) in SearchAlbums.row(withShared))
+        assertEquals(listOf(cloud(pets), cloud(sharedPets)), SearchAlbums.matches(withShared, "pets"))
+    }
+
+    @Test
+    fun `a shared album with the exact name leads the partial matches`() {
+        val sharedExact = album("sp", "Pets", lastActivityTimeMs = 1, sharedByEmail = "friend@example.com")
+        val petsTwo = album("pets2", "Pets 2", lastActivityTimeMs = 900)
+        val both = source.copy(cloudAlbums = source.cloudAlbums + petsTwo, sharedAlbums = listOf(sharedExact))
+        // Exact names lead, the user's own album ahead of the shared one, then the name starting with it.
+        assertEquals(listOf(cloud(pets), cloud(sharedExact), cloud(petsTwo)), SearchAlbums.matches(both, "pets"))
+    }
+
+    @Test
+    fun `a guest has no shared albums to find`() {
+        val guest = SearchAlbums.Source(deviceFolders = listOf(camera))
+        assertTrue(SearchAlbums.matches(guest, "friend").isEmpty())
+    }
+
+    @Test
     fun `a blank query finds nothing`() {
         for (query in listOf("", " ", "   ", "\t\n")) {
             assertTrue("'$query'", SearchAlbums.matches(source, query).isEmpty())

@@ -91,6 +91,7 @@ import eu.akoos.photos.presentation.albums.AlbumDetailScreen
 import eu.akoos.photos.presentation.albums.AlbumOpenAction
 import eu.akoos.photos.presentation.albums.AlbumPhotoPickerScreen
 import eu.akoos.photos.presentation.albums.AlbumPhotoPickerViewModel
+import eu.akoos.photos.presentation.albums.LibraryTile
 import eu.akoos.photos.presentation.auth.SignInScreen
 import eu.akoos.photos.presentation.calendar.CalendarScreen
 import eu.akoos.photos.presentation.calendar.DayDetailScreen
@@ -1989,6 +1990,20 @@ fun NavGraph(
                     deviceFolderOpenAction = null
                     deviceFolderFromVault = false
                     navController.navigate(Screen.DeviceFolderDetail.route)
+                },
+                // The pages the Albums tab's shortcut tiles lead to, by the same routes.
+                onOpenDestination = { tile ->
+                    when (tile) {
+                        LibraryTile.Collection -> navController.navigate(Screen.Memories.route)
+                        LibraryTile.Hidden -> navController.navigate(Screen.HiddenAlbum.route)
+                        LibraryTile.Shared -> navController.navigate(Screen.Shared.route)
+                        LibraryTile.Map ->
+                            if (!mapStylePrompted) showMapStyleChooser = true
+                            else navController.navigate(if (mapStyleOsm) Screen.Map.route else Screen.CustomMap.route)
+                        LibraryTile.Calendar -> navController.navigate(Screen.Calendar.route)
+                        LibraryTile.People -> navController.navigate(Screen.People.route)
+                        LibraryTile.Offline -> navController.navigate(Screen.Offline.route)
+                    }
                 },
             )
         }

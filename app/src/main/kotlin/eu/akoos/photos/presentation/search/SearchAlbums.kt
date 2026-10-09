@@ -51,7 +51,7 @@ sealed interface SearchAlbum {
  * What the Search screen shows of the albums: the idle page's Albums row, and the albums and folders
  * a typed query finds. Both draw on the cards the Albums tab lays out, in its order: the user's own
  * cloud albums, then the device folders. Albums shared with the user have their own tab and stay off
- * both.
+ * the idle row, but a typed name finds them after the rest.
  */
 internal object SearchAlbums {
 
@@ -63,6 +63,8 @@ internal object SearchAlbums {
     data class Source(
         val cloudAlbums: List<Album> = emptyList(),
         val deviceFolders: List<DeviceFolder> = emptyList(),
+        /** The albums other people shared with the user, which only a typed name reaches. */
+        val sharedAlbums: List<Album> = emptyList(),
         val hiddenAlbumIds: Set<String> = emptySet(),
         /** The albums and folders taken off the grid, as [AlbumsGridExclusion] stores them. */
         val excluded: Set<String> = emptySet(),
@@ -90,7 +92,8 @@ internal object SearchAlbums {
      * the Albums tab's order.
      *
      * An album or folder taken off the grid is still found, since that exclusion is about the grid
-     * alone. A hidden album never is. A blank query finds nothing.
+     * alone. A hidden album never is. An album shared with the user is found too, after the user's own
+     * albums and the folders. A blank query finds nothing.
      */
     fun matches(source: Source, query: String): List<SearchAlbum> {
         val needle = SearchFilter.fold(query.trim())
@@ -98,7 +101,7 @@ internal object SearchAlbums {
         val exact = ArrayList<SearchAlbum>()
         val startsWith = ArrayList<SearchAlbum>()
         val contains = ArrayList<SearchAlbum>()
-        for (entry in candidates(source)) {
+        for (entry in candidates(source) + sharedWithMe(source)) {
             val name = SearchFilter.fold(entry.name.trim())
             when {
                 name == needle -> exact += entry
@@ -108,6 +111,10 @@ internal object SearchAlbums {
         }
         return exact + startsWith + contains
     }
+
+    /** The albums shared with the user, newest activity first as the cache lists them, less any hidden. */
+    private fun sharedWithMe(source: Source): List<SearchAlbum> =
+        source.sharedAlbums.filter { it.linkId !in source.hiddenAlbumIds }.map { SearchAlbum.Cloud(it) }
 
     /** Every card either surface may show, in the Albums tab's order: the user's own cloud albums sorted
      *  as the grid sorts them, less the hidden ones, then the folders that still hold a photo. */

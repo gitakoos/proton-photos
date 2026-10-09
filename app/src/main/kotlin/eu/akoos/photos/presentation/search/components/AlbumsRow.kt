@@ -109,8 +109,11 @@ private fun SearchAlbumCard(entry: SearchAlbum, onClick: () -> Unit) {
                 coverModel = album.coverThumbnailUrl,
                 title = album.name,
                 metaText = pluralStringResource(R.plurals.count_items_plural, album.photoCount, album.photoCount),
-                // Only the user's own albums reach this row, so a shared one is always shared by them.
-                shareBadge = if (album.isShared) AlbumShareBadge.SharedByMe else AlbumShareBadge.None,
+                shareBadge = when {
+                    album.isSharedWithMe -> AlbumShareBadge.SharedWithMe
+                    album.isShared -> AlbumShareBadge.SharedByMe
+                    else -> AlbumShareBadge.None
+                },
                 cloudBadge = AlbumCloudBadge.Cloud,
                 onClick = onClick,
                 modifier = cardModifier,

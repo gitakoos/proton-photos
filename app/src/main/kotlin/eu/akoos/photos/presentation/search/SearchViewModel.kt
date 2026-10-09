@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -84,7 +85,9 @@ import eu.akoos.photos.domain.usecase.SemanticSearchUseCase
 import eu.akoos.photos.domain.usecase.decodeAlbumOrder
 import eu.akoos.photos.presentation.albums.AlbumBrowseSource
 import eu.akoos.photos.presentation.albums.DeviceFolderCards
+import eu.akoos.photos.presentation.albums.LibraryTile
 import eu.akoos.photos.presentation.albums.deviceBucketOf
+import eu.akoos.photos.presentation.albums.resolveTileOrder
 import eu.akoos.photos.presentation.common.GalleryItemSelectionController
 import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.gallery.ContentFilter
@@ -122,6 +125,16 @@ private class ScopeFilter(private val linkIds: Set<String>?, private val folder:
         return deviceBucketOf(item) == folder
     }
 }
+
+/**
+ * One step of the content search: whether it is running, and the ranked keys when it has them. [keys] is
+ * null while a new query is still being embedded, which leaves the previous query's ranking in place.
+ */
+internal data class RankStep(val loading: Boolean, val keys: List<String>?)
+
+/** The (still-running, ranked keys) pair after [step]: its keys when it has them, otherwise those held. */
+internal fun Pair<Boolean, List<String>>.after(step: RankStep): Pair<Boolean, List<String>> =
+    step.loading to (step.keys ?: second)
 
 /** Backs the Search screen. Filters the merged gallery by displayName substring + ContentFilter. */
 @HiltViewModel
@@ -249,7 +262,7 @@ class SearchViewModel @Inject constructor(
     /** The text field updates [_query] on every keystroke for instant echo, but the heavy
      *  per-item filter only needs to run once typing settles. Debouncing the query feed into
      *  [results] keeps the field responsive while sparing the library a full re-scan per key. */
-    private val debouncedQuery = _query.debounce(250)
+    private val debouncedQuery = _query.debounce(QUERY_SETTLE_MS)
 
     /** The chip-driven inputs folded into one value so the [results] combine stays within the typed
      *  5-flow arity: the category chip, the Offline pin set, the Favourites device-heart set, and the
@@ -280,13 +293,14 @@ class SearchViewModel @Inject constructor(
     private data class LocalizedText(
         val months: List<String>,
         val filterNames: Map<GalleryFilter, String>,
+        val tileNames: Map<LibraryTile, String>,
     ) {
         val categoryNames: Map<Int, String> =
             filterNames.entries.mapNotNull { (filter, name) -> filter.tagId?.let { it to name } }.toMap()
     }
 
     private val localizedText: Flow<LocalizedText> = _locale
-        .map { LocalizedText(SearchFilter.foldedMonthNames(it), foldedFilterNames(it)) }
+        .map { LocalizedText(SearchFilter.foldedMonthNames(it), foldedFilterNames(it), foldedTileNames(it)) }
         .distinctUntilChanged()
         .flowOn(Dispatchers.Default)
 
@@ -345,30 +359,33 @@ class SearchViewModel @Inject constructor(
      * The image-content search as (still-running, ranked photo keys). Gated on the AI + semantic flags
      * (never runs, empty when off) and guest-safe (a null account keys the local partition).
      *
-     * A fresh non-blank query emits loading true at once, so the screen's placeholder shows through the
-     * settle delay AND the model run rather than only after; then it waits [SEMANTIC_DEBOUNCE_MS] for
-     * typing to settle (flatMapLatest cancels a superseded query mid-wait, exactly as a debounce would),
-     * embeds and ranks off the main thread, and emits the ranked keys with loading false. Keys, not
-     * items, cross this stage so [semanticFeed] can re-resolve them against the library on a sync change
-     * without re-running the model. The CLIP embed is far dearer than the keyword filter, so it settles a
-     * touch longer than the keyword feed.
+     * A fresh query of [SEMANTIC_MIN_CHARS] or more emits loading true at once, so the screen's placeholder
+     * shows through the settle delay AND the model run rather than only after; the ranking of the query
+     * before it stays on screen until this one's arrives, so the content matches are replaced in one step
+     * rather than vanishing and coming back. Then it waits [QUERY_SETTLE_MS], the same settle the keyword
+     * feed uses, for typing to settle (flatMapLatest cancels a superseded query mid-wait, exactly as a
+     * debounce would), embeds and ranks off the main thread, and emits the ranked keys with loading false.
+     * A shorter or blank query, or switching the search off, clears the ranking. Keys, not items, cross
+     * this stage so [semanticFeed] can re-resolve them against the library on a sync change without
+     * re-running the model.
      */
     private val rankedKeys: Flow<Pair<Boolean, List<String>>> = combine(
         semanticEnabled,
         accountManager.getPrimaryUserId(),
     ) { on, userId -> on to userId }
         .flatMapLatest { (on, userId) ->
-            if (!on) flowOf(false to emptyList<String>())
-            else _query.flatMapLatest { q ->
-                if (q.isBlank()) flowOf(false to emptyList<String>())
+            if (!on) flowOf(RankStep(false, emptyList()))
+            else _query.map { it.trim() }.distinctUntilChanged().flatMapLatest { q ->
+                if (q.length < SEMANTIC_MIN_CHARS) flowOf(RankStep(false, emptyList()))
                 else flow {
-                    emit(true to emptyList<String>())
-                    delay(SEMANTIC_DEBOUNCE_MS)
-                    emit(false to semanticSearchUseCase.searchKeys(q, userId, SEMANTIC_LIMIT))
+                    emit(RankStep(true, null))
+                    delay(QUERY_SETTLE_MS)
+                    emit(RankStep(false, semanticSearchUseCase.searchKeys(q, userId, SEMANTIC_LIMIT)))
                 }
             }
         }
         .flowOn(Dispatchers.Default)
+        .scan(false to emptyList<String>()) { held, step -> held.after(step) }
 
     /**
      * The resolved content matches plus the live loading flag. Each ranked key is resolved to the
@@ -475,6 +492,38 @@ class SearchViewModel @Inject constructor(
      *  Empty while the query is blank. */
     val albumSuggestions: StateFlow<List<SearchAlbum>> =
         combine(albumSource, debouncedQuery) { source, q -> SearchAlbums.matches(source, q) }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** What decides which shortcut tiles a name can reach: the Albums tab's own order and hidden set,
+     *  and whether face grouping is on, the gate the People tile has there. */
+    private data class TileSettings(val order: String?, val hidden: Set<String>, val faceOn: Boolean)
+
+    private val tileSettings: Flow<TileSettings> = context.settingsDataStore.data
+        .map {
+            TileSettings(
+                order = it[SettingsKeys.ALBUMS_TILE_ORDER],
+                hidden = it[SettingsKeys.ALBUMS_TILE_HIDDEN] ?: emptySet(),
+                faceOn = it[SettingsKeys.FACE_ENABLED] ?: false,
+            )
+        }
+        .distinctUntilChanged()
+
+    /** The shortcut tiles the typed query names, offered under the same rules the Albums tab shows them
+     *  by: its order, a tile the user hid stays out, People needs face grouping, and Shared and Offline
+     *  need an account. Empty while the query is blank. */
+    val destinations: StateFlow<List<LibraryTile>> =
+        combine(debouncedQuery, localizedText, tileSettings, isSignedIn) { q, text, settings, signedIn ->
+            val offered = resolveTileOrder(settings.order).filter { tile ->
+                tile.name !in settings.hidden && when (tile) {
+                    LibraryTile.People -> settings.faceOn
+                    LibraryTile.Shared, LibraryTile.Offline -> signedIn
+                    else -> true
+                }
+            }
+            SearchDestinations.match(q, offered.mapNotNull { tile -> text.tileNames[tile]?.let { tile to it } })
+        }
+            .distinctUntilChanged()
             .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -705,11 +754,22 @@ class SearchViewModel @Inject constructor(
         foldedLabels = foldedLabels,
     )
 
+    private fun localizedContext(locale: Locale): Context {
+        val config = Configuration(context.resources.configuration).apply { setLocale(locale) }
+        return context.createConfigurationContext(config)
+    }
+
+    /** Library tile → pre-folded label in [locale], the Albums tab's own labels, so "shared" or "map"
+     *  names the tile the way it is drawn. */
+    private fun foldedTileNames(locale: Locale): Map<LibraryTile, String> {
+        val localized = localizedContext(locale)
+        return LibraryTile.entries.associateWith { SearchFilter.fold(localized.getString(it.label)) }
+    }
+
     /** Category chip → pre-folded name in [locale], so "screenshot" / "selfie" etc. match. The names
      *  are the rail's own labels, from a context localized the way the screen's own is. */
     private fun foldedFilterNames(locale: Locale): Map<GalleryFilter, String> {
-        val config = Configuration(context.resources.configuration).apply { setLocale(locale) }
-        val localized = context.createConfigurationContext(config)
+        val localized = localizedContext(locale)
         return GalleryFilter.entries
             .mapNotNull { filter -> categoryLabelRes(filter)?.let { filter to SearchFilter.fold(localized.getString(it)) } }
             .toMap()
@@ -720,10 +780,13 @@ class SearchViewModel @Inject constructor(
          *  shows at once, cheap to rank and merge. */
         const val SEMANTIC_LIMIT = 200
 
-        /** Settle delay before a content search embeds the query, the debounce the keyword feed uses plus
-         *  a touch, since the CLIP embed is far dearer than the per-item filter. A superseded query cancels
-         *  the wait through flatMapLatest, so only the query typing settles on is ever embedded. */
-        const val SEMANTIC_DEBOUNCE_MS = 300L
+        /** How long typing must pause before the keyword feed filters and a content search embeds the query,
+         *  one value for both so their results land together. A superseded query cancels the wait through
+         *  flatMapLatest, so only the query typing settles on is ever embedded. */
+        const val QUERY_SETTLE_MS = 250L
+
+        /** The shortest query a content search embeds: one letter ranks noise. */
+        const val SEMANTIC_MIN_CHARS = 2
 
         /** Settle delay before a typed category name selects its chip, long enough that the plural 's'
          *  typed right after "screenshot" lands first. */

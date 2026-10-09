@@ -68,18 +68,18 @@ class AlbumBrowseSource @Inject constructor(
 ) {
 
     /**
-     * The user's own cloud albums as the album cache holds them. Cache only: the Albums tab keeps it
+     * The user's own cloud albums, and the ones shared with them, as the album cache holds them. Cache only: the Albums tab keeps it
      * fresh, so a surface drawing from here adds no network call. Read again whenever that cache
      * changes, and whenever the hidden cloud photos change, which re-resolves a cover that just became
      * hidden. A guest has no cloud albums, and a later sign-in re-subscribes this, so the rows gain them
      * in place.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val cachedCloudAlbums: Flow<List<Album>> = accountManager.getPrimaryUserId()
+    private val cachedCloudAlbums: Flow<Pair<List<Album>, List<Album>>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
+            if (userId == null) flowOf(emptyList<Album>() to emptyList())
             else combine(cloudAlbumDao.observeOwned(), driveRepo.observeHiddenAlbumMemberLinkIds()) { _, _ -> }
-                .mapLatest { driveRepo.loadAlbumsCached() }
+                .mapLatest { driveRepo.loadAlbumsCached() to driveRepo.loadSharedWithMeAlbumsCached() }
         }
         .retryOnDbTear("AlbumBrowseSource")
 
@@ -117,8 +117,8 @@ class AlbumBrowseSource @Inject constructor(
                 )
             }
             .distinctUntilChanged(),
-    ) { cloudAlbums, folders, settings ->
-        settings.copy(cloudAlbums = cloudAlbums, deviceFolders = folders)
+    ) { (cloudAlbums, sharedAlbums), folders, settings ->
+        settings.copy(cloudAlbums = cloudAlbums, sharedAlbums = sharedAlbums, deviceFolders = folders)
     }
         .catch { emit(SearchAlbums.Source()) }
 }

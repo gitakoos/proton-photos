@@ -115,4 +115,40 @@ class LabelSearchTest {
         assertEquals(listOf("IMG_100.jpg"), search(listOf(a, b, c), "wedding img", labels))
         assertEquals(emptyList<String>(), search(listOf(a, b, c), "wedding 200", labels))
     }
+
+    @Test
+    fun `matches lead with the photos named for the query, then the labelled, then the rest`() {
+        // All three are dated June 2024, so the month alone reaches them; the library lists them in
+        // the order the result must undo.
+        val dateOnly = local("a.jpg")
+        val labelled = local("b.jpg")
+        val named = local("june-party.jpg")
+        val labels = mapOf(labelled.stableId to listOf("June trip"))
+        assertEquals(
+            listOf("june-party.jpg", "b.jpg", "a.jpg"),
+            search(listOf(dateOnly, labelled, named), "june", labels),
+        )
+    }
+
+    @Test
+    fun `photos in the same tier keep the order the library gave`() {
+        val first = local("june-1.jpg")
+        val second = local("june-2.jpg")
+        val third = local("june-3.jpg")
+        assertEquals(
+            listOf("june-1.jpg", "june-2.jpg", "june-3.jpg"),
+            search(listOf(first, second, third), "june", emptyMap()),
+        )
+    }
+
+    @Test
+    fun `a name and a label together can satisfy a multi-word query in the labelled tier`() {
+        val mixed = local("beach.jpg")
+        val named = local("beach-sunset.jpg")
+        val labels = mapOf(mixed.stableId to listOf("Sunset"))
+        assertEquals(
+            listOf("beach-sunset.jpg", "beach.jpg"),
+            search(listOf(mixed, named), "beach sunset", labels),
+        )
+    }
 }

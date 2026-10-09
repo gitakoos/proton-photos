@@ -1619,7 +1619,7 @@ private fun LibraryViewsRow(
 }
 
 @Composable
-private fun ViewTile(
+internal fun ViewTile(
     icon: ImageVector,
     @StringRes label: Int,
     onClick: () -> Unit,

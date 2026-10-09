@@ -81,7 +81,8 @@ internal object SearchFilter {
 
     /**
      * The whole narrowing, in the order the screen applies it: query words, then the content filter,
-     * then the category chip. [foldedMonths] and [foldedCategoryNames] are pre-folded localized text
+     * then the category chip. The query's matches lead with the photos whose name holds every word, then
+     * those whose name and labels together do, then the ones only a date, type or category reaches. [foldedMonths] and [foldedCategoryNames] are pre-folded localized text
      * the query is matched against; [offlinePinIds] backs the Offline chip, which is a local pin set
      * rather than a server tag, and [favoriteIds] backs the Favourites chip for the photos whose
      * heart lives on the device rather than in Drive. [foldedLabels] holds each labelled photo's
@@ -109,14 +110,19 @@ internal object SearchFilter {
             // type + categories) so multi-word queries like "june 2024" or "beach video" work too.
             val needleWords = fold(qTrimmed).split(' ').filter { it.isNotBlank() }
             val cal = Calendar.getInstance()
-            out = out.filter { item ->
+            // Photos that name the query come ahead of the ones only its date, type or category
+            // reaches, each group keeping the order the library gave.
+            val byName = ArrayList<GalleryItem>()
+            val byLabel = ArrayList<GalleryItem>()
+            val byMetadata = ArrayList<GalleryItem>()
+            for (item in out) {
                 // A word matches if it is in the file name OR the full date/type/tag haystack.
                 // Test the cheap folded name first and only build the heavier haystack when the
                 // name misses — for plain name queries the haystack is never built. Cache it per
                 // item so multi-word queries build it at most once.
                 val foldedName = fold(displayNameOf(item))
                 var haystack: String? = null
-                needleWords.all { word ->
+                val matches = needleWords.all { word ->
                     foldedName.contains(word) || run {
                         val full = haystack
                             ?: searchHaystack(item, cal, foldedMonths, foldedCategoryNames, foldedLabels)
@@ -124,7 +130,19 @@ internal object SearchFilter {
                         full.contains(word)
                     }
                 }
+                if (!matches) continue
+                if (needleWords.all { foldedName.contains(it) }) {
+                    byName += item
+                } else {
+                    val labels = labelsOf(item, foldedLabels)
+                    if (labels != null && needleWords.all { foldedName.contains(it) || labels.contains(it) }) {
+                        byLabel += item
+                    } else {
+                        byMetadata += item
+                    }
+                }
             }
+            out = byName + byLabel + byMetadata
         }
         return applyFacets(out, filter, category, offlinePinIds, favoriteIds, personPhotoKeys)
     }
