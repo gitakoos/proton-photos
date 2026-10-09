@@ -331,6 +331,8 @@
     <string name="album_picker_title">Dodaj do albumu</string>
     <string name="album_picker_selected">Wybrano: %1$d</string>
     <string name="album_add_count">Dodaj (%1$d)</string>
+    <string name="picker_done">Gotowe</string>
+    <string name="picker_nothing_selected">Nie wybrano zdjęć</string>
     <string name="picker_selection_limit">Możesz zaznaczyć maksymalnie %1$d naraz</string>
     <string name="album_picker_empty">Brak zdjęć do dodania.</string>
 
@@ -996,8 +998,7 @@
 
     <!-- Search -->
     <string name="search_title">Szukaj</string>
-    <string name="search_placeholder">Szukaj według nazwy pliku</string>
-    <string name="search_placeholder_semantic">Szukaj zdjęć</string>
+    <string name="search_placeholder">Szukaj zdjęć</string>
     <string name="search_empty_idle">Wpisz nazwę, aby rozpocząć wyszukiwanie</string>
     <string name="search_empty_no_results">Brak dopasowań</string>
     <string name="search_section_on_this_day">Tego dnia</string>

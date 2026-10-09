@@ -475,13 +475,6 @@ fun GalleryScreen(
     // pops (an album, a folder, Settings) comes back on the filter it showed, with no pass through All.
     var albumFilter by rememberSaveable { mutableStateOf(AlbumDisplayFilter.All) }
     var albumFilterSettled by rememberSaveable { mutableStateOf(false) }
-    // Albums-tab inline search: the typed query (kept across a config change) and whether the rail's
-    // search bar is open. Hoisted beside the filter so the header rail and the Albums page read one
-    // source. Arranging takes the whole rail, so it and the search are mutually exclusive: opening the
-    // arrange mode clears an open search, and while it is on the rail hides the search entry.
-    var albumQuery by rememberSaveable { mutableStateOf("") }
-    var albumSearchActive by remember { mutableStateOf(false) }
-    var albumReorderActive by remember { mutableStateOf(false) }
     // Albums-tab view filter settings: default narrowing, a remember-last toggle, and the last picked
     // value, as one snapshot. Null until the store delivers, so the entry effect below can wait for the
     // stored values instead of resolving from placeholders.
@@ -1040,7 +1033,6 @@ fun GalleryScreen(
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     var showAddToPersonSheet by remember { mutableStateOf(false) }
     var showCreateAlbumInline by remember { mutableStateOf(false) }
-    val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // ── Move-to-folder multi-action ───────────────────────────────────────────
     // The target picker (existing folders + New folder) and the typed-name dialog it hands off to.
@@ -1280,12 +1272,6 @@ fun GalleryScreen(
                 sharedBadge = sharedUiState.pendingInvitations.isNotEmpty(),
                 createRequestSignal = albumCreateSignal,
                 displayFilter = albumFilter,
-                query = albumQuery,
-                onReorderModeChange = { active ->
-                    albumReorderActive = active
-                    // Search and arrange cannot share the rail; opening arrange closes an open search.
-                    if (active) { albumSearchActive = false; albumQuery = "" }
-                },
             )
         }
         }
@@ -1354,12 +1340,6 @@ fun GalleryScreen(
                             }
                         },
                         onOpenAlbumsFilterSheet = { showAlbumsFilterSheet = true },
-                        albumQuery = albumQuery,
-                        onAlbumQueryChange = { albumQuery = it },
-                        albumSearchActive = albumSearchActive,
-                        onAlbumSearchActiveChange = { albumSearchActive = it },
-                        // Arranging owns the whole rail, so entering it closes any open search first.
-                        albumReorderActive = albumReorderActive,
                         onSettingsClick = onSettingsClick,
                         onOpenUploads = onOpenUploads,
                         onOpenDownloads = onOpenDownloads,
@@ -1540,8 +1520,12 @@ fun GalleryScreen(
             BottomDock(
                 // The live fractional page position drives the sliding highlight, so it follows a swipe.
                 position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
-                onSearchClick = onSearchClick,
                 onTabSelected = { tab ->
+                    // Search is the dock's third tab but its own screen, not a page of this pager.
+                    if (tab == 2) {
+                        onSearchClick()
+                        return@BottomDock
+                    }
                     // Re-tapping the active tab always returns it to the visual top (item 0). Switching
                     // to a different tab also resets to the top, unless "keep place when switching tabs"
                     // is on, in which case the target page stays where it was last scrolled. At this
@@ -1721,7 +1705,6 @@ fun GalleryScreen(
         GalleryAddToAlbumDialog(
             selectedItems = state.selectedItems,
             cloudAlbums = albumsState.addableAlbums,
-            sheetState = addToAlbumSheetState,
             onCreateNew = {
                 showAddToAlbumSheet = false
                 showCreateAlbumInline = true
@@ -1860,216 +1843,6 @@ fun GalleryScreen(
     // drawer while the upload keeps running, still tracked by the Activity transfer list.
     CloudMetadataSaveDrawer(ui = cloudSaveUi, onDismiss = { cloudSaveVm.dismiss() })
 }
-
-// ── Add-to-album picker sheet ─────────────────────────────────────────────────
-//
-// Bottom sheet with a [+ New album] row followed by the user's cloud albums.
-// Mirrors the styling AlbumDetailScreen uses for its own bottom sheets.
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun GalleryAddToAlbumPickerSheet(
-    cloudAlbums: List<Album>,
-    selectionHasCloud: Boolean,
-    onCreateNew: () -> Unit,
-    onCloudAlbumSelected: (Album) -> Unit,
-    onDismiss: () -> Unit,
-    hiddenAlbumIds: Set<String> = emptySet(),
-    selectionCloudLinkIds: Set<String> = emptySet(),
-    albumMemberIds: Map<String, Set<String>> = emptyMap(),
-) {
-    val appColors = AppColors.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(bottom = 16.dp),
-    ) {
-        Text(
-            stringResource(R.string.gallery_add_to_album),
-            color = appColors.fgPrimary,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-        )
-
-        // + New album
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { onCreateNew() }
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(Accent.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Default.Add, null, tint = Accent, modifier = Modifier.size(22.dp))
-            }
-            Text(
-                stringResource(R.string.albums_new_album),
-                color = Accent,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
-        HorizontalDivider(color = Line2, thickness = 0.5.dp,
-            modifier = Modifier.padding(horizontal = 20.dp))
-
-        // Cloud albums — shown whenever any album exists. Local-only photos have no Drive
-        // linkId yet; tapping an album backs them up first, then joins them (handled in the
-        // add path), so the rows stay tappable and an inline note explains the two steps.
-        if (cloudAlbums.isNotEmpty()) {
-            Text(stringResource(R.string.gallery_picker_drive_albums),
-                color = appColors.fgMute, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            if (!selectionHasCloud) {
-                Text(stringResource(R.string.gallery_add_to_album_local_note),
-                    color = appColors.fgMute, fontSize = 13.sp,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-            }
-            // Scroll the album rows within a bounded height so a large album collection stays
-            // fully reachable. A LazyColumn participates in the bottom sheet's nested scroll,
-            // so the inner list scrolls instead of the sheet swallowing the drag.
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 360.dp),
-            ) {
-                items(cloudAlbums) { album ->
-                    // Derived from the live selection, so ticking another photo re-reads the row.
-                    val membership = albumMembershipState(
-                        selectionCloudLinkIds,
-                        albumMemberIds[album.linkId].orEmpty(),
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onCloudAlbumSelected(album) }
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        if (album.coverThumbnailUrl != null) {
-                            AsyncImage(
-                                model = album.coverThumbnailUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Bg0),
-                            )
-                        } else {
-                            Box(modifier = Modifier
-                                .size(44.dp)
-                                .background(Bg0, RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(Icons.Default.Cloud, null, tint = appColors.fgMute,
-                                    modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Text(
-                                    album.name, color = appColors.fgPrimary, fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.weight(1f, fill = false),
-                                )
-                                // A client-side hidden album stays a valid target; the lock just
-                                // tells the user this row is one of their hidden albums.
-                                if (album.linkId in hiddenAlbumIds) {
-                                    Icon(
-                                        Icons.Default.Lock,
-                                        contentDescription = stringResource(R.string.timeline_filter_hidden_album),
-                                        tint = appColors.fgMute,
-                                        modifier = Modifier.size(14.dp),
-                                    )
-                                }
-                            }
-                            Text(
-                                stringResource(
-                                    // Someone else's album reads "Shared" instead of "Drive", so a
-                                    // row that adds to another person's album is never mistaken for
-                                    // one of your own.
-                                    if (album.isSharedWithMe) R.string.gallery_album_picker_count_shared
-                                    else R.string.gallery_album_picker_count_drive,
-                                    androidx.compose.ui.res.pluralStringResource(
-                                        R.plurals.count_photos_plural, album.photoCount, album.photoCount,
-                                    ),
-                                ),
-                                color = appColors.fgMute, fontSize = 12.sp)
-                        }
-                        // Accent check for a fully-covered album, a fraction when the album holds
-                        // part of the selection; nothing at all in the common not-yet-added case.
-                        // Mirrors the viewer sheet's membership tile.
-                        when (membership) {
-                            is AlbumMembership.All -> Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .background(Accent, RoundedCornerShape(14.dp)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = stringResource(R.string.cd_status_all_selected_in_album),
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                            is AlbumMembership.Some -> {
-                                // The visible "3 / 5" is digits only; the spoken form carries the meaning.
-                                val fractionCd = stringResource(
-                                    R.string.cd_status_some_selected_in_album,
-                                    membership.inAlbum, membership.total,
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .background(Accent.copy(alpha = 0.15f), RoundedCornerShape(14.dp))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                        // The row merges its children, so replace the bare digits
-                                        // rather than let them read out alongside the spoken form.
-                                        .clearAndSetSemantics { contentDescription = fractionCd },
-                                ) {
-                                    Text(
-                                        stringResource(
-                                            R.string.gallery_album_picker_in_album_fraction,
-                                            membership.inAlbum, membership.total,
-                                        ),
-                                        color = Accent,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
-                                }
-                            }
-                            is AlbumMembership.None -> Unit
-                        }
-                    }
-                }
-            }
-        }
-
-        // Empty state — shown only when no album exists. The + New row above is still tappable.
-        if (cloudAlbums.isEmpty()) {
-            Text(
-                stringResource(R.string.gallery_no_albums_yet),
-                color = appColors.fgMute,
-                fontSize = 13.sp,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
-            )
-        }
-    }
-}
-
 
 // ── Multi-select delete sheet ─────────────────────────────────────────────────
 

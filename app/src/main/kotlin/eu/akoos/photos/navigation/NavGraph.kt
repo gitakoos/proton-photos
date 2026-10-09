@@ -23,6 +23,8 @@
 package eu.akoos.photos.navigation
 
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -97,6 +99,7 @@ import eu.akoos.photos.presentation.editor.VideoEditorScreen
 import eu.akoos.photos.presentation.folders.DeviceFolderDetailScreen
 import eu.akoos.photos.presentation.folders.DeviceFolderOpenAction
 import eu.akoos.photos.presentation.gallery.GalleryScreen
+import eu.akoos.photos.presentation.gallery.GalleryPickScreen
 import eu.akoos.photos.presentation.gallery.localVideoUri
 import eu.akoos.photos.presentation.gallery.videoCloudPhoto
 import eu.akoos.photos.presentation.hidden.HiddenAlbumScreen
@@ -647,8 +650,8 @@ fun NavGraph(
         LocalThumbnailUrls provides thumbnailUrlsState,
         LocalViewerReturnKey provides viewerReturnKey,
     ) {
-    // Routes that open with their own scale/zoom transition (Search), so the screen behind them holds
-    // still (fade only) instead of sliding, letting the scale read cleanly. Others keep the slide.
+    // Routes that open with their own full-width slide from the side (Search, the third tab of the dock), so
+    // the screen behind them holds still and is covered or uncovered by it, instead of moving too.
     val scaleOpenRoutes = setOf(Screen.Search.route)
     NavHost(
         navController = navController,
@@ -659,11 +662,11 @@ fun NavGraph(
         // The slide is small (a sixth of the width) so it also suits full-screen routes like the viewer.
         enterTransition = { fadeIn(tween(220)) + slideInHorizontally(tween(220)) { it / 6 } },
         exitTransition = {
-            if (targetState.destination.route in scaleOpenRoutes) fadeOut(tween(200))
+            if (targetState.destination.route in scaleOpenRoutes) ExitTransition.None
             else fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { -it / 12 }
         },
         popEnterTransition = {
-            if (initialState.destination.route in scaleOpenRoutes) fadeIn(tween(200))
+            if (initialState.destination.route in scaleOpenRoutes) EnterTransition.None
             else fadeIn(tween(220)) + slideInHorizontally(tween(220)) { -it / 12 }
         },
         popExitTransition = { fadeOut(tween(220)) + slideOutHorizontally(tween(220)) { it / 6 } },
@@ -1507,18 +1510,24 @@ fun NavGraph(
             }
         }
 
-        composable(Screen.AlbumPhotoPicker.route) {
+        composable(Screen.AlbumPhotoPicker.route) { entry ->
             val album = selectedAlbum
             if (album == null) {
                 navController.popBackStack()
             } else {
-                AlbumPhotoPickerScreen(
+                // The gallery itself in picking mode, drawn from the gallery's own view model so its
+                // filters and categories are the ones the timeline has.
+                val galleryEntry = remember(entry) {
+                    runCatching { navController.getBackStackEntry(Screen.Gallery.route) }.getOrNull()
+                }
+                GalleryPickScreen(
                     albumLinkId = album.linkId,
                     albumName = album.name,
                     excludeLinkIds = pickerExcludeLinkIds,
                     onBack = { navController.popBackStack() },
                     // The album observes the add via AlbumListEventBus and refreshes itself.
                     onAdded = { navController.popBackStack() },
+                    viewModel = if (galleryEntry != null) hiltViewModel(galleryEntry) else hiltViewModel(),
                 )
             }
         }
@@ -1945,19 +1954,12 @@ fun NavGraph(
 
         composable(
             Screen.Search.route,
-            // Container-transform feel on open: the search page grows up from the top bar (where the
-            // search affordance sits) and fades in, then shrinks back on the way out, so it reads as the
-            // search field enlarging into the page rather than a plain push. Gentler scale than the globe.
-            enterTransition = {
-                scaleIn(animationSpec = tween(300), initialScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0.0f)) +
-                    fadeIn(animationSpec = tween(220))
-            },
+            // Search is the dock's third tab, so it comes in from the side over the page that was showing, and
+            // leaves the same way, the Add to album screen's own motion.
+            enterTransition = { slideInHorizontally(animationSpec = tween(300)) { it } },
             exitTransition = { fadeOut(animationSpec = tween(160)) },
             popEnterTransition = { fadeIn(animationSpec = tween(200)) },
-            popExitTransition = {
-                scaleOut(animationSpec = tween(260), targetScale = 0.92f, transformOrigin = TransformOrigin(0.5f, 0.0f)) +
-                    fadeOut(animationSpec = tween(200))
-            },
+            popExitTransition = { slideOutHorizontally(animationSpec = tween(260)) { it } },
         ) {
             SearchScreen(
                 onBack = { navController.popBackStack() },

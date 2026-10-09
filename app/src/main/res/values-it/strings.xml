@@ -786,8 +786,7 @@
 
     <!-- Ricerca -->
     <string name="search_title">Cerca</string>
-    <string name="search_placeholder">Cerca per nome file</string>
-    <string name="search_placeholder_semantic">Cerca le tue foto</string>
+    <string name="search_placeholder">Cerca le tue foto</string>
     <string name="search_empty_idle">Digita un nome per iniziare</string>
     <string name="search_empty_no_results">Nessun risultato</string>
 
@@ -1313,6 +1312,8 @@
     <string name="album_picker_title">Aggiungi all\'album</string>
     <string name="album_picker_selected">%1$d selezionate</string>
     <string name="album_add_count">Aggiungi (%1$d)</string>
+    <string name="picker_done">Fatto</string>
+    <string name="picker_nothing_selected">Nessuna foto selezionata</string>
     <string name="picker_selection_limit">Puoi selezionarne al massimo %1$d alla volta</string>
     <string name="album_picker_empty">Nessuna foto da aggiungere.</string>
 

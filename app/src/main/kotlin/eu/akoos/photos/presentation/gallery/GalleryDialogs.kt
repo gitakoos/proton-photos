@@ -99,49 +99,6 @@ internal fun GalleryMultiDeleteDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun GalleryAddToAlbumDialog(
-    selectedItems: Set<GalleryItem>,
-    cloudAlbums: List<Album>,
-    sheetState: SheetState,
-    onCreateNew: () -> Unit,
-    onCloudAlbumSelected: (Album) -> Unit,
-    onDismiss: () -> Unit,
-    hiddenAlbumIds: Set<String> = emptySet(),
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = SheetBg,
-        scrimColor = Color.Black.copy(alpha = 0.5f),
-    ) {
-        // Only cloud-backed items carry a linkId, so the picker offers cloud albums + New album.
-        val anyCloudBacked = selectedItems.any {
-            it is GalleryItem.Synced || it is GalleryItem.CloudOnly
-        }
-        // The "already in this album" marks follow from the selection alone, so the drawer resolves
-        // them itself and every caller gets the indicator without wiring one up. Scoped to the open
-        // sheet: the read starts with the picker and stops with it, and re-keys if the selection
-        // changes underneath.
-        val membershipViewModel: AddToAlbumMembershipViewModel = hiltViewModel()
-        val selectionLinkIds = selectionCloudLinkIds(selectedItems)
-        val albumMemberIds by remember(selectionLinkIds) {
-            membershipViewModel.observeSelectionAlbumMembership(selectionLinkIds)
-        }.collectAsStateWithLifecycle(initialValue = emptyMap())
-        GalleryAddToAlbumPickerSheet(
-            cloudAlbums = cloudAlbums,
-            selectionHasCloud = anyCloudBacked,
-            onCreateNew = onCreateNew,
-            onCloudAlbumSelected = onCloudAlbumSelected,
-            onDismiss = onDismiss,
-            hiddenAlbumIds = hiddenAlbumIds,
-            selectionCloudLinkIds = selectionLinkIds,
-            albumMemberIds = albumMemberIds,
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
 internal fun GalleryNewAlbumDialog(
     onDismiss: () -> Unit,
     onCreate: (String) -> Unit,

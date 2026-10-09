@@ -192,7 +192,6 @@ fun LocationPhotosContent(
 
     var showSaveAsAlbumConfirm by remember { mutableStateOf(false) }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
-    val addToAlbumSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // The picker's own "New album" row, which names an album and then adds the selection to it.
     var showCreateAlbumInline by remember { mutableStateOf(false) }
     // Move the device selection into another folder, logged-out, device-data only. The shared host
@@ -844,7 +843,6 @@ fun LocationPhotosContent(
         eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog(
             selectedItems = selectedItems,
             cloudAlbums = albums,
-            sheetState = addToAlbumSheetState,
             onCreateNew = {
                 showAddToAlbumSheet = false
                 showCreateAlbumInline = true

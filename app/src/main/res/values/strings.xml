@@ -482,6 +482,8 @@
     <string name="album_picker_title">Add to album</string>
     <string name="album_picker_selected">%1$d selected</string>
     <string name="album_add_count">Add (%1$d)</string>
+    <string name="picker_done">Done</string>
+    <string name="picker_nothing_selected">No photos selected</string>
     <string name="picker_selection_limit">You can select up to %1$d at once</string>
     <string name="album_picker_empty">No photos to add.</string>
     <string name="picker_filter_all">All</string>
@@ -1382,8 +1384,7 @@
 
     <!-- Search -->
     <string name="search_title">Search</string>
-    <string name="search_placeholder">Search by filename</string>
-    <string name="search_placeholder_semantic">Search your photos</string>
+    <string name="search_placeholder">Search your photos</string>
     <string name="search_empty_idle">Type a name to start searching</string>
     <string name="search_empty_no_results">No matches</string>
     <string name="search_section_on_this_day">On this day</string>

@@ -331,6 +331,8 @@
     <string name="album_picker_title">Pridať do albumu</string>
     <string name="album_picker_selected">Vybraných: %1$d</string>
     <string name="album_add_count">Pridať (%1$d)</string>
+    <string name="picker_done">Hotovo</string>
+    <string name="picker_nothing_selected">Nie sú vybraté žiadne fotky</string>
     <string name="picker_selection_limit">Naraz môžeš vybrať najviac %1$d</string>
     <string name="album_picker_empty">Žiadne fotky na pridanie.</string>
 
@@ -996,8 +998,7 @@
 
     <!-- Search -->
     <string name="search_title">Hľadať</string>
-    <string name="search_placeholder">Hľadať podľa názvu súboru</string>
-    <string name="search_placeholder_semantic">Hľadať fotky</string>
+    <string name="search_placeholder">Hľadať fotky</string>
     <string name="search_empty_idle">Začnite hľadať zadaním názvu</string>
     <string name="search_empty_no_results">Žiadne zhody</string>
     <string name="search_section_on_this_day">V tento deň</string>

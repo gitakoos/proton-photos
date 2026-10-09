@@ -44,12 +44,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import eu.akoos.photos.presentation.theme.AppColors
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -121,16 +123,20 @@ fun MonthTileRow(
     onMonthClick: (year: Int, month: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // The tiles lay out exactly as the results grid does, so a tile is the same size here as there.
+    val seamless = rememberSeamlessGrid()
+    val gap = if (seamless) 2.dp else 4.dp
     Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap),
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 14.dp)
-            .padding(bottom = 8.dp),
+            .padding(horizontal = if (seamless) 0.dp else 6.dp)
+            .padding(bottom = gap),
     ) {
         row.forEach { bucket ->
             MonthTile(
                 bucket = bucket,
+                corner = if (seamless) 0.dp else 10.dp,
                 onClick = { onMonthClick(bucket.year, bucket.month) },
                 modifier = Modifier.weight(1f),
             )
@@ -146,6 +152,7 @@ fun MonthTileRow(
 @Composable
 private fun MonthTile(
     bucket: MonthBucket,
+    corner: Dp,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -168,7 +175,7 @@ private fun MonthTile(
     Box(
         modifier = modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(corner))
             .background(colors.bg2)
             .clickable(onClick = onClick),
     ) {

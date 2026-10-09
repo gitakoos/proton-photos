@@ -68,13 +68,6 @@ internal fun GalleryHeader(
     onAlbumFilterSelected: (AlbumDisplayFilter) -> Unit = {},
     /** Opens the Albums-tab view-filter sheet from its filter icon. */
     onOpenAlbumsFilterSheet: () -> Unit = {},
-    /** Albums-tab inline search: the query, whether the rail's search bar is open, and their setters. */
-    albumQuery: String = "",
-    onAlbumQueryChange: (String) -> Unit = {},
-    albumSearchActive: Boolean = false,
-    onAlbumSearchActiveChange: (Boolean) -> Unit = {},
-    /** True while the Albums page is in arrange mode, which hides the search entry in the rail. */
-    albumReorderActive: Boolean = false,
     onSettingsClick: () -> Unit,
     onHeaderMeasured: (Int) -> Unit,
     updateAvailable: Boolean = false,
@@ -123,11 +116,6 @@ internal fun GalleryHeader(
                         onFilterSelected = onAlbumFilterSelected,
                         onOpenSheet = onOpenAlbumsFilterSheet,
                         isSignedIn = galleryState.isSignedIn,
-                        searchQuery = albumQuery,
-                        onSearchQueryChange = onAlbumQueryChange,
-                        searchActive = albumSearchActive,
-                        onSearchActiveChange = onAlbumSearchActiveChange,
-                        reorderActive = albumReorderActive,
                         modifier = Modifier.weight(1f),
                     )
                 }

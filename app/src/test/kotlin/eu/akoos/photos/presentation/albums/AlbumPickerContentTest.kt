@@ -255,6 +255,32 @@ class AlbumPickerContentTest {
     }
 
     @Test
+    fun `an open cloud album keeps only its own photos in library order`() {
+        val library = listOf<GalleryItem>(
+            GalleryItem.CloudOnly(cloud("a", epochMs("UTC", 2024, 5, 3, 10, 0))),
+            GalleryItem.CloudOnly(cloud("b", epochMs("UTC", 2024, 5, 2, 10, 0))),
+            GalleryItem.LocalOnly(local("content://media/c", epochMs("UTC", 2024, 5, 1, 10, 0))),
+        )
+        val content = AlbumPickerContent.build(
+            library, PickerQuery(scopeLinkIds = setOf("b", "a")), emptySet(), emptySet(),
+        )
+        assertEquals(listOf("a", "b"), content.photoKeys)
+    }
+
+    @Test
+    fun `an open device folder keeps only the photos on the device in that folder`() {
+        val library = listOf<GalleryItem>(
+            GalleryItem.CloudOnly(cloud("a", epochMs("UTC", 2024, 5, 3, 10, 0))),
+            GalleryItem.LocalOnly(local("content://media/b", epochMs("UTC", 2024, 5, 2, 10, 0))),
+            GalleryItem.LocalOnly(local("content://media/c", epochMs("UTC", 2024, 5, 1, 10, 0)).copy(bucketName = "Other")),
+        )
+        val content = AlbumPickerContent.build(
+            library, PickerQuery(scopeFolder = "Camera"), emptySet(), emptySet(),
+        )
+        assertEquals(listOf("content://media/b"), content.photoKeys)
+    }
+
+    @Test
     fun `an empty library or a query that matches nothing yields empty content`() {
         val empty = AlbumPickerContent.build(emptyList(), PickerQuery(), emptySet(), emptySet())
         assertTrue(empty.photos.isEmpty())

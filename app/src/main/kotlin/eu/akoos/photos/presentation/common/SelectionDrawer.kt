@@ -26,6 +26,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -58,6 +61,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -81,6 +85,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -1059,6 +1064,87 @@ private fun Modifier.settlesPreviewFirst(previewOpen: Boolean, onSettle: () -> U
             }
         }
     }
+
+/**
+ * The picked photos as a system gallery's picker shows them, for a screen that is only picking: a strip of
+ * their thumbnails, or, while nothing is picked, a line saying so in the same space, so the page below does
+ * not move when the first photo is picked, over a rule with a chevron in it. [expanded] folds the strip away
+ * and leaves the rule, which [onToggle] opens and closes again. Each thumbnail takes [onItemClick] (the picker
+ * puts the photo back), and the strip follows the newest pick.
+ */
+@Composable
+fun SelectedPhotosStrip(
+    items: List<GalleryItem>,
+    emptyLabel: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onItemClick: (GalleryItem) -> Unit,
+    modifier: Modifier = Modifier,
+    cacheThumbnails: Boolean = true,
+) {
+    val colors = AppColors.current
+    val stripState = rememberLazyListState()
+    var lastCount by remember { mutableIntStateOf(items.size) }
+    LaunchedEffect(items.size) {
+        if (items.size > lastCount) stripState.animateScrollToItem(items.lastIndex)
+        lastCount = items.size
+    }
+    Column(modifier = modifier.fillMaxWidth()) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(tween(200)) + fadeIn(tween(200)),
+            exit = shrinkVertically(tween(200)) + fadeOut(tween(150)),
+        ) {
+            Crossfade(
+                targetState = items.isEmpty(),
+                animationSpec = tween(160),
+                label = "selectedPhotosStrip",
+                modifier = Modifier.fillMaxWidth().height(PICKED_STRIP_HEIGHT),
+            ) { empty ->
+                if (empty) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(emptyLabel, color = colors.fgMute, fontSize = 14.sp)
+                    }
+                } else {
+                    LazyRow(
+                        state = stripState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        items(items, key = { it.stableId }) { item ->
+                            val inputs = remember(item) { photoCellInputsFor(item) }
+                            SelectionThumb(
+                                cacheThumbnails = cacheThumbnails,
+                                inputs = inputs,
+                                enlarged = false,
+                                onClick = { onItemClick(item) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        // The rule, with the chevron that opens and closes the strip breaking it.
+        Row(
+            modifier = Modifier.fillMaxWidth().height(24.dp).clickable(onClick = onToggle),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HorizontalDivider(modifier = Modifier.weight(1f), color = Line2, thickness = DIVIDER_THICKNESS)
+            Icon(
+                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = colors.fgMute,
+                modifier = Modifier.padding(horizontal = 12.dp).size(20.dp),
+            )
+            HorizontalDivider(modifier = Modifier.weight(1f), color = Line2, thickness = DIVIDER_THICKNESS)
+        }
+    }
+}
+
+/** Height of the picked-photos strip: the thumbnail and the air around it. */
+private val PICKED_STRIP_HEIGHT = 72.dp
 
 /** The media-typed count the resting bar carries: "5 photos, 2 videos" rather than an
  *  undifferentiated total, since the storage and network cost of a video differs a lot. */

@@ -104,6 +104,10 @@ fun UnifiedAlbumCard(
     /** Shows a folder glyph in the corner badge for bucket-derived local albums (rename/delete
      *  refused for these). */
     isDeviceFolder: Boolean = false,
+    /** Drawn on an empty cover in place of an image, for a card that opens a screen or starts an album
+     *  rather than showing one, in [glyphTint]. */
+    glyph: ImageVector? = null,
+    glyphTint: Color = FgDim,
     /** False while a grid-wide mode owns the card's gestures. The clickable is dropped outright
      *  rather than pointed at no-op lambdas, so the card cannot ripple at a tap it will ignore. */
     interactionsEnabled: Boolean = true,
@@ -129,7 +133,11 @@ fun UnifiedAlbumCard(
                 .clip(AlbumCoverShape)
                 .background(Bg2),
         ) {
-            if (coverModel != null) AlbumCoverImage(coverModel, coverIsGif)
+            if (glyph != null) {
+                Icon(glyph, contentDescription = null, tint = glyphTint, modifier = Modifier.align(Alignment.Center).size(40.dp))
+            } else if (coverModel != null) {
+                AlbumCoverImage(coverModel, coverIsGif)
+            }
 
             CloudCornerBadge(
                 cloud = cloudBadge,
@@ -216,6 +224,7 @@ fun UnifiedAlbumRow(
     /** Drawn on an empty cover in place of an image, for a row that opens a screen rather than an
      *  album. */
     glyph: ImageVector? = null,
+    glyphTint: Color = FgDim,
     /** True while the albums are being arranged. The row's gestures belong to the arrangement then,
      *  so its clicks are dropped, as a card's are, and a drag handle stands where the options button
      *  was. */
@@ -249,7 +258,7 @@ fun UnifiedAlbumRow(
         ) {
             when {
                 glyph != null ->
-                    Icon(glyph, contentDescription = null, tint = FgDim, modifier = Modifier.size(24.dp))
+                    Icon(glyph, contentDescription = null, tint = glyphTint, modifier = Modifier.size(24.dp))
                 coverModel != null -> AlbumCoverImage(coverModel, coverIsGif)
             }
             CloudCornerBadge(

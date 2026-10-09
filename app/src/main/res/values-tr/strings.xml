@@ -453,6 +453,8 @@
     <string name="album_picker_title">Albüme ekle</string>
     <string name="album_picker_selected">%1$d seçili</string>
     <string name="album_add_count">Ekle (%1$d)</string>
+    <string name="picker_done">Bitti</string>
+    <string name="picker_nothing_selected">Seçili fotoğraf yok</string>
     <string name="picker_selection_limit">Tek seferde en fazla %1$d öğe seçebilirsin</string>
     <string name="album_picker_empty">Eklenecek fotoğraf yok.</string>
     <string name="picker_filter_all">Tümü</string>
@@ -1302,8 +1304,7 @@
     <string name="settings_search_no_results">Eşleşen ayar yok</string>
 
     <string name="search_title">Arama</string>
-    <string name="search_placeholder">Dosya adına göre ara</string>
-    <string name="search_placeholder_semantic">Fotoğraflarında ara</string>
+    <string name="search_placeholder">Fotoğraflarında ara</string>
     <string name="search_empty_idle">Aramaya başlamak için bir ad yaz</string>
     <string name="search_empty_no_results">Eşleşme yok</string>
     <string name="search_section_on_this_day">Bu gün</string>

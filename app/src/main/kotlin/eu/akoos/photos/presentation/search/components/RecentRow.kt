@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,12 +47,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
@@ -71,23 +74,26 @@ fun RecentRow(
 ) {
     val colors = AppColors.current
     val six = items.take(6)
-    val gap = 4.dp
+    // The tiles lay out exactly as the results grid does (its side margin, gap and corner, edge to edge
+    // when seamless), so a photo is the same size whether the page is idle or showing results.
+    val seamless = rememberSeamlessGrid()
+    val gap = if (seamless) 2.dp else 4.dp
+    val side = if (seamless) 0.dp else 6.dp
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            // Match the side padding used by the JumpToMonth grid so the Recent
-            // strip doesn't run edge-to-edge while the section below it is inset.
-            .padding(horizontal = 16.dp)
+            .padding(horizontal = side)
             .padding(top = 8.dp, bottom = 16.dp),
     ) {
+        // The heading keeps the 14dp the other sections of this page start their text at.
         Text(
             text = stringResource(R.string.search_section_recent),
             color = colors.fgPrimary,
-            fontSize = 22.sp,
+            fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
-            letterSpacing = (-0.44).sp,
-            modifier = Modifier.padding(bottom = 12.dp),
+            letterSpacing = (-0.3).sp,
+            modifier = Modifier.padding(start = 14.dp - side, top = 6.dp, bottom = 10.dp),
         )
         // Split the (up to) 6 items into two rows of three. Each row uses
         // weight(1f) per cell so the tiles scale evenly with the screen width
@@ -104,6 +110,7 @@ fun RecentRow(
                         RecentTile(
                             item = item,
                             placeholderBg = colors.cardBg,
+                            corner = if (seamless) 0.dp else 10.dp,
                             onClick = { onPhotoClick(six, six.indexOf(item)) },
                             modifier = Modifier.weight(1f).aspectRatio(1f),
                         )
@@ -114,7 +121,7 @@ fun RecentRow(
                     }
                 }
             }
-            if (rowIdx < rows.lastIndex) Spacer(modifier = Modifier.padding(top = gap / 2))
+            if (rowIdx < rows.lastIndex) Spacer(modifier = Modifier.height(gap))
         }
     }
 }
@@ -123,6 +130,7 @@ fun RecentRow(
 private fun RecentTile(
     item: GalleryItem,
     placeholderBg: Color,
+    corner: Dp,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -140,7 +148,7 @@ private fun RecentTile(
     val isVideo = mimeType.startsWith("video/")
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(corner))
             .background(placeholderBg)
             .clickable(onClick = onClick),
     ) {

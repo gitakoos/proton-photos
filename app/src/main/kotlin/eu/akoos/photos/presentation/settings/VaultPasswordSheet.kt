@@ -44,7 +44,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,31 +64,12 @@ import eu.akoos.photos.data.hidden.HiddenRescue
 import eu.akoos.photos.presentation.common.DestructiveButton
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SecondaryButton
+import eu.akoos.photos.presentation.common.rememberSheetFieldsReady
 import eu.akoos.photos.presentation.lock.showAppLockPrompt
 import eu.akoos.photos.presentation.settings.components.ActionRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.SheetBg
-import kotlinx.coroutines.delay
-
-/**
- * Whether the sheet's fields may take focus yet. A sheet is a window of its own, and when it opens
- * Compose hands the first focusable field the focus at once, before the sheet has slid in and the
- * keyboard is up. That put the cursor in a field nobody had chosen, and a password manager placed its
- * suggestion at the field's still-unmoved position. Fields stay unfocusable until the sheet has
- * settled, so nothing is focused until a field is tapped.
- */
-@Composable
-private fun rememberFieldsReady(): Boolean {
-    var ready by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(SHEET_SETTLE_MS)
-        ready = true
-    }
-    return ready
-}
-
-private const val SHEET_SETTLE_MS = 500L
 
 /** The shortest vault password the sheet accepts. */
 internal const val VAULT_PASSWORD_MIN_LENGTH = 8
@@ -174,7 +154,7 @@ internal fun VaultPasswordSheet(
     var current by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var repeat by remember { mutableStateOf("") }
-    val fieldsReady = rememberFieldsReady()
+    val fieldsReady = rememberSheetFieldsReady()
     val problem = vaultPasswordProblem(password, repeat)
     // The hint shows once something is typed, so the empty sheet opens without an error.
     val shownProblem = problem.takeIf { password.isNotEmpty() }
@@ -289,7 +269,7 @@ internal fun VaultPasswordRemoveSheet(
 ) {
     val colors = AppColors.current
     var current by remember { mutableStateOf("") }
-    val fieldsReady = rememberFieldsReady()
+    val fieldsReady = rememberSheetFieldsReady()
     ModalBottomSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss,

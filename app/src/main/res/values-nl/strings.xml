@@ -819,8 +819,7 @@
 
     <!-- Search -->
     <string name="search_title">Zoeken</string>
-    <string name="search_placeholder">Zoeken op bestandsnaam</string>
-    <string name="search_placeholder_semantic">Foto\'s zoeken</string>
+    <string name="search_placeholder">Foto\'s zoeken</string>
     <string name="search_empty_idle">Typ een naam om te beginnen met zoeken</string>
     <string name="search_empty_no_results">Geen overeenkomsten</string>
     <string name="search_section_on_this_day">Op deze dag</string>
@@ -1313,6 +1312,8 @@
     <string name="album_picker_title">Aan album toevoegen</string>
     <string name="album_picker_selected">%1$d geselecteerd</string>
     <string name="album_add_count">Toevoegen (%1$d)</string>
+    <string name="picker_done">Klaar</string>
+    <string name="picker_nothing_selected">Geen foto\'s geselecteerd</string>
     <string name="picker_selection_limit">Je kunt er maximaal %1$d tegelijk selecteren</string>
     <string name="album_picker_empty">Geen foto\'s om toe te voegen.</string>
 

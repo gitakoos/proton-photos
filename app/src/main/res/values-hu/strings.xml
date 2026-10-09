@@ -804,8 +804,7 @@
 
     <!-- Keresés -->
     <string name="search_title">Keresés</string>
-    <string name="search_placeholder">Keresés fájlnév szerint</string>
-    <string name="search_placeholder_semantic">Fotók keresése</string>
+    <string name="search_placeholder">Fotók keresése</string>
     <string name="search_empty_idle">Írj be egy nevet a kereséshez</string>
     <string name="search_empty_no_results">Nincs találat</string>
 
@@ -1320,6 +1319,8 @@
     <string name="album_picker_title">Albumhoz adás</string>
     <string name="album_picker_selected">%1$d kijelölve</string>
     <string name="album_add_count">Hozzáadás (%1$d)</string>
+    <string name="picker_done">Kész</string>
+    <string name="picker_nothing_selected">Nincs kijelölt fotó</string>
     <string name="picker_selection_limit">Egyszerre legfeljebb %1$d elemet választhatsz ki</string>
     <string name="album_picker_empty">Nincs hozzáadható fotó.</string>
 

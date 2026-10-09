@@ -261,7 +261,6 @@ fun AlbumDetailScreen(
     var showAddToPersonSheet by remember { mutableStateOf(false) }
     val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
     var showMoveToAlbumSheet by remember { mutableStateOf(false) }
-    val moveToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showCreateAlbumForMove by remember { mutableStateOf(false) }
 
     // The cloud metadata save drawer's live view, shared with the timeline through the app-scoped
@@ -1266,7 +1265,6 @@ fun AlbumDetailScreen(
         eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog(
             selectedItems = moveItems,
             cloudAlbums = albumsState.addableAlbums.filter { it.linkId != state.albumLinkId },
-            sheetState = moveToAlbumSheetState,
             onCreateNew = {
                 showMoveToAlbumSheet = false
                 showCreateAlbumForMove = true

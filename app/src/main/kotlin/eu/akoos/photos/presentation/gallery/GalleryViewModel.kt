@@ -138,7 +138,7 @@ private data class GallerySources(
  * locale and first-seen order are identical to the prior inline grouping, so the timeline is
  * unchanged. groupBy yields a LinkedHashMap, preserving encounter order.
  */
-private fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
+internal fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
     val fmt = monthYearFormat()
     val scratch = Date()
     return items
@@ -151,7 +151,7 @@ private fun groupByMonth(items: List<GalleryItem>): List<Pair<String, List<Galle
  * shape as [groupByMonth]; the "d MMMM yyyy" label matches the grid's prior inline Day format, so
  * the 3-column default headers are unchanged. groupBy yields a LinkedHashMap, preserving order.
  */
-private fun groupByDay(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
+internal fun groupByDay(items: List<GalleryItem>): List<Pair<String, List<GalleryItem>>> {
     val fmt = dayMonthYearFormat()
     val scratch = Date()
     return items

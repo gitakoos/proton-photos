@@ -381,6 +381,11 @@ fun AlbumsScreen(
     showCollection: Boolean = true,
     /** Cover cards in a grid, or one row per album (the Albums filter sheet's view choice). */
     viewMode: AlbumsViewMode = AlbumsViewMode.Default,
+    /** True when the grid is only picking an album or folder to browse: the pinned library tiles are left
+     *  out and a press opens nothing but the album, so no action sheet or arranging is reachable. */
+    pickMode: Boolean = false,
+    /** An album left off the grid in [pickMode], the one a picker is adding photos to. */
+    hideAlbumLinkId: String? = null,
     viewModel: AlbumsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -535,18 +540,18 @@ fun AlbumsScreen(
     // matching album keeps its sorted slot; the fold is accent-insensitive, the rule search uses.
     val foldedQuery = SearchFilter.fold(query.trim())
     val searching = foldedQuery.isNotEmpty()
-    val collectionCardShown = albumsCollectionCardShown(showCollection, searching, displayFilter)
+    val collectionCardShown = !pickMode && albumsCollectionCardShown(showCollection, searching, displayFilter)
     // Where the cloud cards begin in the grid. Read through state, since the drag handlers outlive
     // the composition that built them: an arrangement opened from a search result is built on a grid
     // without the Collection card, and opening it clears that search, which brings the card back.
     val cloudSegmentStart by rememberUpdatedState(
         albumsCloudSegmentStart(showCollection, searching, displayFilter),
     )
-    val albums = if (searching) {
+    val albums = (if (searching) {
         orderedAlbums.filter { SearchFilter.fold(it.name).contains(foldedQuery) }
     } else {
         orderedAlbums
-    }
+    }).let { list -> if (hideAlbumLinkId == null) list else list.filter { it.linkId != hideAlbumLinkId } }
     // Folders whose card the user hid are off the grid, exactly as a hidden cloud album is. The
     // folder itself is untouched and its photos stay in the timeline; only the card goes.
     val deviceFolders = if (searching) {
@@ -849,7 +854,7 @@ fun AlbumsScreen(
                                     resolveCoverGif = viewModel::resolveCoverGif,
                                     arranging = reorderMode,
                                     onClick = { onAlbumClick(album) },
-                                    onOptionsClick = { cloudAlbumSheetFor = album },
+                                    onOptionsClick = if (pickMode) null else ({ cloudAlbumSheetFor = album }),
                                     modifier = Modifier
                                         .animateItem(placementSpec = if (dragged) null else ArrangeSlotSpring)
                                         .zIndex(if (dragged) 1f else 0f)
@@ -881,7 +886,7 @@ fun AlbumsScreen(
                                     resolveCoverGif = viewModel::resolveCoverGif,
                                     interactionsEnabled = !reorderMode,
                                     onClick     = { onAlbumClick(album) },
-                                    onLongClick = { cloudAlbumSheetFor = album },
+                                    onLongClick = { if (!pickMode) cloudAlbumSheetFor = album },
                                     modifier = Modifier
                                         .animateItem(placementSpec = if (dragged) null else ArrangeSlotSpring)
                                         .zIndex(if (dragged) 1f else 0f)
@@ -912,8 +917,8 @@ fun AlbumsScreen(
                                         metaText = metaText,
                                         isDeviceFolder = true,
                                         onClick = { onDeviceFolderClick(folder.name) },
-                                        onLongClick = { deviceFolderSheetFor = folder },
-                                        onOptionsClick = { deviceFolderSheetFor = folder },
+                                        onLongClick = if (pickMode) null else ({ deviceFolderSheetFor = folder }),
+                                        onOptionsClick = if (pickMode) null else ({ deviceFolderSheetFor = folder }),
                                     )
                                 } else {
                                     UnifiedAlbumCard(
@@ -923,7 +928,7 @@ fun AlbumsScreen(
                                         metaText = metaText,
                                         isDeviceFolder = true,
                                         onClick = { onDeviceFolderClick(folder.name) },
-                                        onLongClick = { deviceFolderSheetFor = folder },
+                                        onLongClick = { if (!pickMode) deviceFolderSheetFor = folder },
                                     )
                                 }
                             }
@@ -1470,7 +1475,7 @@ private fun CloudAlbumCard(
 private fun CloudAlbumRow(
     album: Album,
     onClick: () -> Unit,
-    onOptionsClick: () -> Unit,
+    onOptionsClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     arranging: Boolean = false,
     resolveCoverGif: suspend (String) -> String? = { null },

@@ -64,6 +64,7 @@ import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.transfer.TransferCenter
+import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
@@ -81,8 +82,9 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.SemanticSearchUseCase
 import eu.akoos.photos.domain.usecase.decodeAlbumOrder
-import eu.akoos.photos.presentation.albums.DeviceFolder
+import eu.akoos.photos.presentation.albums.AlbumBrowseSource
 import eu.akoos.photos.presentation.albums.DeviceFolderCards
+import eu.akoos.photos.presentation.albums.deviceBucketOf
 import eu.akoos.photos.presentation.common.GalleryItemSelectionController
 import eu.akoos.photos.presentation.common.MoveToFolderController
 import eu.akoos.photos.presentation.gallery.ContentFilter
@@ -97,6 +99,30 @@ import eu.akoos.photos.util.retryOnDbTear
 import java.util.Locale
 import javax.inject.Inject
 
+/**
+ * An album or device folder a search is narrowed to, shown as a pill in the field. [key] is `c:<linkId>`
+ * for one of the user's cloud albums or `f:<bucket>` for a device folder.
+ */
+data class SearchScope(val key: String, val name: String) {
+    val cloudLinkId: String? get() = key.takeIf { it.startsWith("c:") }?.drop(2)
+    val folder: String? get() = key.takeIf { it.startsWith("f:") }?.drop(2)
+}
+
+/** What an active [SearchScope] lets through: a cloud album's member photos, or a device folder's. */
+private class ScopeFilter(private val linkIds: Set<String>?, private val folder: String?) {
+    fun accepts(item: GalleryItem): Boolean {
+        if (linkIds != null) {
+            val linkId = when (item) {
+                is GalleryItem.CloudOnly -> item.cloud.linkId
+                is GalleryItem.Synced -> item.cloud.linkId
+                is GalleryItem.LocalOnly -> null
+            }
+            return linkId != null && linkId in linkIds
+        }
+        return deviceBucketOf(item) == folder
+    }
+}
+
 /** Backs the Search screen. Filters the merged gallery by displayName substring + ContentFilter. */
 @HiltViewModel
 class SearchViewModel @Inject constructor(
@@ -108,8 +134,8 @@ class SearchViewModel @Inject constructor(
     private val faceDao: FaceDao,
     private val moveController: MoveToFolderController,
     private val driveRepo: DrivePhotoRepository,
-    private val cloudAlbumDao: CloudAlbumDao,
-    private val localMediaRepo: LocalMediaRepository,
+    private val albumBrowseSource: AlbumBrowseSource,
+    private val albumMembershipDao: AlbumPhotoMembershipDao,
     private val labelRepo: PhotoLabelRepository,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -182,6 +208,25 @@ class SearchViewModel @Inject constructor(
     private val _personSelection = MutableStateFlow(PersonSelection())
     val selectedPersonId: StateFlow<Long?> =
         _personSelection.map { it.id }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val _scope = MutableStateFlow<SearchScope?>(null)
+
+    /** The album or device folder the results are narrowed to, or null for the whole library. */
+    val scope: StateFlow<SearchScope?> = _scope.asStateFlow()
+
+    fun setScope(value: SearchScope?) { _scope.value = value }
+
+    /** What the active scope lets through, following the album's membership as it changes. */
+    private val scopeFilter: Flow<ScopeFilter?> = _scope.flatMapLatest { scope ->
+        when {
+            scope == null -> flowOf(null)
+            scope.cloudLinkId != null ->
+                albumMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(setOf(scope.cloudLinkId!!))
+                    .map<List<String>, ScopeFilter?> { ScopeFilter(it.toSet(), null) }
+                    .catch { emit(ScopeFilter(emptySet(), null)) }
+            else -> flowOf(ScopeFilter(null, scope.folder))
+        }
+    }
 
     /**
      * Unfiltered gallery source. The search page's empty state surfaces "On this day"
@@ -292,11 +337,6 @@ class SearchViewModel @Inject constructor(
         .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.SEMANTIC_ENABLED] == true }
         .distinctUntilChanged()
 
-    /** Exposed for the search bar placeholder: with semantic search on the field matches any
-     *  description, not just filenames, so the hint text switches accordingly. */
-    val semanticSearchEnabled: StateFlow<Boolean> = semanticEnabled
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
     /** The content-search feed: whether a search is still running for the current query, and the
      *  resolved matches so far. Held as one value so the loading flag and the matches never disagree. */
     private data class SemanticFeed(val loading: Boolean, val items: List<GalleryItem>)
@@ -366,9 +406,9 @@ class SearchViewModel @Inject constructor(
      * no hits) leaves this exactly equal to [keywordResults], so the non-semantic path never changes;
      * with it on the same grid gains the content-matched photos.
      */
-    val results: StateFlow<List<GalleryItem>> = combine(keywordResults, semanticFeed) { keyword, feed ->
+    val results: StateFlow<List<GalleryItem>> = combine(keywordResults, semanticFeed, scopeFilter) { keyword, feed, scoped ->
         val semantic = feed.items
-        if (semantic.isEmpty()) {
+        val merged = if (semantic.isEmpty()) {
             keyword
         } else {
             val seen = HashSet<String>(keyword.size + semantic.size)
@@ -376,6 +416,7 @@ class SearchViewModel @Inject constructor(
             val tail = semantic.filter { seen.add(it.stableId) }
             if (tail.isEmpty()) keyword else keyword + tail
         }
+        if (scoped == null) merged else merged.filter(scoped::accepts)
     }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -420,60 +461,8 @@ class SearchViewModel @Inject constructor(
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /**
-     * The user's own cloud albums as the album cache holds them. Cache only: the Albums tab keeps it
-     * fresh, so Search adds no network call. Read again whenever that cache changes, as when a refresh
-     * the Albums tab started lands, and whenever the hidden cloud photos change, which re-resolves a
-     * cover that just became hidden, as the Albums tab does. A guest has no cloud albums, and a later
-     * sign-in re-subscribes this, so the rows gain them in place.
-     */
-    private val cachedCloudAlbums: Flow<List<Album>> = accountManager.getPrimaryUserId()
-        .flatMapLatest { userId ->
-            if (userId == null) flowOf(emptyList())
-            else combine(cloudAlbumDao.observeOwned(), driveRepo.observeHiddenAlbumMemberLinkIds()) { _, _ -> }
-                .mapLatest { driveRepo.loadAlbumsCached() }
-        }
-        .retryOnDbTear("SearchAlbums")
-
-    /** The device folders as the Albums tab builds them, from the shared device listing rather than a
-     *  scan of their own, with the vaulted photos left out and each folder's pinned cover. A guest has
-     *  these too. */
-    private val deviceFolders: Flow<List<DeviceFolder>> = combine(
-        localMediaRepo.observeLocalMedia(),
-        context.settingsDataStore.data
-            .map { prefs ->
-                (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) to
-                    FolderCoverMap.parse(prefs[SettingsKeys.FOLDER_COVER_URI_MAP])
-            }
-            .distinctUntilChanged(),
-    ) { items, (hiddenUris, pinnedCovers) ->
-        DeviceFolderCards.build(items, hiddenUris, pinnedCovers)
-    }
-        // Grouping the whole device library into folders is CPU work, kept off the main thread.
-        .flowOn(Dispatchers.Default)
-        // No folders until the device listing lands, so the cloud albums never wait on a scan.
-        .onStart { emit(emptyList()) }
-        .catch { emit(emptyList()) }
-
-    /** What both album surfaces are drawn from, read once and shared between them. The album settings
-     *  travel as one snapshot, so writes to unrelated settings re-emit nothing. */
-    private val albumSource: StateFlow<SearchAlbums.Source> = combine(
-        cachedCloudAlbums,
-        deviceFolders,
-        context.settingsDataStore.data
-            .map { prefs ->
-                SearchAlbums.Source(
-                    hiddenAlbumIds = prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet(),
-                    excluded = prefs[SettingsKeys.ALBUMS_GRID_EXCLUDED] ?: emptySet(),
-                    sortMode = AlbumSortMode.fromOrdinal(prefs[SettingsKeys.ALBUMS_SORT_MODE]),
-                    customOrder = decodeAlbumOrder(prefs[SettingsKeys.ALBUMS_CUSTOM_ORDER]),
-                )
-            }
-            .distinctUntilChanged(),
-    ) { cloudAlbums, folders, settings ->
-        settings.copy(cloudAlbums = cloudAlbums, deviceFolders = folders)
-    }
-        .catch { emit(SearchAlbums.Source()) }
+    /** What both album surfaces are drawn from, read once and shared between them. */
+    private val albumSource: StateFlow<SearchAlbums.Source> = albumBrowseSource.source
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SearchAlbums.Source())
 
     /** The idle page's Albums row: the Albums tab's cards in its order, by [SearchAlbums.row]. */
@@ -543,6 +532,7 @@ class SearchViewModel @Inject constructor(
     fun onCategorySelected(filter: GalleryFilter) { _selectedCategory.value = filter }
     fun clearAll() {
         _query.value = ""
+        _scope.value = null
         _contentFilter.value = ContentFilter()
         _selectedCategory.value = GalleryFilter.All
         _personSelection.value = PersonSelection()

@@ -82,6 +82,7 @@ class AlbumPhotoPickerViewModel @Inject constructor(
     private val forceUploadLocalUris: ForceUploadLocalUrisUseCase,
     private val albumPhotoMembershipDao: AlbumPhotoMembershipDao,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
+    private val albumBrowseSource: AlbumBrowseSource,
 ) : ViewModel() {
 
     @Volatile private var primaryUserId: me.proton.core.domain.entity.UserId? = null
@@ -122,6 +123,20 @@ class AlbumPhotoPickerViewModel @Inject constructor(
             emit(emptySet())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    /** The albums and device folders of the Albums tab, in its order, for the picker's Albums view. */
+    internal val browseSource: StateFlow<eu.akoos.photos.presentation.search.SearchAlbums.Source> =
+        albumBrowseSource.source.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            eu.akoos.photos.presentation.search.SearchAlbums.Source(),
+        )
+
+    /** The cloud ids of the photos album [albumLinkId] holds, read from the local membership table. */
+    fun albumMembers(albumLinkId: String): kotlinx.coroutines.flow.Flow<Set<String>> =
+        albumPhotoMembershipDao.observeAssociatedPhotoLinkIdsForAlbums(setOf(albumLinkId))
+            .map { it.toSet() }
+            .catch { emit(emptySet()) }
 
     private val query = MutableStateFlow<PickerQuery?>(null)
 

@@ -35,10 +35,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -64,6 +68,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -97,6 +103,7 @@ import eu.akoos.photos.presentation.gallery.rememberSeamlessGrid
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -172,7 +179,6 @@ import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
-import eu.akoos.photos.presentation.search.components.AlbumSuggestionRow
 import eu.akoos.photos.presentation.search.components.AlbumsRow
 import eu.akoos.photos.presentation.search.components.JumpToMonthHeader
 import eu.akoos.photos.presentation.search.components.MonthTileRow
@@ -190,6 +196,28 @@ import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.util.computeOnThisDay
 import java.util.Calendar
 
+/**
+ * The search run for picking photos into something (the photo picker's search) instead of acting on them:
+ * every tap selects into [selected] (the picker's own selection, [onToggle] and [onSetSelection] write it),
+ * nothing but the search itself shows (no selection drawer, no idle page), photos in [excludeLinkIds] are
+ * never offered, and the search opens narrowed to [initialScope]. The picker owns the top bar and the tab
+ * bar, so the search draws neither a header nor a back button: its field and the category chips sit at the
+ * bottom, above the tab bar and above the keyboard, with no filter button.
+ */
+class SearchPick(
+    val selected: Set<GalleryItem>,
+    val onToggle: (GalleryItem) -> Unit,
+    val onSetSelection: (Set<GalleryItem>) -> Unit,
+    val excludeLinkIds: Set<String>,
+    val initialScope: SearchScope?,
+    /** What the picker draws over the top of the screen, which the results clear. */
+    val topInset: Dp,
+    /** What the picker draws over the bottom (its tab bar), which the search field sits above. */
+    val bottomInset: Dp,
+    /** Whether the results have scrolled away from the top, so the picker's bar can lift off the page. */
+    val onScrolled: (Boolean) -> Unit,
+)
+
 @Composable
 fun SearchScreen(
     onBack: () -> Unit,
@@ -202,6 +230,8 @@ fun SearchScreen(
     onOpenAlbum: (Album) -> Unit = {},
     /** Opens a device folder by its bucket name, from the same two places. */
     onOpenDeviceFolder: (bucketName: String) -> Unit = {},
+    /** Set when the search picks photos for a picker rather than acting on them. */
+    pick: SearchPick? = null,
     vm: SearchViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
@@ -209,9 +239,20 @@ fun SearchScreen(
     val peopleSuggestions by vm.peopleSuggestions.collectAsStateWithLifecycle()
     val albumRow by vm.albumRow.collectAsStateWithLifecycle()
     val albumSuggestions by vm.albumSuggestions.collectAsStateWithLifecycle()
-    val results by vm.results.collectAsStateWithLifecycle()
+    val rawResults by vm.results.collectAsStateWithLifecycle()
+    val searchScope by vm.scope.collectAsStateWithLifecycle()
+    // A picker never offers what the target already holds.
+    val pickExcluded = pick?.excludeLinkIds.orEmpty()
+    val results = remember(rawResults, pickExcluded) {
+        if (pickExcluded.isEmpty()) rawResults else rawResults.filterNot { item ->
+            when (item) {
+                is GalleryItem.CloudOnly -> item.cloud.linkId in pickExcluded
+                is GalleryItem.Synced -> item.cloud.linkId in pickExcluded
+                is GalleryItem.LocalOnly -> false
+            }
+        }
+    }
     val semanticSearching by vm.semanticSearching.collectAsStateWithLifecycle()
-    val semanticSearchEnabled by vm.semanticSearchEnabled.collectAsStateWithLifecycle()
     val filter by vm.contentFilter.collectAsStateWithLifecycle()
     val dateSuggestions by vm.dateSuggestions.collectAsStateWithLifecycle()
     val selectedCategory by vm.selectedCategory.collectAsStateWithLifecycle()
@@ -220,7 +261,8 @@ fun SearchScreen(
     // Whether the People face bar is revealed under the category rail (mirrors the timeline).
     var peopleExpanded by remember { mutableStateOf(false) }
     val allItems by vm.allItems.collectAsStateWithLifecycle()
-    val selectedItems by vm.selectedItems.collectAsStateWithLifecycle()
+    val vmSelectedItems by vm.selectedItems.collectAsStateWithLifecycle()
+    val selectedItems = pick?.selected ?: vmSelectedItems
     val albums by vm.albums.collectAsStateWithLifecycle()
     val pendingDeleteIntent by vm.pendingDeleteIntent.collectAsStateWithLifecycle()
     val isDeleting by vm.isDeleting.collectAsStateWithLifecycle()
@@ -237,18 +279,41 @@ fun SearchScreen(
     val screenLocale = appLocale()
     LaunchedEffect(screenLocale) { vm.setLocale(screenLocale) }
 
-    val isSelectionMode = selectedItems.isNotEmpty()
+    // A picker is always selecting: every tap on a result picks it.
+    val isSelectionMode = pick != null || selectedItems.isNotEmpty()
+    // The search the picker opens starts from nothing, narrowed to the album it was opened in, if any.
+    if (pick != null) {
+        DisposableEffect(Unit) {
+            vm.clearAll()
+            vm.setScope(pick.initialScope)
+            onDispose { vm.clearAll() }
+        }
+    }
     // In selection mode the back button cancels the selection instead of leaving the screen.
-    BackHandler(enabled = isSelectionMode) { vm.clearSelection() }
+    BackHandler(enabled = pick == null && isSelectionMode) { vm.clearSelection() }
 
     // The name matches the floating header lists above the results.
     val showPeopleSuggestions = query.isNotBlank() && peopleSuggestions.isNotEmpty()
     val showAlbumSuggestions = query.isNotBlank() && albumSuggestions.isNotEmpty()
     val openAlbum: (SearchAlbum) -> Unit = { entry ->
-        when (entry) {
+        if (pick != null) {
+            // A picker narrows the search to the album, which sits in the field as a pill.
+            vm.setScope(
+                when (entry) {
+                    is SearchAlbum.Cloud -> SearchScope("c:${entry.album.linkId}", entry.album.name)
+                    is SearchAlbum.Folder -> SearchScope("f:${entry.folder.name}", entry.folder.name)
+                },
+            )
+            vm.setQuery("")
+        } else when (entry) {
             is SearchAlbum.Cloud -> onOpenAlbum(entry.album)
             is SearchAlbum.Folder -> onOpenDeviceFolder(entry.folder.name)
         }
+    }
+    val openPerson: (Long) -> Unit = if (pick != null) {
+        { personId -> vm.onPersonSelected(personId); vm.setQuery("") }
+    } else {
+        onOpenPerson
     }
 
     val context = LocalContext.current
@@ -300,7 +365,6 @@ fun SearchScreen(
         mutableStateOf<eu.akoos.photos.data.hidden.HiddenFolderRecords.HideSplit?>(null)
     }
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
-    val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showAddToPersonSheet by remember { mutableStateOf(false) }
     // The picker's own "New album" row, which names an album and then adds the selection to it.
     var showCreateAlbumInline by remember { mutableStateOf(false) }
@@ -412,6 +476,115 @@ fun SearchScreen(
     }
     var searchFocused by remember { mutableStateOf(false) }
 
+    // The pieces of the header, defined once so the picker can lay them out at the bottom instead.
+    // Whatever already narrows the results sits in the field as a pill: the chosen category,
+    // the type and storage filters and the date, each removable on its own.
+    val searchLocale = appLocale()
+    val categoryName = if (selectedCategory == GalleryFilter.All) null else categoryLabel(selectedCategory)
+    val photosName = stringResource(R.string.gallery_filter_photos)
+    val videosName = stringResource(R.string.filter_type_videos)
+    val localName = stringResource(R.string.filter_sync_local)
+    val backedUpName = stringResource(R.string.filter_sync_backedup)
+    val cloudName = stringResource(R.string.filter_sync_cloud)
+    val searchTerms = buildList {
+        searchScope?.let { add(SearchFieldTerm(it.name) { vm.setScope(null) }) }
+        categoryName?.let { add(SearchFieldTerm(it) { vm.onCategorySelected(GalleryFilter.All) }) }
+        when (filter.mediaType) {
+            MediaType.PhotosOnly -> add(SearchFieldTerm(photosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
+            MediaType.VideosOnly -> add(SearchFieldTerm(videosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
+            MediaType.All -> Unit
+        }
+        when (filter.syncStatus) {
+            SyncStatusFilter.LocalOnly -> add(SearchFieldTerm(localName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
+            SyncStatusFilter.BackedUp -> add(SearchFieldTerm(backedUpName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
+            SyncStatusFilter.CloudOnly -> add(SearchFieldTerm(cloudName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
+            SyncStatusFilter.All -> Unit
+        }
+        dateTermLabel(filter.year, filter.month, filter.day, filter.dayEnd, searchLocale)?.let { label ->
+            add(SearchFieldTerm(label) { vm.setContentFilter(filter.copy(year = null, month = null, day = null, dayEnd = null)) })
+        }
+    }
+    val searchField: @Composable (Modifier) -> Unit = { modifier ->
+        AppSearchField(
+            query = query,
+            onQueryChange = vm::setQuery,
+            terms = searchTerms,
+            // With semantic search on the field matches any description, so "by filename"
+            // would read as wrong; fall back to it only when semantic search is off.
+            placeholder = stringResource(R.string.search_placeholder),
+            modifier = modifier,
+            onFocusChanged = { searchFocused = it },
+        )
+    }
+    // Tap-to-filter category chips (same row as the timeline). Tapping a category narrows the
+    // results immediately, without opening the filter sheet.
+    // The shared category rail also renders the People chip + face bar when a person is
+    // available, driven through the LocalPeopleRail CompositionLocal exactly like the timeline.
+    val peopleActive = peopleExpanded || selectedPersonId != null
+    val peopleRail = remember(people, selectedPersonId, peopleActive) {
+        PeopleRailData(
+            people = people,
+            selectedPersonId = selectedPersonId,
+            active = peopleActive,
+            onToggle = {
+                if (peopleActive) {
+                    peopleExpanded = false
+                    vm.onPersonSelected(null)
+                } else {
+                    peopleExpanded = true
+                }
+            },
+            onPersonSelected = { id ->
+                peopleExpanded = true
+                vm.onPersonSelected(if (selectedPersonId == id) null else id)
+            },
+        )
+    }
+    val categoryRow: @Composable () -> Unit = {
+        CompositionLocalProvider(LocalPeopleRail provides peopleRail) {
+            CategoryRail(
+                selectedFilter = selectedCategory,
+                onFilterSelected = vm::onCategorySelected,
+                shape = RoundedCornerShape(14.dp),
+            )
+        }
+    }
+    val dateRow: @Composable () -> Unit = {
+        // A month or a year typed into the field is offered as a date to pick, which turns it into a
+        // pill and leaves the field free for words and names.
+        if (dateSuggestions.isNotEmpty()) {
+            val dateLocale = appLocale()
+            Spacer(modifier = Modifier.height(8.dp))
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(dateSuggestions) { suggestion ->
+                    FilterChip(
+                        label = dateTermLabel(suggestion.year, suggestion.month, null, null, dateLocale).orEmpty(),
+                        selected = false,
+                        onClick = { vm.applyDateSuggestion(suggestion) },
+                    )
+                }
+            }
+        }
+    }
+    val density = LocalDensity.current
+    // What a picker draws over the bottom: its tab bar, or the keyboard once it is up.
+    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+    val pickBottomBase = pick?.let { if (imeBottom > 0.dp) imeBottom + 8.dp else it.bottomInset } ?: 0.dp
+    if (pick != null) {
+        val scrolled by remember {
+            derivedStateOf { resultsGridState.firstVisibleItemIndex > 0 || resultsGridState.firstVisibleItemScrollOffset > 0 }
+        }
+        val resultsScrolled = scrolled && results.isNotEmpty()
+        LaunchedEffect(resultsScrolled) { pick.onScrolled(resultsScrolled) }
+        DisposableEffect(Unit) { onDispose { pick.onScrolled(false) } }
+    }
+    // The field (46dp) and the gaps around it.
+    val pickBottom = pickBottomBase + 62.dp
+
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -423,7 +596,6 @@ fun SearchScreen(
       // The content fills the screen and scrolls up under the floating header. The header is drawn
       // after the content (below) so it overlays it, and its measured height pads the content clear
       // of it so the first row never starts hidden.
-      val density = LocalDensity.current
       // Seed with an estimate so the very first frame already insets the content, instead of flashing
       // it under the header for the frame before onSizeChanged reports the real height.
       var headerHeightPx by remember { mutableIntStateOf(with(density) { 150.dp.roundToPx() }) }
@@ -431,7 +603,29 @@ fun SearchScreen(
 
       Box(modifier = Modifier.fillMaxSize()) {
         val isIdle = SearchFilter.nothingAsked(query, filter, selectedCategory, personSelected = selectedPersonId != null)
-        if (results.isEmpty() && isIdle) {
+        // The people and albums whose name matches the query are rows of the results, so a name that
+        // matched no photo still has something to show.
+        val hasMatches = showPeopleSuggestions || showAlbumSuggestions
+        val phase = when {
+            pick != null && results.isEmpty() && isIdle -> 0
+            results.isEmpty() && isIdle -> 1
+            results.isEmpty() && !hasMatches && semanticSearching -> 2
+            results.isEmpty() && !hasMatches -> 3
+            else -> 4
+        }
+        if (phase == 0) {
+            // A picker's search is empty until something is typed: no recents, albums or months offered.
+            Box(
+                modifier = Modifier.fillMaxSize().padding(top = headerPad, bottom = pickBottom),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.search_empty_idle),
+                    color = colors.fgMute,
+                    fontSize = 14.sp,
+                )
+            }
+        } else if (phase == 1) {
             // Idle empty state — surface "On this day" memories + a month-jump grid
             // so the page is useful without typing anything. Both sections live inside
             // one LazyColumn so they scroll as a unit and benefit from item-level
@@ -541,28 +735,26 @@ fun SearchScreen(
                 minItemsToShow = 8,
             )
             }
-        } else if (results.isEmpty() && semanticSearching) {
+        } else if (phase == 2) {
             // A content search is running and nothing keyword-matched yet (say "sunset", which no
             // filename matches): show shimmering placeholder tiles rather than a blank "no results"
             // that the matches then pop into once the model returns.
             SemanticSearchSkeletonGrid(topPadding = headerPad)
-        } else if (results.isEmpty()) {
-            // A name that matched people or albums but no photo still found something: the header
-            // lists them, so the line stays away.
-            if (!showPeopleSuggestions && !showAlbumSuggestions) {
-                Box(
-                    modifier = Modifier.fillMaxSize().padding(top = headerPad),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = stringResource(R.string.search_empty_no_results),
-                        color = colors.fgMute,
-                        fontSize = 14.sp,
-                    )
-                }
+        } else if (phase == 3) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(top = headerPad, bottom = pickBottom),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = stringResource(R.string.search_empty_no_results),
+                    color = colors.fgMute,
+                    fontSize = 14.sp,
+                )
             }
         } else {
             Box(modifier = Modifier.fillMaxSize()) {
+                // Full-width rows ahead of the first photo, which the viewer's return position counts.
+                val leadingRows = (if (showPeopleSuggestions) 1 else 0) + (if (showAlbumSuggestions) 1 else 0)
                 // Drag-to-select: long-press a cell then drag to sweep a range. Cells key on the
                 // shared keyOf() (LocalOnly/Synced by uri, CloudOnly by linkId); the swept keys map
                 // back to the whole GalleryItem the selection holds.
@@ -575,7 +767,7 @@ fun SearchScreen(
                     items = results,
                     indexByKey = keyToIndex,
                     selected = selectedItems,
-                    onSelectionChange = vm::setSelection,
+                    onSelectionChange = pick?.onSetSelection ?: vm::setSelection,
                     tapGuard = tapGuard,
                     enabled = !isDeleting,
                 )
@@ -588,6 +780,7 @@ fun SearchScreen(
                     gridState = resultsGridState,
                     groups = returnGroups,
                     headerPerGroup = false,
+                    leadingSlots = leadingRows,
                     keyOf = { it.stableId },
                 )
                 LazyVerticalGrid(
@@ -597,15 +790,28 @@ fun SearchScreen(
                         start = if (seamless) 0.dp else 6.dp,
                         end = if (seamless) 0.dp else 6.dp,
                         top = headerPad + 4.dp,
-                        bottom = selectionGridBottomPadding(12.dp, isSelectionMode, gridPadsNavigationBar = true),
+                        bottom = if (pick != null) pickBottom else selectionGridBottomPadding(12.dp, isSelectionMode, gridPadsNavigationBar = true),
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                     modifier = Modifier
                         .fillMaxSize()
-                        .navigationBarsPadding()
+                        .then(if (pick == null) Modifier.navigationBarsPadding() else Modifier)
                         .then(dragSelectModifier),
                 ) {
+                    // People whose name matches, then the albums and folders whose name matches: rows of
+                    // the results, so they scroll with the photos instead of riding the header.
+                    if (showPeopleSuggestions) {
+                        item(key = "match_people", span = { GridItemSpan(maxLineSpan) }) {
+                            PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = openPerson)
+                        }
+                    }
+                    if (showAlbumSuggestions) {
+                        // The same Albums row the idle page shows, with only the albums whose name matches.
+                        item(key = "match_albums", span = { GridItemSpan(maxLineSpan) }) {
+                            AlbumsRow(entries = albumSuggestions, onOpen = openAlbum)
+                        }
+                    }
                     itemsIndexed(results, key = { _, it -> keyOf(it) }) { idx, item ->
                         val inputs = remember(item, favoriteIds) {
                             photoCellInputsFor(item, favoriteIds = favoriteIds)
@@ -633,6 +839,8 @@ fun SearchScreen(
                                 // would toggle the just-anchored cell back off.
                                 if (tapGuard.value) {
                                     tapGuard.value = false
+                                } else if (pick != null) {
+                                    pick.onToggle(item)
                                 } else if (isSelectionMode) {
                                     vm.toggleSelection(item)
                                 } else onPhotoClick(results, idx)
@@ -647,7 +855,7 @@ fun SearchScreen(
                     items = results,
                     grouping = TimelineGrouping.Month,
                     topPadding = headerPad + 8.dp,
-                    bottomPadding = 24.dp,
+                    bottomPadding = if (pick != null) pickBottom else 24.dp,
                     keyOf = { keyOf(it) },
                 )
             }
@@ -682,10 +890,14 @@ fun SearchScreen(
                         1.0f to colors.bg0.copy(alpha = 0f),
                     )
                 )
-                .statusBarsPadding()
-                .padding(top = 8.dp),
+                // A picker draws its own bar over the top, which the header clears; its field sits at the
+                // bottom instead of in this row, and it has no back button or filter button.
+                .then(
+                    if (pick != null) Modifier.padding(top = pick.topInset)
+                    else Modifier.statusBarsPadding().padding(top = 8.dp),
+                ),
         ) {
-            Row(
+            if (pick == null) Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 4.dp),
@@ -697,49 +909,11 @@ fun SearchScreen(
                 IconBubble(
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = stringResource(R.string.onboarding_back),
-                    onClick = { if (isSelectionMode) vm.clearSelection() else onBack() },
+                    onClick = { if (pick == null && isSelectionMode) vm.clearSelection() else onBack() },
                     background = colors.chipUnselectedBg,
                     borderColor = colors.line,
                 )
-                // Whatever already narrows the results sits in the field as a pill: the chosen category,
-                // the type and storage filters and the date, each removable on its own.
-                val searchLocale = appLocale()
-                val categoryName = if (selectedCategory == GalleryFilter.All) null else categoryLabel(selectedCategory)
-                val photosName = stringResource(R.string.gallery_filter_photos)
-                val videosName = stringResource(R.string.filter_type_videos)
-                val localName = stringResource(R.string.filter_sync_local)
-                val backedUpName = stringResource(R.string.filter_sync_backedup)
-                val cloudName = stringResource(R.string.filter_sync_cloud)
-                val searchTerms = buildList {
-                    categoryName?.let { add(SearchFieldTerm(it) { vm.onCategorySelected(GalleryFilter.All) }) }
-                    when (filter.mediaType) {
-                        MediaType.PhotosOnly -> add(SearchFieldTerm(photosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
-                        MediaType.VideosOnly -> add(SearchFieldTerm(videosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
-                        MediaType.All -> Unit
-                    }
-                    when (filter.syncStatus) {
-                        SyncStatusFilter.LocalOnly -> add(SearchFieldTerm(localName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
-                        SyncStatusFilter.BackedUp -> add(SearchFieldTerm(backedUpName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
-                        SyncStatusFilter.CloudOnly -> add(SearchFieldTerm(cloudName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
-                        SyncStatusFilter.All -> Unit
-                    }
-                    dateTermLabel(filter.year, filter.month, filter.day, filter.dayEnd, searchLocale)?.let { label ->
-                        add(SearchFieldTerm(label) { vm.setContentFilter(filter.copy(year = null, month = null, day = null, dayEnd = null)) })
-                    }
-                }
-                AppSearchField(
-                    query = query,
-                    onQueryChange = vm::setQuery,
-                    terms = searchTerms,
-                    // With semantic search on the field matches any description, so "by filename"
-                    // would read as wrong; fall back to it only when semantic search is off.
-                    placeholder = stringResource(
-                        if (semanticSearchEnabled) R.string.search_placeholder_semantic
-                        else R.string.search_placeholder,
-                    ),
-                    modifier = Modifier.weight(1f),
-                    onFocusChanged = { searchFocused = it },
-                )
+                searchField(Modifier.weight(1f))
                 // Filter button beside the search field — opens the sheet (sync status). Accent
                 // outline + tint when a sheet filter is active, so it reads as "filters applied".
                 val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All
@@ -760,76 +934,32 @@ fun SearchScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            if (pick == null) Spacer(modifier = Modifier.height(10.dp))
 
-            // Tap-to-filter category chips (same row as the timeline). Tapping a category narrows the
-            // results immediately, without opening the filter sheet.
-            // The shared category rail also renders the People chip + face bar when a person is
-            // available, driven through the LocalPeopleRail CompositionLocal exactly like the timeline.
-            val peopleActive = peopleExpanded || selectedPersonId != null
-            val peopleRail = remember(people, selectedPersonId, peopleActive) {
-                PeopleRailData(
-                    people = people,
-                    selectedPersonId = selectedPersonId,
-                    active = peopleActive,
-                    onToggle = {
-                        if (peopleActive) {
-                            peopleExpanded = false
-                            vm.onPersonSelected(null)
-                        } else {
-                            peopleExpanded = true
-                        }
-                    },
-                    onPersonSelected = { id ->
-                        peopleExpanded = true
-                        vm.onPersonSelected(if (selectedPersonId == id) null else id)
-                    },
-                )
-            }
-            CompositionLocalProvider(LocalPeopleRail provides peopleRail) {
-                CategoryRail(
-                    selectedFilter = selectedCategory,
-                    onFilterSelected = vm::onCategorySelected,
-                    shape = RoundedCornerShape(14.dp),
-                )
-            }
+            // A picker's search has no category chips: it is looking for something by name.
+            if (pick == null) categoryRow()
 
-            // A month or a year typed into the field is offered as a date to pick, which turns it into a
-            // pill and leaves the field free for words and names.
-            if (dateSuggestions.isNotEmpty()) {
-                val dateLocale = appLocale()
-                Spacer(modifier = Modifier.height(8.dp))
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(dateSuggestions) { suggestion ->
-                        FilterChip(
-                            label = dateTermLabel(suggestion.year, suggestion.month, null, null, dateLocale).orEmpty(),
-                            selected = false,
-                            onClick = { vm.applyDateSuggestion(suggestion) },
-                        )
-                    }
-                }
-            }
-
-            // People whose name matches the query, above the results so a name search reaches a
-            // person even when no photo filename matches the text.
-            if (showPeopleSuggestions) {
-                Spacer(modifier = Modifier.height(8.dp))
-                PeopleSuggestionRow(people = peopleSuggestions, onOpenPerson = onOpenPerson)
-            }
-            // Albums and device folders whose name matches, right after the people for the same reason.
-            if (showAlbumSuggestions) {
-                if (!showPeopleSuggestions) Spacer(modifier = Modifier.height(8.dp))
-                AlbumSuggestionRow(entries = albumSuggestions, onOpen = openAlbum)
-            }
+            dateRow()
 
             // Breathing room below the header so the content clears the category bar instead of
             // tucking right under it, and the scrim keeps a soft tail.
             Spacer(modifier = Modifier.height(10.dp))
         }
       }
+
+        // A picker's field sits at the bottom, above its tab bar and the keyboard; everything else of the
+        // search stays where it is in the header.
+        if (pick != null) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .padding(bottom = pickBottomBase + 8.dp),
+            ) {
+                searchField(Modifier.weight(1f))
+            }
+        }
 
         // A multi-select delete blocks the screen behind a progress drawer so a second tap can't
         // fire into a half-finished delete.
@@ -1014,7 +1144,7 @@ fun SearchScreen(
             )
         }
         SelectionDrawer(
-            visible = isSelectionMode,
+            visible = pick == null && isSelectionMode,
             items = remember(selectedItems) { selectedItems.toList() },
             actions = searchSelectionActions,
             onDismiss = { vm.clearSelection() },
@@ -1071,7 +1201,6 @@ fun SearchScreen(
             GalleryAddToAlbumDialog(
                 selectedItems = selectedItems,
                 cloudAlbums = albums,
-                sheetState = addToAlbumSheetState,
                 onCreateNew = {
                     showAddToAlbumSheet = false
                     showCreateAlbumInline = true

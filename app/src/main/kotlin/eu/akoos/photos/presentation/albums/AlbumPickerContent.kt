@@ -41,6 +41,10 @@ data class PickerQuery(
     val videosOnly: Boolean = false,
     val filter: PickerFilter = PickerFilter.All,
     val unfiledOnly: Boolean = false,
+    /** Keeps only the photos of one cloud album, by cloud id, while that album is open in the picker. */
+    val scopeLinkIds: Set<String>? = null,
+    /** Keeps only the photos of one device folder, by its name, while that folder is open in the picker. */
+    val scopeFolder: String? = null,
     val grouping: TimelineGrouping = TimelineGrouping.Day,
 )
 
@@ -93,7 +97,8 @@ object AlbumPickerContent {
     ): List<GalleryItem> {
         val excludes = query.excludeLinkIds.isNotEmpty() || query.excludeKeys.isNotEmpty() ||
             hiddenCloudLinkIds.isNotEmpty()
-        val narrows = query.deviceOnly || query.filter != PickerFilter.All || query.videosOnly || query.unfiledOnly
+        val narrows = query.deviceOnly || query.filter != PickerFilter.All || query.videosOnly || query.unfiledOnly ||
+            query.scopeLinkIds != null || query.scopeFolder != null
         if (!excludes && !narrows) return items
         return items.filter { item ->
             val cloudId = when (item) {
@@ -105,6 +110,8 @@ object AlbumPickerContent {
                 if (cloudId != null && (cloudId in query.excludeLinkIds || cloudId in hiddenCloudLinkIds)) return@filter false
                 if (AlbumPhotoPickerViewModel.stableKeyOf(item) in query.excludeKeys) return@filter false
             }
+            if (query.scopeLinkIds != null && (cloudId == null || cloudId !in query.scopeLinkIds)) return@filter false
+            if (query.scopeFolder != null && deviceBucketOf(item) != query.scopeFolder) return@filter false
             // A folder move relocates a device file, so device-only mode keeps photos with a device original.
             if (query.deviceOnly && item is GalleryItem.CloudOnly) return@filter false
             val sourceOk = when (query.filter) {
@@ -155,4 +162,11 @@ object AlbumPickerContent {
         is GalleryItem.Synced -> item.local.mimeType
         is GalleryItem.CloudOnly -> item.cloud.mimeType
     }
+}
+
+/** The device folder (bucket) [item] sits in, or null for a photo with no device original. */
+internal fun deviceBucketOf(item: GalleryItem): String? = when (item) {
+    is GalleryItem.LocalOnly -> item.local.bucketName
+    is GalleryItem.Synced -> item.local.bucketName
+    is GalleryItem.CloudOnly -> null
 }

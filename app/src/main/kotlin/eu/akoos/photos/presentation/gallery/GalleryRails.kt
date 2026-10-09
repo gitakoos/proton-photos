@@ -77,6 +77,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -126,6 +127,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
@@ -184,111 +186,22 @@ internal fun AlbumsFilterRail(
     onFilterSelected: (AlbumDisplayFilter) -> Unit = {},
     onOpenSheet: () -> Unit = {},
     isSignedIn: Boolean = true,
-    /** Albums-tab inline search, hoisted in the gallery and threaded through the header. */
-    searchQuery: String = "",
-    onSearchQueryChange: (String) -> Unit = {},
-    searchActive: Boolean = false,
-    onSearchActiveChange: (Boolean) -> Unit = {},
-    /** True while the page arranges albums; hides the search entry so the two never share the rail. */
-    reorderActive: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    // Focus the field only as the bar opens, never on a plain tab visit.
-    val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(searchActive) { if (searchActive) focusRequester.requestFocus() }
-    // Back closes the bar and clears the query before it leaves the tab.
-    BackHandler(enabled = searchActive) { onSearchActiveChange(false); onSearchQueryChange("") }
-
-    BoxWithConstraints(modifier = modifier) {
-        // The rail is the weighted half of the header row, so it already stops before the avatar: the
-        // open bar fills the whole rail width, collapsed it is one 38dp icon pinned at the end.
-        val searchWidth by animateDpAsState(
-            targetValue = if (searchActive) maxWidth else 38.dp,
-            animationSpec = tween(220),
-            label = "albumsSearchWidth",
-        )
-        // Filter, Hidden and New pills, taken off the rail while the bar is open so none is pressed by
-        // accident. The avatar beside the rail stays in place throughout.
-        if (!searchActive) {
-            AlbumsRailPills(
-                onNewAlbumClick = onNewAlbumClick,
-                onNewLocalFolder = onNewLocalFolder,
-                selectedFilter = selectedFilter,
-                onFilterSelected = onFilterSelected,
-                onOpenSheet = onOpenSheet,
-                isSignedIn = isSignedIn,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        // Morphing search element: a 38dp icon collapsed, the input bar filling the rail open. Gone
-        // while arranging, which takes the whole rail for its own bar.
-        if (!reorderActive) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .width(searchWidth)
-                    .height(38.dp)
-                    .clip(pillShape)
-                    .background(PillBg, pillShape)
-                    .border(0.5.dp, if (searchQuery.isNotEmpty()) Accent else PillBorder, pillShape)
-                    .clickable(enabled = !searchActive) { onSearchActiveChange(true) },
-            ) {
-                if (searchActive) {
-                    Row(
-                        modifier = Modifier.fillMaxSize().padding(start = 12.dp, end = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(Icons.Default.Search, contentDescription = null, tint = FgDim, modifier = Modifier.size(18.dp))
-                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                            if (searchQuery.isEmpty()) {
-                                Text(
-                                    stringResource(R.string.albums_search_hint),
-                                    color = FgMute,
-                                    fontSize = 14.sp,
-                                    maxLines = 1,
-                                )
-                            }
-                            BasicTextField(
-                                value = searchQuery,
-                                onValueChange = onSearchQueryChange,
-                                singleLine = true,
-                                textStyle = TextStyle(color = FgPrimary, fontSize = 14.sp),
-                                cursorBrush = SolidColor(Accent),
-                                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-                            )
-                        }
-                        // Clears a non-empty query, then closes the bar on the next tap.
-                        Box(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .clickable { if (searchQuery.isNotEmpty()) onSearchQueryChange("") else onSearchActiveChange(false) },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = stringResource(R.string.cd_clear_search),
-                                tint = FgDim,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-                } else {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = stringResource(R.string.search_title),
-                        tint = FgDim,
-                        modifier = Modifier.align(Alignment.Center).size(18.dp),
-                    )
-                }
-            }
-        }
-    }
+    // Albums are found through Search, so the rail carries only the view filter and the New pill.
+    AlbumsRailPills(
+        onNewAlbumClick = onNewAlbumClick,
+        onNewLocalFolder = onNewLocalFolder,
+        selectedFilter = selectedFilter,
+        onFilterSelected = onFilterSelected,
+        onOpenSheet = onOpenSheet,
+        isSignedIn = isSignedIn,
+        modifier = modifier.fillMaxWidth(),
+    )
 }
 
-/** The Albums rail's fixed pills (view filter, Hidden, New), lifted out so the search bar can take
- *  their place while it is open without re-indenting or duplicating them. */
+/** The Albums rail's pills (view filter, New), drawn as the Photos rail's "All" pill is: the same height,
+ *  the same `filterPillBg` surface with no border, and the accent tint when the filter is off its default. */
 @Composable
 private fun AlbumsRailPills(
     onNewAlbumClick: () -> Unit,
@@ -311,8 +224,6 @@ private fun AlbumsRailPills(
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        // Room at the end so a pill never slides under the collapsed search icon.
-        contentPadding = PaddingValues(end = 46.dp),
     ) {
         // All / Cloud / Local / Excluded view filter. Tapping the label cycles through them in that
         // order; the filter icon after the separator opens the sheet (view, sort, more settings).
@@ -329,8 +240,7 @@ private fun AlbumsRailPills(
             Row(
                 modifier = Modifier
                     .height(38.dp)
-                    .background(if (active) AppColors.current.chipSelectedBg else PillBg, pillShape)
-                    .border(0.5.dp, if (active) Accent else PillBorder, pillShape)
+                    .background(if (active) Accent.copy(alpha = 0.18f) else AppColors.current.filterPillBg, pillShape)
                     .padding(start = 14.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -348,7 +258,7 @@ private fun AlbumsRailPills(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Text(label, color = if (active) FgPrimary else FgDim, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text(label, color = if (active) Accent else FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
                 // Hairline separator + filter button, mirroring the timeline All pill. Opens the
                 // sheet for the view and the sort, and from it the Albums settings page.
@@ -381,8 +291,7 @@ private fun AlbumsRailPills(
                 Box(
                     modifier = Modifier
                         .size(38.dp)
-                        .background(PillBg, pillShape)
-                        .border(0.5.dp, PillBorder, pillShape)
+                        .background(AppColors.current.filterPillBg, pillShape)
                         .clickable { onNewAlbumClick() },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -398,8 +307,7 @@ private fun AlbumsRailPills(
                 Box(
                     modifier = Modifier
                         .size(38.dp)
-                        .background(PillBg, pillShape)
-                        .border(0.5.dp, PillBorder, pillShape)
+                        .background(AppColors.current.filterPillBg, pillShape)
                         .clickable { onNewLocalFolder() },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -1292,19 +1200,25 @@ internal fun CategoryReorderList(modifier: Modifier = Modifier) {
 // ── Bottom dock ───────────────────────────────────────────────────────────────
 
 @Composable
-internal fun BottomDock(position: Float, onTabSelected: (Int) -> Unit, onSearchClick: () -> Unit) {
+internal fun BottomDock(
+    position: Float,
+    onTabSelected: (Int) -> Unit,
+    // False for a picker that has no search to offer: the pill then holds Photos and Albums alone.
+    searchTab: Boolean = true,
+) {
     val density = LocalDensity.current
     // Each tab's measured left offset + size (labels differ in width), so the single highlight can slide
     // to the selected one instead of the fill just snapping between tabs.
-    val tabX = remember { mutableStateListOf(0f, 0f) }
-    val tabW = remember { mutableStateListOf(0f, 0f) }
+    val tabX = remember { mutableStateListOf(0f, 0f, 0f) }
+    val tabW = remember { mutableStateListOf(0f, 0f, 0f) }
+    val lastTab = if (searchTab) 2 else 1
     var tabH by remember { mutableFloatStateOf(0f) }
-    val selectedTab = position.roundToInt().coerceIn(0, 1)
+    val selectedTab = position.roundToInt().coerceIn(0, lastTab)
     // Drive the highlight off the pager's LIVE fractional position, interpolating between the two tabs it
     // sits over, so it tracks a swiping finger the whole way (and a tap, which the pager animates) rather
     // than only sliding once the page has settled.
-    val lower = position.toInt().coerceIn(0, 1)
-    val upper = (lower + 1).coerceAtMost(1)
+    val lower = position.toInt().coerceIn(0, lastTab)
+    val upper = (lower + 1).coerceAtMost(lastTab)
     val frac = (position - lower).coerceIn(0f, 1f)
     val hlX = lerp(tabX[lower], tabX[upper], frac)
     val hlW = lerp(tabW[lower], tabW[upper], frac)
@@ -1327,21 +1241,83 @@ internal fun BottomDock(position: Float, onTabSelected: (Int) -> Unit, onSearchC
             Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             DockTab(Icons.Default.Photo, stringResource(R.string.gallery_tab_photos), selectedTab == 0, { onTabSelected(0) }) { x, w, h -> tabX[0] = x; tabW[0] = w; tabH = h }
             DockTab(Icons.Default.Collections, stringResource(R.string.gallery_tab_albums), selectedTab == 1, { onTabSelected(1) }) { x, w, h -> tabX[1] = x; tabW[1] = w; tabH = h }
+            // Search is the third tab of the pill. The pager has no page for it, so a surface that opens
+            // search as its own screen never lights it; one that has a page for it does.
+            if (searchTab) {
+                DockTab(Icons.Default.Search, stringResource(R.string.search_title), selectedTab == 2, { onTabSelected(2) }) { x, w, h -> tabX[2] = x; tabW[2] = w; tabH = h }
+            }
             }
         }
-        // Search, one tap from every tab: a round button the dock's height, opening the same search the
-        // Photos header opens.
-        val buttonSize = if (tabH > 0f) with(density) { tabH.toDp() } + 8.dp else 44.dp
+    }
+}
+
+/** The dock's round search button, on its own where a screen has no tab pill beside it. */
+@Composable
+internal fun DockSearchButton(onClick: () -> Unit, modifier: Modifier = Modifier, size: Dp = 50.dp) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .background(PillBgOpaque, CircleShape)
+            .border(0.5.dp, PillBorder, CircleShape)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Default.Search, stringResource(R.string.search_title), tint = FgDim, modifier = Modifier.size(20.dp))
+    }
+}
+
+/**
+ * The search a screen opens from the dock's search button: a bar that takes the dock's place at the bottom
+ * (the tabs are gone while it is open), above the keyboard. The field takes focus as it appears, the X
+ * clears a typed query and then closes the bar, and Back closes it and clears the query.
+ */
+@Composable
+internal fun DockSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    BackHandler { onQueryChange(""); onClose() }
+    Row(
+        modifier = modifier
+            .height(50.dp)
+            .background(PillBgOpaque, pillShape)
+            .border(0.5.dp, if (query.isNotEmpty()) Accent else PillBorder, pillShape)
+            .padding(start = 16.dp, end = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Default.Search, contentDescription = null, tint = FgDim, modifier = Modifier.size(20.dp))
+        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) {
+                Text(stringResource(R.string.albums_search_hint), color = FgMute, fontSize = 15.sp, maxLines = 1)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TextStyle(color = FgPrimary, fontSize = 15.sp),
+                cursorBrush = SolidColor(Accent),
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            )
+        }
         Box(
             modifier = Modifier
-                .size(buttonSize)
-                .background(PillBgOpaque, CircleShape)
-                .border(0.5.dp, PillBorder, CircleShape)
+                .size(34.dp)
                 .clip(CircleShape)
-                .clickable(onClick = onSearchClick),
+                .clickable { if (query.isNotEmpty()) onQueryChange("") else onClose() },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Default.Search, stringResource(R.string.search_title), tint = FgDim, modifier = Modifier.size(20.dp))
+            Icon(
+                Icons.Default.Close,
+                contentDescription = stringResource(R.string.cd_clear_search),
+                tint = FgDim,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }

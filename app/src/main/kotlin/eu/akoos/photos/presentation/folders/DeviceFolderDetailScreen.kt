@@ -295,7 +295,6 @@ fun DeviceFolderDetailScreen(
     // Add selected to a cloud album — reuses the gallery's picker sheet so the styling and
     // behaviour (cloud-backed photos join now, local-only photos upload then join) stay identical.
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
-    val addToAlbumSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // The picker's own "New album" row, which names an album and then adds the selection to it.
     var showCreateAlbumInline by remember { mutableStateOf(false) }
     // What an album add landed on, said the same way whichever row started it. A photo that still has
@@ -1023,7 +1022,6 @@ fun DeviceFolderDetailScreen(
             eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog(
                 selectedItems = addItems,
                 cloudAlbums = albums,
-                sheetState = addToAlbumSheetState,
                 onCreateNew = {
                     showAddToAlbumSheet = false
                     showCreateAlbumInline = true

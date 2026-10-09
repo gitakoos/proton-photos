@@ -332,6 +332,8 @@
     <string name="album_picker_title">Dodaj v album</string>
     <string name="album_picker_selected">Izbranih: %1$d</string>
     <string name="album_add_count">Dodaj (%1$d)</string>
+    <string name="picker_done">Končano</string>
+    <string name="picker_nothing_selected">Nobena fotografija ni izbrana</string>
     <string name="picker_selection_limit">Naenkrat lahko izbereš največ %1$d</string>
     <string name="album_picker_empty">Ni fotografij za dodajanje.</string>
 
@@ -997,8 +999,7 @@
 
     <!-- Search -->
     <string name="search_title">Iskanje</string>
-    <string name="search_placeholder">Iskanje po imenu datoteke</string>
-    <string name="search_placeholder_semantic">Iskanje fotografij</string>
+    <string name="search_placeholder">Iskanje fotografij</string>
     <string name="search_empty_idle">Za začetek iskanja vnesite ime</string>
     <string name="search_empty_no_results">Ni zadetkov</string>
     <string name="search_section_on_this_day">Na ta dan</string>
