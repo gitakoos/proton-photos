@@ -201,7 +201,7 @@ data class SettingsUiState(
     /** Which quality tier the VIDEO upload compression uses when [compressVideosOnUpload] is on, the
      *  video-only counterpart of [compressTier]. Reuses the same [labelRes] / [descRes] mapping. */
     val compressTierVideo: UploadCompressionTier = UploadCompressionTier.BALANCED,
-    val videoCodec: VideoCodecChoice = VideoCodecChoice.AUTO,
+    val videoCodec: VideoCodecChoice = VideoCodecChoice.AVC,
     /** This device's video encoders, for the codec chips; null until the one-off scan finishes. */
     val encoderCapabilities: EncoderCapabilities? = null,
     val mirrorStripToLocal: Boolean = false,

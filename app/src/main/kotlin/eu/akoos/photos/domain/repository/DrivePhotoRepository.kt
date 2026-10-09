@@ -56,6 +56,12 @@ interface DrivePhotoRepository {
      */
     suspend fun loadAlbumsCached(): List<Album>
 
+    /** Album linkIds holding [photoLinkId] according to the local membership table, no network. */
+    suspend fun getCachedAlbumIdsForPhoto(photoLinkId: String): Set<String>
+
+    /** [loadAlbumsCached] as a stream: emits again whenever the cached album rows change. */
+    fun observeAlbumsCached(): Flow<List<Album>>
+
     /** Cached shared-with-me albums this user has edit rights on, for the add-to-album picker. */
     suspend fun loadSharedAddableAlbumsCached(): List<Album>
 

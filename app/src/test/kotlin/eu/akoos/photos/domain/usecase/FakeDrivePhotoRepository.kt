@@ -261,6 +261,10 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
     override suspend fun refreshCloudPhotos(userId: UserId, force: Boolean) {}
     override suspend fun refreshCloudPhotosIncremental(userId: UserId) {}
     override suspend fun loadAlbumsCached(): List<Album> = emptyList()
+
+    override fun observeAlbumsCached(): Flow<List<Album>> = kotlinx.coroutines.flow.flowOf(emptyList())
+
+    override suspend fun getCachedAlbumIdsForPhoto(photoLinkId: String): Set<String> = emptySet()
     override suspend fun loadSharedAddableAlbumsCached(): List<Album> = sharedAddableAlbums.toList()
     override suspend fun loadSharedWithMeAlbumsCached(): List<Album> = emptyList()
     override suspend fun prefetchAlbumsMembership(userId: UserId, albums: List<Album>) {}

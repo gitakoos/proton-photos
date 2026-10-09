@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -123,6 +124,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val favoriteWriter: eu.akoos.photos.presentation.common.FavoriteWriter,
     private val moveController: MoveToFolderController,
     private val folderDelete: DeviceFolderDeleteController,
+    private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
 ) : ViewModel() {
 
     private val _items = MutableStateFlow<List<GalleryItem>>(emptyList())
@@ -619,11 +621,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** Replace the whole selection — used by the drag-select sweep, which sets the swept range each frame. */
     fun setSelectedUris(uris: Set<String>) = selection.set(uris)
 
-    /** Seed [albums] from the local album cache so the "Add to album" picker has options. */
+    /** Keep [albums] on the cached album rows, so the "Add to album" picker has options without a
+     *  network round-trip and follows an album made or refreshed anywhere in the app. */
     private fun loadAlbums() {
         viewModelScope.launch {
-            runCatching { driveRepo.loadAlbumsCached() }
-                .onSuccess { _albums.value = it }
+            driveRepo.observeAlbumsCached()
+                .catch { }
+                .collect { _albums.value = it }
         }
     }
 
@@ -640,6 +644,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         if (items.isEmpty()) return onResult(0, 0)
         viewModelScope.launch {
             val (joined, queued) = addItemsToAlbum(userId, albumLinkId, items)
+            if (joined > 0) albumListEvents.notifyChanged()
             selection.clear()
             onResult(joined, queued)
         }
@@ -670,6 +675,11 @@ class DeviceFolderDetailViewModel @Inject constructor(
             val (joined, queued) = addItemsToAlbum(userId, albumLinkId, items)
             selection.clear()
             onResult(joined, queued, null)
+            // Refreshing writes the new album into the cached list the picker and the Albums page
+            // read; the notice makes an open Albums page reload as well.
+            runCatching { driveRepo.loadAlbums(userId) }
+                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+            albumListEvents.notifyChanged()
         }
     }
 

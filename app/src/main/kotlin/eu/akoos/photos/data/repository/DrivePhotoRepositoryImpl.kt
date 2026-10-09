@@ -167,6 +167,12 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     override suspend fun loadAlbumsCached(): List<Album> =
         albumService.loadAlbumsCached()
 
+    override suspend fun getCachedAlbumIdsForPhoto(photoLinkId: String): Set<String> =
+        albumService.getCachedAlbumIdsForPhoto(photoLinkId)
+
+    override fun observeAlbumsCached(): Flow<List<Album>> =
+        albumService.observeAlbumsCached()
+
     override suspend fun loadSharedAddableAlbumsCached(): List<Album> =
         albumService.loadSharedAddableAlbumsCached()
 

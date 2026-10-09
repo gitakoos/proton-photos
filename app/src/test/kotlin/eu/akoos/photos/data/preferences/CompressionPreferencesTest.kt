@@ -52,16 +52,16 @@ class CompressionPreferencesTest {
             VideoCodecChoice.KEEP_SOURCE,
             CompressionPreferences.videoCodec(preferencesOf(SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD to true)),
         )
-        assertEquals(VideoCodecChoice.AUTO, CompressionPreferences.videoCodec(preferencesOf()))
+        assertEquals(VideoCodecChoice.AVC, CompressionPreferences.videoCodec(preferencesOf()))
     }
 
     @Test
-    fun after_the_migration_turning_videos_on_starts_on_auto() {
+    fun after_the_migration_turning_videos_on_starts_on_h264() {
         val prefs = preferencesOf(
             SettingsKeys.COMPRESS_CODEC_MIGRATED to true,
             SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD to true,
         )
-        assertEquals(VideoCodecChoice.AUTO, CompressionPreferences.videoCodec(prefs))
+        assertEquals(VideoCodecChoice.AVC, CompressionPreferences.videoCodec(prefs))
     }
 
     @Test
@@ -79,7 +79,7 @@ class CompressionPreferencesTest {
 
         val fresh = mutablePreferencesOf()
         assertTrue(CompressionPreferences.migrate(fresh))
-        assertEquals("auto", fresh[SettingsKeys.COMPRESS_VIDEO_CODEC])
+        assertEquals("avc", fresh[SettingsKeys.COMPRESS_VIDEO_CODEC])
 
         val chosen = mutablePreferencesOf(SettingsKeys.COMPRESS_VIDEO_CODEC to "hevc")
         assertTrue(CompressionPreferences.migrate(chosen))

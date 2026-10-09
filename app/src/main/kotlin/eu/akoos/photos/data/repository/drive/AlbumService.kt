@@ -278,6 +278,18 @@ class AlbumService @Inject constructor(
     }
 
     /**
+     * The album linkIds [photoLinkId] is in, read from the local membership table with no network
+     * call. May miss albums whose members were not stored yet; [getAlbumIdsByPhoto] is the
+     * complete answer. Empty on a read failure.
+     */
+    suspend fun getCachedAlbumIdsForPhoto(photoLinkId: String): Set<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            albumPhotoMembershipDao.observeAlbumIdsForPhotos(setOf(photoLinkId)).first()
+                .mapTo(HashSet()) { it.albumLinkId }
+        }.getOrDefault(emptySet())
+    }
+
+    /**
      * Returns the FULL `photoLinkId → Set<albumLinkId>` map, but only when the enumeration is verified
      * complete: loadAlbums succeeded AND every album's children loaded. Throws otherwise. A photo that
      * is genuinely in zero albums under a complete walk simply has no entry (an empty set downstream via
@@ -585,21 +597,38 @@ class AlbumService @Inject constructor(
      * run on this device, or when the user has just signed out.
      */
     suspend fun loadAlbumsCached(): List<Album> = withContext(Dispatchers.IO) {
-        runCatching {
-            val thumbnailCacheDir = File(context.cacheDir, "thumbnails")
-            val hiddenAlbumIds = runCatching { context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_ALBUM_IDS] }.getOrNull().orEmpty()
-            val hiddenCoverIds = runCatching { observeHiddenAlbumMemberLinkIds().first() }.getOrNull().orEmpty()
-            cloudAlbumDao.getOwned().map { entity ->
-                val domain = entity.toDomain()
-                // Rehydrate coverThumbnailUrl from local sources (the entity doesn't persist expiring
-                // CDN URLs) and skip a hidden cover, resolving a non-hidden member instead. A hidden
-                // album keeps its own cover for the Hidden view.
-                val coverUrl = resolveVisibleCoverThumbnail(domain.linkId, domain.coverLinkId, domain.linkId in hiddenAlbumIds, hiddenCoverIds, thumbnailCacheDir)
-                domain.copy(coverThumbnailUrl = coverUrl)
-            }
-        }.getOrElse { e ->
+        runCatching { hydrateOwnedAlbums(cloudAlbumDao.getOwned()) }.getOrElse { e ->
             Log.w(TAG, "loadAlbumsCached: failed (${e.message}), returning empty")
             emptyList()
+        }
+    }
+
+    /**
+     * Live version of [loadAlbumsCached]: re-emits whenever the cached album rows change, so a
+     * picker that holds the list follows an album created or refreshed anywhere in the app.
+     */
+    fun observeAlbumsCached(): Flow<List<Album>> = cloudAlbumDao.observeOwned()
+        .map { entities ->
+            withContext(Dispatchers.IO) {
+                runCatching { hydrateOwnedAlbums(entities) }.getOrElse { e ->
+                    Log.w(TAG, "observeAlbumsCached: failed (${e.message}), returning empty")
+                    emptyList()
+                }
+            }
+        }
+        .distinctUntilChanged()
+
+    private suspend fun hydrateOwnedAlbums(entities: List<CloudAlbumEntity>): List<Album> {
+        val thumbnailCacheDir = File(context.cacheDir, "thumbnails")
+        val hiddenAlbumIds = runCatching { context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_ALBUM_IDS] }.getOrNull().orEmpty()
+        val hiddenCoverIds = runCatching { observeHiddenAlbumMemberLinkIds().first() }.getOrNull().orEmpty()
+        return entities.map { entity ->
+            val domain = entity.toDomain()
+            // Rehydrate coverThumbnailUrl from local sources (the entity doesn't persist expiring
+            // CDN URLs) and skip a hidden cover, resolving a non-hidden member instead. A hidden
+            // album keeps its own cover for the Hidden view.
+            val coverUrl = resolveVisibleCoverThumbnail(domain.linkId, domain.coverLinkId, domain.linkId in hiddenAlbumIds, hiddenCoverIds, thumbnailCacheDir)
+            domain.copy(coverThumbnailUrl = coverUrl)
         }
     }
 

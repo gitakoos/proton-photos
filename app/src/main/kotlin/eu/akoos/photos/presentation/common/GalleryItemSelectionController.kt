@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -71,6 +72,7 @@ import eu.akoos.photos.domain.usecase.DownloadPhotosUseCase
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import eu.akoos.photos.domain.usecase.InvalidateStrippedLocationsUseCase
 import eu.akoos.photos.presentation.util.formatBytes
+import eu.akoos.photos.util.AlbumListEventBus
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.ProtonPhotosStorage
@@ -125,6 +127,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
     private val undoController: UndoController,
     private val accountManager: AccountManager,
     private val favoriteWriter: FavoriteWriter,
+    private val albumListEvents: AlbumListEventBus,
     @ApplicationContext private val context: Context,
 ) {
     @AssistedFactory
@@ -148,7 +151,13 @@ class GalleryItemSelectionController @AssistedInject constructor(
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
 
     init {
-        scope.launch { runCatching { driveRepo.loadAlbumsCached() }.onSuccess { _albums.value = it } }
+        // Follows the cached album rows, so an album made or refreshed anywhere shows in the picker
+        // without a visit to the Albums tab.
+        scope.launch {
+            driveRepo.observeAlbumsCached()
+                .catch { Log.w(TAG, "album list stream failed: ${it.message}") }
+                .collect { _albums.value = it }
+        }
     }
 
     // ── One-shot results the screen consumes ────────────────────────────────────────────────────
@@ -293,6 +302,7 @@ class GalleryItemSelectionController @AssistedInject constructor(
         scope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch onResult(0, 0)
             val (joined, queued) = addItemsToAlbum(userId, albumLinkId, items)
+            if (joined > 0) albumListEvents.notifyChanged()
             selection.clear()
             onResult(joined, queued)
         }
@@ -324,6 +334,11 @@ class GalleryItemSelectionController @AssistedInject constructor(
             val (joined, queued) = addItemsToAlbum(userId, albumLinkId, items)
             selection.clear()
             onResult(joined, queued, null)
+            // The refresh writes the new album into the cached list the picker and the Albums page
+            // read, so both show it at once; the notice makes the open Albums page reload too.
+            runCatching { driveRepo.loadAlbums(userId) }
+                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+            albumListEvents.notifyChanged()
         }
     }
 

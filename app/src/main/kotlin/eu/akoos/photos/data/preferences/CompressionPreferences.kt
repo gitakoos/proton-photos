@@ -32,7 +32,7 @@ import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
  * Reads the video compression settings for the upload path and the settings screen alike.
  *
  * An install that compressed videos before the codec choice existed kept each clip's own codec, so
- * it stays on "Same as original" until the user picks a codec; everyone else starts on Auto. [migrate]
+ * it stays on "Same as original" until the user picks a codec; everyone else starts on H.264, the codec every phone plays. [migrate]
  * pins that once at startup, and until it has run the same rule applies on read.
  */
 object CompressionPreferences {
@@ -58,6 +58,6 @@ object CompressionPreferences {
     private fun defaultCodec(prefs: Preferences): VideoCodecChoice {
         val compressedBefore = prefs[SettingsKeys.COMPRESS_CODEC_MIGRATED] != true &&
             prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] == true
-        return if (compressedBefore) VideoCodecChoice.KEEP_SOURCE else VideoCodecChoice.AUTO
+        return if (compressedBefore) VideoCodecChoice.KEEP_SOURCE else VideoCodecChoice.AVC
     }
 }

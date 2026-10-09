@@ -60,6 +60,6 @@ enum class VideoCodecChoice(val key: String) {
 
 /** The video compression settings: the codec choice, and the quality tier that also caps size and frame rate. */
 data class VideoCompressionProfile(
-    val codec: VideoCodecChoice = VideoCodecChoice.AUTO,
+    val codec: VideoCodecChoice = VideoCodecChoice.AVC,
     val tier: UploadCompressionTier = UploadCompressionTier.BALANCED,
 )

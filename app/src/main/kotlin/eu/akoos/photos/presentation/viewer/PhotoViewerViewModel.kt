@@ -125,6 +125,10 @@ data class DetailsGps(val latitude: Double, val longitude: Double)
  *  to many). */
 data class DetailsAlbums(val localFolder: String? = null, val cloudAlbums: List<String> = emptyList())
 
+/** The sorted, distinct names of the [albums] whose linkId is in [albumIds]. */
+internal fun albumNamesFor(albumIds: Set<String>, albums: List<Album>): List<String> =
+    albums.filter { it.linkId in albumIds }.map { it.name }.distinct().sorted()
+
 /** A completed album removal: the album the photo was taken out of, plus the photo's Drive linkId.
  *  Both ids travel together so a viewer can tell a removal from the album it was opened from apart
  *  from one aimed at any other album the photo also belongs to. */
@@ -1882,18 +1886,21 @@ class PhotoViewerViewModel @Inject constructor(
         _detailsAlbums.value = DetailsAlbums(localFolder = localFolder)
         if (cloudLinkId == null) return
         viewModelScope.launch {
+            // The stored albums and memberships answer at once; the walk of every album below is
+            // the complete answer and replaces this one when it arrives.
+            val stored = runCatching {
+                albumNamesFor(
+                    cloudRepo.getCachedAlbumIdsForPhoto(cloudLinkId),
+                    cloudRepo.loadAlbumsCached().ifEmpty { _albums.value },
+                )
+            }.getOrDefault(emptyList())
+            if (stored.isNotEmpty()) {
+                _detailsAlbums.value = DetailsAlbums(localFolder = localFolder, cloudAlbums = stored)
+            }
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            val names = runCatching { cloudRepo.getAlbumIdsByPhoto(userId) }
-                .getOrNull()
-                ?.get(cloudLinkId)
-                ?.let { ids ->
-                    _albums.value
-                        .filter { it.linkId in ids }
-                        .map { it.name }
-                        .distinct()
-                        .sorted()
-                }
-                .orEmpty()
+            // A failed walk keeps the stored answer; a finished one is the truth, a photo in no album included.
+            val byPhoto = runCatching { cloudRepo.getAlbumIdsByPhoto(userId) }.getOrNull() ?: return@launch
+            val names = albumNamesFor(byPhoto[cloudLinkId].orEmpty(), _albums.value.ifEmpty { cloudRepo.loadAlbumsCached() })
             _detailsAlbums.value = DetailsAlbums(localFolder = localFolder, cloudAlbums = names)
         }
     }
