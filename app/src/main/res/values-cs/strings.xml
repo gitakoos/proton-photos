@@ -1001,6 +1001,12 @@
     <string name="search_placeholder">Hledat fotky</string>
     <string name="search_empty_idle">Začněte hledat zadáním názvu</string>
     <string name="search_empty_no_results">Žádné shody</string>
+    <string name="search_rel_today">dnes|dneska</string>
+    <string name="search_rel_yesterday">včera</string>
+    <string name="search_rel_this_month">tento měsíc</string>
+    <string name="search_rel_last_month">minulý měsíc|předchozí měsíc</string>
+    <string name="search_rel_this_year">tento rok|letos</string>
+    <string name="search_rel_last_year">minulý rok|loni</string>
     <string name="search_section_on_this_day">V tento den</string>
     <string name="search_section_on_this_day_years">Před %1$d rokem</string>
     <string name="search_section_on_this_day_years_plural">Před %1$d lety</string>
@@ -1368,6 +1374,7 @@
     <string name="albums_sort_name">Název (A-Z)</string>
     <string name="albums_sort_activity">Poslední aktivita</string>
     <string name="albums_sort_count">Počet fotek</string>
+    <string name="albums_show_heading">Zobrazit</string>
     <string name="albums_view_heading">Zobrazení</string>
     <string name="albums_view_grid">Mřížka</string>
     <string name="albums_view_list">Seznam</string>

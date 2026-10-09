@@ -82,6 +82,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -93,8 +94,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -113,6 +125,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -237,16 +252,22 @@ private fun AlbumsRailPills(
                 AlbumDisplayFilter.Local -> stringResource(R.string.albums_filter_local)
                 AlbumDisplayFilter.Excluded -> stringResource(R.string.albums_filter_excluded)
             }
+            val activeAmount by rememberPillActiveAmount(active)
+            val idleBackground = AppColors.current.filterPillBg
+            val activeBackground = Accent.copy(alpha = 0.18f)
+            val idleDivider = PillBorder
+            val activeDivider = Accent.copy(alpha = 0.4f)
+            val primary = FgPrimary
+            val accent = Accent
             Row(
                 modifier = Modifier
-                    .height(38.dp)
-                    .background(if (active) Accent.copy(alpha = 0.18f) else AppColors.current.filterPillBg, pillShape)
+                    .tintedPill(idleBackground, activeBackground) { activeAmount }
                     .padding(start = 14.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // Label part cycles to the next narrowing on tap.
-                Row(
+                Box(
                     modifier = Modifier
                         .clickable {
                             val next = AlbumDisplayFilter.entries[
@@ -255,10 +276,8 @@ private fun AlbumsRailPills(
                             onFilterSelected(next)
                         }
                         .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Text(label, color = if (active) Accent else FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    PillLabel(label, color = { lerp(primary, accent, activeAmount) })
                 }
                 // Hairline separator + filter button, mirroring the timeline All pill. Opens the
                 // sheet for the view and the sort, and from it the Albums settings page.
@@ -266,22 +285,13 @@ private fun AlbumsRailPills(
                     modifier = Modifier
                         .height(18.dp)
                         .width(0.5.dp)
-                        .background(if (active) Accent.copy(alpha = 0.4f) else PillBorder),
+                        .drawBehind { drawRect(lerp(idleDivider, activeDivider, activeAmount)) },
                 )
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable { onOpenSheet() }
-                        .padding(6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.FilterList,
-                        stringResource(R.string.albums_filter_sheet_title),
-                        tint = if (active) Accent else FgDim,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
+                FilterPillButton(
+                    activeAmount = { activeAmount },
+                    description = stringResource(R.string.albums_filter_sheet_title),
+                    onClick = onOpenSheet,
+                )
             }
         }
         // New album: compact icon button that opens the create-album dialog. A local-only session
@@ -579,11 +589,24 @@ internal fun FilterRail(
     val localLabel = stringResource(R.string.filter_sync_local)
     val backedUpLabel = stringResource(R.string.filter_sync_backedup)
     val cloudLabel = stringResource(R.string.filter_sync_cloud)
+    val offlineLabel = stringResource(R.string.filter_offline)
     val allLabel = stringResource(R.string.gallery_filter_all)
-    val contentSummary = remember(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel) {
-        buildContentFilterSummary(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel)
+    val contentSummary = remember(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel, offlineLabel) {
+        buildContentFilterSummary(contentFilter, photosLabel, videosLabel, localLabel, backedUpLabel, cloudLabel, offlineLabel)
     }
     val filterSummary = listOfNotNull(categoryName, contentSummary).joinToString(" · ").ifEmpty { null }
+
+    // One value carries every tint of the pill, so the whole change is a single eased step that is drawn,
+    // not recomposed. The label cross-fades into the next one in place and the pill's width follows with
+    // one spring, so nothing disappears and nothing moves on a curve of its own.
+    val activeAmount by rememberPillActiveAmount(isContentFilterActive)
+    val idleBackground = AppColors.current.filterPillBg
+    val activeBackground = Accent.copy(alpha = 0.18f)
+    val idleDivider = PillBorder
+    val activeDivider = Accent.copy(alpha = 0.4f)
+    val accent = Accent
+    val primary = FgPrimary
+    val pillContent = PillContent(isContentFilterActive, filterSummary ?: allLabel)
 
     LazyRow(
         modifier = modifier,
@@ -594,43 +617,54 @@ internal fun FilterRail(
         item(key = "all") {
             Row(
                 modifier = Modifier
-                    .height(38.dp)
-                    .background(
-                        if (isContentFilterActive) Accent.copy(alpha = 0.18f) else AppColors.current.filterPillBg,
-                        pillShape
-                    )
+                    .tintedPill(idleBackground, activeBackground) { activeAmount }
                     .padding(start = 14.dp, end = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // Summary + count. Tap opens the timeline filter drawer (same as the funnel), or
                 // clears the filter when one is active so the pill keeps its quick-clear shortcut.
-                Row(
+                Box(
                     modifier = Modifier
                         .clickable { if (isContentFilterActive) onClearContentFilter() else onOpenTimelineFilter() }
                         .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    if (!isContentFilterActive) {
-                        Icon(Icons.Default.Check, null, tint = FgPrimary, modifier = Modifier.size(12.dp))
-                    }
-                    Text(
-                        filterSummary ?: allLabel,
-                        color = if (isContentFilterActive) Accent else FgPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    if (totalCount > 0) {
-                        Text(
-                            formatCount(totalCount),
-                            color = if (isContentFilterActive) Accent.copy(alpha = 0.7f) else FgDim,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                    if (isContentFilterActive) {
-                        Icon(Icons.Default.Close, stringResource(R.string.filter_reset), tint = Accent, modifier = Modifier.size(14.dp))
+                    // The marks around the label differ between idle and active, so those two swap as a
+                    // whole; a change of label inside one state is the label's own cross-fade.
+                    AnimatedContent(
+                        targetState = pillContent,
+                        contentKey = { it.active },
+                        transitionSpec = {
+                            fadeIn(tween(PILL_FADE_MS)) togetherWith fadeOut(tween(PILL_FADE_MS)) using
+                                SizeTransform(clip = false) { _, _ -> snap() }
+                        },
+                        contentAlignment = Alignment.CenterStart,
+                        label = "filterPillState",
+                    ) { content ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (!content.active) {
+                                Icon(
+                                    Icons.Default.Check, null, tint = FgPrimary,
+                                    modifier = Modifier.padding(end = 6.dp).size(12.dp),
+                                )
+                            }
+                            PillLabel(content.label, color = { if (content.active) accent else primary })
+                            if (totalCount > 0) {
+                                Text(
+                                    formatCount(totalCount),
+                                    color = if (content.active) Accent.copy(alpha = 0.7f) else FgDim,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(start = 6.dp),
+                                )
+                            }
+                            if (content.active) {
+                                Icon(
+                                    Icons.Default.Close, stringResource(R.string.filter_reset), tint = Accent,
+                                    modifier = Modifier.padding(start = 6.dp).size(14.dp),
+                                )
+                            }
+                        }
                     }
                 }
                 // Hairline separator + filter button. Opens the content-filter drawer (sync status
@@ -640,26 +674,80 @@ internal fun FilterRail(
                     modifier = Modifier
                         .height(18.dp)
                         .width(0.5.dp)
-                        .background(if (isContentFilterActive) Accent.copy(alpha = 0.4f) else PillBorder),
+                        .drawBehind { drawRect(lerp(idleDivider, activeDivider, activeAmount)) },
                 )
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .clickable { onOpenTimelineFilter() }
-                        .padding(6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Default.FilterList,
-                        stringResource(R.string.settings_timeline_filter),
-                        tint = if (isContentFilterActive) Accent else FgDim,
-                        modifier = Modifier.size(16.dp),
-                    )
-                }
+                FilterPillButton(
+                    activeAmount = { activeAmount },
+                    description = stringResource(R.string.settings_timeline_filter),
+                    onClick = onOpenTimelineFilter,
+                )
             }
         }
 
 
+    }
+}
+
+/** What the Photos filter pill shows: whether a filter is active and the label it names. */
+private data class PillContent(val active: Boolean, val label: String)
+
+private const val PILL_TINT_MS = 240
+private const val PILL_FADE_MS = 200
+
+/** The 0..1 amount a filter pill is tinted by, easing between idle and active as one step. */
+@Composable
+private fun rememberPillActiveAmount(active: Boolean): State<Float> =
+    animateFloatAsState(
+        if (active) 1f else 0f,
+        tween(PILL_TINT_MS, easing = FastOutSlowInEasing),
+        label = "pillActive",
+    )
+
+/** The surface of a filter pill: its width follows its content with one spring, and its tint is drawn
+ *  from [amount] (0 idle, 1 active) rather than recomposed. */
+private fun Modifier.tintedPill(idle: Color, active: Color, amount: () -> Float): Modifier = this
+    .animateContentSize(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
+    .height(38.dp)
+    .drawBehind {
+        drawOutline(pillShape.createOutline(size, layoutDirection, this), lerp(idle, active, amount()))
+    }
+
+/** A pill's label. A new [text] fades in over the old one, which fades out as it does, in the same spot,
+ *  while the label's width eases to the new text's, so the words never vanish between two states. */
+@Composable
+private fun PillLabel(text: String, color: () -> Color) {
+    AnimatedContent(
+        targetState = text,
+        transitionSpec = {
+            fadeIn(tween(PILL_FADE_MS)) togetherWith fadeOut(tween(PILL_FADE_MS)) using
+                SizeTransform(clip = false) { _, _ ->
+                    spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow)
+                }
+        },
+        contentAlignment = Alignment.CenterStart,
+        label = "pillLabel",
+    ) { label ->
+        Text(label, color = color(), fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
+}
+
+/** The filter button at the end of a pill. Its tint follows [activeAmount] and is read here, in a
+ *  composable of its own, so a frame of the change redraws this icon alone. */
+@Composable
+private fun FilterPillButton(activeAmount: () -> Float, description: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .padding(6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.FilterList,
+            description,
+            tint = lerp(FgDim, Accent, activeAmount()),
+            modifier = Modifier.size(16.dp),
+        )
     }
 }
 

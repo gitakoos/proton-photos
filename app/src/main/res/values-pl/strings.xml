@@ -1001,6 +1001,12 @@
     <string name="search_placeholder">Szukaj zdjęć</string>
     <string name="search_empty_idle">Wpisz nazwę, aby rozpocząć wyszukiwanie</string>
     <string name="search_empty_no_results">Brak dopasowań</string>
+    <string name="search_rel_today">dzisiaj|dziś</string>
+    <string name="search_rel_yesterday">wczoraj</string>
+    <string name="search_rel_this_month">ten miesiąc|w tym miesiącu</string>
+    <string name="search_rel_last_month">zeszły miesiąc|ostatni miesiąc|w zeszłym miesiącu|poprzedni miesiąc</string>
+    <string name="search_rel_this_year">ten rok|w tym roku</string>
+    <string name="search_rel_last_year">zeszły rok|ostatni rok|w zeszłym roku|poprzedni rok|rok temu</string>
     <string name="search_section_on_this_day">Tego dnia</string>
     <string name="search_section_on_this_day_years">%1$d rok temu</string>
     <string name="search_section_on_this_day_years_plural">%1$d lat temu</string>
@@ -1368,6 +1374,7 @@
     <string name="albums_sort_name">Nazwa (A-Z)</string>
     <string name="albums_sort_activity">Ostatnia aktywność</string>
     <string name="albums_sort_count">Liczba zdjęć</string>
+    <string name="albums_show_heading">Pokaż</string>
     <string name="albums_view_heading">Widok</string>
     <string name="albums_view_grid">Siatka</string>
     <string name="albums_view_list">Lista</string>

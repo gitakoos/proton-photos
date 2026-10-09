@@ -1002,6 +1002,12 @@
     <string name="search_placeholder">Iskanje fotografij</string>
     <string name="search_empty_idle">Za začetek iskanja vnesite ime</string>
     <string name="search_empty_no_results">Ni zadetkov</string>
+    <string name="search_rel_today">danes</string>
+    <string name="search_rel_yesterday">včeraj</string>
+    <string name="search_rel_this_month">ta mesec</string>
+    <string name="search_rel_last_month">prejšnji mesec|pretekli mesec</string>
+    <string name="search_rel_this_year">to leto|letos</string>
+    <string name="search_rel_last_year">lani|lansko leto|prejšnje leto</string>
     <string name="search_section_on_this_day">Na ta dan</string>
     <string name="search_section_on_this_day_years">Pred %1$d letom</string>
     <string name="search_section_on_this_day_years_plural">Pred %1$d leti</string>
@@ -1369,6 +1375,7 @@
     <string name="albums_sort_name">Ime (A-Z)</string>
     <string name="albums_sort_activity">Zadnja dejavnost</string>
     <string name="albums_sort_count">Število fotografij</string>
+    <string name="albums_show_heading">Prikaži</string>
     <string name="albums_view_heading">Pogled</string>
     <string name="albums_view_grid">Mreža</string>
     <string name="albums_view_list">Seznam</string>

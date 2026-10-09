@@ -270,6 +270,7 @@ internal fun buildContentFilterSummary(
     localLabel: String,
     backedUpLabel: String,
     cloudLabel: String,
+    offlineLabel: String,
 ): String? {
     if (filter == ContentFilter()) return null
     val parts = buildList {
@@ -282,6 +283,7 @@ internal fun buildContentFilterSummary(
             SyncStatusFilter.LocalOnly -> add(localLabel)
             SyncStatusFilter.BackedUp  -> add(backedUpLabel)
             SyncStatusFilter.CloudOnly -> add(cloudLabel)
+            SyncStatusFilter.Offline   -> add(offlineLabel)
             else -> {}
         }
         if (filter.year != null) add("${filter.year}")
@@ -475,6 +477,17 @@ fun GalleryScreen(
     // pops (an album, a folder, Settings) comes back on the filter it showed, with no pass through All.
     var albumFilter by rememberSaveable { mutableStateOf(AlbumDisplayFilter.All) }
     var albumFilterSettled by rememberSaveable { mutableStateOf(false) }
+    // A pick from the rail pill or from the Albums filter sheet: shows that view and, but for Excluded, which
+    // is a place to put an album back rather than a view to reopen on, remembers it as the last pick.
+    val pickAlbumFilter: (AlbumDisplayFilter) -> Unit = { picked ->
+        albumFilter = picked
+        albumFilterSettled = true
+        if (picked != AlbumDisplayFilter.Excluded) {
+            tabScope.launch {
+                context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_LAST_FILTER] = picked.ordinal }
+            }
+        }
+    }
     // Albums-tab view filter settings: default narrowing, a remember-last toggle, and the last picked
     // value, as one snapshot. Null until the store delivers, so the entry effect below can wait for the
     // stored values instead of resolving from placeholders.
@@ -1328,17 +1341,7 @@ fun GalleryScreen(
                         onNewAlbumClick = { albumCreateSignal++ },
                         onNewLocalFolder = { showNewFolderNameDialog = true },
                         albumFilter = albumFilter,
-                        onAlbumFilterSelected = { picked ->
-                            albumFilter = picked
-                            albumFilterSettled = true
-                            // The Excluded view is a place to put an album back rather than a view to
-                            // reopen on, so picking it leaves the remembered pick as it was.
-                            if (picked != AlbumDisplayFilter.Excluded) {
-                                tabScope.launch {
-                                    context.settingsDataStore.edit { it[SettingsKeys.ALBUMS_LAST_FILTER] = picked.ordinal }
-                                }
-                            }
-                        },
+                        onAlbumFilterSelected = pickAlbumFilter,
                         onOpenAlbumsFilterSheet = { showAlbumsFilterSheet = true },
                         onSettingsClick = onSettingsClick,
                         onOpenUploads = onOpenUploads,
@@ -1609,6 +1612,8 @@ fun GalleryScreen(
     if (showAlbumsFilterSheet) {
         AlbumsFilterSheet(
             sheetState = albumsFilterSheetState,
+            displayFilter = albumFilter,
+            onDisplayFilterChange = pickAlbumFilter,
             viewMode = albumsViewMode,
             sortMode = albumsSortMode,
             onViewModeChange = { picked ->

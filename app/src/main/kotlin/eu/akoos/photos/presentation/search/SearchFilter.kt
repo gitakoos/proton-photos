@@ -30,6 +30,7 @@ import eu.akoos.photos.presentation.gallery.GalleryFilter
 import eu.akoos.photos.presentation.gallery.MediaType
 import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import eu.akoos.photos.presentation.gallery.isItemFavorite
+import eu.akoos.photos.presentation.gallery.isItemOfflinePinned
 import java.text.Normalizer
 import java.util.Calendar
 import java.util.Locale
@@ -44,6 +45,11 @@ internal object SearchFilter {
     /** Combining (nonspacing) marks left behind by NFD decomposition. */
     private val MARK_REGEX = Regex("\\p{Mn}+")
     private val SPACES = Regex("\\s+")
+
+    private const val TIER_NAME = 0
+    private const val TIER_DESCRIBED = 1
+    private const val TIER_METADATA = 2
+    private const val NO_MATCH = 3
 
     /** Lower-cases and strips diacritics so an ASCII query ("jose") matches accented names
      *  ("josé"). NFD decomposes each accented letter into base + combining mark, then the
@@ -67,6 +73,14 @@ internal object SearchFilter {
         return (0..11).map { m -> cal.set(Calendar.MONTH, m); fold(fmt.format(cal.time)) }
     }
 
+    /** The usual short forms of the twelve month names of [locale] ("Jan", "febr."), folded and without a
+     *  closing dot, so a typed "febr" is the same word as the abbreviation. */
+    fun foldedMonthAbbreviations(locale: Locale): List<String> {
+        val fmt = java.text.SimpleDateFormat("LLL", locale)
+        val cal = Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }
+        return (0..11).map { m -> cal.set(Calendar.MONTH, m); fold(fmt.format(cal.time)).trimEnd('.') }
+    }
+
     fun displayNameOf(item: GalleryItem): String = when (item) {
         is GalleryItem.LocalOnly -> item.local.displayName
         is GalleryItem.Synced    -> item.local.displayName
@@ -82,11 +96,12 @@ internal object SearchFilter {
     /**
      * The whole narrowing, in the order the screen applies it: query words, then the content filter,
      * then the category chip. The query's matches lead with the photos whose name holds every word, then
-     * those whose name and labels together do, then the ones only a date, type or category reaches. [foldedMonths] and [foldedCategoryNames] are pre-folded localized text
+     * those whose name, labels and place together do, then the ones only a date, type or category reaches. [foldedMonths] and [foldedCategoryNames] are pre-folded localized text
      * the query is matched against; [offlinePinIds] backs the Offline chip, which is a local pin set
      * rather than a server tag, and [favoriteIds] backs the Favourites chip for the photos whose
      * heart lives on the device rather than in Drive. [foldedLabels] holds each labelled photo's
-     * labels, pre-folded by [foldLabels], so a typed word finds a photo by its label too.
+     * labels, pre-folded by [foldLabels], so a typed word finds a photo by its label too, and
+     * [foldedPlaces] its city and country by the key of its stored location ([placesOf]).
      */
     fun apply(
         items: List<GalleryItem>,
@@ -99,47 +114,65 @@ internal object SearchFilter {
         foldedMonths: List<String>,
         foldedCategoryNames: Map<Int, String>,
         foldedLabels: Map<String, String> = emptyMap(),
+        foldedPlaces: Map<String, String> = emptyMap(),
     ): List<GalleryItem> {
         val qTrimmed = q.trim()
-        if (nothingAsked(qTrimmed, filter, category, personSelected = personPhotoKeys != null)) {
+        // Commas separate alternatives ("beach, sunset" finds a photo that matches either), and the words
+        // of one alternative must all match ("beach june"). Commas and spaces alone are no query.
+        val alternatives = fold(qTrimmed).split(',')
+            .map { part -> part.split(' ').filter { it.isNotBlank() } }
+            .filter { it.isNotEmpty() }
+        if (nothingAsked(if (alternatives.isEmpty()) "" else qTrimmed, filter, category, personSelected = personPhotoKeys != null)) {
             return emptyList()
         }
         var out = items
-        if (qTrimmed.isNotEmpty()) {
-            // Match every query word against the item's folded metadata haystack (name + date +
+        if (alternatives.isNotEmpty()) {
+            // Match every word of an alternative against the item's folded metadata haystack (name + date +
             // type + categories) so multi-word queries like "june 2024" or "beach video" work too.
-            val needleWords = fold(qTrimmed).split(' ').filter { it.isNotBlank() }
             val cal = Calendar.getInstance()
             // Photos that name the query come ahead of the ones only its date, type or category
-            // reaches, each group keeping the order the library gave.
+            // reaches, each group keeping the order the library gave. A photo ranks by the best
+            // alternative it matches.
             val byName = ArrayList<GalleryItem>()
             val byLabel = ArrayList<GalleryItem>()
             val byMetadata = ArrayList<GalleryItem>()
             for (item in out) {
                 // A word matches if it is in the file name OR the full date/type/tag haystack.
                 // Test the cheap folded name first and only build the heavier haystack when the
-                // name misses — for plain name queries the haystack is never built. Cache it per
-                // item so multi-word queries build it at most once.
+                // name misses: for plain name queries the haystack is never built. Cache it per
+                // item so several words and alternatives build it at most once.
                 val foldedName = fold(displayNameOf(item))
                 var haystack: String? = null
-                val matches = needleWords.all { word ->
-                    foldedName.contains(word) || run {
-                        val full = haystack
-                            ?: searchHaystack(item, cal, foldedMonths, foldedCategoryNames, foldedLabels)
-                                .also { haystack = it }
-                        full.contains(word)
-                    }
-                }
-                if (!matches) continue
-                if (needleWords.all { foldedName.contains(it) }) {
-                    byName += item
-                } else {
-                    val labels = labelsOf(item, foldedLabels)
-                    if (labels != null && needleWords.all { foldedName.contains(it) || labels.contains(it) }) {
-                        byLabel += item
+                var described: String? = null
+                var best = NO_MATCH
+                for (words in alternatives) {
+                    val tier = if (words.all { foldedName.contains(it) }) {
+                        TIER_NAME
                     } else {
-                        byMetadata += item
+                        val full = haystack
+                            ?: searchHaystack(item, cal, foldedMonths, foldedCategoryNames, foldedLabels, foldedPlaces)
+                                .also { haystack = it }
+                        if (!words.all { foldedName.contains(it) || full.contains(it) }) {
+                            NO_MATCH
+                        } else {
+                            // What the user attached or the photo's place says, as opposed to a date or a type.
+                            val text = described
+                                ?: listOfNotNull(labelsOf(item, foldedLabels), placesOf(item, foldedPlaces))
+                                    .joinToString(" ").also { described = it }
+                            if (text.isNotEmpty() && words.all { foldedName.contains(it) || text.contains(it) }) {
+                                TIER_DESCRIBED
+                            } else {
+                                TIER_METADATA
+                            }
+                        }
                     }
+                    if (tier < best) best = tier
+                    if (best == TIER_NAME) break
+                }
+                when (best) {
+                    TIER_NAME -> byName += item
+                    TIER_DESCRIBED -> byLabel += item
+                    TIER_METADATA -> byMetadata += item
                 }
             }
             out = byName + byLabel + byMetadata
@@ -166,7 +199,7 @@ internal object SearchFilter {
         favoriteIds: Set<String> = emptySet(),
         personPhotoKeys: Set<String>? = null,
     ): List<GalleryItem> {
-        var out = applyContentFilter(items, filter)
+        var out = applyContentFilter(items, filter, offlinePinIds)
         if (category != GalleryFilter.All) {
             out = when (category) {
                 // Live Photos (tag 3) and Motion Photos (tag 4) are the same concept on iOS/Android
@@ -175,8 +208,7 @@ internal object SearchFilter {
                     out.filter { CategorizeItem.belongsTo(it, 3) || CategorizeItem.belongsTo(it, 4) }
                 // Offline = the cloud photos pinned for offline; not a server tag, so it filters on
                 // the pinned linkId set rather than CategorizeItem. Mirrors the gallery filter.
-                GalleryFilter.Offline ->
-                    out.filter { (it as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { id -> id in offlinePinIds } == true }
+                GalleryFilter.Offline -> out.filter { isItemOfflinePinned(it, offlinePinIds) }
                 // Favourite = the device-side set for a photo that lives only on the device, Drive
                 // PhotoTag 0 for a backed-up one. Through the same helper the timeline, the grid
                 // hearts and the viewer use, so the one chip cannot mean two things on two screens.
@@ -192,7 +224,11 @@ internal object SearchFilter {
         return out
     }
 
-    fun applyContentFilter(items: List<GalleryItem>, filter: ContentFilter): List<GalleryItem> {
+    fun applyContentFilter(
+        items: List<GalleryItem>,
+        filter: ContentFilter,
+        offlinePinIds: Set<String> = emptySet(),
+    ): List<GalleryItem> {
         var out = items
         out = when (filter.mediaType) {
             MediaType.All        -> out
@@ -204,6 +240,7 @@ internal object SearchFilter {
             SyncStatusFilter.LocalOnly -> out.filter { it is GalleryItem.LocalOnly }
             SyncStatusFilter.BackedUp  -> out.filter { it is GalleryItem.Synced }
             SyncStatusFilter.CloudOnly -> out.filter { it is GalleryItem.CloudOnly }
+            SyncStatusFilter.Offline   -> out.filter { isItemOfflinePinned(it, offlinePinIds) }
         }
         // Every date part that is set narrows on its own, which is what the timeline's own filter
         // does. Hanging the whole branch off the year made a month or a day without one inert here
@@ -232,13 +269,15 @@ internal object SearchFilter {
      *  the file name. Month/category names arrive pre-folded; only the per-item name is folded here.
      *  The categories are the ones the category rail files the item under ([CategorizeItem.classify]),
      *  so a user-picked or device-detected category is findable by name as well as a server tag. The
-     *  photo's own labels close it, read under every key they may sit under ([labelsOf]). */
+     *  photo's own labels follow, read under every key they may sit under ([labelsOf]), and its city and
+     *  country close it ([placesOf]). */
     fun searchHaystack(
         item: GalleryItem,
         cal: Calendar,
         foldedMonths: List<String>,
         foldedCategoryNames: Map<Int, String>,
         foldedLabels: Map<String, String> = emptyMap(),
+        foldedPlaces: Map<String, String> = emptyMap(),
     ): String {
         cal.timeInMillis = item.captureTimeMs
         val mime = mimeOf(item)
@@ -252,7 +291,16 @@ internal object SearchFilter {
             if (ext.isNotEmpty()) { append(' '); append(ext) }
             tags.forEach { id -> foldedCategoryNames[id]?.let { append(' '); append(it) } }
             labelsOf(item, foldedLabels)?.let { append(' '); append(it) }
+            placesOf(item, foldedPlaces)?.let { append(' '); append(it) }
         }
+    }
+
+    /** [item]'s folded city and country from [foldedPlaces], read under the keys its stored location may
+     *  sit under (a device uri, a cloud linkId); null when it has no stored location. */
+    fun placesOf(item: GalleryItem, foldedPlaces: Map<String, String>): String? {
+        if (foldedPlaces.isEmpty()) return null
+        for (key in LabelKeyReconciler.keysFor(item)) foldedPlaces[key]?.let { return it }
+        return null
     }
 
     /** Each photo key's labels folded and joined by single spaces, built once per label change rather

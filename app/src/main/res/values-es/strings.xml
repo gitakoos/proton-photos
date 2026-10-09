@@ -789,6 +789,12 @@
     <string name="search_placeholder">Buscar tus fotos</string>
     <string name="search_empty_idle">Escribe un nombre para empezar</string>
     <string name="search_empty_no_results">Sin resultados</string>
+    <string name="search_rel_today">hoy</string>
+    <string name="search_rel_yesterday">ayer</string>
+    <string name="search_rel_this_month">este mes</string>
+    <string name="search_rel_last_month">el mes pasado|mes pasado|último mes</string>
+    <string name="search_rel_this_year">este año</string>
+    <string name="search_rel_last_year">el año pasado|año pasado|último año</string>
 
     <string name="viewer_play_slideshow">Iniciar pase de diapositivas</string>
     <string name="viewer_pause_slideshow">Pausar pase de diapositivas</string>
@@ -1152,6 +1158,7 @@
     <string name="albums_sort_name">Nombre (A-Z)</string>
     <string name="albums_sort_activity">Última actividad</string>
     <string name="albums_sort_count">Número de fotos</string>
+    <string name="albums_show_heading">Mostrar</string>
     <string name="albums_view_heading">Vista</string>
     <string name="albums_view_grid">Cuadrícula</string>
     <string name="albums_view_list">Lista</string>

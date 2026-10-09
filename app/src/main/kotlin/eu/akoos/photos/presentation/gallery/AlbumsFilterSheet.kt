@@ -59,26 +59,28 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 
 /** One row of the Albums filter sheet. */
-internal enum class AlbumsSheetRow { View, Sort, MoreSettings }
+internal enum class AlbumsSheetRow { Show, View, Sort, MoreSettings }
 
 /**
- * The rows the Albums filter sheet lays out, top to bottom, the same in either layout: the view and
- * the sort, since both reshape the tab behind the sheet at once, then the More settings row into the
- * Albums settings page, which holds the rest
+ * The rows the Albums filter sheet lays out, top to bottom, the same in either layout: which albums
+ * show, the view and the sort, since all three reshape the tab behind the sheet at once, then the More
+ * settings row into the Albums settings page, which holds the rest
  * ([eu.akoos.photos.presentation.settings.albumsSettingsRows]).
  */
 internal fun albumsSheetRows(): List<AlbumsSheetRow> =
-    listOf(AlbumsSheetRow.View, AlbumsSheetRow.Sort, AlbumsSheetRow.MoreSettings)
+    listOf(AlbumsSheetRow.Show, AlbumsSheetRow.View, AlbumsSheetRow.Sort, AlbumsSheetRow.MoreSettings)
 
 /** Bottom sheet for the Albums tab's layout and order, in the order [albumsSheetRows] gives: the
- *  grid-or-list choice and the sort, then a More settings row that closes the sheet and opens the
- *  Albums settings page through [onOpenMoreSettings], the way the timeline drawer opens its own page.
- *  The active All/Cloud/Local/Excluded narrowing is cycled from the rail pill. Each pick lands on the
- *  tab behind the sheet, which observes the stored values. */
+ *  All/Cloud/On device/Excluded narrowing (the rail pill cycles the same choice), the grid-or-list
+ *  choice and the sort, then a More settings row that closes the sheet and opens the Albums settings
+ *  page through [onOpenMoreSettings], the way the timeline drawer opens its own page. Each pick lands
+ *  on the tab behind the sheet. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlbumsFilterSheet(
     sheetState: SheetState,
+    displayFilter: AlbumDisplayFilter,
+    onDisplayFilterChange: (AlbumDisplayFilter) -> Unit,
     viewMode: AlbumsViewMode,
     sortMode: AlbumSortMode,
     onViewModeChange: (AlbumsViewMode) -> Unit,
@@ -114,6 +116,11 @@ fun AlbumsFilterSheet(
             albumsSheetRows().forEach { row ->
                 key(row) {
                     when (row) {
+                        AlbumsSheetRow.Show ->
+                            AlbumsSheetSection(stringResource(R.string.albums_show_heading)) {
+                                AlbumDisplayFilterChips(selected = displayFilter, onSelected = onDisplayFilterChange)
+                            }
+
                         AlbumsSheetRow.View ->
                             AlbumsSheetSection(stringResource(R.string.albums_view_heading)) {
                                 AlbumViewChipRow(selected = viewMode, onSelected = onViewModeChange)
@@ -154,6 +161,35 @@ private fun AlbumsSheetSection(
             letterSpacing = 0.6.sp,
         )
         content()
+    }
+}
+
+/** Chips for the [AlbumDisplayFilter] values, two by two so four labels in any language keep a readable
+ *  width. The chosen one is accented, as the rail pill is when off its default. */
+@Composable
+private fun AlbumDisplayFilterChips(
+    selected: AlbumDisplayFilter,
+    onSelected: (AlbumDisplayFilter) -> Unit,
+) {
+    val options = listOf(
+        AlbumDisplayFilter.All to stringResource(R.string.albums_filter_all),
+        AlbumDisplayFilter.Cloud to stringResource(R.string.albums_filter_cloud),
+        AlbumDisplayFilter.Local to stringResource(R.string.albums_filter_local),
+        AlbumDisplayFilter.Excluded to stringResource(R.string.albums_filter_excluded),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.chunked(2).forEach { rowOptions ->
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowOptions.forEach { (filter, label) ->
+                    FilterChip(
+                        label = label,
+                        selected = selected == filter,
+                        onClick = { onSelected(filter) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
     }
 }
 

@@ -784,6 +784,12 @@
     <string name="search_placeholder">Fotos durchsuchen</string>
     <string name="search_empty_idle">Namen eingeben, um zu suchen</string>
     <string name="search_empty_no_results">Keine Treffer</string>
+    <string name="search_rel_today">heute</string>
+    <string name="search_rel_yesterday">gestern</string>
+    <string name="search_rel_this_month">diesen Monat|dieser Monat</string>
+    <string name="search_rel_last_month">letzten Monat|letzter Monat|vorigen Monat|vergangenen Monat</string>
+    <string name="search_rel_this_year">dieses Jahr</string>
+    <string name="search_rel_last_year">letztes Jahr|letzten Jahres|vergangenes Jahr|voriges Jahr</string>
 
     <string name="viewer_play_slideshow">Diashow starten</string>
     <string name="viewer_pause_slideshow">Diashow pausieren</string>
@@ -1137,6 +1143,7 @@
     <string name="albums_sort_name">Name (A-Z)</string>
     <string name="albums_sort_activity">Letzte Aktivität</string>
     <string name="albums_sort_count">Anzahl der Fotos</string>
+    <string name="albums_show_heading">Anzeigen</string>
     <string name="albums_view_heading">Ansicht</string>
     <string name="albums_view_grid">Raster</string>
     <string name="albums_view_list">Liste</string>

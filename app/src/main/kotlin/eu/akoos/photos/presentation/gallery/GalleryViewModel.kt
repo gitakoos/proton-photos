@@ -515,7 +515,7 @@ class GalleryViewModel @Inject constructor(
                     // gallery emission re-applied it — a visible flicker while "Hide photos in
                     // albums" is on.
                     val filtered = applyFilter(
-                        applyContentFilter(state.items, state.contentFilter),
+                        applyContentFilter(state.items, state.contentFilter, state.offlinePinIds),
                         state.selectedFilter,
                         favIds,
                         state.albumHideCloudIds,
@@ -538,9 +538,11 @@ class GalleryViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { ids ->
                     val state = _uiState.value
-                    if (state.selectedFilter == GalleryFilter.Offline) {
+                    if (state.selectedFilter == GalleryFilter.Offline ||
+                        state.contentFilter.syncStatus == SyncStatusFilter.Offline
+                    ) {
                         val filtered = applyFilter(
-                            applyContentFilter(state.items, state.contentFilter),
+                            applyContentFilter(state.items, state.contentFilter, ids),
                             state.selectedFilter,
                             state.favoriteIds,
                             state.albumHideCloudIds,
@@ -638,7 +640,7 @@ class GalleryViewModel @Inject constructor(
     private fun recomputeFilteredForPerson() {
         val state = _uiState.value
         val filtered = applyFilter(
-            applyContentFilter(state.items, state.contentFilter),
+            applyContentFilter(state.items, state.contentFilter, state.offlinePinIds),
             state.selectedFilter,
             state.favoriteIds,
             state.albumHideCloudIds,
@@ -888,7 +890,7 @@ class GalleryViewModel @Inject constructor(
                         notHidden && notExcludedBucket
                     }
                     val filtered = applyFilter(
-                        applyContentFilter(items, snapshot.contentFilter),
+                        applyContentFilter(items, snapshot.contentFilter, snapshot.offlinePinIds),
                         snapshot.selectedFilter,
                         snapshot.favoriteIds,
                         sources.cloudInAlbum,
@@ -1136,7 +1138,7 @@ class GalleryViewModel @Inject constructor(
     fun onFilterSelected(filter: GalleryFilter) {
         val state = _uiState.value
         val filtered = applyFilter(
-            applyContentFilter(state.items, state.contentFilter),
+            applyContentFilter(state.items, state.contentFilter, state.offlinePinIds),
             filter,
             state.favoriteIds,
             state.albumHideCloudIds,
@@ -1182,7 +1184,7 @@ class GalleryViewModel @Inject constructor(
     fun setContentFilter(filter: ContentFilter) {
         val state = _uiState.value
         val filtered = applyFilter(
-            applyContentFilter(state.items, filter),
+            applyContentFilter(state.items, filter, state.offlinePinIds),
             state.selectedFilter,
             state.favoriteIds,
             state.albumHideCloudIds,
@@ -2712,9 +2714,7 @@ class GalleryViewModel @Inject constructor(
             }
             // Offline = the cloud photos pinned for offline (their linkId is in OFFLINE_PIN_IDS).
             // Not a server tag, so it filters on the pinned set rather than CategorizeItem.
-            GalleryFilter.Offline -> baseItems.filter { item ->
-                (item as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { id -> id in offlinePinIds } == true
-            }
+            GalleryFilter.Offline -> baseItems.filter { isItemOfflinePinned(it, offlinePinIds) }
             else -> {
                 val tagId = filter.tagId
                 if (tagId == null) baseItems else baseItems.filter { CategorizeItem.belongsTo(it, tagId) }
@@ -2732,7 +2732,11 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    private fun applyContentFilter(items: List<GalleryItem>, filter: ContentFilter): List<GalleryItem> {
+    private fun applyContentFilter(
+        items: List<GalleryItem>,
+        filter: ContentFilter,
+        offlinePinIds: Set<String> = emptySet(),
+    ): List<GalleryItem> {
         var result = items
 
         // Sync status
@@ -2741,6 +2745,7 @@ class GalleryViewModel @Inject constructor(
             SyncStatusFilter.LocalOnly -> result.filterIsInstance<GalleryItem.LocalOnly>()
             SyncStatusFilter.BackedUp  -> result.filterIsInstance<GalleryItem.Synced>()
             SyncStatusFilter.CloudOnly -> result.filterIsInstance<GalleryItem.CloudOnly>()
+            SyncStatusFilter.Offline   -> result.filter { isItemOfflinePinned(it, offlinePinIds) }
         }
 
         // Media type

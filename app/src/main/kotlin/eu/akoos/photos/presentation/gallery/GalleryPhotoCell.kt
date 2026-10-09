@@ -157,6 +157,11 @@ internal fun isItemFavorite(
     is GalleryItem.CloudOnly -> 0 in (liveCloudTags ?: item.cloud.tags)
 }
 
+/** Whether [item] is a cloud photo pinned for offline: its linkId is in [offlinePinIds]. Not a server tag,
+ *  so the Offline category and the Offline storage state both answer through this one test. */
+internal fun isItemOfflinePinned(item: GalleryItem, offlinePinIds: Set<String>): Boolean =
+    (item as? GalleryItem.CloudOnly)?.cloud?.linkId?.let { it in offlinePinIds } == true
+
 /** Resolve a [GalleryItem] to [PhotoCellInputs]. The category look-ups run once here rather than
  *  repeatedly inside the cell. [downloadedCloudLinkIds] upgrades a downloaded CloudOnly tile to the
  *  green synced badge; [favoriteIds] adds the heart on a device-only tile (a backed-up one reads its

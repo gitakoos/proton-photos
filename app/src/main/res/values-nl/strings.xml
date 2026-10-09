@@ -822,6 +822,12 @@
     <string name="search_placeholder">Foto\'s zoeken</string>
     <string name="search_empty_idle">Typ een naam om te beginnen met zoeken</string>
     <string name="search_empty_no_results">Geen overeenkomsten</string>
+    <string name="search_rel_today">vandaag</string>
+    <string name="search_rel_yesterday">gisteren</string>
+    <string name="search_rel_this_month">deze maand</string>
+    <string name="search_rel_last_month">vorige maand|afgelopen maand|laatste maand</string>
+    <string name="search_rel_this_year">dit jaar</string>
+    <string name="search_rel_last_year">vorig jaar|afgelopen jaar|laatste jaar</string>
     <string name="search_section_on_this_day">Op deze dag</string>
     <string name="search_section_on_this_day_years">%1$d jaar geleden</string>
     <string name="search_section_on_this_day_years_plural">%1$d jaar geleden</string>
@@ -1153,6 +1159,7 @@
     <string name="albums_sort_name">Naam (A-Z)</string>
     <string name="albums_sort_activity">Laatste activiteit</string>
     <string name="albums_sort_count">Aantal foto\'s</string>
+    <string name="albums_show_heading">Tonen</string>
     <string name="albums_view_heading">Weergave</string>
     <string name="albums_view_grid">Raster</string>
     <string name="albums_view_list">Lijst</string>

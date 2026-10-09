@@ -807,6 +807,12 @@
     <string name="search_placeholder">Fotók keresése</string>
     <string name="search_empty_idle">Írj be egy nevet a kereséshez</string>
     <string name="search_empty_no_results">Nincs találat</string>
+    <string name="search_rel_today">ma</string>
+    <string name="search_rel_yesterday">tegnap</string>
+    <string name="search_rel_this_month">ez a hónap|ebben a hónapban</string>
+    <string name="search_rel_last_month">múlt hónap|előző hónap|a múlt hónap</string>
+    <string name="search_rel_this_year">idén|ez az év|ebben az évben</string>
+    <string name="search_rel_last_year">múlt év|tavaly|a múlt év|előző év</string>
 
     <string name="viewer_play_slideshow">Diavetítés indítása</string>
     <string name="viewer_pause_slideshow">Diavetítés szüneteltetése</string>
@@ -1160,6 +1166,7 @@
     <string name="albums_sort_name">Név (A-Z)</string>
     <string name="albums_sort_activity">Legutóbbi módosítás</string>
     <string name="albums_sort_count">Fotók száma</string>
+    <string name="albums_show_heading">Megjelenítés</string>
     <string name="albums_view_heading">Nézet</string>
     <string name="albums_view_grid">Rács</string>
     <string name="albums_view_list">Lista</string>

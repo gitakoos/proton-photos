@@ -65,6 +65,7 @@ import eu.akoos.photos.data.offline.OfflineStorageManager
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.transfer.TransferCenter
+import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.AlbumPhotoMembershipDao
 import eu.akoos.photos.data.db.dao.CloudAlbumDao
 import eu.akoos.photos.data.db.dao.FaceDao
@@ -99,6 +100,7 @@ import eu.akoos.photos.presentation.gallery.visibleCategories
 import eu.akoos.photos.util.FolderCoverMap
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.retryOnDbTear
+import java.util.Calendar
 import java.util.Locale
 import javax.inject.Inject
 
@@ -150,6 +152,7 @@ class SearchViewModel @Inject constructor(
     private val albumBrowseSource: AlbumBrowseSource,
     private val albumMembershipDao: AlbumPhotoMembershipDao,
     private val labelRepo: PhotoLabelRepository,
+    private val placeIndex: PhotoPlaceIndex,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -294,13 +297,33 @@ class SearchViewModel @Inject constructor(
         val months: List<String>,
         val filterNames: Map<GalleryFilter, String>,
         val tileNames: Map<LibraryTile, String>,
+        /** The phrases that name a day, month or year relative to today, in the app's language and in
+         *  English, each through [DateSuggestions.phraseKey]. */
+        val relativePhrases: Map<RelativeDate, Set<String>>,
+        /** The usual short forms of the month names ("jan", "febr"). */
+        val monthAbbreviations: List<String>,
+        /** The month names and their short forms in every language the app is offered in, for a typed month
+         *  of another one. */
+        val otherMonths: List<List<String>>,
     ) {
         val categoryNames: Map<Int, String> =
             filterNames.entries.mapNotNull { (filter, name) -> filter.tagId?.let { it to name } }.toMap()
     }
 
     private val localizedText: Flow<LocalizedText> = _locale
-        .map { LocalizedText(SearchFilter.foldedMonthNames(it), foldedFilterNames(it), foldedTileNames(it)) }
+        .map {
+            LocalizedText(
+                SearchFilter.foldedMonthNames(it),
+                foldedFilterNames(it),
+                foldedTileNames(it),
+                relativePhrases(it),
+                SearchFilter.foldedMonthAbbreviations(it),
+                DateSuggestions.MONTH_LANGUAGES.flatMap { tag ->
+                    val language = Locale.forLanguageTag(tag)
+                    listOf(SearchFilter.foldedMonthNames(language), SearchFilter.foldedMonthAbbreviations(language))
+                },
+            )
+        }
         .distinctUntilChanged()
         .flowOn(Dispatchers.Default)
 
@@ -313,9 +336,24 @@ class SearchViewModel @Inject constructor(
         .catch { emit(emptyMap()) }
         .flowOn(Dispatchers.Default)
 
-    /** The typed side of the keyword match: the settled query, and the localized names and folded
-     *  labels it is matched against, travelling as one value to keep the combine within its arity. */
-    private data class TypedInput(val q: String, val text: LocalizedText, val labels: Map<String, String>)
+    /** Every located photo's city and country, folded, by its location key. Empty until the index has
+     *  geocoded the library's spots, so a first search never waits on it and the place matches join in
+     *  when it lands. */
+    private val foldedPlaces: Flow<Map<String, String>> = _locale
+        .flatMapLatest { placeIndex.observe(it) }
+        .catch { emit(emptyMap()) }
+        .onStart { emit(emptyMap()) }
+        .flowOn(Dispatchers.Default)
+
+    /** The typed side of the keyword match: the settled query, and the localized names, folded labels
+     *  and folded places it is matched against, travelling as one value to keep the combine within its
+     *  arity. */
+    private data class TypedInput(
+        val q: String,
+        val text: LocalizedText,
+        val labels: Map<String, String>,
+        val places: Map<String, String>,
+    )
 
     /** The keyword + metadata matches, the search path that has always been here: the merged library
      *  narrowed by the typed query, the content filter, the category chip and the People rail. Folded
@@ -326,7 +364,9 @@ class SearchViewModel @Inject constructor(
                 else getGalleryItems.invoke(userId)
             combine(
                 libraryFlow,
-                combine(debouncedQuery, localizedText, foldedLabels) { q, text, labels -> TypedInput(q, text, labels) },
+                combine(debouncedQuery, localizedText, foldedLabels, foldedPlaces) { q, text, labels, places ->
+                    TypedInput(q, text, labels, places)
+                },
                 _contentFilter,
                 // Category, the two local id sets the chips read, and the selected person's photo keys
                 // travel together so the later sources stay within the typed combine arity; the Offline
@@ -337,7 +377,7 @@ class SearchViewModel @Inject constructor(
             ) { all, typed, filter, chip, hidden ->
                 applyAll(
                     all.dropHidden(hidden), typed.q, typed.text, filter,
-                    chip.category, chip.pins, chip.hearts, chip.personKeys, typed.labels,
+                    chip.category, chip.pins, chip.hearts, chip.personKeys, typed.labels, typed.places,
                 )
             }
         }
@@ -609,7 +649,7 @@ class SearchViewModel @Inject constructor(
     /** Dates the end of the typed query could mean, to pick as a filter instead of matching as text. */
     val dateSuggestions: StateFlow<List<DateSuggestion>> =
         combine(_query, availableYears, localizedText) { q, years, text ->
-            DateSuggestions.suggest(q, text.months, years)
+            DateSuggestions.suggest(q, text.months, years, text.monthAbbreviations)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Takes a suggested date: the words that spelled it leave the text and it becomes the date filter. */
@@ -626,6 +666,31 @@ class SearchViewModel @Inject constructor(
         .distinctUntilChanged()
 
     init {
+        // A month name or a whole year at the end of the settled query becomes the date filter, shown as a
+        // pill, and the words leave the text; a month and a year typed one after the other join into one
+        // date. Only for the text still in the field.
+        viewModelScope.launch {
+            combine(_query, localizedText) { q, text ->
+                val relative = DateSuggestions.relative(q, text.relativePhrases)
+                    ?.let { (date, words) -> DateSuggestions.resolveRelative(date, Calendar.getInstance(), words) }
+                q to (relative ?: DateSuggestions.term(q, text.months, text.monthAbbreviations, text.otherMonths))
+            }
+                .debounce { (_, term) ->
+                    when {
+                        term == null -> 0L
+                        term.complete -> DATE_SETTLE_MS
+                        else -> DATE_PARTIAL_SETTLE_MS
+                    }
+                }
+                .collect { (q, term) ->
+                    if (term == null || q != _query.value) return@collect
+                    val current = _contentFilter.value
+                    _query.value = SearchFilter.dropLastWords(q, term.consumedTokens)
+                    _contentFilter.value = current.copy(
+                        year = term.year ?: current.year, month = term.month ?: current.month, day = term.day, dayEnd = null,
+                    )
+                }
+        }
         // A query that settles on a category's whole name selects that chip, exactly as a tap on the
         // rail would, and the words that spelled it leave the text. Only while no chip is picked, and
         // only for the text still in the field, so clearing the pill never brings it back.
@@ -741,6 +806,7 @@ class SearchViewModel @Inject constructor(
         favoriteIds: Set<String> = emptySet(),
         personPhotoKeys: Set<String>? = null,
         foldedLabels: Map<String, String> = emptyMap(),
+        foldedPlaces: Map<String, String> = emptyMap(),
     ): List<GalleryItem> = SearchFilter.apply(
         items = items,
         q = q,
@@ -752,11 +818,33 @@ class SearchViewModel @Inject constructor(
         foldedMonths = text.months,
         foldedCategoryNames = text.categoryNames,
         foldedLabels = foldedLabels,
+        foldedPlaces = foldedPlaces,
     )
 
     private fun localizedContext(locale: Locale): Context {
         val config = Configuration(context.resources.configuration).apply { setLocale(locale) }
         return context.createConfigurationContext(config)
+    }
+
+    /** The phrases for today, yesterday, this and last month and this and last year, in [locale] and in
+     *  English, from the `search_rel_*` strings, whose variants are separated by a bar. */
+    private fun relativePhrases(locale: Locale): Map<RelativeDate, Set<String>> {
+        val contexts = listOf(localizedContext(locale), localizedContext(Locale.ENGLISH))
+        return RelativeDate.entries.associateWith { date ->
+            contexts.flatMap { it.getString(relativePhraseRes(date)).split('|') }
+                .map { DateSuggestions.phraseKey(it) }
+                .filter { it.isNotEmpty() }
+                .toSet()
+        }
+    }
+
+    private fun relativePhraseRes(date: RelativeDate): Int = when (date) {
+        RelativeDate.Today -> R.string.search_rel_today
+        RelativeDate.Yesterday -> R.string.search_rel_yesterday
+        RelativeDate.ThisMonth -> R.string.search_rel_this_month
+        RelativeDate.LastMonth -> R.string.search_rel_last_month
+        RelativeDate.ThisYear -> R.string.search_rel_this_year
+        RelativeDate.LastYear -> R.string.search_rel_last_year
     }
 
     /** Library tile → pre-folded label in [locale], the Albums tab's own labels, so "shared" or "map"
@@ -783,13 +871,22 @@ class SearchViewModel @Inject constructor(
         /** How long typing must pause before the keyword feed filters and a content search embeds the query,
          *  one value for both so their results land together. A superseded query cancels the wait through
          *  flatMapLatest, so only the query typing settles on is ever embedded. */
-        const val QUERY_SETTLE_MS = 250L
+        const val QUERY_SETTLE_MS = 300L
 
         /** The shortest query a content search embeds: one letter ranks noise. */
         const val SEMANTIC_MIN_CHARS = 2
 
+        /** Settle delay before a typed whole month name or year becomes the date pill. It rewrites what was
+         *  typed, so it waits well past the pause between two keystrokes, where the results only wait
+         *  [QUERY_SETTLE_MS]. */
+        const val DATE_SETTLE_MS = 700L
+
+        /** The same for a month that is only the start of its name ("jan"), which may be going to become
+         *  another word, so it waits longer. */
+        const val DATE_PARTIAL_SETTLE_MS = 1_000L
+
         /** Settle delay before a typed category name selects its chip, long enough that the plural 's'
          *  typed right after "screenshot" lands first. */
-        const val CATEGORY_SETTLE_MS = 500L
+        const val CATEGORY_SETTLE_MS = 700L
     }
 }

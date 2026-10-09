@@ -1387,6 +1387,12 @@
     <string name="search_placeholder">Search your photos</string>
     <string name="search_empty_idle">Type a name to start searching</string>
     <string name="search_empty_no_results">No matches</string>
+    <string name="search_rel_today">today</string>
+    <string name="search_rel_yesterday">yesterday</string>
+    <string name="search_rel_this_month">this month</string>
+    <string name="search_rel_last_month">last month|previous month|past month</string>
+    <string name="search_rel_this_year">this year</string>
+    <string name="search_rel_last_year">last year|previous year|past year</string>
     <string name="search_section_on_this_day">On this day</string>
     <string name="search_section_on_this_day_years">%1$d year ago</string>
     <string name="search_section_on_this_day_years_plural">%1$d years ago</string>
@@ -1836,6 +1842,7 @@
     <string name="albums_sort_name">Name (A to Z)</string>
     <string name="albums_sort_activity">Last activity</string>
     <string name="albums_sort_count">Photo count</string>
+    <string name="albums_show_heading">Show</string>
     <string name="albums_view_heading">View</string>
     <string name="albums_view_grid">Grid</string>
     <string name="albums_view_list">List</string>

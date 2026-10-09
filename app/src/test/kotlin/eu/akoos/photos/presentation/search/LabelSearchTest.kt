@@ -131,6 +131,58 @@ class LabelSearchTest {
     }
 
     @Test
+    fun `labels separated by commas find the photos that have either`() {
+        val a = local("a.jpg")
+        val b = local("b.jpg")
+        val c = local("c.jpg")
+        val labels = mapOf(a.stableId to listOf("Beach"), b.stableId to listOf("Work"))
+        assertEquals(listOf("a.jpg", "b.jpg"), search(listOf(a, b, c), "beach, work", labels))
+        assertEquals(listOf("a.jpg", "b.jpg"), search(listOf(a, b, c), "work,beach", labels))
+        assertEquals(listOf("a.jpg"), search(listOf(a, b, c), "beach", labels))
+    }
+
+    @Test
+    fun `words inside one comma part must all match, so a part can narrow`() {
+        val a = local("a.jpg")
+        val b = local("b.jpg")
+        val c = local("c.jpg")
+        val labels = mapOf(
+            a.stableId to listOf("Beach", "Sunset"),
+            b.stableId to listOf("Beach"),
+            c.stableId to listOf("Work"),
+        )
+        assertEquals(listOf("a.jpg"), search(listOf(a, b, c), "beach sunset", labels))
+        assertEquals(listOf("a.jpg", "c.jpg"), search(listOf(a, b, c), "beach sunset, work", labels))
+    }
+
+    @Test
+    fun `a trailing or doubled comma does not change the query, and commas alone are no query`() {
+        val a = local("a.jpg")
+        val b = local("b.jpg")
+        val labels = mapOf(a.stableId to listOf("Beach"), b.stableId to listOf("Work"))
+        assertEquals(listOf("a.jpg"), search(listOf(a, b), "beach,", labels))
+        assertEquals(listOf("a.jpg", "b.jpg"), search(listOf(a, b), "beach,, work", labels))
+        assertEquals(emptyList<String>(), search(listOf(a, b), ",", labels))
+        assertEquals(emptyList<String>(), search(listOf(a, b), " , ,", labels))
+    }
+
+    @Test
+    fun `a photo matching two comma parts ranks by the better one and is listed once`() {
+        val dateOnly = local("a.jpg")
+        val named = local("beach.jpg")
+        val labels = mapOf(dateOnly.stableId to listOf("Work"))
+        // "beach" names the second photo (name tier); "work" reaches the first by its label.
+        assertEquals(
+            listOf("beach.jpg", "a.jpg"),
+            search(listOf(dateOnly, named), "work, beach", labels),
+        )
+        assertEquals(
+            listOf("beach.jpg"),
+            search(listOf(dateOnly, named), "beach, beach", labels),
+        )
+    }
+
+    @Test
     fun `photos in the same tier keep the order the library gave`() {
         val first = local("june-1.jpg")
         val second = local("june-2.jpg")

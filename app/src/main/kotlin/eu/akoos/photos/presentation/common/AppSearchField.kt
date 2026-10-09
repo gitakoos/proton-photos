@@ -29,9 +29,12 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -78,6 +81,7 @@ import eu.akoos.photos.presentation.theme.AppColors
  * field is not empty. [modifier] shapes the width (a weight in a row, or fill in a column); [background]
  * defaults to the input surface but a darker host can pass its own.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AppSearchField(
     query: String,
@@ -101,7 +105,7 @@ internal fun AppSearchField(
     val focusRequester = remember { FocusRequester() }
     Row(
         modifier = modifier
-            .height(46.dp)
+            .heightIn(min = 46.dp)
             // A tap anywhere on the pill focuses the field, not just the thin text line; no ripple so
             // the surface looks unchanged.
             .clickable(
@@ -125,42 +129,48 @@ internal fun AppSearchField(
             tint = colors.fgDim,
             modifier = Modifier.size(iconSize),
         )
-        if (terms.isNotEmpty()) {
-            Row(
-                modifier = Modifier.widthIn(max = 200.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        // The pills and the text share one wrapping flow: the pills fill the line they fit on and the
+        // typing area takes the rest of the last line (a line of its own when the pills leave too little),
+        // so there is always somewhere to tap and type, and the field grows to hold them.
+        FlowRow(
+            modifier = Modifier.weight(1f).padding(vertical = if (terms.isEmpty()) 0.dp else 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
+            maxLines = 3,
+        ) {
+            terms.forEach { term -> SearchTermPill(term) }
+            Box(
+                modifier = Modifier.weight(1f).widthIn(min = 96.dp).heightIn(min = 30.dp),
+                contentAlignment = Alignment.CenterStart,
             ) {
-                terms.forEach { term -> SearchTermPill(term) }
+                if (query.isEmpty() && terms.isEmpty()) {
+                    Text(text = placeholder, color = colors.fgMute, maxLines = 1, fontSize = textSize)
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = TextStyle(color = colors.fgPrimary, fontSize = textSize),
+                    cursorBrush = SolidColor(colors.accent),
+                    keyboardOptions = keyboardOptions,
+                    keyboardActions = keyboardActions,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .onFocusChanged { onFocusChanged(it.isFocused) }
+                        .onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace &&
+                                query.isEmpty() && terms.isNotEmpty()
+                            ) {
+                                terms.last().onRemove()
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                )
             }
-        }
-        Box(modifier = Modifier.weight(1f).widthIn(min = 48.dp), contentAlignment = Alignment.CenterStart) {
-            if (query.isEmpty() && terms.isEmpty()) {
-                Text(text = placeholder, color = colors.fgMute, maxLines = 1, fontSize = textSize)
-            }
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                singleLine = true,
-                textStyle = TextStyle(color = colors.fgPrimary, fontSize = textSize),
-                cursorBrush = SolidColor(colors.accent),
-                keyboardOptions = keyboardOptions,
-                keyboardActions = keyboardActions,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { onFocusChanged(it.isFocused) }
-                    .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace &&
-                            query.isEmpty() && terms.isNotEmpty()
-                        ) {
-                            terms.last().onRemove()
-                            true
-                        } else {
-                            false
-                        }
-                    },
-            )
         }
         if (query.isNotEmpty()) {
             Box(
@@ -194,15 +204,15 @@ internal fun SearchTermPill(term: SearchFieldTerm) {
     val colors = AppColors.current
     Row(
         modifier = Modifier
-            .height(30.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .height(24.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(colors.accent.copy(alpha = 0.18f))
             .clickable { term.onRemove() }
-            .padding(start = 10.dp, end = 6.dp),
+            .padding(start = 8.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(term.label, color = colors.accent, fontSize = 13.sp, maxLines = 1)
-        Icon(Icons.Filled.Close, contentDescription = term.removeDescription, tint = colors.accent, modifier = Modifier.size(14.dp))
+        Text(term.label, color = colors.accent, fontSize = 11.sp, maxLines = 1)
+        Icon(Icons.Filled.Close, contentDescription = term.removeDescription, tint = colors.accent, modifier = Modifier.size(12.dp))
     }
 }

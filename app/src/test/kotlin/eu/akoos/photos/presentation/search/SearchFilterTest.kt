@@ -768,6 +768,28 @@ class SearchFilterTest {
     // ── the month names the view model hands over ───────────────────────────────────────────────
 
     @Test
+    fun `the Offline storage state keeps the cloud photos pinned for offline`() {
+        val pinned = cloud("a.jpg")
+        val notPinned = cloud("b.jpg")
+        val device = local("c.jpg")
+        val out = SearchFilter.applyContentFilter(
+            listOf(pinned, notPinned, device),
+            ContentFilter(syncStatus = SyncStatusFilter.Offline),
+            offlinePinIds = setOf(pinned.cloud.linkId),
+        )
+        assertEquals(listOf("a.jpg"), namesFrom(out))
+    }
+
+    @Test
+    fun `the Offline storage state with nothing pinned shows nothing`() {
+        val out = SearchFilter.applyContentFilter(
+            listOf(cloud("a.jpg"), local("b.jpg")),
+            ContentFilter(syncStatus = SyncStatusFilter.Offline),
+        )
+        assertTrue(out.isEmpty())
+    }
+
+    @Test
     fun `the month names are twelve, folded, and in calendar order`() {
         assertEquals(12, englishMonths.size)
         assertEquals("january", englishMonths.first())

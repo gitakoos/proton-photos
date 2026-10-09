@@ -201,7 +201,7 @@ data class ContentFilter(
 )
 
 enum class MediaType { All, PhotosOnly, VideosOnly }
-enum class SyncStatusFilter { All, LocalOnly, BackedUp, CloudOnly }
+enum class SyncStatusFilter { All, LocalOnly, BackedUp, CloudOnly, Offline }
 
 enum class TimelineGrouping { None, Day, Month, Year }
 

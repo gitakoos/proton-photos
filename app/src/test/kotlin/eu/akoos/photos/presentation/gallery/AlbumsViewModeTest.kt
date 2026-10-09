@@ -63,9 +63,9 @@ class AlbumsViewModeTest {
     }
 
     @Test
-    fun `the sheet holds the view and the sort, then the way to the settings page`() {
+    fun `the sheet holds which albums show, the view and the sort, then the way to the settings page`() {
         assertEquals(
-            listOf(AlbumsSheetRow.View, AlbumsSheetRow.Sort, AlbumsSheetRow.MoreSettings),
+            listOf(AlbumsSheetRow.Show, AlbumsSheetRow.View, AlbumsSheetRow.Sort, AlbumsSheetRow.MoreSettings),
             albumsSheetRows(),
         )
         assertEquals(AlbumsSheetRow.entries.toList(), albumsSheetRows())

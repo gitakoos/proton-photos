@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -216,21 +217,26 @@ internal fun ContentFilterSheet(
                 SyncStatusFilter.LocalOnly to stringResource(R.string.filter_sync_local),
                 SyncStatusFilter.BackedUp to stringResource(R.string.filter_sync_backedup),
                 SyncStatusFilter.CloudOnly to stringResource(R.string.filter_sync_cloud),
+                SyncStatusFilter.Offline to stringResource(R.string.filter_offline),
             )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                syncOptions.forEach { (status, label) ->
-                    FilterChip(
-                        label = label,
-                        selected = syncStatus == status,
-                        accentWhenSelected = true,
-                        trailingClear = true,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            val newStatus = if (syncStatus == status) SyncStatusFilter.All else status
-                            syncStatus = newStatus
-                            applyNow(ss = newStatus)
-                        },
-                    )
+            // Two by two, so four labels in any language keep a readable width.
+            syncOptions.chunked(2).forEachIndexed { rowIndex, rowOptions ->
+                if (rowIndex > 0) Spacer(Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    rowOptions.forEach { (status, label) ->
+                        FilterChip(
+                            label = label,
+                            selected = syncStatus == status,
+                            accentWhenSelected = true,
+                            trailingClear = true,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                val newStatus = if (syncStatus == status) SyncStatusFilter.All else status
+                                syncStatus = newStatus
+                                applyNow(ss = newStatus)
+                            },
+                        )
+                    }
                 }
             }
         }

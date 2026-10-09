@@ -498,6 +498,7 @@ fun SearchScreen(
     val localName = stringResource(R.string.filter_sync_local)
     val backedUpName = stringResource(R.string.filter_sync_backedup)
     val cloudName = stringResource(R.string.filter_sync_cloud)
+    val offlineName = stringResource(R.string.filter_offline)
     val searchTerms = buildList {
         searchScope?.let { add(SearchFieldTerm(it.name) { vm.setScope(null) }) }
         categoryName?.let { add(SearchFieldTerm(it) { vm.onCategorySelected(GalleryFilter.All) }) }
@@ -510,6 +511,7 @@ fun SearchScreen(
             SyncStatusFilter.LocalOnly -> add(SearchFieldTerm(localName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
             SyncStatusFilter.BackedUp -> add(SearchFieldTerm(backedUpName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
             SyncStatusFilter.CloudOnly -> add(SearchFieldTerm(cloudName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
+            SyncStatusFilter.Offline -> add(SearchFieldTerm(offlineName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
             SyncStatusFilter.All -> Unit
         }
         dateTermLabel(filter.year, filter.month, filter.day, filter.dayEnd, searchLocale)?.let { label ->
@@ -562,8 +564,9 @@ fun SearchScreen(
         }
     }
     val dateRow: @Composable () -> Unit = {
-        // A month or a year typed into the field is offered as a date to pick, which turns it into a
-        // pill and leaves the field free for words and names.
+        // A few year digits typed into the field are offered as the years they could become, to pick one,
+        // which turns it into a pill and leaves the field free for words and names. A month or a whole
+        // year becomes the pill by itself.
         if (dateSuggestions.isNotEmpty()) {
             val dateLocale = appLocale()
             Spacer(modifier = Modifier.height(8.dp))

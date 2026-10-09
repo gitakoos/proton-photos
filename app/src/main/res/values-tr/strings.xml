@@ -1307,6 +1307,12 @@
     <string name="search_placeholder">Fotoğraflarında ara</string>
     <string name="search_empty_idle">Aramaya başlamak için bir ad yaz</string>
     <string name="search_empty_no_results">Eşleşme yok</string>
+    <string name="search_rel_today">bugün</string>
+    <string name="search_rel_yesterday">dün</string>
+    <string name="search_rel_this_month">bu ay</string>
+    <string name="search_rel_last_month">geçen ay|önceki ay|geçtiğimiz ay</string>
+    <string name="search_rel_this_year">bu yıl|bu sene</string>
+    <string name="search_rel_last_year">geçen yıl|geçen sene|önceki yıl</string>
     <string name="search_section_on_this_day">Bu gün</string>
     <string name="search_section_on_this_day_years">%1$d yıl önce</string>
     <string name="search_section_on_this_day_years_plural">%1$d yıl önce</string>
@@ -1732,6 +1738,7 @@
     <string name="albums_sort_name">Ad (A\'dan Z\'ye)</string>
     <string name="albums_sort_activity">Son etkinlik</string>
     <string name="albums_sort_count">Fotoğraf sayısı</string>
+    <string name="albums_show_heading">Göster</string>
     <string name="albums_view_heading">Görünüm</string>
     <string name="albums_view_grid">Izgara</string>
     <string name="albums_view_list">Liste</string>
