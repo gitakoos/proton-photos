@@ -170,7 +170,7 @@ class MainActivity : AppCompatActivity() {
     private val vaultSignOut by lazy {
         VaultSignOutPolicy(
             rescue = { hiddenVaultRestorer.rescueDeviceOnly() },
-            notifyMoved = { vaultRescueNotifier.notifyMoved() },
+            notifyMoved = { zipName -> vaultRescueNotifier.notifyMoved(zipName) },
         )
     }
 

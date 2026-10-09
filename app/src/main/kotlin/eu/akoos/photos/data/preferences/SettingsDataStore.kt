@@ -345,6 +345,10 @@ object SettingsKeys {
      */
     val HIDDEN_URI_ORIGINAL_NAME_MAP = stringSetPreferencesKey("hidden_uri_original_name_map")
 
+    /** The optional vault password, encrypted under a key that never leaves the Android Keystore (see
+     *  VaultPasswordStore). Absent when no password is set. Machine-level: it survives a sign-out. */
+    val VAULT_PASSWORD_BLOB = stringPreferencesKey("vault_password_blob")
+
     /**
      * hiddenUri → everything else the hidden photo owned that is keyed by its device uri, as a set of
      * "hiddenUri|sourceUri|favourite|userTags|coverFolder|albums" strings (same flatten as the maps

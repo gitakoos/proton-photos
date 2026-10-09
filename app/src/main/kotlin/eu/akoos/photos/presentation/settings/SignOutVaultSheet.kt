@@ -72,6 +72,7 @@ import eu.akoos.photos.presentation.theme.SheetBg
 @Composable
 internal fun SignOutVaultSheet(
     message: String,
+    zipped: Boolean = false,
     onConfirm: (SignOutVaultChoice) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -105,8 +106,12 @@ internal fun SignOutVaultSheet(
             )
             VaultChoiceRow(
                 selected = choice == SignOutVaultChoice.MOVE_OUT,
-                title = stringResource(R.string.sign_out_vault_move),
-                description = stringResource(R.string.sign_out_vault_move_desc, HiddenRescue.SIGN_OUT_FOLDER),
+                title = stringResource(if (zipped) R.string.sign_out_vault_move_zip else R.string.sign_out_vault_move),
+                description = if (zipped) {
+                    stringResource(R.string.sign_out_vault_move_zip_desc)
+                } else {
+                    stringResource(R.string.sign_out_vault_move_desc, HiddenRescue.SIGN_OUT_FOLDER)
+                },
                 onClick = { choice = SignOutVaultChoice.MOVE_OUT },
             )
             VaultChoiceRow(

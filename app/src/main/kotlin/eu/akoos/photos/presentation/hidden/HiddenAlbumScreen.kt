@@ -69,6 +69,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import eu.akoos.photos.presentation.settings.HiddenSettingsSheet
+import eu.akoos.photos.presentation.settings.VaultPasswordFlow
+import eu.akoos.photos.presentation.settings.VaultPasswordStep
+import eu.akoos.photos.presentation.settings.VaultPasswordViewModel
+import androidx.compose.material.icons.filled.Settings
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.CloudPhotoCell
 import eu.akoos.photos.presentation.common.ConfirmSheet
@@ -142,6 +147,10 @@ fun HiddenAlbumScreen(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showHiddenSettings by remember { mutableStateOf(false) }
+    var vaultPasswordStep by remember { mutableStateOf(VaultPasswordStep.None) }
+    val vaultPasswordViewModel: VaultPasswordViewModel = hiltViewModel()
+    val vaultPasswordSet by vaultPasswordViewModel.isSet.collectAsStateWithLifecycle()
 
     SecureScreenEffect()
 
@@ -608,8 +617,30 @@ fun HiddenAlbumScreen(
                 FloatingHeader(
                     title = stringResource(R.string.hidden_photos_title),
                     onBack = onBack,
+                    trailing = {
+                        IconBubble(
+                            icon = Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.settings_title),
+                            onClick = { showHiddenSettings = true },
+                        )
+                    },
                 )
             }
+            if (showHiddenSettings) {
+                HiddenSettingsSheet(
+                    passwordSet = vaultPasswordSet,
+                    onOpenPassword = {
+                        showHiddenSettings = false
+                        vaultPasswordStep = if (vaultPasswordSet) VaultPasswordStep.Choose else VaultPasswordStep.Set
+                    },
+                    onDismiss = { showHiddenSettings = false },
+                )
+            }
+            VaultPasswordFlow(
+                step = vaultPasswordStep,
+                onStep = { vaultPasswordStep = it },
+                viewModel = vaultPasswordViewModel,
+            )
 
             // The strip carries exactly what the grid holds selected, in the order the grid lists
             // it: the hidden cloud photos first, then the vaulted device ones, so a sweep across

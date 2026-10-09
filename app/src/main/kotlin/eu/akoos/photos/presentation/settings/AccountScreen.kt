@@ -227,6 +227,7 @@ fun AccountScreen(
             if (deviceOnlyVault > 0) {
                 SignOutVaultSheet(
                     message = signOutMessage,
+                    zipped = state.vaultPasswordSet,
                     onConfirm = { choice ->
                         showSignOutDialog = false
                         onSignOut(choice)

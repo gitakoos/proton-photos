@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.hidden
 
 import android.content.Context
+import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
 import androidx.datastore.preferences.core.edit
@@ -43,6 +44,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.util.HiddenCaptureTime
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -50,8 +56,9 @@ import javax.inject.Singleton
 data class HiddenFolderProgress(val done: Int, val total: Int, val restoring: Boolean)
 
 /** What an involuntary sign-out took back to the device: how many photos, and which vault files are
- *  still there because the write failed. */
-data class HiddenRescue(val moved: Int, val stillInVault: Set<String>) {
+ *  still there because the write failed. [zipName] is the password-protected zip in Downloads the photos
+ *  went into when a vault password is set; they are then in that zip and not in the gallery. */
+data class HiddenRescue(val moved: Int, val stillInVault: Set<String>, val zipName: String? = null) {
     companion object {
         /** The gallery folder rescued photos land in, apart from every folder the user chose. The suffix
          *  names why the folder exists, so another cause can later get a folder of its own. */
@@ -88,6 +95,8 @@ class HiddenVaultRestorer @Inject constructor(
     private val localTagDao: LocalTagDao,
     private val uploadAlbumTargetDao: UploadAlbumTargetDao,
     private val photoLocationDao: PhotoLocationDao,
+    private val vaultPassword: VaultPasswordStore,
+    private val zipPublisher: VaultZipPublisher,
 ) {
 
     private val runs = HiddenRestoreRuns(appScope)
@@ -520,6 +529,17 @@ class HiddenVaultRestorer @Inject constructor(
         )
         if (targets.isEmpty()) return@detached HiddenRescue(moved = 0, stillInVault = emptySet())
         val buckets = recordedBucketsOf(targets)
+        // With a vault password the photos go into an encrypted zip and not back into the gallery. Any
+        // failure on that route falls through to the plain rescue below, so nothing is ever lost to it.
+        val password = vaultPassword.read()
+        if (password != null) {
+            val zipped = try {
+                zipRescue(targets, password, folder, buckets)
+            } finally {
+                password.fill('\u0000')
+            }
+            if (zipped != null) return@detached zipped
+        }
         val tally = RevealTally()
         HiddenVaultDiagnostics.revealStarted(targets.size)
         val kept = mutableSetOf<String>()
@@ -534,6 +554,62 @@ class HiddenVaultRestorer @Inject constructor(
         clearEmptiedFolders(buckets)
         HiddenVaultDiagnostics.revealFinished(moved, targets.size - moved, tally)
         HiddenRescue(moved = moved, stillInVault = stillInVault)
+    }
+
+    /**
+     * Writes [targets] into one AES zip in Downloads, named after [folder], and only once the zip has
+     * been read back whole does it drop what the vault recorded about them. Null when anything on the
+     * way failed; the vault files are untouched then, so the caller can still rescue them plainly.
+     * The files themselves are removed by the vault wipe the sign-out runs next.
+     */
+    private suspend fun zipRescue(
+        targets: List<String>,
+        password: CharArray,
+        folder: String,
+        buckets: Set<String>,
+    ): HiddenRescue? = withContext(Dispatchers.IO) {
+        val prefs = context.settingsDataStore.data.first()
+        val storedNames = prefs[SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP].orEmpty()
+            .associate { it.substringBefore('|') to it.substringAfter('|', "") }
+        val files = targets.mapNotNull { uri ->
+            val file = Uri.parse(uri).path?.let { File(it) }?.takeIf { it.isFile } ?: return@mapNotNull null
+            Triple(uri, file, storedNames[uri]?.takeIf { it.isNotBlank() } ?: HiddenCaptureTime.strip(file.name))
+        }
+        if (files.size != targets.size) return@withContext null
+        val names = VaultZip.uniqueNames(files.map { it.third }) { "photo_$it" }
+        val entries = files.mapIndexed { i, (_, file, _) ->
+            VaultZipEntry(file, names[i], HiddenCaptureTime.parse(file.name))
+        }
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val zipName = "${folder}_$stamp.zip"
+        val work = File(context.cacheDir, "vault_zip").apply { mkdirs() }
+        val temp = File(work, zipName)
+        try {
+            temp.delete()
+            VaultZip.write(entries, password, temp)
+            if (!VaultZip.verify(temp, password, entries)) return@withContext null
+            if (!zipPublisher.publish(temp, zipName)) return@withContext null
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            return@withContext null
+        } finally {
+            temp.delete()
+        }
+        context.settingsDataStore.edit { p ->
+            p[SettingsKeys.HIDDEN_PHOTO_URIS] = (p[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) - targets.toSet()
+            for (key in listOf(
+                SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP,
+                SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
+                SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
+                SettingsKeys.HIDDEN_URI_CARRIED_MAP,
+            )) {
+                val existing = p[key] ?: continue
+                p[key] = HiddenVaultRecords.dropped(existing, targets.toSet())
+            }
+        }
+        journal.forget(targets)
+        clearEmptiedFolders(buckets)
+        HiddenRescue(moved = targets.size, stillInVault = emptySet(), zipName = zipName)
     }
 
     /**

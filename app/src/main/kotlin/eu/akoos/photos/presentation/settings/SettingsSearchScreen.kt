@@ -197,6 +197,11 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         Screen.HiddenAlbum.route,
     ),
     SettingsSearchEntry(
+        R.string.settings_vault_password, R.string.settings_privacy_security,
+        listOf("vault", "password", "zip", "hidden", "forced logout", "jelszó", "széf", "titkosított"),
+        Screen.PrivacySecuritySettings.route,
+    ),
+    SettingsSearchEntry(
         R.string.permissions_title, R.string.settings_privacy_security,
         listOf("permissions", "access", "grant", "engedélyek"),
         Screen.Permissions.route,

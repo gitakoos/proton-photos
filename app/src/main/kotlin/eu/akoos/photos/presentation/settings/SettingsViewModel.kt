@@ -1011,6 +1011,7 @@ class SettingsViewModel @Inject constructor(
                     stripShareSoftwareInfo = migratedPrefs[SettingsKeys.STRIP_SHARE_SOFTWARE_INFO] ?: false,
                     stripShareAuthorship = migratedPrefs[SettingsKeys.STRIP_SHARE_AUTHORSHIP] ?: false,
                     appLockEnabled = migratedPrefs[SettingsKeys.APP_LOCK_ENABLED] ?: false,
+                    vaultPasswordSet = migratedPrefs[SettingsKeys.VAULT_PASSWORD_BLOB] != null,
                     appLockTimeoutSeconds = migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_SECONDS]
                         ?: migratedPrefs[SettingsKeys.APP_LOCK_TIMEOUT_MINUTES]?.let { it * 60 } ?: 0,
                     clearCacheOnAppClose = migratedPrefs[SettingsKeys.CLEAR_CACHE_ON_APP_CLOSE] ?: false,

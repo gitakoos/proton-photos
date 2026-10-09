@@ -271,6 +271,7 @@ dependencies {
 
     // EXIF reading/writing
     implementation(libs.exifinterface)
+    implementation(libs.zip4j)
 
     // Biometric authentication (hidden album)
     implementation("androidx.biometric:biometric:1.1.0")

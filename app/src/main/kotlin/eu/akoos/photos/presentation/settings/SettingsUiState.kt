@@ -226,6 +226,8 @@ data class SettingsUiState(
     val stripShareAuthorship: Boolean = false,
     // App lock
     val appLockEnabled: Boolean = false,
+    /** Whether the optional vault password is set. */
+    val vaultPasswordSet: Boolean = false,
     /** Lock-on-return timeout in seconds. 0 = immediate; common picks: 5 / 10 / 30 / 60 / 300. */
     val appLockTimeoutSeconds: Int = 0,
     /** Privacy opt-in: wipe `cacheDir/fullres/` on every process backgrounding. Off by

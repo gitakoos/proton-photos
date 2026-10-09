@@ -72,6 +72,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -2341,13 +2342,28 @@ fun PrivacySecuritySettingsScreen(
 
         Spacer(Modifier.height(20.dp))
         // Hidden vault, a lock/biometric-gated photo collection, so it belongs with the app lock.
+        var vaultPasswordStep by remember { mutableStateOf(VaultPasswordStep.None) }
+        val vaultPasswordViewModel: VaultPasswordViewModel = hiltViewModel()
+        val vaultPasswordSet by vaultPasswordViewModel.isSet.collectAsStateWithLifecycle()
         SettingsCard {
             NavRow(
                 label = stringResource(R.string.settings_hidden_photos),
                 description = stringResource(R.string.settings_hidden_photos_desc),
                 onClick = onHiddenAlbumClick,
             )
+            RowDivider()
+            VaultPasswordSettingRow(
+                isSet = vaultPasswordSet,
+                onClick = {
+                    vaultPasswordStep = if (vaultPasswordSet) VaultPasswordStep.Choose else VaultPasswordStep.Set
+                },
+            )
         }
+        VaultPasswordFlow(
+            step = vaultPasswordStep,
+            onStep = { vaultPasswordStep = it },
+            viewModel = vaultPasswordViewModel,
+        )
     }
 }
 

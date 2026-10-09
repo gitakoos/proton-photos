@@ -39,10 +39,11 @@ class VaultSignOutPolicyTest {
 
     private var rescues = 0
     private var notices = 0
+    private var lastZipName: String? = null
 
     private fun policy(rescue: suspend () -> HiddenRescue) = VaultSignOutPolicy(
         rescue = { rescues++; rescue() },
-        notifyMoved = { notices++ },
+        notifyMoved = { zipName -> notices++; lastZipName = zipName },
     )
 
     @Test
@@ -168,6 +169,27 @@ class VaultSignOutPolicyTest {
 
         assertEquals(VaultWipe.Except(emptySet()), later)
         assertEquals(1, rescues)
+    }
+
+    @Test
+    fun `a zipped rescue tells the notice which zip holds the photos and wipes the whole vault`() = runTest {
+        val policy = policy { HiddenRescue(moved = 2, stillInVault = emptySet(), zipName = "PFPVault_ForcedLogout_1.zip") }
+
+        val wipe = policy.afterSignOut("u1")
+
+        assertEquals(VaultWipe.Except(emptySet()), wipe)
+        assertEquals(1, notices)
+        assertEquals("PFPVault_ForcedLogout_1.zip", lastZipName)
+    }
+
+    @Test
+    fun `the note for a zipped rescue says zipped and never names the zip`() {
+        val note = VaultSignOutPolicy.vaultNote(
+            HiddenRescue(moved = 4, stillInVault = emptySet(), zipName = "PFPVault_ForcedLogout_secret.zip"),
+        )
+
+        assertEquals("vault zipped 4, 0 left in vault", note)
+        assertFalse(note.contains("secret"))
     }
 
     @Test
