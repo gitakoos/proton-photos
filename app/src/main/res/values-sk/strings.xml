@@ -2476,14 +2476,30 @@
     <string name="compression_unavailable_fallback">%1$s nie je na tomto telefóne k dispozícii, videá preto použijú %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Štítky fotiek</string>
-    <string name="whats_new_260_labels_body">Pridávajte fotkám vlastné štítky a vyhľadávajte podľa nich. Štítky sa zálohujú na Drive.</string>
+    <string name="whats_new_260_labels_body">Otvorte fotku, ťuknite na „Podrobnosti“ a v poli „Štítky“ pridajte až päť štítkov, alebo vyberte viac fotiek a zvoľte „Pridať štítky“. Vyhľadávanie nájde fotky podľa štítkov. Štítky môžete premenovať, zlúčiť a vymazať, zálohovať na Drive alebo obnoviť v „Nastavenia > Ďalšie nastavenia > Štítky“.</string>
     <string name="whats_new_260_compress_title">Kompresia videí</string>
-    <string name="whats_new_260_compress_body">Vyberte kodek a kvalitu a sledujte priebeh i ušetrené miesto.</string>
-    <string name="whats_new_260_vault_title">Skryté fotky ostanú v bezpečí</string>
-    <string name="whats_new_260_vault_body">Odhlásenie zachová skryté fotky bez kópie na Drive v zipe s voliteľným heslom.</string>
+    <string name="whats_new_260_compress_body">Zapnite „Komprimovať videá“ v „Nastavenia > Zálohovanie a úložisko > Nastavenia zálohovania > Kvalita a veľkosť“ a vyberte kodek a kvalitu. Predvolený je H.264, ktorý prehrajú všetky zariadenia. Nahrávanie ukazuje priebeh aj ušetrené miesto a fotky sa nahrávajú ďalej, aj keď sa video komprimuje.</string>
+    <string name="whats_new_260_vault_title">Skryté fotky pri odhlásení</string>
+    <string name="whats_new_260_vault_body">Pri odhlásení sa program spýta, čo urobiť so skrytými fotkami bez kópie na Drive, a reláciu ukončenú serverom presunie do priečinka v galérii sám. Ak ich chcete mať radšej v zipe chránenom heslom v Stiahnutých, zapnite „Chrániť skryté fotky pri odhlásení“ v „Nastavenia > Ďalšie nastavenia > Súkromie a zabezpečenie“.</string>
+    <string name="whats_new_260_albums_title">Karta Albumy</string>
+    <string name="whats_new_260_albums_body">Albumy sa zobrazujú ako mriežka alebo zoznam a v oboch ich môžete usporiadať ručne. Príkazom „Vylúčiť z Albumov“ v ponuke albumu ho skryjete z mriežky a nájdete ho vo filtri „Vylúčené“. Ako karta vyzerá a otvára sa, nastavíte v „Nastavenia > Vzhľad a jazyk > Knižnica > Albumy“.</string>
+    <string name="whats_new_260_shortcuts_title">Dlaždice a stránka Zdieľané</string>
+    <string name="whats_new_260_shortcuts_body">Karta Albumy začína radom dlaždíc: „Kolekcia“, „Skryté“, „Zdieľané“, „Mapa“, „Kalendár“, „Ľudia“, „Offline“. „Zdieľané“ sa otvorí ako samostatná stránka, s bodkou, keď čaká pozvánka. Dlaždice preusporiadate alebo skryjete v „Nastavenia > Vzhľad a jazyk > Knižnica > Albumy > Odkazy“.</string>
     <string name="whats_new_260_search_title">Vyhľadávanie nájde viac</string>
-    <string name="whats_new_260_search_body">Hľadajte miesto, minulý týždeň alebo viac slov naraz a zužujte výsledky filtrami.</string>
+    <string name="whats_new_260_search_body">Hľadajte podľa miesta, mesiaca alebo roka, prípadne slovami ako minulý týždeň, včera alebo pred 3 dňami. Slová oddelené čiarkou stačí splniť ktorékoľvek. Albumy a stránky skratiek sa ponúkajú pri písaní a filtre dátumu a kategórií sa ukazujú ako odznaky, ktoré možno odobrať.</string>
+    <string name="whats_new_260_picker_title">Pridanie do albumu</string>
+    <string name="whats_new_260_picker_body">Výber fotiek pre album otvorí výber, ktorý funguje ako galéria telefónu, s kartou „Hľadať“ ako treťou. List „Pridať do albumu“ zostane otvorený, takže jedna fotka môže ísť do viacerých albumov, a pridať možno aj fotky, ktoré sa ešte nahrávajú.</string>
+    <string name="whats_new_260_selection_title">Výber fotiek</string>
+    <string name="whats_new_260_selection_body">„Zdieľať“, „Pridať do albumu“ a „Odstrániť“ sú tlačidlá hneď pod vybranými fotkami, ostatné je v „Viac“ a „Vybrať všetko“ je vedľa počtu.</string>
+    <string name="whats_new_260_settings_title">Nastavenia nanovo zoskupené</string>
+    <string name="whats_new_260_settings_body">Prvá stránka obsahuje „Účet“, „Zálohovanie a úložisko“ a nástroje. „Ďalšie nastavenia“ teraz obsahuje „Strojové učenie“, „Štítky“, „Súkromie a zabezpečenie“, povolenia, upozornenia a diagnostiku. „Novinky“, „Časté otázky“ a aktualizácie sa presunuli do „O aplikácii“ a „Nastavenia zálohovania“ začína tlačidlom „Synchronizovať teraz“ a voľbou siete.</string>
+    <string name="whats_new_260_grouping_title">Radenie a zoskupovanie v albumoch</string>
+    <string name="whats_new_260_grouping_body">V ponuke albumu alebo priečinka môžete fotky radiť a zoskupovať podľa dňa, mesiaca alebo roka. Každý si pamätá svoju voľbu a štipnutím prepínate medzi rokom, mesiacom a dňom. Názov a akcie zostávajú pri posúvaní v hlavičke.</string>
+    <string name="whats_new_260_details_title">Ľudia a mapa v detailoch</string>
+    <string name="whats_new_260_details_body">„Podrobnosti“ fotky teraz ukazujú ľudí na nej a mapu miesta, kde vznikla. Ťuknutím na osobu otvoríte jej stránku, ťuknutím na mapu ju otvoríte na celú obrazovku. Ťuknutím na nepomenovanú tvár ju pomenujete alebo priradíte niekomu.</string>
     <string name="whats_new_260_frame_title">Nástroj Rám</string>
-    <string name="whats_new_260_frame_body">V editore umiestnite fotku na vyplnené plátno.</string>
-    <string name="whats_new_260_more">Navyše stránka Zdieľané, výber albumu ako v systémovej galérii, zoskupovanie štipnutím podľa dní, mesiacov alebo rokov, skupiny duplikátov, ktoré možno ignorovať, turečtina a množstvo ďalších opráv a vylepšení stability.</string>
+    <string name="whats_new_260_frame_body">V editore fotiek umiestnite fotku na plátno iného tvaru, napríklad 1:1, 9:16 alebo Polaroid, vyplnené farbou alebo mäkkým rozostrením. Nástroj je stále vo vývoji a ďalšie vylepšenia prídu.</string>
+    <string name="whats_new_260_drive_title">Dáta tvárí a vyhľadávania na Drive</string>
+    <string name="whats_new_260_drive_body">Uložte mená tvárí a dáta vyhľadávania na Drive a obnovte ich v inom telefóne, pričom si vyberiete, čo sa vráti, v „Nastavenia > Ďalšie nastavenia > Strojové učenie“.</string>
+    <string name="whats_new_260_more">Navyše upraviteľný dátum pri HEIC, GIF a RAW, skupiny duplikátov, ktoré možno ignorovať, výber miesta na mape, turečtina a množstvo ďalších opráv a vylepšení stability.</string>
 </resources>

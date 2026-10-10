@@ -2475,14 +2475,30 @@
     <string name="compression_unavailable_fallback">%1$s není na tomto telefonu k dispozici, videa proto použijí %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Štítky fotek</string>
-    <string name="whats_new_260_labels_body">Přidávejte fotkám vlastní štítky a hledejte podle nich. Štítky se zálohují na Drive.</string>
+    <string name="whats_new_260_labels_body">Otevřete fotku, klepněte na „Podrobnosti“ a v poli „Štítky“ přidejte až pět štítků, nebo vyberte více fotek a zvolte „Přidat štítky“. Hledání najde fotky podle štítků. Štítky přejmenujete, sloučíte a smažete a zálohujete na Drive nebo obnovíte v „Nastavení > Další nastavení > Štítky“.</string>
     <string name="whats_new_260_compress_title">Komprese videí</string>
-    <string name="whats_new_260_compress_body">Vyberte kodek a kvalitu a sledujte průběh i ušetřené místo.</string>
-    <string name="whats_new_260_vault_title">Skryté fotky zůstanou v bezpečí</string>
-    <string name="whats_new_260_vault_body">Odhlášení zachová skryté fotky bez kopie na Drive v zipu s volitelným heslem.</string>
+    <string name="whats_new_260_compress_body">Zapněte „Komprimovat videa“ v „Nastavení > Zálohování a úložiště > Nastavení zálohování > Kvalita a velikost“ a vyberte kodek a kvalitu. Výchozí je H.264, který přehrají všechna zařízení. Nahrávání ukazuje průběh i ušetřené místo a fotky se nahrávají dál, i když se video komprimuje.</string>
+    <string name="whats_new_260_vault_title">Skryté fotky při odhlášení</string>
+    <string name="whats_new_260_vault_body">Odhlášení se zeptá, co dělat se skrytými fotkami bez kopie na Drive, a relace ukončená serverem je sama přesune do složky v galerii. Chcete-li je místo toho mít v zipu chráněném heslem ve Stažených, zapněte „Chránit skryté fotky při odhlášení“ v „Nastavení > Další nastavení > Soukromí a zabezpečení“.</string>
+    <string name="whats_new_260_albums_title">Karta Alba</string>
+    <string name="whats_new_260_albums_body">Alba se zobrazují jako mřížka nebo seznam a v obou je můžete uspořádat ručně. Příkazem „Vyloučit z Alb“ v nabídce alba ho skryjete z mřížky a najdete ho ve filtru „Vyloučené“. Jak karta vypadá a jak se otevírá, nastavíte v „Nastavení > Vzhled a jazyk > Knihovna > Alba“.</string>
+    <string name="whats_new_260_shortcuts_title">Zkratky a stránka Sdílené</string>
+    <string name="whats_new_260_shortcuts_body">Karta Alba začíná řadou dlaždic: „Sbírka“, „Skryté“, „Sdílené“, „Mapa“, „Kalendář“, „Lidé“, „Offline“. „Sdílené“ se otevře jako samostatná stránka, s tečkou, když čeká pozvánka. Dlaždice přeuspořádáte nebo skryjete v „Nastavení > Vzhled a jazyk > Knihovna > Alba > Zkratky“.</string>
     <string name="whats_new_260_search_title">Hledání najde víc</string>
-    <string name="whats_new_260_search_body">Hledejte podle místa, minulého týdne nebo více slov najednou a zužujte výsledky filtry.</string>
+    <string name="whats_new_260_search_body">Hledejte podle místa, měsíce nebo roku, případně slovy jako minulý týden, včera nebo před 3 dny. Slova oddělená čárkou stačí splnit kterékoli. Alba a stránky zkratek se nabízejí při psaní a filtry data a kategorií se ukazují jako odznaky, které lze odebrat.</string>
+    <string name="whats_new_260_picker_title">Přidání do alba</string>
+    <string name="whats_new_260_picker_body">Výběr fotek pro album otevře výběr, který funguje jako galerie telefonu, s kartou „Hledat“ jako třetí. List „Přidat do alba“ zůstane otevřený, takže jedna fotka může do více alb, a přidat lze i fotky, které se ještě nahrávají.</string>
+    <string name="whats_new_260_selection_title">Výběr fotek</string>
+    <string name="whats_new_260_selection_body">„Sdílet“, „Přidat do alba“ a „Smazat“ jsou tlačítka přímo pod vybranými fotkami, ostatní je v „Více“ a „Vybrat vše“ je vedle počtu.</string>
+    <string name="whats_new_260_settings_title">Nastavení po novu</string>
+    <string name="whats_new_260_settings_body">První stránka obsahuje „Účet“, „Zálohování a úložiště“ a nástroje. „Další nastavení“ teď obsahuje „Strojové učení“, „Štítky“, „Soukromí a zabezpečení“, oprávnění, oznámení a diagnostiku. „Novinky“, „Časté dotazy“ a aktualizace se přesunuly do „O aplikaci“ a „Nastavení zálohování“ začíná tlačítkem „Synchronizovat nyní“ a volbou sítě.</string>
+    <string name="whats_new_260_grouping_title">Řazení a seskupení v albech</string>
+    <string name="whats_new_260_grouping_body">V nabídce alba nebo složky můžete fotky řadit a seskupovat podle dne, měsíce nebo roku. Každé si pamatuje svou volbu a stisknutím prstů přepínáte mezi rokem, měsícem a dnem. Název a akce zůstávají při posouvání v záhlaví.</string>
+    <string name="whats_new_260_details_title">Lidé a mapa v detailech</string>
+    <string name="whats_new_260_details_body">Panel „Podrobnosti“ u fotky teď ukazuje lidi na ní a mapu místa, kde vznikla. Klepnutím na osobu otevřete její stránku, klepnutím na mapu ji otevřete na celou obrazovku. Klepnutím na nepojmenovanou tvář ji pojmenujete nebo přiřadíte někomu.</string>
     <string name="whats_new_260_frame_title">Nástroj Rám</string>
-    <string name="whats_new_260_frame_body">V editoru umístěte fotku na vyplněné plátno.</string>
-    <string name="whats_new_260_more">Navíc stránka Sdílené, výběr alba jako v systémové galerii, seskupování stisknutím podle dnů, měsíců či let, skupiny duplicit, které lze ignorovat, turečtina a spousta dalších oprav a vylepšení stability.</string>
+    <string name="whats_new_260_frame_body">V editoru fotek umístěte fotku na plátno jiného tvaru, třeba 1:1, 9:16 nebo Polaroid, vyplněné barvou nebo měkkým rozostřením. Nástroj je stále ve vývoji a další vylepšení přijdou.</string>
+    <string name="whats_new_260_drive_title">Data obličejů a hledání na Drive</string>
+    <string name="whats_new_260_drive_body">Uložte jména tváří a data hledání na Drive a obnovte je v jiném telefonu, přičemž si vyberete, co se vrátí, v „Nastavení > Další nastavení > Strojové učení“.</string>
+    <string name="whats_new_260_more">Navíc upravitelné datum u HEIC, GIF a RAW, skupiny duplicit, které lze ignorovat, výběr místa na mapě, turečtina a spousta dalších oprav a vylepšení stability.</string>
 </resources>

@@ -2391,14 +2391,30 @@
     <string name="compression_unavailable_fallback">%1$s is not available on this phone, so videos use %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Photo labels</string>
-    <string name="whats_new_260_labels_body">Add your own labels to photos and search by them. Labels back up to Drive.</string>
+    <string name="whats_new_260_labels_body">Open a photo, tap “Details” and add up to five labels in the “Labels” box, or select several photos and choose “Add labels”. Search finds photos by their labels. Rename, merge and delete labels, and back them up to Drive or restore them, under “Settings > More settings > Labels”.</string>
     <string name="whats_new_260_compress_title">Video compression</string>
-    <string name="whats_new_260_compress_body">Pick the codec and quality, and see the progress and the space saved.</string>
-    <string name="whats_new_260_vault_title">Hidden photos stay safe</string>
-    <string name="whats_new_260_vault_body">A sign-out keeps hidden photos that have no Drive copy, in a zip with an optional password.</string>
+    <string name="whats_new_260_compress_body">Turn on “Compress videos” under “Settings > Backup &amp; storage > Backup settings > Quality and size”, then choose the codec and the quality. H.264 is the default and plays everywhere. Uploads show their progress and the space saved, and your photos keep uploading while a video compresses.</string>
+    <string name="whats_new_260_vault_title">Hidden photos on sign-out</string>
+    <string name="whats_new_260_vault_body">Signing out asks what to do with hidden photos that have no copy in Drive, and a session the server ends moves them to a folder in your gallery for you. To keep them in a password-protected zip in Downloads instead, turn on “Protect hidden photos on sign-out” under “Settings > More settings > Privacy &amp; security”.</string>
+    <string name="whats_new_260_albums_title">Albums tab</string>
+    <string name="whats_new_260_albums_body">Albums show as a grid or a list, and you can arrange them by hand in either. Use “Exclude from Albums” in an album\'s menu to hide it from the grid, and find it again under the “Excluded” filter. Choose how the tab looks and opens under “Settings > Appearance &amp; Language > Library > Albums”.</string>
+    <string name="whats_new_260_shortcuts_title">Shortcuts and the Shared page</string>
+    <string name="whats_new_260_shortcuts_body">The Albums tab starts with a row of tiles: “Collection”, “Hidden”, “Shared”, “Map”, “Calendar”, “People”, “Offline”. “Shared” opens as a page of its own, with a dot when an invitation is waiting. Reorder or hide the tiles under “Settings > Appearance &amp; Language > Library > Albums > Shortcuts”.</string>
     <string name="whats_new_260_search_title">Search finds more</string>
-    <string name="whats_new_260_search_body">Look up a place, last week or several words at once, and narrow results with filters.</string>
+    <string name="whats_new_260_search_body">Search by place, month or year, or by words like last week, yesterday or 3 days ago. Separate words with a comma to match any of them. Albums and shortcut pages appear as you type, and date and category filters show as pills you can remove.</string>
+    <string name="whats_new_260_picker_title">Add to album</string>
+    <string name="whats_new_260_picker_body">Choosing photos for an album opens a picker that works like your phone\'s gallery, with “Search” as its third tab. The “Add to album” sheet stays open, so one photo can go into several albums, and photos that are still uploading can be added too.</string>
+    <string name="whats_new_260_selection_title">Selecting photos</string>
+    <string name="whats_new_260_selection_body">“Share”, “Add to album” and “Delete” appear as buttons right under the selected photos, with “More” for the rest, and “Select all” sits next to the count.</string>
+    <string name="whats_new_260_settings_title">Settings, regrouped</string>
+    <string name="whats_new_260_settings_body">The first page keeps “Account”, “Backup &amp; storage” and the tools. “More settings” now holds “Machine learning”, “Labels”, “Privacy &amp; security”, permissions, notifications and diagnostics. “What\'s new”, “Frequently asked questions” and updates moved into “About”, and “Backup settings” starts with “Sync now” and the network choice.</string>
+    <string name="whats_new_260_grouping_title">Sort and group in albums</string>
+    <string name="whats_new_260_grouping_body">Open the menu of an album or folder to sort and group its photos by day, month or year. Each one remembers its own choice, and a pinch steps between year, month and day. The name and actions stay in a header while you scroll.</string>
+    <string name="whats_new_260_details_title">People and map in details</string>
+    <string name="whats_new_260_details_body">A photo\'s “Details” now show the people in it and a map of where it was taken. Tap a person to open their page, or the map to open it full screen. Tap an unnamed face to name it or add it to someone.</string>
     <string name="whats_new_260_frame_title">Frame tool</string>
-    <string name="whats_new_260_frame_body">Place a photo on a filled canvas in the editor.</string>
-    <string name="whats_new_260_more">Plus a Shared page, an album picker that works like a system gallery, pinch grouping by day, month or year, duplicate groups you can ignore, Turkish, and lots more fixes and stability improvements.</string>
+    <string name="whats_new_260_frame_body">In the photo editor, place a photo on a canvas of another shape, such as 1:1, 9:16 or Polaroid, filled with a colour or a soft blur. The tool is still in progress, and more improvements are on the way.</string>
+    <string name="whats_new_260_drive_title">Face and search data in Drive</string>
+    <string name="whats_new_260_drive_body">Save your face names and search data to Drive and restore them on another phone, choosing what comes back, under “Settings > More settings > Machine learning”.</string>
+    <string name="whats_new_260_more">Plus editable dates for HEIC, GIF and RAW photos, duplicate groups you can ignore, a map place picker, Turkish, and lots more fixes and stability improvements.</string>
 </resources>

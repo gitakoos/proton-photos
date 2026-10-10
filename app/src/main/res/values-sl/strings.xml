@@ -2469,14 +2469,30 @@
     <string name="compression_unavailable_fallback">%1$s na tem telefonu ni na voljo, zato videoposnetki uporabijo %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Oznake fotografij</string>
-    <string name="whats_new_260_labels_body">Fotografijam dodajte lastne oznake in iščite po njih. Oznake se varnostno kopirajo v Drive.</string>
+    <string name="whats_new_260_labels_body">Odprite fotografijo, tapnite „Podrobnosti“ in v polju „Oznake“ dodajte do pet oznak, ali izberite več fotografij in izberite „Dodaj oznake“. Iskanje najde fotografije po oznakah. Oznake lahko preimenujete, združite in izbrišete ter jih varnostno kopirate v Drive ali obnovite v „Nastavitve > Več nastavitev > Oznake“.</string>
     <string name="whats_new_260_compress_title">Stiskanje videa</string>
-    <string name="whats_new_260_compress_body">Izberite kodek in kakovost ter spremljajte napredek in prihranjen prostor.</string>
-    <string name="whats_new_260_vault_title">Skrite fotografije ostanejo varne</string>
-    <string name="whats_new_260_vault_body">Odjava ohrani skrite fotografije brez kopije v Drive v datoteki zip z neobveznim geslom.</string>
+    <string name="whats_new_260_compress_body">Vklopite „Stisni videoposnetke“ v „Nastavitve > Varnostno kopiranje in shramba > Nastavitve varnostnega kopiranja > Kakovost in velikost“, nato izberite kodek in kakovost. Privzet je H.264, ki se predvaja povsod. Nalaganje prikazuje napredek in prihranjen prostor, fotografije pa se nalagajo naprej, medtem ko se video stiska.</string>
+    <string name="whats_new_260_vault_title">Skrite fotografije ob odjavi</string>
+    <string name="whats_new_260_vault_body">Ob odjavi vas program vpraša, kaj storiti s skritimi fotografijami brez kopije v Drive, sejo, ki jo konča strežnik, pa skrite fotografije same premaknejo v mapo v galeriji. Če jih želite namesto tega v zipu z geslom v Prenosih, vklopite „Zaščiti skrite fotografije ob odjavi“ v „Nastavitve > Več nastavitev > Zasebnost in varnost“.</string>
+    <string name="whats_new_260_albums_title">Zavihek Albumi</string>
+    <string name="whats_new_260_albums_body">Albumi so prikazani kot mreža ali seznam, v obeh pa jih lahko razporedite ročno. „Izključi iz Albumov“ v meniju albuma ga umakne iz mreže, najdete pa ga v filtru „Izključeni“. Videz in odpiranje zavihka nastavite v „Nastavitve > Videz in jezik > Knjižnica > Albumi“.</string>
+    <string name="whats_new_260_shortcuts_title">Ploščice in stran Deljeno</string>
+    <string name="whats_new_260_shortcuts_body">Zavihek Albumi se začne z vrsto ploščic: „Zbirka“, „Skrite“, „V skupni rabi“, „Zemljevid“, „Koledar“, „Osebe“, „Brez povezave“. „V skupni rabi“ se odpre kot svoja stran, s piko, ko čaka vabilo. Ploščice preuredite ali skrijete v „Nastavitve > Videz in jezik > Knjižnica > Albumi > Bližnjice“.</string>
     <string name="whats_new_260_search_title">Iskanje najde več</string>
-    <string name="whats_new_260_search_body">Iščite kraj, prejšnji teden ali več besed hkrati in zožite rezultate s filtri.</string>
+    <string name="whats_new_260_search_body">Iščite po kraju, mesecu ali letu ali z besedami, kot so prejšnji teden, včeraj ali pred 3 dnevi. Besede, ločene z vejico, dajo zadetke za katero koli od njih. Albumi in strani bližnjic se pojavijo med tipkanjem, filtri datuma in kategorije pa so prikazani kot značke, ki jih lahko odstranite.</string>
+    <string name="whats_new_260_picker_title">Dodajanje v album</string>
+    <string name="whats_new_260_picker_body">Izbira fotografij za album odpre izbirnik, ki deluje kot galerija telefona, z „Iskanje“ kot tretjim zavihkom. List „Dodaj v album“ ostane odprt, tako da lahko ena fotografija gre v več albumov, dodate pa lahko tudi fotografije, ki se še nalagajo.</string>
+    <string name="whats_new_260_selection_title">Izbiranje fotografij</string>
+    <string name="whats_new_260_selection_body">„Deli“, „Dodaj v album“ in „Izbriši“ so gumbi tik pod izbranimi fotografijami, ostalo je v „Več“, „Izberi vse“ pa je ob številu.</string>
+    <string name="whats_new_260_settings_title">Nastavitve na novo združene</string>
+    <string name="whats_new_260_settings_body">Prva stran ohrani „Račun“, „Varnostno kopiranje in shramba“ in orodja. „Več nastavitev“ zdaj vsebuje „Strojno učenje“, „Oznake“, „Zasebnost in varnost“, dovoljenja, obvestila in diagnostiko. „Novosti“, „Pogosta vprašanja“ in posodobitve so se preselili v „O aplikaciji“, „Nastavitve varnostnega kopiranja“ pa se začne z „Sinhroniziraj zdaj“ in izbiro omrežja.</string>
+    <string name="whats_new_260_grouping_title">Razvrščanje in združevanje v albumih</string>
+    <string name="whats_new_260_grouping_body">V meniju albuma ali mape fotografije razvrstite in združite po dnevu, mesecu ali letu. Vsak si zapomni svojo izbiro, s ščipom pa preklapljate med letom, mesecem in dnevom. Ime in dejanja ostanejo med pomikanjem v glavi.</string>
+    <string name="whats_new_260_details_title">Osebe in zemljevid v podrobnostih</string>
+    <string name="whats_new_260_details_body">„Podrobnosti“ fotografije zdaj prikazujejo osebe na njej in zemljevid, kje je nastala. Tapnite osebo, da odprete njeno stran, ali zemljevid za celozaslonski prikaz. Tapnite obraz brez imena, da ga poimenujete ali dodelite komu.</string>
     <string name="whats_new_260_frame_title">Orodje Okvir</string>
-    <string name="whats_new_260_frame_body">V urejevalniku postavite fotografijo na zapolnjeno platno.</string>
-    <string name="whats_new_260_more">Poleg tega stran Deljeno, izbirnik albumov kot v sistemski galeriji, združevanje s ščipom po dnevih, mesecih ali letih, skupine dvojnikov, ki jih lahko prezrete, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
+    <string name="whats_new_260_frame_body">V urejevalniku fotografij postavite fotografijo na platno druge oblike, na primer 1:1, 9:16 ali Polaroid, zapolnjeno z barvo ali mehkim zameglenjem. Orodje je še v nastajanju in prihajajo nove izboljšave.</string>
+    <string name="whats_new_260_drive_title">Podatki o obrazih in iskanju v Drive</string>
+    <string name="whats_new_260_drive_body">Imena obrazov in podatke iskanja shranite v Drive in jih obnovite na drugem telefonu, pri čemer izberete, kaj se vrne, v „Nastavitve > Več nastavitev > Strojno učenje“.</string>
+    <string name="whats_new_260_more">Poleg tega urejljivi datumi pri HEIC, GIF in RAW, skupine dvojnikov, ki jih lahko prezrete, izbira kraja na zemljevidu, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
 </resources>

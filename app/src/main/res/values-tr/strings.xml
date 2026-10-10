@@ -2268,14 +2268,30 @@
     <string name="compression_unavailable_fallback">%1$s bu telefonda kullanılamıyor, bu yüzden videolarda %2$s kullanılır.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Fotoğraf etiketleri</string>
-    <string name="whats_new_260_labels_body">Fotoğraflara kendi etiketlerinizi ekleyin ve etiketle arayın. Etiketler Drive\'a yedeklenir.</string>
+    <string name="whats_new_260_labels_body">Bir fotoğrafı açın, “Ayrıntılar” öğesine dokunun ve “Etiketler” kutusuna en fazla beş etiket ekleyin; ya da birkaç fotoğraf seçip “Etiket ekle” öğesini seçin. Arama fotoğrafları etiketlerine göre bulur. Etiketleri yeniden adlandırabilir, birleştirebilir, silebilir, Drive\'a yedekleyebilir veya geri yükleyebilirsiniz: “Ayarlar > Diğer ayarlar > Etiketler”.</string>
     <string name="whats_new_260_compress_title">Video sıkıştırma</string>
-    <string name="whats_new_260_compress_body">Kodeki ve kaliteyi seçin, ilerlemeyi ve kazanılan alanı görün.</string>
-    <string name="whats_new_260_vault_title">Gizli fotoğraflar güvende kalır</string>
-    <string name="whats_new_260_vault_body">Oturum kapatıldığında Drive kopyası olmayan gizli fotoğraflar, isteğe bağlı parolalı bir zip içinde korunur.</string>
+    <string name="whats_new_260_compress_body">“Ayarlar > Yedekleme ve depolama > Yedekleme ayarları > Kalite ve boyut” altında “Videoları sıkıştır” seçeneğini açın, sonra kodeki ve kaliteyi seçin. Varsayılan her yerde oynatılan H.264\'tür. Yükleme ilerlemeyi ve kazanılan alanı gösterir, bir video sıkıştırılırken fotoğraflarınız yüklenmeye devam eder.</string>
+    <string name="whats_new_260_vault_title">Oturum kapatırken gizli fotoğraflar</string>
+    <string name="whats_new_260_vault_body">Oturum kapatırken Drive kopyası olmayan gizli fotoğraflarla ne yapılacağı sorulur; sunucunun sonlandırdığı bir oturum onları galerinizdeki bir klasöre kendisi taşır. Bunun yerine İndirilenler\'de parolalı bir zip içinde tutulmalarını istiyorsanız “Ayarlar > Diğer ayarlar > Gizlilik ve güvenlik” altında “Çıkışta gizli fotoğrafları koru” seçeneğini açın.</string>
+    <string name="whats_new_260_albums_title">Albümler sekmesi</string>
+    <string name="whats_new_260_albums_body">Albümler ızgara veya liste olarak görünür ve ikisinde de elle sıralayabilirsiniz. Bir albümün menüsündeki “Albümlerden hariç tut” onu ızgaradan çıkarır, “Hariç tutulanlar” filtresinde yeniden bulursunuz. Sekmenin görünümünü ve açılışını “Ayarlar > Görünüm ve dil > Kitaplık > Albümler” altında ayarlarsınız.</string>
+    <string name="whats_new_260_shortcuts_title">Kutucuklar ve Paylaşılan sayfası</string>
+    <string name="whats_new_260_shortcuts_body">Albümler sekmesi bir kutucuk sırasıyla başlar: “Koleksiyon”, “Gizli”, “Paylaşılanlar”, “Harita”, “Takvim”, “Kişiler”, “Çevrimdışı”. “Paylaşılanlar” ayrı bir sayfa olarak açılır, bekleyen bir davet olduğunda bir nokta görünür. Kutucukları “Ayarlar > Görünüm ve dil > Kitaplık > Albümler > Kısayollar” altında yeniden sıralayabilir veya gizleyebilirsiniz.</string>
     <string name="whats_new_260_search_title">Arama daha fazlasını bulur</string>
-    <string name="whats_new_260_search_body">Bir yeri, geçen haftayı veya birkaç kelimeyi birlikte arayın ve sonuçları filtrelerle daraltın.</string>
+    <string name="whats_new_260_search_body">Yer, ay veya yıla göre ya da geçen hafta, dün veya 3 gün önce gibi sözcüklerle arayın. Virgülle ayrılan sözcüklerden herhangi biri eşleşir. Albümler ve kısayol sayfaları yazarken önerilir, tarih ve kategori filtreleri kaldırabileceğiniz rozetler olarak görünür.</string>
+    <string name="whats_new_260_picker_title">Albüme ekleme</string>
+    <string name="whats_new_260_picker_body">Bir albüm için fotoğraf seçmek, telefonunuzun galerisi gibi çalışan bir seçici açar; “Arama” üçüncü sekmedir. “Albüme ekle” sayfası açık kalır, böylece bir fotoğraf birden çok albüme girebilir ve hâlâ yüklenen fotoğraflar da eklenebilir.</string>
+    <string name="whats_new_260_selection_title">Fotoğraf seçme</string>
+    <string name="whats_new_260_selection_body">“Paylaş”, “Albüme ekle” ve “Sil” seçilen fotoğrafların hemen altında düğmeler olarak görünür, gerisi “Diğer” içindedir, “Tümünü seç” ise sayının yanındadır.</string>
+    <string name="whats_new_260_settings_title">Yeniden gruplanan ayarlar</string>
+    <string name="whats_new_260_settings_body">İlk sayfada “Hesap”, “Yedekleme ve depolama” ve araçlar kalır. “Diğer ayarlar” artık “Makine öğrenimi”, “Etiketler”, “Gizlilik ve güvenlik”, izinler, bildirimler ve tanılamayı içerir. “Yenilikler”, “Sık sorulan sorular” ve güncellemeler “Hakkında” içine taşındı, “Yedekleme ayarları” ise “Şimdi eşitle” ve ağ seçimiyle başlar.</string>
+    <string name="whats_new_260_grouping_title">Albümlerde sıralama ve gruplama</string>
+    <string name="whats_new_260_grouping_body">Bir albümün veya klasörün menüsünde fotoğrafları güne, aya veya yıla göre sıralayıp gruplayın. Her biri kendi seçimini hatırlar, kıstırma ise yıl, ay ve gün arasında geçiş yapar. Ad ve eylemler kaydırırken bir üst bilgide kalır.</string>
+    <string name="whats_new_260_details_title">Ayrıntılarda kişiler ve harita</string>
+    <string name="whats_new_260_details_body">Bir fotoğrafın “Ayrıntılar” bölümü artık içindeki kişileri ve çekildiği yerin haritasını gösterir. Sayfasını açmak için bir kişiye, tam ekran görmek için haritaya dokunun. Adsız bir yüze dokunarak ona ad verin veya birine ekleyin.</string>
     <string name="whats_new_260_frame_title">Çerçeve aracı</string>
-    <string name="whats_new_260_frame_body">Düzenleyicide bir fotoğrafı dolu bir tuvale yerleştirin.</string>
-    <string name="whats_new_260_more">Ayrıca Paylaşılan sayfası, sistem galerisi gibi albüm seçici, kıstırarak güne, aya veya yıla göre gruplama, yok sayılabilen kopya grupları, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
+    <string name="whats_new_260_frame_body">Fotoğraf düzenleyicide bir fotoğrafı 1:1, 9:16 veya Polaroid gibi başka şekilli bir tuvale, bir renkle veya yumuşak bir bulanıklıkla doldurarak yerleştirin. Araç hâlâ geliştiriliyor ve yeni iyileştirmeler gelecek.</string>
+    <string name="whats_new_260_drive_title">Drive\'da yüz ve arama verileri</string>
+    <string name="whats_new_260_drive_body">Yüz adlarını ve arama verilerini Drive\'a kaydedin ve başka bir telefonda geri yükleyin; neyin geri geleceğini siz seçersiniz: “Ayarlar > Diğer ayarlar > Makine öğrenimi”.</string>
+    <string name="whats_new_260_more">Ayrıca HEIC, GIF ve RAW için düzenlenebilir tarih, yok sayılabilen kopya grupları, haritada yer seçici, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
 </resources>

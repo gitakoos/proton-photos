@@ -2350,14 +2350,30 @@
     <string name="compression_unavailable_fallback">A(z) %1$s nem érhető el ezen a telefonon, ezért a videók %2$s kodeket használnak.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Fotócímkék</string>
-    <string name="whats_new_260_labels_body">Adj saját címkéket a fotókhoz, és keress rájuk. A címkék a Drive-ra is mentődnek.</string>
+    <string name="whats_new_260_labels_body">Nyiss meg egy fotót, koppints a(z) „Részletek” gombra, és a „Címkék” mezőben adj hozzá legfeljebb öt címkét, vagy jelölj ki több fotót, és válaszd a(z) „Címkék hozzáadása” lehetőséget. A keresés a címkék alapján találja meg a fotókat. A címkéket átnevezheted, összevonhatod és törölheted, valamint mentheted Drive-ra vagy visszaállíthatod: „Beállítások > További beállítások > Címkék”.</string>
     <string name="whats_new_260_compress_title">Videótömörítés</string>
-    <string name="whats_new_260_compress_body">Válaszd ki a kodeket és a minőséget, és kövesd az előrehaladást és a megtakarított helyet.</string>
-    <string name="whats_new_260_vault_title">A rejtett fotók biztonságban maradnak</string>
-    <string name="whats_new_260_vault_body">Kijelentkezéskor a Drive-másolat nélküli rejtett fotók egy zipben maradnak meg, opcionális jelszóval.</string>
+    <string name="whats_new_260_compress_body">Kapcsold be a(z) „Videók tömörítése” beállítást itt: „Beállítások > Biztonsági mentés és tárhely > Mentési beállítások > Minőség és méret”, majd válaszd ki a kodeket és a minőséget. Az alapértelmezett a H.264, amely mindenhol lejátszható. A feltöltés mutatja az előrehaladást és a megtakarított helyet, a fotók pedig tovább töltődnek fel, amíg egy videó tömörítése folyik.</string>
+    <string name="whats_new_260_vault_title">Rejtett fotók kijelentkezéskor</string>
+    <string name="whats_new_260_vault_body">Kijelentkezéskor a program megkérdezi, mi legyen a Drive-másolat nélküli rejtett fotókkal, a szerver által megszakított munkamenet pedig magától a galéria egy mappájába teszi őket. Ha inkább jelszóval védett zipben szeretnéd őket a Letöltések mappában, kapcsold be a(z) „Rejtett fotók védelme kijelentkezéskor” beállítást itt: „Beállítások > További beállítások > Adatvédelem és biztonság”.</string>
+    <string name="whats_new_260_albums_title">Albumok fül</string>
+    <string name="whats_new_260_albums_body">Az albumok rácsban vagy listában jelennek meg, és mindkettőben kézzel rendezheted őket. Az album menüjében a(z) „Kizárás az Albumokból” kiveszi a rácsból, és a(z) „Kizárt” szűrőben újra megtalálod. A fül kinézetét és nyitását itt állíthatod: „Beállítások > Megjelenés és nyelv > Fotótár > Albumok”.</string>
+    <string name="whats_new_260_shortcuts_title">Csempék és a Megosztott oldal</string>
+    <string name="whats_new_260_shortcuts_body">Az Albumok fül egy csempesorral indul: „Gyűjtemény”, „Rejtett”, „Megosztott”, „Térkép”, „Naptár”, „Emberek”, „Offline”. A(z) „Megosztott” külön oldalként nyílik meg, ponttal jelezve, ha meghívó vár. A csempéket átrendezheted vagy elrejtheted itt: „Beállítások > Megjelenés és nyelv > Fotótár > Albumok > Gyorsparancsok”.</string>
     <string name="whats_new_260_search_title">A keresés többet talál</string>
-    <string name="whats_new_260_search_body">Keress helyre, a múlt hétre vagy több szóra egyszerre, és szűkítsd az eredményeket szűrőkkel.</string>
+    <string name="whats_new_260_search_body">Keress hely, hónap vagy év szerint, vagy olyan szavakkal, mint múlt hét, tegnap vagy 3 napja. A vesszővel elválasztott szavak közül bármelyik találatot ad. Az albumok és a gyorsoldalak gépelés közben megjelennek, a dátum- és kategóriaszűrők pedig eltávolítható címkékként látszanak.</string>
+    <string name="whats_new_260_picker_title">Hozzáadás albumhoz</string>
+    <string name="whats_new_260_picker_body">Ha fotókat választasz egy albumhoz, a telefon galériájához hasonló választó nyílik meg, a(z) „Keresés” a harmadik fül. A(z) „Albumhoz adás” lap nyitva marad, így egy fotó több albumba is kerülhet, és még feltöltés alatt álló fotók is hozzáadhatók.</string>
+    <string name="whats_new_260_selection_title">Fotók kijelölése</string>
+    <string name="whats_new_260_selection_body">A(z) „Megosztás”, „Albumhoz adás” és „Törlés” gombként jelenik meg közvetlenül a kijelölt fotók alatt, a többi a(z) „Továbbiak” alatt, a(z) „Összes kijelölése” pedig a darabszám mellett van.</string>
+    <string name="whats_new_260_settings_title">Újracsoportosított beállítások</string>
+    <string name="whats_new_260_settings_body">Az első oldalon maradt a(z) „Fiók”, a(z) „Biztonsági mentés és tárhely” és az eszközök. A(z) „További beállítások” oldalon most a(z) „Gépi tanulás”, „Címkék”, „Adatvédelem és biztonság”, az engedélyek, az értesítések és a diagnosztika található. A(z) „Újdonságok”, a(z) „Gyakori kérdések” és a frissítések a(z) „Névjegy” alá kerültek, a(z) „Mentési beállítások” pedig a(z) „Szinkronizálás most” gombbal és a hálózat választásával indul.</string>
+    <string name="whats_new_260_grouping_title">Rendezés és csoportosítás az albumokban</string>
+    <string name="whats_new_260_grouping_body">Egy album vagy mappa menüjében napok, hónapok vagy évek szerint rendezheted és csoportosíthatod a fotókat. Mindegyik megjegyzi a saját választását, a csippentés pedig váltogat az év, a hónap és a nap között. A név és a műveletek görgetés közben egy fejlécben maradnak.</string>
+    <string name="whats_new_260_details_title">Emberek és térkép a részletekben</string>
+    <string name="whats_new_260_details_body">A fotó „Részletek” most megmutatja a rajta lévő embereket és egy térképet arról, hol készült. Egy személyre koppintva megnyílik az oldala, a térképre koppintva teljes képernyőn látod. Egy név nélküli arcra koppintva elnevezheted, vagy valakihez adhatod.</string>
     <string name="whats_new_260_frame_title">Keret eszköz</string>
-    <string name="whats_new_260_frame_body">Helyezz egy fotót kitöltött vászonra a szerkesztőben.</string>
-    <string name="whats_new_260_more">Ráadásul Megosztott oldal, rendszergalériához hasonló albumválasztó, csippentéssel napok, hónapok vagy évek szerinti csoportosítás, figyelmen kívül hagyható duplikátumcsoportok, török nyelv, és rengeteg további javítás és stabilitási fejlesztés.</string>
+    <string name="whats_new_260_frame_body">A fotószerkesztőben helyezz egy fotót más alakú vászonra, például 1:1, 9:16 vagy Polaroid, színnel vagy lágy elmosással kitöltve. Az eszköz még fejlesztés alatt áll, további fejlesztések érkeznek.</string>
+    <string name="whats_new_260_drive_title">Arc- és keresési adatok a Drive-on</string>
+    <string name="whats_new_260_drive_body">Mentsd az arcnevek és a keresési adatok másolatát Drive-ra, és állítsd vissza egy másik telefonon, a visszatérő elemeket kiválasztva, itt: „Beállítások > További beállítások > Gépi tanulás”.</string>
+    <string name="whats_new_260_more">Ráadásul szerkeszthető dátum HEIC, GIF és RAW fájloknál, figyelmen kívül hagyható duplikátumcsoportok, helyválasztó a térképen, török nyelv, és rengeteg további javítás és stabilitási fejlesztés.</string>
 </resources>

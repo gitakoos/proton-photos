@@ -2390,14 +2390,30 @@
     <string name="compression_unavailable_fallback">%1$s non è disponibile su questo telefono, quindi i video usano %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Etichette per le foto</string>
-    <string name="whats_new_260_labels_body">Aggiungi etichette personali alle foto e cercale. Le etichette vengono salvate su Drive.</string>
+    <string name="whats_new_260_labels_body">Apri una foto, tocca “Dettagli” e aggiungi fino a cinque etichette nel riquadro “Etichette”, oppure seleziona più foto e scegli “Aggiungi etichette”. La ricerca trova le foto dalle etichette. Puoi rinominare, unire ed eliminare le etichette, e salvarle su Drive o ripristinarle, in “Impostazioni > Altre impostazioni > Etichette”.</string>
     <string name="whats_new_260_compress_title">Compressione video</string>
-    <string name="whats_new_260_compress_body">Scegli codec e qualità e guarda l\'avanzamento e lo spazio risparmiato.</string>
-    <string name="whats_new_260_vault_title">Le foto nascoste restano al sicuro</string>
-    <string name="whats_new_260_vault_body">Alla disconnessione le foto nascoste senza copia su Drive restano in uno zip con password facoltativa.</string>
+    <string name="whats_new_260_compress_body">Attiva “Comprimi video” in “Impostazioni > Backup e archiviazione > Impostazioni di backup > Qualità e dimensione”, poi scegli il codec e la qualità. H.264 è il predefinito e si riproduce ovunque. Il caricamento mostra l\'avanzamento e lo spazio risparmiato, e le foto continuano a caricarsi mentre un video viene compresso.</string>
+    <string name="whats_new_260_vault_title">Foto nascoste alla disconnessione</string>
+    <string name="whats_new_260_vault_body">Alla disconnessione viene chiesto cosa fare delle foto nascoste senza copia su Drive, e una sessione terminata dal server le sposta da sola in una cartella della galleria. Per tenerle invece in uno zip protetto da password in Download, attiva “Proteggi le foto nascoste all\'uscita” in “Impostazioni > Altre impostazioni > Privacy e sicurezza”.</string>
+    <string name="whats_new_260_albums_title">Scheda Album</string>
+    <string name="whats_new_260_albums_body">Gli album compaiono in griglia o in elenco e puoi ordinarli a mano in entrambi. “Escludi da Album” nel menu di un album lo toglie dalla griglia e lo ritrovi nel filtro “Esclusi”. Come appare e si apre la scheda si sceglie in “Impostazioni > Aspetto e lingua > Libreria > Album”.</string>
+    <string name="whats_new_260_shortcuts_title">Riquadri e pagina Condivisi</string>
+    <string name="whats_new_260_shortcuts_body">La scheda Album inizia con una riga di riquadri: “Raccolta”, “Nascoste”, “Condivisi”, “Mappa”, “Calendario”, “Persone”, “Offline”. “Condivisi” si apre come pagina a sé, con un punto quando c\'è un invito in attesa. Riordina o nascondi i riquadri in “Impostazioni > Aspetto e lingua > Libreria > Album > Scorciatoie”.</string>
     <string name="whats_new_260_search_title">La ricerca trova di più</string>
-    <string name="whats_new_260_search_body">Cerca un luogo, la settimana scorsa o più parole insieme e restringi i risultati con i filtri.</string>
+    <string name="whats_new_260_search_body">Cerca per luogo, mese o anno, o con parole come settimana scorsa, ieri o 3 giorni fa. Separa le parole con una virgola per trovare una qualsiasi. Album e pagine di scelta rapida compaiono mentre scrivi, e i filtri di data e categoria si mostrano come pillole che puoi togliere.</string>
+    <string name="whats_new_260_picker_title">Aggiungi all\'album</string>
+    <string name="whats_new_260_picker_body">Scegliere le foto per un album apre un selettore che funziona come la galleria del telefono, con “Cerca” come terza scheda. Il foglio “Aggiungi all\'album” resta aperto, quindi una foto può andare in più album, e si possono aggiungere anche foto ancora in caricamento.</string>
+    <string name="whats_new_260_selection_title">Selezione delle foto</string>
+    <string name="whats_new_260_selection_body">“Condividi”, “Aggiungi all\'album” ed “Elimina” appaiono come pulsanti subito sotto le foto selezionate, con “Altro” per il resto, e “Seleziona tutto” è accanto al conteggio.</string>
+    <string name="whats_new_260_settings_title">Impostazioni raggruppate</string>
+    <string name="whats_new_260_settings_body">La prima pagina conserva “Account”, “Backup e archiviazione” e gli strumenti. “Altre impostazioni” ora contiene “Apprendimento automatico”, “Etichette”, “Privacy e sicurezza”, autorizzazioni, notifiche e diagnostica. “Novità”, “Domande frequenti” e gli aggiornamenti sono passati in “Informazioni”, e “Impostazioni di backup” inizia con “Sincronizza ora” e la scelta della rete.</string>
+    <string name="whats_new_260_grouping_title">Ordina e raggruppa negli album</string>
+    <string name="whats_new_260_grouping_body">Nel menu di un album o di una cartella ordina e raggruppa le foto per giorno, mese o anno. Ognuno ricorda la propria scelta, e un pizzico passa tra anno, mese e giorno. Il nome e le azioni restano in un\'intestazione mentre scorri.</string>
+    <string name="whats_new_260_details_title">Persone e mappa nei dettagli</string>
+    <string name="whats_new_260_details_body">I “Dettagli” di una foto ora mostrano le persone presenti e una mappa di dove è stata scattata. Tocca una persona per aprire la sua pagina, o la mappa per vederla a schermo intero. Tocca un volto senza nome per dargli un nome o aggiungerlo a qualcuno.</string>
     <string name="whats_new_260_frame_title">Strumento Cornice</string>
-    <string name="whats_new_260_frame_body">Posiziona una foto su una tela riempita nell\'editor.</string>
-    <string name="whats_new_260_more">Inoltre una pagina Condivisi, un selettore di album come in una galleria di sistema, il raggruppamento con il pizzico per giorno, mese o anno, gruppi di duplicati da ignorare, il turco e tante altre correzioni e miglioramenti di stabilità.</string>
+    <string name="whats_new_260_frame_body">Nell\'editor foto, posiziona una foto su una tela di un\'altra forma, come 1:1, 9:16 o Polaroid, riempita con un colore o una sfocatura morbida. Lo strumento è ancora in sviluppo e arriveranno altri miglioramenti.</string>
+    <string name="whats_new_260_drive_title">Dati di volti e ricerca su Drive</string>
+    <string name="whats_new_260_drive_body">Salva su Drive i nomi dei volti e i dati di ricerca e ripristinali su un altro telefono, scegliendo cosa recuperare, in “Impostazioni > Altre impostazioni > Apprendimento automatico”.</string>
+    <string name="whats_new_260_more">Inoltre date modificabili per HEIC, GIF e RAW, gruppi di duplicati da ignorare, un selettore di luogo sulla mappa, il turco e tante altre correzioni e miglioramenti di stabilità.</string>
 </resources>

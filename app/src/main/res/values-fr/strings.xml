@@ -2353,14 +2353,30 @@
     <string name="compression_unavailable_fallback">%1$s n’est pas disponible sur ce téléphone, les vidéos utilisent donc %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Libellés de photos</string>
-    <string name="whats_new_260_labels_body">Ajoutez vos propres libellés aux photos et cherchez-les. Les libellés sont sauvegardés sur Drive.</string>
+    <string name="whats_new_260_labels_body">Ouvrez une photo, touchez « Détails » et ajoutez jusqu\'à cinq libellés dans la zone « Étiquettes », ou sélectionnez plusieurs photos et choisissez « Ajouter des étiquettes ». La recherche trouve les photos par leurs libellés. Renommez, fusionnez et supprimez les libellés, et sauvegardez-les sur Drive ou restaurez-les, dans « Paramètres > Autres réglages > Étiquettes ».</string>
     <string name="whats_new_260_compress_title">Compression vidéo</string>
-    <string name="whats_new_260_compress_body">Choisissez le codec et la qualité, et suivez la progression et l\'espace économisé.</string>
-    <string name="whats_new_260_vault_title">Les photos masquées restent en sécurité</string>
-    <string name="whats_new_260_vault_body">Une déconnexion conserve les photos masquées sans copie sur Drive dans un zip, avec un mot de passe facultatif.</string>
+    <string name="whats_new_260_compress_body">Activez « Compresser les vidéos » dans « Paramètres > Sauvegarde et stockage > Paramètres de sauvegarde > Qualité et taille », puis choisissez le codec et la qualité. H.264 est le choix par défaut et se lit partout. L\'envoi affiche sa progression et l\'espace économisé, et vos photos continuent d\'être envoyées pendant qu\'une vidéo est compressée.</string>
+    <string name="whats_new_260_vault_title">Photos masquées à la déconnexion</string>
+    <string name="whats_new_260_vault_body">À la déconnexion, une question demande quoi faire des photos masquées sans copie sur Drive, et une session terminée par le serveur les déplace d\'elle-même dans un dossier de la galerie. Pour les garder plutôt dans un zip protégé par mot de passe dans Téléchargements, activez « Protéger les photos masquées à la déconnexion » dans « Paramètres > Autres réglages > Confidentialité et sécurité ».</string>
+    <string name="whats_new_260_albums_title">Onglet Albums</string>
+    <string name="whats_new_260_albums_body">Les albums s\'affichent en grille ou en liste, et vous pouvez les classer à la main dans les deux. « Exclure des Albums » dans le menu d\'un album le retire de la grille, et il se retrouve dans le filtre « Exclus ». L\'aspect et l\'ouverture de l\'onglet se règlent dans « Paramètres > Apparence &amp; langue > Bibliothèque > Albums ».</string>
+    <string name="whats_new_260_shortcuts_title">Raccourcis et page Partagé</string>
+    <string name="whats_new_260_shortcuts_body">L\'onglet Albums commence par une rangée de vignettes : « Collection », « Masqués », « Partagés », « Carte », « Calendrier », « Personnes », « Hors ligne ». « Partagés » s\'ouvre comme une page à part, avec un point quand une invitation attend. Réordonnez ou masquez les vignettes dans « Paramètres > Apparence &amp; langue > Bibliothèque > Albums > Raccourcis ».</string>
     <string name="whats_new_260_search_title">La recherche trouve plus</string>
-    <string name="whats_new_260_search_body">Cherchez un lieu, la semaine dernière ou plusieurs mots à la fois, et affinez les résultats avec des filtres.</string>
+    <string name="whats_new_260_search_body">Cherchez par lieu, mois ou année, ou avec des mots comme la semaine dernière, hier ou il y a 3 jours. Séparez les mots par une virgule pour trouver l\'un ou l\'autre. Les albums et les pages raccourcis apparaissent pendant la saisie, et les filtres de date et de catégorie s\'affichent en pastilles que vous pouvez retirer.</string>
+    <string name="whats_new_260_picker_title">Ajouter à un album</string>
+    <string name="whats_new_260_picker_body">Choisir des photos pour un album ouvre un sélecteur qui fonctionne comme la galerie du téléphone, avec « Rechercher » comme troisième onglet. La feuille « Ajouter à l\'album » reste ouverte, donc une photo peut aller dans plusieurs albums, et les photos encore en cours d\'envoi peuvent aussi être ajoutées.</string>
+    <string name="whats_new_260_selection_title">Sélection de photos</string>
+    <string name="whats_new_260_selection_body">« Partager », « Ajouter à l\'album » et « Supprimer » apparaissent en boutons juste sous les photos sélectionnées, avec « Plus » pour le reste, et « Tout sélectionner » se trouve à côté du compteur.</string>
+    <string name="whats_new_260_settings_title">Réglages regroupés</string>
+    <string name="whats_new_260_settings_body">La première page garde « Compte », « Sauvegarde et stockage » et les outils. « Autres réglages » contient désormais « Apprentissage automatique », « Étiquettes », « Confidentialité et sécurité », les autorisations, les notifications et le diagnostic. « Nouveautés », « Questions fréquentes » et les mises à jour sont passés dans « À propos », et « Paramètres de sauvegarde » commence par « Synchroniser maintenant » et le choix du réseau.</string>
+    <string name="whats_new_260_grouping_title">Trier et regrouper dans les albums</string>
+    <string name="whats_new_260_grouping_body">Dans le menu d\'un album ou d\'un dossier, triez et regroupez ses photos par jour, mois ou année. Chacun retient son propre choix, et un pincement passe de l\'année au mois et au jour. Le nom et les actions restent dans un en-tête pendant le défilement.</string>
+    <string name="whats_new_260_details_title">Personnes et carte dans les détails</string>
+    <string name="whats_new_260_details_body">Les « Détails » d\'une photo montrent maintenant les personnes présentes et une carte du lieu de prise de vue. Touchez une personne pour ouvrir sa page, ou la carte pour l\'afficher en plein écran. Touchez un visage sans nom pour le nommer ou l\'ajouter à quelqu\'un.</string>
     <string name="whats_new_260_frame_title">Outil Cadre</string>
-    <string name="whats_new_260_frame_body">Placez une photo sur un canevas rempli dans l\'éditeur.</string>
-    <string name="whats_new_260_more">Et aussi une page Partagé, un sélecteur d\'albums comme celui d\'une galerie système, le regroupement par pincement par jour, mois ou année, des groupes de doublons à ignorer, le turc et de nombreuses autres corrections et améliorations de stabilité.</string>
+    <string name="whats_new_260_frame_body">Dans l\'éditeur de photos, placez une photo sur un canevas d\'une autre forme, comme 1:1, 9:16 ou Polaroid, rempli d\'une couleur ou d\'un flou doux. L\'outil est encore en cours de développement et d\'autres améliorations arrivent.</string>
+    <string name="whats_new_260_drive_title">Données de visages et de recherche sur Drive</string>
+    <string name="whats_new_260_drive_body">Sauvegardez les noms des visages et les données de recherche sur Drive et restaurez-les sur un autre téléphone, en choisissant ce qui revient, dans « Paramètres > Autres réglages > Apprentissage automatique ».</string>
+    <string name="whats_new_260_more">Et aussi des dates modifiables pour HEIC, GIF et RAW, des groupes de doublons à ignorer, un sélecteur de lieu sur la carte, le turc et de nombreuses autres corrections et améliorations de stabilité.</string>
 </resources>

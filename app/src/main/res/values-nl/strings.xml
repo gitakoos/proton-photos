@@ -2378,14 +2378,30 @@
     <string name="compression_unavailable_fallback">%1$s is niet beschikbaar op deze telefoon, dus video’s gebruiken %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Fotolabels</string>
-    <string name="whats_new_260_labels_body">Geef foto\'s je eigen labels en zoek erop. Labels worden naar Drive geback-upt.</string>
+    <string name="whats_new_260_labels_body">Open een foto, tik op “Details” en voeg tot vijf labels toe in het vak “Labels”, of selecteer meerdere foto\'s en kies “Labels toevoegen”. Zoeken vindt foto\'s op hun labels. Labels hernoemen, samenvoegen en verwijderen, en ze naar Drive back-uppen of terugzetten kan onder “Instellingen > Meer instellingen > Labels”.</string>
     <string name="whats_new_260_compress_title">Videocompressie</string>
-    <string name="whats_new_260_compress_body">Kies de codec en kwaliteit en zie de voortgang en de bespaarde ruimte.</string>
-    <string name="whats_new_260_vault_title">Verborgen foto\'s blijven veilig</string>
-    <string name="whats_new_260_vault_body">Bij uitloggen blijven verborgen foto\'s zonder Drive-kopie bewaard in een zip met optioneel wachtwoord.</string>
+    <string name="whats_new_260_compress_body">Zet “Video\'s comprimeren” aan onder “Instellingen > Back-up &amp; opslag > Back-upinstellingen > Kwaliteit en grootte” en kies de codec en de kwaliteit. H.264 is de standaard en speelt overal af. Bij het uploaden zie je de voortgang en de bespaarde ruimte, en je foto\'s blijven uploaden terwijl een video wordt gecomprimeerd.</string>
+    <string name="whats_new_260_vault_title">Verborgen foto\'s bij uitloggen</string>
+    <string name="whats_new_260_vault_body">Bij uitloggen wordt gevraagd wat er met verborgen foto\'s zonder Drive-kopie moet gebeuren, en een sessie die de server beëindigt verplaatst ze zelf naar een map in je galerij. Wil je ze liever in een zip met wachtwoord in Downloads, zet dan “Verborgen foto\'s beschermen bij afmelden” aan onder “Instellingen > Meer instellingen > Privacy &amp; beveiliging”.</string>
+    <string name="whats_new_260_albums_title">Tabblad Albums</string>
+    <string name="whats_new_260_albums_body">Albums verschijnen als raster of lijst en je kunt ze in beide met de hand ordenen. Met “Uitsluiten van Albums” in het menu van een album haal je het uit het raster en vind je het terug in het filter “Uitgesloten”. Hoe het tabblad eruitziet en opent, stel je in onder “Instellingen > Weergave &amp; taal > Bibliotheek > Albums”.</string>
+    <string name="whats_new_260_shortcuts_title">Tegels en de pagina Gedeeld</string>
+    <string name="whats_new_260_shortcuts_body">Het tabblad Albums begint met een rij tegels: “Collectie”, “Verborgen”, “Gedeeld”, “Kaart”, “Kalender”, “Personen”, “Offline”. “Gedeeld” opent als eigen pagina, met een stip als er een uitnodiging wacht. Tegels herschikken of verbergen doe je onder “Instellingen > Weergave &amp; taal > Bibliotheek > Albums > Snelkoppelingen”.</string>
     <string name="whats_new_260_search_title">Zoeken vindt meer</string>
-    <string name="whats_new_260_search_body">Zoek op een plaats, vorige week of meerdere woorden tegelijk en verfijn de resultaten met filters.</string>
+    <string name="whats_new_260_search_body">Zoek op plaats, maand of jaar, of met woorden als vorige week, gisteren of 3 dagen geleden. Woorden gescheiden door een komma leveren een treffer op voor elk van die woorden. Albums en snelkoppelingspagina\'s verschijnen tijdens het typen, en datum- en categoriefilters staan als pillen die je kunt weghalen.</string>
+    <string name="whats_new_260_picker_title">Toevoegen aan album</string>
+    <string name="whats_new_260_picker_body">Foto\'s kiezen voor een album opent een kiezer die werkt als de galerij van je telefoon, met “Zoeken” als derde tabblad. Het blad “Aan album toevoegen” blijft open, zodat één foto in meerdere albums kan, en ook foto\'s die nog uploaden kun je toevoegen.</string>
+    <string name="whats_new_260_selection_title">Foto\'s selecteren</string>
+    <string name="whats_new_260_selection_body">“Delen”, “Aan album toevoegen” en “Verwijderen” staan als knoppen direct onder de geselecteerde foto\'s, de rest onder “Meer”, en “Alles selecteren” staat naast het aantal.</string>
+    <string name="whats_new_260_settings_title">Instellingen opnieuw gegroepeerd</string>
+    <string name="whats_new_260_settings_body">De eerste pagina houdt “Account”, “Back-up &amp; opslag” en de hulpmiddelen. “Meer instellingen” bevat nu “Machine learning”, “Labels”, “Privacy &amp; beveiliging”, machtigingen, meldingen en diagnose. “Nieuw”, “Veelgestelde vragen” en updates zijn verhuisd naar “Over”, en “Back-upinstellingen” begint met “Nu synchroniseren” en de netwerkkeuze.</string>
+    <string name="whats_new_260_grouping_title">Sorteren en groeperen in albums</string>
+    <string name="whats_new_260_grouping_body">Open het menu van een album of map om de foto\'s te sorteren en te groeperen op dag, maand of jaar. Elk onthoudt zijn eigen keuze, en met knijpen wissel je tussen jaar, maand en dag. De naam en acties blijven tijdens het scrollen in een kopbalk.</string>
+    <string name="whats_new_260_details_title">Personen en kaart in de details</string>
+    <string name="whats_new_260_details_body">De “Details” van een foto tonen nu de mensen erop en een kaart van waar hij is genomen. Tik op een persoon om diens pagina te openen, of op de kaart voor beeldvullend. Tik op een gezicht zonder naam om het een naam te geven of aan iemand toe te voegen.</string>
     <string name="whats_new_260_frame_title">Kadergereedschap</string>
-    <string name="whats_new_260_frame_body">Plaats een foto op een gevuld canvas in de editor.</string>
-    <string name="whats_new_260_more">Daarnaast een pagina Gedeeld, een albumkiezer zoals in een systeemgalerij, groeperen met knijpen per dag, maand of jaar, groepen met duplicaten die je kunt negeren, Turks en nog veel meer fixes en stabiliteitsverbeteringen.</string>
+    <string name="whats_new_260_frame_body">Plaats in de foto-editor een foto op een canvas met een andere vorm, zoals 1:1, 9:16 of Polaroid, gevuld met een kleur of een zachte vervaging. Het gereedschap is nog in ontwikkeling en er komen meer verbeteringen.</string>
+    <string name="whats_new_260_drive_title">Gezichts- en zoekgegevens in Drive</string>
+    <string name="whats_new_260_drive_body">Bewaar gezichtsnamen en zoekgegevens in Drive en zet ze terug op een andere telefoon, waarbij je kiest wat terugkomt, onder “Instellingen > Meer instellingen > Machine learning”.</string>
+    <string name="whats_new_260_more">Daarnaast bewerkbare datums voor HEIC, GIF en RAW, groepen met duplicaten die je kunt negeren, een plaatskiezer op de kaart, Turks en nog veel meer fixes en stabiliteitsverbeteringen.</string>
 </resources>

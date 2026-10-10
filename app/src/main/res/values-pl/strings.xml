@@ -2469,14 +2469,30 @@
     <string name="compression_unavailable_fallback">%1$s nie jest dostępny na tym telefonie, więc filmy używają %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Etykiety zdjęć</string>
-    <string name="whats_new_260_labels_body">Dodawaj zdjęciom własne etykiety i szukaj po nich. Etykiety są zapisywane w kopii na Drive.</string>
+    <string name="whats_new_260_labels_body">Otwórz zdjęcie, dotknij „Szczegóły” i dodaj do pięciu etykiet w polu „Etykiety”, albo zaznacz kilka zdjęć i wybierz „Dodaj etykiety”. Wyszukiwanie znajduje zdjęcia po etykietach. Etykiety można zmieniać, scalać i usuwać oraz zapisywać w kopii na Drive lub przywracać w „Ustawienia > Więcej ustawień > Etykiety”.</string>
     <string name="whats_new_260_compress_title">Kompresja wideo</string>
-    <string name="whats_new_260_compress_body">Wybierz kodek i jakość oraz śledź postęp i zaoszczędzone miejsce.</string>
-    <string name="whats_new_260_vault_title">Ukryte zdjęcia są bezpieczne</string>
-    <string name="whats_new_260_vault_body">Wylogowanie zachowuje ukryte zdjęcia bez kopii na Drive w pliku zip z opcjonalnym hasłem.</string>
+    <string name="whats_new_260_compress_body">Włącz „Kompresuj filmy” w „Ustawienia > Kopia zapasowa i pamięć > Ustawienia kopii zapasowej > Jakość i rozmiar”, a potem wybierz kodek i jakość. Domyślny jest H.264, który odtwarza się wszędzie. Wysyłanie pokazuje postęp i zaoszczędzone miejsce, a zdjęcia są wysyłane dalej, gdy wideo jest kompresowane.</string>
+    <string name="whats_new_260_vault_title">Ukryte zdjęcia przy wylogowaniu</string>
+    <string name="whats_new_260_vault_body">Przy wylogowaniu pojawia się pytanie, co zrobić z ukrytymi zdjęciami bez kopii na Drive, a sesja zakończona przez serwer sama przenosi je do folderu w galerii. Aby zamiast tego trafiały do zipu chronionego hasłem w Pobranych, włącz „Chroń ukryte zdjęcia przy wylogowaniu” w „Ustawienia > Więcej ustawień > Prywatność i bezpieczeństwo”.</string>
+    <string name="whats_new_260_albums_title">Karta Albumy</string>
+    <string name="whats_new_260_albums_body">Albumy są widoczne jako siatka lub lista i w obu można je układać ręcznie. „Wyklucz z Albumów” w menu albumu usuwa go z siatki, a znajdziesz go w filtrze „Wykluczone”. Wygląd i otwieranie karty ustawisz w „Ustawienia > Wygląd i język > Biblioteka > Albumy”.</string>
+    <string name="whats_new_260_shortcuts_title">Kafelki i strona Udostępnione</string>
+    <string name="whats_new_260_shortcuts_body">Karta Albumy zaczyna się rzędem kafelków: „Kolekcja”, „Ukryte”, „Udostępnione”, „Mapa”, „Kalendarz”, „Osoby”, „Offline”. „Udostępnione” otwiera się jako osobna strona, z kropką, gdy czeka zaproszenie. Kafelki zmienisz kolejnością lub ukryjesz w „Ustawienia > Wygląd i język > Biblioteka > Albumy > Skróty”.</string>
     <string name="whats_new_260_search_title">Wyszukiwanie znajdzie więcej</string>
-    <string name="whats_new_260_search_body">Szukaj miejsca, zeszłego tygodnia lub kilku słów naraz i zawężaj wyniki filtrami.</string>
+    <string name="whats_new_260_search_body">Szukaj po miejscu, miesiącu lub roku albo słowami takimi jak zeszły tydzień, wczoraj czy 3 dni temu. Słowa oddzielone przecinkiem dają wyniki dla któregokolwiek z nich. Albumy i strony skrótów pojawiają się podczas pisania, a filtry daty i kategorii są widoczne jako plakietki, które możesz usunąć.</string>
+    <string name="whats_new_260_picker_title">Dodawanie do albumu</string>
+    <string name="whats_new_260_picker_body">Wybór zdjęć do albumu otwiera selektor działający jak galeria telefonu, z „Szukaj” jako trzecią kartą. Arkusz „Dodaj do albumu” zostaje otwarty, więc jedno zdjęcie może trafić do kilku albumów, a dodać można też zdjęcia, które jeszcze się wysyłają.</string>
+    <string name="whats_new_260_selection_title">Zaznaczanie zdjęć</string>
+    <string name="whats_new_260_selection_body">„Udostępnij”, „Dodaj do albumu” i „Usuń” są przyciskami tuż pod zaznaczonymi zdjęciami, reszta jest w „Więcej”, a „Zaznacz wszystko” znajduje się obok licznika.</string>
+    <string name="whats_new_260_settings_title">Ustawienia pogrupowane na nowo</string>
+    <string name="whats_new_260_settings_body">Pierwsza strona zachowuje „Konto”, „Kopia zapasowa i pamięć” i narzędzia. „Więcej ustawień” zawiera teraz „Uczenie maszynowe”, „Etykiety”, „Prywatność i bezpieczeństwo”, uprawnienia, powiadomienia i diagnostykę. „Nowości”, „Najczęstsze pytania” i aktualizacje przeniesiono do „Informacje”, a „Ustawienia kopii zapasowej” zaczyna się od „Synchronizuj teraz” i wyboru sieci.</string>
+    <string name="whats_new_260_grouping_title">Sortowanie i grupowanie w albumach</string>
+    <string name="whats_new_260_grouping_body">W menu albumu lub folderu sortuj i grupuj zdjęcia według dni, miesięcy lub lat. Każdy zapamiętuje własny wybór, a szczypnięcie przełącza między rokiem, miesiącem i dniem. Nazwa i akcje zostają w nagłówku podczas przewijania.</string>
+    <string name="whats_new_260_details_title">Osoby i mapa w szczegółach</string>
+    <string name="whats_new_260_details_body">„Szczegóły” zdjęcia pokazują teraz osoby na nim oraz mapę miejsca, w którym je zrobiono. Dotknij osoby, by otworzyć jej stronę, lub mapy, by zobaczyć ją na pełnym ekranie. Dotknij twarzy bez nazwy, by ją nazwać lub przypisać komuś.</string>
     <string name="whats_new_260_frame_title">Narzędzie Ramka</string>
-    <string name="whats_new_260_frame_body">Umieść zdjęcie na wypełnionym płótnie w edytorze.</string>
-    <string name="whats_new_260_more">Do tego strona Udostępnione, wybór albumu jak w galerii systemowej, grupowanie szczypnięciem według dni, miesięcy lub lat, grupy duplikatów, które można zignorować, język turecki oraz mnóstwo innych poprawek i usprawnień stabilności.</string>
+    <string name="whats_new_260_frame_body">W edytorze zdjęć umieść zdjęcie na płótnie o innym kształcie, takim jak 1:1, 9:16 lub Polaroid, wypełnionym kolorem lub miękkim rozmyciem. Narzędzie jest wciąż rozwijane i pojawią się kolejne usprawnienia.</string>
+    <string name="whats_new_260_drive_title">Dane twarzy i wyszukiwania na Drive</string>
+    <string name="whats_new_260_drive_body">Zapisz nazwy twarzy i dane wyszukiwania na Drive i przywróć je na innym telefonie, wybierając, co wróci, w „Ustawienia > Więcej ustawień > Uczenie maszynowe”.</string>
+    <string name="whats_new_260_more">Do tego edytowalne daty w HEIC, GIF i RAW, grupy duplikatów, które można zignorować, wybór miejsca na mapie, język turecki oraz mnóstwo innych poprawek i usprawnień stabilności.</string>
 </resources>

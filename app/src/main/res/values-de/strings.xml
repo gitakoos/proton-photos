@@ -2351,14 +2351,30 @@
     <string name="compression_unavailable_fallback">%1$s ist auf diesem Telefon nicht verfügbar, Videos verwenden daher %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Foto-Labels</string>
-    <string name="whats_new_260_labels_body">Gib Fotos eigene Labels und suche danach. Labels werden in Drive gesichert.</string>
+    <string name="whats_new_260_labels_body">Öffne ein Foto, tippe auf „Details“ und füge im Feld „Labels“ bis zu fünf Labels hinzu, oder wähle mehrere Fotos und tippe auf „Labels hinzufügen“. Die Suche findet Fotos über ihre Labels. Labels umbenennen, zusammenführen und löschen sowie in Drive sichern oder wiederherstellen kannst du unter „Einstellungen > Weitere Einstellungen > Labels“.</string>
     <string name="whats_new_260_compress_title">Videokomprimierung</string>
-    <string name="whats_new_260_compress_body">Wähle Codec und Qualität und sieh Fortschritt und gesparten Speicher.</string>
-    <string name="whats_new_260_vault_title">Versteckte Fotos bleiben sicher</string>
-    <string name="whats_new_260_vault_body">Beim Abmelden bleiben versteckte Fotos ohne Drive-Kopie in einer ZIP-Datei mit optionalem Passwort erhalten.</string>
+    <string name="whats_new_260_compress_body">Schalte „Videos komprimieren“ unter „Einstellungen > Sicherung &amp; Speicher > Backup-Einstellungen > Qualität und Größe“ ein und wähle Codec und Qualität. H.264 ist die Vorgabe und läuft überall. Beim Hochladen siehst du den Fortschritt und den gesparten Speicher, und deine Fotos werden weiter hochgeladen, während ein Video komprimiert wird.</string>
+    <string name="whats_new_260_vault_title">Versteckte Fotos beim Abmelden</string>
+    <string name="whats_new_260_vault_body">Beim Abmelden wirst du gefragt, was mit versteckten Fotos ohne Drive-Kopie geschehen soll; eine vom Server beendete Sitzung verschiebt sie selbst in einen Ordner deiner Galerie. Damit sie stattdessen in einer passwortgeschützten ZIP-Datei in Downloads landen, schalte „Versteckte Fotos beim Abmelden schützen“ unter „Einstellungen > Weitere Einstellungen > Datenschutz &amp; Sicherheit“ ein.</string>
+    <string name="whats_new_260_albums_title">Alben-Tab</string>
+    <string name="whats_new_260_albums_body">Alben erscheinen als Raster oder Liste und lassen sich in beiden von Hand anordnen. Mit „Aus Alben ausschließen“ im Menü eines Albums blendest du es im Raster aus und findest es im Filter „Ausgeschlossen“ wieder. Wie der Tab aussieht und sich öffnet, stellst du unter „Einstellungen > Darstellung &amp; Sprache > Bibliothek > Alben“ ein.</string>
+    <string name="whats_new_260_shortcuts_title">Kacheln und die Seite Geteilt</string>
+    <string name="whats_new_260_shortcuts_body">Der Alben-Tab beginnt mit einer Reihe Kacheln: „Sammlung“, „Ausgeblendet“, „Geteilt“, „Karte“, „Kalender“, „Personen“, „Offline“. „Geteilt“ öffnet sich als eigene Seite, mit einem Punkt, wenn eine Einladung wartet. Die Kacheln ordnest du um oder blendest sie aus unter „Einstellungen > Darstellung &amp; Sprache > Bibliothek > Alben > Verknüpfungen“.</string>
     <string name="whats_new_260_search_title">Die Suche findet mehr</string>
-    <string name="whats_new_260_search_body">Suche nach einem Ort, letzter Woche oder mehreren Wörtern zugleich und grenze die Treffer mit Filtern ein.</string>
+    <string name="whats_new_260_search_body">Suche nach Ort, Monat oder Jahr oder mit Wörtern wie letzte Woche, gestern oder vor 3 Tagen. Mit Komma getrennte Wörter finden Treffer für eines davon. Alben und Verknüpfungsseiten erscheinen beim Tippen, und Datums- und Kategoriefilter werden als Pillen angezeigt, die du entfernen kannst.</string>
+    <string name="whats_new_260_picker_title">Zum Album hinzufügen</string>
+    <string name="whats_new_260_picker_body">Wenn du Fotos für ein Album auswählst, öffnet sich eine Auswahl wie in der Galerie deines Telefons, mit „Suche“ als drittem Tab. Das Blatt „Zum Album hinzufügen“ bleibt offen, sodass ein Foto in mehrere Alben kann, und auch Fotos, die noch hochgeladen werden, lassen sich hinzufügen.</string>
+    <string name="whats_new_260_selection_title">Fotos auswählen</string>
+    <string name="whats_new_260_selection_body">„Teilen“, „Zum Album hinzufügen“ und „Löschen“ erscheinen als Schaltflächen direkt unter den ausgewählten Fotos, alles Weitere unter „Mehr“, und „Alle auswählen“ steht neben der Anzahl.</string>
+    <string name="whats_new_260_settings_title">Einstellungen neu gruppiert</string>
+    <string name="whats_new_260_settings_body">Die erste Seite enthält „Konto“, „Sicherung &amp; Speicher“ und die Werkzeuge. „Weitere Einstellungen“ enthält jetzt „Maschinelles Lernen“, „Labels“, „Datenschutz &amp; Sicherheit“, Berechtigungen, Benachrichtigungen und Diagnose. „Neuigkeiten“, „Häufige Fragen“ und Updates sind nach „Über“ umgezogen, und „Backup-Einstellungen“ beginnt mit „Jetzt synchronisieren“ und der Netzwerkwahl.</string>
+    <string name="whats_new_260_grouping_title">Sortieren und Gruppieren in Alben</string>
+    <string name="whats_new_260_grouping_body">Im Menü eines Albums oder Ordners sortierst und gruppierst du die Fotos nach Tag, Monat oder Jahr. Jedes merkt sich seine eigene Wahl, und mit einer Kneifgeste wechselst du zwischen Jahr, Monat und Tag. Name und Aktionen bleiben beim Scrollen in einer Kopfleiste.</string>
+    <string name="whats_new_260_details_title">Personen und Karte in den Details</string>
+    <string name="whats_new_260_details_body">Die „Details“ eines Fotos zeigen jetzt die Personen darauf und eine Karte, wo es aufgenommen wurde. Tippe auf eine Person, um ihre Seite zu öffnen, oder auf die Karte für die Vollbildansicht. Tippe auf ein unbenanntes Gesicht, um es zu benennen oder jemandem zuzuordnen.</string>
     <string name="whats_new_260_frame_title">Rahmen-Werkzeug</string>
-    <string name="whats_new_260_frame_body">Setze ein Foto im Editor auf eine gefüllte Leinwand.</string>
-    <string name="whats_new_260_more">Dazu eine Seite für Geteiltes, eine Albumauswahl wie in einer System-Galerie, Gruppieren per Kneifgeste nach Tag, Monat oder Jahr, Duplikatgruppen zum Ignorieren, Türkisch und viele weitere Korrekturen und Stabilitätsverbesserungen.</string>
+    <string name="whats_new_260_frame_body">Setze im Foto-Editor ein Foto auf eine Leinwand anderer Form, etwa 1:1, 9:16 oder Polaroid, gefüllt mit einer Farbe oder einer weichen Unschärfe. Das Werkzeug ist noch in Arbeit, weitere Verbesserungen folgen.</string>
+    <string name="whats_new_260_drive_title">Gesichts- und Suchdaten in Drive</string>
+    <string name="whats_new_260_drive_body">Sichere Gesichtsnamen und Suchdaten in Drive und stelle sie auf einem anderen Telefon wieder her, wobei du wählst, was zurückkommt, unter „Einstellungen > Weitere Einstellungen > Maschinelles Lernen“.</string>
+    <string name="whats_new_260_more">Dazu bearbeitbare Daten bei HEIC, GIF und RAW, Duplikatgruppen zum Ignorieren, eine Ortsauswahl auf der Karte, Türkisch und viele weitere Korrekturen und Stabilitätsverbesserungen.</string>
 </resources>
