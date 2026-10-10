@@ -1286,6 +1286,8 @@
     <string name="shared_by_me_photos_section">Paylaşılan fotoğraflar</string>
 
     <string name="filter_title">Filtre</string>
+    <string name="filter_quick_dates">Hızlı tarihler</string>
+    <string name="filter_pick_date">Tarih seç</string>
     <string name="filter_type_label">Tür</string>
     <string name="filter_type_videos">Videolar</string>
     <string name="filter_sync_label">Eşitleme durumu</string>
@@ -1313,6 +1315,12 @@
     <string name="search_rel_last_month">geçen ay|önceki ay|geçtiğimiz ay</string>
     <string name="search_rel_this_year">bu yıl|bu sene</string>
     <string name="search_rel_last_year">geçen yıl|geçen sene|önceki yıl</string>
+    <string name="search_rel_this_week">bu hafta</string>
+    <string name="search_rel_last_week">geçen hafta|önceki hafta|geçtiğimiz hafta</string>
+    <string name="search_ago_days"># gün önce|bir gün önce</string>
+    <string name="search_ago_weeks"># hafta önce|bir hafta önce</string>
+    <string name="search_ago_months"># ay önce|bir ay önce</string>
+    <string name="search_ago_years"># yıl önce|# sene önce|bir yıl önce|bir sene önce</string>
     <string name="search_section_on_this_day">Bu gün</string>
     <string name="search_section_on_this_day_years">%1$d yıl önce</string>
     <string name="search_section_on_this_day_years_plural">%1$d yıl önce</string>

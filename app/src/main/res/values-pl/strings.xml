@@ -981,6 +981,8 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filtr</string>
+    <string name="filter_quick_dates">Szybkie daty</string>
+    <string name="filter_pick_date">Wybierz datę</string>
     <string name="filter_type_label">Typ</string>
     <string name="filter_type_videos">Filmy</string>
     <string name="filter_sync_label">Stan synchronizacji</string>
@@ -1007,6 +1009,12 @@
     <string name="search_rel_last_month">zeszły miesiąc|ostatni miesiąc|w zeszłym miesiącu|poprzedni miesiąc</string>
     <string name="search_rel_this_year">ten rok|w tym roku</string>
     <string name="search_rel_last_year">zeszły rok|ostatni rok|w zeszłym roku|poprzedni rok|rok temu</string>
+    <string name="search_rel_this_week">ten tydzień|w tym tygodniu</string>
+    <string name="search_rel_last_week">zeszły tydzień|ostatni tydzień|w zeszłym tygodniu|poprzedni tydzień</string>
+    <string name="search_ago_days"># dzień temu|# dni temu|dzień temu</string>
+    <string name="search_ago_weeks"># tydzień temu|# tygodnie temu|# tygodni temu|tydzień temu</string>
+    <string name="search_ago_months"># miesiąc temu|# miesiące temu|# miesięcy temu|miesiąc temu</string>
+    <string name="search_ago_years"># rok temu|# lata temu|# lat temu|rok temu</string>
     <string name="search_section_on_this_day">Tego dnia</string>
     <string name="search_section_on_this_day_years">%1$d rok temu</string>
     <string name="search_section_on_this_day_years_plural">%1$d lat temu</string>

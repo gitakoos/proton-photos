@@ -1363,6 +1363,8 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filter</string>
+    <string name="filter_quick_dates">Quick dates</string>
+    <string name="filter_pick_date">Pick a date</string>
     <string name="filter_type_label">Type</string>
     <string name="filter_type_videos">Videos</string>
     <string name="filter_sync_label">Sync status</string>
@@ -1393,6 +1395,12 @@
     <string name="search_rel_last_month">last month|previous month|past month</string>
     <string name="search_rel_this_year">this year</string>
     <string name="search_rel_last_year">last year|previous year|past year</string>
+    <string name="search_rel_this_week">this week</string>
+    <string name="search_rel_last_week">last week|previous week|past week</string>
+    <string name="search_ago_days"># days ago|# day ago|a day ago</string>
+    <string name="search_ago_weeks"># weeks ago|# week ago|a week ago</string>
+    <string name="search_ago_months"># months ago|# month ago|a month ago</string>
+    <string name="search_ago_years"># years ago|# year ago|a year ago</string>
     <string name="search_section_on_this_day">On this day</string>
     <string name="search_section_on_this_day_years">%1$d year ago</string>
     <string name="search_section_on_this_day_years_plural">%1$d years ago</string>

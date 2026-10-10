@@ -755,6 +755,8 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filtro</string>
+    <string name="filter_quick_dates">Date rapide</string>
+    <string name="filter_pick_date">Scegli una data</string>
     <string name="filter_type_label">Tipo</string>
     <string name="filter_type_videos">Video</string>
     <string name="filter_sync_label">Stato sincronizzazione</string>
@@ -795,6 +797,12 @@
     <string name="search_rel_last_month">il mese scorso|mese scorso|scorso mese|ultimo mese</string>
     <string name="search_rel_this_year">quest\'anno|questo anno</string>
     <string name="search_rel_last_year">l\'anno scorso|anno scorso|scorso anno|ultimo anno</string>
+    <string name="search_rel_this_week">questa settimana</string>
+    <string name="search_rel_last_week">la settimana scorsa|settimana scorsa|scorsa settimana|ultima settimana</string>
+    <string name="search_ago_days"># giorni fa|# giorno fa|un giorno fa</string>
+    <string name="search_ago_weeks"># settimane fa|# settimana fa|una settimana fa</string>
+    <string name="search_ago_months"># mesi fa|# mese fa|un mese fa</string>
+    <string name="search_ago_years"># anni fa|# anno fa|un anno fa</string>
 
     <string name="viewer_play_slideshow">Avvia presentazione</string>
     <string name="viewer_pause_slideshow">Sospendi presentazione</string>

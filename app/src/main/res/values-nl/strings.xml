@@ -802,6 +802,8 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filter</string>
+    <string name="filter_quick_dates">Snelle datums</string>
+    <string name="filter_pick_date">Datum kiezen</string>
     <string name="filter_type_label">Type</string>
     <string name="filter_type_videos">Video\'s</string>
     <string name="filter_sync_label">Synchronisatiestatus</string>
@@ -828,6 +830,12 @@
     <string name="search_rel_last_month">vorige maand|afgelopen maand|laatste maand</string>
     <string name="search_rel_this_year">dit jaar</string>
     <string name="search_rel_last_year">vorig jaar|afgelopen jaar|laatste jaar</string>
+    <string name="search_rel_this_week">deze week</string>
+    <string name="search_rel_last_week">vorige week|afgelopen week|laatste week</string>
+    <string name="search_ago_days"># dagen geleden|# dag geleden|een dag geleden</string>
+    <string name="search_ago_weeks"># weken geleden|# week geleden|een week geleden</string>
+    <string name="search_ago_months"># maanden geleden|# maand geleden|een maand geleden</string>
+    <string name="search_ago_years"># jaar geleden|een jaar geleden</string>
     <string name="search_section_on_this_day">Op deze dag</string>
     <string name="search_section_on_this_day_years">%1$d jaar geleden</string>
     <string name="search_section_on_this_day_years_plural">%1$d jaar geleden</string>

@@ -981,6 +981,8 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filter</string>
+    <string name="filter_quick_dates">Rýchle dátumy</string>
+    <string name="filter_pick_date">Vybrať dátum</string>
     <string name="filter_type_label">Typ</string>
     <string name="filter_type_videos">Videá</string>
     <string name="filter_sync_label">Stav synchronizácie</string>
@@ -1007,6 +1009,12 @@
     <string name="search_rel_last_month">minulý mesiac|predošlý mesiac</string>
     <string name="search_rel_this_year">tento rok</string>
     <string name="search_rel_last_year">minulý rok|vlani</string>
+    <string name="search_rel_this_week">tento týždeň</string>
+    <string name="search_rel_last_week">minulý týždeň|predošlý týždeň</string>
+    <string name="search_ago_days">pred # dňom|pred # dňami|pred dňom</string>
+    <string name="search_ago_weeks">pred # týždňom|pred # týždňami|pred týždňom</string>
+    <string name="search_ago_months">pred # mesiacom|pred # mesiacmi|pred mesiacom</string>
+    <string name="search_ago_years">pred # rokom|pred # rokmi|pred rokom</string>
     <string name="search_section_on_this_day">V tento deň</string>
     <string name="search_section_on_this_day_years">Pred %1$d rokom</string>
     <string name="search_section_on_this_day_years_plural">Pred %1$d rokmi</string>

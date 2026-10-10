@@ -773,6 +773,8 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Szűrő</string>
+    <string name="filter_quick_dates">Gyors dátumok</string>
+    <string name="filter_pick_date">Dátum választása</string>
     <string name="filter_type_label">Típus</string>
     <string name="filter_type_videos">Videók</string>
     <string name="filter_sync_label">Szinkron állapot</string>
@@ -813,6 +815,12 @@
     <string name="search_rel_last_month">múlt hónap|előző hónap|a múlt hónap</string>
     <string name="search_rel_this_year">idén|ez az év|ebben az évben</string>
     <string name="search_rel_last_year">múlt év|tavaly|a múlt év|előző év</string>
+    <string name="search_rel_this_week">ez a hét|e hét|ezen a héten</string>
+    <string name="search_rel_last_week">múlt hét|a múlt hét|előző hét|múlt héten|a múlt héten</string>
+    <string name="search_ago_days"># napja|# nappal ezelőtt|egy napja</string>
+    <string name="search_ago_weeks"># hete|# héttel ezelőtt|egy hete</string>
+    <string name="search_ago_months"># hónapja|# hónappal ezelőtt|egy hónapja</string>
+    <string name="search_ago_years"># éve|# évvel ezelőtt|egy éve</string>
 
     <string name="viewer_play_slideshow">Diavetítés indítása</string>
     <string name="viewer_pause_slideshow">Diavetítés szüneteltetése</string>

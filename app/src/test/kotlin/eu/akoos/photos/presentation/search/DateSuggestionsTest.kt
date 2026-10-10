@@ -19,6 +19,8 @@
 
 package eu.akoos.photos.presentation.search
 
+import eu.akoos.photos.presentation.gallery.ContentFilter
+import java.time.LocalDate
 import java.util.Calendar
 import java.util.Locale
 import org.junit.Assert.assertEquals
@@ -199,6 +201,8 @@ class DateSuggestionsTest {
     private val phrases: Map<RelativeDate, Set<String>> = mapOf(
         RelativeDate.Today to setOf("today"),
         RelativeDate.Yesterday to setOf("yesterday"),
+        RelativeDate.ThisWeek to setOf("this week"),
+        RelativeDate.LastWeek to setOf("last week"),
         RelativeDate.ThisMonth to setOf("this month", "ce mois ci"),
         RelativeDate.LastMonth to setOf("last month", "previous month"),
         RelativeDate.ThisYear to setOf("this year"),
@@ -254,6 +258,8 @@ class DateSuggestionsTest {
         val names = mapOf(
             RelativeDate.Today to "search_rel_today",
             RelativeDate.Yesterday to "search_rel_yesterday",
+            RelativeDate.ThisWeek to "search_rel_this_week",
+            RelativeDate.LastWeek to "search_rel_last_week",
             RelativeDate.ThisMonth to "search_rel_this_month",
             RelativeDate.LastMonth to "search_rel_last_month",
             RelativeDate.ThisYear to "search_rel_this_year",
@@ -267,7 +273,7 @@ class DateSuggestionsTest {
     }
 
     @Test
-    fun `every language the app is offered in names all six relative dates, and no phrase names two`() {
+    fun `every language the app is offered in names all eight relative dates, and no phrase names two`() {
         for (tag in DateSuggestions.MONTH_LANGUAGES) {
             val folder = if (tag == "en") "values" else "values-$tag"
             val byDate = relativeStrings(folder)
@@ -289,6 +295,157 @@ class DateSuggestionsTest {
             for ((date, set) in byDate) {
                 for (phrase in set) {
                     assertEquals("$tag '$phrase'", date to phrase.split(' ').size, DateSuggestions.relative("beach $phrase", byDate))
+                }
+            }
+        }
+    }
+
+    private fun dayIn(locale: Locale, year: Int, month: Int, day: Int): Calendar =
+        Calendar.getInstance(locale).apply { clear(); set(year, month - 1, day, 12, 0, 0) }
+
+    private fun run(from: LocalDate, to: LocalDate, words: Int) = DateTerm(null, null, words, from = from, to = to)
+
+    @Test
+    fun `this and last week are the calendar week, from the first day of the week the language uses`() {
+        val monday = dayIn(Locale.GERMANY, 2026, 10, 7)
+        assertEquals(
+            run(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 11), 2),
+            DateSuggestions.resolveRelative(RelativeDate.ThisWeek, monday, 2),
+        )
+        assertEquals(
+            run(LocalDate.of(2026, 9, 28), LocalDate.of(2026, 10, 4), 2),
+            DateSuggestions.resolveRelative(RelativeDate.LastWeek, monday, 2),
+        )
+        val sunday = dayIn(Locale.US, 2026, 10, 7)
+        assertEquals(
+            run(LocalDate.of(2026, 10, 4), LocalDate.of(2026, 10, 10), 2),
+            DateSuggestions.resolveRelative(RelativeDate.ThisWeek, sunday, 2),
+        )
+        assertEquals(
+            run(LocalDate.of(2026, 9, 27), LocalDate.of(2026, 10, 3), 2),
+            DateSuggestions.resolveRelative(RelativeDate.LastWeek, sunday, 2),
+        )
+    }
+
+    @Test
+    fun `a week that crosses the new year is one run, and the first day of the week starts its own`() {
+        val friday = dayIn(Locale.GERMANY, 2026, 1, 2)
+        assertEquals(
+            run(LocalDate.of(2025, 12, 29), LocalDate.of(2026, 1, 4), 2),
+            DateSuggestions.resolveRelative(RelativeDate.ThisWeek, friday, 2),
+        )
+        assertEquals(
+            run(LocalDate.of(2025, 12, 22), LocalDate.of(2025, 12, 28), 2),
+            DateSuggestions.resolveRelative(RelativeDate.LastWeek, friday, 2),
+        )
+        val firstDay = dayIn(Locale.GERMANY, 2026, 10, 5)
+        assertEquals(
+            run(LocalDate.of(2026, 10, 5), LocalDate.of(2026, 10, 11), 1),
+            DateSuggestions.resolveRelative(RelativeDate.ThisWeek, firstDay, 1),
+        )
+    }
+
+    private val englishCounted = DateSuggestions.countedPatterns(
+        mapOf(
+            RelativeUnit.Day to setOf("# days ago", "# day ago", "a day ago"),
+            RelativeUnit.Week to setOf("# weeks ago", "# week ago", "a week ago"),
+            RelativeUnit.Month to setOf("# months ago"),
+            RelativeUnit.Year to setOf("# years ago"),
+        ),
+    )
+
+    @Test
+    fun `a counted phrase at the end of the query gives its unit, its number and its words`() {
+        assertEquals(Triple(RelativeUnit.Week, 2, 3), DateSuggestions.counted("beach 2 weeks ago", englishCounted))
+        assertEquals(Triple(RelativeUnit.Day, 15, 3), DateSuggestions.counted("15 Days  Ago", englishCounted))
+        assertEquals(Triple(RelativeUnit.Week, 1, 3), DateSuggestions.counted("a week ago", englishCounted))
+        assertEquals(Triple(RelativeUnit.Year, 999, 3), DateSuggestions.counted("999 years ago", englishCounted))
+        val french = DateSuggestions.countedPatterns(mapOf(RelativeUnit.Week to setOf("il y a # semaines")))
+        assertEquals(Triple(RelativeUnit.Week, 3, 5), DateSuggestions.counted("chien il y a 3 semaines", french))
+    }
+
+    @Test
+    fun `half a counted phrase, zero, a number too long or a phrase not at the end is only text`() {
+        for (query in listOf("2 weeks", "weeks ago", "0 weeks ago", "1000 weeks ago", "2 weeks ago beach", "2weeks ago", "", "ago")) {
+            assertNull("'$query'", DateSuggestions.counted(query, englishCounted))
+        }
+    }
+
+    @Test
+    fun `a counted date is that day, or the week, month or year it falls in`() {
+        val march = dayIn(Locale.GERMANY, 2026, 3, 1)
+        assertEquals(DateTerm(2026, 2, 3, day = 26), DateSuggestions.resolveCounted(RelativeUnit.Day, 3, march, 3))
+        assertEquals(DateTerm(2025, 11, 3), DateSuggestions.resolveCounted(RelativeUnit.Month, 4, march, 3))
+        assertEquals(DateTerm(2024, null, 3), DateSuggestions.resolveCounted(RelativeUnit.Year, 2, march, 3))
+        val wednesday = dayIn(Locale.GERMANY, 2026, 10, 7)
+        assertEquals(
+            run(LocalDate.of(2026, 9, 21), LocalDate.of(2026, 9, 27), 3),
+            DateSuggestions.resolveCounted(RelativeUnit.Week, 2, wednesday, 3),
+        )
+        assertEquals(
+            DateSuggestions.resolveRelative(RelativeDate.LastWeek, wednesday, 3),
+            DateSuggestions.resolveCounted(RelativeUnit.Week, 1, wednesday, 3),
+        )
+        assertEquals(
+            DateTerm(2025, 12, 3),
+            DateSuggestions.resolveCounted(RelativeUnit.Month, 1, dayIn(Locale.GERMANY, 2026, 1, 31), 3),
+        )
+    }
+
+    @Test
+    fun `a term becomes the filter's date, a run replacing the parts and the parts keeping what the filter holds`() {
+        val held = ContentFilter(year = 2024, month = 5, day = 3, dateFrom = null)
+        val week = run(LocalDate.of(2026, 9, 21), LocalDate.of(2026, 9, 27), 2).applyTo(held)
+        assertEquals(ContentFilter(dateFrom = LocalDate.of(2026, 9, 21), dateTo = LocalDate.of(2026, 9, 27)), week)
+        assertEquals(ContentFilter(year = 2026, month = 3), DateTerm(null, 3, 1).applyTo(ContentFilter(year = 2026, day = 9)))
+        assertEquals(ContentFilter(year = 2025), DateTerm(2025, null, 1).applyTo(ContentFilter()))
+        assertEquals(ContentFilter(year = 2026, month = 10, day = 7), DateTerm(2026, 10, 1, day = 7).applyTo(week))
+    }
+
+    /** The `search_ago_*` strings of one locale folder, read off the file, variants split on the bar. */
+    private fun countedStrings(folder: String): Map<RelativeUnit, Set<String>> {
+        val text = java.io.File("src/main/res/$folder/strings.xml").readText()
+        val names = mapOf(
+            RelativeUnit.Day to "search_ago_days",
+            RelativeUnit.Week to "search_ago_weeks",
+            RelativeUnit.Month to "search_ago_months",
+            RelativeUnit.Year to "search_ago_years",
+        )
+        return names.mapValues { (_, name) ->
+            val value = Regex("<string name=\"$name\">([^<]*)</string>").find(text)?.groupValues?.get(1)
+            assertTrue("$folder is missing $name", !value.isNullOrBlank())
+            value!!.replace("\\'", "'").split('|').map { DateSuggestions.phraseKey(it) }.filter { it.isNotEmpty() }.toSet()
+        }
+    }
+
+    @Test
+    fun `every language names all four counted units, and no phrase names two`() {
+        for (tag in DateSuggestions.MONTH_LANGUAGES) {
+            val byUnit = countedStrings(if (tag == "en") "values" else "values-$tag")
+            val seen = HashMap<String, RelativeUnit>()
+            for ((unit, set) in byUnit) {
+                assertTrue("$tag $unit has no counted phrase", set.any { "#" in it })
+                for (phrase in set) {
+                    val other = seen.put(phrase, unit)
+                    assertTrue("$tag: '$phrase' names both $other and $unit", other == null)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `every language's own counted phrases are read from the end of a query`() {
+        for (tag in DateSuggestions.MONTH_LANGUAGES) {
+            val byUnit = countedStrings(if (tag == "en") "values" else "values-$tag")
+            val patterns = DateSuggestions.countedPatterns(byUnit)
+            for ((unit, set) in byUnit) {
+                for (phrase in set) {
+                    val typed = phrase.replace("#", "7")
+                    assertEquals(
+                        "$tag '$typed'",
+                        Triple(unit, if ('#' in phrase) 7 else 1, typed.split(' ').size),
+                        DateSuggestions.counted("beach $typed", patterns),
+                    )
                 }
             }
         }

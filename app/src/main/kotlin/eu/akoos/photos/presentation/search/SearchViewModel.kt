@@ -297,9 +297,11 @@ class SearchViewModel @Inject constructor(
         val months: List<String>,
         val filterNames: Map<GalleryFilter, String>,
         val tileNames: Map<LibraryTile, String>,
-        /** The phrases that name a day, month or year relative to today, in the app's language and in
+        /** The phrases that name a day, week, month or year relative to today, in the app's language and in
          *  English, each through [DateSuggestions.phraseKey]. */
         val relativePhrases: Map<RelativeDate, Set<String>>,
+        /** The phrasings of a counted date ("2 weeks ago"), in the app's language and in English. */
+        val countedPatterns: List<CountedPattern>,
         /** The usual short forms of the month names ("jan", "febr"). */
         val monthAbbreviations: List<String>,
         /** The month names and their short forms in every language the app is offered in, for a typed month
@@ -317,6 +319,7 @@ class SearchViewModel @Inject constructor(
                 foldedFilterNames(it),
                 foldedTileNames(it),
                 relativePhrases(it),
+                countedPatterns(it),
                 SearchFilter.foldedMonthAbbreviations(it),
                 DateSuggestions.MONTH_LANGUAGES.flatMap { tag ->
                     val language = Locale.forLanguageTag(tag)
@@ -373,11 +376,11 @@ class SearchViewModel @Inject constructor(
                 // chip filters on the pinned linkIds, the Favourites chip on the device hearts, and the
                 // People rail on the person keys, all in applyAll.
                 chipState,
-                hiddenUrisFlow,
-            ) { all, typed, filter, chip, hidden ->
+                combine(hiddenUrisFlow, _scope) { hidden, scope -> hidden to (scope != null) },
+            ) { all, typed, filter, chip, (hidden, scoped) ->
                 applyAll(
                     all.dropHidden(hidden), typed.q, typed.text, filter,
-                    chip.category, chip.pins, chip.hearts, chip.personKeys, typed.labels, typed.places,
+                    chip.category, chip.pins, chip.hearts, chip.personKeys, typed.labels, typed.places, scoped,
                 )
             }
         }
@@ -656,7 +659,7 @@ class SearchViewModel @Inject constructor(
     fun applyDateSuggestion(suggestion: DateSuggestion) {
         _query.value = SearchFilter.dropLastWords(_query.value, suggestion.consumedTokens)
         _contentFilter.value = _contentFilter.value.copy(
-            year = suggestion.year, month = suggestion.month, day = null, dayEnd = null,
+            year = suggestion.year, month = suggestion.month, day = null, dayEnd = null, dateFrom = null, dateTo = null,
         )
     }
 
@@ -668,12 +671,17 @@ class SearchViewModel @Inject constructor(
     init {
         // A month name or a whole year at the end of the settled query becomes the date filter, shown as a
         // pill, and the words leave the text; a month and a year typed one after the other join into one
-        // date. Only for the text still in the field.
+        // date. A relative or counted phrase ("last week", "2 weeks ago") does the same, the longer of the
+        // two winning. Only for the text still in the field.
         viewModelScope.launch {
             combine(_query, localizedText) { q, text ->
+                val today = Calendar.getInstance(_locale.value)
                 val relative = DateSuggestions.relative(q, text.relativePhrases)
-                    ?.let { (date, words) -> DateSuggestions.resolveRelative(date, Calendar.getInstance(), words) }
-                q to (relative ?: DateSuggestions.term(q, text.months, text.monthAbbreviations, text.otherMonths))
+                    ?.let { (date, words) -> DateSuggestions.resolveRelative(date, today, words) }
+                val counted = DateSuggestions.counted(q, text.countedPatterns)
+                    ?.let { (unit, number, words) -> DateSuggestions.resolveCounted(unit, number, today, words) }
+                val phrase = listOfNotNull(relative, counted).maxByOrNull { it.consumedTokens }
+                q to (phrase ?: DateSuggestions.term(q, text.months, text.monthAbbreviations, text.otherMonths))
             }
                 .debounce { (_, term) ->
                     when {
@@ -686,9 +694,7 @@ class SearchViewModel @Inject constructor(
                     if (term == null || q != _query.value) return@collect
                     val current = _contentFilter.value
                     _query.value = SearchFilter.dropLastWords(q, term.consumedTokens)
-                    _contentFilter.value = current.copy(
-                        year = term.year ?: current.year, month = term.month ?: current.month, day = term.day, dayEnd = null,
-                    )
+                    _contentFilter.value = term.applyTo(current)
                 }
         }
         // A query that settles on a category's whole name selects that chip, exactly as a tap on the
@@ -807,6 +813,7 @@ class SearchViewModel @Inject constructor(
         personPhotoKeys: Set<String>? = null,
         foldedLabels: Map<String, String> = emptyMap(),
         foldedPlaces: Map<String, String> = emptyMap(),
+        scoped: Boolean = false,
     ): List<GalleryItem> = SearchFilter.apply(
         items = items,
         q = q,
@@ -819,6 +826,7 @@ class SearchViewModel @Inject constructor(
         foldedCategoryNames = text.categoryNames,
         foldedLabels = foldedLabels,
         foldedPlaces = foldedPlaces,
+        scoped = scoped,
     )
 
     private fun localizedContext(locale: Locale): Context {
@@ -826,7 +834,7 @@ class SearchViewModel @Inject constructor(
         return context.createConfigurationContext(config)
     }
 
-    /** The phrases for today, yesterday, this and last month and this and last year, in [locale] and in
+    /** The phrases for today, yesterday, this and last week, month and year, in [locale] and in
      *  English, from the `search_rel_*` strings, whose variants are separated by a bar. */
     private fun relativePhrases(locale: Locale): Map<RelativeDate, Set<String>> {
         val contexts = listOf(localizedContext(locale), localizedContext(Locale.ENGLISH))
@@ -838,9 +846,32 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    /** The counted phrasings in [locale] and in English, from the `search_ago_*` strings, whose variants are
+     *  separated by a bar and whose `#` stands for the number. */
+    private fun countedPatterns(locale: Locale): List<CountedPattern> {
+        val contexts = listOf(localizedContext(locale), localizedContext(Locale.ENGLISH))
+        return DateSuggestions.countedPatterns(
+            RelativeUnit.entries.associateWith { unit ->
+                contexts.flatMap { it.getString(countedPhraseRes(unit)).split('|') }
+                    .map { DateSuggestions.phraseKey(it) }
+                    .filter { it.isNotEmpty() }
+                    .toSet()
+            },
+        )
+    }
+
+    private fun countedPhraseRes(unit: RelativeUnit): Int = when (unit) {
+        RelativeUnit.Day -> R.string.search_ago_days
+        RelativeUnit.Week -> R.string.search_ago_weeks
+        RelativeUnit.Month -> R.string.search_ago_months
+        RelativeUnit.Year -> R.string.search_ago_years
+    }
+
     private fun relativePhraseRes(date: RelativeDate): Int = when (date) {
         RelativeDate.Today -> R.string.search_rel_today
         RelativeDate.Yesterday -> R.string.search_rel_yesterday
+        RelativeDate.ThisWeek -> R.string.search_rel_this_week
+        RelativeDate.LastWeek -> R.string.search_rel_last_week
         RelativeDate.ThisMonth -> R.string.search_rel_this_month
         RelativeDate.LastMonth -> R.string.search_rel_last_month
         RelativeDate.ThisYear -> R.string.search_rel_this_year

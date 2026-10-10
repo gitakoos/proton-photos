@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.gallery
 
 
 import eu.akoos.photos.domain.entity.GalleryItem
+import java.time.LocalDate
 
 data class GalleryUiState(
     val isLoading: Boolean = true,
@@ -198,6 +199,10 @@ data class ContentFilter(
     // Inclusive end of a day range within (year, month); when set, [day] is the range start. A single
     // day leaves this null. Only meaningful alongside a month, since a range is swept in one month grid.
     val dayEnd: Int? = null,
+    // An inclusive run of days that may cross a month or a year, as a week does. Search sets it in place
+    // of the year, month and day above, which cannot hold such a run; picking a date there clears it.
+    val dateFrom: LocalDate? = null,
+    val dateTo: LocalDate? = null,
 )
 
 enum class MediaType { All, PhotosOnly, VideosOnly }

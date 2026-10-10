@@ -982,6 +982,8 @@
 
     <!-- Content filter sheet -->
     <string name="filter_title">Filter</string>
+    <string name="filter_quick_dates">Hitri datumi</string>
+    <string name="filter_pick_date">Izberi datum</string>
     <string name="filter_type_label">Vrsta</string>
     <string name="filter_type_videos">Videoposnetki</string>
     <string name="filter_sync_label">Stanje sinhronizacije</string>
@@ -1008,6 +1010,12 @@
     <string name="search_rel_last_month">prejšnji mesec|pretekli mesec</string>
     <string name="search_rel_this_year">to leto|letos</string>
     <string name="search_rel_last_year">lani|lansko leto|prejšnje leto</string>
+    <string name="search_rel_this_week">ta teden</string>
+    <string name="search_rel_last_week">prejšnji teden|pretekli teden</string>
+    <string name="search_ago_days">pred # dnevom|pred # dnevoma|pred # dnevi|pred dnevom</string>
+    <string name="search_ago_weeks">pred # tednom|pred # tednoma|pred # tedni|pred tednom</string>
+    <string name="search_ago_months">pred # mesecem|pred # mesecema|pred # meseci|pred mesecem</string>
+    <string name="search_ago_years">pred # letom|pred # letoma|pred # leti|pred letom</string>
     <string name="search_section_on_this_day">Na ta dan</string>
     <string name="search_section_on_this_day_years">Pred %1$d letom</string>
     <string name="search_section_on_this_day_years_plural">Pred %1$d leti</string>

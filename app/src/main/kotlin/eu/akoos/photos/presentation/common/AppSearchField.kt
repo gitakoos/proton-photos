@@ -29,15 +29,11 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,7 +46,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +55,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -81,7 +77,6 @@ import eu.akoos.photos.presentation.theme.AppColors
  * field is not empty. [modifier] shapes the width (a weight in a row, or fill in a column); [background]
  * defaults to the input surface but a darker host can pass its own.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AppSearchField(
     query: String,
@@ -97,15 +92,17 @@ internal fun AppSearchField(
     // A field whose keyboard key does something (a picker committing the typed name) passes its own.
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
-    // What already narrows the results, shown as removable pills ahead of the text; Backspace on an
-    // empty field takes the last one away.
-    terms: List<SearchFieldTerm> = emptyList(),
+    // True while something besides the text narrows the results (shown as pills beneath the field), which
+    // turns the border to the accent colour like typed text does.
+    filtered: Boolean = false,
+    // What Backspace does on an empty field, such as taking the last pill away.
+    onBackspaceWhenEmpty: (() -> Unit)? = null,
 ) {
     val colors = AppColors.current
     val focusRequester = remember { FocusRequester() }
     Row(
         modifier = modifier
-            .heightIn(min = 46.dp)
+            .height(46.dp)
             // A tap anywhere on the pill focuses the field, not just the thin text line; no ripple so
             // the surface looks unchanged.
             .clickable(
@@ -116,7 +113,7 @@ internal fun AppSearchField(
             .background(background)
             .border(
                 1.dp,
-                if (query.isNotEmpty() || terms.isNotEmpty()) colors.accent else colors.line,
+                if (query.isNotEmpty() || filtered) colors.accent else colors.line,
                 RoundedCornerShape(14.dp),
             )
             .padding(start = 12.dp, end = 6.dp),
@@ -129,48 +126,33 @@ internal fun AppSearchField(
             tint = colors.fgDim,
             modifier = Modifier.size(iconSize),
         )
-        // The pills and the text share one wrapping flow: the pills fill the line they fit on and the
-        // typing area takes the rest of the last line (a line of its own when the pills leave too little),
-        // so there is always somewhere to tap and type, and the field grows to hold them.
-        FlowRow(
-            modifier = Modifier.weight(1f).padding(vertical = if (terms.isEmpty()) 0.dp else 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            itemVerticalAlignment = Alignment.CenterVertically,
-            maxLines = 3,
-        ) {
-            terms.forEach { term -> SearchTermPill(term) }
-            Box(
-                modifier = Modifier.weight(1f).widthIn(min = 96.dp).heightIn(min = 30.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                if (query.isEmpty() && terms.isEmpty()) {
-                    Text(text = placeholder, color = colors.fgMute, maxLines = 1, fontSize = textSize)
-                }
-                BasicTextField(
-                    value = query,
-                    onValueChange = onQueryChange,
-                    singleLine = true,
-                    textStyle = TextStyle(color = colors.fgPrimary, fontSize = textSize),
-                    cursorBrush = SolidColor(colors.accent),
-                    keyboardOptions = keyboardOptions,
-                    keyboardActions = keyboardActions,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(focusRequester)
-                        .onFocusChanged { onFocusChanged(it.isFocused) }
-                        .onPreviewKeyEvent { event ->
-                            if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace &&
-                                query.isEmpty() && terms.isNotEmpty()
-                            ) {
-                                terms.last().onRemove()
-                                true
-                            } else {
-                                false
-                            }
-                        },
-                )
+        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (query.isEmpty()) {
+                Text(text = placeholder, color = colors.fgMute, maxLines = 1, fontSize = textSize)
             }
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                singleLine = true,
+                textStyle = TextStyle(color = colors.fgPrimary, fontSize = textSize),
+                cursorBrush = SolidColor(colors.accent),
+                keyboardOptions = keyboardOptions,
+                keyboardActions = keyboardActions,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { onFocusChanged(it.isFocused) }
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.Backspace &&
+                            query.isEmpty() && onBackspaceWhenEmpty != null
+                        ) {
+                            onBackspaceWhenEmpty()
+                            true
+                        } else {
+                            false
+                        }
+                    },
+            )
         }
         if (query.isNotEmpty()) {
             Box(
@@ -191,28 +173,48 @@ internal fun AppSearchField(
     }
 }
 
-/** One thing that narrows a search, shown as a pill in the field: its [label] and what removes it. */
+/** One thing that narrows a search, shown as a pill beneath the field: its [label] and what removes it. */
 internal data class SearchFieldTerm(
     val label: String,
     val removeDescription: String? = null,
     val onRemove: () -> Unit,
 )
 
+/** What narrows a search, as a sideways-scrolling row of [SearchTermPill]s beneath the field; nothing at all
+ *  while there is none, so the header does not grow. */
+@Composable
+internal fun SearchTermRow(terms: List<SearchFieldTerm>, modifier: Modifier = Modifier) {
+    if (terms.isEmpty()) return
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        terms.forEach { SearchTermPill(it, large = true) }
+    }
+}
+
 /** A [SearchFieldTerm] as a pill; a tap anywhere on it removes it. Shared with the Add labels field. */
 @Composable
-internal fun SearchTermPill(term: SearchFieldTerm) {
+internal fun SearchTermPill(term: SearchFieldTerm, large: Boolean = false) {
     val colors = AppColors.current
     Row(
         modifier = Modifier
-            .height(24.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(colors.accent.copy(alpha = 0.18f))
+            .height(if (large) 34.dp else 24.dp)
+            .clip(RoundedCornerShape(if (large) 14.dp else 8.dp))
+            .background(
+                if (large) colors.accent.copy(alpha = 0.18f).compositeOver(colors.bg0)
+                else colors.accent.copy(alpha = 0.18f),
+            )
             .clickable { term.onRemove() }
-            .padding(start = 8.dp, end = 4.dp),
+            .padding(start = if (large) 12.dp else 8.dp, end = if (large) 8.dp else 4.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (large) 4.dp else 2.dp),
     ) {
-        Text(term.label, color = colors.accent, fontSize = 11.sp, maxLines = 1)
-        Icon(Icons.Filled.Close, contentDescription = term.removeDescription, tint = colors.accent, modifier = Modifier.size(12.dp))
+        Text(term.label, color = colors.accent, fontSize = if (large) 14.sp else 11.sp, maxLines = 1)
+        Icon(
+            Icons.Filled.Close, contentDescription = term.removeDescription, tint = colors.accent,
+            modifier = Modifier.size(if (large) 16.dp else 12.dp),
+        )
     }
 }

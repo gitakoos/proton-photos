@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.shrinkVertically
@@ -119,6 +120,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -138,6 +140,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.SearchFieldTerm
+import eu.akoos.photos.presentation.common.SearchTermRow
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
@@ -191,6 +194,9 @@ import eu.akoos.photos.presentation.search.components.buildMonthBuckets
 import eu.akoos.photos.presentation.gallery.TimelineScrubber
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
 import eu.akoos.photos.presentation.theme.ErrorColor
+import eu.akoos.photos.presentation.theme.FgPrimary
+import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBorder
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -489,8 +495,8 @@ fun SearchScreen(
     var searchFocused by remember { mutableStateOf(false) }
 
     // The pieces of the header, defined once so the picker can lay them out at the bottom instead.
-    // Whatever already narrows the results sits in the field as a pill: the chosen category,
-    // the type and storage filters and the date, each removable on its own.
+    // Whatever already narrows the results is a pill in a row beneath the field: the chosen category (the
+    // rail steps aside for it), the type and storage filters and the date, each removable on its own.
     val searchLocale = appLocale()
     val categoryName = if (selectedCategory == GalleryFilter.All) null else categoryLabel(selectedCategory)
     val photosName = stringResource(R.string.gallery_filter_photos)
@@ -499,9 +505,10 @@ fun SearchScreen(
     val backedUpName = stringResource(R.string.filter_sync_backedup)
     val cloudName = stringResource(R.string.filter_sync_cloud)
     val offlineName = stringResource(R.string.filter_offline)
-    val searchTerms = buildList {
+    // The chosen category takes the rail's own place as a pill; the other filters share the row above it.
+    val categoryTerm = categoryName?.let { SearchFieldTerm(it) { vm.onCategorySelected(GalleryFilter.All) } }
+    val filterTerms = buildList {
         searchScope?.let { add(SearchFieldTerm(it.name) { vm.setScope(null) }) }
-        categoryName?.let { add(SearchFieldTerm(it) { vm.onCategorySelected(GalleryFilter.All) }) }
         when (filter.mediaType) {
             MediaType.PhotosOnly -> add(SearchFieldTerm(photosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
             MediaType.VideosOnly -> add(SearchFieldTerm(videosName) { vm.setContentFilter(filter.copy(mediaType = MediaType.All)) })
@@ -514,15 +521,19 @@ fun SearchScreen(
             SyncStatusFilter.Offline -> add(SearchFieldTerm(offlineName) { vm.setContentFilter(filter.copy(syncStatus = SyncStatusFilter.All)) })
             SyncStatusFilter.All -> Unit
         }
-        dateTermLabel(filter.year, filter.month, filter.day, filter.dayEnd, searchLocale)?.let { label ->
-            add(SearchFieldTerm(label) { vm.setContentFilter(filter.copy(year = null, month = null, day = null, dayEnd = null)) })
+        dateTermLabel(filter.year, filter.month, filter.day, filter.dayEnd, searchLocale, filter.dateFrom, filter.dateTo)?.let { label ->
+            add(SearchFieldTerm(label) {
+                vm.setContentFilter(filter.copy(year = null, month = null, day = null, dayEnd = null, dateFrom = null, dateTo = null))
+            })
         }
     }
+    val searchTerms = listOfNotNull(categoryTerm) + filterTerms
     val searchField: @Composable (Modifier) -> Unit = { modifier ->
         AppSearchField(
             query = query,
             onQueryChange = vm::setQuery,
-            terms = searchTerms,
+            filtered = searchTerms.isNotEmpty(),
+            onBackspaceWhenEmpty = searchTerms.lastOrNull()?.onRemove,
             // With semantic search on the field matches any description, so "by filename"
             // would read as wrong; fall back to it only when semantic search is off.
             placeholder = stringResource(R.string.search_placeholder),
@@ -587,7 +598,9 @@ fun SearchScreen(
     val density = LocalDensity.current
     // What a picker draws over the bottom: its tab bar, or the keyboard once it is up.
     val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
-    val pickBottomBase = pick?.let { if (imeBottom > 0.dp) imeBottom + 8.dp else it.bottomInset } ?: 0.dp
+    // The keyboard animates its height, so the field follows the larger of the two: it never dips below the
+    // tab bar's top while the keyboard slides in or out, and then snaps back.
+    val pickBottomBase = pick?.let { maxOf(it.bottomInset, imeBottom + 8.dp) } ?: 0.dp
     if (pick != null) {
         val scrolled by remember {
             derivedStateOf { resultsGridState.firstVisibleItemIndex > 0 || resultsGridState.firstVisibleItemScrollOffset > 0 }
@@ -596,8 +609,8 @@ fun SearchScreen(
         LaunchedEffect(resultsScrolled) { pick.onScrolled(resultsScrolled) }
         DisposableEffect(Unit) { onDispose { pick.onScrolled(false) } }
     }
-    // The field (46dp) and the gaps around it.
-    val pickBottom = pickBottomBase + 62.dp
+    // The field (46dp), the pill row above it while there is one (24dp and its gap), and the gaps around.
+    val pickBottom = pickBottomBase + 62.dp + if (searchTerms.isNotEmpty()) 32.dp else 0.dp
 
 
     Box(
@@ -617,7 +630,9 @@ fun SearchScreen(
       val headerPad = with(density) { headerHeightPx.toDp() }
 
       Box(modifier = Modifier.fillMaxSize()) {
-        val isIdle = SearchFilter.nothingAsked(query, filter, selectedCategory, personSelected = selectedPersonId != null)
+        val isIdle = SearchFilter.nothingAsked(
+            query, filter, selectedCategory, personSelected = selectedPersonId != null, scoped = searchScope != null,
+        )
         // The people and albums whose name matches the query are rows of the results, so a name that
         // matched no photo still has something to show.
         val hasMatches = showPeopleSuggestions || showAlbumSuggestions || showDestinations
@@ -903,14 +918,18 @@ fun SearchScreen(
                 // reports only the children, leaving the inset short and the content tucked under the bar.
                 .onSizeChanged { headerHeightPx = it.height }
                 // Scrim under the floating bar so buttons stay legible over photos: solid at the top,
-                // still darkening through the category row, fading out just below it.
-                .background(
-                    Brush.verticalGradient(
-                        0.0f to colors.bg0,
-                        0.55f to colors.bg0.copy(alpha = 0.82f),
-                        0.9f to colors.bg0.copy(alpha = 0.4f),
-                        1.0f to colors.bg0.copy(alpha = 0f),
-                    )
+                // still darkening through the category row, fading out just below it. A picker has no bar
+                // of its own here, so its header carries no scrim under the picked-photos strip.
+                .then(
+                    if (pick != null) Modifier
+                    else Modifier.background(
+                        Brush.verticalGradient(
+                            0.0f to colors.bg0,
+                            0.55f to colors.bg0.copy(alpha = 0.82f),
+                            0.9f to colors.bg0.copy(alpha = 0.4f),
+                            1.0f to colors.bg0.copy(alpha = 0f),
+                        ),
+                    ),
                 )
                 // A picker draws its own bar over the top, which the header clears; its field sits at the
                 // bottom instead of in this row, and it has no back button or filter button.
@@ -936,30 +955,45 @@ fun SearchScreen(
                     borderColor = colors.line,
                 )
                 searchField(Modifier.weight(1f))
-                // Filter button beside the search field — opens the sheet (sync status). Accent
-                // outline + tint when a sheet filter is active, so it reads as "filters applied".
-                val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (sheetFilterActive) colors.accent.copy(alpha = 0.15f) else colors.chipUnselectedBg)
-                        .border(1.dp, if (sheetFilterActive) colors.accent else colors.line, RoundedCornerShape(14.dp))
-                        .clickable { showFilterSheet = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.FilterList,
-                        contentDescription = stringResource(R.string.filter_title),
-                        tint = if (sheetFilterActive) colors.accent else colors.fgDim,
-                    )
-                }
             }
 
-            if (pick == null) Spacer(modifier = Modifier.height(10.dp))
+            if (pick == null) {
+                // The pill row and the rail ease in and out, so the photos below glide up or down with the
+                // header instead of jumping.
+                AnimatedVisibility(
+                    visible = filterTerms.isNotEmpty(),
+                    enter = expandVertically(tween(HEADER_EASE_MS)) + fadeIn(tween(HEADER_EASE_MS)),
+                    exit = shrinkVertically(tween(HEADER_EASE_MS)) + fadeOut(tween(HEADER_EASE_MS)),
+                ) {
+                    // Keeps the last pills while the row eases out.
+                    val held = remember { object { var terms = filterTerms } }
+                    if (filterTerms.isNotEmpty()) held.terms = filterTerms
+                    Column {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        SearchTermRow(held.terms, Modifier.fillMaxWidth().padding(horizontal = 20.dp))
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
 
-            // A picker's search has no category chips: it is looking for something by name.
-            if (pick == null) categoryRow()
+            // A picker's search has no category chips: it is looking for something by name. A picked
+            // category takes the rail's place as a pill of the same height and indent, the two fading into
+            // one another where they sit, so the active filter is always in view and nothing else moves.
+            if (pick == null) {
+                val heldCategory = remember { object { var term = categoryTerm } }
+                if (categoryTerm != null) heldCategory.term = categoryTerm
+                Crossfade(
+                    targetState = selectedCategory == GalleryFilter.All,
+                    animationSpec = tween(HEADER_EASE_MS),
+                    label = "categorySlot",
+                ) { railShown ->
+                    if (railShown) {
+                        categoryRow()
+                    } else {
+                        SearchTermRow(listOfNotNull(heldCategory.term), Modifier.fillMaxWidth().padding(horizontal = 20.dp))
+                    }
+                }
+            }
 
             dateRow()
 
@@ -969,17 +1003,41 @@ fun SearchScreen(
         }
       }
 
+        // The filter button floats at the bottom right, so the field above can run the full width. It takes
+        // the accent while a filter the sheet holds is on, and steps aside for the selection drawer.
+        if (pick == null && !isSelectionMode) {
+            val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All || filter.mediaType != MediaType.All ||
+                filter.year != null || filter.dateFrom != null || selectedCategory != GalleryFilter.All
+            IconBubble(
+                icon = Icons.Filled.FilterList,
+                contentDescription = stringResource(R.string.filter_title),
+                onClick = { showFilterSheet = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 24.dp, bottom = 36.dp),
+                diameter = 52.dp,
+                iconSize = 22.dp,
+                // Opaque while lit: the tinted fill alone would let the photos show through.
+                background = if (sheetFilterActive) colors.accent.copy(alpha = 0.18f).compositeOver(colors.bg0) else PillBg,
+                borderColor = if (sheetFilterActive) colors.accent else PillBorder,
+                tint = if (sheetFilterActive) colors.accent else FgPrimary,
+            )
+        }
+
         // A picker's field sits at the bottom, above its tab bar and the keyboard; everything else of the
         // search stays where it is in the header.
         if (pick != null) {
-            Row(
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp)
                     .padding(bottom = pickBottomBase + 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                searchField(Modifier.weight(1f))
+                SearchTermRow(searchTerms, Modifier.fillMaxWidth())
+                searchField(Modifier.fillMaxWidth())
             }
         }
 
@@ -1301,16 +1359,20 @@ fun SearchScreen(
                 onApply = { vm.setContentFilter(it) },
                 onCategorySelected = vm::onCategorySelected,
                 onDismiss = { showFilterSheet = false },
-                // Categories + media type are inline now (chips above); the sheet keeps the
-                // sync-status + precise date pickers only.
-                showCategorySection = false,
+                // The sheet holds the categories too, so every filter can be reached from this one place; the
+                // media type stays a category of its own (Videos).
+                showCategorySection = true,
                 showMediaTypeSection = false,
+                showRelativeDates = true,
                 // Signed out there is only on-device media, so the backed-up / cloud chips are hidden.
                 showSyncStatusSection = isSignedIn,
             )
         }
     }
 }
+
+/** How long the header's pill row and category rail take to ease in or out. */
+private const val HEADER_EASE_MS = 220
 
 private fun keyOf(item: GalleryItem): String = when (item) {
     is GalleryItem.LocalOnly -> "L:" + item.local.uri

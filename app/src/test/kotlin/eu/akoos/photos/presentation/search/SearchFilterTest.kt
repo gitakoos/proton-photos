@@ -33,6 +33,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 import java.util.Calendar
 import java.util.Locale
 
@@ -466,6 +467,20 @@ class SearchFilterTest {
     }
 
     @Test
+    fun `a date range keeps every hour of its days across a month and a year, and nothing outside`() {
+        val items = listOf(
+            local("before.jpg", at = at(2025, 12, 28, hour = 23)),
+            local("first.jpg", at = at(2025, 12, 29, hour = 0)),
+            local("newyear.jpg", at = at(2026, 1, 1)),
+            local("last.jpg", at = at(2026, 1, 4, hour = 23)),
+            local("after.jpg", at = at(2026, 1, 5, hour = 0)),
+        )
+        val range = ContentFilter(dateFrom = LocalDate.of(2025, 12, 29), dateTo = LocalDate.of(2026, 1, 4))
+        assertEquals(listOf("first.jpg", "newyear.jpg", "last.jpg"), namesFrom(search(items, filter = range)))
+        assertFalse(SearchFilter.nothingAsked("", range, GalleryFilter.All, personSelected = false))
+    }
+
+    @Test
     fun `a month without a year keeps that month in every year`() {
         // Each date part narrows on its own, the way the timeline's own filter has always read them.
         // A month that narrowed nothing while still counting as "something was asked for" made the
@@ -756,6 +771,19 @@ class SearchFilterTest {
     @Test
     fun `a selected person alone means the page asks for something`() {
         assertFalse(SearchFilter.nothingAsked("", ContentFilter(), GalleryFilter.All, personSelected = true))
+    }
+
+    @Test
+    fun `a search narrowed to an album asks for its photos even with nothing typed`() {
+        assertFalse(SearchFilter.nothingAsked("", ContentFilter(), GalleryFilter.All, personSelected = false, scoped = true))
+        val photo = local("a.jpg")
+        assertEquals(
+            listOf(photo),
+            SearchFilter.apply(
+                items = listOf(photo), q = "", filter = ContentFilter(), category = GalleryFilter.All,
+                foldedMonths = emptyList(), foldedCategoryNames = emptyMap(), scoped = true,
+            ),
+        )
     }
 
     @Test

@@ -32,6 +32,8 @@ import eu.akoos.photos.presentation.gallery.SyncStatusFilter
 import eu.akoos.photos.presentation.gallery.isItemFavorite
 import eu.akoos.photos.presentation.gallery.isItemOfflinePinned
 import java.text.Normalizer
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Calendar
 import java.util.Locale
 
@@ -115,6 +117,7 @@ internal object SearchFilter {
         foldedCategoryNames: Map<Int, String>,
         foldedLabels: Map<String, String> = emptyMap(),
         foldedPlaces: Map<String, String> = emptyMap(),
+        scoped: Boolean = false,
     ): List<GalleryItem> {
         val qTrimmed = q.trim()
         // Commas separate alternatives ("beach, sunset" finds a photo that matches either), and the words
@@ -122,7 +125,7 @@ internal object SearchFilter {
         val alternatives = fold(qTrimmed).split(',')
             .map { part -> part.split(' ').filter { it.isNotBlank() } }
             .filter { it.isNotEmpty() }
-        if (nothingAsked(if (alternatives.isEmpty()) "" else qTrimmed, filter, category, personSelected = personPhotoKeys != null)) {
+        if (nothingAsked(if (alternatives.isEmpty()) "" else qTrimmed, filter, category, personSelected = personPhotoKeys != null, scoped = scoped)) {
             return emptyList()
         }
         var out = items
@@ -182,9 +185,15 @@ internal object SearchFilter {
 
     /** True when the page asks for nothing: no query, no filter, no category chip and no person. A
      *  selected person is itself a filter, so it narrows an otherwise-untouched page to their photos
-     *  rather than leaving it on the idle page. */
-    fun nothingAsked(q: String, filter: ContentFilter, category: GalleryFilter, personSelected: Boolean): Boolean =
-        q.isBlank() && filter == ContentFilter() && category == GalleryFilter.All && !personSelected
+     *  rather than leaving it on the idle page, and so is an album or folder the search is narrowed to. */
+    fun nothingAsked(
+        q: String,
+        filter: ContentFilter,
+        category: GalleryFilter,
+        personSelected: Boolean,
+        scoped: Boolean = false,
+    ): Boolean =
+        q.isBlank() && filter == ContentFilter() && category == GalleryFilter.All && !personSelected && !scoped
 
     /**
      * Everything but the query: the content filter, the category chip and the People rail, in that
@@ -261,8 +270,19 @@ internal object SearchFilter {
                     (day == null || (if (dayEnd != null) dom in day..dayEnd else dom == day))
             }
         }
+        val from = filter.dateFrom
+        val to = filter.dateTo
+        if (from != null && to != null) {
+            val (start, end) = dayRangeBounds(from, to, ZoneId.systemDefault())
+            out = out.filter { it.captureTimeMs in start until end }
+        }
         return out
     }
+
+    /** The instants [from] begins at and the day after [to] begins at, in [zone]: the half-open span of
+     *  milliseconds that holds every moment of the days from [from] to [to]. */
+    internal fun dayRangeBounds(from: LocalDate, to: LocalDate, zone: ZoneId): Pair<Long, Long> =
+        from.atStartOfDay(zone).toInstant().toEpochMilli() to to.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
 
     /** Folded text a typed query matches against (file name + capture year + month name + media
      *  type + file extension + category names), so the search box finds photos by metadata, not just
