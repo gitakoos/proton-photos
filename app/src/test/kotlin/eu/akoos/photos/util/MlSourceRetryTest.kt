@@ -202,6 +202,21 @@ class MlSourceRetryTest {
     }
 
     @Test
+    fun `a device file that keeps failing to open settles on the third attempt`() {
+        assertEquals(SourceMiss.TRANSIENT, settledLocalMiss(SourceMiss.TRANSIENT, priorAttempts = 0))
+        assertEquals(SourceMiss.TRANSIENT, settledLocalMiss(SourceMiss.TRANSIENT, priorAttempts = 1))
+        assertEquals(SourceMiss.PERMANENT, settledLocalMiss(SourceMiss.TRANSIENT, priorAttempts = 2))
+        assertEquals(SourceMiss.DEFERRED, settledLocalMiss(SourceMiss.DEFERRED, priorAttempts = 5))
+    }
+
+    @Test
+    fun `a device file counts as permanent only when it opened and the decode threw nothing`() {
+        assertEquals(SourceMiss.PERMANENT, sourceMissForUndecodedLocal(readable = true, decodeThrew = false))
+        assertEquals(SourceMiss.TRANSIENT, sourceMissForUndecodedLocal(readable = false, decodeThrew = false))
+        assertEquals(SourceMiss.TRANSIENT, sourceMissForUndecodedLocal(readable = true, decodeThrew = true))
+    }
+
+    @Test
     fun a_note_reads_transient_until_a_step_gives_up_with_a_reason() {
         val note = SourceMissNote()
         assertEquals(SourceMiss.TRANSIENT, note.reason)

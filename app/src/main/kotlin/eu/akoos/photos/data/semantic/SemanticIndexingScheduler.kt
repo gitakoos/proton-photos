@@ -63,8 +63,10 @@ import eu.akoos.photos.util.WalkRestart
 import eu.akoos.photos.util.WalkRetryKick
 import eu.akoos.photos.util.boundedDetachedRun
 import eu.akoos.photos.util.retryKickDelayMs
+import eu.akoos.photos.util.settledLocalMiss
 import eu.akoos.photos.util.sourceMissForDownloadFailure
 import eu.akoos.photos.util.sourceMissForUndecodedDownload
+import eu.akoos.photos.util.sourceMissForUndecodedLocal
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -166,17 +168,16 @@ private fun settledSemanticLabel(indexedCount: Int): SemanticStatusLabel =
 
 /**
  * Whether a photo whose source failed to load should be recorded embedded (a zero-vector tombstone the
- * search ranks at similarity 0, so a re-run skips it) rather than left pending. A device item that
- * yields no bitmap is a corrupt or unsupported local file with no cloud original to retry, so it is
- * tombstoned. A cloud item is tombstoned when its load wedged past a decode or decrypt watchdog (a
- * deterministic hang that would re-wedge next pass), or when the load reported a [SourceMiss.PERMANENT]
- * miss (the link, its keys or its revision gone, or an original the decoder cannot read); any other
- * [miss] (off Wi-Fi, out of budget, a transient failure) leaves it pending for a later retry. Pure so it
- * is unit-tested without Android; a copy of the face walk's rule so the semantic rail does not depend on
- * the face file.
+ * search ranks at similarity 0, so a re-run skips it) rather than left pending. It is tombstoned when its
+ * load wedged past a decode or decrypt watchdog (a deterministic hang that would re-wedge next pass), or
+ * when the load reported a [SourceMiss.PERMANENT] miss: a cloud link, its keys or its revision gone, or
+ * an original (cloud or device) the decoder cannot read. Any other [miss] (off Wi-Fi, out of budget, a
+ * device file that could not be opened, a transient failure) leaves it pending for a later retry. Pure
+ * so it is unit-tested without Android; a copy of the face walk's rule so the semantic rail does not
+ * depend on the face file.
  */
-internal fun shouldTombstoneOnNullSource(isLocalOnly: Boolean, loadTimedOut: Boolean, miss: SourceMiss): Boolean =
-    isLocalOnly || loadTimedOut || miss == SourceMiss.PERMANENT
+internal fun shouldTombstoneOnNullSource(loadTimedOut: Boolean, miss: SourceMiss): Boolean =
+    loadTimedOut || miss == SourceMiss.PERMANENT
 
 /**
  * The (device key, cloud key) pairs whose embedding has to follow a photo backed up after it was
@@ -622,13 +623,16 @@ class SemanticIndexingScheduler @Inject constructor(
             val loadTimedOut = AtomicBoolean(false)
             val missNote = SourceMissNote()
             val source = loadSource(item, userId, decryptBudget, loadTimedOut, missNote) ?: run {
-                // No source this pass. A device-only item, one whose decode/decrypt wedged past its
-                // watchdog, or a cloud item the load reports permanently unavailable, will not load next
-                // pass either, so tombstone it rather than fetch or re-decode it every pass. A transient
-                // failure (a download timeout is kept off loadTimedOut) waits out a backoff; a cloud item
-                // deferred off Wi-Fi or out of budget stays pending for a later pass.
-                val miss = missNote.reason
-                if (shouldTombstoneOnNullSource(item is GalleryItem.LocalOnly, loadTimedOut.get(), miss)) {
+                // No source this pass. A device file that opens but will not decode, one whose
+                // decode/decrypt wedged past its watchdog, or a cloud item the load reports permanently
+                // unavailable, will not load next pass either, so tombstone it rather than fetch or
+                // re-decode it every pass. A transient failure (a device file that could not be opened, a
+                // download timeout kept off loadTimedOut) waits out a backoff; a cloud item deferred off
+                // Wi-Fi or out of budget stays pending for a later pass.
+                val miss = missNote.reason.let {
+                    if (item is GalleryItem.LocalOnly) settledLocalMiss(it, tally.attempts(photoKey)) else it
+                }
+                if (shouldTombstoneOnNullSource(loadTimedOut.get(), miss)) {
                     val permanent = item !is GalleryItem.LocalOnly && miss == SourceMiss.PERMANENT
                     if (permanent) SemanticDiagnostics.recordPermanentSkip()
                     tally.movedOn(photoKey, permanent)
@@ -733,8 +737,7 @@ class SemanticIndexingScheduler @Inject constructor(
         timedOut: AtomicBoolean,
         miss: SourceMissNote,
     ): Bitmap? = when (item) {
-        is GalleryItem.LocalOnly -> decodeLocalBounded(item.local.uri, timedOut)
-            ?: decodeLocalVideoFrame(item.local.uri)
+        is GalleryItem.LocalOnly -> loadLocalOnly(item.local.uri, timedOut, miss)
         is GalleryItem.Synced -> decodeLocalBounded(item.local.uri, timedOut)
             ?: decodeLocalVideoFrame(item.local.uri)
             ?: userId?.let { decodeCloud(item.cloud, it, decryptBudget, timedOut, miss) }
@@ -837,12 +840,26 @@ class SemanticIndexingScheduler @Inject constructor(
         }
     }
 
-    /** A bounded decode of a device file, run detached under a watchdog so a decode that wedges frees the
-     *  worker and flips [timedOut] rather than pinning it. */
-    private suspend fun decodeLocalBounded(uri: String, timedOut: AtomicBoolean): Bitmap? =
-        boundedRun(DECODE_TIMEOUT_MS, Dispatchers.IO, timedOut) { decodeLocalBlocking(uri) }
+    /** A device-only photo's source: the decoded image, else a video's still frame. When neither comes, the
+     *  miss says whether the file is unreadable for good or merely could not be read now. */
+    private suspend fun loadLocalOnly(uri: String, timedOut: AtomicBoolean, miss: SourceMissNote): Bitmap? {
+        val threw = AtomicBoolean(false)
+        return decodeLocalBounded(uri, timedOut, threw)
+            ?: decodeLocalVideoFrame(uri)
+            ?: miss.giveUp(sourceMissForUndecodedLocal(readable = isLocalReadable(uri), decodeThrew = threw.get()))
+    }
 
-    private fun decodeLocalBlocking(uri: String): Bitmap? = runCatching {
+    private suspend fun isLocalReadable(uri: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { context.contentResolver.openInputStream(Uri.parse(uri))?.use { true } ?: false }
+            .getOrDefault(false)
+    }
+
+    /** A bounded decode of a device file, run detached under a watchdog so a decode that wedges frees the
+     *  worker and flips [timedOut] rather than pinning it. [threw] flips when the decode threw. */
+    private suspend fun decodeLocalBounded(uri: String, timedOut: AtomicBoolean, threw: AtomicBoolean? = null): Bitmap? =
+        boundedRun(DECODE_TIMEOUT_MS, Dispatchers.IO, timedOut) { decodeLocalBlocking(uri, threw) }
+
+    private fun decodeLocalBlocking(uri: String, threw: AtomicBoolean? = null): Bitmap? = runCatching {
         val u = Uri.parse(uri)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(u)?.use { BitmapFactory.decodeStream(it, null, bounds) }
@@ -858,7 +875,7 @@ class SemanticIndexingScheduler @Inject constructor(
             ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
         } ?: ExifInterface.ORIENTATION_NORMAL
         orientedBitmap(bmp, orientation)
-    }.getOrNull()
+    }.getOrElse { threw?.set(true); null }
 
     /** A bounded decode of a cache file, run detached under a watchdog so a decode that wedges frees the
      *  worker and flips [timedOut] rather than pinning it. [unreadable] as for [decodeFileBlocking]. */

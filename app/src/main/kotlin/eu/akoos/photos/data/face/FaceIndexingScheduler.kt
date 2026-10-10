@@ -114,8 +114,10 @@ import eu.akoos.photos.util.SourceRetryBook
 import eu.akoos.photos.util.WalkRestart
 import eu.akoos.photos.util.WalkRetryKick
 import eu.akoos.photos.util.retryKickDelayMs
+import eu.akoos.photos.util.settledLocalMiss
 import eu.akoos.photos.util.sourceMissForDownloadFailure
 import eu.akoos.photos.util.sourceMissForUndecodedDownload
+import eu.akoos.photos.util.sourceMissForUndecodedLocal
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -162,15 +164,14 @@ fun shouldRunForegroundIndex(pending: Int, backgroundEnabled: Boolean): Boolean 
 
 /**
  * Whether a photo whose source failed to load should be recorded scanned (so a later pass skips it)
- * rather than left pending. A device item that yields no bitmap is a corrupt or unsupported local file
- * with no cloud original to retry, so it is marked. A cloud item is marked when its load wedged past a
- * decode or decrypt watchdog (a deterministic hang that would re-wedge next pass), or when the load
- * reported a [SourceMiss.PERMANENT] miss (the link, its keys or its revision gone, or an original the
- * decoder cannot read); any other [miss] (off Wi-Fi, out of budget, a transient failure) leaves it
- * pending for a later retry. Pure so it is unit-tested without Android.
+ * rather than left pending. It is marked when its load wedged past a decode or decrypt watchdog (a
+ * deterministic hang that would re-wedge next pass), or when the load reported a [SourceMiss.PERMANENT]
+ * miss: a cloud link, its keys or its revision gone, or an original (cloud or device) the decoder cannot
+ * read. Any other [miss] (off Wi-Fi, out of budget, a device file that could not be opened, a transient
+ * failure) leaves it pending for a later retry. Pure so it is unit-tested without Android.
  */
-internal fun shouldMarkScannedOnNullSource(isLocalOnly: Boolean, loadTimedOut: Boolean, miss: SourceMiss): Boolean =
-    isLocalOnly || loadTimedOut || miss == SourceMiss.PERMANENT
+internal fun shouldMarkScannedOnNullSource(loadTimedOut: Boolean, miss: SourceMiss): Boolean =
+    loadTimedOut || miss == SourceMiss.PERMANENT
 
 /**
  * Whether a finished walk pass should group the account's waiting faces into people. It needs a walk
@@ -1854,19 +1855,21 @@ class FaceIndexingScheduler @Inject constructor(
             val loaded = loadSource(item, userId, decryptBudget, force, loadTimedOut, loadMetrics, missNote)
             val loadMs = SystemClock.elapsedRealtime() - loadStart
             val source = loaded ?: run {
-                // A device-only item that still yields no source is neither a decodable image nor a
-                // decodable video (a corrupt or unsupported local file), and has no cloud original to try on
-                // a later pass. Record it scanned rather than leave it pending forever: once only such items
-                // remained, a pass would load nothing, the walk would not re-kick, and the count would stand
-                // still at "Running" for good. A cloud item the load reports permanently unavailable is
-                // recorded the same way, so it never again spends a pass's budget. A decode or decrypt that
-                // wedged past its watchdog (loadTimedOut) is recorded too, so a deterministically hanging
-                // source is skipped next pass rather than re-hung. Any other cloud miss stays pending: a
-                // transient failure waits out its backoff, a defer (off Wi-Fi or out of budget) waits for the
-                // next pass.
-                if (item is GalleryItem.LocalOnly) FaceDiagnostics.recordUnloadableLocal()
-                val miss = missNote.reason
-                if (shouldMarkScannedOnNullSource(item is GalleryItem.LocalOnly, loadTimedOut.get(), miss)) {
+                // A device-only item that opens but decodes to neither an image nor a video frame is a
+                // corrupt or unsupported local file with no cloud original to try on a later pass. Record
+                // it scanned rather than leave it pending forever: once only such items remained, a pass
+                // would load nothing, the walk would not re-kick, and the count would stand still at
+                // "Running" for good. A cloud item the load reports permanently unavailable is recorded
+                // the same way, so it never again spends a pass's budget. A decode or decrypt that wedged
+                // past its watchdog (loadTimedOut) is recorded too, so a deterministically hanging source
+                // is skipped next pass rather than re-hung. Any other miss stays pending: a device file that
+                // could not be opened (the card unmounted) or a transient cloud failure waits out its
+                // backoff, a defer (off Wi-Fi or out of budget) waits for the next pass.
+                val miss = missNote.reason.let {
+                    if (item is GalleryItem.LocalOnly) settledLocalMiss(it, tally?.attempts(photoKey) ?: 0) else it
+                }
+                if (shouldMarkScannedOnNullSource(loadTimedOut.get(), miss)) {
+                    if (item is GalleryItem.LocalOnly) FaceDiagnostics.recordUnloadableLocal()
                     val permanent = item !is GalleryItem.LocalOnly && miss == SourceMiss.PERMANENT
                     if (permanent) FaceDiagnostics.recordPermanentSkip()
                     tally?.movedOn(photoKey, permanent)
@@ -2036,8 +2039,7 @@ class FaceIndexingScheduler @Inject constructor(
     ): Bitmap? = when (item) {
         // A device video decodes to no bitmap through BitmapFactory, so fall through to a still frame;
         // an image takes the first branch and never opens the retriever.
-        is GalleryItem.LocalOnly -> decodeLocalBounded(item.local.uri, timedOut)
-            ?: decodeLocalVideoFrame(item.local.uri)
+        is GalleryItem.LocalOnly -> loadLocalOnly(item.local.uri, timedOut, miss)
         // The cloud fallback stays account-bound: a guest has only device items, so it is never reached.
         is GalleryItem.Synced -> decodeLocalBounded(item.local.uri, timedOut)
             ?: decodeLocalVideoFrame(item.local.uri)
@@ -2166,12 +2168,26 @@ class FaceIndexingScheduler @Inject constructor(
         }
     }
 
-    /** A bounded decode of a device file, run detached under a watchdog so a decode that wedges frees the
-     *  worker and flips [timedOut] rather than pinning it. */
-    private suspend fun decodeLocalBounded(uri: String, timedOut: AtomicBoolean): Bitmap? =
-        boundedRun(DECODE_TIMEOUT_MS, Dispatchers.IO, timedOut) { decodeLocalBlocking(uri) }
+    /** A device-only photo's source: the decoded image, else a video's still frame. When neither comes, the
+     *  miss says whether the file is unreadable for good or merely could not be read now. */
+    private suspend fun loadLocalOnly(uri: String, timedOut: AtomicBoolean, miss: SourceMissNote): Bitmap? {
+        val threw = AtomicBoolean(false)
+        return decodeLocalBounded(uri, timedOut, threw)
+            ?: decodeLocalVideoFrame(uri)
+            ?: miss.giveUp(sourceMissForUndecodedLocal(readable = isLocalReadable(uri), decodeThrew = threw.get()))
+    }
 
-    private fun decodeLocalBlocking(uri: String): Bitmap? = runCatching {
+    private suspend fun isLocalReadable(uri: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { context.contentResolver.openInputStream(Uri.parse(uri))?.use { true } ?: false }
+            .getOrDefault(false)
+    }
+
+    /** A bounded decode of a device file, run detached under a watchdog so a decode that wedges frees the
+     *  worker and flips [timedOut] rather than pinning it. [threw] flips when the decode threw. */
+    private suspend fun decodeLocalBounded(uri: String, timedOut: AtomicBoolean, threw: AtomicBoolean? = null): Bitmap? =
+        boundedRun(DECODE_TIMEOUT_MS, Dispatchers.IO, timedOut) { decodeLocalBlocking(uri, threw) }
+
+    private fun decodeLocalBlocking(uri: String, threw: AtomicBoolean? = null): Bitmap? = runCatching {
         val u = Uri.parse(uri)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(u)?.use { BitmapFactory.decodeStream(it, null, bounds) }
@@ -2187,7 +2203,7 @@ class FaceIndexingScheduler @Inject constructor(
             ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
         } ?: ExifInterface.ORIENTATION_NORMAL
         orientedBitmap(bmp, orientation)
-    }.getOrNull()
+    }.getOrElse { threw?.set(true); null }
 
     /** A bounded decode of a cache file, run detached under a watchdog so a decode that wedges frees the
      *  worker and flips [timedOut] rather than pinning it. [unreadable] as for [decodeFileBlocking]. */

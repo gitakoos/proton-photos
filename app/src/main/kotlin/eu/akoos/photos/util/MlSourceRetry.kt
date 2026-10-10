@@ -87,6 +87,26 @@ fun sourceMissForDownloadFailure(error: Throwable?): SourceMiss =
 fun sourceMissForUndecodedDownload(unreadableFormat: Boolean): SourceMiss =
     if (unreadableFormat) SourceMiss.PERMANENT else SourceMiss.TRANSIENT
 
+/**
+ * How a device file that yielded no bitmap counts: permanent when the file opened and the decoder could
+ * make no image of it (a corrupt or unsupported file), transient when it could not be opened (the card
+ * unmounted, a provider that answered nothing) or the decode itself threw (out of memory).
+ */
+fun sourceMissForUndecodedLocal(readable: Boolean, decodeThrew: Boolean): SourceMiss =
+    if (readable && !decodeThrew) SourceMiss.PERMANENT else SourceMiss.TRANSIENT
+
+/** How many times in a row a device file may fail to open before the walk settles it: a card that is
+ *  only unmounted comes back within a few passes, a row whose file is gone never does. */
+const val LOCAL_UNREADABLE_ATTEMPTS = 3
+
+/**
+ * A device file's miss after [priorAttempts] earlier failed attempts: a transient miss that has now
+ * repeated [LOCAL_UNREADABLE_ATTEMPTS] times counts as permanent, so a library row whose file is gone
+ * cannot keep a walk pending for good. Any other miss is returned as it is.
+ */
+fun settledLocalMiss(miss: SourceMiss, priorAttempts: Int): SourceMiss =
+    if (miss == SourceMiss.TRANSIENT && priorAttempts + 1 >= LOCAL_UNREADABLE_ATTEMPTS) SourceMiss.PERMANENT else miss
+
 /** The waits between a photo's transient failure and its next attempt: five minutes, thirty minutes, two
  *  hours, then six hours for every later one. */
 val SOURCE_RETRY_BACKOFF_MS: List<Long> = listOf(5L * 60_000L, 30L * 60_000L, 2L * 3_600_000L, 6L * 3_600_000L)
@@ -197,6 +217,9 @@ class SourcePassTally(private val book: SourceRetryBook) {
     private val permanentMisses = AtomicInteger(0)
     private val transientMisses = AtomicInteger(0)
     private val overBudgetMisses = AtomicInteger(0)
+
+    /** How many transient failures in a row [key] has had in this process. */
+    fun attempts(key: String): Int = book.attempts(key)
 
     val moved: Int get() = movedOn.get()
     val permanent: Int get() = permanentMisses.get()
