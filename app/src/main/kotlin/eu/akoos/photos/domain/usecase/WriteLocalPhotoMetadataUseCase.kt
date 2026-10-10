@@ -374,6 +374,13 @@ class WriteLocalPhotoMetadataUseCase @Inject constructor(
         internal fun isMvhdStampableMime(mimeType: String): Boolean =
             normalizeMime(mimeType) in MVHD_STAMPABLE_MIMES
 
+        /** True when a capture date written to a [mimeType] file reaches only the MediaStore column: the
+         *  container has neither an EXIF block ExifInterface can save nor an mvhd to stamp (HEIC, GIF, RAW,
+         *  a Matroska video). A media scan re-derives the column from the file, so such a date holds only
+         *  once the app also records it as a capture-date override. Pure. */
+        internal fun dateLivesOnlyInColumn(mimeType: String): Boolean =
+            !isExifWritableImageMime(mimeType) && !isMvhdStampableMime(mimeType)
+
         private fun normalizeMime(mimeType: String): String =
             mimeType.substringBefore(';').trim().lowercase(Locale.ROOT)
     }

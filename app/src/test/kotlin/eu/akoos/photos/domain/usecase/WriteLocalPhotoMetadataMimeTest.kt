@@ -85,21 +85,18 @@ class WriteLocalPhotoMetadataMimeTest {
     }
 
     @Test
-    fun `durable date edit covers writable images and any video, not heic heif avif`() {
-        // The exact predicate the metadata editor uses to keep the date field: a write durably holds on
-        // an EXIF-writable image (the embedded datetime) or any video (the mvhd or the column). An
-        // EXIF-unwritable image has no durable leg, so the editor locks its date rather than accepting an
-        // edit the next scan reverts.
-        fun takesDurableDateEdit(mime: String) =
-            WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(mime) ||
-                WriteLocalPhotoMetadataUseCase.isVideoMime(mime)
-
-        assertTrue(takesDurableDateEdit("image/jpeg"))
-        assertTrue(takesDurableDateEdit("image/png"))
-        assertTrue(takesDurableDateEdit("image/webp"))
-        assertTrue(takesDurableDateEdit("video/mp4"))
-        assertFalse(takesDurableDateEdit("image/heic"))
-        assertFalse(takesDurableDateEdit("image/heif"))
-        assertFalse(takesDurableDateEdit("image/avif"))
+    fun `a date lives only in the column where the container has no stamp to take`() {
+        // Where the file carries the date (an EXIF image, an mp4-family video) the media scan re-derives
+        // the same value; where it cannot (HEIC, GIF, RAW, Matroska) the editor also records a capture-date
+        // override, so the edit holds instead of being refused.
+        assertTrue(WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn("image/heic"))
+        assertTrue(WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn("image/heif"))
+        assertTrue(WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn("image/avif"))
+        assertTrue(WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn("image/gif"))
+        assertTrue(WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn("video/x-matroska"))
+        assertFalse(WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn("image/jpeg"))
+        assertFalse(WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn("image/png"))
+        assertFalse(WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn("image/webp"))
+        assertFalse(WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn("video/mp4"))
     }
 }

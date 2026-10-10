@@ -411,20 +411,13 @@ class MetadataEditorViewModel @Inject constructor(
         val singleMode = items.size == 1 && editableCount == 1
         val bulk = editableCount >= 1 && !singleMode
 
-        // A date write lands only where it durably holds: an editable image whose EXIF takes the stamp
-        // or any video (its mvhd or the column), so an EXIF-unwritable image is held back, since only its
-        // column would move and the next scan reverts it. A vaulted photo is covered whatever it is: the
-        // vault keeps its date in the file name and reads it from there, so the container it happens to
-        // be in decides nothing. A place write needs a GPS EXIF block ExifInterface can save, which is
+        // Every device photo takes a date write. Where the container holds the stamp (an EXIF image, an mvhd
+        // video) the file carries it, and where it cannot (HEIC, GIF, RAW) the write also records a
+        // capture-date override, which outranks the column a media scan re-derives. A vaulted photo keeps
+        // its date in the file name, so the container it happens to be in decides nothing. A place write needs a GPS EXIF block ExifInterface can save, which is
         // the same JPEG / PNG / WebP set the text tags need, so a video (no GPS block) and an unwritable
         // image (HEIC, GIF, RAW) both stay out of the location targets.
-        dateTargetUris = editable
-            .filter {
-                hiddenStorage.isHiddenUri(it.local.uri) ||
-                    WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) ||
-                    WriteLocalPhotoMetadataUseCase.isVideoMime(it.local.mimeType)
-            }
-            .map { it.local.uri } + (syncedImages + syncedVideos).map { it.local.uri }
+        dateTargetUris = editable.map { it.local.uri } + (syncedImages + syncedVideos).map { it.local.uri }
         placeTargetUris = (editable
             .filter { WriteLocalPhotoMetadataUseCase.isExifWritableImageMime(it.local.mimeType) }
             .map { it.local.uri }) + syncedImages.map { it.local.uri }
@@ -1016,12 +1009,19 @@ class MetadataEditorViewModel @Inject constructor(
      */
     private suspend fun retargetDateOverrides(captureMsByUri: Map<String, Long>) {
         if (captureMsByUri.isEmpty()) return
+        // A file whose container cannot hold the date keeps it only in the override, so it gets an entry
+        // even when it had none; the rest only move an entry they already have.
+        val columnOnlyUris = boundItems.filterIsInstance<GalleryItem.LocalOnly>()
+            .filter { WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn(it.local.mimeType) }
+            .mapTo(HashSet()) { it.local.uri }
+        val columnOnly = captureMsByUri.filterKeys { it in columnOnlyUris && !hiddenStorage.isHiddenUri(it) }
+        val modifiedByUri = columnOnly.keys.associateWith { localMediaRepository.queryByUri(it)?.dateModified }
         runCatching {
             context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: return@edit
-                CaptureDateOverride.retarget(current, captureMsByUri)?.let {
-                    prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = it
-                }
+                val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
+                var next = CaptureDateOverride.retarget(current, captureMsByUri - columnOnly.keys) ?: current
+                next = CaptureDateOverride.upsert(next, columnOnly, modifiedByUri) ?: next
+                if (next != current) prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = next
             }
         }
     }
