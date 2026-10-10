@@ -2467,4 +2467,16 @@
     <string name="compression_codec_desc_av1">Najmniejsze pliki; starsze urządzenia i niektóre przeglądarki go nie odtworzą</string>
     <string name="compression_estimate">Około %1$s na minutę wideo %2$dp</string>
     <string name="compression_unavailable_fallback">%1$s nie jest dostępny na tym telefonie, więc filmy używają %2$s.</string>
+    <!-- 2.6.0 -->
+    <string name="whats_new_260_labels_title">Etykiety zdjęć</string>
+    <string name="whats_new_260_labels_body">Dodawaj zdjęciom własne etykiety i szukaj po nich. Etykiety są zapisywane w kopii na Drive.</string>
+    <string name="whats_new_260_compress_title">Kompresja wideo</string>
+    <string name="whats_new_260_compress_body">Wybierz kodek i jakość oraz śledź postęp i zaoszczędzone miejsce.</string>
+    <string name="whats_new_260_vault_title">Ukryte zdjęcia są bezpieczne</string>
+    <string name="whats_new_260_vault_body">Wylogowanie zachowuje ukryte zdjęcia bez kopii na Drive w pliku zip z opcjonalnym hasłem.</string>
+    <string name="whats_new_260_search_title">Wyszukiwanie znajdzie więcej</string>
+    <string name="whats_new_260_search_body">Szukaj miejsca, zeszłego tygodnia lub kilku słów naraz i zawężaj wyniki filtrami.</string>
+    <string name="whats_new_260_frame_title">Narzędzie Ramka</string>
+    <string name="whats_new_260_frame_body">Umieść zdjęcie na wypełnionym płótnie w edytorze.</string>
+    <string name="whats_new_260_more">Do tego strona Udostępnione, wybór albumu jak w galerii systemowej, grupowanie szczypnięciem według dni, miesięcy lub lat, grupy duplikatów, które można zignorować, język turecki oraz mnóstwo innych poprawek i usprawnień stabilności.</string>
 </resources>

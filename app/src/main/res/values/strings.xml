@@ -2389,4 +2389,16 @@
     <string name="compression_codec_desc_av1">Smallest files; older devices and some browsers cannot play it</string>
     <string name="compression_estimate">About %1$s per minute of %2$dp video</string>
     <string name="compression_unavailable_fallback">%1$s is not available on this phone, so videos use %2$s.</string>
+    <!-- 2.6.0 -->
+    <string name="whats_new_260_labels_title">Photo labels</string>
+    <string name="whats_new_260_labels_body">Add your own labels to photos and search by them. Labels back up to Drive.</string>
+    <string name="whats_new_260_compress_title">Video compression</string>
+    <string name="whats_new_260_compress_body">Pick the codec and quality, and see the progress and the space saved.</string>
+    <string name="whats_new_260_vault_title">Hidden photos stay safe</string>
+    <string name="whats_new_260_vault_body">A sign-out keeps hidden photos that have no Drive copy, in a zip with an optional password.</string>
+    <string name="whats_new_260_search_title">Search finds more</string>
+    <string name="whats_new_260_search_body">Look up a place, last week or several words at once, and narrow results with filters.</string>
+    <string name="whats_new_260_frame_title">Frame tool</string>
+    <string name="whats_new_260_frame_body">Place a photo on a filled canvas in the editor.</string>
+    <string name="whats_new_260_more">Plus a Shared page, an album picker that works like a system gallery, pinch grouping by day, month or year, duplicate groups you can ignore, Turkish, and lots more fixes and stability improvements.</string>
 </resources>

@@ -2266,4 +2266,16 @@
     <string name="compression_codec_desc_av1">En küçük dosyalar; eski cihazlar ve bazı tarayıcılar oynatamaz</string>
     <string name="compression_estimate">Dakika başına yaklaşık %1$s (%2$dp video)</string>
     <string name="compression_unavailable_fallback">%1$s bu telefonda kullanılamıyor, bu yüzden videolarda %2$s kullanılır.</string>
+    <!-- 2.6.0 -->
+    <string name="whats_new_260_labels_title">Fotoğraf etiketleri</string>
+    <string name="whats_new_260_labels_body">Fotoğraflara kendi etiketlerinizi ekleyin ve etiketle arayın. Etiketler Drive\'a yedeklenir.</string>
+    <string name="whats_new_260_compress_title">Video sıkıştırma</string>
+    <string name="whats_new_260_compress_body">Kodeki ve kaliteyi seçin, ilerlemeyi ve kazanılan alanı görün.</string>
+    <string name="whats_new_260_vault_title">Gizli fotoğraflar güvende kalır</string>
+    <string name="whats_new_260_vault_body">Oturum kapatıldığında Drive kopyası olmayan gizli fotoğraflar, isteğe bağlı parolalı bir zip içinde korunur.</string>
+    <string name="whats_new_260_search_title">Arama daha fazlasını bulur</string>
+    <string name="whats_new_260_search_body">Bir yeri, geçen haftayı veya birkaç kelimeyi birlikte arayın ve sonuçları filtrelerle daraltın.</string>
+    <string name="whats_new_260_frame_title">Çerçeve aracı</string>
+    <string name="whats_new_260_frame_body">Düzenleyicide bir fotoğrafı dolu bir tuvale yerleştirin.</string>
+    <string name="whats_new_260_more">Ayrıca Paylaşılan sayfası, sistem galerisi gibi albüm seçici, kıstırarak güne, aya veya yıla göre gruplama, yok sayılabilen kopya grupları, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
 </resources>

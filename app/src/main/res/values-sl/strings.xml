@@ -2467,4 +2467,16 @@
     <string name="compression_codec_desc_av1">Najmanjše datoteke; starejše naprave in nekateri brskalniki ga ne predvajajo</string>
     <string name="compression_estimate">Približno %1$s na minuto videa v %2$dp</string>
     <string name="compression_unavailable_fallback">%1$s na tem telefonu ni na voljo, zato videoposnetki uporabijo %2$s.</string>
+    <!-- 2.6.0 -->
+    <string name="whats_new_260_labels_title">Oznake fotografij</string>
+    <string name="whats_new_260_labels_body">Fotografijam dodajte lastne oznake in iščite po njih. Oznake se varnostno kopirajo v Drive.</string>
+    <string name="whats_new_260_compress_title">Stiskanje videa</string>
+    <string name="whats_new_260_compress_body">Izberite kodek in kakovost ter spremljajte napredek in prihranjen prostor.</string>
+    <string name="whats_new_260_vault_title">Skrite fotografije ostanejo varne</string>
+    <string name="whats_new_260_vault_body">Odjava ohrani skrite fotografije brez kopije v Drive v datoteki zip z neobveznim geslom.</string>
+    <string name="whats_new_260_search_title">Iskanje najde več</string>
+    <string name="whats_new_260_search_body">Iščite kraj, prejšnji teden ali več besed hkrati in zožite rezultate s filtri.</string>
+    <string name="whats_new_260_frame_title">Orodje Okvir</string>
+    <string name="whats_new_260_frame_body">V urejevalniku postavite fotografijo na zapolnjeno platno.</string>
+    <string name="whats_new_260_more">Poleg tega stran Deljeno, izbirnik albumov kot v sistemski galeriji, združevanje s ščipom po dnevih, mesecih ali letih, skupine dvojnikov, ki jih lahko prezrete, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
 </resources>

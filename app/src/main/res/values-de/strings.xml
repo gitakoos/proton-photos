@@ -2349,4 +2349,16 @@
     <string name="compression_codec_desc_av1">Kleinste Dateien; ältere Geräte und manche Browser spielen es nicht ab</string>
     <string name="compression_estimate">Etwa %1$s pro Minute %2$dp-Video</string>
     <string name="compression_unavailable_fallback">%1$s ist auf diesem Telefon nicht verfügbar, Videos verwenden daher %2$s.</string>
+    <!-- 2.6.0 -->
+    <string name="whats_new_260_labels_title">Foto-Labels</string>
+    <string name="whats_new_260_labels_body">Gib Fotos eigene Labels und suche danach. Labels werden in Drive gesichert.</string>
+    <string name="whats_new_260_compress_title">Videokomprimierung</string>
+    <string name="whats_new_260_compress_body">Wähle Codec und Qualität und sieh Fortschritt und gesparten Speicher.</string>
+    <string name="whats_new_260_vault_title">Versteckte Fotos bleiben sicher</string>
+    <string name="whats_new_260_vault_body">Beim Abmelden bleiben versteckte Fotos ohne Drive-Kopie in einer ZIP-Datei mit optionalem Passwort erhalten.</string>
+    <string name="whats_new_260_search_title">Die Suche findet mehr</string>
+    <string name="whats_new_260_search_body">Suche nach einem Ort, letzter Woche oder mehreren Wörtern zugleich und grenze die Treffer mit Filtern ein.</string>
+    <string name="whats_new_260_frame_title">Rahmen-Werkzeug</string>
+    <string name="whats_new_260_frame_body">Setze ein Foto im Editor auf eine gefüllte Leinwand.</string>
+    <string name="whats_new_260_more">Dazu eine Seite für Geteiltes, eine Albumauswahl wie in einer System-Galerie, Gruppieren per Kneifgeste nach Tag, Monat oder Jahr, Duplikatgruppen zum Ignorieren, Türkisch und viele weitere Korrekturen und Stabilitätsverbesserungen.</string>
 </resources>

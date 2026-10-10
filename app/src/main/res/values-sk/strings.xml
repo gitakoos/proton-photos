@@ -2474,4 +2474,16 @@
     <string name="compression_codec_desc_av1">Najmenšie súbory; staršie zariadenia a niektoré prehliadače ho neprehrajú</string>
     <string name="compression_estimate">Asi %1$s za minútu videa v %2$dp</string>
     <string name="compression_unavailable_fallback">%1$s nie je na tomto telefóne k dispozícii, videá preto použijú %2$s.</string>
+    <!-- 2.6.0 -->
+    <string name="whats_new_260_labels_title">Štítky fotiek</string>
+    <string name="whats_new_260_labels_body">Pridávajte fotkám vlastné štítky a vyhľadávajte podľa nich. Štítky sa zálohujú na Drive.</string>
+    <string name="whats_new_260_compress_title">Kompresia videí</string>
+    <string name="whats_new_260_compress_body">Vyberte kodek a kvalitu a sledujte priebeh i ušetrené miesto.</string>
+    <string name="whats_new_260_vault_title">Skryté fotky ostanú v bezpečí</string>
+    <string name="whats_new_260_vault_body">Odhlásenie zachová skryté fotky bez kópie na Drive v zipe s voliteľným heslom.</string>
+    <string name="whats_new_260_search_title">Vyhľadávanie nájde viac</string>
+    <string name="whats_new_260_search_body">Hľadajte miesto, minulý týždeň alebo viac slov naraz a zužujte výsledky filtrami.</string>
+    <string name="whats_new_260_frame_title">Nástroj Rám</string>
+    <string name="whats_new_260_frame_body">V editore umiestnite fotku na vyplnené plátno.</string>
+    <string name="whats_new_260_more">Navyše stránka Zdieľané, výber albumu ako v systémovej galérii, zoskupovanie štipnutím podľa dní, mesiacov alebo rokov, skupiny duplikátov, ktoré možno ignorovať, turečtina a množstvo ďalších opráv a vylepšení stability.</string>
 </resources>

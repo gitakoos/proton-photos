@@ -2376,4 +2376,16 @@
     <string name="compression_codec_desc_av1">Kleinste bestanden; oudere apparaten en sommige browsers spelen het niet af</string>
     <string name="compression_estimate">Ongeveer %1$s per minuut %2$dp-video</string>
     <string name="compression_unavailable_fallback">%1$s is niet beschikbaar op deze telefoon, dus video’s gebruiken %2$s.</string>
+    <!-- 2.6.0 -->
+    <string name="whats_new_260_labels_title">Fotolabels</string>
+    <string name="whats_new_260_labels_body">Geef foto\'s je eigen labels en zoek erop. Labels worden naar Drive geback-upt.</string>
+    <string name="whats_new_260_compress_title">Videocompressie</string>
+    <string name="whats_new_260_compress_body">Kies de codec en kwaliteit en zie de voortgang en de bespaarde ruimte.</string>
+    <string name="whats_new_260_vault_title">Verborgen foto\'s blijven veilig</string>
+    <string name="whats_new_260_vault_body">Bij uitloggen blijven verborgen foto\'s zonder Drive-kopie bewaard in een zip met optioneel wachtwoord.</string>
+    <string name="whats_new_260_search_title">Zoeken vindt meer</string>
+    <string name="whats_new_260_search_body">Zoek op een plaats, vorige week of meerdere woorden tegelijk en verfijn de resultaten met filters.</string>
+    <string name="whats_new_260_frame_title">Kadergereedschap</string>
+    <string name="whats_new_260_frame_body">Plaats een foto op een gevuld canvas in de editor.</string>
+    <string name="whats_new_260_more">Daarnaast een pagina Gedeeld, een albumkiezer zoals in een systeemgalerij, groeperen met knijpen per dag, maand of jaar, groepen met duplicaten die je kunt negeren, Turks en nog veel meer fixes en stabiliteitsverbeteringen.</string>
 </resources>

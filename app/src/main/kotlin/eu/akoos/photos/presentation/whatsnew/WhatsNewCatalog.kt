@@ -120,6 +120,18 @@ internal data class WhatsNewRelease(
  * fails if a card is repeated from an older entry.
  */
 internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
+    WhatsNewRelease(
+        version = "2.6.0",
+        hero = null,
+        features = listOf(
+            WhatsNewFeature(Icons.Default.Bookmark, R.string.whats_new_260_labels_title, R.string.whats_new_260_labels_body),
+            WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_260_compress_title, R.string.whats_new_260_compress_body),
+            WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_260_vault_title, R.string.whats_new_260_vault_body),
+            WhatsNewFeature(Icons.Default.Search, R.string.whats_new_260_search_title, R.string.whats_new_260_search_body),
+            WhatsNewFeature(Icons.Default.Crop, R.string.whats_new_260_frame_title, R.string.whats_new_260_frame_body),
+        ),
+        moreRes = R.string.whats_new_260_more,
+    ),
     // 2.5.0 STABLE: the whole release since 2.4.0, consolidated to its main features so someone
     // updating from 2.4.0 meets 2.5.0 as a tight set of cards rather than every preview's delta.
     // All cards are New here, so no section labels show; the closing line covers the smaller changes.

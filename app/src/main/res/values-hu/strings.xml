@@ -2348,4 +2348,16 @@
     <string name="compression_codec_desc_av1">A legkisebb fájlok; a régebbi eszközök és néhány böngésző nem játssza le</string>
     <string name="compression_estimate">Kb. %1$s percenként %2$dp-s videónál</string>
     <string name="compression_unavailable_fallback">A(z) %1$s nem érhető el ezen a telefonon, ezért a videók %2$s kodeket használnak.</string>
+    <!-- 2.6.0 -->
+    <string name="whats_new_260_labels_title">Fotócímkék</string>
+    <string name="whats_new_260_labels_body">Adj saját címkéket a fotókhoz, és keress rájuk. A címkék a Drive-ra is mentődnek.</string>
+    <string name="whats_new_260_compress_title">Videótömörítés</string>
+    <string name="whats_new_260_compress_body">Válaszd ki a kodeket és a minőséget, és kövesd az előrehaladást és a megtakarított helyet.</string>
+    <string name="whats_new_260_vault_title">A rejtett fotók biztonságban maradnak</string>
+    <string name="whats_new_260_vault_body">Kijelentkezéskor a Drive-másolat nélküli rejtett fotók egy zipben maradnak meg, opcionális jelszóval.</string>
+    <string name="whats_new_260_search_title">A keresés többet talál</string>
+    <string name="whats_new_260_search_body">Keress helyre, a múlt hétre vagy több szóra egyszerre, és szűkítsd az eredményeket szűrőkkel.</string>
+    <string name="whats_new_260_frame_title">Keret eszköz</string>
+    <string name="whats_new_260_frame_body">Helyezz egy fotót kitöltött vászonra a szerkesztőben.</string>
+    <string name="whats_new_260_more">Ráadásul Megosztott oldal, rendszergalériához hasonló albumválasztó, csippentéssel napok, hónapok vagy évek szerinti csoportosítás, figyelmen kívül hagyható duplikátumcsoportok, török nyelv, és rengeteg további javítás és stabilitási fejlesztés.</string>
 </resources>

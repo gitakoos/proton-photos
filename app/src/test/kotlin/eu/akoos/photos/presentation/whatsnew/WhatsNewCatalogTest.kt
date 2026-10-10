@@ -149,12 +149,11 @@ class WhatsNewCatalogTest {
     }
 
     @Test
-    fun the_current_release_is_2_5_0_with_feature_cards() {
-        // 2.5.0 is the stable release: this card holds the whole release since 2.4.0, consolidated
-        // to its main features. It leads with feature cards (no hero) and announces at least one.
+    fun the_current_release_is_2_6_0_with_feature_cards() {
+        // 2.6.0 is the newest card: it leads with feature cards (no hero) and announces at least one.
         val latest = LatestWhatsNewRelease
-        assertEquals("2.5.0", latest.version)
-        assertTrue("2.5.0 leads with feature cards, not a hero card", latest.hero == null)
-        assertTrue("2.5.0 announces its feature cards", latest.features.isNotEmpty())
+        assertEquals("2.6.0", latest.version)
+        assertTrue("2.6.0 leads with feature cards, not a hero card", latest.hero == null)
+        assertTrue("2.6.0 announces its feature cards", latest.features.isNotEmpty())
     }
 }
