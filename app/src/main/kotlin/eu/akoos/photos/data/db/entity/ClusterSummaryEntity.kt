@@ -32,7 +32,7 @@ import androidx.room.PrimaryKey
  * the people already grouped without re-reading every stored embedding. [personId] mirrors the
  * `person.id` the summary describes, so one row summarises one cluster.
  *
- * [centroid] is the person's mean direction: the 128-d, L2-normalised recognition vector packed
+ * [centroid] is the person's mean direction: the 512-d, L2-normalised recognition vector packed
  * little-endian, byte-for-byte the layout the indexer writes into `face.embedding` (packEmbedding /
  * unpackEmbedding), so a cosine between a face and a centroid is a plain dot product. [memberCount] is
  * how many faces the centroid was averaged over, so an incremental update can fold a new face in as a
