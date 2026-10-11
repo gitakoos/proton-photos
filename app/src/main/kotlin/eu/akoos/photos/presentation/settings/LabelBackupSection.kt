@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
+import eu.akoos.photos.data.autosave.AutoSaveKind
 import eu.akoos.photos.data.label.LabelBackupOperation
 import eu.akoos.photos.data.label.LabelBackupProgress
 import eu.akoos.photos.data.label.LabelBackupState
@@ -115,6 +116,7 @@ internal fun LabelBackupSection(viewModel: LabelsSettingsViewModel) {
                     enabled = actionsEnabled,
                 )
             }
+            AutoSaveRows(AutoSaveKind.LABELS, R.string.settings_autosave_confirm_labels)
         }
     }
 

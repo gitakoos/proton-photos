@@ -82,6 +82,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     @Inject
     lateinit var pendingAlbumAddsImporter: eu.akoos.photos.data.upload.PendingAlbumAddsImporter
 
+    @Inject
+    lateinit var autoSaveCoordinator: eu.akoos.photos.data.autosave.AutoSaveCoordinator
+
     // Set up in constructor so getWorkManagerConfiguration() works before Hilt injects workerFactory.
     private val delegatingFactory = DelegatingWorkerFactory()
 
@@ -111,6 +114,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         if (!isMainProcess()) return
         delegatingFactory.addFactory(workerFactory)
         sweepMlSyncScratch(processStartMs)
+        // Watches the data behind the automatic Drive saves and plans their next check, which a force stop drops.
+        autoSaveCoordinator.start()
         // Drop crash records left over from a version this build replaced, so a diagnostics bundle copied
         // after an update carries only this build's crashes rather than a prior version's history. Keeps
         // this version's own blocks, so a real crash from an earlier session on this build survives.

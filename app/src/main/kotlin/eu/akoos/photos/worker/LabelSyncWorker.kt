@@ -39,6 +39,9 @@ import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import eu.akoos.photos.R
+import eu.akoos.photos.data.autosave.AutoSaveCoordinator
+import eu.akoos.photos.data.autosave.AutoSaveKind
+import eu.akoos.photos.data.autosave.AutoSaveRunResult
 import eu.akoos.photos.data.label.LabelBackupOperation
 import eu.akoos.photos.data.label.LabelBackupOutcome
 import eu.akoos.photos.data.label.LabelBackupProgress
@@ -57,6 +60,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
@@ -83,13 +87,47 @@ class LabelSyncWorker @AssistedInject constructor(
     private val sdkGate: SdkGate,
     private val runner: LabelBackupRunner,
     private val signOut: MlSyncSignOut,
+    private val autoSave: AutoSaveCoordinator,
 ) : CoroutineWorker(context, params) {
 
     /** Read from the input on its own, so the notification knows it even for a request that is unreadable. */
     private val operation: LabelBackupOperation? by lazy { LabelSyncWorkData.operation(inputData) }
 
+    /** When this run began and how it ended, so the automatic save can record a finished save. */
+    private var runStartedMs = 0L
+    private var lastOutcome: LabelBackupOutcome? = null
+
     /** Tracked whole, so a sign-out can stop the run and wait for it to end. */
-    override suspend fun doWork(): Result = signOut.track { runRequest() }
+    override suspend fun doWork(): Result = signOut.track {
+        runStartedMs = System.currentTimeMillis()
+        try {
+            runRequest()
+        } finally {
+            withContext(NonCancellable) { recordAutoSave() }
+        }
+    }
+
+    /** Tells the automatic save how this run went, whoever started it, so it records a finished save and plans the next. */
+    private suspend fun recordAutoSave() {
+        val outcome = lastOutcome
+        val result = if (outcome?.operation != LabelBackupOperation.SAVE) {
+            AutoSaveRunResult.NEITHER
+        } else {
+            when (outcome.result) {
+                LabelBackupResult.SAVED, LabelBackupResult.NOTHING_TO_SAVE -> AutoSaveRunResult.SAVED
+                LabelBackupResult.FAILED, LabelBackupResult.CONFLICT, LabelBackupResult.FOLDER_MISSING ->
+                    AutoSaveRunResult.FAILED
+                else -> AutoSaveRunResult.NEITHER
+            }
+        }
+        try {
+            autoSave.saveEnded(AutoSaveKind.LABELS, runStartedMs, result)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "automatic save not told: ${e.javaClass.simpleName}")
+        }
+    }
 
     override suspend fun getForegroundInfo(): ForegroundInfo = foregroundInfo()
 
@@ -108,6 +146,9 @@ class LabelSyncWorker @AssistedInject constructor(
             finish(outcome ?: outcomeOf(request, LabelBackupResult.NOT_SIGNED_IN))
         } catch (e: CancellationException) {
             throw e
+        } catch (e: OutOfMemoryError) {
+            Log.w(TAG, "${request.operation} ran out of memory")
+            finish(outcomeOf(request, LabelBackupResult.FAILED))
         } catch (e: Exception) {
             Log.w(TAG, "${request.operation} failed: ${e.javaClass.simpleName}")
             finish(outcomeOf(request, LabelBackupResult.FAILED))
@@ -158,6 +199,7 @@ class LabelSyncWorker @AssistedInject constructor(
     }
 
     private fun finish(outcome: LabelBackupOutcome): Result {
+        lastOutcome = outcome
         Log.i(TAG, "${outcome.operation} ended: ${outcome.result}")
         val output = LabelSyncWorkData.output(outcome)
         return when (outcome.result) {

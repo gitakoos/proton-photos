@@ -91,6 +91,10 @@ class MlSyncSignOut @Inject constructor(
                 val work = WorkManager.getInstance(context)
                 work.cancelUniqueWork(MlSyncWorker.UNIQUE_WORK_NAME).await()
                 work.cancelUniqueWork(LabelSyncWorker.UNIQUE_WORK_NAME).await()
+                for (kind in eu.akoos.photos.data.autosave.AutoSaveKind.entries) {
+                    work.cancelUniqueWork(eu.akoos.photos.data.autosave.AutoSaveCoordinator.uniqueName(kind)).await()
+                }
+                eu.akoos.photos.data.autosave.AutoSaveStore(context).clearAll()
             }
         } catch (e: CancellationException) {
             throw e

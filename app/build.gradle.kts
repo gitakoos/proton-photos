@@ -137,6 +137,8 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
+        // The Robolectric database tests share one test JVM; its default heap runs out part way through the suite.
+        unitTests.all { it.maxHeapSize = "2g" }
     }
 }
 

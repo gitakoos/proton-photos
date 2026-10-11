@@ -130,7 +130,7 @@ private fun codecInfo(choice: VideoCodecChoice): String = stringResource(
 /** A bottom drawer in the app's usual sheet style, with a title and a scrollable body. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ChoiceSheet(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun ChoiceSheet(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val colors = AppColors.current
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -183,7 +183,7 @@ private fun ChoiceText(
  * description and detail a list row does, so the page says what is chosen without opening anything.
  */
 @Composable
-private fun CurrentChoice(
+internal fun CurrentChoice(
     title: String,
     description: String,
     detail: @Composable (() -> Unit)?,
@@ -214,7 +214,7 @@ private fun CurrentChoice(
  * rows, and one the phone cannot use stays in the list, dimmed, with its reason.
  */
 @Composable
-private fun ChoiceRow(
+internal fun ChoiceRow(
     selected: Boolean,
     enabled: Boolean,
     title: String,
@@ -260,7 +260,7 @@ private fun ChoiceRow(
 
 /** The thin line between two options of a list; left out beside the chosen option, whose card has its own border. */
 @Composable
-private fun ChoiceDivider() {
+internal fun ChoiceDivider() {
     HorizontalDivider(thickness = 0.5.dp, color = AppColors.current.cardBorder)
 }
 

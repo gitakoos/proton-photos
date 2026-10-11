@@ -39,6 +39,9 @@ import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import eu.akoos.photos.R
+import eu.akoos.photos.data.autosave.AutoSaveCoordinator
+import eu.akoos.photos.data.autosave.AutoSaveKind
+import eu.akoos.photos.data.autosave.AutoSaveRunResult
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.mlsync.CONFLICT_FAILURE
 import eu.akoos.photos.data.mlsync.FACE_WALK_IDLE_TIMEOUT_MS
@@ -151,17 +154,48 @@ class MlSyncWorker @AssistedInject constructor(
     private val semanticIndexingScheduler: SemanticIndexingScheduler,
     private val mlWalkGate: MlWalkGate,
     private val signOut: MlSyncSignOut,
+    private val autoSave: AutoSaveCoordinator,
 ) : CoroutineWorker(context, params) {
 
     /** Read from the input on its own, so the notification knows it even for a request that is unreadable. */
     private val operation: MlSyncOperation? by lazy { MlSyncWorkData.operation(inputData) }
 
+    /** When this run began and how it ended, so the automatic save can record a finished save. */
+    private var runStartedMs = 0L
+    private var lastOutcome: MlSyncOutcome? = null
+
     /** Tracked whole, the hand-back included, so a sign-out can stop the run and wait for it to end. */
     override suspend fun doWork(): Result = signOut.track {
+        runStartedMs = System.currentTimeMillis()
         try {
             runRequest()
         } finally {
-            withContext(NonCancellable) { handBackLeftoverFacePause() }
+            withContext(NonCancellable) {
+                handBackLeftoverFacePause()
+                recordAutoSave()
+            }
+        }
+    }
+
+    /** Tells the automatic save how this run went, whoever started it, so it records a finished save and plans the next. */
+    private suspend fun recordAutoSave() {
+        val outcome = lastOutcome
+        val result = if (outcome?.operation != MlSyncOperation.SAVE) {
+            AutoSaveRunResult.NEITHER
+        } else {
+            when (outcome.result) {
+                MlSyncResult.SUCCESS, MlSyncResult.NOTHING_TO_SAVE -> AutoSaveRunResult.SAVED
+                MlSyncResult.PARTIAL, MlSyncResult.FAILED, MlSyncResult.NO_SPACE, MlSyncResult.FOLDER_MISSING ->
+                    AutoSaveRunResult.FAILED
+                else -> AutoSaveRunResult.NEITHER
+            }
+        }
+        try {
+            autoSave.saveEnded(AutoSaveKind.ML, runStartedMs, result)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "automatic save not told: ${className(e)}")
         }
     }
 
@@ -191,6 +225,10 @@ class MlSyncWorker @AssistedInject constructor(
             finish(outcome ?: MlSyncOutcome(request.operation, MlSyncResult.NOT_SIGNED_IN))
         } catch (e: CancellationException) {
             throw e
+        } catch (e: OutOfMemoryError) {
+            // A very large library can run the heap out: the run ends as failed, and the automatic save tries again later.
+            Log.w(TAG, "${request.operation} ran out of memory")
+            finish(MlSyncOutcome(request.operation, MlSyncResult.FAILED, failure = "OutOfMemory"))
         } catch (e: Exception) {
             Log.w(TAG, "${request.operation} failed: ${className(e)}")
             finish(MlSyncOutcome(request.operation, MlSyncResult.FAILED, failure = className(e)))
@@ -668,6 +706,7 @@ class MlSyncWorker @AssistedInject constructor(
     }
 
     private fun finish(outcome: MlSyncOutcome): Result {
+        lastOutcome = outcome
         Log.i(TAG, "${outcome.operation} ended: ${outcome.result}")
         val output = MlSyncWorkData.output(outcome)
         return when (outcome.result) {

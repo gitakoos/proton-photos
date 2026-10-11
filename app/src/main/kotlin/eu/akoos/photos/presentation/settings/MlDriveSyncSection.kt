@@ -80,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
+import eu.akoos.photos.data.autosave.AutoSaveKind
 import eu.akoos.photos.data.mlsync.FaceSnapshotMode
 import eu.akoos.photos.data.mlsync.MlDriveFileKind
 import eu.akoos.photos.data.mlsync.MlSyncState
@@ -162,6 +163,7 @@ internal fun MlDriveSyncSection(
             onClick = viewModel::openRestore,
             enabled = actionsEnabled,
         )
+        AutoSaveRows(AutoSaveKind.ML, R.string.settings_autosave_confirm_ml)
     }
 
     // A job's outcome, the folder prompt and the Merge or Replace question all arrive once background work
