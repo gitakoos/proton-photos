@@ -131,6 +131,16 @@ import kotlin.math.sqrt
 // the screen's shorter side.
 private const val FOCUS_ZOOM = 12f
 
+// How far a pinch can zoom the globe in. Deep enough that cities a few kilometres apart each get room.
+private const val MAX_ZOOM = 120f
+
+// A city pin's width (the bitmap keeps its own proportions) and how far the city name hangs under the spot.
+private const val PIN_WIDTH_DP = 46f
+private const val CITY_LABEL_DROP = 24f
+
+// How far from a city's dot a tap still counts as that city.
+private const val DOT_HIT_DP = 16f
+
 /**
  * A rotating vector globe that surfaces the account's own places. The whole world is drawn as a light
  * base map; the countries with photos are washed in the accent and given a thicker outline, and each
@@ -291,7 +301,7 @@ fun CustomMapScreen(
                         while (true) {
                             val event = awaitPointerEvent()
                             val zoomChange = event.calculateZoom()
-                            if (zoomChange != 1f) zoom = (zoom * zoomChange).coerceIn(1f, 60f)
+                            if (zoomChange != 1f) zoom = (zoom * zoomChange).coerceIn(1f, MAX_ZOOM)
                             val pan = event.calculatePan()
                             if (pan != Offset.Zero) {
                                 val k = 0.22f / zoom
@@ -311,16 +321,8 @@ fun CustomMapScreen(
                             val radius = min(size.width, size.height) / 2f * 0.92f * zoom
                             val cLat = centerLat.toDouble()
                             val cLng = centerLng.toDouble()
-                            val pinScale = (1f + (zoom - 1f) * 0.05f).coerceAtMost(3f)
-                            val dstW = 46f * density * pinScale
-                            val dstH = dstW * 1.15f
-                            val city = cities.firstOrNull { c ->
-                                val gp = GlobeProjection.project(c.latitude, c.longitude, cLat, cLng, radius.toDouble())
-                                if (!gp.visible) return@firstOrNull false
-                                val px = cx + gp.x
-                                val py = cy + gp.y
-                                downPos.x in (px - dstW / 2f)..(px + dstW / 2f) && downPos.y in (py - dstH)..(py + 8f)
-                            }
+                            val city = placeCities(cities, thumbs, size.width.toFloat(), size.height.toFloat(), radius.toDouble(), cLat, cLng, density, cityPaint)
+                                .firstOrNull { it.hit(downPos.x, downPos.y, density) }?.city
                             if (city != null) {
                                 onCityClick(city.latitude, city.longitude)
                             } else {
@@ -391,34 +393,31 @@ fun CustomMapScreen(
                 drawIntoCanvas { it.nativeCanvas.drawText(label, cx + gp.x, cy + gp.y, countryPaint) }
             }
 
-            // A thumbnail pin + name for each visited city, over everything else.
-            for (city in cities) {
-                val gp = GlobeProjection.project(city.latitude, city.longitude, cLat, cLng, radius)
-                if (!gp.visible) continue
-                val px = cx + gp.x
-                val py = cy + gp.y
-                if (px < -60f || px > size.width + 60f || py < -60f || py > size.height + 60f) continue
-                val pinBmp = thumbs[city.city + "|" + city.countryCode]
-                if (pinBmp != null) {
-                    // The exact OSM marker bitmap, drawn with its bottom (the pointer tip) on the spot,
-                    // matching the OSM map's anchor; grows a little as the globe is zoomed in.
-                    val pinScale = (1f + (zoom - 1f) * 0.05f).coerceAtMost(3f)
-                    val dstW = 46f * density * pinScale
-                    val dstH = dstW * pinBmp.height / pinBmp.width
-                    drawImage(
-                        image = pinBmp,
-                        srcOffset = IntOffset.Zero,
-                        srcSize = IntSize(pinBmp.width, pinBmp.height),
-                        dstOffset = IntOffset((px - dstW / 2f).toInt(), (py - dstH).toInt()),
-                        dstSize = IntSize(dstW.toInt(), dstH.toInt()),
-                        alpha = fade,
-                    )
-                } else {
-                    drawCircle(Color.White, 7f, Offset(px, py), alpha = fade)
-                    drawCircle(highlight, 5f, Offset(px, py), alpha = fade)
-                }
+            // A thumbnail pin + name for each visited city that has room for it, over everything else; the
+            // busiest cities claim their room first and the others show as plain dots until a zoom gives
+            // them space.
+            val placements = placeCities(cities, thumbs, size.width, size.height, radius, cLat, cLng, density, cityPaint)
+            for (place in placements) {
+                if (place.pin != null) continue
+                drawCircle(Color.White, 4.5f * density, Offset(place.x, place.y), alpha = fade)
+                drawCircle(highlight, 3.2f * density, Offset(place.x, place.y), alpha = fade)
+            }
+            for (place in placements) {
+                if (place.pin == null) continue
+                val dstW = PIN_WIDTH_DP * density
+                val dstH = dstW * place.pin.height / place.pin.width
+                // The exact OSM marker bitmap, drawn with its bottom (the pointer tip) on the spot,
+                // matching the OSM map's anchor.
+                drawImage(
+                    image = place.pin,
+                    srcOffset = IntOffset.Zero,
+                    srcSize = IntSize(place.pin.width, place.pin.height),
+                    dstOffset = IntOffset((place.x - dstW / 2f).toInt(), (place.y - dstH).toInt()),
+                    dstSize = IntSize(dstW.toInt(), dstH.toInt()),
+                    alpha = fade,
+                )
                 cityPaint.alpha = (210 * fade).toInt()
-                drawIntoCanvas { it.nativeCanvas.drawText(city.city, px, py + 24f, cityPaint) }
+                drawIntoCanvas { it.nativeCanvas.drawText(place.city.city, place.x, place.y + CITY_LABEL_DROP, cityPaint) }
             }
 
             // The place the globe was opened on: an accent dot in a white ring inside a faint accent halo,
@@ -495,6 +494,62 @@ fun CustomMapScreen(
             )
         }
     }
+}
+
+/** A city placed on screen: [pin] is its drawn marker, or null when it only gets a dot. */
+private class CityPlacement(val city: PlaceCity, val x: Float, val y: Float, val pin: ImageBitmap?) {
+    /** Whether a tap at ([tapX], [tapY]) lands on this city's pin, or on its dot. */
+    fun hit(tapX: Float, tapY: Float, density: Float): Boolean {
+        if (pin == null) {
+            val r = DOT_HIT_DP * density
+            return abs(tapX - x) <= r && abs(tapY - y) <= r
+        }
+        val w = PIN_WIDTH_DP * density
+        val h = w * pin.height / pin.width
+        return tapX in (x - w / 2f)..(x + w / 2f) && tapY in (y - h)..(y + 8f)
+    }
+}
+
+/**
+ * The cities on the visible face of the globe that fall on screen, each as a full pin where the busiest
+ * cities leave room for it and as a dot where they do not. Both the drawing and the tap use this, so a tap
+ * always meets what is shown.
+ */
+private fun placeCities(
+    cities: List<PlaceCity>,
+    thumbs: Map<String, ImageBitmap>,
+    width: Float,
+    height: Float,
+    radius: Double,
+    cLat: Double,
+    cLng: Double,
+    density: Float,
+    labelPaint: android.graphics.Paint,
+): List<CityPlacement> {
+    val cx = width / 2f
+    val cy = height / 2f
+    val onScreen = ArrayList<CityPlacement>()
+    val footprints = ArrayList<PinFootprint>()
+    val pinW = PIN_WIDTH_DP * density
+    for (city in cities) {
+        val gp = GlobeProjection.project(city.latitude, city.longitude, cLat, cLng, radius)
+        if (!gp.visible) continue
+        val x = cx + gp.x
+        val y = cy + gp.y
+        if (x < -60f || x > width + 60f || y < -60f || y > height + 60f) continue
+        val pin = thumbs[city.city + "|" + city.countryCode]
+        val labelHalf = labelPaint.measureText(city.city) / 2f
+        val pinH = if (pin != null) pinW * pin.height / pin.width else 10f * density
+        footprints += PinFootprint(
+            x = x, y = y,
+            halfWidth = max(labelHalf, if (pin != null) pinW / 2f else 10f * density),
+            above = pinH,
+            below = CITY_LABEL_DROP + 8f,
+        )
+        onScreen += CityPlacement(city, x, y, pin)
+    }
+    val kept = keptPins(footprints, gap = 4f * density)
+    return onScreen.mapIndexed { i, p -> if (kept[i]) p else CityPlacement(p.city, p.x, p.y, null) }
 }
 
 private fun coverModel(item: GalleryItem?): Any? = when (item) {

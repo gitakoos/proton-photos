@@ -164,7 +164,9 @@ internal fun DuplicateGroupReview(
     val exifCache = remember { mutableStateMapOf<String, PhotoMetadata>() }
 
     val currentItem = group.items[pagerState.currentPage]
-    val canDelete = !isDeleting && selected.isNotEmpty()
+    // A selection covering every copy comes only from the list's Delete group; this overlay deletes
+    // extras and always keeps one, so such a selection is deleted from the list instead.
+    val canDelete = !isDeleting && selected.isNotEmpty() && selected.size < allIds.size
 
     // Fetch every copy's full-res (and thereby its true size and dimensions) as the group opens, so a
     // swipe lands on already-resolved details instead of a spinner. Device copies need no fetch.

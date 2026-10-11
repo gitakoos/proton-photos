@@ -1611,6 +1611,9 @@
     <string name="duplicates_filter_identical">Stejné</string>
     <string name="duplicates_filter_similar">Podobné</string>
     <string name="duplicates_ignore_group">Ignorovat</string>
+    <string name="duplicates_delete_group">Smazat skupinu</string>
+    <string name="duplicates_confirm_title_whole">Smazat všechny kopie?</string>
+    <string name="duplicates_confirm_message_whole">Smazání skupiny odstraní všechny kopie v dané skupině, takže žádná z těchto fotek nezůstane. Fotky mimo vybrané skupiny se nezmění.</string>
     <string name="duplicates_unignore_group">Přestat ignorovat</string>
     <string name="duplicates_filter_ignored_label">Ignorované skupiny</string>
     <string name="duplicates_filter_ignored">Zobrazit ignorované</string>

@@ -1612,6 +1612,9 @@
     <string name="duplicates_filter_identical">Enake</string>
     <string name="duplicates_filter_similar">Podobne</string>
     <string name="duplicates_ignore_group">Ne upoštevaj</string>
+    <string name="duplicates_delete_group">Izbriši skupino</string>
+    <string name="duplicates_confirm_title_whole">Izbrišem vse kopije?</string>
+    <string name="duplicates_confirm_message_whole">Brisanje skupine odstrani vse kopije v tej skupini, zato nobena od teh fotografij ne ostane. Fotografije zunaj izbranih skupin ostanejo nedotaknjene.</string>
     <string name="duplicates_unignore_group">Upoštevaj znova</string>
     <string name="duplicates_filter_ignored_label">Neupoštevane skupine</string>
     <string name="duplicates_filter_ignored">Pokaži neupoštevane</string>

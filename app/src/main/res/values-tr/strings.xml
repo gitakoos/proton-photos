@@ -2182,6 +2182,9 @@
     <string name="duplicates_filter_identical">Birebir aynı</string>
     <string name="duplicates_filter_similar">Benzer</string>
     <string name="duplicates_ignore_group">Yok say</string>
+    <string name="duplicates_delete_group">Grubu sil</string>
+    <string name="duplicates_confirm_title_whole">Tüm kopyalar silinsin mi?</string>
+    <string name="duplicates_confirm_message_whole">Grubu sil, o gruptaki her kopyayı kaldırır; bu yüzden o fotoğraflardan hiçbiri kalmaz. Seçili grupların dışındaki fotoğraflara dokunulmaz.</string>
     <string name="duplicates_unignore_group">Yok saymayı bırak</string>
     <string name="duplicates_filter_ignored_label">Yok sayılan gruplar</string>
     <string name="duplicates_filter_ignored">Yok sayılanları göster</string>

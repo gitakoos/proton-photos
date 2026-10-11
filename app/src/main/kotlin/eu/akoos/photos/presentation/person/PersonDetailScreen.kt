@@ -269,6 +269,20 @@ fun PersonDetailScreen(
             else -> {
                 val cols = eu.akoos.photos.presentation.gallery.rememberDefaultGridColumns()
                 val seamless = eu.akoos.photos.presentation.gallery.rememberSeamlessGrid()
+                // Long-press a photo then drag to sweep a range, the way the timeline and albums select. The
+                // hint and merge rows at the top carry no photo key, so they are never part of a sweep.
+                val selectableIds = remember(state.items) { state.items.map { it.stableId } }
+                val idToIndex = remember(selectableIds) { selectableIds.withIndex().associate { (i, id) -> id to i } }
+                // Armed at the long-press anchor so the cell's release-tap does not toggle it straight back off.
+                val tapGuard = remember { mutableStateOf(false) }
+                val dragSelectModifier = eu.akoos.photos.presentation.gallery.rememberDragMultiSelectModifier(
+                    gridState = gridState,
+                    items = selectableIds,
+                    indexByKey = idToIndex,
+                    selected = selection,
+                    onSelectionChange = { selection = it },
+                    tapGuard = tapGuard,
+                )
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(cols),
                     state = gridState,
@@ -284,7 +298,7 @@ fun PersonDetailScreen(
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().then(dragSelectModifier),
                 ) {
                     // The Unsorted bucket explains itself at the top of its grid, so it is never mistaken
                     // for a person the app thinks it recognised.
@@ -333,8 +347,15 @@ fun PersonDetailScreen(
                             typeBadgeCdRes = inputs.typeBadgeCdRes,
                             columns = cols,
                             cornerRadius = if (seamless) 0.dp else 10.dp,
-                            onClick = { if (selecting) toggle(item.stableId) else onOpenPhoto(item) },
-                            onLongClick = { toggle(item.stableId) },
+                            onClick = {
+                                // Skip the release-tap that follows a long-press select; it would
+                                // otherwise toggle the just-anchored photo back off.
+                                if (tapGuard.value) tapGuard.value = false
+                                else if (selecting) toggle(item.stableId)
+                                else onOpenPhoto(item)
+                            },
+                            // Long-press and drag are handled by the grid-level drag-select.
+                            onLongClick = null,
                         )
                     }
                 }

@@ -2299,6 +2299,9 @@
     <string name="duplicates_filter_identical">Identical</string>
     <string name="duplicates_filter_similar">Similar</string>
     <string name="duplicates_ignore_group">Ignore</string>
+    <string name="duplicates_delete_group">Delete group</string>
+    <string name="duplicates_confirm_title_whole">Delete every copy?</string>
+    <string name="duplicates_confirm_message_whole">Delete group removes every copy in that group, so none of those photos stays. Photos outside the selected groups are not touched.</string>
     <string name="duplicates_unignore_group">Stop ignoring</string>
     <string name="duplicates_filter_ignored_label">Ignored groups</string>
     <string name="duplicates_filter_ignored">Show ignored</string>

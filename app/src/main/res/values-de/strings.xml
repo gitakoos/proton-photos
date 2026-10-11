@@ -1533,6 +1533,9 @@
     <string name="duplicates_filter_identical">Identisch</string>
     <string name="duplicates_filter_similar">Ähnlich</string>
     <string name="duplicates_ignore_group">Ignorieren</string>
+    <string name="duplicates_delete_group">Gruppe löschen</string>
+    <string name="duplicates_confirm_title_whole">Alle Kopien löschen?</string>
+    <string name="duplicates_confirm_message_whole">Gruppe löschen entfernt jede Kopie dieser Gruppe, sodass keines dieser Fotos übrig bleibt. Fotos außerhalb der gewählten Gruppen bleiben unberührt.</string>
     <string name="duplicates_unignore_group">Nicht mehr ignorieren</string>
     <string name="duplicates_filter_ignored_label">Ignorierte Gruppen</string>
     <string name="duplicates_filter_ignored">Ignorierte anzeigen</string>

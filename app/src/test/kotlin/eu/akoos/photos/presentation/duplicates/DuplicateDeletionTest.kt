@@ -112,4 +112,57 @@ class DuplicateDeletionTest {
         )
         assertEquals(listOf(listOf("C")), out)
     }
+
+    @Test
+    fun `whole group takes every copy`() {
+        val (partial, whole) = DuplicateDeletion.batchDeletableWithWholeGroups(
+            partialGroups = emptyList(),
+            wholeGroups = listOf(listOf("A", "B", "C")),
+            alreadyDeleted = emptySet(),
+        )
+        assertTrue(partial.isEmpty())
+        assertEquals(listOf(listOf("A", "B", "C")), whole)
+    }
+
+    @Test
+    fun `whole group skips copies already deleted`() {
+        val (_, whole) = DuplicateDeletion.batchDeletableWithWholeGroups(
+            partialGroups = emptyList(),
+            wholeGroups = listOf(listOf("A", "B")),
+            alreadyDeleted = setOf("A"),
+        )
+        assertEquals(listOf(listOf("B")), whole)
+    }
+
+    @Test
+    fun `a partial group whose keeper is in a whole group deletes nothing`() {
+        val (partial, whole) = DuplicateDeletion.batchDeletableWithWholeGroups(
+            partialGroups = listOf(listOf("A", "X") to setOf("A")),
+            wholeGroups = listOf(listOf("A", "B")),
+            alreadyDeleted = emptySet(),
+        )
+        assertEquals("the keeper is going, so X must stay", listOf(emptyList<String>()), partial)
+        assertEquals(listOf(listOf("A", "B")), whole)
+    }
+
+    @Test
+    fun `a partial group with an unrelated keeper still deletes its extras next to a whole group`() {
+        val (partial, whole) = DuplicateDeletion.batchDeletableWithWholeGroups(
+            partialGroups = listOf(listOf("C", "D") to setOf("C")),
+            wholeGroups = listOf(listOf("A", "B")),
+            alreadyDeleted = emptySet(),
+        )
+        assertEquals(listOf(listOf("D")), partial)
+        assertEquals(listOf(listOf("A", "B")), whole)
+    }
+
+    @Test
+    fun `a copy in two whole groups is deleted once`() {
+        val (_, whole) = DuplicateDeletion.batchDeletableWithWholeGroups(
+            partialGroups = emptyList(),
+            wholeGroups = listOf(listOf("A", "B"), listOf("B", "C")),
+            alreadyDeleted = emptySet(),
+        )
+        assertEquals(listOf(listOf("A", "B"), listOf("C")), whole)
+    }
 }

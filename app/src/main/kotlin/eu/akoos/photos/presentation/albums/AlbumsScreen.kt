@@ -1571,8 +1571,9 @@ private fun LibraryViewsRow(
         val gap = 12.dp
         val sidePad = if (padded) 20.dp else 0.dp
         // With more tiles than fit, they are sized so the last one shows only in part and fades out,
-        // which says the strip scrolls. Few enough tiles keep their plain size.
-        val tileWidth = if (tiles.size > 4) (maxWidth - sidePad * 2 - gap * 3) / 3.5f else 72.dp
+        // which says the strip scrolls. Few enough tiles keep their plain size. The width is capped so a
+        // wide screen keeps the tiles close together instead of stretching the gaps between the icons.
+        val tileWidth = if (tiles.size > 4) ((maxWidth - sidePad * 2 - gap * 3) / 3.5f).coerceAtMost(100.dp) else 72.dp
         val fadeColor = AppColors.current.bg0
         val scrolledAway by remember { derivedStateOf { scrollState.value > 0 } }
         val moreAhead by remember { derivedStateOf { scrollState.value < scrollState.maxValue } }

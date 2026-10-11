@@ -72,4 +72,28 @@ object DuplicateDeletion {
             ids
         }
     }
+
+    /**
+     * The ids to delete when the user chose whole groups ([wholeGroups], every copy goes) next to groups
+     * where some copies stay ([partialGroups], each with its keepers), as (partial per group, whole per
+     * group), both in input order.
+     *
+     * A whole group is the user's explicit choice, so it takes every copy not already deleted. It is
+     * worked out first and its ids are fed to the partial groups as already gone: a partial group whose
+     * keeper sits in a whole group then stands down, exactly like a keeper deleted earlier, instead of
+     * deleting its other copies on the promise of a survivor that is about to go.
+     */
+    fun batchDeletableWithWholeGroups(
+        partialGroups: List<Pair<List<String>, Set<String>>>,
+        wholeGroups: List<List<String>>,
+        alreadyDeleted: Set<String>,
+    ): Pair<List<List<String>>, List<List<String>>> {
+        val running = alreadyDeleted.toMutableSet()
+        val whole = wholeGroups.map { groupIds ->
+            val ids = groupIds.filter { it !in running }
+            running += ids
+            ids
+        }
+        return batchDeletableExtras(partialGroups, running) to whole
+    }
 }

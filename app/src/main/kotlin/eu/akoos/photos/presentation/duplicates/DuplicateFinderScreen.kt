@@ -36,6 +36,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -80,6 +82,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -241,6 +244,29 @@ fun DuplicateFinderScreen(
                 val remove = groupSelections[duplicateGroupKey(g)].orEmpty()
                 if (remove.isEmpty()) null else g to remove
             }
+        // Groups the user chose Delete group on: every copy is ticked and the whole group goes. A group
+        // only counts while all its copies are still ticked, so unticking one returns it to a normal pick.
+        val wholeGroupKeys = remember { mutableStateListOf<String>() }
+        val wholeSelections = batchSelections.filter { (g, remove) ->
+            duplicateGroupKey(g) in wholeGroupKeys && remove.size == g.items.size
+        }
+        val partialSelections = batchSelections.filter { it !in wholeSelections }
+        val toggleDeleteGroup: (DuplicateGroup) -> Unit = { group ->
+            val key = duplicateGroupKey(group)
+            if (key in wholeGroupKeys) {
+                wholeGroupKeys.remove(key)
+                groupSelections.remove(key)
+            } else {
+                wholeGroupKeys.add(key)
+                groupSelections[key] = group.items.map { it.stableId }.toSet()
+            }
+        }
+        // A hand edit of a card's ticks ends the Delete group choice for that card.
+        val editSelection: (DuplicateGroup, Set<String>) -> Unit = { group, ticks ->
+            val key = duplicateGroupKey(group)
+            wholeGroupKeys.remove(key)
+            groupSelections[key] = ticks
+        }
         // The ticked copies across every visible group, flattened for the shared selection drawer.
         val selectedItems = batchSelections.flatMap { (g, remove) -> g.items.filter { it.stableId in remove } }
         // Ticks every copy but the first of each listed group that has nothing ticked yet, identical and
@@ -255,6 +281,7 @@ fun DuplicateFinderScreen(
                 viewModel.restoreGroup(group)
             } else {
                 groupSelections.remove(duplicateGroupKey(group))
+                wholeGroupKeys.remove(duplicateGroupKey(group))
                 viewModel.ignoreGroup(group)
             }
         }
@@ -325,8 +352,10 @@ fun DuplicateFinderScreen(
                                 similar = false,
                                 albumNames = albumNames,
                                 selected = groupSelections[key].orEmpty(),
-                                onSelectionChange = { groupSelections[key] = it },
+                                onSelectionChange = { editSelection(group, it) },
                                 ignored = showIgnored,
+                                deleteGroupChosen = key in wholeGroupKeys,
+                                onDeleteGroup = { toggleDeleteGroup(group) },
                                 onToggleIgnore = { toggleIgnore(group) },
                                 onOpenReviewAt = { idx ->
                                     reviewGroup = group
@@ -347,8 +376,10 @@ fun DuplicateFinderScreen(
                                 similar = false,
                                 albumNames = albumNames,
                                 selected = groupSelections[key].orEmpty(),
-                                onSelectionChange = { groupSelections[key] = it },
+                                onSelectionChange = { editSelection(group, it) },
                                 ignored = showIgnored,
+                                deleteGroupChosen = key in wholeGroupKeys,
+                                onDeleteGroup = { toggleDeleteGroup(group) },
                                 onToggleIgnore = { toggleIgnore(group) },
                                 onOpenReviewAt = { idx ->
                                     reviewGroup = group
@@ -377,8 +408,10 @@ fun DuplicateFinderScreen(
                                 similar = true,
                                 albumNames = albumNames,
                                 selected = groupSelections[key].orEmpty(),
-                                onSelectionChange = { groupSelections[key] = it },
+                                onSelectionChange = { editSelection(group, it) },
                                 ignored = showIgnored,
+                                deleteGroupChosen = key in wholeGroupKeys,
+                                onDeleteGroup = { toggleDeleteGroup(group) },
                                 onToggleIgnore = { toggleIgnore(group) },
                                 onOpenReviewAt = { idx ->
                                     reviewGroup = group
@@ -396,8 +429,10 @@ fun DuplicateFinderScreen(
                                 similar = true,
                                 albumNames = albumNames,
                                 selected = groupSelections[key].orEmpty(),
-                                onSelectionChange = { groupSelections[key] = it },
+                                onSelectionChange = { editSelection(group, it) },
                                 ignored = showIgnored,
+                                deleteGroupChosen = key in wholeGroupKeys,
+                                onDeleteGroup = { toggleDeleteGroup(group) },
                                 onToggleIgnore = { toggleIgnore(group) },
                                 onOpenReviewAt = { idx ->
                                     reviewGroup = group
@@ -500,17 +535,23 @@ fun DuplicateFinderScreen(
                 else R.string.duplicates_confirm_message
             )
             val freesNote = stringResource(R.string.delete_frees_note, formatBytes(freed))
+            val withFrees = if (freed > 0) "$baseMessage $freesNote" else baseMessage
+            val wholeNote = stringResource(R.string.duplicates_confirm_message_whole)
+            val hasWhole = wholeSelections.isNotEmpty()
             ConfirmDialog(
-                title = stringResource(R.string.duplicates_confirm_title),
-                message = if (freed > 0) "$baseMessage $freesNote" else baseMessage,
+                title = stringResource(
+                    if (hasWhole) R.string.duplicates_confirm_title_whole else R.string.duplicates_confirm_title
+                ),
+                message = if (hasWhole) "$wholeNote $withFrees" else withFrees,
                 confirmLabel = stringResource(R.string.duplicates_confirm_delete),
                 dismissLabel = stringResource(R.string.cancel),
                 onConfirm = {
                     showBatchConfirm = false
                     viewModel.deleteExtrasBatch(
-                        batchSelections.map { (g, remove) ->
+                        selections = partialSelections.map { (g, remove) ->
                             g to keepIdsForRemoval(g.items.map { it.stableId }.toSet(), remove)
                         },
+                        wholeGroups = wholeSelections.map { it.first },
                     )
                 },
                 onDismiss = { showBatchConfirm = false },
@@ -742,6 +783,7 @@ private fun ScanningRow() {
  * removal set can never name a copy the group no longer holds. A pill at the bottom leaves the group out of
  * the list ([ignored] false) or brings it back from the Ignored list ([ignored] true).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DuplicateGroupCard(
     group: DuplicateGroup,
@@ -751,6 +793,8 @@ private fun DuplicateGroupCard(
     onSelectionChange: (Set<String>) -> Unit,
     ignored: Boolean,
     onToggleIgnore: () -> Unit,
+    deleteGroupChosen: Boolean,
+    onDeleteGroup: () -> Unit,
     onOpenReviewAt: (index: Int) -> Unit,
     requestDecrypt: (String) -> Unit,
     cancelDecrypt: (String) -> Unit,
@@ -811,9 +855,40 @@ private fun DuplicateGroupCard(
                 )
             }
         }
-        // Leave the group out of the list (or, in the Ignored list, bring it back). One pill on a line of
-        // its own, so a long label in any language has the whole width and never squeezes another control.
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        // Delete the whole group (selects every copy for the usual delete bar) and leave the group out of the
+        // list (or, in the Ignored list, bring it back). The pills wrap, so a long label in any language
+        // drops to its own line instead of squeezing the other.
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (!ignored) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+                        .clickable(onClick = onDeleteGroup)
+                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(
+                        Icons.Default.DeleteOutline,
+                        contentDescription = null,
+                        tint = if (deleteGroupChosen) Accent else FgDim,
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Text(
+                        stringResource(R.string.duplicates_delete_group),
+                        color = if (deleteGroupChosen) Accent else FgDim,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))

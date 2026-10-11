@@ -1558,6 +1558,9 @@
     <string name="duplicates_filter_identical">Azonos</string>
     <string name="duplicates_filter_similar">Hasonló</string>
     <string name="duplicates_ignore_group">Kihagyás</string>
+    <string name="duplicates_delete_group">Csoport törlése</string>
+    <string name="duplicates_confirm_title_whole">Törlöd az összes másolatot?</string>
+    <string name="duplicates_confirm_message_whole">A csoport törlése a csoport minden másolatát eltávolítja, így azokból a fotókból egy sem marad meg. A kijelölt csoportokon kívüli fotókhoz nem nyúl.</string>
     <string name="duplicates_unignore_group">Visszahozás</string>
     <string name="duplicates_filter_ignored_label">Kihagyott csoportok</string>
     <string name="duplicates_filter_ignored">Kihagyottak mutatása</string>

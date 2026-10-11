@@ -574,21 +574,28 @@ class DuplicateFinderViewModel @Inject constructor(
      * Batching matters for correctness as much as convenience: the device trash path carries a single
      * pending-permission slot, so deleting group by group would let two device groups clobber each
      * other's system dialog. One call means one dialog for every device copy at once.
+     *
+     * [wholeGroups] are groups the user chose to remove completely (the card's Delete group action);
+     * every copy of each goes, and a partial group whose keeper sits in one of them stands down.
      */
-    fun deleteExtrasBatch(selections: List<Pair<FindDuplicatesUseCase.DuplicateGroup, Set<String>>>) {
+    fun deleteExtrasBatch(
+        selections: List<Pair<FindDuplicatesUseCase.DuplicateGroup, Set<String>>>,
+        wholeGroups: List<FindDuplicatesUseCase.DuplicateGroup> = emptyList(),
+    ) {
         // Thread each group's deletions into the next group's guard, so two cards that show the same
         // pair with opposite keepers cannot each delete the copy the other kept. A single frozen
         // snapshot across every group is what lets that happen; batchDeletableExtras accumulates.
-        val perGroupIds = DuplicateDeletion.batchDeletableExtras(
-            groups = selections.map { (group, keepIds) -> group.items.map { it.stableId } to keepIds },
+        val (partialIds, wholeIds) = DuplicateDeletion.batchDeletableWithWholeGroups(
+            partialGroups = selections.map { (group, keepIds) -> group.items.map { it.stableId } to keepIds },
+            wholeGroups = wholeGroups.map { group -> group.items.map { it.stableId } },
             alreadyDeleted = recentlyDeleted.value,
         )
-        val perGroup = selections.zip(perGroupIds).mapNotNull { (selection, ids) ->
-            val (group, _) = selection
-            val idSet = ids.toSet()
-            val items = group.items.filter { it.stableId in idSet }
-            if (items.isEmpty()) null else group to items
-        }
+        val perGroup = (selections.map { it.first }.zip(partialIds) + wholeGroups.zip(wholeIds))
+            .mapNotNull { (group, ids) ->
+                val idSet = ids.toSet()
+                val items = group.items.filter { it.stableId in idSet }
+                if (items.isEmpty()) null else group to items
+            }
         val toDelete = perGroup.flatMap { it.second }
         if (toDelete.isEmpty()) return
 
