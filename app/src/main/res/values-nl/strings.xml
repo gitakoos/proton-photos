@@ -925,6 +925,8 @@
     <!-- "On this day" memories card on the Photos tab. Shown above the grid when the user
          has photos taken on TODAY's calendar date (same month + day) in earlier years. -->
     <string name="gallery_on_this_day">Op deze dag</string>
+    <string name="settings_on_this_day_range">Dagen ervoor en erna</string>
+    <string name="settings_on_this_day_range_desc">0 toont alleen de dag zelf. 1 tot 3 voegen zoveel dagen ervoor en erna toe.</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">%1$d jaar geleden</item>
         <item quantity="other">%1$d jaar geleden</item>

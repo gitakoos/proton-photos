@@ -43,6 +43,7 @@ import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.util.computeOnThisDay
+import eu.akoos.photos.util.onThisDayWindowDays
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -99,8 +100,9 @@ class MemoriesViewModel @Inject constructor(
                 // grouping runs under the local partition, so People appear here too when AI is on, the
                 // same opt-in the signed-in branch below honours. Local covers load directly, so the
                 // cloud cover-pinning tail is not needed here.
-                val memories = getGalleryItems.invokeLocalOnly()
-                    .map { all -> MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all), seasons = buckets(all)) }
+                val memories = combine(getGalleryItems.invokeLocalOnly(), context.onThisDayWindowDays()) { all, days ->
+                    MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all, days), seasons = buckets(all))
+                }
                 val people = context.settingsDataStore.data
                     .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.FACE_ENABLED] == true }
                     .distinctUntilChanged()
@@ -111,8 +113,9 @@ class MemoriesViewModel @Inject constructor(
                     }
                 combine(memories, people) { state, ppl -> state.copy(people = ppl) }
             } else {
-                val memories = getGalleryItems.invoke(userId)
-                    .map { all -> MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all), seasons = buckets(all)) }
+                val memories = combine(getGalleryItems.invoke(userId), context.onThisDayWindowDays()) { all, days ->
+                    MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all, days), seasons = buckets(all))
+                }
                 // People show in the Collection only with AI on, the same opt-in the rest of the
                 // grouping honours; the face crop needs the feed's original dimensions, so the use
                 // case is handed the same library flow.

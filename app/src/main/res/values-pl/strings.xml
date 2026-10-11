@@ -1122,6 +1122,8 @@
     <!-- "On this day" memories card on the Photos tab. Shown above the grid when the user
          has photos taken on TODAY's calendar date (same month + day) in earlier years. -->
     <string name="gallery_on_this_day">Tego dnia</string>
+    <string name="settings_on_this_day_range">Dni przed i po</string>
+    <string name="settings_on_this_day_range_desc">0 pokazuje tylko sam dzień. Od 1 do 3 dodaje tyle dni przed i po nim.</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">%1$d rok temu</item>
         <item quantity="few">%1$d lata temu</item>

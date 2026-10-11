@@ -140,6 +140,7 @@ import eu.akoos.photos.presentation.settings.ExcludedFoldersScreen
 import eu.akoos.photos.presentation.settings.SyncFoldersScreen
 import eu.akoos.photos.presentation.settings.TimelineFilterScreen
 import eu.akoos.photos.presentation.settings.TimelineLayoutScreen
+import eu.akoos.photos.presentation.settings.TimelineOnThisDayScreen
 import eu.akoos.photos.presentation.settings.TimelineCategoriesScreen
 import eu.akoos.photos.presentation.settings.TimelineAlbumsScreen
 import eu.akoos.photos.presentation.settings.TimelineDeviceFoldersScreen
@@ -230,6 +231,7 @@ sealed class Screen(val route: String) {
     data object NotificationSettings : Screen("notification_settings")
     data object TimelineFilter : Screen("timeline_filter")
     data object TimelineLayout : Screen("timeline_layout")
+    data object TimelineOnThisDay : Screen("timeline_on_this_day")
     data object TimelineCategories : Screen("timeline_categories")
     data object TimelineAlbums : Screen("timeline_albums")
     data object TimelineDeviceFolders : Screen("timeline_device_folders")
@@ -1884,6 +1886,7 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 isSignedIn = navViewModel.isLoggedIn.collectAsStateWithLifecycle().value == true,
                 onOpenLayout = { navController.navigate(Screen.TimelineLayout.route) },
+                onOpenOnThisDay = { navController.navigate(Screen.TimelineOnThisDay.route) },
                 onOpenCategories = { navController.navigate(Screen.TimelineCategories.route) },
                 onOpenAlbums = { navController.navigate(Screen.TimelineAlbums.route) },
                 onOpenDeviceFolders = { navController.navigate(Screen.TimelineDeviceFolders.route) },
@@ -1891,7 +1894,14 @@ fun NavGraph(
         }
 
         composable(Screen.TimelineLayout.route) {
-            TimelineLayoutScreen(onBack = { navController.popBackStack() })
+            TimelineLayoutScreen(
+                onBack = { navController.popBackStack() },
+                onOpenOnThisDay = { navController.navigate(Screen.TimelineOnThisDay.route) },
+            )
+        }
+
+        composable(Screen.TimelineOnThisDay.route) {
+            TimelineOnThisDayScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.TimelineCategories.route) {

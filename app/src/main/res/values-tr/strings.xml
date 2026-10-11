@@ -1487,6 +1487,8 @@
     </plurals>
 
     <string name="gallery_on_this_day">Bu gün</string>
+    <string name="settings_on_this_day_range">Öncesi ve sonrası gün sayısı</string>
+    <string name="settings_on_this_day_range_desc">0 yalnızca günün kendisini gösterir. 1 ile 3 arası, öncesine ve sonrasına o kadar gün ekler.</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">%1$d yıl önce</item>
         <item quantity="other">%1$d yıl önce</item>

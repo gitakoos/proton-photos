@@ -869,6 +869,8 @@
     </plurals>
 
     <string name="gallery_on_this_day">Ce jour-là</string>
+    <string name="settings_on_this_day_range">Jours avant et après</string>
+    <string name="settings_on_this_day_range_desc">0 n\'affiche que le jour même. De 1 à 3 ajoutent autant de jours avant et après.</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">il y a %1$d an</item>
         <item quantity="other">il y a %1$d ans</item>

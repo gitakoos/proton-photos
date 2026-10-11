@@ -86,6 +86,8 @@ import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.StatusError
+import eu.akoos.photos.util.ON_THIS_DAY_MAX_WINDOW_DAYS
+import eu.akoos.photos.util.onThisDayWindowDays
 
 /**
  * The Photos timeline settings hub — a menu of focused sub-pages so each concern lives on its
@@ -98,6 +100,7 @@ fun TimelineFilterScreen(
     onBack: () -> Unit,
     isSignedIn: Boolean = true,
     onOpenLayout: () -> Unit = {},
+    onOpenOnThisDay: () -> Unit = {},
     onOpenCategories: () -> Unit = {},
     onOpenAlbums: () -> Unit = {},
     onOpenDeviceFolders: () -> Unit = {},
@@ -109,6 +112,8 @@ fun TimelineFilterScreen(
                 description = stringResource(R.string.timeline_filter_layout_desc),
                 onClick = onOpenLayout,
             )
+            RowDivider()
+            NavRow(label = stringResource(R.string.gallery_on_this_day), onClick = onOpenOnThisDay)
             RowDivider()
             NavRow(label = stringResource(R.string.timeline_filter_categories_header), onClick = onOpenCategories)
             RowDivider()
@@ -126,14 +131,10 @@ fun TimelineFilterScreen(
 @Composable
 fun TimelineLayoutScreen(
     onBack: () -> Unit,
+    onOpenOnThisDay: () -> Unit = {},
     settingsViewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     val settings by settingsViewModel.uiState.collectAsStateWithLifecycle()
-    val showOnThisDay by remember {
-        ctx.settingsDataStore.data.map { it[SettingsKeys.SHOW_ON_THIS_DAY] ?: true }
-    }.collectAsState(initial = true)
 
     SettingsSubPageScaffold(
         title = stringResource(R.string.settings_timeline_section_layout),
@@ -201,14 +202,8 @@ fun TimelineLayoutScreen(
                 onCheckedChange = settingsViewModel::setSeamlessGrid,
             )
             RowDivider()
-            // "On this day" memories carousel on the Photos tab — display toggle, default on.
-            ToggleRow(
-                label = stringResource(R.string.gallery_on_this_day),
-                checked = showOnThisDay,
-                onCheckedChange = { on ->
-                    scope.launch { ctx.settingsDataStore.edit { it[SettingsKeys.SHOW_ON_THIS_DAY] = on } }
-                },
-            )
+            // "On this day" memories: the switch and the range live on their own page.
+            NavRow(label = stringResource(R.string.gallery_on_this_day), onClick = onOpenOnThisDay)
             RowDivider()
             ToggleRow(
                 label = stringResource(R.string.settings_gif_autoplay_grid),
@@ -221,6 +216,62 @@ fun TimelineLayoutScreen(
                 checked = settings.gifAutoplayCovers,
                 onCheckedChange = settingsViewModel::setGifAutoplayCovers,
             )
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** "On this day": whether the memories show, and how many whole days either side of the date they reach. */
+@Composable
+fun TimelineOnThisDayScreen(onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val colors = AppColors.current
+    val show by remember {
+        ctx.settingsDataStore.data.map { it[SettingsKeys.SHOW_ON_THIS_DAY] ?: true }
+    }.collectAsState(initial = true)
+    val days by remember { ctx.onThisDayWindowDays() }.collectAsState(initial = 0)
+
+    SettingsSubPageScaffold(title = stringResource(R.string.gallery_on_this_day), onBack = onBack) {
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.gallery_on_this_day),
+                checked = show,
+                onCheckedChange = { on ->
+                    scope.launch { ctx.settingsDataStore.edit { it[SettingsKeys.SHOW_ON_THIS_DAY] = on } }
+                },
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        // Greyed out while the memories are off, as the default columns are while the last zoom is kept.
+        CollapsibleSection(label = stringResource(R.string.settings_on_this_day_range)) {
+            Column(modifier = Modifier.alpha(if (show) 1f else 0.4f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    (0..ON_THIS_DAY_MAX_WINDOW_DAYS).forEach { count ->
+                        TimelinePill(
+                            label = count.toString(),
+                            selected = days == count,
+                            onClick = {
+                                if (show) {
+                                    scope.launch {
+                                        ctx.settingsDataStore.edit { it[SettingsKeys.ON_THIS_DAY_WINDOW_DAYS] = count }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    stringResource(R.string.settings_on_this_day_range_desc),
+                    color = colors.fgMute,
+                    fontSize = 12.5.sp,
+                )
+            }
         }
         Spacer(Modifier.height(24.dp))
     }

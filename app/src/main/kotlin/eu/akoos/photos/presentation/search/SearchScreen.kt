@@ -112,6 +112,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -202,6 +203,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.util.computeOnThisDay
+import eu.akoos.photos.util.onThisDayWindowDays
 import java.util.Calendar
 
 /**
@@ -665,9 +667,11 @@ fun SearchScreen(
             // frame on a full-library walk.
             // Both producers assign `value` below; @Suppress silences a lint false-positive it
             // raises on the `value = withContext { … }` form.
+            val searchContext = LocalContext.current
+            val onThisDayDays by remember(searchContext) { searchContext.onThisDayWindowDays() }.collectAsState(initial = 0)
             @Suppress("ProduceStateDoesNotAssignValue")
-            val onThisDay by produceState(emptyList<Pair<Int, List<GalleryItem>>>(), allItems) {
-                value = withContext(Dispatchers.Default) { computeOnThisDay(allItems) }
+            val onThisDay by produceState(emptyList<Pair<Int, List<GalleryItem>>>(), allItems, onThisDayDays) {
+                value = withContext(Dispatchers.Default) { computeOnThisDay(allItems, onThisDayDays) }
             }
             @Suppress("ProduceStateDoesNotAssignValue")
             val monthBuckets by produceState(emptyList<MonthBucket>(), allItems) {

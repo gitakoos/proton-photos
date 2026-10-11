@@ -30,15 +30,21 @@ import org.junit.Test
 import java.util.Calendar
 
 /**
- * Coverage for [computeOnThisDay] — the milestone-anniversary "memories" selector behind the
- * gallery carousel and the search memories row. The function reads the system clock via
- * [Calendar.getInstance], so the fixtures are built RELATIVE to now (anniversary anchors derived
- * the same way the production code does) rather than from hardcoded epochs.
+ * Coverage for [computeOnThisDay], the milestone-anniversary "memories" selector behind the gallery
+ * carousel, the search memories row and the Memories screen. "Today" is a fixed moment passed in, so the
+ * fixtures are exact calendar days.
  *
- * Milestones surfaced: 1, 2, 5, 10 years ago. Window: ±3 days around each anniversary. Non-milestone
- * years (3, 4, 6 …) are intentionally skipped.
+ * Milestones surfaced: 1, 2, 5, 10 years ago. The match is by whole local days: the day itself by
+ * default, and with a window of N that many whole days before and after. Non-milestone years (3, 4,
+ * 6 ...) are intentionally skipped.
  */
 class OnThisDayHelperTest {
+
+    /** Today for every test: 2026-10-11 15:30 local time. */
+    private fun today(): Calendar = Calendar.getInstance().apply {
+        clear()
+        set(2026, Calendar.OCTOBER, 11, 15, 30, 0)
+    }
 
     /** A cloud-only gallery item whose effective captureTimeMs is exactly [ms]. */
     private fun itemAt(ms: Long, id: String = "link-$ms"): GalleryItem = GalleryItem.CloudOnly(
@@ -56,74 +62,109 @@ class OnThisDayHelperTest {
         ),
     )
 
-    /** Epoch-ms for [yearsAgo] years before now, shifted by [dayDelta] days. */
-    private fun anniversaryMs(yearsAgo: Int, dayDelta: Int = 0): Long =
-        Calendar.getInstance().apply {
+    /** A moment on the day [dayDelta] days from [yearsAgo] years before [today], at [hour]:[minute]. */
+    private fun at(yearsAgo: Int, dayDelta: Int = 0, hour: Int = 12, minute: Int = 0): Long =
+        today().apply {
             add(Calendar.YEAR, -yearsAgo)
             add(Calendar.DAY_OF_YEAR, dayDelta)
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
         }.timeInMillis
+
+    private fun memories(items: List<GalleryItem>, windowDays: Int = 0) =
+        computeOnThisDay(items, windowDays, today())
 
     @Test
     fun `empty input yields no memories`() {
-        assertEquals(emptyList<Pair<Int, List<GalleryItem>>>(), computeOnThisDay(emptyList()))
+        assertEquals(emptyList<Pair<Int, List<GalleryItem>>>(), memories(emptyList()))
     }
 
     @Test
-    fun `a photo exactly one year ago today is surfaced as a 1-year memory`() {
-        val todayYear = Calendar.getInstance().get(Calendar.YEAR)
-        val result = computeOnThisDay(listOf(itemAt(anniversaryMs(1))))
-
+    fun `a photo on the same date one year ago is a 1-year memory`() {
+        val result = memories(listOf(itemAt(at(1))))
         assertEquals(1, result.size)
-        // The pair's year label is (todayYear - yearsAgo).
-        assertEquals(todayYear - 1, result.first().first)
+        assertEquals(2025, result.first().first)
         assertEquals(1, result.first().second.size)
     }
 
     @Test
-    fun `a photo within the plus-or-minus 3 day window still counts`() {
-        // 2 days before the 2-year anniversary is inside the ±3-day window.
-        val result = computeOnThisDay(listOf(itemAt(anniversaryMs(2, dayDelta = -2))))
-        assertEquals(1, result.size)
+    fun `by default a photo from the day before or after is not shown`() {
+        assertTrue(memories(listOf(itemAt(at(1, dayDelta = -1)))).isEmpty())
+        assertTrue(memories(listOf(itemAt(at(1, dayDelta = 1)))).isEmpty())
     }
 
     @Test
-    fun `a photo well outside the window is excluded`() {
-        // 30 days off the 1-year anniversary is far outside ±3 days → no memory.
-        val result = computeOnThisDay(listOf(itemAt(anniversaryMs(1, dayDelta = 30))))
-        assertTrue(result.isEmpty())
+    fun `the whole day counts from its first minute to its last`() {
+        val items = listOf(
+            itemAt(at(2, hour = 0, minute = 0), id = "first"),
+            itemAt(at(2, hour = 23, minute = 59), id = "last"),
+        )
+        val result = memories(items)
+        assertEquals(1, result.size)
+        assertEquals(2, result.first().second.size)
+    }
+
+    @Test
+    fun `the last minute of the day before and the first of the day after stay out`() {
+        assertTrue(memories(listOf(itemAt(at(2, dayDelta = -1, hour = 23, minute = 59)))).isEmpty())
+        assertTrue(memories(listOf(itemAt(at(2, dayDelta = 1, hour = 0, minute = 0)))).isEmpty())
+    }
+
+    @Test
+    fun `a window of one day adds the neighbouring days and no more`() {
+        val items = listOf(
+            itemAt(at(2, dayDelta = -1), id = "before"),
+            itemAt(at(2), id = "day"),
+            itemAt(at(2, dayDelta = 1), id = "after"),
+            itemAt(at(2, dayDelta = 2), id = "too-far"),
+        )
+        val result = memories(items, windowDays = 1)
+        assertEquals(1, result.size)
+        assertEquals(setOf("before", "day", "after"), result.first().second.map { (it as GalleryItem.CloudOnly).cloud.linkId }.toSet())
+    }
+
+    @Test
+    fun `a window of three days reaches three whole days either side`() {
+        assertEquals(1, memories(listOf(itemAt(at(1, dayDelta = -3, hour = 0))), windowDays = 3).size)
+        assertEquals(1, memories(listOf(itemAt(at(1, dayDelta = 3, hour = 23, minute = 59))), windowDays = 3).size)
+        assertTrue(memories(listOf(itemAt(at(1, dayDelta = 4, hour = 0))), windowDays = 3).isEmpty())
+    }
+
+    @Test
+    fun `a window beyond the maximum is held at three days`() {
+        assertTrue(memories(listOf(itemAt(at(1, dayDelta = 4, hour = 0))), windowDays = 9).isEmpty())
+        assertEquals(1, memories(listOf(itemAt(at(1, dayDelta = 3))), windowDays = 9).size)
+    }
+
+    @Test
+    fun `a photo weeks away is excluded at any window`() {
+        assertTrue(memories(listOf(itemAt(at(1, dayDelta = 30))), windowDays = 3).isEmpty())
     }
 
     @Test
     fun `a non-milestone anniversary (3 years) is skipped`() {
-        // 3 years is NOT a milestone (only 1, 2, 5, 10 are), so an exact 3-year-ago photo is ignored.
-        val result = computeOnThisDay(listOf(itemAt(anniversaryMs(3))))
-        assertTrue(result.isEmpty())
+        assertTrue(memories(listOf(itemAt(at(3)))).isEmpty())
     }
 
     @Test
     fun `multiple milestones are returned most-recent-first`() {
         val items = listOf(
-            itemAt(anniversaryMs(5), id = "five"),
-            itemAt(anniversaryMs(1), id = "one"),
-            itemAt(anniversaryMs(10), id = "ten"),
+            itemAt(at(5), id = "five"),
+            itemAt(at(1), id = "one"),
+            itemAt(at(10), id = "ten"),
         )
-        val todayYear = Calendar.getInstance().get(Calendar.YEAR)
-        val result = computeOnThisDay(items)
-
-        // 1, 5 and 10 years all have a photo → three groups.
-        assertEquals(3, result.size)
-        // MEMORY_MILESTONE_YEARS iterates 1, 2, 5, 10, so the year labels descend: y-1, y-5, y-10.
-        assertEquals(listOf(todayYear - 1, todayYear - 5, todayYear - 10), result.map { it.first })
+        val result = memories(items)
+        assertEquals(listOf(2025, 2021, 2016), result.map { it.first })
     }
 
     @Test
-    fun `all photos in one milestone window land in the same group`() {
+    fun `all photos on the day in one milestone year land in the same group`() {
         val items = listOf(
-            itemAt(anniversaryMs(2, dayDelta = -1), id = "a"),
-            itemAt(anniversaryMs(2, dayDelta = 0), id = "b"),
-            itemAt(anniversaryMs(2, dayDelta = 1), id = "c"),
+            itemAt(at(2, hour = 8), id = "a"),
+            itemAt(at(2, hour = 13), id = "b"),
+            itemAt(at(2, hour = 21), id = "c"),
         )
-        val result = computeOnThisDay(items)
+        val result = memories(items)
         assertEquals(1, result.size)
         assertEquals(3, result.first().second.size)
     }

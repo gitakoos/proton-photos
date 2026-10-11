@@ -1122,6 +1122,8 @@
     <!-- "On this day" memories card on the Photos tab. Shown above the grid when the user
          has photos taken on TODAY's calendar date (same month + day) in earlier years. -->
     <string name="gallery_on_this_day">V tento deň</string>
+    <string name="settings_on_this_day_range">Dni pred a po</string>
+    <string name="settings_on_this_day_range_desc">0 zobrazí iba samotný deň. Hodnoty 1 až 3 pridajú toľko dní pred a po ňom.</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">pred %1$d rokom</item>
         <item quantity="few">pred %1$d rokmi</item>

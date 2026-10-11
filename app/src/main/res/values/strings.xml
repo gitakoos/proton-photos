@@ -1576,6 +1576,8 @@
     <!-- "On this day" memories card on the Photos tab. Shown above the grid when the user
          has photos taken on TODAY's calendar date (same month + day) in earlier years. -->
     <string name="gallery_on_this_day">On this day</string>
+    <string name="settings_on_this_day_range">Days either side</string>
+    <string name="settings_on_this_day_range_desc">0 shows only the day itself. 1 to 3 add that many days before and after it.</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">%1$d year ago</item>
         <item quantity="other">%1$d years ago</item>

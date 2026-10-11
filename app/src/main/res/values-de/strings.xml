@@ -868,6 +868,8 @@
     </plurals>
 
     <string name="gallery_on_this_day">An diesem Tag</string>
+    <string name="settings_on_this_day_range">Tage davor und danach</string>
+    <string name="settings_on_this_day_range_desc">0 zeigt nur den Tag selbst. 1 bis 3 fügen so viele Tage davor und danach hinzu.</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">vor %1$d Jahr</item>
         <item quantity="other">vor %1$d Jahren</item>

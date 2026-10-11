@@ -881,6 +881,8 @@
     </plurals>
 
     <string name="gallery_on_this_day">En este día</string>
+    <string name="settings_on_this_day_range">Días antes y después</string>
+    <string name="settings_on_this_day_range_desc">0 muestra solo el propio día. De 1 a 3 añaden esos días antes y después.</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">hace %1$d año</item>
         <item quantity="many">hace %1$d años</item>

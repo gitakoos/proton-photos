@@ -891,6 +891,8 @@
     </plurals>
 
     <string name="gallery_on_this_day">Ezen a napon</string>
+    <string name="settings_on_this_day_range">Napok előtte és utána</string>
+    <string name="settings_on_this_day_range_desc">A 0 csak magát a napot mutatja. Az 1-től 3-ig terjedő értékek ennyi napot adnak hozzá előtte és utána.</string>
     <plurals name="count_years_ago_plural">
         <item quantity="one">%1$d éve</item>
         <item quantity="other">%1$d éve</item>

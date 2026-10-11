@@ -46,6 +46,10 @@ object SettingsKeys {
     /** When false, the gallery hides the "On this day" memories carousel. Default true. */
     val SHOW_ON_THIS_DAY = booleanPreferencesKey("show_on_this_day")
 
+    /** How many whole days either side of today's date count as "On this day", 0 to 3. Absent reads as 0:
+     *  only the day itself. */
+    val ON_THIS_DAY_WINDOW_DAYS = intPreferencesKey("on_this_day_window_days")
+
     /** When true, a floating month/year label fades in over the Photos timeline while it is
      *  actively scrolling, giving a time reference for the topmost visible photo. Off by default. */
     val SHOW_SCROLL_DATE = booleanPreferencesKey("show_scroll_date")
