@@ -185,4 +185,47 @@ class DeviceHealthPolicyTest {
             assertEquals(evaluateDeviceHealth(s).heavyMlAllowed, heavyMlBlockReason(s) == HealthBlockReason.NONE)
         }
     }
+
+    @Test
+    fun `charging only stands both tiers down on battery and lets them run on the charger`() {
+        val onBattery = evaluateDeviceHealth(snap(batteryPercent = 90, charging = false), chargingOnly = true)
+        assertFalse(onBattery.heavyMlAllowed)
+        assertFalse(onBattery.backgroundWorkAllowed)
+        assertEquals("not charging", onBattery.reason)
+
+        val plugged = evaluateDeviceHealth(snap(batteryPercent = 90, charging = true), chargingOnly = true)
+        assertTrue(plugged.heavyMlAllowed)
+        assertTrue(plugged.backgroundWorkAllowed)
+    }
+
+    @Test
+    fun `without the charging choice an unplugged healthy phone still runs`() {
+        assertTrue(evaluateDeviceHealth(snap(charging = false)).backgroundWorkAllowed)
+        assertTrue(evaluateDeviceHealth(snap(charging = false), chargingOnly = false).heavyMlAllowed)
+    }
+
+    @Test
+    fun `charging only does not lift the other limits while plugged in`() {
+        assertFalse(evaluateDeviceHealth(snap(charging = true, batteryTempCelsius = 44f), chargingOnly = true).backgroundWorkAllowed)
+        assertFalse(evaluateDeviceHealth(snap(charging = true, powerSaveOn = true), chargingOnly = true).backgroundWorkAllowed)
+        assertFalse(evaluateDeviceHealth(snap(charging = true, interacting = true), chargingOnly = true).heavyMlAllowed)
+    }
+
+    @Test
+    fun `block reason names the missing charger and stays persistent`() {
+        val reason = heavyMlBlockReason(snap(charging = false), chargingOnly = true)
+        assertEquals(HealthBlockReason.NOT_CHARGING, reason)
+        assertTrue(reason.isPersistent)
+        assertEquals(HealthBlockReason.NONE, heavyMlBlockReason(snap(charging = true), chargingOnly = true))
+    }
+
+    @Test
+    fun `block reason NONE still agrees with the verdict when charging only is on`() {
+        listOf(snap(charging = false), snap(charging = true), snap(charging = true, interacting = true)).forEach { s ->
+            assertEquals(
+                evaluateDeviceHealth(s, chargingOnly = true).heavyMlAllowed,
+                heavyMlBlockReason(s, chargingOnly = true) == HealthBlockReason.NONE,
+            )
+        }
+    }
 }

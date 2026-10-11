@@ -1745,6 +1745,9 @@
     <string name="settings_ai_indexing_paused_battery">Pausiert, Akku niedrig</string>
     <string name="settings_ai_indexing_paused_warm">Pausiert, Telefon ist warm</string>
     <string name="settings_ai_indexing_paused_power_save">Pausiert, Energiesparmodus ist an</string>
+    <string name="settings_ai_charging_only">Nur beim Laden</string>
+    <string name="settings_ai_charging_only_desc">Gesichtserkennung und Fotosuche warten, bis das Ladegerät angeschlossen ist.</string>
+    <string name="settings_ai_indexing_paused_not_charging">Pausiert, wartet auf das Ladegerät</string>
     <string name="settings_ai_indexing_paused_desc">Bis du fortsetzt, werden keine Fotos nach Gesichtern durchsucht.</string>
     <string name="settings_ai_indexing_progress">%1$d von %2$d Fotos</string>
     <plurals name="settings_ai_indexing_people">

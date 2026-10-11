@@ -47,7 +47,6 @@ import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.util.DeviceHealthPolicy
-import eu.akoos.photos.util.HEALTH_PAUSE_POLL_MS
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -346,7 +345,7 @@ class ThumbnailDecryptScheduler @Inject constructor(
                     // Defer this background walk while the phone is hot, low on battery, or in the power saver; it
                     // resumes on its own once conditions clear. Not gated on interaction: it runs quietly in the
                     // background and does not compete with the UI.
-                    while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
+                    deviceHealth.awaitBackgroundWorkAllowed()
                     val batch = runCatching {
                         photoListingDao.getUndecryptedThumbnailsBefore(userId.id, beforeTime, BACKFILL_PAGE_SIZE)
                     }.getOrElse { e -> Log.w(TAG, "backfillAll: query failed: ${e.message}"); break@page }

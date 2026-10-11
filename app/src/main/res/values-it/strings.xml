@@ -1780,6 +1780,9 @@
     <string name="settings_ai_indexing_paused_battery">In pausa, batteria scarica</string>
     <string name="settings_ai_indexing_paused_warm">In pausa, il telefono è caldo</string>
     <string name="settings_ai_indexing_paused_power_save">In pausa, risparmio energetico attivo</string>
+    <string name="settings_ai_charging_only">Solo durante la ricarica</string>
+    <string name="settings_ai_charging_only_desc">Il riconoscimento dei volti e la ricerca delle foto attendono il caricabatterie.</string>
+    <string name="settings_ai_indexing_paused_not_charging">In pausa, in attesa del caricabatterie</string>
     <string name="settings_ai_indexing_paused_desc">Le foto non vengono analizzate per trovare volti finché non riprendi.</string>
     <string name="settings_ai_indexing_progress">%1$d di %2$d foto</string>
     <plurals name="settings_ai_indexing_people">

@@ -868,6 +868,13 @@ object SettingsKeys {
     val FACE_INDEXING_PAUSED = booleanPreferencesKey("face_indexing_paused")
 
     /**
+     * When true, the face and photo-search scans run only while the phone is on external power. Absent
+     * (the default) reads as OFF, so the scans run on battery as before, under the usual battery,
+     * heat and power-saver limits. Backups and the other background jobs ignore it.
+     */
+    val ML_ONLY_WHILE_CHARGING = booleanPreferencesKey("ml_only_while_charging")
+
+    /**
      * When true, the face scan automatically merges each named person's closest look-alike cluster (the
      * same matches the manual "this may be the same person" card would offer), instead of surfacing them
      * for confirmation. Off by default, since a merge cannot be cleanly undone.

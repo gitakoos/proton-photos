@@ -539,6 +539,16 @@ interface FaceDao {
     @Query("SELECT id, embedding, score, blur, landmarks FROM face WHERE userId = :userId AND personId IS NULL AND rejected = 0")
     suspend fun unclusteredFaces(userId: String): List<UnclusteredFace>
 
+    /** The next [limit] not-yet-grouped faces after [afterId] in id order, so a library too big for the
+     *  whole-library rebuild is placed against the cached people a bounded batch at a time. The id cursor
+     *  moves past faces that stay unplaced, so a batch of look-alike strangers never blocks the ones
+     *  behind it. Start from an empty [afterId]. */
+    @Query(
+        "SELECT id, embedding, score, blur, landmarks FROM face " +
+            "WHERE userId = :userId AND personId IS NULL AND rejected = 0 AND id > :afterId ORDER BY id LIMIT :limit",
+    )
+    suspend fun unclusteredFacesBatch(userId: String, afterId: String, limit: Int): List<UnclusteredFace>
+
     /** One page of the account's KEPT faces (not removed), id + embedding, for the hide-similar sweep so
      *  dismissing a junk cluster can also reject its look-alikes that landed in other clusters, without
      *  loading every stored embedding at once. Ordered by id so paging stays stable. */

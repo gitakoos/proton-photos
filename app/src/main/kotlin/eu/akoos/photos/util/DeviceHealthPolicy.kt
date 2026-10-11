@@ -43,7 +43,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -77,12 +82,12 @@ data class HealthVerdict(
  * settings card treats those three as the blocks a pause or resume cannot lift.
  */
 enum class HealthBlockReason {
-    NONE, LOW_BATTERY, WARM, POWER_SAVE, INTERACTION;
+    NONE, NOT_CHARGING, LOW_BATTERY, WARM, POWER_SAVE, INTERACTION;
 
     /** True for a block that will not clear on its own, so the face card disables its pause / resume
      *  control while one holds; a transient interaction pause and [NONE] leave it live. */
     val isPersistent: Boolean
-        get() = this == LOW_BATTERY || this == WARM || this == POWER_SAVE
+        get() = this == NOT_CHARGING || this == LOW_BATTERY || this == WARM || this == POWER_SAVE
 }
 
 /**
@@ -102,12 +107,18 @@ enum class HealthBlockReason {
  * Unreadable signals do not block: a device that cannot report its temperature or thermal state
  * behaves exactly as it did before this gate existed, so adding the gate never suppresses work on a
  * guess, it only stands work down on a condition it can positively see.
+ *
+ * [chargingOnly] is the user's "only while charging" choice for the ML scans: it stands both tiers down
+ * whenever the phone is not on external power, even with plenty of charge left. Callers that are not an
+ * ML scan leave it off.
  */
 fun evaluateDeviceHealth(
     snapshot: HealthSnapshot,
     lowBatteryPercent: Int = LOW_BATTERY_PERCENT,
     hotBatteryCelsius: Float = HOT_BATTERY_CELSIUS,
+    chargingOnly: Boolean = false,
 ): HealthVerdict {
+    val chargingOk = !chargingOnly || snapshot.charging
     val batteryOk = snapshot.charging ||
         snapshot.batteryPercent < 0 ||
         snapshot.batteryPercent > lowBatteryPercent
@@ -116,10 +127,11 @@ fun evaluateDeviceHealth(
     val thermalOk = snapshot.thermal != ThermalState.THROTTLING
     val physicallyOk = batteryOk && temperatureOk && thermalOk
 
-    val backgroundWorkAllowed = physicallyOk && !snapshot.powerSaveOn
+    val backgroundWorkAllowed = chargingOk && physicallyOk && !snapshot.powerSaveOn
     val heavyMlAllowed = backgroundWorkAllowed && !snapshot.interacting
 
     val reason = when {
+        !chargingOk -> "not charging"
         !batteryOk -> "battery ${snapshot.batteryPercent}% not charging"
         !temperatureOk -> "battery ${snapshot.batteryTempCelsius}C"
         !thermalOk -> "thermal throttling"
@@ -140,6 +152,7 @@ fun heavyMlBlockReason(
     snapshot: HealthSnapshot,
     lowBatteryPercent: Int = LOW_BATTERY_PERCENT,
     hotBatteryCelsius: Float = HOT_BATTERY_CELSIUS,
+    chargingOnly: Boolean = false,
 ): HealthBlockReason {
     val batteryOk = snapshot.charging ||
         snapshot.batteryPercent < 0 ||
@@ -148,6 +161,7 @@ fun heavyMlBlockReason(
         snapshot.batteryTempCelsius <= hotBatteryCelsius
     val thermalOk = snapshot.thermal != ThermalState.THROTTLING
     return when {
+        chargingOnly && !snapshot.charging -> HealthBlockReason.NOT_CHARGING
         !batteryOk -> HealthBlockReason.LOW_BATTERY
         !temperatureOk -> HealthBlockReason.WARM
         !thermalOk -> HealthBlockReason.WARM
@@ -173,9 +187,10 @@ const val LOW_BATTERY_PERCENT = 15
 /** Battery temperature above which heavy on-device work stands down to let the phone cool. */
 const val HOT_BATTERY_CELSIUS = 42f
 
-/** How often a parked background walk re-checks device health, so a resume (or a stop) takes effect
- *  within a second without a busy loop. */
-const val HEALTH_PAUSE_POLL_MS = 1_000L
+/** The longest a parked ML walk sleeps before it looks again at whether it is still wanted. Device
+ *  conditions wake it the moment they change; this only bounds how late a pause or a sign-out, which
+ *  are not device conditions, can reach a walk that is parked. */
+const val HEALTH_PARK_TICK_MS = 5_000L
 
 // Face indexing yields to an active touch but resumes quickly after it, so a brief tap does not stall
 // the walk: heavy ML stands down only while a touch is fresh, then picks straight back up.
@@ -274,8 +289,30 @@ class DeviceHealthPolicy @Inject constructor(
         }
     }
 
+    /** Whether the user limited the face and photo-search scans to when the phone is charging. */
+    val mlChargingOnly: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.ML_ONLY_WHILE_CHARGING] == true }
+        .catch { emit(false) }
+        .stateIn(scope, SharingStarted.Eagerly, false)
+
     /** Snapshot the current verdict. */
     fun verdict(): HealthVerdict = evaluateDeviceHealth(snapshot.value)
+
+    /** The verdict for the face and photo-search scans: [verdict] plus the "only while charging" choice. */
+    fun mlVerdict(): HealthVerdict = evaluateDeviceHealth(snapshot.value, chargingOnly = mlChargingOnly.value)
+
+    /**
+     * Parks an ML scan that [mlVerdict] stood down: returns the moment the scan may run, or after
+     * [maxWaitMs] at the latest, so the caller can look again at whether it is still wanted. Wakes on a
+     * device-condition change or a flip of the charging choice rather than on a timer.
+     */
+    suspend fun awaitMlWorkAllowed(maxWaitMs: Long = HEALTH_PARK_TICK_MS) {
+        withTimeoutOrNull(maxWaitMs) {
+            combine(snapshot, mlChargingOnly) { snap, chargingOnly ->
+                evaluateDeviceHealth(snap, chargingOnly = chargingOnly).backgroundWorkAllowed
+            }.first { it }
+        }
+    }
 
     fun heavyMlAllowed(): Boolean = verdict().heavyMlAllowed
 

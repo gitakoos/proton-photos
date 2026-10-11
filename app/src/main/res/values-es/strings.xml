@@ -1781,6 +1781,9 @@
     <string name="settings_ai_indexing_paused_battery">En pausa, batería baja</string>
     <string name="settings_ai_indexing_paused_warm">En pausa, el teléfono está caliente</string>
     <string name="settings_ai_indexing_paused_power_save">En pausa, el ahorro de energía está activado</string>
+    <string name="settings_ai_charging_only">Solo mientras se carga</string>
+    <string name="settings_ai_charging_only_desc">El reconocimiento facial y la búsqueda de fotos esperan al cargador.</string>
+    <string name="settings_ai_indexing_paused_not_charging">En pausa, esperando el cargador</string>
     <string name="settings_ai_indexing_paused_desc">Las fotos no se analizan en busca de caras hasta que reanudes.</string>
     <string name="settings_ai_indexing_progress">%1$d de %2$d fotos</string>
     <plurals name="settings_ai_indexing_people">

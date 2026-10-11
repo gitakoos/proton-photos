@@ -1839,6 +1839,9 @@
     <string name="settings_ai_indexing_paused_battery">Pozastavené, nízka batéria</string>
     <string name="settings_ai_indexing_paused_warm">Pozastavené, telefón je teplý</string>
     <string name="settings_ai_indexing_paused_power_save">Pozastavené, šetrič batérie je zapnutý</string>
+    <string name="settings_ai_charging_only">Len počas nabíjania</string>
+    <string name="settings_ai_charging_only_desc">Rozpoznávanie tvárí a vyhľadávanie fotiek čakajú na nabíjačku.</string>
+    <string name="settings_ai_indexing_paused_not_charging">Pozastavené, čaká sa na nabíjačku</string>
     <string name="settings_ai_indexing_paused_desc">Fotky sa na tváre neprehľadávajú, kým nebudete pokračovať.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotiek</string>
     <plurals name="settings_ai_indexing_people">

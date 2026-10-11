@@ -1829,6 +1829,9 @@
     <string name="settings_ai_indexing_paused_battery">Wstrzymano, niski poziom baterii</string>
     <string name="settings_ai_indexing_paused_warm">Wstrzymano, telefon jest ciepły</string>
     <string name="settings_ai_indexing_paused_power_save">Wstrzymano, oszczędzanie baterii jest włączone</string>
+    <string name="settings_ai_charging_only">Tylko podczas ładowania</string>
+    <string name="settings_ai_charging_only_desc">Rozpoznawanie twarzy i wyszukiwanie zdjęć czekają na ładowarkę.</string>
+    <string name="settings_ai_indexing_paused_not_charging">Wstrzymano, czeka na ładowarkę</string>
     <string name="settings_ai_indexing_paused_desc">Zdjęcia nie są przeszukiwane pod kątem twarzy, dopóki nie wznowisz.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d zdjęć</string>
     <plurals name="settings_ai_indexing_people">

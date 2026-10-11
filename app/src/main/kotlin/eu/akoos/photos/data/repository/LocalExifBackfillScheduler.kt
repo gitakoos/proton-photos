@@ -47,7 +47,6 @@ import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.ExifHelper
-import eu.akoos.photos.util.HEALTH_PAUSE_POLL_MS
 import eu.akoos.photos.util.Mp4CreationTime
 import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.PhotoGpsResolver
@@ -204,7 +203,7 @@ class LocalExifBackfillScheduler @Inject constructor(
             // the wait still reaches the finally that clears the inFlight reservations. A user-initiated
             // call (the map, opened by the user) skips this: they asked to see their places now, so the
             // walk runs even on a low battery rather than leaving the map empty until the phone charges.
-            if (respectHealthGate) while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
+            if (respectHealthGate) deviceHealth.awaitBackgroundWorkAllowed()
             forEachPooled(
                 pending,
                 workers = WORKER_COUNT,

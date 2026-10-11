@@ -61,6 +61,16 @@ internal fun clusterLogLine(size: Int, named: Boolean): String =
 data class FaceRegroupOutcome(val committed: Boolean, val leftUngrouped: Int)
 
 /**
+ * The cursor of a batched incremental placement: each [ClusterFacesUseCase.assignNewFaces] call reads at
+ * most [limit] ungrouped faces after [afterId], then advances [afterId] past them and reports in [scanned]
+ * how many it read, so the caller loops until a call reads none.
+ */
+class IncrementalBatch(val limit: Int) {
+    var afterId: String = ""
+    var scanned: Int = 0
+}
+
+/**
  * Rebuilds the account's people from scratch out of every stored face embedding, one quality-aware
  * pass with a merge step.
  *
@@ -339,6 +349,7 @@ class ClusterFacesUseCase @Inject constructor(
      */
     suspend fun assignNewFaces(
         userId: UserId?,
+        batch: IncrementalBatch? = null,
         writeAllowed: () -> Boolean = { true },
     ): Boolean = withContext(Dispatchers.Default) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
@@ -352,8 +363,10 @@ class ClusterFacesUseCase @Inject constructor(
         //     and the summaries are stale. One self-validating check standing in for scattered invalidation.
         if (summaries.sumOf { it.memberCount } != faceDao.assignedFaceCount(account)) return@withContext false
         // (4) A large unclustered backlog: a first scan or a big import groups better in one global pass.
+        // A [batch] run is the answer to that backlog (the whole-library pass did not fit the heap), so it
+        // skips this bail-out and reads the backlog a bounded slice at a time instead.
         val backlog = faceDao.unclusteredCount(account)
-        if (backlog > INCREMENTAL_MAX_BACKLOG) return@withContext false
+        if (batch == null && backlog > INCREMENTAL_MAX_BACKLOG) return@withContext false
         // Nothing waiting: handled, no rebuild needed.
         if (backlog == 0) return@withContext true
 
@@ -373,7 +386,14 @@ class ClusterFacesUseCase @Inject constructor(
 
         // Only the unclustered remainder is read, graded exactly as the full pass grades a face so a weak
         // crop clears a stricter bar (see samplesForSweep).
-        val rows = faceDao.unclusteredFaces(account)
+        val rows = if (batch == null) {
+            faceDao.unclusteredFaces(account)
+        } else {
+            faceDao.unclusteredFacesBatch(account, batch.afterId, batch.limit).also {
+                batch.scanned = it.size
+                if (it.isNotEmpty()) batch.afterId = it.last().id
+            }
+        }
         val idBySample = ArrayList<String>(rows.size)
         val samples = ArrayList<FaceSample>(rows.size)
         for (row in rows) {

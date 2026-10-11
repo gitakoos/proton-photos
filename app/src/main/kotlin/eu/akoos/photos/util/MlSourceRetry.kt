@@ -124,10 +124,12 @@ const val SOURCE_RETRIES_PER_PASS = 16
 class SourcePassPlan<T>(val queue: List<T>, val retries: Int, val waiting: Int, val heldBack: Int)
 
 /**
- * The in-process record of photos whose source failed transiently: how many attempts each has had and
- * when it is due again, on the [backoffMs] ladder. Each walk keeps its own in memory, never in the
- * database, so a new process tries them afresh; a successful load, a settle, or a sign-out or rescan
- * drops the record. Thread-safe, since a pass's workers file their outcomes concurrently.
+ * The record of photos whose source failed transiently: how many attempts each has had and when it is
+ * due again, on the [backoffMs] ladder. Each walk keeps its own, never in the library database; it saves
+ * the book to its [MlWalkStateStore] at the end of a pass and takes it back with [restore] at its first
+ * pass in a new process, so a process the system killed does not begin the backoffs again. A successful
+ * load, a settle, or a sign-out or rescan drops the record. Thread-safe, since a pass's workers file their
+ * outcomes concurrently.
  */
 class SourceRetryBook(private val backoffMs: List<Long> = SOURCE_RETRY_BACKOFF_MS) {
     private class Entry(val attempts: Int, val dueMs: Long)
@@ -164,6 +166,30 @@ class SourceRetryBook(private val backoffMs: List<Long> = SOURCE_RETRY_BACKOFF_M
     /** How many photos hold a record, due or not. */
     @Synchronized
     fun size(): Int = entries.size
+
+    /** The records as they are kept on disk: each due time on the wall clock, given both clocks now. */
+    @Synchronized
+    fun export(nowMs: Long, nowEpochMs: Long): List<RetryRecord> =
+        entries.entries.take(MAX_PERSISTED_RETRIES).map { (key, entry) ->
+            RetryRecord(key, entry.attempts, epochFromElapsed(entry.dueMs, nowMs, nowEpochMs))
+        }
+
+    /**
+     * Takes back records [export]ed by an earlier process. A record keeps its attempt count, so a photo that
+     * keeps failing climbs the ladder across restarts instead of beginning it again; its wait is what is
+     * left of the one it was given, never more than the longest step of the ladder, so a wall clock that
+     * was set back cannot park a photo for good. A record already due is due at once. Photos that already
+     * hold a record in this process keep it.
+     */
+    @Synchronized
+    fun restore(records: List<RetryRecord>, nowMs: Long, nowEpochMs: Long) {
+        val longest = backoffMs.last()
+        for (record in records.take(MAX_PERSISTED_RETRIES)) {
+            if (entries.containsKey(record.key)) continue
+            val remaining = (record.dueEpochMs - nowEpochMs).coerceIn(0L, longest)
+            entries[record.key] = Entry(record.attempts.coerceAtLeast(1), nowMs + remaining)
+        }
+    }
 
     /** When the earliest record not yet due at [nowMs] falls due, or null when none waits past it. */
     @Synchronized

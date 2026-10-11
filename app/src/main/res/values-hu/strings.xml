@@ -1744,6 +1744,9 @@
     <string name="settings_ai_indexing_paused_battery">Szüneteltetve, alacsony töltöttség</string>
     <string name="settings_ai_indexing_paused_warm">Szüneteltetve, a telefon meleg</string>
     <string name="settings_ai_indexing_paused_power_save">Szüneteltetve, energiatakarékos mód bekapcsolva</string>
+    <string name="settings_ai_charging_only">Csak töltés közben</string>
+    <string name="settings_ai_charging_only_desc">Az arcfelismerés és a fotókeresés megvárja a töltőt.</string>
+    <string name="settings_ai_indexing_paused_not_charging">Szüneteltetve, töltőre vár</string>
     <string name="settings_ai_indexing_paused_desc">A folytatásig az alkalmazás nem keres arcokat a fotókon.</string>
     <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>
     <plurals name="settings_ai_indexing_people">

@@ -43,6 +43,8 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.yield
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,6 +58,7 @@ import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_THRESHOLD
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
+import eu.akoos.photos.domain.usecase.IncrementalBatch
 import eu.akoos.photos.domain.usecase.clusterFaces
 import eu.akoos.photos.domain.usecase.cosineSimilarity
 import eu.akoos.photos.domain.usecase.REATTACH_MIN_IOU
@@ -103,10 +106,14 @@ import eu.akoos.photos.util.FaceDiagnostics.RegroupTrigger
 import eu.akoos.photos.util.GuardedSessionHolder
 import eu.akoos.photos.util.MlAbandonCap
 import eu.akoos.photos.util.MlRail
+import eu.akoos.photos.util.MlWalkState
+import eu.akoos.photos.util.MlWalkStateStore
 import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.SOURCE_RETRIES_PER_PASS
 import eu.akoos.photos.util.SessionLease
 import eu.akoos.photos.util.boundedDetachedRun
+import eu.akoos.photos.util.elapsedFromEpoch
+import eu.akoos.photos.util.epochFromElapsed
 import eu.akoos.photos.util.SourceMiss
 import eu.akoos.photos.util.SourceMissNote
 import eu.akoos.photos.util.SourcePassTally
@@ -474,9 +481,19 @@ class FaceIndexingScheduler @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Photos whose last load failed transiently, each with its attempts and when it is due again, so a
-     *  pass tries never-tried photos first and a failing one waits out its backoff. In memory only;
-     *  dropped on [reset], so a rescan or a new account tries everything afresh. */
+     *  pass tries never-tried photos first and a failing one waits out its backoff. Saved to [stateStore]
+     *  at the end of a pass and taken back by the first pass of a new process; dropped on [reset], so a
+     *  rescan or a new account tries everything afresh. */
     private val retryBook = SourceRetryBook()
+
+    /** What the walk keeps between process starts (the retry book and the full regroups' spacing), so a
+     *  process the system killed does not begin its backoffs and its regroups again. */
+    private val stateStore by lazy {
+        MlWalkStateStore(File(File(context.filesDir, "ml_state"), "face_walk.bin"), BuildConfig.VERSION_CODE)
+    }
+
+    /** The account whose saved state this process has already taken back, so it is read once. */
+    @Volatile private var stateRestoredFor: String? = null
 
     /** The re-kick a settled walk leaves for its earliest waiting retry. */
     private val retryKick = WalkRetryKick(scope)
@@ -674,6 +691,7 @@ class FaceIndexingScheduler @Inject constructor(
             }
 
             val account = accountOf(userId)
+            restoreWalkState(account)
             val items = try {
                 val provider = galleryItemsProvider.get()
                 (if (userId == null) provider.invokeLocalOnly() else provider.invoke(userId)).first()
@@ -875,11 +893,11 @@ class FaceIndexingScheduler @Inject constructor(
                                 // the recorded reason honest: a snapshot that denies background work always
                                 // names a physical/power reason (the interaction branch is reached only
                                 // once those gates pass), so the walk never records an interaction park.
-                                var verdict = deviceHealth.verdict()
+                                var verdict = deviceHealth.mlVerdict()
                                 while (passLive() && !verdict.backgroundWorkAllowed) {
                                     FaceDiagnostics.recordPark(verdict.reason)
-                                    delay(HEALTH_PAUSE_POLL_MS)
-                                    verdict = deviceHealth.verdict()
+                                    deviceHealth.awaitMlWorkAllowed()
+                                    verdict = deviceHealth.mlVerdict()
                                 }
                                 if (!passLive()) break
                                 val i = cursor.getAndIncrement()
@@ -1034,6 +1052,7 @@ class FaceIndexingScheduler @Inject constructor(
             }
         } finally {
             if (holdsGate) mlWalkGate.release(MlRail.FACE)
+            if (!stopRequested && writeFence.allows(passToken)) saveWalkState(userId)
             running.set(false)
             walkRunning.value = false
             // Auto-continue: a full-res walk only downloads a bounded batch per pass, so keep going
@@ -1162,6 +1181,8 @@ class FaceIndexingScheduler @Inject constructor(
      */
     suspend fun <T> withImportFence(block: suspend () -> T): T {
         writeFence.enterImport()
+        // The saved leftover count described the faces as they were before this import.
+        runCatching { stateStore.delete() }
         try {
             return block()
         } finally {
@@ -1507,6 +1528,8 @@ class FaceIndexingScheduler @Inject constructor(
         writeFence.invalidate()
         retryKick.cancel()
         retryBook.clear()
+        runCatching { stateStore.delete() }
+        stateRestoredFor = null
         restart.reset()
         triedReattachStamp = null
         lastFailedRegroupMs = null
@@ -1595,6 +1618,8 @@ class FaceIndexingScheduler @Inject constructor(
         // The leftover count of the last regroup described faces that are gone now, and every name waiting
         // on disk is off the faces again until the next reattach.
         regroupBaseline = null
+        retryBook.clear()
+        runCatching { stateStore.delete() }
         triedReattachStamp = null
         // Marker last: only now is the wipe durably complete. The snapshot is left on disk for the
         // drained reattach to consume, so a crash after this still finds it waiting.
@@ -2461,6 +2486,30 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /**
+     * The route for a library too big for the whole-library rebuild's heap: places the ungrouped faces
+     * against the people already held, [INCREMENTAL_BATCH_SIZE] at a time, so a big library still gains
+     * people while the full rebuild keeps being retried after its backoff. A caller holds [groupingLock].
+     * Each batch is its own fenced transaction, so an import or a sign-out stops the next one; a failure
+     * ends the pass quietly, since the same faces are tried again at the next one.
+     */
+    private suspend fun placeBacklogInBatches(userId: UserId?, fenceToken: Long) {
+        val batch = IncrementalBatch(INCREMENTAL_BATCH_SIZE)
+        try {
+            while (true) {
+                coroutineContext.ensureActive()
+                batch.scanned = 0
+                val handled = clusterFacesUseCase.assignNewFaces(userId, batch) { writeFence.allows(fenceToken) }
+                if (!handled || batch.scanned < batch.limit) return
+                yield()
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "batched incremental assign failed: ${e.message}")
+        }
+    }
+
+    /**
      * Group every stored face into people while the walk is still permitted to run (a forced call runs
      * regardless), queued behind any grouping already running ([groupingLock]), and not while names wait
      * to be reattached, a forced call short of their grace ([regroupAllowed]); see [regroupLocked].
@@ -2500,6 +2549,8 @@ class FaceIndexingScheduler @Inject constructor(
         val faceCount = runCatching { faceDao.countForUser(accountOf(userId)) }.getOrDefault(0)
         if (!regroupFitsHeapNow(regroupHeapNeedBytes(faceCount))) {
             lastFailedRegroupMs = SystemClock.elapsedRealtime()
+            placeBacklogInBatches(userId, fenceToken)
+            saveWalkState(userId)
             return false
         }
         val tookGate = !gateHeld && mlWalkGate.tryAcquire(MlRail.FACE)
@@ -2572,8 +2623,55 @@ class FaceIndexingScheduler @Inject constructor(
             FaceDiagnostics.recordRegroupFailed(e)
             false
         }
+        saveWalkState(userId)
         pushLibraryCounts(userId)
         return grouped
+    }
+
+    /**
+     * Takes back, once per process and account, what the last process saved: the photos waiting out a
+     * retry and how the full regroups were spaced, so a restart does not begin them again. Whatever it
+     * cannot read counts as nothing saved. The leftover count is taken back under the fence token now in
+     * force, so it lasts only until an import, a sign-out or a rescan moves the fence, as a measured one
+     * does.
+     */
+    private fun restoreWalkState(account: String) {
+        if (stateRestoredFor == account) return
+        stateRestoredFor = account
+        val saved = runCatching { stateStore.read(account) }.getOrNull() ?: return
+        val nowMs = SystemClock.elapsedRealtime()
+        val nowEpoch = System.currentTimeMillis()
+        retryBook.restore(saved.retries, nowMs, nowEpoch)
+        if (lastFailedRegroupMs == null) {
+            lastFailedRegroupMs = saved.lastFailedRegroupEpochMs?.let { elapsedFromEpoch(it, nowMs, nowEpoch) }
+        }
+        if (lastRegroupEndMs == null) {
+            lastRegroupEndMs = saved.lastRegroupEndEpochMs?.let { elapsedFromEpoch(it, nowMs, nowEpoch) }
+            lastRegroupDurationMs = saved.lastRegroupDurationMs
+        }
+        if (regroupBaseline == null) {
+            saved.baselineUngrouped?.let { regroupBaseline = RegroupBaseline(account, it, writeFence.token()) }
+        }
+    }
+
+    /** Saves what [restoreWalkState] takes back. Best effort: a failed write costs only the backoff. */
+    private fun saveWalkState(userId: UserId?) {
+        val account = accountOf(userId)
+        if (stateRestoredFor != account) return
+        runCatching {
+            val nowMs = SystemClock.elapsedRealtime()
+            val nowEpoch = System.currentTimeMillis()
+            stateStore.write(
+                MlWalkState(
+                    account = account,
+                    retries = retryBook.export(nowMs, nowEpoch),
+                    lastFailedRegroupEpochMs = lastFailedRegroupMs?.let { epochFromElapsed(it, nowMs, nowEpoch) },
+                    lastRegroupEndEpochMs = lastRegroupEndMs?.let { epochFromElapsed(it, nowMs, nowEpoch) },
+                    lastRegroupDurationMs = lastRegroupDurationMs,
+                    baselineUngrouped = currentRegroupBaseline(userId),
+                ),
+            )
+        }.onFailure { Log.w(TAG, "walk state save failed: ${it.message}") }
     }
 
     /** The last completed regroup's leftover count for [userId]'s faces while the face data it measured is
@@ -2866,10 +2964,6 @@ class FaceIndexingScheduler @Inject constructor(
          *  flood the crypto service; the rest wait for a later pass once their thumbnail has warmed. */
         const val MAX_COLD_DECRYPTS_PER_PASS = 64
 
-        /** While the device is not in a good state for heavy work, each worker re-checks at this
-         *  cadence, so a resume or a pause / sign-out both take effect within a second. */
-        const val HEALTH_PAUSE_POLL_MS = 1_000L
-
         const val MIB = 1024L * 1024L
 
         /** Hard ceiling on one clustering round (see [regroupLocked]). The clusterer is bounded and
@@ -2884,6 +2978,10 @@ class FaceIndexingScheduler @Inject constructor(
         /** Thirty minutes in which the pass-end grouping holds off a full regroup after one timed out or
          *  threw, so a regroup that keeps failing is not retried on every settled pass. */
         const val FULL_REGROUP_FAILURE_BACKOFF_MS = 1_800_000L
+
+        /** Ungrouped faces placed per batch when the whole-library rebuild does not fit the heap: about
+         *  two megabytes of embeddings, so a batch is small next to the heap it is spared. */
+        const val INCREMENTAL_BATCH_SIZE = 2_000
 
         /** A full regroup started from the pass end waits at least this many times as long as the last one
          *  ran, so the full regroups take at most about a tenth of the time while a large library scans. */

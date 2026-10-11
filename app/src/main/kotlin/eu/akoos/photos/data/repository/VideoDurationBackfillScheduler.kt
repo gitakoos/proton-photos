@@ -45,7 +45,6 @@ import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
 import eu.akoos.photos.data.repository.drive.PhotosShareService
 import eu.akoos.photos.data.repository.drive.SharedAlbumKeyStore
 import eu.akoos.photos.util.DeviceHealthPolicy
-import eu.akoos.photos.util.HEALTH_PAUSE_POLL_MS
 import eu.akoos.photos.util.isTransientApiError
 import eu.akoos.photos.util.retryWithBackoff
 import java.util.concurrent.ConcurrentHashMap
@@ -137,7 +136,7 @@ class VideoDurationBackfillScheduler @Inject constructor(
                 // Defer this background walk while the phone is hot, low on battery, or in the power saver; it
                 // resumes on its own once conditions clear. Not gated on interaction: it runs quietly in the
                 // background and does not compete with the UI.
-                while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
+                deviceHealth.awaitBackgroundWorkAllowed()
                 val batch = runCatching { photoListingDao.getVideosMissingDuration(userId.id, ownVolumeId, PAGE) }
                     .getOrElse { e ->
                         if (e is CancellationException) throw e
@@ -222,7 +221,7 @@ class VideoDurationBackfillScheduler @Inject constructor(
             // Defer this background walk while the phone is hot, low on battery, or in the power saver; it
             // resumes on its own once conditions clear. Not gated on interaction: it runs quietly in the
             // background and does not compete with the UI.
-            while (!deviceHealth.backgroundWorkAllowed()) delay(HEALTH_PAUSE_POLL_MS)
+            deviceHealth.awaitBackgroundWorkAllowed()
             val batch = runCatching {
                 photoListingDao.getAlbumVideosMissingDuration(userId.id, ctx.albumLinkId, PAGE)
             }.getOrElse { e ->

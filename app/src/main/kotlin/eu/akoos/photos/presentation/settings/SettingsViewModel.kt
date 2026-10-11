@@ -301,8 +301,8 @@ class SettingsViewModel @Inject constructor(
      *  not help. A persistent block (low battery, warm, power saver) disables the action; a transient
      *  interaction pause or a clear device leaves it enabled. */
     val faceIndexingUi: StateFlow<FaceIndexingUi> =
-        combine(faceIndexingScheduler.progress, deviceHealth.snapshot) { p, snap ->
-            val blockReason = heavyMlBlockReason(snap)
+        combine(faceIndexingScheduler.progress, deviceHealth.snapshot, deviceHealth.mlChargingOnly) { p, snap, chargingOnly ->
+            val blockReason = heavyMlBlockReason(snap, chargingOnly = chargingOnly)
             FaceIndexingUi(
                 state = p.state,
                 indexed = p.indexed,
@@ -1277,6 +1277,22 @@ class SettingsViewModel @Inject constructor(
      * editor and viewer observe [SettingsKeys.AI_FEATURES_ENABLED] directly, so flipping it takes
      * effect the next time either surface is opened.
      */
+    /** Whether the face and photo-search scans are limited to when the phone is charging. */
+    val mlOnlyWhileCharging: StateFlow<Boolean> = deviceHealth.mlChargingOnly
+
+    /** The condition standing the on-device scans down right now, so the photo-search rows can name it
+     *  the way the face card does instead of reading as a plain "scanning". */
+    val mlBlockReason: StateFlow<HealthBlockReason> =
+        combine(deviceHealth.snapshot, deviceHealth.mlChargingOnly) { snap, chargingOnly ->
+            heavyMlBlockReason(snap, chargingOnly = chargingOnly)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), HealthBlockReason.NONE)
+
+    fun setMlOnlyWhileCharging(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.ML_ONLY_WHILE_CHARGING] = enabled }
+        }
+    }
+
     fun setAiFeaturesEnabled(enabled: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.AI_FEATURES_ENABLED] = enabled }

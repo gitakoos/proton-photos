@@ -1037,20 +1037,25 @@ fun AiSettingsScreen(
                     onCheckedChange = viewModel::setOcrEnabled,
                     enabled = !state.ocrModelDownloading,
                 )
+            }
+
+            Spacer(Modifier.height(20.dp))
+            SettingsCard {
                 // Face recognition runs fully on-device, so it works without an account too; a guest's
                 // face and person rows go under a local partition. Like semantic search, its toggle and
                 // controls live on the dedicated sub-page reached through this row; the subtitle reflects
                 // the live scan state while a walk runs, and the feature description while it is off. A
                 // paused scan reads as paused whoever paused it, and the sub-page holds its Resume.
-                RowDivider()
                 val faceProgress by viewModel.faceIndexingProgress.collectAsStateWithLifecycle()
                 val facePauseSwitch by viewModel.faceIndexingPaused.collectAsStateWithLifecycle()
+                val mlBlock by viewModel.mlBlockReason.collectAsStateWithLifecycle()
                 NavRow(
                     label = stringResource(R.string.settings_ai_face_toggle),
                     description = if (state.faceEnabled) {
                         faceRowSubtitle(
                             faceProgress.state,
                             paused = faceScanPausedRow(facePauseSwitch, faceProgress.state),
+                            blockReason = mlBlock,
                         )
                     } else {
                         stringResource(R.string.settings_ai_face_desc)
@@ -1065,8 +1070,18 @@ fun AiSettingsScreen(
                 val semanticProgress by viewModel.semanticIndexingProgress.collectAsStateWithLifecycle()
                 NavRow(
                     label = stringResource(R.string.settings_ai_semantic),
-                    description = semanticRowSubtitle(semanticProgress.state),
+                    description = semanticRowSubtitle(semanticProgress.state, mlBlock),
                     onClick = onSemanticSearchClick,
+                )
+                // Both scans are the heavy battery users, so they can be limited to the charger. It only
+                // governs these two scans: backups and the other background jobs ignore it.
+                RowDivider()
+                val onlyWhileCharging by viewModel.mlOnlyWhileCharging.collectAsStateWithLifecycle()
+                ToggleRow(
+                    label = stringResource(R.string.settings_ai_charging_only),
+                    description = stringResource(R.string.settings_ai_charging_only_desc),
+                    checked = onlyWhileCharging,
+                    onCheckedChange = viewModel::setMlOnlyWhileCharging,
                 )
             }
 
@@ -1111,12 +1126,29 @@ fun AiSettingsScreen(
     }
 }
 
+/** The "Paused, ..." line for a condition that holds the on-device scans, or null when none does or the
+ *  condition is only a passing touch. One wording for the face and photo-search cards. */
+@Composable
+private fun healthBlockLabel(reason: HealthBlockReason): String? = when (reason) {
+    HealthBlockReason.NOT_CHARGING -> stringResource(R.string.settings_ai_indexing_paused_not_charging)
+    HealthBlockReason.LOW_BATTERY -> stringResource(R.string.settings_ai_indexing_paused_battery)
+    HealthBlockReason.WARM -> stringResource(R.string.settings_ai_indexing_paused_warm)
+    HealthBlockReason.POWER_SAVE -> stringResource(R.string.settings_ai_indexing_paused_power_save)
+    else -> null
+}
+
 /** Subtitle for the Face recognition row: "Paused" whenever the scan is paused ([paused], see
  *  [faceScanPausedRow]), the live scan state while a walk runs, otherwise the feature's one-line
  *  description. Mirrors [semanticRowSubtitle]. */
 @Composable
-private fun faceRowSubtitle(state: FaceIndexingState, paused: Boolean): String = when {
+private fun faceRowSubtitle(
+    state: FaceIndexingState,
+    paused: Boolean,
+    blockReason: HealthBlockReason = HealthBlockReason.NONE,
+): String = when {
     paused -> stringResource(R.string.settings_ai_indexing_paused)
+    state == FaceIndexingState.Running && healthBlockLabel(blockReason) != null ->
+        healthBlockLabel(blockReason)!!
     state == FaceIndexingState.Running || state == FaceIndexingState.WaitingModel ->
         stringResource(R.string.settings_ai_indexing_running)
     else -> stringResource(R.string.settings_ai_face_desc)
@@ -1125,8 +1157,13 @@ private fun faceRowSubtitle(state: FaceIndexingState, paused: Boolean): String =
 /** Subtitle for the Semantic search row: the live scan state while a walk runs or is paused, otherwise
  *  the feature's one-line description, so the row reads as a result when idle. Mirrors [faceRowSubtitle]. */
 @Composable
-private fun semanticRowSubtitle(state: SemanticIndexingState): String = when (state) {
-    SemanticIndexingState.Running, SemanticIndexingState.WaitingModel ->
+private fun semanticRowSubtitle(
+    state: SemanticIndexingState,
+    blockReason: HealthBlockReason = HealthBlockReason.NONE,
+): String = when (state) {
+    SemanticIndexingState.Running ->
+        healthBlockLabel(blockReason) ?: stringResource(R.string.settings_ai_indexing_running)
+    SemanticIndexingState.WaitingModel ->
         stringResource(R.string.settings_ai_indexing_running)
     SemanticIndexingState.Paused -> stringResource(R.string.settings_ai_indexing_paused)
     else -> stringResource(R.string.settings_ai_semantic_desc)
@@ -1334,6 +1371,7 @@ private fun FaceStatusCard(
         (ui.total - ui.indexed).coerceAtLeast(0) >= FACE_INDEX_FOREGROUND_THRESHOLD
     val healthLabel = if (faceBulkIndex) {
         when (ui.blockReason) {
+            HealthBlockReason.NOT_CHARGING -> stringResource(R.string.settings_ai_indexing_paused_not_charging)
             HealthBlockReason.LOW_BATTERY -> stringResource(R.string.settings_ai_indexing_paused_battery)
             HealthBlockReason.WARM -> stringResource(R.string.settings_ai_indexing_paused_warm)
             HealthBlockReason.POWER_SAVE -> stringResource(R.string.settings_ai_indexing_paused_power_save)
@@ -1539,6 +1577,7 @@ fun SemanticSearchScreen(
     val progress by viewModel.semanticIndexingProgress.collectAsStateWithLifecycle()
     val semanticIndexedCount by viewModel.semanticIndexedCount.collectAsStateWithLifecycle()
     val mlActiveRail by viewModel.mlActiveRail.collectAsStateWithLifecycle()
+    val mlBlock by viewModel.mlBlockReason.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
     // Opening this screen resumes an indexing pass the OS killed, so re-entry continues without a manual
@@ -1614,6 +1653,7 @@ fun SemanticSearchScreen(
                 // Running state but the face walk holds the shared model gate = standing by behind it.
                 waitingForOther = mlActiveRail == eu.akoos.photos.util.MlRail.FACE &&
                     progress.state == SemanticIndexingState.Running,
+                blockReason = mlBlock,
                 onSetPaused = viewModel::setSemanticIndexingPaused,
             )
             Spacer(Modifier.height(20.dp))
@@ -1674,6 +1714,7 @@ private fun SemanticStatusCard(
     progress: SemanticIndexingProgress,
     indexedCount: Int,
     waitingForOther: Boolean,
+    blockReason: HealthBlockReason,
     onSetPaused: (Boolean) -> Unit,
 ) {
     val colors = AppColors.current
@@ -1684,7 +1725,10 @@ private fun SemanticStatusCard(
     // first, finish silently instead of looking stuck.
     val label = semanticStatusLabel(state, indexedCount, (progress.total - progress.indexed).coerceAtLeast(0))
     val title = when (label) {
-        SemanticStatusLabel.Indexing -> stringResource(R.string.settings_ai_indexing_running)
+        // A condition holding the scan (no charger, low battery, warm, power saver) is named in place of
+        // the plain running line, as the face card does, since the walk itself keeps reporting Running.
+        SemanticStatusLabel.Indexing ->
+            healthBlockLabel(blockReason) ?: stringResource(R.string.settings_ai_indexing_running)
         SemanticStatusLabel.WaitingModel -> stringResource(R.string.settings_ai_semantic_indexing_waiting)
         SemanticStatusLabel.Paused -> stringResource(R.string.settings_ai_indexing_paused)
         SemanticStatusLabel.Ready -> stringResource(R.string.settings_ai_semantic_ready)

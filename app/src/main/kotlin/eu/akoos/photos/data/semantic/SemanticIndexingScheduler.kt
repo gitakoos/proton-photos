@@ -41,6 +41,7 @@ import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.PhotoDownloadService
+import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -50,6 +51,8 @@ import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.GuardedSessionHolder
 import eu.akoos.photos.util.MlAbandonCap
 import eu.akoos.photos.util.MlRail
+import eu.akoos.photos.util.MlWalkState
+import eu.akoos.photos.util.MlWalkStateStore
 import eu.akoos.photos.util.MlWalkGate
 import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.util.SOURCE_RETRIES_PER_PASS
@@ -260,9 +263,19 @@ class SemanticIndexingScheduler @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Photos whose last load (or inference) failed transiently, each with its attempts and when it is due
-     *  again, so a pass tries never-tried photos first and a failing one waits out its backoff. In memory
-     *  only; dropped on [reset], so a rescan or a new account tries everything afresh. */
+     *  again, so a pass tries never-tried photos first and a failing one waits out its backoff. Saved to
+     *  [stateStore] at the end of a pass and taken back by the first pass of a new process; dropped on
+     *  [reset], so a rescan or a new account tries everything afresh. */
     private val retryBook = SourceRetryBook()
+
+    /** What the walk keeps between process starts, so a process the system killed does not begin its
+     *  backoffs again. */
+    private val stateStore by lazy {
+        MlWalkStateStore(File(File(context.filesDir, "ml_state"), "semantic_walk.bin"), BuildConfig.VERSION_CODE)
+    }
+
+    /** The account whose saved state this process has already taken back, so it is read once. */
+    @Volatile private var stateRestoredFor: String? = null
 
     /** The re-kick a settled walk leaves for its earliest waiting retry. */
     private val retryKick = WalkRetryKick(scope)
@@ -392,6 +405,7 @@ class SemanticIndexingScheduler @Inject constructor(
             }
 
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            restoreWalkState(account)
             // The model is on the device and a walk is about to run, so this is the choke point to
             // reconcile the stored embeddings' model version: an older-generation row is dropped once
             // here, before anything reads it, and the walk below re-embeds it with the current model.
@@ -462,11 +476,11 @@ class SemanticIndexingScheduler @Inject constructor(
                                 // the face walk: the scan runs serialized on background threads, so viewing
                                 // a screen never freezes it. Poll so a pause or sign-out still stops the walk
                                 // promptly and the model stays loaded across a short park.
-                                var verdict = deviceHealth.verdict()
+                                var verdict = deviceHealth.mlVerdict()
                                 while (active() && !verdict.backgroundWorkAllowed) {
                                     SemanticDiagnostics.recordPark(verdict.reason)
-                                    delay(HEALTH_PAUSE_POLL_MS)
-                                    verdict = deviceHealth.verdict()
+                                    deviceHealth.awaitMlWorkAllowed()
+                                    verdict = deviceHealth.mlVerdict()
                                 }
                                 if (!active()) break
                                 val i = cursor.getAndIncrement()
@@ -523,6 +537,7 @@ class SemanticIndexingScheduler @Inject constructor(
                 else -> SemanticIndexingProgress(SemanticIndexingState.Idle, indexedNow, libraryTotal)
             }
         } finally {
+            if (!stopRequested) saveWalkState(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
             running.set(false)
             // Auto-continue: a full-res walk only downloads a bounded batch per pass, so keep going until
             // the library is drained. A pending resume always re-kicks; otherwise re-kick only while the
@@ -541,6 +556,25 @@ class SemanticIndexingScheduler @Inject constructor(
                 }
             }
         }
+    }
+
+    /** Takes back, once per process and account, the photos the last process left waiting out a retry, so a
+     *  restart does not begin their backoffs again. What it cannot read counts as nothing saved. */
+    private fun restoreWalkState(account: String) {
+        if (stateRestoredFor == account) return
+        stateRestoredFor = account
+        val saved = runCatching { stateStore.read(account) }.getOrNull() ?: return
+        retryBook.restore(saved.retries, SystemClock.elapsedRealtime(), System.currentTimeMillis())
+    }
+
+    /** Saves what [restoreWalkState] takes back. Best effort: a failed write costs only the backoff. */
+    private fun saveWalkState(account: String) {
+        if (stateRestoredFor != account) return
+        runCatching {
+            stateStore.write(
+                MlWalkState(account = account, retries = retryBook.export(SystemClock.elapsedRealtime(), System.currentTimeMillis())),
+            )
+        }.onFailure { Log.w(TAG, "walk state save failed: ${it.message}") }
     }
 
     /** Starts the pass a walk's tail owes [userId], only while it is still the account last asked for and
@@ -592,6 +626,8 @@ class SemanticIndexingScheduler @Inject constructor(
         stopRequested = true
         retryKick.cancel()
         retryBook.clear()
+        runCatching { stateStore.delete() }
+        stateRestoredFor = null
         restart.reset()
         _progress.value = SemanticIndexingProgress(SemanticIndexingState.Idle, 0, 0)
         SemanticDiagnostics.clear()
@@ -1109,10 +1145,6 @@ class SemanticIndexingScheduler @Inject constructor(
         /** Cold cloud thumbnails a single pass will decrypt inline, so the whole-library walk cannot flood
          *  the crypto service; the rest wait for a later pass once their thumbnail has warmed. */
         const val MAX_COLD_DECRYPTS_PER_PASS = 64
-
-        /** While the device is not in a good state for heavy work, each worker re-checks at this cadence,
-         *  so a resume or a pause / sign-out both take effect within a second. */
-        const val HEALTH_PAUSE_POLL_MS = 1_000L
 
         /** Hard ceiling on one device-video still-frame decode, so a malformed file that hangs
          *  MediaMetadataRetriever frees the worker instead of pinning it. */
