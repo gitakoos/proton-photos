@@ -71,11 +71,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -121,6 +124,10 @@ private val HANDLE_WIDTH = 32.dp
 private val HANDLE_HEIGHT = 4.dp
 private const val SETTLE_VELOCITY = 400f
 
+/** The longest side a copy is decoded to in the review, so an enlarged copy shows real detail while a very
+ *  large photo cannot exhaust memory. */
+private const val REVIEW_DECODE_EDGE = 3072
+
 /**
  * Full-screen review of one duplicate group. A pager swipes the copies at full resolution above a
  * draggable drawer that carries their details; pulling the drawer up shrinks the photo and reveals
@@ -164,6 +171,11 @@ internal fun DuplicateGroupReview(
     val exifCache = remember { mutableStateMapOf<String, PhotoMetadata>() }
 
     val currentItem = group.items[pagerState.currentPage]
+    // How the shown copy is enlarged. It belongs to the page on screen and starts over on every new page,
+    // so swiping to the next copy always opens it fitted.
+    var zoom by remember { mutableStateOf(PhotoZoom()) }
+    var photoViewSize by remember { mutableStateOf(Size.Zero) }
+    LaunchedEffect(pagerState.settledPage) { zoom = PhotoZoom() }
     // A selection covering every copy comes only from the list's Delete group; this overlay deletes
     // extras and always keeps one, so such a selection is deleted from the list instead.
     val canDelete = !isDeleting && selected.isNotEmpty() && selected.size < allIds.size
@@ -287,6 +299,8 @@ internal fun DuplicateGroupReview(
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.weight(1f).fillMaxWidth(),
+                // An enlarged copy is panned with the finger, so the pager must not also page away.
+                userScrollEnabled = !zoom.isZoomed,
             ) { page ->
                 val item = group.items[page]
                 val pendingLinkId =
@@ -309,36 +323,67 @@ internal fun DuplicateGroupReview(
                 // under the full-res so the sharp image fades in over it, not over Bg0: the same technique
                 // the photo viewer uses so the swap morphs instead of flashing white.
                 val thumbModel = inputs.imageData ?: LocalThumbnailUrls.current.value[inputs.stableKey]
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    if (thumbModel != null) {
-                        AsyncImage(
-                            // No crossfade on the base: it is the instant layer the full-res fades over.
-                            model = remember(thumbModel) {
-                                ImageRequest.Builder(context).data(thumbModel).crossfade(false).build()
+                val onThisPage = page == pagerState.currentPage
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        // An enlarged copy stays inside its own area; it never draws over the top bar or the drawer.
+                        .clipToBounds()
+                        .onSizeChanged { photoViewSize = Size(it.width.toFloat(), it.height.toFloat()) }
+                        .then(
+                            if (onThisPage) {
+                                Modifier.photoZoomGestures({ zoom }, { photoViewSize }, { zoom = it })
+                            } else {
+                                Modifier
                             },
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
-                        )
-                    }
-                    if (fullResUri != null) {
-                        AsyncImage(
-                            // Fade the full-res in over the still-visible thumb for a blurry->sharp morph.
-                            model = remember(fullResUri) {
-                                ImageRequest.Builder(context).data(fullResUri).crossfade(220).build()
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // The pictures enlarge as one layer; the selection circle below stays out of it.
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                if (onThisPage) {
+                                    scaleX = zoom.scale
+                                    scaleY = zoom.scale
+                                    translationX = zoom.offset.x
+                                    translationY = zoom.offset.y
+                                }
                             },
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
-                        )
-                    }
-                    if (thumbModel == null && fullResUri == null) {
-                        Icon(
-                            Icons.Default.Photo,
-                            contentDescription = null,
-                            tint = FgDim.copy(alpha = 0.45f),
-                            modifier = Modifier.size(40.dp),
-                        )
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (thumbModel != null) {
+                            AsyncImage(
+                                // No crossfade on the base: it is the instant layer the full-res fades over.
+                                // Decoded up to REVIEW_DECODE_EDGE so a device copy stays sharp when enlarged.
+                                model = remember(thumbModel) {
+                                    ImageRequest.Builder(context).data(thumbModel).size(REVIEW_DECODE_EDGE).crossfade(false).build()
+                                },
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
+                            )
+                        }
+                        if (fullResUri != null) {
+                            AsyncImage(
+                                // Fade the full-res in over the still-visible thumb for a blurry->sharp morph.
+                                model = remember(fullResUri) {
+                                    ImageRequest.Builder(context).data(fullResUri).size(REVIEW_DECODE_EDGE).crossfade(220).build()
+                                },
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp),
+                            )
+                        }
+                        if (thumbModel == null && fullResUri == null) {
+                            Icon(
+                                Icons.Default.Photo,
+                                contentDescription = null,
+                                tint = FgDim.copy(alpha = 0.45f),
+                                modifier = Modifier.size(40.dp),
+                            )
+                        }
                     }
                     SelectionCircle(
                         selected = item.stableId in selected,
