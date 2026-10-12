@@ -2444,5 +2444,15 @@
     <string name="whats_new_260_frame_body">In the photo editor, place a photo on a canvas of another shape, such as 1:1, 9:16 or Polaroid, filled with a colour or a soft blur. The tool is still in progress, and more improvements are on the way.</string>
     <string name="whats_new_260_drive_title">Face and search data in Drive</string>
     <string name="whats_new_260_drive_body">Save your face names and search data to Drive and restore them on another phone, choosing what comes back, under “Settings > More settings > Machine learning”.</string>
-    <string name="whats_new_260_more">Plus editable dates for HEIC, GIF and RAW photos, duplicate groups you can ignore, a map place picker, Turkish, and lots more fixes and stability improvements.</string>
+    <string name="whats_new_260_autosave_title">Automatic Drive saves</string>
+    <string name="whats_new_260_autosave_body">Turn on “Save automatically” on the Drive copy of your face and search data or of your labels, and the copy stays up to date in the background: after changes, daily or weekly. Find them under “Settings > More settings”, in “Machine learning” and “Labels”.</string>
+    <string name="whats_new_260_worldmap_title">A richer world map</string>
+    <string name="whats_new_260_worldmap_body">The world map now draws country and province borders, tints the province where you took photos, names places as you zoom in and shows the same pins as the classic map. It opens over Europe, and moving and pinching keep the spot under your fingers.</string>
+    <string name="whats_new_260_time_title">Time format</string>
+    <string name="whats_new_260_time_body">Choose how times are shown under “Settings > Appearance &amp; Language > Time format”: automatic, 24-hour or 12-hour, apart from the app language. Automatic follows your phone\'s own clock setting.</string>
+    <string name="whats_new_260_onthisday_title">Days either side</string>
+    <string name="whats_new_260_onthisday_body">“On this day” now shows only the day itself. Choose 0 to 3 days either side under “Settings > Appearance &amp; Language > Library > Timeline > On this day”.</string>
+    <string name="whats_new_260_duplicates_title">Duplicate review</string>
+    <string name="whats_new_260_duplicates_body">Pinch, drag or double tap to enlarge a copy up to 6x before you decide what to delete. “Delete group” selects every copy of a group at once.</string>
+    <string name="whats_new_260_more">Plus “Add to another album” in an album\'s selection bar, an “Only while charging” switch for the scans, drag to select in a person\'s photos, editable dates for HEIC, GIF and RAW photos, duplicate groups you can ignore, a map place picker, Turkish, and lots more fixes and stability improvements.</string>
 </resources>

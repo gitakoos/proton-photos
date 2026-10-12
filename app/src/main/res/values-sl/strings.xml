@@ -2522,5 +2522,15 @@
     <string name="whats_new_260_frame_body">V urejevalniku fotografij postavite fotografijo na platno druge oblike, na primer 1:1, 9:16 ali Polaroid, zapolnjeno z barvo ali mehkim zameglenjem. Orodje je še v nastajanju in prihajajo nove izboljšave.</string>
     <string name="whats_new_260_drive_title">Podatki o obrazih in iskanju v Drive</string>
     <string name="whats_new_260_drive_body">Imena obrazov in podatke iskanja shranite v Drive in jih obnovite na drugem telefonu, pri čemer izberete, kaj se vrne, v „Nastavitve > Več nastavitev > Strojno učenje“.</string>
-    <string name="whats_new_260_more">Poleg tega urejljivi datumi pri HEIC, GIF in RAW, skupine dvojnikov, ki jih lahko prezrete, izbira kraja na zemljevidu, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
+    <string name="whats_new_260_autosave_title">Samodejno shranjevanje v Drive</string>
+    <string name="whats_new_260_autosave_body">Vklopite „Samodejno shranjevanje“ pri kopiji v Drive za podatke obrazov in iskanja ali za oznake, pa se kopija v ozadju ohranja posodobljena: po spremembah, dnevno ali tedensko. Najdete jih v „Nastavitve > Več nastavitev“, pod „Strojno učenje“ in „Oznake“.</string>
+    <string name="whats_new_260_worldmap_title">Bogatejši zemljevid sveta</string>
+    <string name="whats_new_260_worldmap_body">Zemljevid sveta zdaj riše meje držav in pokrajin, obarva pokrajino, kjer ste fotografirali, ob približevanju poimenuje kraje in kaže iste žebljičke kot klasični zemljevid. Odpre se nad Evropo, pri premikanju in ščipanju pa točka pod prsti ostane na mestu.</string>
+    <string name="whats_new_260_time_title">Oblika časa</string>
+    <string name="whats_new_260_time_body">Kako se prikaže čas, izberete v „Nastavitve > Videz in jezik > Oblika časa“: samodejno, 24-urno ali 12-urno, neodvisno od jezika aplikacije. Samodejno sledi nastavitvi ure telefona.</string>
+    <string name="whats_new_260_onthisday_title">Dni pred in po</string>
+    <string name="whats_new_260_onthisday_body">„Na ta dan“ zdaj prikaže le sam dan. Od 0 do 3 dni pred in po izberete v „Nastavitve > Videz in jezik > Knjižnica > Časovnica > Na ta dan“.</string>
+    <string name="whats_new_260_duplicates_title">Pregled dvojnikov</string>
+    <string name="whats_new_260_duplicates_body">S ščipanjem, vlečenjem ali dvojnim tapom povečate kopijo do 6-krat, preden se odločite, kaj izbrisati. „Izbriši skupino“ izbere vse kopije skupine naenkrat.</string>
+    <string name="whats_new_260_more">Poleg tega „Dodaj v drug album“ v vrstici izbire albuma, stikalo „Samo med polnjenjem“ za skeniranje, izbiranje z vlečenjem pri fotografijah osebe, urejljivi datumi pri HEIC, GIF in RAW, skupine dvojnikov, ki jih lahko prezrete, izbira kraja na zemljevidu, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
 </resources>

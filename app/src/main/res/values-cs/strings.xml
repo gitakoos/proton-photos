@@ -2528,5 +2528,15 @@
     <string name="whats_new_260_frame_body">V editoru fotek umístěte fotku na plátno jiného tvaru, třeba 1:1, 9:16 nebo Polaroid, vyplněné barvou nebo měkkým rozostřením. Nástroj je stále ve vývoji a další vylepšení přijdou.</string>
     <string name="whats_new_260_drive_title">Data obličejů a hledání na Drive</string>
     <string name="whats_new_260_drive_body">Uložte jména tváří a data hledání na Drive a obnovte je v jiném telefonu, přičemž si vyberete, co se vrátí, v „Nastavení > Další nastavení > Strojové učení“.</string>
-    <string name="whats_new_260_more">Navíc upravitelné datum u HEIC, GIF a RAW, skupiny duplicit, které lze ignorovat, výběr místa na mapě, turečtina a spousta dalších oprav a vylepšení stability.</string>
+    <string name="whats_new_260_autosave_title">Automatické ukládání na Drive</string>
+    <string name="whats_new_260_autosave_body">Zapněte „Ukládat automaticky“ u kopie na Drive pro data tváří a hledání nebo pro štítky a kopie se bude na pozadí udržovat aktuální: po změnách, denně nebo týdně. Najdete je v „Nastavení > Další nastavení“, v částech „Strojové učení“ a „Štítky“.</string>
+    <string name="whats_new_260_worldmap_title">Bohatší mapa světa</string>
+    <string name="whats_new_260_worldmap_body">Mapa světa nově kreslí hranice států a provincií, vybarví provincii, kde jste fotili, při přibližování pojmenovává místa a ukazuje stejné špendlíky jako klasická mapa. Otevře se nad Evropou a při posouvání a roztahování zůstává bod pod prsty na místě.</string>
+    <string name="whats_new_260_time_title">Formát času</string>
+    <string name="whats_new_260_time_body">Jak se zobrazuje čas, zvolíte v „Nastavení > Vzhled a jazyk > Formát času“: automaticky, 24hodinový nebo 12hodinový, nezávisle na jazyce aplikace. Automaticky se řídí nastavením hodin telefonu.</string>
+    <string name="whats_new_260_onthisday_title">Dní na každou stranu</string>
+    <string name="whats_new_260_onthisday_body">„V tento den“ nově ukazuje jen samotný den. Počet dní před a po (0 až 3) zvolíte v „Nastavení > Vzhled a jazyk > Knihovna > Časová osa > V tento den“.</string>
+    <string name="whats_new_260_duplicates_title">Kontrola duplicit</string>
+    <string name="whats_new_260_duplicates_body">Sevřením, tažením nebo dvojitým klepnutím zvětšíte kopii až 6krát, než se rozhodnete, co smazat. „Smazat skupinu“ vybere najednou všechny kopie skupiny.</string>
+    <string name="whats_new_260_more">Navíc „Přidat do jiného alba“ v liště výběru alba, přepínač „Jen při nabíjení“ pro skenování, výběr tažením u fotek osoby, upravitelné datum u HEIC, GIF a RAW, skupiny duplicit, které lze ignorovat, výběr místa na mapě, turečtina a spousta dalších oprav a vylepšení stability.</string>
 </resources>

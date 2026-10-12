@@ -2443,5 +2443,15 @@
     <string name="whats_new_260_frame_body">Nell\'editor foto, posiziona una foto su una tela di un\'altra forma, come 1:1, 9:16 o Polaroid, riempita con un colore o una sfocatura morbida. Lo strumento è ancora in sviluppo e arriveranno altri miglioramenti.</string>
     <string name="whats_new_260_drive_title">Dati di volti e ricerca su Drive</string>
     <string name="whats_new_260_drive_body">Salva su Drive i nomi dei volti e i dati di ricerca e ripristinali su un altro telefono, scegliendo cosa recuperare, in “Impostazioni > Altre impostazioni > Apprendimento automatico”.</string>
-    <string name="whats_new_260_more">Inoltre date modificabili per HEIC, GIF e RAW, gruppi di duplicati da ignorare, un selettore di luogo sulla mappa, il turco e tante altre correzioni e miglioramenti di stabilità.</string>
+    <string name="whats_new_260_autosave_title">Salvataggio automatico su Drive</string>
+    <string name="whats_new_260_autosave_body">Attiva “Salva automaticamente” sulla copia Drive dei dati di volti e ricerca o delle etichette, e la copia resta aggiornata in background: dopo le modifiche, ogni giorno o ogni settimana. Le trovi in “Impostazioni > Altre impostazioni”, sotto “Apprendimento automatico” ed “Etichette”.</string>
+    <string name="whats_new_260_worldmap_title">Una mappa del mondo più ricca</string>
+    <string name="whats_new_260_worldmap_body">La mappa del mondo ora disegna i confini di paesi e province, colora la provincia dove hai scattato foto, nomina i luoghi mentre ingrandisci e mostra gli stessi segnaposto della mappa classica. Si apre sull\'Europa, e muovendola o pizzicando il punto sotto le dita resta fermo.</string>
+    <string name="whats_new_260_time_title">Formato dell\'ora</string>
+    <string name="whats_new_260_time_body">Scegli come mostrare l\'ora in “Impostazioni > Aspetto e lingua > Formato dell\'ora”: automatico, 24 ore o 12 ore, a prescindere dalla lingua dell\'app. Automatico segue l\'impostazione dell\'orologio del telefono.</string>
+    <string name="whats_new_260_onthisday_title">Giorni prima e dopo</string>
+    <string name="whats_new_260_onthisday_body">“In questo giorno” ora mostra solo il giorno stesso. Scegli da 0 a 3 giorni prima e dopo in “Impostazioni > Aspetto e lingua > Libreria > Sequenza > In questo giorno”.</string>
+    <string name="whats_new_260_duplicates_title">Revisione dei duplicati</string>
+    <string name="whats_new_260_duplicates_body">Pizzica, trascina o tocca due volte per ingrandire una copia fino a 6 volte prima di decidere cosa eliminare. “Elimina gruppo” seleziona in un colpo tutte le copie di un gruppo.</string>
+    <string name="whats_new_260_more">Inoltre “Aggiungi a un altro album” nella barra di selezione di un album, un interruttore “Solo durante la ricarica” per le scansioni, selezione trascinando nelle foto di una persona, date modificabili per HEIC, GIF e RAW, gruppi di duplicati da ignorare, un selettore di luogo sulla mappa, il turco e tante altre correzioni e miglioramenti di stabilità.</string>
 </resources>

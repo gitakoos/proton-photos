@@ -2321,5 +2321,15 @@
     <string name="whats_new_260_frame_body">Fotoğraf düzenleyicide bir fotoğrafı 1:1, 9:16 veya Polaroid gibi başka şekilli bir tuvale, bir renkle veya yumuşak bir bulanıklıkla doldurarak yerleştirin. Araç hâlâ geliştiriliyor ve yeni iyileştirmeler gelecek.</string>
     <string name="whats_new_260_drive_title">Drive\'da yüz ve arama verileri</string>
     <string name="whats_new_260_drive_body">Yüz adlarını ve arama verilerini Drive\'a kaydedin ve başka bir telefonda geri yükleyin; neyin geri geleceğini siz seçersiniz: “Ayarlar > Diğer ayarlar > Makine öğrenimi”.</string>
-    <string name="whats_new_260_more">Ayrıca HEIC, GIF ve RAW için düzenlenebilir tarih, yok sayılabilen kopya grupları, haritada yer seçici, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
+    <string name="whats_new_260_autosave_title">Drive\'a otomatik kayıt</string>
+    <string name="whats_new_260_autosave_body">Yüz ve arama verilerinizin ya da etiketlerinizin Drive kopyasında “Otomatik kaydet” seçeneğini açın; kopya arka planda güncel kalır: değişikliklerden sonra, günlük veya haftalık. Bunları “Ayarlar > Diğer ayarlar” altında, “Makine öğrenimi” ve “Etiketler” bölümlerinde bulabilirsiniz.</string>
+    <string name="whats_new_260_worldmap_title">Daha zengin dünya haritası</string>
+    <string name="whats_new_260_worldmap_body">Dünya haritası artık ülke ve il sınırlarını çiziyor, fotoğraf çektiğiniz ili renklendiriyor, yaklaştıkça yerlerin adlarını gösteriyor ve klasik haritayla aynı iğneleri kullanıyor. Avrupa üzerinde açılır; kaydırırken ve sıkıştırırken parmaklarınızın altındaki nokta yerinde kalır.</string>
+    <string name="whats_new_260_time_title">Saat biçimi</string>
+    <string name="whats_new_260_time_body">Saatin nasıl gösterileceğini “Ayarlar > Görünüm ve dil > Saat biçimi” altından seçin: otomatik, 24 saatlik veya 12 saatlik; uygulama dilinden bağımsız. Otomatik, telefonun kendi saat ayarını izler.</string>
+    <string name="whats_new_260_onthisday_title">Öncesi ve sonrası gün sayısı</string>
+    <string name="whats_new_260_onthisday_body">“Bu gün” artık yalnızca günün kendisini gösterir. Öncesi ve sonrası için 0 ile 3 gün arasında seçimi “Ayarlar > Görünüm ve dil > Kitaplık > Zaman çizelgesi > Bu gün” altında yapın.</string>
+    <string name="whats_new_260_duplicates_title">Kopyaları inceleme</string>
+    <string name="whats_new_260_duplicates_body">Bir kopyayı, neyi sileceğinize karar vermeden önce sıkıştırarak, sürükleyerek veya çift dokunarak 6 kata kadar büyütün. “Grubu sil” bir grubun tüm kopyalarını tek seferde seçer.</string>
+    <string name="whats_new_260_more">Ayrıca bir albümün seçim çubuğunda “Başka bir albüme ekle”, taramalar için “Yalnızca şarj olurken” anahtarı, bir kişinin fotoğraflarında sürükleyerek seçim, HEIC, GIF ve RAW için düzenlenebilir tarih, yok sayılabilen kopya grupları, haritada yer seçici, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
 </resources>

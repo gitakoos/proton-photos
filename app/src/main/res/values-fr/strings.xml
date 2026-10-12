@@ -2406,5 +2406,15 @@
     <string name="whats_new_260_frame_body">Dans l\'éditeur de photos, placez une photo sur un canevas d\'une autre forme, comme 1:1, 9:16 ou Polaroid, rempli d\'une couleur ou d\'un flou doux. L\'outil est encore en cours de développement et d\'autres améliorations arrivent.</string>
     <string name="whats_new_260_drive_title">Données de visages et de recherche sur Drive</string>
     <string name="whats_new_260_drive_body">Sauvegardez les noms des visages et les données de recherche sur Drive et restaurez-les sur un autre téléphone, en choisissant ce qui revient, dans « Paramètres > Autres réglages > Apprentissage automatique ».</string>
-    <string name="whats_new_260_more">Et aussi des dates modifiables pour HEIC, GIF et RAW, des groupes de doublons à ignorer, un sélecteur de lieu sur la carte, le turc et de nombreuses autres corrections et améliorations de stabilité.</string>
+    <string name="whats_new_260_autosave_title">Enregistrement automatique sur Drive</string>
+    <string name="whats_new_260_autosave_body">Activez « Enregistrer automatiquement » sur la copie Drive de vos données de visages et de recherche ou de vos étiquettes : la copie reste à jour en arrière-plan, après les modifications, chaque jour ou chaque semaine. Vous les trouverez dans « Paramètres > Autres réglages », sous « Apprentissage automatique » et « Étiquettes ».</string>
+    <string name="whats_new_260_worldmap_title">Une carte du monde plus riche</string>
+    <string name="whats_new_260_worldmap_body">La carte du monde dessine désormais les frontières des pays et des provinces, colore la province où vous avez pris des photos, nomme les lieux quand vous zoomez et affiche les mêmes repères que la carte classique. Elle s\'ouvre sur l\'Europe, et en la déplaçant ou en pinçant, le point sous vos doigts reste en place.</string>
+    <string name="whats_new_260_time_title">Format de l\'heure</string>
+    <string name="whats_new_260_time_body">Choisissez l\'affichage de l\'heure dans « Paramètres > Apparence &amp; langue > Format de l\'heure » : automatique, 24 heures ou 12 heures, indépendamment de la langue de l\'appli. Automatique suit le réglage d\'horloge du téléphone.</string>
+    <string name="whats_new_260_onthisday_title">Jours avant et après</string>
+    <string name="whats_new_260_onthisday_body">« Ce jour-là » n\'affiche plus que le jour lui-même. Choisissez de 0 à 3 jours avant et après dans « Paramètres > Apparence &amp; langue > Bibliothèque > Fil > Ce jour-là ».</string>
+    <string name="whats_new_260_duplicates_title">Revue des doublons</string>
+    <string name="whats_new_260_duplicates_body">Pincez, faites glisser ou touchez deux fois pour agrandir une copie jusqu\'à 6 fois avant de décider quoi supprimer. « Supprimer le groupe » sélectionne d\'un coup toutes les copies d\'un groupe.</string>
+    <string name="whats_new_260_more">Et aussi « Ajouter à un autre album » dans la barre de sélection d\'un album, un réglage « Uniquement pendant la charge » pour les analyses, la sélection par glissement dans les photos d\'une personne, des dates modifiables pour HEIC, GIF et RAW, des groupes de doublons à ignorer, un sélecteur de lieu sur la carte, le turc et de nombreuses autres corrections et améliorations de stabilité.</string>
 </resources>

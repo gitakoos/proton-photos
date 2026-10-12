@@ -2529,5 +2529,15 @@
     <string name="whats_new_260_frame_body">V editore fotiek umiestnite fotku na plátno iného tvaru, napríklad 1:1, 9:16 alebo Polaroid, vyplnené farbou alebo mäkkým rozostrením. Nástroj je stále vo vývoji a ďalšie vylepšenia prídu.</string>
     <string name="whats_new_260_drive_title">Dáta tvárí a vyhľadávania na Drive</string>
     <string name="whats_new_260_drive_body">Uložte mená tvárí a dáta vyhľadávania na Drive a obnovte ich v inom telefóne, pričom si vyberiete, čo sa vráti, v „Nastavenia > Ďalšie nastavenia > Strojové učenie“.</string>
-    <string name="whats_new_260_more">Navyše upraviteľný dátum pri HEIC, GIF a RAW, skupiny duplikátov, ktoré možno ignorovať, výber miesta na mape, turečtina a množstvo ďalších opráv a vylepšení stability.</string>
+    <string name="whats_new_260_autosave_title">Automatické ukladanie na Drive</string>
+    <string name="whats_new_260_autosave_body">Zapnite „Ukladať automaticky“ pri kópii na Drive pre dáta tvárí a vyhľadávania alebo pre štítky a kópia sa bude na pozadí udržiavať aktuálna: po zmenách, denne alebo týždenne. Nájdete ich v „Nastavenia > Ďalšie nastavenia“, v častiach „Strojové učenie“ a „Štítky“.</string>
+    <string name="whats_new_260_worldmap_title">Bohatšia mapa sveta</string>
+    <string name="whats_new_260_worldmap_body">Mapa sveta teraz kreslí hranice štátov a provincií, vyfarbí provinciu, kde ste fotili, pri približovaní pomenúva miesta a ukazuje rovnaké špendlíky ako klasická mapa. Otvorí sa nad Európou a pri posúvaní a štipnutí zostáva bod pod prstami na mieste.</string>
+    <string name="whats_new_260_time_title">Formát času</string>
+    <string name="whats_new_260_time_body">Spôsob zobrazenia času zvolíte v „Nastavenia > Vzhľad a jazyk > Formát času“: automaticky, 24-hodinový alebo 12-hodinový, nezávisle od jazyka aplikácie. Automaticky sa riadi nastavením hodín telefónu.</string>
+    <string name="whats_new_260_onthisday_title">Dni pred a po</string>
+    <string name="whats_new_260_onthisday_body">„V tento deň“ teraz ukazuje len samotný deň. Počet dní pred a po (0 až 3) zvolíte v „Nastavenia > Vzhľad a jazyk > Knižnica > Časová os > V tento deň“.</string>
+    <string name="whats_new_260_duplicates_title">Kontrola duplikátov</string>
+    <string name="whats_new_260_duplicates_body">Štipnutím, ťahaním alebo dvojitým ťuknutím zväčšíte kópiu až 6-krát, kým sa rozhodnete, čo odstrániť. „Odstrániť skupinu“ vyberie naraz všetky kópie skupiny.</string>
+    <string name="whats_new_260_more">Navyše „Pridať do iného albumu“ v lište výberu albumu, prepínač „Len počas nabíjania“ pre skenovanie, výber ťahaním pri fotkách osoby, upraviteľný dátum pri HEIC, GIF a RAW, skupiny duplikátov, ktoré možno ignorovať, výber miesta na mape, turečtina a množstvo ďalších opráv a vylepšení stability.</string>
 </resources>

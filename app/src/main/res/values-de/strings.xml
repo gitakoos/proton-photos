@@ -2404,5 +2404,15 @@
     <string name="whats_new_260_frame_body">Setze im Foto-Editor ein Foto auf eine Leinwand anderer Form, etwa 1:1, 9:16 oder Polaroid, gefüllt mit einer Farbe oder einer weichen Unschärfe. Das Werkzeug ist noch in Arbeit, weitere Verbesserungen folgen.</string>
     <string name="whats_new_260_drive_title">Gesichts- und Suchdaten in Drive</string>
     <string name="whats_new_260_drive_body">Sichere Gesichtsnamen und Suchdaten in Drive und stelle sie auf einem anderen Telefon wieder her, wobei du wählst, was zurückkommt, unter „Einstellungen > Weitere Einstellungen > Maschinelles Lernen“.</string>
-    <string name="whats_new_260_more">Dazu bearbeitbare Daten bei HEIC, GIF und RAW, Duplikatgruppen zum Ignorieren, eine Ortsauswahl auf der Karte, Türkisch und viele weitere Korrekturen und Stabilitätsverbesserungen.</string>
+    <string name="whats_new_260_autosave_title">Automatisch in Drive speichern</string>
+    <string name="whats_new_260_autosave_body">Schalte „Automatisch speichern“ bei der Drive-Kopie deiner Gesichts- und Suchdaten oder deiner Labels ein, dann bleibt die Kopie im Hintergrund aktuell: nach Änderungen, täglich oder wöchentlich. Du findest sie unter „Einstellungen > Weitere Einstellungen“, bei „Maschinelles Lernen“ und „Labels“.</string>
+    <string name="whats_new_260_worldmap_title">Eine reichere Weltkarte</string>
+    <string name="whats_new_260_worldmap_body">Die Weltkarte zeichnet jetzt Länder- und Provinzgrenzen, färbt die Provinz ein, in der du fotografiert hast, nennt beim Hineinzoomen die Orte und zeigt dieselben Pins wie die klassische Karte. Sie öffnet sich über Europa, und beim Verschieben und Zoomen bleibt der Punkt unter deinen Fingern an seinem Platz.</string>
+    <string name="whats_new_260_time_title">Zeitformat</string>
+    <string name="whats_new_260_time_body">Wie die Uhrzeit angezeigt wird, wählst du unter „Einstellungen > Darstellung &amp; Sprache > Zeitformat“: automatisch, 24-Stunden oder 12-Stunden, unabhängig von der App-Sprache. Automatisch folgt der Uhreinstellung deines Telefons.</string>
+    <string name="whats_new_260_onthisday_title">Tage davor und danach</string>
+    <string name="whats_new_260_onthisday_body">„An diesem Tag“ zeigt jetzt nur noch den Tag selbst. Wähle 0 bis 3 Tage davor und danach unter „Einstellungen > Darstellung &amp; Sprache > Bibliothek > Verlauf > An diesem Tag“.</string>
+    <string name="whats_new_260_duplicates_title">Duplikate prüfen</string>
+    <string name="whats_new_260_duplicates_body">Mit Zwei-Finger-Zoom, Ziehen oder Doppeltippen vergrößerst du eine Kopie bis auf das 6-Fache, bevor du entscheidest, was gelöscht wird. „Gruppe löschen“ markiert alle Kopien einer Gruppe auf einmal.</string>
+    <string name="whats_new_260_more">Dazu „Zu anderem Album hinzufügen“ in der Auswahlleiste eines Albums, ein Schalter „Nur beim Laden“ für die Scans, Wischauswahl bei den Fotos einer Person, bearbeitbare Daten bei HEIC, GIF und RAW, Duplikatgruppen zum Ignorieren, eine Ortsauswahl auf der Karte, Türkisch und viele weitere Korrekturen und Stabilitätsverbesserungen.</string>
 </resources>

@@ -2522,5 +2522,15 @@
     <string name="whats_new_260_frame_body">W edytorze zdjęć umieść zdjęcie na płótnie o innym kształcie, takim jak 1:1, 9:16 lub Polaroid, wypełnionym kolorem lub miękkim rozmyciem. Narzędzie jest wciąż rozwijane i pojawią się kolejne usprawnienia.</string>
     <string name="whats_new_260_drive_title">Dane twarzy i wyszukiwania na Drive</string>
     <string name="whats_new_260_drive_body">Zapisz nazwy twarzy i dane wyszukiwania na Drive i przywróć je na innym telefonie, wybierając, co wróci, w „Ustawienia > Więcej ustawień > Uczenie maszynowe”.</string>
-    <string name="whats_new_260_more">Do tego edytowalne daty w HEIC, GIF i RAW, grupy duplikatów, które można zignorować, wybór miejsca na mapie, język turecki oraz mnóstwo innych poprawek i usprawnień stabilności.</string>
+    <string name="whats_new_260_autosave_title">Automatyczny zapis na Drive</string>
+    <string name="whats_new_260_autosave_body">Włącz „Zapisuj automatycznie” przy kopii na Drive danych twarzy i wyszukiwania albo etykiet, a kopia będzie aktualizowana w tle: po zmianach, codziennie lub co tydzień. Znajdziesz je w „Ustawienia > Więcej ustawień”, w sekcjach „Uczenie maszynowe” i „Etykiety”.</string>
+    <string name="whats_new_260_worldmap_title">Bogatsza mapa świata</string>
+    <string name="whats_new_260_worldmap_body">Mapa świata rysuje teraz granice państw i prowincji, zabarwia prowincję, w której robiono zdjęcia, nazywa miejsca przy powiększaniu i pokazuje te same pinezki co klasyczna mapa. Otwiera się nad Europą, a przy przesuwaniu i szczypaniu punkt pod palcami pozostaje na miejscu.</string>
+    <string name="whats_new_260_time_title">Format czasu</string>
+    <string name="whats_new_260_time_body">Sposób wyświetlania czasu wybierzesz w „Ustawienia > Wygląd i język > Format czasu”: automatyczny, 24-godzinny lub 12-godzinny, niezależnie od języka aplikacji. Automatyczny podąża za ustawieniem zegara telefonu.</string>
+    <string name="whats_new_260_onthisday_title">Dni przed i po</string>
+    <string name="whats_new_260_onthisday_body">„Tego dnia” pokazuje teraz tylko sam dzień. Od 0 do 3 dni przed i po wybierzesz w „Ustawienia > Wygląd i język > Biblioteka > Oś czasu > Tego dnia”.</string>
+    <string name="whats_new_260_duplicates_title">Przegląd duplikatów</string>
+    <string name="whats_new_260_duplicates_body">Szczypnij, przeciągnij lub dotknij dwukrotnie, aby powiększyć kopię nawet 6 razy, zanim zdecydujesz, co usunąć. „Usuń grupę” zaznacza naraz wszystkie kopie grupy.</string>
+    <string name="whats_new_260_more">Do tego „Dodaj do innego albumu” na pasku zaznaczania albumu, przełącznik „Tylko podczas ładowania” dla skanowania, zaznaczanie przeciąganiem wśród zdjęć osoby, edytowalne daty w HEIC, GIF i RAW, grupy duplikatów, które można zignorować, wybór miejsca na mapie, język turecki oraz mnóstwo innych poprawek i usprawnień stabilności.</string>
 </resources>

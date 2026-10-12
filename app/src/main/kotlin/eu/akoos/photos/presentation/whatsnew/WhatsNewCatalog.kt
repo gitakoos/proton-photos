@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.ui.graphics.vector.ImageVector
 import eu.akoos.photos.R
@@ -124,6 +125,11 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         version = "2.6.0",
         hero = null,
         features = listOf(
+            WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_260_autosave_title, R.string.whats_new_260_autosave_body),
+            WhatsNewFeature(Icons.Default.Public, R.string.whats_new_260_worldmap_title, R.string.whats_new_260_worldmap_body),
+            WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_260_time_title, R.string.whats_new_260_time_body),
+            WhatsNewFeature(Icons.Default.Today, R.string.whats_new_260_onthisday_title, R.string.whats_new_260_onthisday_body),
+            WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_260_duplicates_title, R.string.whats_new_260_duplicates_body),
             WhatsNewFeature(Icons.Default.Bookmark, R.string.whats_new_260_labels_title, R.string.whats_new_260_labels_body),
             WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_260_compress_title, R.string.whats_new_260_compress_body),
             WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_260_vault_title, R.string.whats_new_260_vault_body),
