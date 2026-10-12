@@ -1,4 +1,7 @@
 world_countries.geojson and world_cities.geojson are Natural Earth vector data
 (ne_110m_admin_0_countries and ne_110m_populated_places_simple), in the public
-domain. Source: https://www.naturalearthdata.com via
-https://github.com/nvkelso/natural-earth-vector . Made with Natural Earth.
+domain. world_detail.bin is built from Natural Earth 10m data
+(ne_10m_admin_0_countries, ne_10m_admin_1_states_provinces and
+ne_10m_populated_places_simple) by tools/world_data/build_world_data.py. Source:
+https://www.naturalearthdata.com via https://github.com/nvkelso/natural-earth-vector .
+Made with Natural Earth.

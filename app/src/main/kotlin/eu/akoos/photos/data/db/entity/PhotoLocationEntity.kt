@@ -48,3 +48,9 @@ data class PhotoLocationEntity(
         const val LOCAL_USER = "local"
     }
 }
+
+/**
+ * Whether this fix sits at exactly 0 degrees latitude and longitude. A photo with no real GPS is often stored
+ * there, in the sea off West Africa, so the maps and the places grouping leave such a fix out.
+ */
+fun PhotoLocationEntity.isNullIsland(): Boolean = latitude == 0.0 && longitude == 0.0

@@ -29,6 +29,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.db.entity.isNullIsland
 import eu.akoos.photos.data.repository.LocalExifBackfillScheduler
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -37,6 +38,7 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePlacesUseCase
 import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.domain.usecase.PlaceCountry
+import eu.akoos.photos.domain.usecase.PlacesData
 import eu.akoos.photos.util.retryOnDbTear
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
@@ -75,6 +77,7 @@ class MapViewModel @Inject constructor(
             // Read the local partition when signed out, so a guest's on-device GPS fixes plot too.
             photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
         }
+        .map { rows -> rows.filterNot { it.isNullIsland() } }
         .retryOnDbTear("MapLocations")
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -140,6 +143,14 @@ class MapViewModel @Inject constructor(
                 .collect { startLocalBackfill() }
         }
     }
+
+    /**
+     * The places the globe reads, taken from ONE emission so "loaded" and the city and country lists always agree.
+     * Reading them from separate flows let the globe see "loaded" before the cities arrived and never turn to them.
+     */
+    internal val mapPlaces: StateFlow<MapPlaces> = places
+        .map { it.toMapPlaces() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), MapPlaces(false, emptyList(), emptyList()))
 
     /**
      * The distinct cities the account's located photos were taken in, from the shared places grouping,
@@ -224,3 +235,9 @@ class MapViewModel @Inject constructor(
         return itemByKey
     }
 }
+
+/** The places grouping as the globe consumes it: [loaded] is false until the first result, when the lists are empty. */
+internal data class MapPlaces(val loaded: Boolean, val cities: List<PlaceCity>, val countries: List<PlaceCountry>)
+
+internal fun PlacesData?.toMapPlaces(): MapPlaces =
+    MapPlaces(loaded = this != null, cities = this?.cities.orEmpty(), countries = this?.countries.orEmpty())

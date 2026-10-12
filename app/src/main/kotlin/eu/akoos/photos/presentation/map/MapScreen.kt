@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.map
 
 import android.Manifest
 import android.graphics.drawable.BitmapDrawable
+import android.view.View
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -75,6 +76,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import eu.akoos.photos.presentation.map.vector.PinFootprint
+import eu.akoos.photos.presentation.map.vector.keptPins
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.gallery.photoCellInputsFor
 import eu.akoos.photos.presentation.common.FloatingHeader
@@ -83,7 +86,11 @@ import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.places.PlaceSearchSheet
 import eu.akoos.photos.presentation.theme.AppColors
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
@@ -98,13 +105,9 @@ private const val LOCATED_ZOOM = 5.0
 // view allows, so the place reads with its surroundings.
 private const val FOCUS_ZOOM = 13.0
 
-// Plotting every fix gets expensive on a large located library (each pin is a decoded thumbnail +
-// a composited bitmap). Cap to an evenly-sampled subset; clustering arrives in a later piece.
-private const val MARKER_CAP = 150
-
 // Coil decode target for the pin thumbnail — small, since the visible body is ~52dp. Cover-crop
 // happens when the bitmap is composited into the rounded body.
-private const val PIN_THUMB_PX = 120
+internal const val PIN_THUMB_PX = 120
 
 /**
  * Map page. Plots every geotagged photo for the account on an OpenStreetMap canvas. A plain
@@ -120,7 +123,7 @@ private const val PIN_THUMB_PX = 120
  * pin drops immediately; the thumbnail is loaded off-thread through Coil and swapped in once
  * decoded. Tapping a pin opens the full-screen place page ([onOpenPlace]) for the pin's
  * coordinates, the same located-photos view the world map and the Places browser open, so a place
- * opens one way everywhere. Clustering arrives in a later piece.
+ * opens one way everywhere. A pin that would overlap an earlier one shrinks to a small dot until a zoom gives it room.
  *
  * Opened with a [focus], the map starts centred on that place at city level with an accent marker on the
  * point, and the located photos plot around it without moving the camera.
@@ -292,16 +295,13 @@ fun MapScreen(
 
         // Sample down to the marker cap so a large located library stays cheap — evenly spaced so
         // the spread still reads, mirroring the Search map-preview card.
-        val sampled = if (pins.size <= MARKER_CAP) {
-            pins
-        } else {
-            val step = pins.size.toDouble() / MARKER_CAP
-            (0 until MARKER_CAP).map { pins[(it * step).toInt()] }
-        }
+        val sampled = samplePins(pins)
 
         // One shared placeholder drawable across every pin until its thumbnail decodes.
         val placeholder = BitmapDrawable(context.resources, ThumbnailPin.placeholder(density))
 
+        // The dot a pin shrinks to when a pin ahead of it in the list has the room, as on the world map.
+        val dotDrawable = BitmapDrawable(context.resources, ThumbnailPin.dot(density, focusColor))
         val markers = sampled.map { pin ->
             Marker(mapView).apply {
                 position = GeoPoint(pin.latitude, pin.longitude)
@@ -316,39 +316,91 @@ fun MapScreen(
         }
         focusMarker?.let { mapView.overlays.add(it) }
 
-        if (!framed) {
-            val avgLat = pins.sumOf { it.latitude } / pins.size
-            val avgLon = pins.sumOf { it.longitude } / pins.size
-            mapView.controller.setZoom(LOCATED_ZOOM)
-            mapView.controller.setCenter(GeoPoint(avgLat, avgLon))
-            framed = true
+        // Every pin keeps one size at every zoom. Where two would overlap, the one earlier in the list keeps its
+        // pin and the other shows as a small dot until a zoom gives it room. Tapping either opens the place.
+        val pinIcons = Array<android.graphics.drawable.Drawable>(markers.size) { placeholder }
+        val shownAsPin = BooleanArray(markers.size) { true }
+        fun showMarker(index: Int) {
+            val marker = markers[index]
+            if (shownAsPin[index]) {
+                marker.icon = pinIcons[index]
+                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            } else {
+                marker.icon = dotDrawable
+                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            }
         }
-        mapView.invalidate()
-        // Camera now frames the located photos (or the focus); drop the cover so the map is revealed
-        // already centred, ahead of the thumbnails that swap in below.
-        centered = true
-
-        // Now fill in thumbnails. Each pin's resolved library item supplies the same image source the
-        // gallery cell uses — a local content uri or a cloud thumbnail, both decoded through Coil — so
-        // cloud fixes load their photo too. An unresolved pin (no library item yet) keeps the placeholder.
-        sampled.forEachIndexed { index, pin ->
-            val imageData = pin.item?.let { photoCellInputsFor(it).imageData } ?: return@forEachIndexed
-            val pinBitmap = runCatching {
-                val req = ImageRequest.Builder(context)
-                    .data(imageData)
-                    .size(PIN_THUMB_PX)
-                    // Software bitmap so it can be composited onto our Canvas.
-                    .allowHardware(false)
-                    .build()
-                val result = context.imageLoader.execute(req)
-                // Don't recycle this: Coil may hand back a memory-cache-owned bitmap, and the
-                // composite reads from it. The pin is a fresh bitmap we own.
-                val source = (result as? SuccessResult)?.drawable?.toBitmap()
-                    ?: return@runCatching null
-                ThumbnailPin.build(source, density)
-            }.getOrNull() ?: return@forEachIndexed
-            markers[index].icon = BitmapDrawable(context.resources, pinBitmap)
+        val screenPoint = android.graphics.Point()
+        fun declutterPins() {
+            if (mapView.width == 0 || mapView.height == 0) return
+            val projection = mapView.projection
+            val halfWidth = placeholder.intrinsicWidth / 2f
+            val rise = placeholder.intrinsicHeight.toFloat()
+            val footprints = markers.map { marker ->
+                projection.toPixels(marker.position, screenPoint)
+                PinFootprint(screenPoint.x.toFloat(), screenPoint.y.toFloat(), halfWidth, rise, 0f)
+            }
+            val kept = keptPins(footprints)
+            for (index in markers.indices) {
+                shownAsPin[index] = kept[index]
+                showMarker(index)
+            }
             mapView.invalidate()
+        }
+        val zoomListener = object : MapListener {
+            override fun onScroll(event: ScrollEvent?): Boolean = false
+            override fun onZoom(event: ZoomEvent?): Boolean {
+                declutterPins()
+                return false
+            }
+        }
+        val layoutListener = View.OnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop) declutterPins()
+        }
+        mapView.addMapListener(zoomListener)
+        mapView.addOnLayoutChangeListener(layoutListener)
+        try {
+            if (!framed) {
+                val avgLat = pins.sumOf { it.latitude } / pins.size
+                val avgLon = pins.sumOf { it.longitude } / pins.size
+                mapView.controller.setZoom(LOCATED_ZOOM)
+                mapView.controller.setCenter(GeoPoint(avgLat, avgLon))
+                framed = true
+            }
+            mapView.invalidate()
+            declutterPins()
+            // Camera now frames the located photos (or the focus); drop the cover so the map is revealed
+            // already centred, ahead of the thumbnails that swap in below.
+            centered = true
+
+            // Now fill in thumbnails. Each pin's resolved library item supplies the same image source the
+            // gallery cell uses — a local content uri or a cloud thumbnail, both decoded through Coil — so
+            // cloud fixes load their photo too. An unresolved pin (no library item yet) keeps the placeholder.
+            sampled.forEachIndexed { index, pin ->
+                val imageData = pin.item?.let { photoCellInputsFor(it).imageData } ?: return@forEachIndexed
+                val pinBitmap = runCatching {
+                    val req = ImageRequest.Builder(context)
+                        .data(imageData)
+                        .size(PIN_THUMB_PX)
+                        // Software bitmap so it can be composited onto our Canvas.
+                        .allowHardware(false)
+                        .build()
+                    val result = context.imageLoader.execute(req)
+                    // Don't recycle this: Coil may hand back a memory-cache-owned bitmap, and the
+                    // composite reads from it. The pin is a fresh bitmap we own.
+                    val source = (result as? SuccessResult)?.drawable?.toBitmap()
+                        ?: return@runCatching null
+                    ThumbnailPin.build(source, density)
+                }.getOrNull() ?: return@forEachIndexed
+                pinIcons[index] = BitmapDrawable(context.resources, pinBitmap)
+                showMarker(index)
+                mapView.invalidate()
+            }
+            // Keep the listeners for as long as these pins are on the map.
+            awaitCancellation()
+        } finally {
+            mapView.removeMapListener(zoomListener)
+            mapView.removeOnLayoutChangeListener(layoutListener)
         }
     }
 

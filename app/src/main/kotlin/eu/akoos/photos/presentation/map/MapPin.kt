@@ -38,3 +38,16 @@ data class MapPin(
     val longitude: Double,
     val item: GalleryItem?,
 )
+
+/** The most pins a map plots at once: a large located library stays cheap, each pin being a decoded thumbnail. */
+internal const val MARKER_CAP = 150
+
+/**
+ * The pins both maps plot: all of them up to [MARKER_CAP], else an evenly spaced subset so the spread still reads.
+ * One rule for both maps, so a place shows the same pins on either.
+ */
+internal fun samplePins(pins: List<MapPin>): List<MapPin> {
+    if (pins.size <= MARKER_CAP) return pins
+    val step = pins.size.toDouble() / MARKER_CAP
+    return (0 until MARKER_CAP).map { pins[(it * step).toInt()] }
+}

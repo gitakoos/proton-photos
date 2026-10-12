@@ -51,12 +51,34 @@ internal object ThumbnailPin {
     private const val SHADOW_BLUR_DP = 5f
     private const val SHADOW_DY_DP = 2f
     private const val MARGIN_DP = 6f
+    private const val DOT_TOUCH_DP = 28f
+    private const val DOT_RING_DP = 5f
+    private const val DOT_CORE_DP = 3.4f
 
     /** Photo pin: the [thumb] cover-cropped into the rounded body. */
     fun build(thumb: Bitmap, density: Float): Bitmap =
         render(density) { canvas, body, paint ->
             drawCoverCroppedThumb(canvas, thumb, body, CORNER_DP * density)
         }
+
+    /**
+     * The small dot a pin shrinks to when another pin has the room: a white ring around an [accent] centre, like
+     * the world map's dots. The bitmap is a larger transparent square so the dot is easy to tap.
+     */
+    fun dot(density: Float, accent: Int): Bitmap {
+        val size = (DOT_TOUCH_DP * density).toInt()
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        val centre = size / 2f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.color = Color.argb(70, 0, 0, 0)
+        canvas.drawCircle(centre, centre + 1f * density, DOT_RING_DP * density, paint)
+        paint.color = Color.WHITE
+        canvas.drawCircle(centre, centre, DOT_RING_DP * density, paint)
+        paint.color = accent
+        canvas.drawCircle(centre, centre, DOT_CORE_DP * density, paint)
+        return out
+    }
 
     /** Neutral fallback pin (no thumbnail yet, or a non-local source): a flat tile + photo glyph. */
     fun placeholder(density: Float): Bitmap =

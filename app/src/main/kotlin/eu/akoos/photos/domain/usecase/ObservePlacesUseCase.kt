@@ -28,6 +28,7 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.db.entity.isNullIsland
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.util.OfflineGeocoder
@@ -67,7 +68,7 @@ class ObservePlacesUseCase @Inject constructor(
             else getGalleryItems.invoke(userId)
             combine(locationFlow, libraryFlow, thumbnailUrlStore.urls) { locations, library, urls ->
                 val itemByKey = itemsByKey(library)
-                val located = locations.mapNotNull { loc ->
+                val located = locations.filterNot { it.isNullIsland() }.mapNotNull { loc ->
                     itemByKey[loc.id]?.let {
                         LocatedItem(loc.id, loc.latitude, loc.longitude, resolveThumbnail(it, urls))
                     }
