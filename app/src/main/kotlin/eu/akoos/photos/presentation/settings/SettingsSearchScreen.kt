@@ -229,6 +229,11 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         Screen.LanguageSettings.route,
     ),
     SettingsSearchEntry(
+        R.string.settings_time_format, R.string.settings_appearance,
+        listOf("time", "clock", "24", "12", "hour", "am", "pm", "idő", "óra"),
+        Screen.ClockFormatSettings.route,
+    ),
+    SettingsSearchEntry(
         R.string.settings_timeline, R.string.settings_appearance,
         listOf("timeline", "layout", "grid", "categories", "idővonal"),
         Screen.TimelineFilter.route,

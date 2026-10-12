@@ -61,7 +61,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
@@ -82,7 +81,9 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.SheetBg
+import eu.akoos.photos.presentation.util.LocalIs24Hour
 import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.presentation.util.formatDateTimeMinute
 import kotlinx.coroutines.launch
 
 /**
@@ -203,8 +204,8 @@ internal fun LabelRestoreDrawer(
 private fun SavedCopyCard(copy: LabelSavedCopy, picked: Boolean, onPick: () -> Unit, onShowAll: () -> Unit) {
     val shape = RoundedCornerShape(12.dp)
     val locale = appLocale()
-    val is24Hour = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
-    val savedAt = remember(copy.savedAtMillis, locale, is24Hour) { formatSavedAt(copy.savedAtMillis, locale, is24Hour) }
+    val is24Hour = LocalIs24Hour.current
+    val savedAt = remember(copy.savedAtMillis, locale, is24Hour) { formatDateTimeMinute(copy.savedAtMillis, locale, is24Hour) }
     val name = when {
         copy.isThisDevice -> stringResource(R.string.settings_ml_drive_this_device)
         copy.deviceLabel.isNotBlank() -> copy.deviceLabel
@@ -305,8 +306,8 @@ private fun CopyLabelRow(entry: LabelCount, modifier: Modifier = Modifier) {
 private fun AllLabelsSheet(copy: LabelSavedCopy, onClose: () -> Unit) {
     val colors = AppColors.current
     val locale = appLocale()
-    val is24Hour = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
-    val savedAt = remember(copy.savedAtMillis, locale, is24Hour) { formatSavedAt(copy.savedAtMillis, locale, is24Hour) }
+    val is24Hour = LocalIs24Hour.current
+    val savedAt = remember(copy.savedAtMillis, locale, is24Hour) { formatDateTimeMinute(copy.savedAtMillis, locale, is24Hour) }
     ModalBottomSheet(
         onDismissRequest = onClose,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),

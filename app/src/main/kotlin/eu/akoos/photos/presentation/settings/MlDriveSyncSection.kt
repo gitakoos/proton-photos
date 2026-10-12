@@ -69,7 +69,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
@@ -102,12 +101,11 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.SheetBg
+import eu.akoos.photos.presentation.util.LocalIs24Hour
 import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.presentation.util.formatBytes
+import eu.akoos.photos.presentation.util.formatDateTimeMinute
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * The "Face and search data on Drive" section of the machine-learning settings, under the feature rows.
@@ -546,18 +544,10 @@ private fun deviceName(name: MlDeviceName): String = when (name) {
 @Composable
 private fun deviceSummary(device: MlRemoteDevice): String {
     val locale = appLocale()
-    val is24Hour = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
-    val savedAt = remember(device.savedAtMs, locale, is24Hour) { formatSavedAt(device.savedAtMs, locale, is24Hour) }
+    val is24Hour = LocalIs24Hour.current
+    val savedAt = remember(device.savedAtMs, locale, is24Hour) { formatDateTimeMinute(device.savedAtMs, locale, is24Hour) }
     val contents = stringResource(mlRemoteDeviceContents(device))
     return "$contents · ${formatBytes(device.sizeBytes)}\n" +
         stringResource(R.string.settings_ml_drive_saved_at, savedAt)
 }
 
-/**
- * When the set was saved, to the minute, in the locale's own date order and on a 12 or 24 hour clock: the
- * phone's own setting when the user picked one, otherwise the app language's usual clock.
- */
-internal fun formatSavedAt(ms: Long, locale: Locale, is24Hour: Boolean): String {
-    val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, if (is24Hour) "yMMMdHm" else "yMMMdhma")
-    return SimpleDateFormat(pattern, locale).format(Date(ms))
-}

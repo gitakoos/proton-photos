@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.settings
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -51,9 +52,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.edit
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.settings.components.CollapsibleSection
 import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
@@ -64,6 +72,13 @@ import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.paletteAccent
 import eu.akoos.photos.presentation.util.AppLanguages
+import eu.akoos.photos.presentation.util.ClockFormat
+import javax.inject.Inject
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * Appearance hub — menu rows to the theme/palette and language sub-pages, plus the photo
@@ -75,6 +90,7 @@ fun AppearanceSettingsScreen(
     onBack: () -> Unit,
     onThemeClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
+    onTimeFormatClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
     onAlbumsSettingsClick: () -> Unit = {},
     onLandingTabClick: () -> Unit = {},
@@ -91,6 +107,11 @@ fun AppearanceSettingsScreen(
             NavRow(
                 label = stringResource(R.string.language_section),
                 onClick = onLanguageClick,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.settings_time_format),
+                onClick = onTimeFormatClick,
             )
         }
 
@@ -229,6 +250,54 @@ fun LanguageSettingsScreen(
                     description = null,
                     selected = selected,
                     onClick = { viewModel.setLanguage(option.tag) },
+                )
+                if (index < options.lastIndex) RowDivider()
+            }
+        }
+    }
+}
+
+/** The clock choice's saved state and its one write. */
+@HiltViewModel
+class ClockFormatViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
+) : ViewModel() {
+
+    val choice: StateFlow<ClockFormat> = context.settingsDataStore.data
+        .map { ClockFormat.fromKey(it[SettingsKeys.CLOCK_FORMAT]) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), ClockFormat.AUTO)
+
+    fun set(format: ClockFormat) {
+        viewModelScope.launch { context.settingsDataStore.edit { it[SettingsKeys.CLOCK_FORMAT] = format.key } }
+    }
+}
+
+/** How the time of day is written, chosen apart from the display language. */
+@Composable
+fun ClockFormatScreen(
+    onBack: () -> Unit,
+    viewModel: ClockFormatViewModel = hiltViewModel(),
+) {
+    val choice by viewModel.choice.collectAsStateWithLifecycle()
+    val colors = AppColors.current
+    val options = listOf(
+        Triple(ClockFormat.AUTO, R.string.settings_time_format_auto, stringResource(R.string.settings_time_format_auto_desc)),
+        Triple(ClockFormat.H24, R.string.settings_time_format_24h, "13:45"),
+        Triple(ClockFormat.H12, R.string.settings_time_format_12h, "1:45 PM"),
+    )
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_time_format), onBack = onBack) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(colors.cardBg, RoundedCornerShape(12.dp))
+                .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp)),
+        ) {
+            options.forEachIndexed { index, (format, labelRes, description) ->
+                ChoiceRow(
+                    label = stringResource(labelRes),
+                    description = description,
+                    selected = choice == format,
+                    onClick = { viewModel.set(format) },
                 )
                 if (index < options.lastIndex) RowDivider()
             }

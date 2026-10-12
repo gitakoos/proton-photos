@@ -24,7 +24,6 @@ package eu.akoos.photos.presentation.metadata
 
 import android.app.Activity
 import android.net.Uri
-import android.text.format.DateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -121,15 +120,15 @@ import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.util.LocalIs24Hour
 import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.presentation.util.formatDateTimeMinute
 import eu.akoos.photos.util.OfflineGeocoder
 import eu.akoos.photos.util.cityCountryLabel
 import eu.akoos.photos.util.countryName
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
-import java.util.Date
-import java.util.Locale
 
 private val cardShape = RoundedCornerShape(14.dp)
 
@@ -666,7 +665,7 @@ private fun DateField(
         val timePickerState = rememberTimePickerState(
             initialHour = zoned.hour,
             initialMinute = zoned.minute,
-            is24Hour = DateFormat.is24HourFormat(context),
+            is24Hour = LocalIs24Hour.current,
         )
         Dialog(onDismissRequest = { showTimePicker = false }) {
             Surface(shape = RoundedCornerShape(24.dp), color = colors.bg2) {
@@ -984,10 +983,7 @@ private fun LockNote(lock: EditLock) {
 // ── Date/time helpers ────────────────────────────────────────────────────────
 
 /** Locale-aware "medium date, short time" for the shown capture timestamp. */
-private fun formatDateTime(ms: Long): String =
-    java.text.DateFormat
-        .getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT, Locale.getDefault())
-        .format(Date(ms))
+private fun formatDateTime(ms: Long): String = formatDateTimeMinute(ms)
 
 /** UTC midnight of the day [ms] falls on in the device zone. This is the seed a Material date picker
  *  expects, since its calendar reads the selected value in UTC. */

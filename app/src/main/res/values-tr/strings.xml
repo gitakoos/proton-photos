@@ -779,6 +779,11 @@
     <string name="settings_ai_indexing_paused_power_save">Duraklatıldı, güç tasarrufu açık</string>
     <string name="settings_ai_charging_only">Yalnızca şarj olurken</string>
     <string name="settings_ai_charging_only_desc">Yüz tanıma ve fotoğraf arama taramaları şarj cihazını bekler.</string>
+    <string name="settings_time_format">Saat biçimi</string>
+    <string name="settings_time_format_auto">Otomatik</string>
+    <string name="settings_time_format_auto_desc">Telefonun 12 veya 24 saatlik ayarını izler</string>
+    <string name="settings_time_format_24h">24 saatlik</string>
+    <string name="settings_time_format_12h">12 saatlik</string>
     <string name="settings_ai_indexing_paused_not_charging">Duraklatıldı, şarj cihazı bekleniyor</string>
     <string name="settings_ai_indexing_paused_desc">Devam ettirene kadar fotoğraflar yüzler için taranmaz.</string>
     <string name="settings_ai_indexing_progress">%2$d fotoğraftan %1$d</string>

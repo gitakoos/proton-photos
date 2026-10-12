@@ -1784,6 +1784,11 @@
     <string name="settings_ai_indexing_paused_power_save">In pausa, risparmio energetico attivo</string>
     <string name="settings_ai_charging_only">Solo durante la ricarica</string>
     <string name="settings_ai_charging_only_desc">Il riconoscimento dei volti e la ricerca delle foto attendono il caricabatterie.</string>
+    <string name="settings_time_format">Formato dell\'ora</string>
+    <string name="settings_time_format_auto">Automatico</string>
+    <string name="settings_time_format_auto_desc">Segue l\'impostazione a 12 o 24 ore del telefono</string>
+    <string name="settings_time_format_24h">24 ore</string>
+    <string name="settings_time_format_12h">12 ore</string>
     <string name="settings_ai_indexing_paused_not_charging">In pausa, in attesa del caricabatterie</string>
     <string name="settings_ai_indexing_paused_desc">Le foto non vengono analizzate per trovare volti finché non riprendi.</string>
     <string name="settings_ai_indexing_progress">%1$d di %2$d foto</string>

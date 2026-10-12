@@ -1748,6 +1748,11 @@
     <string name="settings_ai_indexing_paused_power_save">Szüneteltetve, energiatakarékos mód bekapcsolva</string>
     <string name="settings_ai_charging_only">Csak töltés közben</string>
     <string name="settings_ai_charging_only_desc">Az arcfelismerés és a fotókeresés megvárja a töltőt.</string>
+    <string name="settings_time_format">Időformátum</string>
+    <string name="settings_time_format_auto">Automatikus</string>
+    <string name="settings_time_format_auto_desc">A telefon 12 vagy 24 órás beállítását követi</string>
+    <string name="settings_time_format_24h">24 órás</string>
+    <string name="settings_time_format_12h">12 órás</string>
     <string name="settings_ai_indexing_paused_not_charging">Szüneteltetve, töltőre vár</string>
     <string name="settings_ai_indexing_paused_desc">A folytatásig az alkalmazás nem keres arcokat a fotókon.</string>
     <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>

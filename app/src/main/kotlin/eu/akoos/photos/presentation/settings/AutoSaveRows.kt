@@ -60,15 +60,15 @@ import eu.akoos.photos.presentation.settings.compression.ChoiceSheet
 import eu.akoos.photos.presentation.settings.compression.CurrentChoice
 import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.util.LocalIs24Hour
 import eu.akoos.photos.presentation.util.appLocale
+import eu.akoos.photos.presentation.util.formatDateTimeMinute
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.text.DateFormat
-import java.util.Date
 import javax.inject.Inject
 
 /**
@@ -151,7 +151,7 @@ internal fun AutoSaveRows(
             CurrentChoice(
                 title = stringResource(frequencyLabel(state.frequency)),
                 description = if (state.lastSaveOkMs > 0L) {
-                    stringResource(R.string.settings_autosave_last_saved, formatSavedTime(state.lastSaveOkMs, locale))
+                    stringResource(R.string.settings_autosave_last_saved, formatSavedTime(state.lastSaveOkMs, locale, LocalIs24Hour.current))
                 } else {
                     stringResource(frequencyDescription(state.frequency))
                 },
@@ -246,5 +246,5 @@ private fun frequencyDescription(frequency: AutoSaveFrequency): Int = when (freq
     AutoSaveFrequency.WEEKLY -> R.string.settings_autosave_weekly_desc
 }
 
-private fun formatSavedTime(epochMs: Long, locale: java.util.Locale): String =
-    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale).format(Date(epochMs))
+private fun formatSavedTime(epochMs: Long, locale: java.util.Locale, is24Hour: Boolean): String =
+    formatDateTimeMinute(epochMs, locale, is24Hour)

@@ -1754,6 +1754,11 @@
     <string name="settings_ai_indexing_paused_power_save">En pause, l\'économiseur d\'énergie est activé</string>
     <string name="settings_ai_charging_only">Uniquement pendant la charge</string>
     <string name="settings_ai_charging_only_desc">La reconnaissance des visages et la recherche de photos attendent le chargeur.</string>
+    <string name="settings_time_format">Format de l\'heure</string>
+    <string name="settings_time_format_auto">Automatique</string>
+    <string name="settings_time_format_auto_desc">Suit le réglage 12 ou 24 heures du téléphone</string>
+    <string name="settings_time_format_24h">24 heures</string>
+    <string name="settings_time_format_12h">12 heures</string>
     <string name="settings_ai_indexing_paused_not_charging">En pause, en attente du chargeur</string>
     <string name="settings_ai_indexing_paused_desc">Les photos ne sont pas analysées pour y trouver des visages tant que vous ne reprenez pas.</string>
     <string name="settings_ai_indexing_progress">%1$d sur %2$d photos</string>

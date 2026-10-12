@@ -827,6 +827,11 @@
     <string name="settings_ai_indexing_paused_power_save">Paused, power saver is on</string>
     <string name="settings_ai_charging_only">Only while charging</string>
     <string name="settings_ai_charging_only_desc">Face recognition and photo search scans wait for the charger.</string>
+    <string name="settings_time_format">Time format</string>
+    <string name="settings_time_format_auto">Automatic</string>
+    <string name="settings_time_format_auto_desc">Follows the phone\'s 12 or 24 hour setting</string>
+    <string name="settings_time_format_24h">24-hour</string>
+    <string name="settings_time_format_12h">12-hour</string>
     <string name="settings_ai_indexing_paused_not_charging">Paused, waiting for the charger</string>
     <string name="settings_ai_indexing_paused_desc">Photos are not scanned for faces until you resume.</string>
     <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>

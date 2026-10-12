@@ -132,6 +132,7 @@ import eu.akoos.photos.presentation.settings.FaceRecognitionScreen
 import eu.akoos.photos.presentation.settings.SemanticSearchScreen
 import eu.akoos.photos.presentation.settings.AppearanceSettingsScreen
 import eu.akoos.photos.presentation.settings.LandingTabScreen
+import eu.akoos.photos.presentation.settings.ClockFormatScreen
 import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
 import eu.akoos.photos.presentation.settings.NotificationSettingsScreen
 import eu.akoos.photos.presentation.settings.PendingDeleteHandler
@@ -228,6 +229,7 @@ sealed class Screen(val route: String) {
     data object LandingTab : Screen("landing_tab")
     data object ThemeSettings : Screen("theme_settings")
     data object LanguageSettings : Screen("language_settings")
+    data object ClockFormatSettings : Screen("clock_format_settings")
     data object NotificationSettings : Screen("notification_settings")
     data object TimelineFilter : Screen("timeline_filter")
     data object TimelineLayout : Screen("timeline_layout")
@@ -1604,6 +1606,7 @@ fun NavGraph(
                 onBack = { navController.popBackStack() },
                 onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
+                onTimeFormatClick = { navController.navigate(Screen.ClockFormatSettings.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
                 onAlbumsSettingsClick = { navController.navigate(Screen.AlbumsSettings.route) },
                 onLandingTabClick = { navController.navigate(Screen.LandingTab.route) },
@@ -1670,6 +1673,12 @@ fun NavGraph(
 
         composable(Screen.LanguageSettings.route) {
             LanguageSettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.ClockFormatSettings.route) {
+            ClockFormatScreen(
                 onBack = { navController.popBackStack() },
             )
         }

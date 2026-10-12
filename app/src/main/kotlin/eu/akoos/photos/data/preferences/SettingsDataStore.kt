@@ -269,6 +269,10 @@ object SettingsKeys {
 
     val LANGUAGE = stringPreferencesKey("language")
 
+    /** How the time of day is written: [eu.akoos.photos.presentation.util.ClockFormat] key `auto`, `24h` or
+     *  `12h`. Absent = auto, the phone's own 12 or 24 hour setting. Independent of [LANGUAGE]. */
+    val CLOCK_FORMAT = stringPreferencesKey("clock_format")
+
     /** Which top-level gallery tab opens on app start: 0 = Photos, 1 = Albums, 2 = Shared.
      *  Default 0 keeps the historical Photos-first behaviour. Applied once per cold start;
      *  manual tab swipes within a session are not written back here. */

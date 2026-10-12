@@ -109,7 +109,11 @@ import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.LocalStaticImageLoader
 import eu.akoos.photos.presentation.theme.ProtonPhotosTheme
+import eu.akoos.photos.presentation.util.ClockFormat
+import eu.akoos.photos.presentation.util.ClockFormatState
+import eu.akoos.photos.presentation.util.LocalIs24Hour
 import eu.akoos.photos.presentation.util.LocaleOverride
+import eu.akoos.photos.presentation.util.phoneUses24Hour
 import eu.akoos.photos.data.repository.drive.PhotoStreamService
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.NetworkObserver
@@ -378,6 +382,16 @@ class MainActivity : AppCompatActivity() {
                 initial = LanguagePrefsBoot.read(this@MainActivity),
             )
 
+            // The clock choice is independent of the language; the formatters outside a composition read it
+            // from ClockFormatState, so it is refreshed here as it changes.
+            val clockFlow = remember {
+                settingsDataStore.data.map { prefs -> ClockFormat.fromKey(prefs[SettingsKeys.CLOCK_FORMAT]) }
+            }
+            val clockFormat by clockFlow.collectAsState(initial = ClockFormat.AUTO)
+            val phoneIs24Hour = phoneUses24Hour(this@MainActivity)
+            val is24Hour = clockFormat.is24Hour(phoneIs24Hour)
+            ClockFormatState.update(clockFormat, phoneIs24Hour)
+
             // Match status/navigation-bar icon contrast to the active theme.
             val view = LocalView.current
             if (!view.isInEditMode) {
@@ -398,7 +412,10 @@ class MainActivity : AppCompatActivity() {
                     gifAutoplayGrid = gifAutoplayGrid,
                     gifAutoplayCovers = gifAutoplayCovers,
                 ) {
-                  CompositionLocalProvider(LocalStaticImageLoader provides staticImageLoader) {
+                  CompositionLocalProvider(
+                      LocalStaticImageLoader provides staticImageLoader,
+                      LocalIs24Hour provides is24Hour,
+                  ) {
                     val forceUpdateFlow = remember {
                         settingsDataStore.data.map { it[FORCE_UPDATE_REQUIRED] == true }
                     }

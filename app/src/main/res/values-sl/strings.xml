@@ -1840,6 +1840,11 @@
     <string name="settings_ai_indexing_paused_power_save">Zaustavljeno, varčevanje z energijo je vklopljeno</string>
     <string name="settings_ai_charging_only">Samo med polnjenjem</string>
     <string name="settings_ai_charging_only_desc">Prepoznavanje obrazov in iskanje fotografij počakata na polnilnik.</string>
+    <string name="settings_time_format">Oblika časa</string>
+    <string name="settings_time_format_auto">Samodejno</string>
+    <string name="settings_time_format_auto_desc">Upošteva telefonovo 12- ali 24-urno nastavitev</string>
+    <string name="settings_time_format_24h">24-urna</string>
+    <string name="settings_time_format_12h">12-urna</string>
     <string name="settings_ai_indexing_paused_not_charging">Zaustavljeno, čaka na polnilnik</string>
     <string name="settings_ai_indexing_paused_desc">Fotografije se ne pregledujejo za obraze, dokler ne nadaljujete.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>

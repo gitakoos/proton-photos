@@ -73,10 +73,10 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.util.formatBytes
+import eu.akoos.photos.presentation.util.formatDateTimeMinute
 import eu.akoos.photos.util.ExifDateFormat
 import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.PhotoMetadata
-import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.time.ZoneId
 import java.util.Date
@@ -615,9 +615,7 @@ internal fun formatMs(ms: Long): String =
 
 /** Capture moment down to the minute, in the locale's own order. The date + place editor renders its
  *  value the same way, so the row and the screen its pencil opens read alike. */
-internal fun formatMsWithTime(ms: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.getDefault())
-        .format(Date(ms))
+internal fun formatMsWithTime(ms: Long): String = formatDateTimeMinute(ms)
 
 /** EXIF stores timestamps as "yyyy:MM:dd HH:mm:ss" (the date uses colons too). Rendered like the
  *  capture row so the group reads as one; falls back to the raw value if it doesn't parse. */

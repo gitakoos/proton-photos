@@ -1843,6 +1843,11 @@
     <string name="settings_ai_indexing_paused_power_save">Pozastavené, šetrič batérie je zapnutý</string>
     <string name="settings_ai_charging_only">Len počas nabíjania</string>
     <string name="settings_ai_charging_only_desc">Rozpoznávanie tvárí a vyhľadávanie fotiek čakajú na nabíjačku.</string>
+    <string name="settings_time_format">Formát času</string>
+    <string name="settings_time_format_auto">Automaticky</string>
+    <string name="settings_time_format_auto_desc">Riadi sa 12- alebo 24-hodinovým nastavením telefónu</string>
+    <string name="settings_time_format_24h">24-hodinový</string>
+    <string name="settings_time_format_12h">12-hodinový</string>
     <string name="settings_ai_indexing_paused_not_charging">Pozastavené, čaká sa na nabíjačku</string>
     <string name="settings_ai_indexing_paused_desc">Fotky sa na tváre neprehľadávajú, kým nebudete pokračovať.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotiek</string>

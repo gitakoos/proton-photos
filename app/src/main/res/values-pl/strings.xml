@@ -1833,6 +1833,11 @@
     <string name="settings_ai_indexing_paused_power_save">Wstrzymano, oszczędzanie baterii jest włączone</string>
     <string name="settings_ai_charging_only">Tylko podczas ładowania</string>
     <string name="settings_ai_charging_only_desc">Rozpoznawanie twarzy i wyszukiwanie zdjęć czekają na ładowarkę.</string>
+    <string name="settings_time_format">Format czasu</string>
+    <string name="settings_time_format_auto">Automatycznie</string>
+    <string name="settings_time_format_auto_desc">Zgodnie z 12- lub 24-godzinnym ustawieniem telefonu</string>
+    <string name="settings_time_format_24h">24-godzinny</string>
+    <string name="settings_time_format_12h">12-godzinny</string>
     <string name="settings_ai_indexing_paused_not_charging">Wstrzymano, czeka na ładowarkę</string>
     <string name="settings_ai_indexing_paused_desc">Zdjęcia nie są przeszukiwane pod kątem twarzy, dopóki nie wznowisz.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d zdjęć</string>
