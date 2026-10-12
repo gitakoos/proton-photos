@@ -2538,12 +2538,12 @@
     <string name="whats_new_260_onthisday_body">„V tento den“ nově ukazuje jen samotný den. Počet dní před a po (0 až 3) zvolíte v „Nastavení > Vzhled a jazyk > Knihovna > Časová osa > V tento den“.</string>
     <string name="whats_new_260_duplicates_title">Kontrola duplicit</string>
     <string name="whats_new_260_duplicates_body">Sevřením, tažením nebo dvojitým klepnutím zvětšíte kopii až 6krát, než se rozhodnete, co smazat. „Smazat skupinu“ vybere najednou všechny kopie skupiny.</string>
-    <string name="whats_new_260_intro_title">Obsahuje 2.6.0-test1</string>
-    <string name="whats_new_260_intro_body">Tato verze obsahuje vše z 2.6.0-test1. Následující karty ukazují jen to, co je nového od té doby.</string>
+    <string name="whats_new_260_intro_title">Obsahuje testovací verzi 1</string>
+    <string name="whats_new_260_intro_body">Tato verze obsahuje i vše z testovací verze 1. Následující karty ukazují jen to, co je nového od té doby.</string>
     <string name="whats_new_260_addalbum_title">Přidat do jiného alba</string>
     <string name="whats_new_260_addalbum_body">Vyberte v albu fotky a zvolte „Přidat do jiného alba“ v liště výběru. Fotky se přidají do druhého alba a v tomto zůstanou, a ve výběru lze vytvořit i nové album.</string>
     <string name="whats_new_260_scans_title">Skenování velkých knihoven</string>
-    <string name="whats_new_260_scans_body">Skenování tváří a hledání fotek pokračuje i u knihoven s více než sto tisíci tvářemi a fotky čekající na opakování přežijí zavření aplikace. Zapněte „Jen při nabíjení“ v „Nastavení > Další nastavení > Strojové učení“, aby skenování čekalo na nabíječku.</string>
+    <string name="whats_new_260_scans_body">U knihoven s více než sto tisíci tvářemi se čekající tváře nově řadí ke stávajícím osobám po dávkách, místo aby zůstaly nezařazené, a fotky čekající na opakování přežijí zavření aplikace.</string>
     <string name="whats_new_260_dragselect_title">Výběr tažením u osob</string>
     <string name="whats_new_260_dragselect_body">Podržte fotku na stránce osoby a tažením vyberte rozsah, stejně jako na časové ose a v albech.</string>
     <string name="whats_new_260_mappins_title">Přehlednější špendlíky na mapě</string>
@@ -2552,5 +2552,7 @@
     <string name="whats_new_260_notif_body">Oznámení „Kontrola nových fotek…“ už nebliká, když se vrátíte do galerie.</string>
     <string name="whats_new_260_tiles_title">Dlaždice na širokém displeji</string>
     <string name="whats_new_260_tiles_body">Dlaždice zkratek nahoře na kartě Alba se na širokém displeji už nerozjíždějí.</string>
+    <string name="whats_new_260_charging_title">Jen při nabíjení</string>
+    <string name="whats_new_260_charging_body">Zapněte „Jen při nabíjení“ v „Nastavení > Další nastavení > Strojové učení“, aby skenování tváří a hledání fotek čekalo na nabíječku. Pozastavené skenování to uvádí na své kartě.</string>
     <string name="whats_new_260_more">Navíc upravitelné datum u HEIC, GIF a RAW, skupiny duplicit, které lze ignorovat, výběr místa na mapě, turečtina a spousta dalších oprav a vylepšení stability.</string>
 </resources>

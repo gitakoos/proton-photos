@@ -2532,12 +2532,12 @@
     <string name="whats_new_260_onthisday_body">„Tego dnia” pokazuje teraz tylko sam dzień. Od 0 do 3 dni przed i po wybierzesz w „Ustawienia > Wygląd i język > Biblioteka > Oś czasu > Tego dnia”.</string>
     <string name="whats_new_260_duplicates_title">Przegląd duplikatów</string>
     <string name="whats_new_260_duplicates_body">Szczypnij, przeciągnij lub dotknij dwukrotnie, aby powiększyć kopię nawet 6 razy, zanim zdecydujesz, co usunąć. „Usuń grupę” zaznacza naraz wszystkie kopie grupy.</string>
-    <string name="whats_new_260_intro_title">Zawiera 2.6.0-test1</string>
-    <string name="whats_new_260_intro_body">Ta wersja zawiera wszystko z 2.6.0-test1. Kolejne karty pokazują tylko to, co nowego od tamtej pory.</string>
+    <string name="whats_new_260_intro_title">Zawiera wersję testową 1</string>
+    <string name="whats_new_260_intro_body">Ta wersja zawiera też wszystko z wersji testowej 1. Kolejne karty pokazują tylko to, co nowego od tamtej pory.</string>
     <string name="whats_new_260_addalbum_title">Dodaj do innego albumu</string>
     <string name="whats_new_260_addalbum_body">Zaznacz zdjęcia w albumie i wybierz „Dodaj do innego albumu” na pasku zaznaczania. Trafiają do drugiego albumu i zostają w tym, a w selektorze można utworzyć nowy album.</string>
     <string name="whats_new_260_scans_title">Skanowanie dużych bibliotek</string>
-    <string name="whats_new_260_scans_body">Skanowanie twarzy i wyszukiwania zdjęć trwa dalej w bibliotekach z ponad stu tysiącami twarzy, a zdjęcia czekające na ponowną próbę przetrwają zamknięcie aplikacji. Włącz „Tylko podczas ładowania” w „Ustawienia > Więcej ustawień > Uczenie maszynowe”, aby skanowanie czekało na ładowarkę.</string>
+    <string name="whats_new_260_scans_body">W bibliotekach z ponad stu tysiącami twarzy oczekujące twarze są teraz przypisywane partiami do istniejących osób zamiast pozostawać niezgrupowane, a zdjęcia czekające na ponowną próbę przetrwają zamknięcie aplikacji.</string>
     <string name="whats_new_260_dragselect_title">Zaznaczanie przeciąganiem w osobach</string>
     <string name="whats_new_260_dragselect_body">Przytrzymaj zdjęcie na stronie osoby i przeciągnij, aby zaznaczyć zakres, jak na osi czasu i w albumach.</string>
     <string name="whats_new_260_mappins_title">Czytelniejsze pinezki na mapie</string>
@@ -2546,5 +2546,7 @@
     <string name="whats_new_260_notif_body">Powiadomienie „Sprawdzanie nowych zdjęć…” nie miga już po powrocie do galerii.</string>
     <string name="whats_new_260_tiles_title">Kafelki na szerokich ekranach</string>
     <string name="whats_new_260_tiles_body">Kafelki skrótów u góry karty Albumy nie rozciągają się już na szerokim ekranie.</string>
+    <string name="whats_new_260_charging_title">Tylko podczas ładowania</string>
+    <string name="whats_new_260_charging_body">Włącz „Tylko podczas ładowania” w „Ustawienia > Więcej ustawień > Uczenie maszynowe”, aby skanowanie twarzy i wyszukiwania zdjęć czekało na ładowarkę. Wstrzymane skanowanie informuje o tym na swojej karcie.</string>
     <string name="whats_new_260_more">Do tego edytowalne daty w HEIC, GIF i RAW, grupy duplikatów, które można zignorować, wybór miejsca na mapie, język turecki oraz mnóstwo innych poprawek i usprawnień stabilności.</string>
 </resources>

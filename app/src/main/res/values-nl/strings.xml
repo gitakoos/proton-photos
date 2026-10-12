@@ -2441,12 +2441,12 @@
     <string name="whats_new_260_onthisday_body">“Op deze dag” toont nu alleen de dag zelf. Kies 0 tot 3 dagen ervoor en erna onder “Instellingen > Weergave &amp; taal > Bibliotheek > Tijdlijn > Op deze dag”.</string>
     <string name="whats_new_260_duplicates_title">Duplicaten bekijken</string>
     <string name="whats_new_260_duplicates_body">Knijp, sleep of dubbeltik om een kopie tot 6 keer te vergroten voordat je bepaalt wat er weg moet. “Groep verwijderen” selecteert alle kopieën van een groep in één keer.</string>
-    <string name="whats_new_260_intro_title">Bevat 2.6.0-test1</string>
-    <string name="whats_new_260_intro_body">Deze versie bevat alles uit 2.6.0-test1. De kaarten hierna tonen alleen wat sindsdien nieuw is.</string>
+    <string name="whats_new_260_intro_title">Bevat testversie 1</string>
+    <string name="whats_new_260_intro_body">Deze versie bevat ook alles uit testversie 1. De kaarten hierna tonen alleen wat sindsdien nieuw is.</string>
     <string name="whats_new_260_addalbum_title">Toevoegen aan ander album</string>
     <string name="whats_new_260_addalbum_body">Selecteer foto\'s in een album en kies “Toevoegen aan ander album” in de selectiebalk. Ze komen in het andere album en blijven in dit album, en in de kiezer kun je een nieuw album maken.</string>
     <string name="whats_new_260_scans_title">Scans voor grote bibliotheken</string>
-    <string name="whats_new_260_scans_body">De scans voor gezichten en foto\'s zoeken gaan door bij bibliotheken met meer dan honderdduizend gezichten, en foto\'s die op een nieuwe poging wachten overleven het afsluiten van de app. Zet “Alleen tijdens het opladen” aan onder “Instellingen > Meer instellingen > Machine learning” om de scans op de oplader te laten wachten.</string>
+    <string name="whats_new_260_scans_body">Bij bibliotheken met meer dan honderdduizend gezichten worden wachtende gezichten nu in porties bij bestaande personen geplaatst in plaats van ongegroepeerd te blijven, en foto\'s die op een nieuwe poging wachten overleven het afsluiten van de app.</string>
     <string name="whats_new_260_dragselect_title">Slepend selecteren bij personen</string>
     <string name="whats_new_260_dragselect_body">Houd een foto op de pagina van een persoon ingedrukt en sleep om een reeks te selecteren, zoals in de tijdlijn en albums.</string>
     <string name="whats_new_260_mappins_title">Nettere kaartmarkeringen</string>
@@ -2455,5 +2455,7 @@
     <string name="whats_new_260_notif_body">De melding “Zoeken naar nieuwe foto\'s…” knippert niet meer als je terugkeert naar de galerij.</string>
     <string name="whats_new_260_tiles_title">Tegels op brede schermen</string>
     <string name="whats_new_260_tiles_body">De snelkoppelingstegels bovenaan het tabblad Albums rekken op een breed scherm niet meer uit.</string>
+    <string name="whats_new_260_charging_title">Alleen tijdens het opladen</string>
+    <string name="whats_new_260_charging_body">Zet “Alleen tijdens het opladen” aan onder “Instellingen > Meer instellingen > Machine learning” om de scans voor gezichtsherkenning en foto\'s zoeken op de oplader te laten wachten. Een gepauzeerde scan meldt dat op zijn kaart.</string>
     <string name="whats_new_260_more">Daarnaast bewerkbare datums voor HEIC, GIF en RAW, groepen met duplicaten die je kunt negeren, een plaatskiezer op de kaart, Turks en nog veel meer fixes en stabiliteitsverbeteringen.</string>
 </resources>
