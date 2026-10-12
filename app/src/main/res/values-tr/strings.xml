@@ -2331,5 +2331,19 @@
     <string name="whats_new_260_onthisday_body">“Bu gün” artık yalnızca günün kendisini gösterir. Öncesi ve sonrası için 0 ile 3 gün arasında seçimi “Ayarlar > Görünüm ve dil > Kitaplık > Zaman çizelgesi > Bu gün” altında yapın.</string>
     <string name="whats_new_260_duplicates_title">Kopyaları inceleme</string>
     <string name="whats_new_260_duplicates_body">Bir kopyayı, neyi sileceğinize karar vermeden önce sıkıştırarak, sürükleyerek veya çift dokunarak 6 kata kadar büyütün. “Grubu sil” bir grubun tüm kopyalarını tek seferde seçer.</string>
-    <string name="whats_new_260_more">Ayrıca bir albümün seçim çubuğunda “Başka bir albüme ekle”, taramalar için “Yalnızca şarj olurken” anahtarı, bir kişinin fotoğraflarında sürükleyerek seçim, HEIC, GIF ve RAW için düzenlenebilir tarih, yok sayılabilen kopya grupları, haritada yer seçici, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
+    <string name="whats_new_260_intro_title">2.6.0-test1 dahil</string>
+    <string name="whats_new_260_intro_body">Bu sürüm 2.6.0-test1\'deki her şeyi içerir. Sonraki kartlar yalnızca o günden beri yeni olanı gösterir.</string>
+    <string name="whats_new_260_addalbum_title">Başka bir albüme ekle</string>
+    <string name="whats_new_260_addalbum_body">Bir albümde fotoğrafları seçin ve seçim çubuğunda “Başka bir albüme ekle” öğesini seçin. Fotoğraflar diğer albüme katılır, bu albümde de kalır; seçicide yeni bir albüm de oluşturabilirsiniz.</string>
+    <string name="whats_new_260_scans_title">Büyük kitaplıklar için taramalar</string>
+    <string name="whats_new_260_scans_body">Yüz tanıma ve fotoğraf arama taramaları yüz binden fazla yüzü olan kitaplıklarda da devam eder, yeniden denenmeyi bekleyen fotoğraflar uygulama kapansa da korunur. Taramaların şarj cihazını beklemesi için “Ayarlar > Diğer ayarlar > Makine öğrenimi” altında “Yalnızca şarj olurken” seçeneğini açın.</string>
+    <string name="whats_new_260_dragselect_title">Kişilerde sürükleyerek seçim</string>
+    <string name="whats_new_260_dragselect_body">Bir kişinin sayfasında bir fotoğrafa uzun basın, sonra zaman çizelgesindeki ve albümlerdeki gibi bir aralık seçmek için sürükleyin.</string>
+    <string name="whats_new_260_mappins_title">Daha düzenli harita iğneleri</string>
+    <string name="whats_new_260_mappins_body">Klasik haritada ve dünya haritasında, daha büyük bir iğneyi örtecek iğne, sığacak kadar yakınlaştırana dek küçük bir nokta olarak görünür.</string>
+    <string name="whats_new_260_notif_title">Daha sakin bildirimler</string>
+    <string name="whats_new_260_notif_body">“Yeni fotoğraflar denetleniyor…” bildirimi, galeriye döndüğünüzde artık yanıp sönmez.</string>
+    <string name="whats_new_260_tiles_title">Geniş ekranlarda kutucuklar</string>
+    <string name="whats_new_260_tiles_body">Albümler sekmesinin üstündeki kısayol kutucukları geniş ekranda artık birbirinden uzaklaşmaz.</string>
+    <string name="whats_new_260_more">Ayrıca HEIC, GIF ve RAW için düzenlenebilir tarih, yok sayılabilen kopya grupları, haritada yer seçici, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
 </resources>

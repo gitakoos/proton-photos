@@ -2532,5 +2532,19 @@
     <string name="whats_new_260_onthisday_body">„Na ta dan“ zdaj prikaže le sam dan. Od 0 do 3 dni pred in po izberete v „Nastavitve > Videz in jezik > Knjižnica > Časovnica > Na ta dan“.</string>
     <string name="whats_new_260_duplicates_title">Pregled dvojnikov</string>
     <string name="whats_new_260_duplicates_body">S ščipanjem, vlečenjem ali dvojnim tapom povečate kopijo do 6-krat, preden se odločite, kaj izbrisati. „Izbriši skupino“ izbere vse kopije skupine naenkrat.</string>
-    <string name="whats_new_260_more">Poleg tega „Dodaj v drug album“ v vrstici izbire albuma, stikalo „Samo med polnjenjem“ za skeniranje, izbiranje z vlečenjem pri fotografijah osebe, urejljivi datumi pri HEIC, GIF in RAW, skupine dvojnikov, ki jih lahko prezrete, izbira kraja na zemljevidu, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
+    <string name="whats_new_260_intro_title">Vključuje 2.6.0-test1</string>
+    <string name="whats_new_260_intro_body">Ta različica vsebuje vse iz 2.6.0-test1. Naslednje kartice kažejo samo, kar je novega od takrat.</string>
+    <string name="whats_new_260_addalbum_title">Dodaj v drug album</string>
+    <string name="whats_new_260_addalbum_body">V albumu izberite fotografije in izberite „Dodaj v drug album“ v vrstici izbire. Pridružijo se drugemu albumu in ostanejo v tem, v izbirniku pa lahko ustvarite tudi nov album.</string>
+    <string name="whats_new_260_scans_title">Skeniranje velikih knjižnic</string>
+    <string name="whats_new_260_scans_body">Skeniranje obrazov in iskanja fotografij se nadaljuje tudi pri knjižnicah z več kot sto tisoč obrazi, fotografije, ki čakajo na ponovni poskus, pa preživijo zaprtje aplikacije. Vklopite „Samo med polnjenjem“ v „Nastavitve > Več nastavitev > Strojno učenje“, da skeniranje počaka na polnilec.</string>
+    <string name="whats_new_260_dragselect_title">Izbiranje z vlečenjem pri osebah</string>
+    <string name="whats_new_260_dragselect_body">Dolgo pritisnite fotografijo na strani osebe in povlecite za izbiro obsega, kot na časovnici in v albumih.</string>
+    <string name="whats_new_260_mappins_title">Bolj urejeni žebljički na zemljevidu</string>
+    <string name="whats_new_260_mappins_body">Na klasičnem zemljevidu in zemljevidu sveta se žebljiček, ki bi prekril večjega, prikaže kot majhna pika, dokler ne približate dovolj, da ima prostor.</string>
+    <string name="whats_new_260_notif_title">Mirnejša obvestila</string>
+    <string name="whats_new_260_notif_body">Obvestilo „Preverjanje novih fotografij…“ ne utripa več, ko se vrnete v galerijo.</string>
+    <string name="whats_new_260_tiles_title">Ploščice na širokih zaslonih</string>
+    <string name="whats_new_260_tiles_body">Ploščice bližnjic na vrhu zavihka Albumi se na širokem zaslonu ne razmikajo več.</string>
+    <string name="whats_new_260_more">Poleg tega urejljivi datumi pri HEIC, GIF in RAW, skupine dvojnikov, ki jih lahko prezrete, izbira kraja na zemljevidu, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
 </resources>

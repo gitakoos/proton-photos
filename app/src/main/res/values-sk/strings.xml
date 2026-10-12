@@ -2539,5 +2539,19 @@
     <string name="whats_new_260_onthisday_body">„V tento deň“ teraz ukazuje len samotný deň. Počet dní pred a po (0 až 3) zvolíte v „Nastavenia > Vzhľad a jazyk > Knižnica > Časová os > V tento deň“.</string>
     <string name="whats_new_260_duplicates_title">Kontrola duplikátov</string>
     <string name="whats_new_260_duplicates_body">Štipnutím, ťahaním alebo dvojitým ťuknutím zväčšíte kópiu až 6-krát, kým sa rozhodnete, čo odstrániť. „Odstrániť skupinu“ vyberie naraz všetky kópie skupiny.</string>
-    <string name="whats_new_260_more">Navyše „Pridať do iného albumu“ v lište výberu albumu, prepínač „Len počas nabíjania“ pre skenovanie, výber ťahaním pri fotkách osoby, upraviteľný dátum pri HEIC, GIF a RAW, skupiny duplikátov, ktoré možno ignorovať, výber miesta na mape, turečtina a množstvo ďalších opráv a vylepšení stability.</string>
+    <string name="whats_new_260_intro_title">Obsahuje 2.6.0-test1</string>
+    <string name="whats_new_260_intro_body">Táto verzia obsahuje všetko z 2.6.0-test1. Nasledujúce karty ukazujú len to, čo je odvtedy nové.</string>
+    <string name="whats_new_260_addalbum_title">Pridať do iného albumu</string>
+    <string name="whats_new_260_addalbum_body">Vyberte v albume fotky a zvoľte „Pridať do iného albumu“ v lište výberu. Fotky sa pridajú do druhého albumu a v tomto zostanú, a vo výbere možno vytvoriť aj nový album.</string>
+    <string name="whats_new_260_scans_title">Skenovanie veľkých knižníc</string>
+    <string name="whats_new_260_scans_body">Skenovanie tvárí a vyhľadávania fotiek pokračuje aj pri knižniciach s viac ako sto tisíc tvárami a fotky čakajúce na opakovanie prežijú zatvorenie aplikácie. Zapnite „Len počas nabíjania“ v „Nastavenia > Ďalšie nastavenia > Strojové učenie“, aby skenovanie čakalo na nabíjačku.</string>
+    <string name="whats_new_260_dragselect_title">Výber ťahaním pri osobách</string>
+    <string name="whats_new_260_dragselect_body">Pridržte fotku na stránke osoby a ťahaním vyberte rozsah, rovnako ako na časovej osi a v albumoch.</string>
+    <string name="whats_new_260_mappins_title">Prehľadnejšie špendlíky na mape</string>
+    <string name="whats_new_260_mappins_body">Na klasickej mape aj na mape sveta sa špendlík, ktorý by prekrýval väčší, zobrazí ako malá bodka, kým nepriblížite tak, aby sa zmestil.</string>
+    <string name="whats_new_260_notif_title">Pokojnejšie oznámenia</string>
+    <string name="whats_new_260_notif_body">Oznámenie „Hľadajú sa nové fotky…“ už nebliká, keď sa vrátite do galérie.</string>
+    <string name="whats_new_260_tiles_title">Dlaždice na širokom displeji</string>
+    <string name="whats_new_260_tiles_body">Dlaždice odkazov navrchu karty Albumy sa na širokom displeji už nerozchádzajú.</string>
+    <string name="whats_new_260_more">Navyše upraviteľný dátum pri HEIC, GIF a RAW, skupiny duplikátov, ktoré možno ignorovať, výber miesta na mape, turečtina a množstvo ďalších opráv a vylepšení stability.</string>
 </resources>

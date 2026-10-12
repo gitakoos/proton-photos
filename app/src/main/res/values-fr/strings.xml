@@ -2416,5 +2416,19 @@
     <string name="whats_new_260_onthisday_body">« Ce jour-là » n\'affiche plus que le jour lui-même. Choisissez de 0 à 3 jours avant et après dans « Paramètres > Apparence &amp; langue > Bibliothèque > Fil > Ce jour-là ».</string>
     <string name="whats_new_260_duplicates_title">Revue des doublons</string>
     <string name="whats_new_260_duplicates_body">Pincez, faites glisser ou touchez deux fois pour agrandir une copie jusqu\'à 6 fois avant de décider quoi supprimer. « Supprimer le groupe » sélectionne d\'un coup toutes les copies d\'un groupe.</string>
-    <string name="whats_new_260_more">Et aussi « Ajouter à un autre album » dans la barre de sélection d\'un album, un réglage « Uniquement pendant la charge » pour les analyses, la sélection par glissement dans les photos d\'une personne, des dates modifiables pour HEIC, GIF et RAW, des groupes de doublons à ignorer, un sélecteur de lieu sur la carte, le turc et de nombreuses autres corrections et améliorations de stabilité.</string>
+    <string name="whats_new_260_intro_title">Inclut la 2.6.0-test1</string>
+    <string name="whats_new_260_intro_body">Cette version contient tout ce qu\'apportait la 2.6.0-test1. Les cartes suivantes ne montrent que les nouveautés depuis.</string>
+    <string name="whats_new_260_addalbum_title">Ajouter à un autre album</string>
+    <string name="whats_new_260_addalbum_body">Sélectionnez des photos dans un album et choisissez « Ajouter à un autre album » dans la barre de sélection. Elles rejoignent l\'autre album et restent dans celui-ci, et le sélecteur permet de créer un nouvel album.</string>
+    <string name="whats_new_260_scans_title">Analyses des grandes bibliothèques</string>
+    <string name="whats_new_260_scans_body">Les analyses des visages et de la recherche de photos continuent sur les bibliothèques de plus de cent mille visages, et les photos en attente d\'un nouvel essai survivent à la fermeture de l\'appli. Activez « Uniquement pendant la charge » dans « Paramètres > Autres réglages > Apprentissage automatique » pour que les analyses attendent le chargeur.</string>
+    <string name="whats_new_260_dragselect_title">Sélection par glissement chez les personnes</string>
+    <string name="whats_new_260_dragselect_body">Appuyez longuement sur une photo dans la page d\'une personne, puis glissez pour sélectionner une plage, comme dans le fil et les albums.</string>
+    <string name="whats_new_260_mappins_title">Repères de carte plus nets</string>
+    <string name="whats_new_260_mappins_body">Sur la carte classique et sur la carte du monde, un repère qui en recouvrirait un plus grand s\'affiche comme un petit point jusqu\'à ce que vous zoomiez assez pour qu\'il ait de la place.</string>
+    <string name="whats_new_260_notif_title">Notifications plus calmes</string>
+    <string name="whats_new_260_notif_body">La notification « Recherche de nouvelles photos… » ne clignote plus quand vous revenez à la galerie.</string>
+    <string name="whats_new_260_tiles_title">Vignettes sur grands écrans</string>
+    <string name="whats_new_260_tiles_body">Les vignettes de raccourcis en haut de l\'onglet Albums ne s\'écartent plus sur un écran large.</string>
+    <string name="whats_new_260_more">Et aussi des dates modifiables pour HEIC, GIF et RAW, des groupes de doublons à ignorer, un sélecteur de lieu sur la carte, le turc et de nombreuses autres corrections et améliorations de stabilité.</string>
 </resources>

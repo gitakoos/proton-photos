@@ -2451,5 +2451,19 @@
     <string name="whats_new_260_onthisday_body">“En este día” ahora muestra solo el propio día. Elige de 0 a 3 días antes y después en “Ajustes > Apariencia e idioma > Biblioteca > Línea de tiempo > En este día”.</string>
     <string name="whats_new_260_duplicates_title">Revisión de duplicados</string>
     <string name="whats_new_260_duplicates_body">Pellizca, arrastra o toca dos veces para ampliar una copia hasta 6 veces antes de decidir qué eliminar. “Eliminar grupo” selecciona de una vez todas las copias de un grupo.</string>
-    <string name="whats_new_260_more">Además, “Añadir a otro álbum” en la barra de selección de un álbum, un interruptor “Solo mientras se carga” para los análisis, selección arrastrando en las fotos de una persona, fechas editables en HEIC, GIF y RAW, grupos de duplicados que puedes ignorar, un selector de lugar en el mapa, turco y muchas más correcciones y mejoras de estabilidad.</string>
+    <string name="whats_new_260_intro_title">Incluye 2.6.0-test1</string>
+    <string name="whats_new_260_intro_body">Esta versión contiene todo lo de 2.6.0-test1. Las tarjetas siguientes muestran solo lo nuevo desde entonces.</string>
+    <string name="whats_new_260_addalbum_title">Añadir a otro álbum</string>
+    <string name="whats_new_260_addalbum_body">Selecciona fotos en un álbum y elige “Añadir a otro álbum” en la barra de selección. Se unen al otro álbum y siguen en este, y el selector permite crear un álbum nuevo.</string>
+    <string name="whats_new_260_scans_title">Análisis para bibliotecas grandes</string>
+    <string name="whats_new_260_scans_body">Los análisis de caras y de búsqueda de fotos siguen en bibliotecas con más de cien mil caras, y las fotos que esperan un reintento sobreviven al cierre de la app. Activa “Solo mientras se carga” en “Ajustes > Más ajustes > Aprendizaje automático” para que los análisis esperen al cargador.</string>
+    <string name="whats_new_260_dragselect_title">Selección arrastrando en personas</string>
+    <string name="whats_new_260_dragselect_body">Mantén pulsada una foto en la página de una persona y arrastra para seleccionar un rango, como en la línea de tiempo y los álbumes.</string>
+    <string name="whats_new_260_mappins_title">Marcadores del mapa más ordenados</string>
+    <string name="whats_new_260_mappins_body">En el mapa clásico y en el mapamundi, un marcador que taparía a otro mayor se muestra como un punto pequeño hasta que acercas lo suficiente para que quepa.</string>
+    <string name="whats_new_260_notif_title">Notificaciones más tranquilas</string>
+    <string name="whats_new_260_notif_body">La notificación “Buscando fotos nuevas…” ya no parpadea al volver a la galería.</string>
+    <string name="whats_new_260_tiles_title">Mosaicos en pantallas anchas</string>
+    <string name="whats_new_260_tiles_body">Los mosaicos de acceso de la parte superior de la pestaña Álbumes ya no se separan en pantallas anchas.</string>
+    <string name="whats_new_260_more">Además, fechas editables en HEIC, GIF y RAW, grupos de duplicados que puedes ignorar, un selector de lugar en el mapa, turco y muchas más correcciones y mejoras de estabilidad.</string>
 </resources>

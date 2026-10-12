@@ -2454,5 +2454,19 @@
     <string name="whats_new_260_onthisday_body">“On this day” now shows only the day itself. Choose 0 to 3 days either side under “Settings > Appearance &amp; Language > Library > Timeline > On this day”.</string>
     <string name="whats_new_260_duplicates_title">Duplicate review</string>
     <string name="whats_new_260_duplicates_body">Pinch, drag or double tap to enlarge a copy up to 6x before you decide what to delete. “Delete group” selects every copy of a group at once.</string>
-    <string name="whats_new_260_more">Plus “Add to another album” in an album\'s selection bar, an “Only while charging” switch for the scans, drag to select in a person\'s photos, editable dates for HEIC, GIF and RAW photos, duplicate groups you can ignore, a map place picker, Turkish, and lots more fixes and stability improvements.</string>
+    <string name="whats_new_260_intro_title">Includes 2.6.0-test1</string>
+    <string name="whats_new_260_intro_body">This build contains everything from 2.6.0-test1. The cards that follow cover only what is new since.</string>
+    <string name="whats_new_260_addalbum_title">Add to another album</string>
+    <string name="whats_new_260_addalbum_body">Select photos in an album and choose “Add to another album” in the selection bar. They join the other album and stay in this one, and the picker can create a new album.</string>
+    <string name="whats_new_260_scans_title">Scans for big libraries</string>
+    <string name="whats_new_260_scans_body">Face recognition and photo search scans keep going on libraries with over a hundred thousand faces, and photos waiting for a retry survive the app being closed. Turn on “Only while charging” under “Settings > More settings > Machine learning” to make the scans wait for the charger.</string>
+    <string name="whats_new_260_dragselect_title">Drag to select in a person\'s page</string>
+    <string name="whats_new_260_dragselect_body">Long-press a photo on a person\'s page, then drag to select a range, like in the timeline and albums.</string>
+    <string name="whats_new_260_mappins_title">Tidier map pins</string>
+    <string name="whats_new_260_mappins_body">On the classic map and the world map, a pin that would overlap a bigger one shows as a small dot until you zoom in and it has room.</string>
+    <string name="whats_new_260_notif_title">Calmer notifications</string>
+    <string name="whats_new_260_notif_body">The “Checking for new photos…” notification no longer flashes when you come back to the gallery.</string>
+    <string name="whats_new_260_tiles_title">Shortcut tiles on wide screens</string>
+    <string name="whats_new_260_tiles_body">The shortcut tiles at the top of the Albums tab no longer stretch apart on a wide screen.</string>
+    <string name="whats_new_260_more">Plus editable dates for HEIC, GIF and RAW photos, duplicate groups you can ignore, a map place picker, Turkish, and lots more fixes and stability improvements.</string>
 </resources>

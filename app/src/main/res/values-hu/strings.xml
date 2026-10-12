@@ -2413,5 +2413,19 @@
     <string name="whats_new_260_onthisday_body">A(z) „Ezen a napon” mostantól csak magát a napot mutatja. A nap előtti és utáni 0–3 napot itt állíthatod: „Beállítások > Megjelenés és nyelv > Fotótár > Idővonal > Ezen a napon”.</string>
     <string name="whats_new_260_duplicates_title">Duplikátumok áttekintése</string>
     <string name="whats_new_260_duplicates_body">Csippentéssel, húzással vagy duplakoppintással akár 6-szorosára nagyíthatsz egy példányt, mielőtt döntesz a törlésről. A(z) „Csoport törlése” gomb a csoport összes példányát egyszerre kijelöli.</string>
-    <string name="whats_new_260_more">Ráadásul „Hozzáadás másik albumhoz” az album kijelölősávjában, „Csak töltés közben” kapcsoló a vizsgálatokhoz, húzásos kijelölés egy személy fotóin, szerkeszthető dátum HEIC, GIF és RAW fájloknál, figyelmen kívül hagyható duplikátumcsoportok, helyválasztó a térképen, török nyelv, és rengeteg további javítás és stabilitási fejlesztés.</string>
+    <string name="whats_new_260_intro_title">A 2.6.0-test1 is benne van</string>
+    <string name="whats_new_260_intro_body">Ez a verzió mindent tartalmaz a 2.6.0-test1-ből. A következő kártyák csak az azóta újat mutatják.</string>
+    <string name="whats_new_260_addalbum_title">Hozzáadás másik albumhoz</string>
+    <string name="whats_new_260_addalbum_body">Jelölj ki fotókat egy albumban, és válaszd a(z) „Hozzáadás másik albumhoz” lehetőséget a kijelölősávban. A fotók a másik albumhoz is hozzáadódnak, ebben pedig megmaradnak, a választóban új albumot is létrehozhatsz.</string>
+    <string name="whats_new_260_scans_title">Vizsgálatok nagy könyvtáraknál</string>
+    <string name="whats_new_260_scans_body">Az arcfelismerés és a fotókeresés vizsgálata a százezernél is több arcot tartalmazó könyvtáraknál is tovább megy, az újrapróbálásra váró fotók pedig túlélik az alkalmazás bezárását. Kapcsold be a(z) „Csak töltés közben” kapcsolót itt: „Beállítások > További beállítások > Gépi tanulás”, hogy a vizsgálatok a töltőre várjanak.</string>
+    <string name="whats_new_260_dragselect_title">Húzásos kijelölés személynél</string>
+    <string name="whats_new_260_dragselect_body">Nyomj hosszan egy fotót egy személy oldalán, majd húzással jelölj ki egy tartományt, mint az idővonalon és az albumokban.</string>
+    <string name="whats_new_260_mappins_title">Rendezettebb térképtűk</string>
+    <string name="whats_new_260_mappins_body">A klasszikus és a világtérképen is kis ponttá válik az a tű, amely egy nagyobbat takarna, amíg annyira nem nagyítasz, hogy elférjen.</string>
+    <string name="whats_new_260_notif_title">Nyugodtabb értesítések</string>
+    <string name="whats_new_260_notif_body">A(z) „Új fotók keresése…” értesítés már nem villan fel, amikor visszatérsz a galériába.</string>
+    <string name="whats_new_260_tiles_title">Gyorsgombok széles képernyőn</string>
+    <string name="whats_new_260_tiles_body">Az Albumok fül tetején lévő gyorsgombok széles képernyőn már nem húzódnak szét.</string>
+    <string name="whats_new_260_more">Ráadásul szerkeszthető dátum HEIC, GIF és RAW fájloknál, figyelmen kívül hagyható duplikátumcsoportok, helyválasztó a térképen, török nyelv, és rengeteg további javítás és stabilitási fejlesztés.</string>
 </resources>

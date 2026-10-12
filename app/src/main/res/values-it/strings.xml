@@ -2453,5 +2453,19 @@
     <string name="whats_new_260_onthisday_body">“In questo giorno” ora mostra solo il giorno stesso. Scegli da 0 a 3 giorni prima e dopo in “Impostazioni > Aspetto e lingua > Libreria > Sequenza > In questo giorno”.</string>
     <string name="whats_new_260_duplicates_title">Revisione dei duplicati</string>
     <string name="whats_new_260_duplicates_body">Pizzica, trascina o tocca due volte per ingrandire una copia fino a 6 volte prima di decidere cosa eliminare. “Elimina gruppo” seleziona in un colpo tutte le copie di un gruppo.</string>
-    <string name="whats_new_260_more">Inoltre “Aggiungi a un altro album” nella barra di selezione di un album, un interruttore “Solo durante la ricarica” per le scansioni, selezione trascinando nelle foto di una persona, date modificabili per HEIC, GIF e RAW, gruppi di duplicati da ignorare, un selettore di luogo sulla mappa, il turco e tante altre correzioni e miglioramenti di stabilità.</string>
+    <string name="whats_new_260_intro_title">Include la 2.6.0-test1</string>
+    <string name="whats_new_260_intro_body">Questa versione contiene tutto della 2.6.0-test1. Le schede seguenti mostrano solo le novità da allora.</string>
+    <string name="whats_new_260_addalbum_title">Aggiungi a un altro album</string>
+    <string name="whats_new_260_addalbum_body">Seleziona le foto in un album e scegli “Aggiungi a un altro album” nella barra di selezione. Entrano nell\'altro album e restano in questo, e dal selettore si può creare un nuovo album.</string>
+    <string name="whats_new_260_scans_title">Scansioni per librerie grandi</string>
+    <string name="whats_new_260_scans_body">Le scansioni di volti e ricerca foto proseguono anche su librerie con oltre centomila volti, e le foto in attesa di un nuovo tentativo sopravvivono alla chiusura dell\'app. Attiva “Solo durante la ricarica” in “Impostazioni > Altre impostazioni > Apprendimento automatico” perché le scansioni aspettino il caricabatterie.</string>
+    <string name="whats_new_260_dragselect_title">Selezione trascinando nelle persone</string>
+    <string name="whats_new_260_dragselect_body">Tieni premuta una foto nella pagina di una persona e trascina per selezionare un intervallo, come nella sequenza e negli album.</string>
+    <string name="whats_new_260_mappins_title">Segnaposto più ordinati</string>
+    <string name="whats_new_260_mappins_body">Sulla mappa classica e su quella del mondo, un segnaposto che ne coprirebbe uno più grande appare come un puntino finché non ingrandisci abbastanza da fargli spazio.</string>
+    <string name="whats_new_260_notif_title">Notifiche più calme</string>
+    <string name="whats_new_260_notif_body">La notifica “Ricerca di nuove foto…” non lampeggia più quando torni alla galleria.</string>
+    <string name="whats_new_260_tiles_title">Riquadri su schermi larghi</string>
+    <string name="whats_new_260_tiles_body">I riquadri di scorciatoia in cima alla scheda Album non si allontanano più su uno schermo largo.</string>
+    <string name="whats_new_260_more">Inoltre date modificabili per HEIC, GIF e RAW, gruppi di duplicati da ignorare, un selettore di luogo sulla mappa, il turco e tante altre correzioni e miglioramenti di stabilità.</string>
 </resources>
