@@ -1338,10 +1338,15 @@ class GalleryViewModel @Inject constructor(
                 }
                 reconcile(userId).collect {}
                 // Enqueue the upload on the worker rather than running it inline in viewModelScope:
-                // the worker is the sole upload owner so the in-app cancel can actually stop it.
-                val wifiOnly = context.settingsDataStore.data
-                    .map { it[SettingsKeys.SYNC_WIFI_ONLY] != false }.first()
-                SyncWorker.runNow(context, wifiOnly)
+                // the worker is the sole upload owner so the in-app cancel can actually stop it. Only
+                // when something is queued: the worker shows its "Checking for new photos" notification
+                // the moment it starts, so waking it with nothing to upload flashed that notification
+                // every time the gallery was entered again (for instance on leaving the search).
+                if (syncStateRepo.countPendingUploads(userId).first() > 0) {
+                    val wifiOnly = context.settingsDataStore.data
+                        .map { it[SettingsKeys.SYNC_WIFI_ONLY] != false }.first()
+                    SyncWorker.runNow(context, wifiOnly)
+                }
             }.onFailure { e ->
                 // Silent-swallow for network-shaped failures — the avatar offline dot
                 // and the dismissible offline banner already tell the user what's wrong;
