@@ -1000,6 +1000,7 @@
     <string name="album_rename_confirm">Yeniden adlandır</string>
     <string name="album_remove_from_album">Albümden kaldır</string>
     <string name="album_move_to_album">Albüme taşı</string>
+    <string name="album_add_to_other_album">Başka bir albüme ekle</string>
     <string name="album_moved_to_album">Taşındı: \"%1$s\"</string>
     <string name="album_move_shared_copy_note">Paylaşılan bir albüme eklenen fotoğraflar albüm sahibine kopyalanır.</string>
     <string name="album_set_as_cover">Kapak yap</string>

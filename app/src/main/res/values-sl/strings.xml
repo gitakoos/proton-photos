@@ -691,6 +691,7 @@
     <string name="album_rename_confirm">Preimenuj</string>
     <string name="album_remove_from_album">Odstrani iz albuma</string>
     <string name="album_move_to_album">Premakni v album</string>
+    <string name="album_add_to_other_album">Dodaj v drug album</string>
     <string name="album_moved_to_album">Premaknjeno v \"%1$s\"</string>
     <string name="album_move_shared_copy_note">Fotografije, dodane v album v skupni rabi, se kopirajo lastniku albuma.</string>
     <string name="op_moving_to_album">Premikanje v album…</string>

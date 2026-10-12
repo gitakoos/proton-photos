@@ -690,6 +690,7 @@
     <string name="album_rename_confirm">Přejmenovat</string>
     <string name="album_remove_from_album">Odebrat z alba</string>
     <string name="album_move_to_album">Přesunout do alba</string>
+    <string name="album_add_to_other_album">Přidat do jiného alba</string>
     <string name="album_moved_to_album">Přesunuto do \"%1$s\"</string>
     <string name="album_move_shared_copy_note">Fotky přidané do sdíleného alba se zkopírují vlastníkovi alba.</string>
     <string name="op_moving_to_album">Přesouvání do alba…</string>

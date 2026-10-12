@@ -84,6 +84,7 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Photo
@@ -262,6 +263,8 @@ fun AlbumDetailScreen(
     val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
     var showMoveToAlbumSheet by remember { mutableStateOf(false) }
     var showCreateAlbumForMove by remember { mutableStateOf(false) }
+    // True while the album picker is open for an add that keeps the photos here, false for a move.
+    var pickerKeepsPhotos by remember { mutableStateOf(false) }
 
     // The cloud metadata save drawer's live view, shared with the timeline through the app-scoped
     // controller, so a save started in this album shows its progress here rather than only on the feed.
@@ -1099,7 +1102,23 @@ fun AlbumDetailScreen(
                         icon = Icons.AutoMirrored.Filled.DriveFileMove,
                         label = stringResource(R.string.album_move_to_album),
                         enabled = !state.isDeletingPhotos,
-                        onClick = { showMoveToAlbumSheet = true },
+                        onClick = {
+                            pickerKeepsPhotos = false
+                            showMoveToAlbumSheet = true
+                        },
+                        slot = PrimarySlot.Organize,
+                    )
+                )
+                // The same picker, but the photos stay in this album as well as joining the other one.
+                add(
+                    SelectionAction(
+                        icon = Icons.Default.LibraryAdd,
+                        label = stringResource(R.string.album_add_to_other_album),
+                        enabled = !state.isDeletingPhotos,
+                        onClick = {
+                            pickerKeepsPhotos = true
+                            showMoveToAlbumSheet = true
+                        },
                         slot = PrimarySlot.Organize,
                     )
                 )
@@ -1203,11 +1222,13 @@ fun AlbumDetailScreen(
         val opDeletingLabel = stringResource(R.string.op_deleting)
         val opRemovingLabel = stringResource(R.string.op_removing_from_album)
         val opMovingLabel = stringResource(R.string.op_moving_to_album)
+        val opAddingLabel = stringResource(R.string.op_adding_to_album)
         val opHidingLabel = stringResource(R.string.op_hiding)
         val albumBusyProgress = if (state.isDeletingPhotos) {
             val label = when (state.busyOp) {
                 AlbumBusyOp.Removing -> opRemovingLabel
                 AlbumBusyOp.Moving -> opMovingLabel
+                AlbumBusyOp.Adding -> opAddingLabel
                 AlbumBusyOp.Hiding -> opHidingLabel
                 else -> opDeletingLabel
             }
@@ -1271,7 +1292,11 @@ fun AlbumDetailScreen(
             },
             onCloudAlbumSelected = { album ->
                 showMoveToAlbumSheet = false
-                viewModel.moveSelectedToAlbum(album.linkId, album.name, album.isSharedWithMe)
+                if (pickerKeepsPhotos) {
+                    viewModel.addSelectedToAlbum(album.linkId, album.name, album.isSharedWithMe)
+                } else {
+                    viewModel.moveSelectedToAlbum(album.linkId, album.name, album.isSharedWithMe)
+                }
             },
             onDismiss = { showMoveToAlbumSheet = false },
             hiddenAlbumIds = albumsState.hiddenAlbumIds,
@@ -1282,7 +1307,7 @@ fun AlbumDetailScreen(
             onDismiss = { showCreateAlbumForMove = false },
             onCreate = { name ->
                 showCreateAlbumForMove = false
-                viewModel.createAlbumThenMoveSelected(name)
+                if (pickerKeepsPhotos) viewModel.createAlbumThenAddSelected(name) else viewModel.createAlbumThenMoveSelected(name)
             },
         )
     }

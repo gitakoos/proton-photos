@@ -156,8 +156,13 @@ sealed class AlbumShareState {
 }
 
 /** Which foreground bulk action is in flight, so the blocking drawer can label it correctly —
- *  delete, remove-from-album, move-to-album and hide all raise [AlbumDetailUiState.isDeletingPhotos]. */
-enum class AlbumBusyOp { None, Deleting, Removing, Moving, Hiding }
+ *  delete, remove-from-album, move-to-album, add-to-album and hide all raise [AlbumDetailUiState.isDeletingPhotos]. */
+enum class AlbumBusyOp { None, Deleting, Removing, Moving, Adding, Hiding }
+
+/** The ids to take out of the source album once the target accepted [addedIds]: all of them for a move,
+ *  none for an add that keeps the photos in both albums. */
+internal fun idsToDropFromSource(removeFromSource: Boolean, addedIds: List<String>): List<String> =
+    if (removeFromSource) addedIds else emptyList()
 
 data class AlbumDetailUiState(
     val albumName: String = "",
@@ -1428,20 +1433,40 @@ class AlbumDetailViewModel @Inject constructor(
      *  target takes the #80 cross-volume copy, flagged back through [MoveToAlbumResult.copiedToSharedTarget].
      *  No Undo is offered: reversing a move must both re-add here and remove there, and the album-remove
      *  undo only re-adds, so a partial undo would leave the photo in both albums. */
-    fun moveSelectedToAlbum(targetLinkId: String, targetName: String, targetIsSharedWithMe: Boolean) {
+    fun moveSelectedToAlbum(targetLinkId: String, targetName: String, targetIsSharedWithMe: Boolean) =
+        addOrMoveSelectedToAlbum(targetLinkId, targetName, targetIsSharedWithMe, removeFromSource = true)
+
+    /** Add the current selection to [targetLinkId] and keep it in this album too: the move without its
+     *  removal step, so the photos end up in both. */
+    fun addSelectedToAlbum(targetLinkId: String, targetName: String, targetIsSharedWithMe: Boolean) =
+        addOrMoveSelectedToAlbum(targetLinkId, targetName, targetIsSharedWithMe, removeFromSource = false)
+
+    private fun addOrMoveSelectedToAlbum(
+        targetLinkId: String,
+        targetName: String,
+        targetIsSharedWithMe: Boolean,
+        removeFromSource: Boolean,
+    ) {
         val sourceLinkId = _uiState.value.albumLinkId.ifBlank { return }
         if (targetLinkId.isBlank() || targetLinkId == sourceLinkId) return
         val linkIds = _uiState.value.selectedPhotos.toList()
         if (linkIds.isEmpty()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            performMoveToAlbum(userId, sourceLinkId, targetLinkId, targetName, targetIsSharedWithMe, linkIds)
+            performMoveToAlbum(
+                userId, sourceLinkId, targetLinkId, targetName, targetIsSharedWithMe, linkIds, removeFromSource,
+            )
         }
     }
 
     /** Inline create-then-move: make a new own album, then move the selection into it. A freshly
      *  created album is always own-volume, so the move is a plain membership move. */
-    fun createAlbumThenMoveSelected(name: String) {
+    fun createAlbumThenMoveSelected(name: String) = createAlbumThenAddOrMoveSelected(name, removeFromSource = true)
+
+    /** Inline create-then-add: make a new own album and add the selection to it, keeping it here too. */
+    fun createAlbumThenAddSelected(name: String) = createAlbumThenAddOrMoveSelected(name, removeFromSource = false)
+
+    private fun createAlbumThenAddOrMoveSelected(name: String, removeFromSource: Boolean) {
         val sourceLinkId = _uiState.value.albumLinkId.ifBlank { return }
         val trimmed = name.trim()
         if (trimmed.isEmpty()) {
@@ -1452,7 +1477,9 @@ class AlbumDetailViewModel @Inject constructor(
         if (linkIds.isEmpty()) return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update { it.copy(isDeletingPhotos = true, busyOp = AlbumBusyOp.Moving) }
+            _uiState.update {
+                it.copy(isDeletingPhotos = true, busyOp = if (removeFromSource) AlbumBusyOp.Moving else AlbumBusyOp.Adding)
+            }
             val newAlbumLinkId = runCatching { driveRepo.createDriveAlbum(userId, trimmed).linkId }
                 .getOrElse { e ->
                     if (e is kotlinx.coroutines.CancellationException) throw e
@@ -1466,7 +1493,9 @@ class AlbumDetailViewModel @Inject constructor(
                     }
                     return@launch
                 }
-            performMoveToAlbum(userId, sourceLinkId, newAlbumLinkId, trimmed, targetIsSharedWithMe = false, linkIds)
+            performMoveToAlbum(
+                userId, sourceLinkId, newAlbumLinkId, trimmed, targetIsSharedWithMe = false, linkIds, removeFromSource,
+            )
         }
     }
 
@@ -1477,8 +1506,11 @@ class AlbumDetailViewModel @Inject constructor(
         targetName: String,
         targetIsSharedWithMe: Boolean,
         linkIds: List<String>,
+        removeFromSource: Boolean,
     ) {
-        _uiState.update { it.copy(isDeletingPhotos = true, busyOp = AlbumBusyOp.Moving) }
+        _uiState.update {
+            it.copy(isDeletingPhotos = true, busyOp = if (removeFromSource) AlbumBusyOp.Moving else AlbumBusyOp.Adding)
+        }
         suppressSelfRefresh = true
         try {
             val added = runCatching { driveRepo.addPhotosToAlbum(userId, targetLinkId, linkIds) }
@@ -1508,7 +1540,10 @@ class AlbumDetailViewModel @Inject constructor(
             }
             // Drop only the ids the target accepted, so a crypto-failed entry stays in this album
             // instead of vanishing from both.
-            val removed = runCatching { driveRepo.removePhotosFromAlbum(userId, sourceLinkId, addedIds) }
+            val toDrop = idsToDropFromSource(removeFromSource, addedIds)
+            val removed = if (toDrop.isEmpty()) emptyList() else runCatching {
+                driveRepo.removePhotosFromAlbum(userId, sourceLinkId, toDrop)
+            }
                 .getOrElse { e ->
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     Log.e("AlbumDetailVM", "moveSelectedToAlbum remove failed", e)

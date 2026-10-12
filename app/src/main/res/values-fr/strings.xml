@@ -480,6 +480,7 @@
     <string name="album_rename_confirm">Renommer</string>
     <string name="album_remove_from_album">Retirer de l\'album</string>
     <string name="album_move_to_album">Déplacer vers l\'album</string>
+    <string name="album_add_to_other_album">Ajouter à un autre album</string>
     <string name="album_moved_to_album">Déplacé vers \"%1$s\"</string>
     <string name="album_move_shared_copy_note">Les photos ajoutées à un album partagé sont copiées vers le propriétaire de l\'album.</string>
     <string name="op_moving_to_album">Déplacement vers l\'album…</string>

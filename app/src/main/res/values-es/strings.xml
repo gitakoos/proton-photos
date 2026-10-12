@@ -484,6 +484,7 @@
     <string name="album_rename_confirm">Renombrar</string>
     <string name="album_remove_from_album">Quitar del álbum</string>
     <string name="album_move_to_album">Mover al álbum</string>
+    <string name="album_add_to_other_album">Añadir a otro álbum</string>
     <string name="album_moved_to_album">Movido a \"%1$s\"</string>
     <string name="album_move_shared_copy_note">Las fotos añadidas a un álbum compartido se copian al propietario del álbum.</string>
     <string name="op_moving_to_album">Moviendo al álbum…</string>
