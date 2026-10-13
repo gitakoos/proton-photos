@@ -1265,12 +1265,11 @@ class PhotoEditorViewModel @Inject constructor(
 
     fun selectTextItem(id: Int?) = _state.update { it.copy(selectedTextId = id) }
 
-    /** Enter/leave the Text tool. Re-renders the preview so the baked text clears (entering: the overlay
-     *  draws it live) or reappears (leaving). Not an undo step; it is only a preview-mode toggle. */
+    /** Enter/leave the Text tool. Not an undo step, and no render: the preview never bakes the text
+     *  ([forPreview] strips it), so a render here only swapped the preview bitmap under the text and made it flash. */
     fun setTextToolActive(active: Boolean) {
         if (_state.value.textToolActive == active) return
         _state.update { it.copy(textToolActive = active) }
-        updateAdjustmentsNoUndo { it }
     }
 
     /** Strip the pen strokes and text overlays from EVERY preview render, so they live as a Compose layer
