@@ -2456,8 +2456,8 @@
     <string name="whats_new_260_onthisday_body">“En este día” ahora muestra solo el propio día. Elige de 0 a 3 días antes y después en “Ajustes > Apariencia e idioma > Biblioteca > Línea de tiempo > En este día”.</string>
     <string name="whats_new_260_duplicates_title">Revisión de duplicados</string>
     <string name="whats_new_260_duplicates_body">Pellizca, arrastra o toca dos veces para ampliar una copia hasta 6 veces antes de decidir qué eliminar. “Eliminar grupo” selecciona de una vez todas las copias de un grupo.</string>
-    <string name="whats_new_260_intro_title">Incluye la versión de prueba 1</string>
-    <string name="whats_new_260_intro_body">Esta versión también contiene todo lo de la versión de prueba 1. Las tarjetas siguientes muestran solo lo nuevo desde entonces.</string>
+    <string name="whats_new_260_intro_title">Incluye las versiones de prueba anteriores</string>
+    <string name="whats_new_260_intro_body">Esta versión también contiene todo lo de las versiones de prueba 1 y 2. Las tarjetas siguientes muestran solo lo nuevo desde entonces.</string>
     <string name="whats_new_260_addalbum_title">Añadir a otro álbum</string>
     <string name="whats_new_260_addalbum_body">Selecciona fotos en un álbum y elige “Añadir a otro álbum” en la barra de selección. Se unen al otro álbum y siguen en este, y el selector permite crear un álbum nuevo.</string>
     <string name="whats_new_260_scans_title">Análisis para bibliotecas grandes</string>
@@ -2472,5 +2472,13 @@
     <string name="whats_new_260_tiles_body">Los mosaicos de acceso de la parte superior de la pestaña Álbumes ya no se separan en pantallas anchas.</string>
     <string name="whats_new_260_charging_title">Solo mientras se carga</string>
     <string name="whats_new_260_charging_body">Activa “Solo mientras se carga” en “Ajustes > Más ajustes > Aprendizaje automático” para que los análisis de caras y de búsqueda de fotos esperen al cargador. Un análisis en pausa lo indica en su tarjeta.</string>
+    <string name="whats_new_260_editor_title">Editor de fotos más simple</string>
+    <string name="whats_new_260_editor_body">El editor de fotos ahora tiene pestañas con iconos abajo y se abre en “Recortar y girar”, con botones para girar y voltear y las proporciones como nombres sencillos. “Ajustar” usa iconos redondos sobre una regla, las herramientas de dibujo están en una sola fila, y “Marco” y “Color” son mosaicos en “Más”. Los colores y otros ajustes se abren en su propio panel, que se cierra con Atrás, la flecha o un toque en la foto.</string>
+    <string name="whats_new_260_texttools_title">Color y fondo del texto</string>
+    <string name="whats_new_260_texttools_body">Elige el color de un texto con un selector de color y dale un fondo con su propio color, opacidad y esquinas redondeadas. Toca un texto para seleccionarlo y vuelve a tocarlo para editarlo.</string>
+    <string name="whats_new_260_frame2_title">Herramienta Marco terminada</string>
+    <string name="whats_new_260_frame2_body">El desenfoque suave es el primer relleno, un cuentagotas con lupa toma un color de la foto, el grosor del borde tiene su propia regla, y 2:3, 4:3 y 3:2 se suman a las formas.</string>
+    <string name="whats_new_260_videoedit_title">Editor de vídeo con el mismo diseño</string>
+    <string name="whats_new_260_videoedit_body">“Ajustar” usa iconos redondos sobre una regla, recortar y girar comparten una pestaña con una lista de proporciones, y el marco de recorte se redimensiona con dos dedos. La imagen ya no parpadea al cambiar de herramienta.</string>
     <string name="whats_new_260_more">Además, fechas editables en HEIC, GIF y RAW, grupos de duplicados que puedes ignorar, un selector de lugar en el mapa, turco y muchas más correcciones y mejoras de estabilidad.</string>
 </resources>

@@ -2336,8 +2336,8 @@
     <string name="whats_new_260_onthisday_body">“Bu gün” artık yalnızca günün kendisini gösterir. Öncesi ve sonrası için 0 ile 3 gün arasında seçimi “Ayarlar > Görünüm ve dil > Kitaplık > Zaman çizelgesi > Bu gün” altında yapın.</string>
     <string name="whats_new_260_duplicates_title">Kopyaları inceleme</string>
     <string name="whats_new_260_duplicates_body">Bir kopyayı, neyi sileceğinize karar vermeden önce sıkıştırarak, sürükleyerek veya çift dokunarak 6 kata kadar büyütün. “Grubu sil” bir grubun tüm kopyalarını tek seferde seçer.</string>
-    <string name="whats_new_260_intro_title">Test sürümü 1 dahil</string>
-    <string name="whats_new_260_intro_body">Bu sürüm, test sürümü 1\'deki her şeyi de içerir. Sonraki kartlar yalnızca o günden beri yeni olanı gösterir.</string>
+    <string name="whats_new_260_intro_title">Önceki test sürümleri dahil</string>
+    <string name="whats_new_260_intro_body">Bu sürüm, test sürümleri 1 ve 2\'deki her şeyi de içerir. Sonraki kartlar yalnızca o günden beri yeni olanı gösterir.</string>
     <string name="whats_new_260_addalbum_title">Başka bir albüme ekle</string>
     <string name="whats_new_260_addalbum_body">Bir albümde fotoğrafları seçin ve seçim çubuğunda “Başka bir albüme ekle” öğesini seçin. Fotoğraflar diğer albüme katılır, bu albümde de kalır; seçicide yeni bir albüm de oluşturabilirsiniz.</string>
     <string name="whats_new_260_scans_title">Büyük kitaplıklar için taramalar</string>
@@ -2352,5 +2352,13 @@
     <string name="whats_new_260_tiles_body">Albümler sekmesinin üstündeki kısayol kutucukları geniş ekranda artık birbirinden uzaklaşmaz.</string>
     <string name="whats_new_260_charging_title">Yalnızca şarj olurken</string>
     <string name="whats_new_260_charging_body">Yüz tanıma ve fotoğraf arama taramalarının şarj cihazını beklemesi için “Ayarlar > Diğer ayarlar > Makine öğrenimi” altında “Yalnızca şarj olurken” seçeneğini açın. Duraklatılmış bir tarama bunu kartında belirtir.</string>
+    <string name="whats_new_260_editor_title">Daha sade fotoğraf düzenleyici</string>
+    <string name="whats_new_260_editor_body">Fotoğraf düzenleyicide altta simgeli sekmeler var ve “Kırp ve döndür” ile açılır; döndürme ve çevirme düğmeleri ile en boy oranları sade adlarla listelenir. “Ayarla” bir cetvelin üstünde yuvarlak simgeler kullanır, çizim araçları tek sırada durur, “Çerçeve” ve “Renk” ise “Daha fazla” altında karolardır. Renkler ve diğer ayarlar kendi panelinde açılır; Geri, ok veya fotoğrafa dokunmak onu kapatır.</string>
+    <string name="whats_new_260_texttools_title">Metin rengi ve arka planı</string>
+    <string name="whats_new_260_texttools_body">Bir metnin rengini renk seçiciyle seçin ve ona kendi rengi, opaklığı ve köşe yuvarlaklığı olan bir arka plan verin. Seçmek için metne dokunun, düzenlemek için bir kez daha dokunun.</string>
+    <string name="whats_new_260_frame2_title">Çerçeve aracı tamamlandı</string>
+    <string name="whats_new_260_frame2_body">Yumuşak bulanıklık ilk dolgudur, büyüteçli damlalık fotoğraftan renk alır, kenar kalınlığının kendi cetveli vardır ve şekillere 2:3, 4:3 ve 3:2 eklendi.</string>
+    <string name="whats_new_260_videoedit_title">Aynı tasarımda video düzenleyici</string>
+    <string name="whats_new_260_videoedit_body">“Ayarla” bir cetvelin üstünde yuvarlak simgeler kullanır, kırpma ve döndürme bir sekmeyi en boy oranı listesiyle paylaşır ve kırpma çerçevesi iki parmakla yeniden boyutlandırılır. Araç değiştirirken görüntü artık titremez.</string>
     <string name="whats_new_260_more">Ayrıca HEIC, GIF ve RAW için düzenlenebilir tarih, yok sayılabilen kopya grupları, haritada yer seçici, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
 </resources>

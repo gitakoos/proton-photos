@@ -2459,8 +2459,8 @@
     <string name="whats_new_260_onthisday_body">“On this day” now shows only the day itself. Choose 0 to 3 days either side under “Settings > Appearance &amp; Language > Library > Timeline > On this day”.</string>
     <string name="whats_new_260_duplicates_title">Duplicate review</string>
     <string name="whats_new_260_duplicates_body">Pinch, drag or double tap to enlarge a copy up to 6x before you decide what to delete. “Delete group” selects every copy of a group at once.</string>
-    <string name="whats_new_260_intro_title">Includes test build 1</string>
-    <string name="whats_new_260_intro_body">This build also contains everything from test build 1. The cards that follow show only what is new since then.</string>
+    <string name="whats_new_260_intro_title">Includes earlier test builds</string>
+    <string name="whats_new_260_intro_body">This build also contains everything from test builds 1 and 2. The cards that follow show only what is new since then.</string>
     <string name="whats_new_260_addalbum_title">Add to another album</string>
     <string name="whats_new_260_addalbum_body">Select photos in an album and choose “Add to another album” in the selection bar. They join the other album and stay in this one, and the picker can create a new album.</string>
     <string name="whats_new_260_scans_title">Scans for big libraries</string>
@@ -2475,5 +2475,13 @@
     <string name="whats_new_260_tiles_body">The shortcut tiles at the top of the Albums tab no longer stretch apart on a wide screen.</string>
     <string name="whats_new_260_charging_title">Only while charging</string>
     <string name="whats_new_260_charging_body">Turn on “Only while charging” under “Settings > More settings > Machine learning” to let face recognition and photo search scans wait for the charger. A paused scan says so on its card.</string>
+    <string name="whats_new_260_editor_title">Simpler photo editor</string>
+    <string name="whats_new_260_editor_body">The photo editor now has icon tabs along the bottom and opens on “Crop and rotate”, with rotate and flip buttons and the aspect ratios as plain names. “Adjust” uses round icons over a ruler, the drawing tools sit in one row, and “Frame” and “Color” are tiles under “More”. Colours and other settings open in their own panel, and Back, the arrow or a tap on the photo closes it.</string>
+    <string name="whats_new_260_texttools_title">Text colour and background</string>
+    <string name="whats_new_260_texttools_body">Pick a text\'s colour with a colour picker and give it a background with its own colour, opacity and corner roundness. Tap a text to select it, tap it again to edit it.</string>
+    <string name="whats_new_260_frame2_title">Frame tool, finished</string>
+    <string name="whats_new_260_frame2_body">The soft blur is now the first fill, an eyedropper with a magnifier picks a colour from the photo, the border width has its own ruler, and 2:3, 4:3 and 3:2 join the shapes.</string>
+    <string name="whats_new_260_videoedit_title">Video editor, same design</string>
+    <string name="whats_new_260_videoedit_body">“Adjust” uses round icons over a ruler, crop and rotate are now one tab with a list of aspect ratios, and the crop frame resizes with a two-finger pinch. The picture no longer flickers when you switch tools.</string>
     <string name="whats_new_260_more">Plus editable dates for HEIC, GIF and RAW photos, duplicate groups you can ignore, a map place picker, Turkish, and lots more fixes and stability improvements.</string>
 </resources>

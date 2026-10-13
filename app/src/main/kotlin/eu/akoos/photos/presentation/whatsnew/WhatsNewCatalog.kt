@@ -137,6 +137,30 @@ internal val WhatsNew260FirstPreview = WhatsNewRelease(
 )
 
 /**
+ * What the second 2.6.0 preview added to the first. The head entry of the list below lists only the cards added
+ * since, so a preview reader does not meet the same cards twice; the 2.6.0 release follows the first preview's
+ * cards with these, then the later previews' cards.
+ */
+internal val WhatsNew260SecondPreview = WhatsNewRelease(
+    version = "2.6.0",
+    hero = null,
+    features = listOf(
+        WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_260_autosave_title, R.string.whats_new_260_autosave_body),
+        WhatsNewFeature(Icons.Default.Public, R.string.whats_new_260_worldmap_title, R.string.whats_new_260_worldmap_body),
+        WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_260_time_title, R.string.whats_new_260_time_body),
+        WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_addalbum_title, R.string.whats_new_260_addalbum_body),
+        WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_260_duplicates_title, R.string.whats_new_260_duplicates_body),
+        WhatsNewFeature(Icons.Default.Checklist, R.string.whats_new_260_dragselect_title, R.string.whats_new_260_dragselect_body),
+        WhatsNewFeature(Icons.Default.BatteryChargingFull, R.string.whats_new_260_charging_title, R.string.whats_new_260_charging_body),
+        WhatsNewFeature(Icons.Default.Today, R.string.whats_new_260_onthisday_title, R.string.whats_new_260_onthisday_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_scans_title, R.string.whats_new_260_scans_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Place, R.string.whats_new_260_mappins_title, R.string.whats_new_260_mappins_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Notifications, R.string.whats_new_260_notif_title, R.string.whats_new_260_notif_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_260_tiles_title, R.string.whats_new_260_tiles_body, WhatsNewCategory.Improved),
+    ),
+)
+
+/**
  * What each release announced, newest first. The head of this list is what the post-update screen
  * shows, and the whole list is what Settings offers to browse.
  *
@@ -156,18 +180,10 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         hero = null,
         features = listOf(
             WhatsNewFeature(Icons.Default.Update, R.string.whats_new_260_intro_title, R.string.whats_new_260_intro_body),
-            WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_260_autosave_title, R.string.whats_new_260_autosave_body),
-            WhatsNewFeature(Icons.Default.Public, R.string.whats_new_260_worldmap_title, R.string.whats_new_260_worldmap_body),
-            WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_260_time_title, R.string.whats_new_260_time_body),
-            WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_addalbum_title, R.string.whats_new_260_addalbum_body),
-            WhatsNewFeature(Icons.Default.Difference, R.string.whats_new_260_duplicates_title, R.string.whats_new_260_duplicates_body),
-            WhatsNewFeature(Icons.Default.Checklist, R.string.whats_new_260_dragselect_title, R.string.whats_new_260_dragselect_body),
-            WhatsNewFeature(Icons.Default.BatteryChargingFull, R.string.whats_new_260_charging_title, R.string.whats_new_260_charging_body),
-            WhatsNewFeature(Icons.Default.Today, R.string.whats_new_260_onthisday_title, R.string.whats_new_260_onthisday_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_scans_title, R.string.whats_new_260_scans_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Place, R.string.whats_new_260_mappins_title, R.string.whats_new_260_mappins_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Notifications, R.string.whats_new_260_notif_title, R.string.whats_new_260_notif_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_260_tiles_title, R.string.whats_new_260_tiles_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Brush, R.string.whats_new_260_editor_title, R.string.whats_new_260_editor_body),
+            WhatsNewFeature(Icons.Default.TextFields, R.string.whats_new_260_texttools_title, R.string.whats_new_260_texttools_body),
+            WhatsNewFeature(Icons.Default.Crop, R.string.whats_new_260_frame2_title, R.string.whats_new_260_frame2_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_260_videoedit_title, R.string.whats_new_260_videoedit_body, WhatsNewCategory.Improved),
         ),
     ),
     // 2.5.0 STABLE: the whole release since 2.4.0, consolidated to its main features so someone

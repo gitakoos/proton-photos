@@ -2543,8 +2543,8 @@
     <string name="whats_new_260_onthisday_body">„V tento den“ nově ukazuje jen samotný den. Počet dní před a po (0 až 3) zvolíte v „Nastavení > Vzhled a jazyk > Knihovna > Časová osa > V tento den“.</string>
     <string name="whats_new_260_duplicates_title">Kontrola duplicit</string>
     <string name="whats_new_260_duplicates_body">Sevřením, tažením nebo dvojitým klepnutím zvětšíte kopii až 6krát, než se rozhodnete, co smazat. „Smazat skupinu“ vybere najednou všechny kopie skupiny.</string>
-    <string name="whats_new_260_intro_title">Obsahuje testovací verzi 1</string>
-    <string name="whats_new_260_intro_body">Tato verze obsahuje i vše z testovací verze 1. Následující karty ukazují jen to, co je nového od té doby.</string>
+    <string name="whats_new_260_intro_title">Obsahuje dřívější testovací verze</string>
+    <string name="whats_new_260_intro_body">Tato verze obsahuje i vše z testovacích verzí 1 a 2. Následující karty ukazují jen to, co je nového od té doby.</string>
     <string name="whats_new_260_addalbum_title">Přidat do jiného alba</string>
     <string name="whats_new_260_addalbum_body">Vyberte v albu fotky a zvolte „Přidat do jiného alba“ v liště výběru. Fotky se přidají do druhého alba a v tomto zůstanou, a ve výběru lze vytvořit i nové album.</string>
     <string name="whats_new_260_scans_title">Skenování velkých knihoven</string>
@@ -2559,5 +2559,13 @@
     <string name="whats_new_260_tiles_body">Dlaždice zkratek nahoře na kartě Alba se na širokém displeji už nerozjíždějí.</string>
     <string name="whats_new_260_charging_title">Jen při nabíjení</string>
     <string name="whats_new_260_charging_body">Zapněte „Jen při nabíjení“ v „Nastavení > Další nastavení > Strojové učení“, aby skenování tváří a hledání fotek čekalo na nabíječku. Pozastavené skenování to uvádí na své kartě.</string>
+    <string name="whats_new_260_editor_title">Jednodušší editor fotek</string>
+    <string name="whats_new_260_editor_body">Editor fotek má dole ikonové karty a otevírá se na „Oříznutí a otočení“ s tlačítky pro otočení a převrácení a s poměry stran jako obyčejnými názvy. „Upravit“ používá kulaté ikony nad pravítkem, kreslicí nástroje jsou v jedné řadě a „Rámeček“ a „Barva“ jsou dlaždice pod „Více“. Barvy a další nastavení se otevírají ve vlastním panelu, který zavře Zpět, šipka nebo klepnutí na fotku.</string>
+    <string name="whats_new_260_texttools_title">Barva a pozadí textu</string>
+    <string name="whats_new_260_texttools_body">Barvu textu vyberete výběrem barvy a text může mít pozadí s vlastní barvou, průhledností a zaoblením. Klepnutím text vyberete, dalším klepnutím ho upravíte.</string>
+    <string name="whats_new_260_frame2_title">Nástroj Rámeček je hotový</string>
+    <string name="whats_new_260_frame2_body">Jemné rozostření je první výplň, pipeta s lupou vybere barvu z fotky, šířka okraje má vlastní pravítko a mezi tvary přibyly 2:3, 4:3 a 3:2.</string>
+    <string name="whats_new_260_videoedit_title">Editor videa ve stejném stylu</string>
+    <string name="whats_new_260_videoedit_body">„Upravit“ používá kulaté ikony nad pravítkem, oříznutí a otočení sdílí jednu kartu se seznamem poměrů stran a velikost ořezového rámečku lze měnit dvěma prsty. Obraz už při přepínání nástrojů nebliká.</string>
     <string name="whats_new_260_more">Navíc upravitelné datum u HEIC, GIF a RAW, skupiny duplicit, které lze ignorovat, výběr místa na mapě, turečtina a spousta dalších oprav a vylepšení stability.</string>
 </resources>

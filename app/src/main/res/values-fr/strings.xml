@@ -2421,8 +2421,8 @@
     <string name="whats_new_260_onthisday_body">« Ce jour-là » n\'affiche plus que le jour lui-même. Choisissez de 0 à 3 jours avant et après dans « Paramètres > Apparence &amp; langue > Bibliothèque > Fil > Ce jour-là ».</string>
     <string name="whats_new_260_duplicates_title">Revue des doublons</string>
     <string name="whats_new_260_duplicates_body">Pincez, faites glisser ou touchez deux fois pour agrandir une copie jusqu\'à 6 fois avant de décider quoi supprimer. « Supprimer le groupe » sélectionne d\'un coup toutes les copies d\'un groupe.</string>
-    <string name="whats_new_260_intro_title">Inclut la version de test 1</string>
-    <string name="whats_new_260_intro_body">Cette version contient aussi tout ce qu\'apportait la version de test 1. Les cartes suivantes ne montrent que les nouveautés depuis.</string>
+    <string name="whats_new_260_intro_title">Inclut les versions de test précédentes</string>
+    <string name="whats_new_260_intro_body">Cette version contient aussi tout ce qu\'apportaient les versions de test 1 et 2. Les cartes suivantes ne montrent que les nouveautés depuis.</string>
     <string name="whats_new_260_addalbum_title">Ajouter à un autre album</string>
     <string name="whats_new_260_addalbum_body">Sélectionnez des photos dans un album et choisissez « Ajouter à un autre album » dans la barre de sélection. Elles rejoignent l\'autre album et restent dans celui-ci, et le sélecteur permet de créer un nouvel album.</string>
     <string name="whats_new_260_scans_title">Analyses des grandes bibliothèques</string>
@@ -2437,5 +2437,13 @@
     <string name="whats_new_260_tiles_body">Les vignettes de raccourcis en haut de l\'onglet Albums ne s\'écartent plus sur un écran large.</string>
     <string name="whats_new_260_charging_title">Uniquement pendant la charge</string>
     <string name="whats_new_260_charging_body">Activez « Uniquement pendant la charge » dans « Paramètres > Autres réglages > Apprentissage automatique » pour que les analyses des visages et de la recherche de photos attendent le chargeur. Une analyse en pause l\'indique sur sa carte.</string>
+    <string name="whats_new_260_editor_title">Éditeur photo plus simple</string>
+    <string name="whats_new_260_editor_body">L\'éditeur photo a désormais des onglets à icônes en bas et s\'ouvre sur « Recadrer et pivoter », avec des boutons pour pivoter et retourner et les formats sous forme de simples noms. « Ajuster » utilise des icônes rondes au-dessus d\'une règle, les outils de dessin tiennent sur une ligne, et « Cadre » et « Couleur » sont des tuiles sous « Plus ». Les couleurs et autres réglages s\'ouvrent dans leur propre panneau, que Retour, la flèche ou un appui sur la photo referme.</string>
+    <string name="whats_new_260_texttools_title">Couleur et arrière-plan du texte</string>
+    <string name="whats_new_260_texttools_body">Choisissez la couleur d\'un texte avec un sélecteur de couleur et donnez-lui un arrière-plan avec sa propre couleur, opacité et son propre arrondi. Touchez un texte pour le sélectionner, touchez-le encore pour le modifier.</string>
+    <string name="whats_new_260_frame2_title">Outil Cadre terminé</string>
+    <string name="whats_new_260_frame2_body">Le flou doux est le premier remplissage, une pipette avec loupe prélève une couleur de la photo, l\'épaisseur de la bordure a sa propre règle, et 2:3, 4:3 et 3:2 rejoignent les formes.</string>
+    <string name="whats_new_260_videoedit_title">Éditeur vidéo au même design</string>
+    <string name="whats_new_260_videoedit_body">« Ajuster » utilise des icônes rondes au-dessus d\'une règle, recadrer et pivoter partagent un onglet avec une liste de formats, et le cadre de recadrage se redimensionne à deux doigts. L\'image ne scintille plus quand on change d\'outil.</string>
     <string name="whats_new_260_more">Et aussi des dates modifiables pour HEIC, GIF et RAW, des groupes de doublons à ignorer, un sélecteur de lieu sur la carte, le turc et de nombreuses autres corrections et améliorations de stabilité.</string>
 </resources>

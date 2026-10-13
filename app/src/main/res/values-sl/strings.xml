@@ -2537,8 +2537,8 @@
     <string name="whats_new_260_onthisday_body">„Na ta dan“ zdaj prikaže le sam dan. Od 0 do 3 dni pred in po izberete v „Nastavitve > Videz in jezik > Knjižnica > Časovnica > Na ta dan“.</string>
     <string name="whats_new_260_duplicates_title">Pregled dvojnikov</string>
     <string name="whats_new_260_duplicates_body">S ščipanjem, vlečenjem ali dvojnim tapom povečate kopijo do 6-krat, preden se odločite, kaj izbrisati. „Izbriši skupino“ izbere vse kopije skupine naenkrat.</string>
-    <string name="whats_new_260_intro_title">Vključuje testno različico 1</string>
-    <string name="whats_new_260_intro_body">Ta različica vsebuje tudi vse iz testne različice 1. Naslednje kartice kažejo samo, kar je novega od takrat.</string>
+    <string name="whats_new_260_intro_title">Vključuje prejšnje testne različice</string>
+    <string name="whats_new_260_intro_body">Ta različica vsebuje tudi vse iz testnih različic 1 in 2. Naslednje kartice kažejo samo, kar je novega od takrat.</string>
     <string name="whats_new_260_addalbum_title">Dodaj v drug album</string>
     <string name="whats_new_260_addalbum_body">V albumu izberite fotografije in izberite „Dodaj v drug album“ v vrstici izbire. Pridružijo se drugemu albumu in ostanejo v tem, v izbirniku pa lahko ustvarite tudi nov album.</string>
     <string name="whats_new_260_scans_title">Skeniranje velikih knjižnic</string>
@@ -2553,5 +2553,13 @@
     <string name="whats_new_260_tiles_body">Ploščice bližnjic na vrhu zavihka Albumi se na širokem zaslonu ne razmikajo več.</string>
     <string name="whats_new_260_charging_title">Samo med polnjenjem</string>
     <string name="whats_new_260_charging_body">Vklopite „Samo med polnjenjem“ v „Nastavitve > Več nastavitev > Strojno učenje“, da skeniranje obrazov in iskanja fotografij počaka na polnilec. Začasno ustavljeno skeniranje to navede na svoji kartici.</string>
+    <string name="whats_new_260_editor_title">Enostavnejši urejevalnik fotografij</string>
+    <string name="whats_new_260_editor_body">Urejevalnik fotografij ima zdaj spodaj zavihke z ikonami in se odpre na „Obreži in zavrti“, z gumbi za vrtenje in zrcaljenje ter razmerji kot preprostimi imeni. „Prilagodi“ uporablja okrogle ikone nad ravnilom, orodja za risanje so v eni vrsti, „Okvir“ in „Barva“ pa sta ploščici pod „Več“. Barve in druge nastavitve se odprejo v lastni plošči, ki jo zapre Nazaj, puščica ali dotik fotografije.</string>
+    <string name="whats_new_260_texttools_title">Barva in ozadje besedila</string>
+    <string name="whats_new_260_texttools_body">Barvo besedila izberete z izbirnikom barv, besedilo pa lahko dobi ozadje z lastno barvo, prosojnostjo in zaobljenostjo. Dotaknite se besedila, da ga izberete, in še enkrat, da ga uredite.</string>
+    <string name="whats_new_260_frame2_title">Orodje Okvir je dokončano</string>
+    <string name="whats_new_260_frame2_body">Mehka zameglitev je prva zapolnitev, pipeta z lupo vzame barvo iz fotografije, širina roba ima lastno ravnilo, med oblike pa so se dodala razmerja 2:3, 4:3 in 3:2.</string>
+    <string name="whats_new_260_videoedit_title">Urejevalnik videa v enaki zasnovi</string>
+    <string name="whats_new_260_videoedit_body">„Prilagodi“ uporablja okrogle ikone nad ravnilom, obrezovanje in vrtenje si delita zavihek s seznamom razmerij, velikost okvirja za obrezovanje pa spremenite z dvema prstoma. Slika med menjavo orodij ne utripa več.</string>
     <string name="whats_new_260_more">Poleg tega urejljivi datumi pri HEIC, GIF in RAW, skupine dvojnikov, ki jih lahko prezrete, izbira kraja na zemljevidu, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
 </resources>

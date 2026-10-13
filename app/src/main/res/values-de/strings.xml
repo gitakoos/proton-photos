@@ -2419,8 +2419,8 @@
     <string name="whats_new_260_onthisday_body">„An diesem Tag“ zeigt jetzt nur noch den Tag selbst. Wähle 0 bis 3 Tage davor und danach unter „Einstellungen > Darstellung &amp; Sprache > Bibliothek > Verlauf > An diesem Tag“.</string>
     <string name="whats_new_260_duplicates_title">Duplikate prüfen</string>
     <string name="whats_new_260_duplicates_body">Mit Zwei-Finger-Zoom, Ziehen oder Doppeltippen vergrößerst du eine Kopie bis auf das 6-Fache, bevor du entscheidest, was gelöscht wird. „Gruppe löschen“ markiert alle Kopien einer Gruppe auf einmal.</string>
-    <string name="whats_new_260_intro_title">Enthält Testversion 1</string>
-    <string name="whats_new_260_intro_body">Dieser Build enthält auch alles aus Testversion 1. Die folgenden Karten zeigen nur, was seitdem neu ist.</string>
+    <string name="whats_new_260_intro_title">Enthält frühere Testversionen</string>
+    <string name="whats_new_260_intro_body">Dieser Build enthält auch alles aus den Testversionen 1 und 2. Die folgenden Karten zeigen nur, was seitdem neu ist.</string>
     <string name="whats_new_260_addalbum_title">Zu anderem Album hinzufügen</string>
     <string name="whats_new_260_addalbum_body">Wähle in einem Album Fotos aus und tippe in der Auswahlleiste auf „Zu anderem Album hinzufügen“. Sie kommen ins andere Album und bleiben in diesem, und in der Auswahl lässt sich ein neues Album anlegen.</string>
     <string name="whats_new_260_scans_title">Scans für große Bibliotheken</string>
@@ -2435,5 +2435,13 @@
     <string name="whats_new_260_tiles_body">Die Kacheln oben im Tab Alben ziehen sich auf einem breiten Bildschirm nicht mehr auseinander.</string>
     <string name="whats_new_260_charging_title">Nur beim Laden</string>
     <string name="whats_new_260_charging_body">Schalte „Nur beim Laden“ unter „Einstellungen > Weitere Einstellungen > Maschinelles Lernen“ ein, damit Gesichtserkennung und Fotosuche-Scans aufs Ladegerät warten. Ein pausierter Scan sagt das auf seiner Karte.</string>
+    <string name="whats_new_260_editor_title">Einfacherer Foto-Editor</string>
+    <string name="whats_new_260_editor_body">Der Foto-Editor hat jetzt Symbol-Tabs am unteren Rand und öffnet mit „Zuschneiden und drehen“, mit Tasten zum Drehen und Spiegeln und den Seitenverhältnissen als schlichten Namen. „Anpassen“ nutzt runde Symbole über einem Lineal, die Zeichenwerkzeuge stehen in einer Reihe, und „Rahmen“ und „Farbe“ sind Kacheln unter „Mehr“. Farben und weitere Einstellungen öffnen sich in einem eigenen Bereich, den Zurück, der Pfeil oder ein Tipp auf das Foto schließt.</string>
+    <string name="whats_new_260_texttools_title">Textfarbe und Hintergrund</string>
+    <string name="whats_new_260_texttools_body">Wähle die Farbe eines Texts mit einer Farbauswahl und gib ihm einen Hintergrund mit eigener Farbe, Deckkraft und Rundung. Tippe einen Text an, um ihn auszuwählen, und noch einmal, um ihn zu bearbeiten.</string>
+    <string name="whats_new_260_frame2_title">Rahmen-Werkzeug, fertig</string>
+    <string name="whats_new_260_frame2_body">Die weiche Unschärfe ist die erste Füllung, eine Pipette mit Lupe nimmt eine Farbe aus dem Foto auf, die Randbreite hat ein eigenes Lineal, und 2:3, 4:3 und 3:2 kommen als Formen dazu.</string>
+    <string name="whats_new_260_videoedit_title">Video-Editor im gleichen Design</string>
+    <string name="whats_new_260_videoedit_body">„Anpassen“ nutzt runde Symbole über einem Lineal, Zuschneiden und Drehen teilen sich einen Tab mit einer Liste der Seitenverhältnisse, und der Zuschneiderahmen lässt sich mit zwei Fingern in der Größe ändern. Das Bild flackert beim Wechsel der Werkzeuge nicht mehr.</string>
     <string name="whats_new_260_more">Dazu bearbeitbare Daten bei HEIC, GIF und RAW, Duplikatgruppen zum Ignorieren, eine Ortsauswahl auf der Karte, Türkisch und viele weitere Korrekturen und Stabilitätsverbesserungen.</string>
 </resources>

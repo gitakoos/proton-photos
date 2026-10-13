@@ -2537,8 +2537,8 @@
     <string name="whats_new_260_onthisday_body">„Tego dnia” pokazuje teraz tylko sam dzień. Od 0 do 3 dni przed i po wybierzesz w „Ustawienia > Wygląd i język > Biblioteka > Oś czasu > Tego dnia”.</string>
     <string name="whats_new_260_duplicates_title">Przegląd duplikatów</string>
     <string name="whats_new_260_duplicates_body">Szczypnij, przeciągnij lub dotknij dwukrotnie, aby powiększyć kopię nawet 6 razy, zanim zdecydujesz, co usunąć. „Usuń grupę” zaznacza naraz wszystkie kopie grupy.</string>
-    <string name="whats_new_260_intro_title">Zawiera wersję testową 1</string>
-    <string name="whats_new_260_intro_body">Ta wersja zawiera też wszystko z wersji testowej 1. Kolejne karty pokazują tylko to, co nowego od tamtej pory.</string>
+    <string name="whats_new_260_intro_title">Zawiera wcześniejsze wersje testowe</string>
+    <string name="whats_new_260_intro_body">Ta wersja zawiera też wszystko z wersji testowych 1 i 2. Kolejne karty pokazują tylko to, co nowego od tamtej pory.</string>
     <string name="whats_new_260_addalbum_title">Dodaj do innego albumu</string>
     <string name="whats_new_260_addalbum_body">Zaznacz zdjęcia w albumie i wybierz „Dodaj do innego albumu” na pasku zaznaczania. Trafiają do drugiego albumu i zostają w tym, a w selektorze można utworzyć nowy album.</string>
     <string name="whats_new_260_scans_title">Skanowanie dużych bibliotek</string>
@@ -2553,5 +2553,13 @@
     <string name="whats_new_260_tiles_body">Kafelki skrótów u góry karty Albumy nie rozciągają się już na szerokim ekranie.</string>
     <string name="whats_new_260_charging_title">Tylko podczas ładowania</string>
     <string name="whats_new_260_charging_body">Włącz „Tylko podczas ładowania” w „Ustawienia > Więcej ustawień > Uczenie maszynowe”, aby skanowanie twarzy i wyszukiwania zdjęć czekało na ładowarkę. Wstrzymane skanowanie informuje o tym na swojej karcie.</string>
+    <string name="whats_new_260_editor_title">Prostszy edytor zdjęć</string>
+    <string name="whats_new_260_editor_body">Edytor zdjęć ma teraz karty z ikonami na dole i otwiera się na „Kadruj i obróć”, z przyciskami obrotu i odbicia oraz proporcjami jako zwykłymi nazwami. „Dostosuj” używa okrągłych ikon nad linijką, narzędzia rysowania są w jednym rzędzie, a „Ramka” i „Kolor” to kafelki w „Więcej”. Kolory i inne ustawienia otwierają się we własnym panelu, który zamyka Wstecz, strzałka lub dotknięcie zdjęcia.</string>
+    <string name="whats_new_260_texttools_title">Kolor i tło tekstu</string>
+    <string name="whats_new_260_texttools_body">Kolor tekstu wybierzesz selektorem kolorów, a tekst może mieć tło z własnym kolorem, kryciem i zaokrągleniem. Dotknij tekstu, aby go zaznaczyć, i dotknij jeszcze raz, aby go edytować.</string>
+    <string name="whats_new_260_frame2_title">Narzędzie Ramka gotowe</string>
+    <string name="whats_new_260_frame2_body">Miękkie rozmycie jest pierwszym wypełnieniem, zakraplacz z lupą pobiera kolor ze zdjęcia, szerokość obramowania ma własną linijkę, a 2:3, 4:3 i 3:2 dołączają do kształtów.</string>
+    <string name="whats_new_260_videoedit_title">Edytor wideo w tym samym stylu</string>
+    <string name="whats_new_260_videoedit_body">„Dostosuj” używa okrągłych ikon nad linijką, kadrowanie i obracanie dzielą jedną kartę z listą proporcji, a ramkę kadru zmienisz dwoma palcami. Obraz nie migocze już przy zmianie narzędzia.</string>
     <string name="whats_new_260_more">Do tego edytowalne daty w HEIC, GIF i RAW, grupy duplikatów, które można zignorować, wybór miejsca na mapie, język turecki oraz mnóstwo innych poprawek i usprawnień stabilności.</string>
 </resources>

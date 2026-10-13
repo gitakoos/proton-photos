@@ -2418,8 +2418,8 @@
     <string name="whats_new_260_onthisday_body">A(z) „Ezen a napon” mostantól csak magát a napot mutatja. A nap előtti és utáni 0–3 napot itt állíthatod: „Beállítások > Megjelenés és nyelv > Fotótár > Idővonal > Ezen a napon”.</string>
     <string name="whats_new_260_duplicates_title">Duplikátumok áttekintése</string>
     <string name="whats_new_260_duplicates_body">Csippentéssel, húzással vagy duplakoppintással akár 6-szorosára nagyíthatsz egy példányt, mielőtt döntesz a törlésről. A(z) „Csoport törlése” gomb a csoport összes példányát egyszerre kijelöli.</string>
-    <string name="whats_new_260_intro_title">Az 1. tesztverzió is benne van</string>
-    <string name="whats_new_260_intro_body">Ez a verzió az 1. tesztverzió összes újdonságát is tartalmazza. A következő kártyák csak az azóta újat mutatják.</string>
+    <string name="whats_new_260_intro_title">A korábbi tesztverziók is benne vannak</string>
+    <string name="whats_new_260_intro_body">Ez a verzió az 1. és 2. tesztverzió összes újdonságát is tartalmazza. A következő kártyák csak az azóta újat mutatják.</string>
     <string name="whats_new_260_addalbum_title">Hozzáadás másik albumhoz</string>
     <string name="whats_new_260_addalbum_body">Jelölj ki fotókat egy albumban, és válaszd a(z) „Hozzáadás másik albumhoz” lehetőséget a kijelölősávban. A fotók a másik albumhoz is hozzáadódnak, ebben pedig megmaradnak, a választóban új albumot is létrehozhatsz.</string>
     <string name="whats_new_260_scans_title">Vizsgálatok nagy könyvtáraknál</string>
@@ -2434,5 +2434,13 @@
     <string name="whats_new_260_tiles_body">Az Albumok fül tetején lévő gyorsgombok széles képernyőn már nem húzódnak szét.</string>
     <string name="whats_new_260_charging_title">Csak töltés közben</string>
     <string name="whats_new_260_charging_body">Kapcsold be a(z) „Csak töltés közben” kapcsolót itt: „Beállítások > További beállítások > Gépi tanulás”, hogy az arcfelismerés és a fotókeresés vizsgálata a töltőre várjon. A szüneteltetett vizsgálat ezt a kártyáján jelzi.</string>
+    <string name="whats_new_260_editor_title">Egyszerűbb fotószerkesztő</string>
+    <string name="whats_new_260_editor_body">A fotószerkesztőben most ikonos fülek vannak alul, és a „Vágás és forgatás” nyílik meg először, forgató és tükröző gombokkal, a képarányok pedig egyszerű nevekkel szerepelnek. Az „Igazítás” kerek ikonokat használ egy vonalzó fölött, a rajzeszközök egy sorban vannak, a „Keret” és a „Szín” pedig csempe a „Továbbiak” alatt. A színek és a többi beállítás külön panelen nyílik meg, amit a Vissza gomb, a nyíl vagy a képre koppintás zár be.</string>
+    <string name="whats_new_260_texttools_title">Szövegszín és háttér</string>
+    <string name="whats_new_260_texttools_body">A szöveg színét színválasztóval állíthatod be, és háttere is lehet saját színnel, átlátszósággal és lekerekítéssel. Koppints egy szövegre a kijelöléséhez, még egyszer a szerkesztéséhez.</string>
+    <string name="whats_new_260_frame2_title">Kész a Keret eszköz</string>
+    <string name="whats_new_260_frame2_body">A lágy elmosás az első kitöltés, a nagyítós pipetta színt vesz fel a fotóból, a keret vastagságának külön vonalzója van, és a 2:3, 4:3 és 3:2 is bekerült az alakzatok közé.</string>
+    <string name="whats_new_260_videoedit_title">Videószerkesztő, ugyanazzal a kialakítással</string>
+    <string name="whats_new_260_videoedit_body">Az „Igazítás” kerek ikonokat használ egy vonalzó fölött, a vágás és a forgatás egy fülön van a képarányok listájával, a vágókeret pedig két ujjal átméretezhető. A kép már nem villog eszközváltáskor.</string>
     <string name="whats_new_260_more">Ráadásul szerkeszthető dátum HEIC, GIF és RAW fájloknál, figyelmen kívül hagyható duplikátumcsoportok, helyválasztó a térképen, török nyelv, és rengeteg további javítás és stabilitási fejlesztés.</string>
 </resources>

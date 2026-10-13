@@ -2458,8 +2458,8 @@
     <string name="whats_new_260_onthisday_body">“In questo giorno” ora mostra solo il giorno stesso. Scegli da 0 a 3 giorni prima e dopo in “Impostazioni > Aspetto e lingua > Libreria > Sequenza > In questo giorno”.</string>
     <string name="whats_new_260_duplicates_title">Revisione dei duplicati</string>
     <string name="whats_new_260_duplicates_body">Pizzica, trascina o tocca due volte per ingrandire una copia fino a 6 volte prima di decidere cosa eliminare. “Elimina gruppo” seleziona in un colpo tutte le copie di un gruppo.</string>
-    <string name="whats_new_260_intro_title">Include la versione di test 1</string>
-    <string name="whats_new_260_intro_body">Questa versione contiene anche tutto della versione di test 1. Le schede seguenti mostrano solo le novità da allora.</string>
+    <string name="whats_new_260_intro_title">Include le versioni di test precedenti</string>
+    <string name="whats_new_260_intro_body">Questa versione contiene anche tutto delle versioni di test 1 e 2. Le schede seguenti mostrano solo le novità da allora.</string>
     <string name="whats_new_260_addalbum_title">Aggiungi a un altro album</string>
     <string name="whats_new_260_addalbum_body">Seleziona le foto in un album e scegli “Aggiungi a un altro album” nella barra di selezione. Entrano nell\'altro album e restano in questo, e dal selettore si può creare un nuovo album.</string>
     <string name="whats_new_260_scans_title">Scansioni per librerie grandi</string>
@@ -2474,5 +2474,13 @@
     <string name="whats_new_260_tiles_body">I riquadri di scorciatoia in cima alla scheda Album non si allontanano più su uno schermo largo.</string>
     <string name="whats_new_260_charging_title">Solo durante la ricarica</string>
     <string name="whats_new_260_charging_body">Attiva “Solo durante la ricarica” in “Impostazioni > Altre impostazioni > Apprendimento automatico” perché le scansioni di volti e ricerca foto aspettino il caricabatterie. Una scansione in pausa lo indica sulla sua scheda.</string>
+    <string name="whats_new_260_editor_title">Editor foto più semplice</string>
+    <string name="whats_new_260_editor_body">L\'editor foto ora ha schede con icone in basso e si apre su “Ritaglia e ruota”, con pulsanti per ruotare e capovolgere e le proporzioni come semplici nomi. “Regola” usa icone rotonde sopra un righello, gli strumenti di disegno stanno in un\'unica riga, e “Cornice” e “Colore” sono riquadri sotto “Altro”. I colori e le altre impostazioni si aprono in un pannello a parte, che si chiude con Indietro, la freccia o un tocco sulla foto.</string>
+    <string name="whats_new_260_texttools_title">Colore e sfondo del testo</string>
+    <string name="whats_new_260_texttools_body">Scegli il colore di un testo con un selettore di colore e dagli uno sfondo con colore, opacità e angoli arrotondati propri. Tocca un testo per selezionarlo, toccalo di nuovo per modificarlo.</string>
+    <string name="whats_new_260_frame2_title">Strumento Cornice completato</string>
+    <string name="whats_new_260_frame2_body">La sfocatura morbida è il primo riempimento, un contagocce con lente preleva un colore dalla foto, lo spessore del bordo ha un righello tutto suo, e 2:3, 4:3 e 3:2 si aggiungono alle forme.</string>
+    <string name="whats_new_260_videoedit_title">Editor video con lo stesso design</string>
+    <string name="whats_new_260_videoedit_body">“Regola” usa icone rotonde sopra un righello, ritaglia e ruota condividono una scheda con un elenco di proporzioni, e il riquadro di ritaglio si ridimensiona con due dita. L\'immagine non sfarfalla più quando cambi strumento.</string>
     <string name="whats_new_260_more">Inoltre date modificabili per HEIC, GIF e RAW, gruppi di duplicati da ignorare, un selettore di luogo sulla mappa, il turco e tante altre correzioni e miglioramenti di stabilità.</string>
 </resources>
