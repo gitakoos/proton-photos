@@ -2067,16 +2067,21 @@
     <string name="editor_straighten">Kiegyenesítés</string>
     <string name="editor_text_add">Szöveg hozzáadása</string>
     <string name="editor_text_delete">Törlés</string>
+    <string name="editor_text_color">Szövegszín</string>
+    <string name="editor_text_background">Háttér</string>
+    <string name="editor_text_opacity">Átlátszóság</string>
+    <string name="editor_text_corners">Lekerekítés</string>
     <string name="editor_text_edit">Szerkesztés</string>
-    <string name="editor_text_hint">Adj hozzá szöveget, majd húzva mozgasd, csippentve átméretezd</string>
-    <string name="editor_text_resize_hint">Húzással mozgasd, csippentéssel átméretezd</string>
     <string name="editor_tool_color">Szín</string>
     <string name="editor_tool_draw">Rajz</string>
     <string name="editor_tool_text">Szöveg</string>
     <string name="editor_tool_frame">Keret</string>
     <string name="editor_frame_none">Nincs</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_hint">Csippentéssel méretezd át a fotót, húzással mozgasd</string>
+    <string name="editor_frame_border">Szegély</string>
+    <string name="editor_tab_transform">Vágás és forgatás</string>
+    <string name="editor_tab_more">Továbbiak</string>
+    <string name="editor_transform_ratio">Képarány</string>
 
     <!-- Video editor -->
     <string name="video_editor_frame_failed">A képkockát nem sikerült menteni</string>

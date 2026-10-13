@@ -2172,16 +2172,21 @@
     <string name="editor_straighten">Wyprostuj</string>
     <string name="editor_text_add">Dodaj tekst</string>
     <string name="editor_text_delete">Usuń</string>
+    <string name="editor_text_color">Kolor tekstu</string>
+    <string name="editor_text_background">Tło</string>
+    <string name="editor_text_opacity">Krycie</string>
+    <string name="editor_text_corners">Zaokrąglenie</string>
     <string name="editor_text_edit">Edytuj</string>
-    <string name="editor_text_hint">Dodaj tekst, a następnie przeciągnij, aby go przesunąć, i ściśnij palcami, aby zmienić rozmiar</string>
-    <string name="editor_text_resize_hint">Przeciągnij, aby przesunąć, ściśnij palcami, aby zmienić rozmiar</string>
     <string name="editor_tool_color">Kolor</string>
     <string name="editor_tool_draw">Rysuj</string>
     <string name="editor_tool_text">Tekst</string>
     <string name="editor_tool_frame">Ramka</string>
     <string name="editor_frame_none">Brak</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_hint">Ściśnij palcami, aby zmienić rozmiar zdjęcia, przeciągnij, aby je przesunąć</string>
+    <string name="editor_frame_border">Obwódka</string>
+    <string name="editor_tab_transform">Kadruj i obróć</string>
+    <string name="editor_tab_more">Więcej</string>
+    <string name="editor_transform_ratio">Proporcje</string>
 
     <!-- Video editor -->
     <string name="video_editor_frame_failed">Nie udało się zapisać klatki</string>

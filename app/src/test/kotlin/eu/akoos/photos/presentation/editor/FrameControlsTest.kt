@@ -98,17 +98,69 @@ class FrameControlsTest {
         assertEquals(FrameShape.Off, frameShapeOf(null))
     }
 
+    // ---- the border slider ----
+
+    @Test
+    fun every_shape_chip_reads_back_as_itself() {
+        for (shape in FrameShape.entries.filter { it != FrameShape.Off }) {
+            assertEquals("$shape", shape, frameShapeOf(shape.toSpec()))
+        }
+    }
+
+    @Test
+    fun a_border_keeps_the_shape_the_fill_and_the_placement() {
+        val placed = FrameShape.ThreeTwo.toSpec(black)!!.copy(scale = 0.6f, offsetX = 0.3f, offsetY = -0.4f)
+        val wider = placed.withBorder(0.2f)
+        assertEquals(placed.copy(margin = 0.2f, bottomMargin = 0.2f), wider)
+        assertEquals(FrameShape.ThreeTwo, frameShapeOf(wider))
+        assertEquals(0.2f, wider.borderValue(), 1e-6f)
+    }
+
+    @Test
+    fun a_polaroid_keeps_its_deeper_bottom_and_its_card_at_the_narrowest_border() {
+        val card = FrameShape.Polaroid.toSpec()!!
+        val wider = card.withBorder(0.1f)
+        assertEquals(0.1f, wider.margin, 1e-6f)
+        assertEquals(0.1f * FRAME_POLAROID_BOTTOM_FACTOR, wider.bottomMargin, 1e-6f)
+        assertEquals(FrameShape.Polaroid, frameShapeOf(wider))
+        val narrowest = card.withBorder(0f)
+        assertEquals(FRAME_MIN_CARD_BORDER, narrowest.margin, 1e-6f)
+        assertEquals(FrameShape.Polaroid, frameShapeOf(narrowest))
+    }
+
+    @Test
+    fun a_border_is_held_to_its_range_and_not_a_number_reads_as_the_narrowest() {
+        val plain = FrameShape.OneToOne.toSpec()!!
+        assertEquals(0f, plain.withBorder(-1f).margin, 0f)
+        assertEquals(FRAME_MAX_BORDER, plain.withBorder(5f).margin, 0f)
+        assertEquals(0f, plain.withBorder(Float.NaN).margin, 0f)
+        val card = FrameShape.Polaroid.toSpec()!!
+        val widest = card.withBorder(5f)
+        assertEquals(1f, widest.bottomMargin, 1e-6f)
+        assertEquals(card.borderRange().endInclusive, widest.margin, 1e-6f)
+    }
+
+    @Test
+    fun a_wider_border_makes_the_canvas_larger_by_that_much_on_each_side() {
+        val spec = FrameSpec(FrameRatio.Original).withBorder(0.1f)
+        val c = frameCanvas(1000, 500, spec)
+        // 10% of the shorter side, 50 px, on all four sides.
+        assertEquals(1100, c.width)
+        assertEquals(600, c.height)
+        assertEquals(FrameRect(50f, 50f, 1050f, 550f), c.photo)
+    }
+
     // ---- the fill swatches ----
 
     @Test
-    fun the_fills_are_white_black_the_other_pen_colours_once_each_and_the_blur() {
+    fun the_fills_are_the_blur_white_black_and_the_other_pen_colours_once_each() {
         val red = 0xFFFF3B30.toInt()
         val blue = 0xFF007AFF.toInt()
         assertEquals(
-            listOf(white, black, FrameFill.Solid(red), FrameFill.Solid(blue), FrameFill.Blur),
+            listOf(FrameFill.Blur, white, black, FrameFill.Solid(red), FrameFill.Solid(blue)),
             frameFills(listOf(red, FRAME_WHITE, blue, FRAME_BLACK, red)),
         )
-        assertEquals(listOf(white, black, FrameFill.Blur), frameFills(emptyList()))
+        assertEquals(listOf(FrameFill.Blur, white, black), frameFills(emptyList()))
     }
 
     @Test

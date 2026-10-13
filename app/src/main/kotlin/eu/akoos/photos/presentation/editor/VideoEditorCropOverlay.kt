@@ -32,6 +32,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -111,6 +115,9 @@ internal fun VideoPreview(
     /** The active colour filter as a 4x5 Android matrix (null = none), previewed live on the video via a
      *  RenderEffect colour filter (Android 12+). The same look is baked into the export on save. */
     filterMatrix: FloatArray? = null,
+    /** Set while the Crop tool is open: its handles and gestures are layered over the same player, so a switch to
+     *  or from the tool never swaps the player's surface and the picture does not flicker. */
+    edit: VideoCropEdit? = null,
 ) {
     // Same VM instance the screen holds (shared NavBackStackEntry store), so the player's
     // reported size can rescue the crop gate when MediaMetadataRetriever read no dimensions.
@@ -205,7 +212,9 @@ internal fun VideoPreview(
                 )
                 // Live crop preview: grey out everything outside the committed crop so the final
                 // framing shows on every tab. Purely visual (no gestures); the crop tool owns editing.
-                if (cropRect != null && sourceWidth > 0 && sourceHeight > 0) {
+                if (edit != null && sourceWidth > 0 && sourceHeight > 0) {
+                    CropEditLayer(srcW = sourceWidth, srcH = sourceHeight, currentCrop = cropRect, edit = edit)
+                } else if (cropRect != null && sourceWidth > 0 && sourceHeight > 0) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val fit = fitImageInBox(
                             sourceWidth.toFloat(), sourceHeight.toFloat(),
@@ -231,135 +240,51 @@ internal fun VideoPreview(
 
 // ─── Crop overlay ────────────────────────────────────────────────────────────
 
+/** What the Crop tool adds to [VideoPreview]: the shape lock the crop is held to, the crop it reports as it moves, and
+ *  the two calls that bracket one gesture as one undo step. */
+internal class VideoCropEdit(
+    /** Source-space width/height ratio the crop is locked to (null = free-form), held through every handle drag and
+     *  pinch by the shared crop geometry, the same shape lock the photo overlay uses. */
+    val lockedRatio: Float?,
+    val onCropChange: (AndroidRect) -> Unit,
+    val onEditBegin: () -> Unit,
+    val onEditCommit: () -> Unit,
+)
+
 /**
- * Renders the source video's first frame as a bitmap and overlays draggable corner
- * brackets and side markers. The user's crop rect lives in source-pixel coordinates; we convert
- * between screen space and source space using a fit-rect (letterbox-aware).
- *
- * Gestures: a drag starts by picking the closest handle; subsequent moves drag that
- * handle while preserving a minimum size. The dark semi-opaque mask paints everything
- * OUTSIDE the crop rect to make the focus clear.
- */
-/**
- * Crop tab content — the same live ExoPlayer as the other tabs PLUS the crop handle
- * overlay layered on top. Both the PlayerView and the crop Canvas live inside a single
- * graphicsLayer-rotated inner box so user rotation propagates to both at once and the
- * Canvas's pointer events get auto-untransformed by Compose into the unrotated crop
- * coord space — no manual handle-coord rotation needed.
- *
- * Mirrors [VideoPreview]'s outer/inner sizing pattern for the rotated-aspect fit. Crop
- * math runs in POST-source-rotation coords (srcW × srcH) — same as before; [VideoEditorViewModel.cropInSourcePixels]
- * still inverts only the source's baked rotation when handing the rect to VideoReencoder.
+ * The Crop tool's layer over the live player: the crop handles and mask, inside the same rotated box as the video, so
+ * a user rotation carries both and Compose hands the Canvas its touches already turned into the unrotated crop space.
+ * Crop math runs in POST-source-rotation coords (srcW × srcH); [VideoEditorViewModel.cropInSourcePixels] still inverts
+ * only the source's baked rotation when handing the rect to VideoReencoder.
  */
 @Composable
-internal fun CropOverPlayer(
-    player: ExoPlayer,
-    sourceWidth: Int,
-    sourceHeight: Int,
-    rotationDegrees: Int = 0,
-    currentCrop: AndroidRect?,
-    /** Source-space width/height ratio the crop is locked to (null = free-form). Held through
-     *  every handle drag by [resizeCrop], the same shape lock the photo overlay uses. */
-    lockedRatio: Float? = null,
-    onCropChange: (AndroidRect) -> Unit,
-    /** Fired when a crop handle drag begins / ends, so the host can bracket it as one undo step. */
-    onEditBegin: () -> Unit = {},
-    onEditCommit: () -> Unit = {},
-    /** Active colour filter as a 4x5 Android matrix (null = none), previewed live via a RenderEffect. */
-    filterMatrix: FloatArray? = null,
-) {
-    val srcW = sourceWidth.coerceAtLeast(1)
-    val srcH = sourceHeight.coerceAtLeast(1)
-
-    // Local pending crop — drag commits live to the VM, the local copy keeps the
-    // pointer math snappy without round-tripping the StateFlow on every frame. A live
-    // handle drag OWNS this rect and commits it to the VM each frame, so it must not be
-    // resynced from currentCrop mid-drag (that was the "crop jumps to original size on
-    // touch" bug). But when NO drag is in flight, an external change to currentCrop — an
-    // aspect chip tap, first entry, a reset — has to reshape the drawn frame immediately;
-    // the old rule resynced only when currentCrop went null, so a chip's fresh rect stayed
-    // invisible until the user touched the frame.
+private fun CropEditLayer(srcW: Int, srcH: Int, currentCrop: AndroidRect?, edit: VideoCropEdit) {
+    // Local pending crop: a gesture commits live to the VM, and the local copy keeps the pointer math snappy without
+    // round-tripping the StateFlow on every frame. A live gesture OWNS this rect and must not be resynced from
+    // currentCrop mid-way (that was the "crop jumps to original size on touch" bug). With none in flight, an external
+    // change to currentCrop, an aspect chip tap, first entry or a reset, reshapes the drawn frame at once.
     var pending by remember { mutableStateOf<AndroidRect?>(null) }
     var dragging by remember { mutableStateOf(false) }
     LaunchedEffect(srcW, srcH, currentCrop, dragging) {
-        if (srcW <= 0 || srcH <= 0) return@LaunchedEffect
         when {
             currentCrop == null -> pending = AndroidRect(0, 0, srcW, srcH) // reset / rotation / Free / Original
-            !dragging -> pending = currentCrop                             // chip tap, first entry — reflect now
-            // else: a live drag owns `pending`; its per-frame commits keep currentCrop in step.
+            !dragging -> pending = currentCrop                             // chip tap, first entry: reflect now
+            // else: a live gesture owns `pending`; its per-frame commits keep currentCrop in step.
         }
     }
-    val pendingRect = pending ?: AndroidRect(0, 0, srcW, srcH)
-
-    val sideways = ((rotationDegrees % 360) + 360) % 360 % 180 != 0
-    val videoAspect = srcW.toFloat() / srcH.toFloat()
-    val visibleAspect = if (sideways) 1f / videoAspect else videoAspect
-
-    BoxWithConstraints(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        val containerW = constraints.maxWidth.toFloat()
-        val containerH = constraints.maxHeight.toFloat().coerceAtLeast(1f)
-        val containerAspect = containerW / containerH
-        // Outer fits the POST-user-rotation visible aspect inside the available area.
-        val (outerWidthDp, outerHeightDp) = with(LocalDensity.current) {
-            if (visibleAspect > containerAspect) {
-                val w = containerW; val h = w / visibleAspect
-                Pair(w.toDp(), h.toDp())
-            } else {
-                val h = containerH; val w = h * visibleAspect
-                Pair(w.toDp(), h.toDp())
-            }
-        }
-        Box(
-            modifier = Modifier.width(outerWidthDp).height(outerHeightDp),
-            contentAlignment = Alignment.Center,
-        ) {
-            // Inner = pre-rotation aspect. For sideways rotations its layout dims swap
-            // vs the outer, then graphicsLayer pulls the rendered footprint back to the
-            // outer's bounds. Same trick VideoPreview uses.
-            val (innerWidthDp, innerHeightDp) = if (sideways) {
-                Pair(outerHeightDp, outerWidthDp)
-            } else {
-                Pair(outerWidthDp, outerHeightDp)
-            }
-            Box(
-                modifier = Modifier
-                    .requiredWidth(innerWidthDp)
-                    .requiredHeight(innerHeightDp)
-                    .graphicsLayer(rotationZ = rotationDegrees.toFloat()),
-            ) {
-                AndroidView(
-                    factory = { ctx ->
-                        val view = android.view.LayoutInflater.from(ctx)
-                            .inflate(R.layout.video_editor_player, null) as androidx.media3.ui.PlayerView
-                        view.player = player
-                        view.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        view
-                    },
-                    update = { view ->
-                        view.player = player
-                        applyFilterRenderEffect(view, filterMatrix)
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
-                CropHandleCanvas(
-                    srcW = srcW, srcH = srcH,
-                    pending = pendingRect,
-                    lockedRatio = lockedRatio,
-                    onPendingChange = { rect ->
-                        pending = rect
-                        onCropChange(rect)
-                    },
-                    onDraggingChange = { d ->
-                        dragging = d
-                        if (d) onEditBegin() else onEditCommit()
-                    },
-                )
-            }
-        }
-    }
+    CropHandleCanvas(
+        srcW = srcW, srcH = srcH,
+        pending = pending ?: AndroidRect(0, 0, srcW, srcH),
+        lockedRatio = edit.lockedRatio,
+        onPendingChange = { rect ->
+            pending = rect
+            edit.onCropChange(rect)
+        },
+        onDraggingChange = { d ->
+            dragging = d
+            if (d) edit.onEditBegin() else edit.onEditCommit()
+        },
+    )
 }
 
 /**
@@ -425,66 +350,123 @@ private fun CropHandleCanvas(
             modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(srcW, srcH, fit) {
-                    // Track which handle is being dragged so a fast move past another
-                    // corner doesn't snap to the wrong one. Inside-the-rect drags
-                    // translate the rect; we remember the touch's source-pixel offset
-                    // from the rect's top-left so the translation stays anchored to the
-                    // finger position instead of snapping the corner under it.
-                    var grabbedHandle: CropHandle? = null
-                    var insideOffsetSrcX = 0
-                    var insideOffsetSrcY = 0
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            val p = pendingState.value
-                            grabbedHandle = pickCropHandle(
-                                box = p.toCropBox(),
-                                scale = fit.scale,
-                                offsetX = fit.offsetX,
-                                offsetY = fit.offsetY,
-                                pointX = offset.x,
-                                pointY = offset.y,
-                                touchSlopPx = touchRadiusPx,
-                            )
-                            if (grabbedHandle != null) onDraggingChange(true)
-                            if (grabbedHandle == CropHandle.Inside) {
-                                val srcX = fit.toImageX(offset.x)
-                                    .coerceIn(0f, srcW.toFloat()).toInt()
-                                val srcY = fit.toImageY(offset.y)
-                                    .coerceIn(0f, srcH.toFloat()).toInt()
-                                insideOffsetSrcX = srcX - p.left
-                                insideOffsetSrcY = srcY - p.top
-                            }
-                        },
-                        onDrag = { change, _ ->
-                            val h = grabbedHandle ?: return@detectDragGestures
-                            // Read the LIVE rect each frame (not the captured one) so a resize/move
-                            // builds on the current crop instead of snapping back to the original.
-                            val p = pendingState.value
-                            val srcX = fit.toImageX(change.position.x)
-                                .coerceIn(0f, srcW.toFloat()).toInt()
-                            val srcY = fit.toImageY(change.position.y)
-                                .coerceIn(0f, srcH.toFloat()).toInt()
-                            // Shared geometry: a null lock is free-form, a non-null lock holds the
-                            // shape through the drag. Same call the photo overlay makes, so a video
-                            // handle and a photo handle behave identically.
-                            val newRect = resizeCrop(
-                                box = p.toCropBox(),
-                                handle = h,
-                                bx = srcX,
-                                by = srcY,
-                                ratio = lockState.value,
-                                boundsW = srcW,
-                                boundsH = srcH,
-                                minPx = 32,
-                                insideOffsetX = insideOffsetSrcX,
-                                insideOffsetY = insideOffsetSrcY,
-                            ).toRect()
-                            onPendingChange(newRect)
-                            change.consume()
-                        },
-                        onDragEnd = { grabbedHandle = null; onDraggingChange(false) },
-                        onDragCancel = { grabbedHandle = null; onDraggingChange(false) },
-                    )
+                    // One loop for the whole touch, as the photo editor's crop reads it: a lone finger picks the
+                    // handle nearest where it crossed the slop and drags it (a touch clear of the frame moves
+                    // nothing), and a second finger makes it a pinch that resizes the whole frame about the point
+                    // between the fingers, the shape lock held. The pinch holds until every finger is up.
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val dragSlopPx = viewConfiguration.touchSlop
+                        var mode = CropGestureMode.Undecided
+                        // The handle stays the one picked at the slop, so a fast move past another corner does not
+                        // snap to it. An inside grab remembers the finger's source-pixel offset from the frame's
+                        // top-left, so the translation stays anchored to the finger.
+                        var handle: CropHandle? = null
+                        var insideOffsetSrcX = 0
+                        var insideOffsetSrcY = 0
+                        var editing = false
+                        var frame: CropBox? = null
+                        // A pinch measures from its base: the frame and the point between the fingers at that
+                        // moment, and the spread and midpoint travel since.
+                        var pinchFrom = CropBox(0, 0, 0, 0)
+                        var focus = Offset.Zero
+                        var zoom = 1f
+                        var pan = Offset.Zero
+                        try {
+                            do {
+                                val event = awaitPointerEvent()
+                                val pressed = event.changes.filter { it.pressed }
+                                val finger = event.changes.firstOrNull { it.id == down.id }
+                                val travelled = finger?.let { (it.position - down.position).getDistance() } ?: 0f
+                                val next = nextCropGestureMode(mode, pressed.size, travelled, dragSlopPx)
+                                if (next == CropGestureMode.Pinch) {
+                                    val box = if (mode == CropGestureMode.Pinch) {
+                                        // Both count only the fingers down on either side of this event, so a
+                                        // finger landing or lifting adds no step.
+                                        val step = event.calculateZoom()
+                                        if (step.isFinite() && step > 0f) zoom *= step
+                                        pan += event.calculatePan() / fit.scale
+                                        scaleCropAbout(
+                                            start = pinchFrom,
+                                            focusX = focus.x,
+                                            focusY = focus.y,
+                                            scale = zoom,
+                                            panX = pan.x,
+                                            panY = pan.y,
+                                            ratio = lockState.value,
+                                            boundsW = srcW,
+                                            boundsH = srcH,
+                                            minPx = 32,
+                                        )
+                                    } else {
+                                        frame ?: pendingState.value.toCropBox()
+                                    }
+                                    if (!editing) {
+                                        editing = true
+                                        onDraggingChange(true)
+                                    }
+                                    if (box != frame) onPendingChange(box.toRect())
+                                    frame = box
+                                    // Re-based on the fingers now down whenever one lands or lifts, so the frame
+                                    // never jumps and scales about the point between them.
+                                    val fingersChanged = event.changes.any { it.pressed != it.previousPressed }
+                                    if (pressed.isNotEmpty() && (mode != CropGestureMode.Pinch || fingersChanged)) {
+                                        pinchFrom = box
+                                        focus = cropPinchFocus(pressed.map { it.position }, fit)
+                                        zoom = 1f
+                                        pan = Offset.Zero
+                                    }
+                                    pressed.forEach { it.consume() }
+                                } else if (next == CropGestureMode.Drag && finger != null && finger.pressed) {
+                                    val srcX = fit.toImageX(finger.position.x).coerceIn(0f, srcW.toFloat()).toInt()
+                                    val srcY = fit.toImageY(finger.position.y).coerceIn(0f, srcH.toFloat()).toInt()
+                                    val starting = mode == CropGestureMode.Undecided
+                                    if (starting) {
+                                        val p = pendingState.value
+                                        handle = pickCropHandle(
+                                            box = p.toCropBox(),
+                                            scale = fit.scale,
+                                            offsetX = fit.offsetX,
+                                            offsetY = fit.offsetY,
+                                            pointX = finger.position.x,
+                                            pointY = finger.position.y,
+                                            touchSlopPx = touchRadiusPx,
+                                        )
+                                        if (handle != null) {
+                                            editing = true
+                                            onDraggingChange(true)
+                                        }
+                                        if (handle == CropHandle.Inside) {
+                                            insideOffsetSrcX = srcX - p.left
+                                            insideOffsetSrcY = srcY - p.top
+                                        }
+                                    }
+                                    val h = handle
+                                    if (h != null && (starting || finger.position != finger.previousPosition)) {
+                                        // Read the LIVE rect each frame (not a captured one) so a resize or move
+                                        // builds on the current crop instead of snapping back to the original.
+                                        val resized = resizeCrop(
+                                            box = pendingState.value.toCropBox(),
+                                            handle = h,
+                                            bx = srcX,
+                                            by = srcY,
+                                            ratio = lockState.value,
+                                            boundsW = srcW,
+                                            boundsH = srcH,
+                                            minPx = 32,
+                                            insideOffsetX = insideOffsetSrcX,
+                                            insideOffsetY = insideOffsetSrcY,
+                                        )
+                                        onPendingChange(resized.toRect())
+                                        finger.consume()
+                                    }
+                                }
+                                mode = next
+                            } while (pressed.isNotEmpty())
+                        } finally {
+                            if (editing) onDraggingChange(false)
+                        }
+                    }
                 },
         ) {
             // Crop rect in screen coords

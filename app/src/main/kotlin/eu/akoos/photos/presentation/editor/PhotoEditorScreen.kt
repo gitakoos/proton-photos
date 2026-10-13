@@ -99,6 +99,25 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.CropRotate
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Straighten
+import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Tonality
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.material.icons.filled.FormatColorFill
+import androidx.compose.material.icons.filled.Opacity
+import androidx.compose.material.icons.filled.RoundedCorner
+import androidx.compose.material.icons.filled.LineWeight
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.material.icons.filled.FilterFrames
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Grain
@@ -111,7 +130,6 @@ import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Restore
-import androidx.compose.material.icons.filled.Tonality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
@@ -202,17 +220,50 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
-private enum class Tool(@androidx.annotation.StringRes val labelRes: Int, val icon: ImageVector) {
-    Adjust(R.string.editor_tool_adjust, Icons.Default.Tune),
-    Filter(R.string.editor_tool_filter, Icons.Default.AutoFixHigh),
-    Color(R.string.editor_tool_color, Icons.Default.Tonality),
-    Crop(R.string.video_editor_crop, Icons.Default.Crop),
-    Frame(R.string.editor_tool_frame, Icons.Default.FilterFrames),
-    Redact(R.string.editor_tool_redact, Icons.Default.Brush),
-    HideFaces(R.string.editor_hide_faces, Icons.Default.Face),
-    Draw(R.string.editor_tool_draw, Icons.Default.Draw),
-    Text(R.string.editor_tool_text, Icons.Default.TextFields),
-    Rotate(R.string.video_editor_rotate, Icons.AutoMirrored.Filled.RotateRight),
+private enum class Tool { Adjust, Filter, Color, Crop, Frame, Markup, Redact, HideFaces, Draw, Text, More }
+
+/**
+ * The tabs of the bottom bar, icon only, each opening one of its tools: Transform is the crop with its turn, flip,
+ * ratio and straighten controls, Draw groups the tools that mark the photo (picked in a row of names under the
+ * panel), and More lists the rest as tiles, each opening its own panel.
+ */
+private enum class EditorTab(
+    @androidx.annotation.StringRes val labelRes: Int,
+    val icon: ImageVector,
+    val tools: List<Tool>,
+) {
+    Transform(R.string.editor_tab_transform, Icons.Default.CropRotate, listOf(Tool.Crop)),
+    Filters(R.string.editor_tool_filter, Icons.Default.Tonality, listOf(Tool.Filter)),
+    Tone(R.string.editor_tool_adjust, Icons.Default.LightMode, listOf(Tool.Adjust)),
+    Decorate(R.string.editor_tool_draw, Icons.Default.Draw, listOf(Tool.Markup, Tool.Draw, Tool.Text, Tool.Redact, Tool.HideFaces)),
+    More(R.string.editor_tab_more, Icons.Default.Apps, listOf(Tool.More, Tool.Frame, Tool.Color)),
+}
+
+private fun Tool.tab(): EditorTab = EditorTab.entries.first { this in it.tools }
+
+@androidx.annotation.StringRes
+private fun Tool.labelRes(): Int = when (this) {
+    Tool.Adjust -> R.string.editor_tool_adjust
+    Tool.Filter -> R.string.editor_tool_filter
+    Tool.Color -> R.string.editor_tool_color
+    Tool.Crop -> R.string.video_editor_crop
+    Tool.Frame -> R.string.editor_tool_frame
+    Tool.Redact -> R.string.editor_tool_redact
+    Tool.HideFaces -> R.string.editor_hide_faces
+    Tool.Draw -> R.string.editor_tool_draw
+    Tool.Text -> R.string.editor_tool_text
+    Tool.Markup -> R.string.editor_tool_draw
+    Tool.More -> R.string.editor_tab_more
+}
+
+/**
+ * The panel a tool opens from its row of buttons, with a back arrow over it: null is the row itself. Every tool in the
+ * Transform and Draw tabs works this way, the buttons first and each setting in a panel of its own.
+ */
+private enum class ToolOption {
+    Ratio, Straighten,
+    TextColor, TextBackground,
+    FacesStyle, FacesStrength,
 }
 
 /** Which slider the Adjust tab is currently exposing in the floating slider pill.
@@ -254,7 +305,17 @@ fun PhotoEditorScreen(
     val visibleTools = remember(aiFeaturesEnabled, faceEnabled) {
         Tool.entries.filter { it != Tool.HideFaces || (aiFeaturesEnabled && faceEnabled) }
     }
-    var activeTool by remember { mutableStateOf(Tool.Adjust) }
+    var activeTool by remember { mutableStateOf(Tool.Crop) }
+    val activeTab = activeTool.tab()
+    // Each tab reopens on the tool it was last left on; More always opens on its tiles.
+    val tabMemory = remember { mutableMapOf<EditorTab, Tool>() }
+    val openTool: (Tool) -> Unit = { tool ->
+        activeTool = tool
+        tabMemory[tool.tab()] = tool
+    }
+    var toolOption by remember { mutableStateOf<ToolOption?>(null) }
+    // The eyedropper of the Frame tool: while on, a press on the photo picks the colour under the finger.
+    var framePicking by remember { mutableStateOf(false) }
     // Pen tool: current stroke colour + width (screen dp), used by the Draw overlay and panel.
     var drawColor by remember { mutableStateOf(DRAW_COLORS.first()) }
     var drawWidth by remember { mutableFloatStateOf(8f) }
@@ -265,6 +326,8 @@ fun PhotoEditorScreen(
     // Text tool: which overlay is open for inline editing (typed directly on the photo), if any.
     var editingTextId by remember { mutableStateOf<Int?>(null) }
     androidx.compose.runtime.LaunchedEffect(activeTool) {
+        if (activeTool != Tool.Frame) framePicking = false
+        toolOption = null
         // Leaving the Text tool: close any open inline editor first, then bake the text back into the
         // preview (in the tool the overlay draws it live, so a move is a cheap redraw, not a re-bake).
         if (activeTool != Tool.Text) {
@@ -310,13 +373,20 @@ fun PhotoEditorScreen(
     val cropDisplayBitmap = state.adjustedBitmapNoCrop ?: state.originalBitmap
     val committedCrop = state.adjustments.cropRect
     var settledCropRect by remember { mutableStateOf<android.graphics.Rect?>(null) }
+    // The size of the bitmap the pending rect was made for. A turn or a flip swaps the displayed bitmap a render
+    // after the edit, so a rect from the old one is not drawn on the new one: the overlay shows the whole image
+    // for that moment instead of jumping.
+    var pendingBasis by remember { mutableStateOf(0 to 0) }
     androidx.compose.runtime.LaunchedEffect(
         activeTool, committedCrop, cropDisplayBitmap?.width, cropDisplayBitmap?.height,
     ) {
         if (activeTool == Tool.Crop) {
             val disp = cropDisplayBitmap ?: return@LaunchedEffect
             val seed = committedCrop ?: android.graphics.Rect(0, 0, disp.width, disp.height)
-            if (pendingCropRect == null || pendingCropRect == settledCropRect) pendingCropRect = seed
+            if (pendingCropRect == null || pendingCropRect == settledCropRect) {
+                pendingCropRect = seed
+                pendingBasis = disp.width to disp.height
+            }
             settledCropRect = seed
         } else {
             pendingCropRect = null
@@ -440,6 +510,22 @@ fun PhotoEditorScreen(
     androidx.activity.compose.BackHandler(enabled = canUndo) {
         showDiscardDialog = true
     }
+    // The panels a tool opens (the ratio row, the straighten dials, Frame, Color) close on Back, on a tap on the
+    // photo and with their arrow, back to the Transform pill or the More tiles. Declared after the discard guard
+    // above, so Back reaches it first.
+    val inMarkupTool = activeTool.tab() == EditorTab.Decorate && activeTool != Tool.Markup
+    val panelOpen = toolOption != null || activeTool == Tool.Frame || activeTool == Tool.Color || inMarkupTool
+    // A tap on the photo closes the panels that leave it alone; the drawing tools use the photo themselves.
+    val tapCloses = toolOption != null || activeTool == Tool.Frame || activeTool == Tool.Color
+    val closePanel: () -> Unit = {
+        when {
+            framePicking -> framePicking = false
+            toolOption != null -> toolOption = null
+            inMarkupTool -> openTool(Tool.Markup)
+            else -> openTool(Tool.More)
+        }
+    }
+    androidx.activity.compose.BackHandler(enabled = panelOpen) { closePanel() }
 
     Column(Modifier.fillMaxSize().background(Bg0).statusBarsPadding()) {
         TopBar(
@@ -472,10 +558,19 @@ fun PhotoEditorScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 6.dp)
                 .then(
+                    if (tapCloses && !framePicking) {
+                        Modifier.pointerInput(activeTool, toolOption) {
+                            detectTapGestures(onTap = { closePanel() })
+                        }
+                    } else {
+                        Modifier
+                    },
+                )
+                .then(
                     // Press-and-hold to peek the original, but only in the tools whose preview is a
                     // static image; Crop and Redact own the pointer for their own drag gestures.
                     if (state.originalBitmap != null &&
-                        (activeTool == Tool.Adjust || activeTool == Tool.Filter || activeTool == Tool.Rotate)
+                        (activeTool == Tool.Adjust || activeTool == Tool.Filter || activeTool == Tool.More)
                     ) {
                         Modifier.pointerInput(activeTool) {
                             detectTapGestures(onPress = {
@@ -507,7 +602,7 @@ fun PhotoEditorScreen(
                         onCopy = {},
                     )
                 }
-                activeTool == Tool.Crop && state.originalBitmap != null -> CropPreview(
+                activeTool == Tool.Crop && toolOption != ToolOption.Straighten && state.originalBitmap != null -> CropPreview(
                     // Use adjustedBitmapNoCrop so colour edits AND any rotation / flip the
                     // user applied stay visible while they pick a crop rectangle — the Crop
                     // tab then shows the same picture the other tabs do, and the rect lives in
@@ -517,10 +612,15 @@ fun PhotoEditorScreen(
                     // is unsuitable because it has crop already applied; that would put the
                     // rect on the wrong canvas size and produce out-of-bounds reads → crash.
                     bitmap = state.adjustedBitmapNoCrop ?: state.originalBitmap!!,
-                    cropRect = pendingCropRect,
+                    cropRect = pendingCropRect?.takeIf {
+                        pendingBasis == ((cropDisplayBitmap?.width ?: 0) to (cropDisplayBitmap?.height ?: 0))
+                    },
                     lockedRatio = cropDisplayBitmap?.let { lockedAspect.lockRatio(it.width, it.height) },
                     // During the drag only the lightweight overlay rect updates (no re-render).
-                    onCropRectChanged = { pendingCropRect = it },
+                    onCropRectChanged = {
+                        pendingCropRect = it
+                        pendingBasis = (cropDisplayBitmap?.width ?: 0) to (cropDisplayBitmap?.height ?: 0)
+                    },
                     // On release the rect commits to crop state, so other tabs and save reflect
                     // it without a separate Apply press. Committing here instead of per-tick
                     // keeps it to one render + one undo entry per gesture. A full-image rect
@@ -570,6 +670,11 @@ fun PhotoEditorScreen(
                         textItems = state.adjustments.textItems,
                         onFrameLive = { vm.setFrameLive(it) },
                         onFrameCommit = { vm.finalizeAdjustments() },
+                        picking = framePicking,
+                        onPicked = { argb ->
+                            state.adjustments.frame?.let { vm.setFrame(it.withFill(FrameFill.Solid(argb))) }
+                            framePicking = false
+                        },
                     )
                 }
                 state.previewBitmap != null -> {
@@ -639,51 +744,86 @@ fun PhotoEditorScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp).wrapContentHeight(),
             ) {
                 AnimatedContent(
-                    targetState = activeTool,
+                    targetState = activeTool to toolOption,
+                    // One thing at a time: the old panel fades out, the box then eases to the new height, and
+                    // the new panel fades in as that settles, so the photo above is never pulled two ways.
                     transitionSpec = {
-                        (fadeIn(tween(190)) + slideInVertically(tween(230)) { it / 5 }) togetherWith
-                            (fadeOut(tween(150)) + slideOutVertically(tween(190)) { it / 5 })
+                        (
+                            (fadeIn(tween(170, delayMillis = 110)) + slideInVertically(tween(210, delayMillis = 110)) { it / 12 }) togetherWith
+                                fadeOut(tween(90))
+                            ) using SizeTransform(clip = false) { _, _ -> tween(210, delayMillis = 60) }
                     },
                     label = "editor_panel",
-                ) { tool ->
+                ) { (tool, panel) ->
                     when (tool) {
                     Tool.Adjust -> AdjustPanel(adjustments = state.adjustments, vm = vm)
                     Tool.Filter -> FilterPanel(state, vm)
-                    Tool.Color -> ColorPanel(
-                        state = state,
-                        vm = vm,
-                        mode = colorMode,
-                        onMode = { colorMode = it },
-                        curveChannel = curveChannel,
-                        onCurveChannel = { curveChannel = it },
-                        hslBandIndex = hslBandIndex,
-                        onHslBand = { hslBandIndex = it },
+                    Tool.Color -> PanelWithBack(Tool.Color.labelRes(), onBack = { openTool(Tool.More) }) {
+                        ColorPanel(
+                            state = state,
+                            vm = vm,
+                            mode = colorMode,
+                            onMode = { colorMode = it },
+                            curveChannel = curveChannel,
+                            onCurveChannel = { curveChannel = it },
+                            hslBandIndex = hslBandIndex,
+                            onHslBand = { hslBandIndex = it },
+                        )
+                    }
+                    Tool.Crop -> when (panel) {
+                        ToolOption.Ratio -> PanelWithBack(R.string.editor_transform_ratio, onBack = { toolOption = null }) {
+                            CropPanel(
+                                state = state,
+                                vm = vm,
+                                lockedAspect = lockedAspect,
+                                onLockedAspectChange = { lockedAspect = it },
+                                onPendingCropRectChange = {
+                                    pendingCropRect = it
+                                    pendingBasis = (cropDisplayBitmap?.width ?: 0) to (cropDisplayBitmap?.height ?: 0)
+                                },
+                            )
+                        }
+                        ToolOption.Straighten -> StraightenPanel(state, vm, onBack = { toolOption = null })
+                        else -> TransformPill(
+                            onFlipH = { vm.toggleFlipH() },
+                            onFlipV = { vm.toggleFlipV() },
+                            onRotate = { vm.rotate90Cw() },
+                            onRatio = { toolOption = ToolOption.Ratio },
+                            onStraighten = { toolOption = ToolOption.Straighten },
+                        )
+                    }
+                    Tool.Frame -> PanelWithBack(Tool.Frame.labelRes(), onBack = { openTool(Tool.More) }) {
+                        FramePanel(state, vm, picking = framePicking, onPickToggle = { framePicking = !framePicking })
+                    }
+                    Tool.More -> MorePanel(onOpen = openTool)
+                    Tool.Markup -> MarkupPill(
+                        tools = visibleTools.filter { it in EditorTab.Decorate.tools && it != Tool.Markup },
+                        onPick = openTool,
                     )
-                    Tool.Crop   -> CropPanel(
-                        state = state,
-                        vm = vm,
-                        lockedAspect = lockedAspect,
-                        onLockedAspectChange = { lockedAspect = it },
-                        onPendingCropRectChange = { pendingCropRect = it },
-                    )
-                    Tool.Frame -> FramePanel(state, vm)
-                    Tool.Redact -> RedactPanel(state, vm)
-                    Tool.HideFaces -> HideFacesPanel(state, vm)
-                    Tool.Draw -> DrawPanel(
-                        state = state,
-                        color = drawColor,
-                        onColor = { drawColor = it },
-                        width = drawWidth,
-                        onWidth = { drawWidth = it },
-                        vm = vm,
-                    )
-                    Tool.Text -> TextPanel(
-                        state = state,
-                        onAdd = { editingTextId = vm.addEmptyTextItem() },
-                        onEdit = { item -> vm.beginTextEdit(item.id); editingTextId = item.id },
-                        vm = vm,
-                    )
-                    Tool.Rotate -> RotatePanel(state = state, vm = vm)
+                    Tool.Redact -> ToolShell(Tool.Redact, panel, { openTool(Tool.Markup) }) {
+                        RedactTool(state, vm)
+                    }
+                    Tool.HideFaces -> ToolShell(Tool.HideFaces, panel, { openTool(Tool.Markup) }) {
+                        FacesTool(state, vm, panel) { toolOption = it }
+                    }
+                    Tool.Draw -> ToolShell(Tool.Draw, panel, { openTool(Tool.Markup) }) {
+                        DrawTool(
+                            color = drawColor,
+                            onColor = { drawColor = it },
+                            width = drawWidth,
+                            onWidth = { drawWidth = it },
+                        )
+                    }
+                    Tool.Text -> ToolShell(Tool.Text, panel, { openTool(Tool.Markup) }) {
+                        TextTool(
+                            state = state,
+                            onAdd = { editingTextId = vm.addEmptyTextItem() },
+                            onEdit = { item -> vm.beginTextEdit(item.id); editingTextId = item.id },
+                            vm = vm,
+                            option = panel,
+                            onOption = { toolOption = it },
+                        )
+                    }
                     }
                 }
             }
@@ -700,12 +840,8 @@ fun PhotoEditorScreen(
                 )
             }
 
-            // Bottom tab bar — a single pill containing the 5 tab tap targets. Matches
-            // GalleryScreen.BottomDock: PillBgOpaque + 0.5.dp PillBorder + pillShape
-            // + 4.dp inner padding. Each tab inside is a 44.dp circle that fills with
-            // Accent.copy(alpha = 0.22f) when selected.
-            // Horizontally scrollable so the tool set can grow past the screen width without the
-            // circles squashing together; padding keeps the first/last tab clear of the pill ends.
+            // Bottom tab bar: a single pill of icon-only tabs sharing the width, the selected one in the accent.
+            // Matches GalleryScreen.BottomDock: PillBgOpaque + 0.5.dp PillBorder + pillShape + inner padding.
             Row(
                 modifier = Modifier
                     // An exclusion of its own, so the row keeps it while the Frame tool lifts the one above.
@@ -714,13 +850,20 @@ fun PhotoEditorScreen(
                     .fillMaxWidth()
                     .background(PillBgOpaque, pillShape)
                     .border(0.5.dp, PillBorder, pillShape)
-                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 6.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                visibleTools.forEach { tool ->
-                    ToolTab(tool = tool, selected = tool == activeTool, onClick = { activeTool = tool })
+                EditorTab.entries.forEach { tab ->
+                    ToolTab(
+                        tab = tab,
+                        selected = tab == activeTab,
+                        onClick = {
+                            // More and Draw open on their list of tools, the others where they were left.
+                            val selector = tab == EditorTab.More || tab == EditorTab.Decorate
+                            openTool(if (selector) tab.tools.first() else tabMemory[tab] ?: tab.tools.first())
+                        },
+                    )
                 }
             }
         }
@@ -1031,7 +1174,7 @@ private fun IconBubble(onClick: () -> Unit, enabled: Boolean = true, content: @C
  *  state mirrors that screen: Accent.copy(alpha = 0.22f) fill + accent-tinted
  *  icon. Unselected = transparent + dim icon. */
 @Composable
-private fun ToolTab(tool: Tool, selected: Boolean, onClick: () -> Unit) {
+private fun ToolTab(tab: EditorTab, selected: Boolean, onClick: () -> Unit) {
     // The selection fills in and the icon springs up a touch, so switching tools reads as a deliberate
     // move rather than an instant swap.
     val bgAlpha by animateFloatAsState(if (selected) 0.22f else 0f, tween(200), label = "tab_bg")
@@ -1043,17 +1186,17 @@ private fun ToolTab(tool: Tool, selected: Boolean, onClick: () -> Unit) {
     )
     Box(
         modifier = Modifier
-            .size(44.dp)
+            .size(48.dp)
             .background(Accent.copy(alpha = bgAlpha), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = tool.icon,
-            contentDescription = stringResource(tool.labelRes),
+            imageVector = tab.icon,
+            contentDescription = stringResource(tab.labelRes),
             tint = tint,
             modifier = Modifier
-                .size(22.dp)
+                .size(24.dp)
                 .graphicsLayer { scaleX = scale; scaleY = scale },
         )
     }
@@ -1228,6 +1371,17 @@ private fun DrawScope.paintEditorOverlays(
                 canvas.nativeCanvas.save()
                 val angle = snapTextAngle(item.rotation)
                 if (angle != 0f) canvas.nativeCanvas.rotate(angle, cxScreen, cyScreen)
+                if (item.hasBackground()) {
+                    val box = textBackdrop(paint.textSize, lines.maxOf { paint.measureText(it) }, lines.size, item.cornerRadius)
+                    val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        color = textBackgroundArgb(item)
+                    }
+                    canvas.nativeCanvas.drawRoundRect(
+                        cxScreen - box.halfWidth, cyScreen - box.halfHeight,
+                        cxScreen + box.halfWidth, cyScreen + box.halfHeight,
+                        box.radius, box.radius, fill,
+                    )
+                }
                 var baseline = cyScreen - totalH / 2f + paint.textSize
                 for (line in lines) {
                     canvas.nativeCanvas.drawText(line, cxScreen, baseline, paint)
@@ -1388,6 +1542,9 @@ private fun TextOverlay(
                         if (editingIdState.value != null) return@awaitEachGesture
                         val hitId = hitTest(down.position.x, down.position.y)
                         if (hitId != null) {
+                            // A tap on a text picks it, which brings up its menu; a tap on the picked one opens it
+                            // to type in.
+                            val wasSelected = selectedIdState.value == hitId
                             onSelect(hitId)
                             var moved = false
                             do {
@@ -1403,7 +1560,7 @@ private fun TextOverlay(
                                     event.changes.forEach { it.consume() }
                                 }
                             } while (event.changes.any { it.pressed })
-                            if (moved) onMoveFinished() else onRequestEdit(hitId)
+                            if (moved) onMoveFinished() else if (wasSelected) onRequestEdit(hitId)
                         } else {
                             onSelect(null)
                         }
@@ -1501,8 +1658,12 @@ private fun FramePreview(
     textItems: List<TextItem>,
     onFrameLive: (FrameSpec) -> Unit,
     onFrameCommit: () -> Unit,
+    picking: Boolean = false,
+    onPicked: (Int) -> Unit = {},
 ) {
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    // Where the finger is while the eyedropper is down, for the loupe.
+    var pickAt by remember { mutableStateOf<Offset?>(null) }
     // The axes a gesture holds the photo snapped on, across and down, for the guide lines.
     var guideX by remember { mutableStateOf(false) }
     var guideY by remember { mutableStateOf(false) }
@@ -1555,7 +1716,7 @@ private fun FramePreview(
             val frameState = androidx.compose.runtime.rememberUpdatedState(frame)
             val onLiveState = androidx.compose.runtime.rememberUpdatedState(onFrameLive)
             val onCommitState = androidx.compose.runtime.rememberUpdatedState(onFrameCommit)
-            Box(
+            if (!picking) Box(
                 Modifier
                     .fillMaxSize()
                     // Keyed on the photo's size alone, which only a crop or a turn changes, so the preview
@@ -1620,9 +1781,95 @@ private fun FramePreview(
                         }
                     },
             )
+            if (picking) {
+                val bitmapState = androidx.compose.runtime.rememberUpdatedState(bitmap)
+                val fitState = androidx.compose.runtime.rememberUpdatedState(fit)
+                val onPickedState = androidx.compose.runtime.rememberUpdatedState(onPicked)
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                down.consume()
+                                pickAt = down.position
+                                try {
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.pressed }
+                                        if (change != null) {
+                                            pickAt = change.position
+                                            change.consume()
+                                        }
+                                    } while (event.changes.any { it.pressed })
+                                    val p = pickAt
+                                    val b = bitmapState.value
+                                    val f = fitState.value
+                                    if (p != null && !b.isRecycled) {
+                                        val x = f.toImageX(p.x).toInt()
+                                        val y = f.toImageY(p.y).toInt()
+                                        if (x in 0 until b.width && y in 0 until b.height) {
+                                            onPickedState.value(b.getPixel(x, y) or (0xFF shl 24))
+                                        }
+                                    }
+                                } finally {
+                                    pickAt = null
+                                }
+                            }
+                        },
+                )
+                if (pickAt != null) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val p = pickAt ?: return@Canvas
+                        val b = bitmapState.value
+                        val f = fitState.value
+                        if (b.isRecycled || b.width < LOUPE_CELLS || b.height < LOUPE_CELLS) return@Canvas
+                        val ix = f.toImageX(p.x).toInt().coerceIn(0, b.width - 1)
+                        val iy = f.toImageY(p.y).toInt().coerceIn(0, b.height - 1)
+                        val half = LOUPE_CELLS / 2
+                        val sx = (ix - half).coerceIn(0, b.width - LOUPE_CELLS)
+                        val sy = (iy - half).coerceIn(0, b.height - LOUPE_CELLS)
+                        val r = 46.dp.toPx()
+                        val cx = p.x.coerceIn(r, size.width - r)
+                        val cy = if (p.y - r * 2.4f > 0f) p.y - r * 1.7f else p.y + r * 1.7f
+                        val cell = 2f * r / LOUPE_CELLS
+                        val left = cx - r
+                        val top = cy - r
+                        val clip = androidx.compose.ui.graphics.Path().apply {
+                            addOval(androidx.compose.ui.geometry.Rect(Offset(cx, cy), r))
+                        }
+                        clipPath(clip) {
+                            drawImage(
+                                image = b.asImageBitmap(),
+                                srcOffset = androidx.compose.ui.unit.IntOffset(sx, sy),
+                                srcSize = IntSize(LOUPE_CELLS, LOUPE_CELLS),
+                                dstOffset = androidx.compose.ui.unit.IntOffset(left.toInt(), top.toInt()),
+                                dstSize = IntSize((2f * r).toInt(), (2f * r).toInt()),
+                                filterQuality = androidx.compose.ui.graphics.FilterQuality.None,
+                            )
+                        }
+                        drawCircle(Color.White, r, Offset(cx, cy), style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx()))
+                        drawRect(
+                            Color.White,
+                            topLeft = Offset(left + (ix - sx) * cell, top + (iy - sy) * cell),
+                            size = GSize(cell, cell),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()),
+                        )
+                        drawRect(
+                            Color.Black,
+                            topLeft = Offset(left + (ix - sx) * cell - 1.dp.toPx(), top + (iy - sy) * cell - 1.dp.toPx()),
+                            size = GSize(cell + 2.dp.toPx(), cell + 2.dp.toPx()),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()),
+                        )
+                    }
+                }
+            }
         }
     }
 }
+
+/** Pixels across the eyedropper loupe's window on the preview, the middle one the colour it picks. */
+private const val LOUPE_CELLS = 11
 
 /**
  * Asks the system to hold back its edge gesture beside the sides of the framed [photo] that sit in its edge strips,
@@ -1674,20 +1921,18 @@ private fun framePhotoSize(state: EditorUiState): IntSize {
 
 // ─── Tool panels ────────────────────────────────────────────────────────────
 
-/** Adjust tab: the video editor's Adjust recipe adapted to the 13 photo adjustments. A horizontally
- *  scrollable pill row picks the adjustment to edit; the leading Auto-Fix pill fires `vm.autoFix()`
- *  instead of selecting. Below the row a header shows the selected adjustment's name, a signed value
- *  readout that turns accent when off-zero, and a Reset that clears all 13 at once (shown only while
- *  something is off-zero); one slider drives the selected adjustment's -100..100 value. Setters route
- *  through updateAdjustmentsFast for the live preview and fold into one undo entry on release via
- *  finalizeAdjustments. Long-pressing a chip still resets that single adjustment. */
+/** Adjust tab: a name over a row of round icons, the leading one the Auto-fix, and a ruler under it. The
+ *  selected adjustment's name sits above the row, its icon round filled and showing the value once it is off
+ *  zero; a dot marks an unselected round that carries an edit. Setters route through updateAdjustmentsFast for
+ *  the live preview and fold into one undo entry on release via finalizeAdjustments. Long-pressing a round
+ *  resets that single adjustment, and Reset clears all 13 (shown only while one is off-zero). */
 @Composable
 private fun AdjustPanel(
     adjustments: EditorAdjustments,
     vm: PhotoEditorViewModel,
 ) {
     var selected by remember { mutableStateOf(Adjustment.Brightness) }
-    // (adjustment, label, icon, current value); a non-zero value lights the chip's "modified" dot.
+    // (adjustment, label, icon, current value); a non-zero value lights the round's "modified" dot.
     val chips = listOf(
         AdjChip(Adjustment.Brightness, R.string.editor_adj_brightness, Icons.Default.BrightnessMedium, adjustments.brightness),
         AdjChip(Adjustment.Exposure, R.string.editor_adj_exposure, Icons.Default.AutoFixHigh, adjustments.exposure),
@@ -1723,70 +1968,22 @@ private fun AdjustPanel(
     val anyEdited = chips.any { it.value != 0 }
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            item(key = "auto_fix") {
-                AdjustCapsulePill(
-                    label = stringResource(R.string.editor_auto_fix),
-                    icon = Icons.Default.AutoFixHigh,
-                    selected = false,
-                    accentIcon = true,
-                    onClick = { vm.autoFix() },
-                )
-            }
-            items(chips, key = { it.adj.name }) { chip ->
-                AdjustCapsulePill(
-                    label = stringResource(chip.labelRes),
-                    icon = chip.icon,
-                    selected = selected == chip.adj,
-                    modified = chip.value != 0,
-                    onClick = { selected = chip.adj },
-                    // Long-press a chip to reset just that one adjustment (one undo entry via resetAdjustment).
-                    onReset = {
-                        vm.resetAdjustment { a ->
-                            when (chip.adj) {
-                                Adjustment.Brightness  -> a.copy(brightness = 0)
-                                Adjustment.Exposure    -> a.copy(exposure = 0)
-                                Adjustment.Contrast    -> a.copy(contrast = 0)
-                                Adjustment.Highlights  -> a.copy(highlights = 0)
-                                Adjustment.Shadows     -> a.copy(shadows = 0)
-                                Adjustment.Saturation  -> a.copy(saturation = 0)
-                                Adjustment.Vibrance    -> a.copy(vibrance = 0)
-                                Adjustment.Tone        -> a.copy(tone = 0)
-                                Adjustment.Temperature -> a.copy(temperature = 0)
-                                Adjustment.Sharpen     -> a.copy(sharpen = 0)
-                                Adjustment.Grain       -> a.copy(grain = 0)
-                                Adjustment.Vignette    -> a.copy(vignette = 0)
-                                Adjustment.Fade        -> a.copy(fade = 0)
-                            }
-                        }
-                    },
-                )
-            }
-        }
-        // Selected adjustment's name, a signed value readout, and a reset that clears every adjustment
-        // in one gesture (one undo entry). Reset only shows while at least one adjustment is off-zero; the
-        // row is a fixed height so revealing it does not grow the row and jolt the whole panel.
-        Row(
-            modifier = Modifier.fillMaxWidth().height(30.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        // The selected adjustment's name, and a reset that clears every adjustment in one gesture (one undo
+        // entry). The row keeps its height whether or not Reset shows, so the panel does not jolt.
+        Box(Modifier.fillMaxWidth().height(28.dp), contentAlignment = Alignment.Center) {
             Text(
                 stringResource(selectedChip.labelRes),
-                color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
+                color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
                 maxLines = 1,
             )
-            Text(
-                if (value > 0) "+$value" else value.toString(),
-                color = if (value != 0) Accent else FgMute,
-                fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-            )
             if (anyEdited) {
-                Row(
+                Text(
+                    stringResource(R.string.filter_reset),
+                    color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
                     modifier = Modifier
+                        .align(Alignment.CenterEnd)
                         .clip(RoundedCornerShape(999.dp))
                         .clickable {
                             vm.resetAdjustment { a ->
@@ -1797,36 +1994,81 @@ private fun AdjustPanel(
                                 )
                             }
                         }
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(Icons.Default.Restore, null, tint = FgDim, modifier = Modifier.size(15.dp))
-                    Text(
-                        stringResource(R.string.filter_reset),
-                        color = FgPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                    )
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+        }
+        val circlesState = androidx.compose.foundation.lazy.rememberLazyListState()
+        val resetOne: (Adjustment) -> Unit = { adj ->
+            vm.resetAdjustment { a ->
+                when (adj) {
+                    Adjustment.Brightness  -> a.copy(brightness = 0)
+                    Adjustment.Exposure    -> a.copy(exposure = 0)
+                    Adjustment.Contrast    -> a.copy(contrast = 0)
+                    Adjustment.Highlights  -> a.copy(highlights = 0)
+                    Adjustment.Shadows     -> a.copy(shadows = 0)
+                    Adjustment.Saturation  -> a.copy(saturation = 0)
+                    Adjustment.Vibrance    -> a.copy(vibrance = 0)
+                    Adjustment.Tone        -> a.copy(tone = 0)
+                    Adjustment.Temperature -> a.copy(temperature = 0)
+                    Adjustment.Sharpen     -> a.copy(sharpen = 0)
+                    Adjustment.Grain       -> a.copy(grain = 0)
+                    Adjustment.Vignette    -> a.copy(vignette = 0)
+                    Adjustment.Fade        -> a.copy(fade = 0)
                 }
             }
         }
-        // House-style slider: the live preview tints per tick through updateAdjustmentsFast, and the drag
-        // folds into one undo entry on release via finalizeAdjustments.
-        Slider(
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyRow(
+                state = circlesState,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                contentPadding = PaddingValues(horizontal = 4.dp),
+            ) {
+                item(key = "auto_fix") {
+                    ToolCircle(
+                        icon = Icons.Default.AutoFixHigh,
+                        label = stringResource(R.string.editor_auto_fix),
+                        selected = false,
+                        accentIcon = true,
+                        onClick = { vm.autoFix() },
+                    )
+                }
+                items(chips, key = { it.adj.name }) { chip ->
+                    ToolCircle(
+                        icon = chip.icon,
+                        label = stringResource(chip.labelRes),
+                        selected = selected == chip.adj,
+                        modified = chip.value != 0,
+                        valueText = chip.value.takeIf { it != 0 }?.let { if (it > 0) "+$it" else it.toString() },
+                        // A tap on the round already open takes that adjustment back to zero; a long press does
+                        // the same from any round.
+                        onClick = {
+                            if (selected == chip.adj) {
+                                if (chip.value != 0) resetOne(chip.adj)
+                            } else {
+                                selected = chip.adj
+                            }
+                        },
+                        onLongClick = { resetOne(chip.adj) },
+                    )
+                }
+            }
+            LazyDots(circlesState)
+        }
+        // The live preview tints per tick through updateAdjustmentsFast, and the drag folds into one undo
+        // entry on release via finalizeAdjustments.
+        RulerSlider(
             value = value.toFloat(),
-            onValueChange = { onChange(it.roundToInt()) },
-            onValueChangeFinished = { vm.finalizeAdjustments() },
             valueRange = -100f..100f,
+            onChange = { onChange(it.roundToInt()) },
+            onFinished = { vm.finalizeAdjustments() },
             modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(
-                thumbColor = Accent,
-                activeTrackColor = Accent,
-                inactiveTrackColor = PanelChip,
-            ),
         )
     }
 }
 
-/** One Adjust chip's static metadata plus its current value (non-zero lights the "modified" dot). */
+/** One Adjust round's static metadata plus its current value (non-zero lights the "modified" dot). */
 private data class AdjChip(
     val adj: Adjustment,
     @androidx.annotation.StringRes val labelRes: Int,
@@ -1834,54 +2076,483 @@ private data class AdjChip(
     val value: Int,
 )
 
-/** One Adjust chip in the pill recipe shared with the video editor: PillBg + a 0.5.dp PillBorder, an
- *  Accent 0.22 fill when selected. The icon lights accent when the chip is selected, when it carries an
- *  off-zero value, or for the always-accent Auto-Fix pill; an unselected off-zero chip shows an accent
- *  dot (the selected chip's value is read out in the header instead). Long-pressing (when onReset is
- *  set) resets that single adjustment. */
+/**
+ * A round tool button, 56dp: PillBg with a PillBorder hairline, or FgPrimary filled with the icon in the page
+ * colour while [selected]. A selected round shows [valueText] in the icon's place once there is one, and an
+ * unselected one a small accent dot while [modified]. [accentIcon] lights the icon for a button that acts rather
+ * than selects. Long-pressing (when [onLongClick] is set) is the round's own reset.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AdjustCapsulePill(
-    label: String,
+internal fun ToolCircle(
     icon: ImageVector,
+    label: String,
     selected: Boolean,
-    accentIcon: Boolean = false,
     modified: Boolean = false,
-    onReset: (() -> Unit)? = null,
+    accentIcon: Boolean = false,
+    valueText: String? = null,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    Row(
+    Box(
         modifier = Modifier
-            .height(38.dp)
-            .background(if (selected) Accent.copy(alpha = 0.22f) else PillBg, pillShape)
-            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
-            .then(
-                // Long-press a chip to reset that one adjustment.
-                if (onReset != null) Modifier.combinedClickable(onClick = onClick, onLongClick = onReset)
-                else Modifier.clickable(onClick = onClick),
-            )
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(if (selected) FgPrimary else PillBg, CircleShape)
+            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, CircleShape) else Modifier)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            icon,
-            null,
-            tint = if (selected || accentIcon || modified) Accent else FgDim,
-            modifier = Modifier.size(15.dp),
-        )
-        Text(
-            label,
-            color = if (selected) Accent else FgPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false,
-        )
-        // Off-zero marker on an unselected chip, so applied edits are visible without opening each slider.
-        if (modified && !selected) {
-            Box(Modifier.size(5.dp).background(Accent, CircleShape))
+        if (selected && valueText != null) {
+            Text(valueText, color = Bg0, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        } else {
+            Icon(
+                icon,
+                label,
+                tint = if (selected) Bg0 else if (accentIcon) Accent else FgDim,
+                modifier = Modifier.size(24.dp),
+            )
         }
+        if (modified && !selected) {
+            Box(Modifier.align(Alignment.TopEnd).padding(10.dp).size(6.dp).background(Accent, CircleShape))
+        }
+    }
+}
+
+/**
+ * A ruler for a value: ticks across the width, every fifth longer, the span between zero (or the low end) and the
+ * value in the accent and a marker at the value. A press or a drag anywhere sets the value under the finger, and
+ * [onFinished] ends the gesture, so one drag is one undo entry where the caller folds it that way.
+ */
+@Composable
+internal fun RulerSlider(
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit,
+    onFinished: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    // The gesture loops start once, so they read the newest lambdas and range through these.
+    val latestOnChange = androidx.compose.runtime.rememberUpdatedState(onChange)
+    val latestOnFinished = androidx.compose.runtime.rememberUpdatedState(onFinished)
+    val latestRange = androidx.compose.runtime.rememberUpdatedState(valueRange)
+    val accent = Accent
+    val tickColor = FgMute.copy(alpha = 0.55f)
+    fun valueAt(x: Float, width: Float): Float {
+        val r = latestRange.value
+        return r.start + (x / width.coerceAtLeast(1f)).coerceIn(0f, 1f) * (r.endInclusive - r.start)
+    }
+    Canvas(
+        modifier = modifier
+            .height(36.dp)
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectDragGestures(
+                    onDragStart = { o -> latestOnChange.value(valueAt(o.x, size.width.toFloat())) },
+                    onDrag = { change, _ ->
+                        latestOnChange.value(valueAt(change.position.x, size.width.toFloat()))
+                        change.consume()
+                    },
+                    onDragEnd = { latestOnFinished.value() },
+                    onDragCancel = { latestOnFinished.value() },
+                )
+            }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectTapGestures(
+                    onTap = { o ->
+                        latestOnChange.value(valueAt(o.x, size.width.toFloat()))
+                        latestOnFinished.value()
+                    },
+                )
+            },
+    ) {
+        val span = valueRange.endInclusive - valueRange.start
+        if (span <= 0f) return@Canvas
+        val frac = ((value - valueRange.start) / span).coerceIn(0f, 1f)
+        val zeroFrac = if (valueRange.start < 0f) (-valueRange.start / span).coerceIn(0f, 1f) else 0f
+        val lo = min(zeroFrac, frac)
+        val hi = max(zeroFrac, frac)
+        val pad = 4.dp.toPx()
+        val usable = size.width - 2f * pad
+        val cy = size.height / 2f
+        val steps = 40
+        for (i in 0..steps) {
+            val f = i / steps.toFloat()
+            val x = pad + usable * f
+            val major = i % 5 == 0
+            val half = size.height * (if (major) 0.26f else 0.16f)
+            val lit = f in lo..hi && hi > lo
+            drawLine(
+                color = if (lit) accent else tickColor,
+                start = Offset(x, cy - half),
+                end = Offset(x, cy + half),
+                strokeWidth = (if (major) 2.dp else 1.5.dp).toPx(),
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            )
+        }
+        val mx = pad + usable * frac
+        drawLine(
+            color = accent,
+            start = Offset(mx, 3.dp.toPx()),
+            end = Offset(mx, size.height - 3.dp.toPx()),
+            strokeWidth = 3.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        )
+    }
+}
+
+/**
+ * The panel a tool opens from More or from Transform's pill: a back arrow and the tool's name over [content].
+ */
+@Composable
+internal fun PanelWithBack(
+    @androidx.annotation.StringRes titleRes: Int,
+    onBack: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    // A panel that has only just come up ignores its arrow for a moment, so a second tap meant for the panel that
+    // just closed cannot land on this one's arrow and close it too.
+    var armed by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(350)
+        armed = true
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.fillMaxWidth().height(32.dp), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .clickable { if (armed) onBack() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    stringResource(R.string.onboarding_back),
+                    tint = FgDim,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Text(
+                stringResource(titleRes),
+                color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+        content()
+    }
+}
+
+/** One button of an [OptionPill]: [swatch] draws a colour dot in the icon's place, [turn] turns the icon. */
+internal data class PillAction(
+    val icon: ImageVector,
+    val label: String,
+    val onClick: () -> Unit,
+    val enabled: Boolean = true,
+    val active: Boolean = false,
+    val swatch: Int? = null,
+    val turn: Float = 0f,
+    /** A colour setting: its round is filled with [swatch], plain while there is none. */
+    val colour: Boolean = false,
+)
+
+/**
+ * A tool's row of buttons in one pill, the way the Transform tab shows its flips, turn, ratio and straighten: a button
+ * either acts at once or opens its setting in a panel of its own. A lit one is a setting that is on, a dimmed one is
+ * not available yet.
+ */
+@Composable
+internal fun OptionPill(items: List<PillAction>) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Row(
+            modifier = Modifier
+                .background(PillBgOpaque, pillShape)
+                .border(0.5.dp, PillBorder, pillShape)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items.forEach { a ->
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (a.active) Accent.copy(alpha = 0.22f) else Color.Transparent, CircleShape)
+                        .alpha(if (a.enabled) 1f else 0.38f)
+                        .clickable(enabled = a.enabled, onClick = a.onClick),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (a.swatch != null) {
+                        Box(
+                            Modifier
+                                .size(24.dp)
+                                .background(Color(a.swatch), CircleShape)
+                                .border(1.dp, PillBorder, CircleShape)
+                                .semantics { contentDescription = a.label },
+                        )
+                    } else {
+                        Icon(
+                            a.icon,
+                            a.label,
+                            tint = if (a.active) Accent else FgPrimary,
+                            modifier = Modifier.size(24.dp).graphicsLayer { rotationZ = a.turn },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A tool's row of round buttons, the buttons of an [OptionPill] as the rounds the Adjust tab uses: one that acts or
+ * opens a setting, a lit one that is on, a dimmed one that is not available yet, and a colour setting filled with its
+ * colour.
+ */
+@Composable
+private fun OptionRow(items: List<PillAction>) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items.forEach { a ->
+            val click: () -> Unit = if (a.enabled) a.onClick else ({})
+            Box(Modifier.alpha(if (a.enabled) 1f else 0.38f)) {
+                if (a.colour) {
+                    ColorCircle(a.swatch?.let { Color(it) }, a.icon, a.label, selected = false, onClick = click)
+                } else {
+                    ToolCircle(a.icon, a.label, selected = a.active, onClick = click)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A round tool button filled with a colour, [fill], or plain while there is none, with its [icon] over it in black or
+ * white, whichever reads on that colour. Selected, it takes an accent ring.
+ */
+@Composable
+private fun ColorCircle(fill: Color?, icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+    val tint = when {
+        fill == null -> FgDim
+        fill.luminance() > 0.5f -> Color.Black
+        else -> Color.White
+    }
+    Box(
+        modifier = Modifier
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(fill ?: PillBg, CircleShape)
+            .border(if (selected) 2.dp else 0.5.dp, if (selected) Accent else PillBorder, CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, label, tint = tint, modifier = Modifier.size(24.dp))
+    }
+}
+
+/** Transform's pill: flip across, flip down, turn a quarter, and the two that open a panel, the ratio and straighten. */
+@Composable
+private fun TransformPill(
+    onFlipH: () -> Unit,
+    onFlipV: () -> Unit,
+    onRotate: () -> Unit,
+    onRatio: () -> Unit,
+    onStraighten: () -> Unit,
+) {
+    OptionPill(
+        listOf(
+            PillAction(Icons.Default.Flip, stringResource(R.string.editor_flip_h), onFlipH),
+            PillAction(Icons.Default.Flip, stringResource(R.string.editor_flip_v), onFlipV, turn = 90f),
+            PillAction(Icons.AutoMirrored.Filled.RotateRight, stringResource(R.string.video_editor_rotate), onRotate),
+            PillAction(Icons.Default.AspectRatio, stringResource(R.string.editor_transform_ratio), onRatio),
+            PillAction(Icons.Default.Straighten, stringResource(R.string.editor_straighten), onStraighten),
+        ),
+    )
+}
+
+/** Which of the straighten dials is open. */
+private enum class GeoDial { Straighten, Vertical, Horizontal }
+
+/**
+ * Transform's straighten panel: three rounds, Straighten, Vertical and Horizontal keystone, over a ruler for the
+ * selected one, its name above. The value shows in the selected round once it is off zero, and Reset takes all
+ * three back. Live ticks render through the fast path and a release folds into one undo entry.
+ */
+@Composable
+private fun StraightenPanel(state: EditorUiState, vm: PhotoEditorViewModel, onBack: () -> Unit) {
+    var dial by remember { mutableStateOf(GeoDial.Straighten) }
+    val a = state.adjustments
+    val value = when (dial) {
+        GeoDial.Straighten -> a.straighten
+        GeoDial.Vertical -> a.perspectiveV
+        GeoDial.Horizontal -> a.perspectiveH
+    }
+    val anyEdited = a.straighten != 0 || a.perspectiveV != 0 || a.perspectiveH != 0
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.fillMaxWidth().height(32.dp), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    stringResource(R.string.onboarding_back),
+                    tint = FgDim,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Text(
+                stringResource(
+                    when (dial) {
+                        GeoDial.Straighten -> R.string.editor_straighten
+                        GeoDial.Vertical -> R.string.editor_perspective_v
+                        GeoDial.Horizontal -> R.string.editor_perspective_h
+                    },
+                ),
+                color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+            if (anyEdited) {
+                Text(
+                    stringResource(R.string.editor_geo_reset),
+                    color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable { vm.resetGeometry() }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
+        ) {
+            ToolCircle(
+                icon = Icons.Default.Straighten,
+                label = stringResource(R.string.editor_straighten),
+                selected = dial == GeoDial.Straighten,
+                modified = a.straighten != 0,
+                valueText = a.straighten.takeIf { it != 0 }?.toString(),
+                onClick = {
+                    if (dial == GeoDial.Straighten) {
+                        if (a.straighten != 0) { vm.updateStraighten(0); vm.finalizeAdjustments() }
+                    } else dial = GeoDial.Straighten
+                },
+            )
+            ToolCircle(
+                icon = Icons.Default.SwapVert,
+                label = stringResource(R.string.editor_perspective_v),
+                selected = dial == GeoDial.Vertical,
+                modified = a.perspectiveV != 0,
+                valueText = a.perspectiveV.takeIf { it != 0 }?.toString(),
+                onClick = {
+                    if (dial == GeoDial.Vertical) {
+                        if (a.perspectiveV != 0) { vm.updatePerspectiveV(0); vm.finalizeAdjustments() }
+                    } else dial = GeoDial.Vertical
+                },
+            )
+            ToolCircle(
+                icon = Icons.Default.SwapHoriz,
+                label = stringResource(R.string.editor_perspective_h),
+                selected = dial == GeoDial.Horizontal,
+                modified = a.perspectiveH != 0,
+                valueText = a.perspectiveH.takeIf { it != 0 }?.toString(),
+                onClick = {
+                    if (dial == GeoDial.Horizontal) {
+                        if (a.perspectiveH != 0) { vm.updatePerspectiveH(0); vm.finalizeAdjustments() }
+                    } else dial = GeoDial.Horizontal
+                },
+            )
+        }
+        RulerSlider(
+            value = value.toFloat(),
+            valueRange = -100f..100f,
+            onChange = {
+                val v = it.roundToInt()
+                when (dial) {
+                    GeoDial.Straighten -> vm.updateStraighten(v)
+                    GeoDial.Vertical -> vm.updatePerspectiveV(v)
+                    GeoDial.Horizontal -> vm.updatePerspectiveH(v)
+                }
+            },
+            onFinished = { vm.finalizeAdjustments() },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/**
+ * A tool of the Draw tab: its own panel under the photo, a back arrow and the tool's name over its buttons, until a
+ * setting opens in a panel of its own, which carries its own arrow. Back leads to the list of tools.
+ */
+@Composable
+private fun ToolShell(tool: Tool, option: ToolOption?, onBack: () -> Unit, content: @Composable () -> Unit) {
+    if (option == null) PanelWithBack(tool.labelRes(), onBack = onBack, content = content) else content()
+}
+
+/** The Draw tab's list of tools in one pill, as Transform lists its actions: the tool is picked here. */
+@Composable
+private fun MarkupPill(tools: List<Tool>, onPick: (Tool) -> Unit) {
+    OptionPill(
+        tools.map { tool ->
+            PillAction(
+                icon = when (tool) {
+                    Tool.Draw -> Icons.Default.Draw
+                    Tool.Text -> Icons.Default.TextFields
+                    Tool.Redact -> Icons.Default.Brush
+                    else -> Icons.Default.Face
+                },
+                label = stringResource(tool.labelRes()),
+                onClick = { onPick(tool) },
+            )
+        },
+    )
+}
+
+/** The More tab: one tile per extra tool, each opening its own panel with a back arrow. */
+@Composable
+private fun MorePanel(onOpen: (Tool) -> Unit) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        item {
+            ToolTile(Icons.Default.FilterFrames, stringResource(R.string.editor_tool_frame)) { onOpen(Tool.Frame) }
+        }
+        item {
+            ToolTile(Icons.Default.Tune, stringResource(R.string.editor_tool_color)) { onOpen(Tool.Color) }
+        }
+    }
+}
+
+@Composable
+private fun ToolTile(icon: ImageVector, label: String, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(76.dp)
+            .height(64.dp)
+            .background(PillBg, RoundedCornerShape(16.dp))
+            .border(0.5.dp, PillBorder, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+    ) {
+        Icon(icon, null, tint = FgPrimary, modifier = Modifier.size(22.dp))
+        Text(label, color = FgPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
     }
 }
 
@@ -1904,372 +2575,302 @@ private fun FilterPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
             )
         }
     }
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(FilterPreset.entries.toList()) { filter ->
-            FilterThumb(
-                filter = filter,
-                source = thumb,
-                selected = state.adjustments.filter == filter,
-                onClick = { vm.selectFilter(filter) },
-            )
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(FilterPreset.entries.toList()) { filter ->
+                FilterThumb(
+                    filter = filter,
+                    source = thumb,
+                    selected = state.adjustments.filter == filter,
+                    onClick = { vm.selectFilter(filter) },
+                )
+            }
         }
+        LazyDots(listState)
     }
 }
 
+/** Names in a row, the picked one in the accent: a small choice that does not need a button each. */
 @Composable
-private fun RedactPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
-    var modeState by remember { mutableStateOf(currentRedactMode) }
-    // One combined pill (same recipe as the bottom tab dock) so the sub-menu reads as a single control
-    // rather than scattered chips. Undo lives in the top bar (it steps the whole history), so no Clear.
+private fun NameRow(names: List<String>, selected: Int, onPick: (Int) -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(PillBgOpaque, pillShape)
-            .border(0.5.dp, PillBorder, pillShape)
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(26.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        PillSegment(
-            label = stringResource(R.string.editor_redact_blackout),
-            icon = Icons.Default.Block,
-            selected = modeState == RedactMode.Black,
-            onClick = { currentRedactMode = RedactMode.Black; modeState = RedactMode.Black },
-            modifier = Modifier.weight(1f),
-        )
-        PillSegment(
-            label = stringResource(R.string.editor_redact_pixelate),
-            icon = Icons.Default.GridOn,
-            selected = modeState == RedactMode.Pixelate,
-            onClick = { currentRedactMode = RedactMode.Pixelate; modeState = RedactMode.Pixelate },
-            modifier = Modifier.weight(1f),
-        )
-        BrushSizeButton(current = state.redactBrushDp, onPick = vm::setRedactBrush, modifier = Modifier.weight(1f))
+        names.forEachIndexed { i, name ->
+            val on = i == selected
+            Text(
+                name,
+                color = if (on) Accent else FgPrimary,
+                fontSize = 15.sp,
+                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onPick(i) }
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+            )
+        }
     }
 }
 
 /**
- * The Hide-faces tool: a one-shot Detect action that finds and covers every face, a Blur / Pixelate
- * style toggle, and a strength slider. The style, strength and Clear controls stay disabled until at
- * least one face is covered. Detection is only ever run by the Detect tap, never per frame.
+ * The Text tool: a pill of Add, Edit, the text colour, the background and Delete, the four on the selected text
+ * dimmed while there is none. The colour opens a colour picker in a panel of its own; the background opens one with
+ * its opacity and corner rulers. A text has no background until the picker or the opacity gives it one. Live ticks
+ * change the text on the overlay with no render, and a release folds the drag into one undo entry.
  */
 @Composable
-private fun HideFacesPanel(state: EditorUiState, vm: PhotoEditorViewModel) {
-    val hf = state.hideFacesState
-    val detecting = hf is HideFacesState.Detecting
-    val hasCovers = state.adjustments.faceCovers.isNotEmpty()
-    val style = state.adjustments.faceCoverStyle
-
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ActionChip(
-                label = stringResource(R.string.editor_hide_faces_detect),
-                icon = Icons.Default.Face,
-                enabled = !detecting,
-                onClick = { vm.detectFaces() },
-                modifier = Modifier.weight(1f),
-            )
-            ActionChip(
-                label = stringResource(R.string.editor_hide_faces_clear),
-                icon = Icons.Default.Delete,
-                enabled = hasCovers && !detecting,
-                onClick = { vm.clearFaceCovers() },
-                modifier = Modifier.weight(1f),
-            )
-        }
-
-        // Status line: spinner while a detect is in flight, then the count of covers the edit carries,
-        // the not-found note, or an inline failure message.
-        when (val status = hideFacesStatus(hf, state.adjustments.faceCovers.size)) {
-            HideFacesStatus.Busy ->
-                CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-            is HideFacesStatus.Covered ->
-                Text(
-                    pluralStringResource(R.plurals.editor_hide_faces_count, status.count, status.count),
-                    color = FgMute, fontSize = 12.sp,
-                )
-            HideFacesStatus.NoFaces ->
-                Text(stringResource(R.string.editor_hide_faces_none), color = FgMute, fontSize = 12.sp)
-            is HideFacesStatus.Failed ->
-                Text(status.message, color = Color(0xFFFF3B30), fontSize = 12.sp)
-            HideFacesStatus.None -> Unit
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .alpha(if (hasCovers) 1f else 0.4f)
-                .background(PillBgOpaque, pillShape)
-                .border(0.5.dp, PillBorder, pillShape)
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PillSegment(
-                label = stringResource(R.string.editor_hide_faces_style_pixelate),
-                icon = Icons.Default.GridView,
-                selected = style == FaceCoverStyle.Pixelate,
-                onClick = { if (hasCovers) vm.setFaceCoverStyle(FaceCoverStyle.Pixelate) },
-                modifier = Modifier.weight(1f),
-            )
-            PillSegment(
-                label = stringResource(R.string.editor_hide_faces_style_blur),
-                icon = Icons.Default.Deblur,
-                selected = style == FaceCoverStyle.Blur,
-                onClick = { if (hasCovers) vm.setFaceCoverStyle(FaceCoverStyle.Blur) },
-                modifier = Modifier.weight(1f),
-            )
-        }
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.editor_hide_faces_strength), color = FgMute, fontSize = 12.sp)
-            Slider(
-                value = state.adjustments.faceCoverStrength,
-                onValueChange = { vm.setFaceCoverStrength(it) },
-                onValueChangeFinished = { vm.finalizeAdjustments() },
-                valueRange = 0f..1f,
-                enabled = hasCovers,
-                colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = TrackBg),
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
-
-/** A single segment inside a combined sub-menu pill: an icon + label with a rounded accent fill when
- *  selected, matching the bottom tab dock. Never wraps to a second line. */
-@Composable
-private fun PillSegment(
-    label: String,
-    icon: ImageVector,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .height(40.dp)
-            .background(if (selected) Accent.copy(alpha = 0.22f) else Color.Transparent, pillShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, null, tint = if (selected) Accent else FgDim, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(
-            label,
-            color = if (selected) Accent else FgPrimary,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
-}
-
-/** Brush-size chip that opens a vertical popup of size dots (largest at the top). */
-@Composable
-private fun BrushSizeButton(current: Float, onPick: (Float) -> Unit, modifier: Modifier = Modifier) {
-    var open by remember { mutableStateOf(false) }
-    val sizes = listOf(8f, 20f, 36f, 56f, 80f)
-    Box(modifier) {
-        Row(
-            modifier = Modifier
-                .height(40.dp)
-                .fillMaxWidth()
-                .clip(pillShape)
-                .clickable { open = true }
-                .padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-        ) {
-            Box(Modifier.size((current / 80f * 12f + 5f).dp).background(FgPrimary, CircleShape))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                stringResource(R.string.editor_redact_brush),
-                color = FgPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                maxLines = 1, softWrap = false,
-            )
-        }
-        if (open) {
-            // Anchor the popup directly above the button (using its measured height) instead of a fixed
-            // offset, so it never floats out over the photo.
-            val gapPx = with(LocalDensity.current) { 8.dp.roundToPx() }
-            val provider = remember(gapPx) {
-                object : androidx.compose.ui.window.PopupPositionProvider {
-                    override fun calculatePosition(
-                        anchorBounds: androidx.compose.ui.unit.IntRect,
-                        windowSize: IntSize,
-                        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
-                        popupContentSize: IntSize,
-                    ): IntOffset {
-                        val x = anchorBounds.left + (anchorBounds.width - popupContentSize.width) / 2
-                        val y = anchorBounds.top - popupContentSize.height - gapPx
-                        return IntOffset(x.coerceAtLeast(0), y.coerceAtLeast(0))
-                    }
-                }
-            }
-            androidx.compose.ui.window.Popup(
-                popupPositionProvider = provider,
-                onDismissRequest = { open = false },
-            ) {
-                Column(
-                    modifier = Modifier
-                        .background(Bg2, RoundedCornerShape(18.dp))
-                        .border(0.5.dp, PillBorder, RoundedCornerShape(18.dp))
-                        .padding(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    sizes.reversed().forEach { s ->
-                        val sel = s == current
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .background(if (sel) Accent.copy(alpha = 0.18f) else Color.Transparent, CircleShape)
-                                .clickable { onPick(s); open = false },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Box(Modifier.size((s / 80f * 16f + 5f).dp).background(if (sel) Accent else FgPrimary, CircleShape))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DrawPanel(
-    state: EditorUiState,
-    color: Int,
-    onColor: (Int) -> Unit,
-    width: Float,
-    onWidth: (Float) -> Unit,
-    vm: PhotoEditorViewModel,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            DRAW_COLORS.forEach { c ->
-                val selected = c == color
-                Box(
-                    Modifier
-                        .size(28.dp)
-                        .background(Color(c), CircleShape)
-                        .border(if (selected) 2.dp else 0.5.dp, if (selected) Accent else PillBorder, CircleShape)
-                        .clickable { onColor(c) },
-                )
-            }
-        }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.editor_draw_width), color = FgMute, fontSize = 12.sp)
-            Slider(
-                value = width,
-                onValueChange = onWidth,
-                valueRange = 2f..40f,
-                colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = TrackBg),
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun TextPanel(
+private fun TextTool(
     state: EditorUiState,
     onAdd: () -> Unit,
     onEdit: (TextItem) -> Unit,
     vm: PhotoEditorViewModel,
+    option: ToolOption?,
+    onOption: (ToolOption?) -> Unit,
 ) {
     val selected = state.adjustments.textItems.firstOrNull { it.id == state.selectedTextId }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        if (selected == null) {
-            ActionChip(
-                label = stringResource(R.string.editor_text_add),
-                icon = Icons.Default.TextFields,
-                enabled = true,
-                onClick = onAdd,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(stringResource(R.string.editor_text_hint), color = FgMute, fontSize = 12.sp)
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                DRAW_COLORS.forEach { c ->
-                    val sel = c == selected.color
-                    Box(
-                        Modifier
-                            .size(28.dp)
-                            .background(Color(c), CircleShape)
-                            .border(if (sel) 2.dp else 0.5.dp, if (sel) Accent else PillBorder, CircleShape)
-                            .clickable { vm.setTextItemColor(selected.id, c) },
+    androidx.compose.runtime.LaunchedEffect(selected == null) {
+        if (selected == null && (option == ToolOption.TextColor || option == ToolOption.TextBackground)) onOption(null)
+    }
+    val id = selected?.id
+    when {
+        option == ToolOption.TextColor && selected != null ->
+            PanelWithBack(R.string.editor_text_color, onBack = { onOption(null) }) {
+                ColorPicker(
+                    argb = selected.color,
+                    onChange = { c -> vm.updateTextItemLive(selected.id) { it.copy(color = c) } },
+                    onFinished = { vm.commitTextMove() },
+                )
+            }
+        option == ToolOption.TextBackground && selected != null ->
+            PanelWithBack(R.string.editor_text_background, onBack = { onOption(null) }) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ColorPicker(
+                        argb = selected.background,
+                        onChange = { c ->
+                            // A first colour makes the box show, so the pick is seen at once.
+                            vm.updateTextItemLive(selected.id) {
+                                it.copy(background = c, backgroundOpacity = if (it.hasBackground()) it.backgroundOpacity else 1f)
+                            }
+                        },
+                        onFinished = { vm.commitTextMove() },
+                    )
+                    RulerRow(
+                        icon = Icons.Default.Opacity,
+                        label = stringResource(R.string.editor_text_opacity),
+                        value = selected.backgroundOpacity * 100f,
+                        onChange = { p -> vm.updateTextItemLive(selected.id) { it.copy(backgroundOpacity = p / 100f) } },
+                        onFinished = { vm.commitTextMove() },
+                    )
+                    RulerRow(
+                        icon = Icons.Default.RoundedCorner,
+                        label = stringResource(R.string.editor_text_corners),
+                        value = selected.cornerRadius * 100f,
+                        onChange = { p -> vm.updateTextItemLive(selected.id) { it.copy(cornerRadius = p / 100f) } },
+                        onFinished = { vm.commitTextMove() },
                     )
                 }
             }
-            Text(stringResource(R.string.editor_text_resize_hint), color = FgMute, fontSize = 12.sp)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(PillBgOpaque, pillShape)
-                    .border(0.5.dp, PillBorder, pillShape)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PillSegment(
-                    label = stringResource(R.string.editor_text_edit),
-                    icon = Icons.Default.Edit,
-                    selected = false,
-                    onClick = { onEdit(selected) },
-                    modifier = Modifier.weight(1f),
-                )
-                PillSegment(
-                    label = stringResource(R.string.editor_text_delete),
-                    icon = Icons.Default.Delete,
-                    selected = false,
-                    onClick = { vm.removeTextItem(selected.id) },
-                    modifier = Modifier.weight(1f),
-                )
-                PillSegment(
-                    label = stringResource(R.string.editor_text_add),
-                    icon = Icons.Default.Add,
-                    selected = false,
-                    onClick = onAdd,
-                    modifier = Modifier.weight(1f),
-                )
+        else -> OptionRow(
+            listOf(
+                PillAction(Icons.Default.Add, stringResource(R.string.editor_text_add), onAdd),
+                PillAction(
+                    Icons.Default.Edit, stringResource(R.string.editor_text_edit),
+                    { selected?.let(onEdit) }, enabled = selected != null,
+                ),
+                PillAction(
+                    Icons.Default.TextFields, stringResource(R.string.editor_text_color),
+                    { onOption(ToolOption.TextColor) }, enabled = selected != null, swatch = selected?.color, colour = true,
+                ),
+                PillAction(
+                    Icons.Default.FormatColorFill, stringResource(R.string.editor_text_background),
+                    { onOption(ToolOption.TextBackground) }, enabled = selected != null,
+                    swatch = selected?.takeIf { it.hasBackground() }?.background, colour = true,
+                ),
+                PillAction(
+                    Icons.Default.Delete, stringResource(R.string.editor_text_delete),
+                    { id?.let { vm.removeTextItem(it) } }, enabled = selected != null,
+                ),
+            ).let { all -> if (selected == null) all.take(1) else all },
+        )
+    }
+}
+
+/** The Draw tool: the pen colour picker and the pen width ruler, both always in view. */
+@Composable
+private fun DrawTool(color: Int, onColor: (Int) -> Unit, width: Float, onWidth: (Float) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ColorPicker(argb = color, onChange = onColor, onFinished = {})
+        RulerRow(
+            icon = Icons.Default.LineWeight,
+            label = stringResource(R.string.editor_draw_width),
+            value = width,
+            range = 2f..40f,
+            onChange = onWidth,
+            onFinished = {},
+        )
+    }
+}
+
+/**
+ * The Redact tool: Blackout and Pixelate, the lit one the mode a stroke is painted in, with the brush size ruler
+ * under them, always in view.
+ */
+@Composable
+private fun RedactTool(state: EditorUiState, vm: PhotoEditorViewModel) {
+    var modeState by remember { mutableStateOf(currentRedactMode) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        OptionRow(
+            listOf(
+                PillAction(
+                    Icons.Default.Block, stringResource(R.string.editor_redact_blackout),
+                    { currentRedactMode = RedactMode.Black; modeState = RedactMode.Black },
+                    active = modeState == RedactMode.Black,
+                ),
+                PillAction(
+                    Icons.Default.GridOn, stringResource(R.string.editor_redact_pixelate),
+                    { currentRedactMode = RedactMode.Pixelate; modeState = RedactMode.Pixelate },
+                    active = modeState == RedactMode.Pixelate,
+                ),
+            ),
+        )
+        RulerRow(
+            icon = Icons.Default.Brush,
+            label = stringResource(R.string.editor_redact_brush),
+            value = state.redactBrushDp,
+            range = 8f..80f,
+            onChange = { vm.setRedactBrush(it) },
+            onFinished = {},
+        )
+    }
+}
+
+/**
+ * The Hide-faces tool: a pill of Detect, which finds and covers every face and is only ever run by a tap, the cover
+ * style, its strength and Clear. Style, strength and Clear stay dimmed until a face is covered; style and strength
+ * open in a panel of their own. A status line under the pill shows the busy spinner, how many faces are covered, the
+ * not-found note or a failure.
+ */
+@Composable
+private fun FacesTool(
+    state: EditorUiState,
+    vm: PhotoEditorViewModel,
+    option: ToolOption?,
+    onOption: (ToolOption?) -> Unit,
+) {
+    val hf = state.hideFacesState
+    val detecting = hf is HideFacesState.Detecting
+    val hasCovers = state.adjustments.faceCovers.isNotEmpty()
+    val style = state.adjustments.faceCoverStyle
+    when (option) {
+        ToolOption.FacesStyle -> PanelWithBack(R.string.editor_hide_faces, onBack = { onOption(null) }) {
+            NameRow(
+                names = listOf(
+                    stringResource(R.string.editor_hide_faces_style_pixelate),
+                    stringResource(R.string.editor_hide_faces_style_blur),
+                ),
+                selected = if (style == FaceCoverStyle.Blur) 1 else 0,
+                onPick = { vm.setFaceCoverStyle(if (it == 1) FaceCoverStyle.Blur else FaceCoverStyle.Pixelate) },
+            )
+        }
+        ToolOption.FacesStrength -> PanelWithBack(R.string.editor_hide_faces_strength, onBack = { onOption(null) }) {
+            RulerSlider(
+                value = state.adjustments.faceCoverStrength * 100f,
+                valueRange = 0f..100f,
+                onChange = { vm.setFaceCoverStrength(it / 100f) },
+                onFinished = { vm.finalizeAdjustments() },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OptionRow(
+                listOf(
+                    PillAction(
+                        Icons.Default.Face, stringResource(R.string.editor_hide_faces_detect),
+                        { vm.detectFaces() }, enabled = !detecting,
+                    ),
+                    PillAction(
+                        if (style == FaceCoverStyle.Blur) Icons.Default.Deblur else Icons.Default.GridView,
+                        stringResource(
+                            if (style == FaceCoverStyle.Blur) R.string.editor_hide_faces_style_blur
+                            else R.string.editor_hide_faces_style_pixelate,
+                        ),
+                        { onOption(ToolOption.FacesStyle) }, enabled = hasCovers && !detecting,
+                    ),
+                    PillAction(
+                        Icons.Default.Tune, stringResource(R.string.editor_hide_faces_strength),
+                        { onOption(ToolOption.FacesStrength) }, enabled = hasCovers && !detecting,
+                    ),
+                    PillAction(
+                        Icons.Default.Delete, stringResource(R.string.editor_hide_faces_clear),
+                        { vm.clearFaceCovers() }, enabled = hasCovers && !detecting,
+                    ),
+                ),
+            )
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                when (val status = hideFacesStatus(hf, state.adjustments.faceCovers.size)) {
+                    HideFacesStatus.Busy ->
+                        CircularProgressIndicator(color = Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+                    is HideFacesStatus.Covered ->
+                        Text(
+                            pluralStringResource(R.plurals.editor_hide_faces_count, status.count, status.count),
+                            color = FgMute, fontSize = 12.sp,
+                        )
+                    HideFacesStatus.NoFaces ->
+                        Text(stringResource(R.string.editor_hide_faces_none), color = FgMute, fontSize = 12.sp)
+                    is HideFacesStatus.Failed ->
+                        Text(status.message, color = Color(0xFFFF3B30), fontSize = 12.sp)
+                    HideFacesStatus.None -> Unit
+                }
             }
         }
     }
 }
 
+/** An icon, a ruler for [value] over [range] and the number, one row of a style panel. */
+@Composable
+private fun RulerRow(
+    icon: ImageVector,
+    label: String,
+    value: Float,
+    onChange: (Float) -> Unit,
+    onFinished: () -> Unit,
+    range: ClosedFloatingPointRange<Float> = 0f..100f,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(icon, label, tint = FgDim, modifier = Modifier.size(22.dp))
+        RulerSlider(
+            value = value,
+            valueRange = range,
+            onChange = onChange,
+            onFinished = onFinished,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            value.roundToInt().toString(),
+            color = Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.width(28.dp),
+        )
+    }
+}
+
 /**
- * The Frame tool: a row of shapes over a row of fills, then the hint for the pinch and drag on the preview. Off takes
- * the frame away, and any other shape puts the photo back in the middle behind an even border, in the fill already
- * on or white for a first frame. The fills stay dimmed until there is a frame to fill. What is lit is read back from
- * the frame itself, so it follows an undo, and every pick is one undo entry.
+ * The Frame tool: a row of shapes, the border ruler and a row of fills. Off takes the frame away, and any other shape
+ * puts the photo back in the middle behind an even border, in the fill already on or white for a first frame. The
+ * fills run the blur of the photo, the eyedropper, then white, black and the pen colours; the eyedropper lets a press
+ * on the photo pick the colour under the finger, and shows the picked colour once one is on. The border and the fills
+ * stay dimmed until there is a frame. What is lit is read back from the frame itself, so it follows an undo, and every
+ * pick is one undo entry.
  */
 @Composable
-private fun FramePanel(state: EditorUiState, vm: PhotoEditorViewModel) {
+private fun FramePanel(state: EditorUiState, vm: PhotoEditorViewModel, picking: Boolean, onPickToggle: () -> Unit) {
     val frame = state.adjustments.frame
     val shape = frameShapeOf(frame)
     val fills = remember { frameFills(DRAW_COLORS) }
@@ -2277,41 +2878,171 @@ private fun FramePanel(state: EditorUiState, vm: PhotoEditorViewModel) {
     val blurLook = remember(blurSource) { frameBlurLook(blurSource) }
     val blurLabel = stringResource(R.string.collage_bg_blur)
     val idle = if (frame == null) Modifier.alpha(0.38f) else Modifier
+    val shapesState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val fillsState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val customFill = (frame?.fill as? FrameFill.Solid)?.takeIf { it !in fills }
     // A pick that lands on the frame already on changes nothing, so it spends no render.
     val pick: (FrameSpec?) -> Unit = { next -> if (next != frame) vm.setFrame(next) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            items(FrameShape.entries) { s ->
-                FrameChip(
-                    label = when (s) {
-                        FrameShape.Off -> stringResource(R.string.editor_frame_none)
-                        FrameShape.Original -> stringResource(R.string.editor_filter_original)
-                        FrameShape.Polaroid -> stringResource(R.string.editor_frame_polaroid)
-                        // Numeric ratios stay as glyph labels.
-                        else -> s.ratio?.label.orEmpty()
-                    },
-                    selected = s == shape,
-                    onClick = { pick(frame.withShape(s)) },
-                )
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyRow(
+                state = shapesState,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                items(FrameShape.entries) { s ->
+                    OptionChip(
+                        label = when (s) {
+                            FrameShape.Off -> stringResource(R.string.editor_frame_none)
+                            FrameShape.Original -> stringResource(R.string.editor_filter_original)
+                            FrameShape.Polaroid -> stringResource(R.string.editor_frame_polaroid)
+                            // Numeric ratios stay as glyph labels.
+                            else -> s.ratio?.label.orEmpty()
+                        },
+                        selected = s == shape,
+                        onClick = { pick(frame.withShape(s)) },
+                    )
+                }
             }
+            LazyDots(shapesState)
         }
-        Row(
-            modifier = Modifier.fillMaxWidth().then(idle).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            fills.forEach { fill ->
-                FrameSwatch(
-                    fill = fill,
-                    selected = frame?.fill == fill,
-                    enabled = frame != null,
-                    blurLook = blurLook,
-                    blurLabel = blurLabel,
-                    onClick = { pick(frame.withFill(fill)) },
-                )
+        FrameBorderRow(
+            frame = frame,
+            onChange = { vm.setFrameLive(it) },
+            onFinished = { vm.finalizeAdjustments() },
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyRow(
+                state = fillsState,
+                modifier = Modifier.fillMaxWidth().then(idle),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                item {
+                    FrameSwatch(
+                        fill = FrameFill.Blur,
+                        selected = frame?.fill == FrameFill.Blur,
+                        enabled = frame != null,
+                        blurLook = blurLook,
+                        blurLabel = blurLabel,
+                        onClick = { pick(frame.withFill(FrameFill.Blur)) },
+                    )
+                }
+                item {
+                    EyedropperSwatch(
+                        picked = customFill?.argb,
+                        selected = picking || customFill != null,
+                        enabled = frame != null,
+                        onClick = onPickToggle,
+                    )
+                }
+                items(fills.filter { it != FrameFill.Blur }) { fill ->
+                    FrameSwatch(
+                        fill = fill,
+                        selected = frame?.fill == fill,
+                        enabled = frame != null,
+                        blurLook = blurLook,
+                        blurLabel = blurLabel,
+                        onClick = { pick(frame.withFill(fill)) },
+                    )
+                }
             }
+            LazyDots(fillsState)
         }
-        Text(stringResource(R.string.editor_frame_hint), color = FgMute, fontSize = 12.sp, modifier = idle)
+    }
+}
+
+/**
+ * The eyedropper swatch, round like the other fills: the picked colour once one is on the frame, with the dropper
+ * over it, and an accent ring while it is on that colour or waiting for a press on the photo.
+ */
+@Composable
+private fun EyedropperSwatch(picked: Int?, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val fill = picked?.let { Color(it) }
+    val iconTint = when {
+        fill == null -> FgDim
+        fill.luminance() > 0.5f -> Color.Black
+        else -> Color.White
+    }
+    Box(
+        Modifier
+            .size(28.dp)
+            .clip(CircleShape)
+            .background(fill ?: PillBg)
+            .border(if (selected) 2.dp else 0.5.dp, if (selected) Accent else PillBorder, CircleShape)
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.Default.Colorize, null, tint = iconTint, modifier = Modifier.size(16.dp))
+    }
+}
+
+/**
+ * Page dots under a row that scrolls, as many as it has pages and the page in view lit, so a row that goes on past
+ * the edge can be seen to. Nothing shows while the whole row fits.
+ */
+@Composable
+internal fun LazyDots(state: androidx.compose.foundation.lazy.LazyListState, modifier: Modifier = Modifier) {
+    val info = state.layoutInfo
+    val visible = info.visibleItemsInfo
+    if (visible.isEmpty() || info.totalItemsCount <= 0) return
+    val viewport = (info.viewportEndOffset - info.viewportStartOffset).toFloat()
+    if (viewport <= 0f) return
+    val pitch = if (visible.size > 1) {
+        (visible.last().offset - visible.first().offset).toFloat() / (visible.size - 1)
+    } else {
+        visible.first().size.toFloat()
+    }
+    if (pitch <= 0f) return
+    val content = pitch * info.totalItemsCount
+    val pages = kotlin.math.ceil(content / viewport).toInt().coerceIn(1, 6)
+    if (pages <= 1) return
+    val first = visible.first()
+    val scrolled = first.index * pitch - first.offset
+    val frac = (scrolled / (content - viewport).coerceAtLeast(1f)).coerceIn(0f, 1f)
+    val active = (frac * (pages - 1)).roundToInt()
+    Row(
+        modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+    ) {
+        repeat(pages) { i ->
+            Box(Modifier.size(6.dp).background(if (i == active) FgPrimary else FgMute.copy(alpha = 0.45f), CircleShape))
+        }
+    }
+}
+
+/**
+ * The border slider: how wide the margin round the photo is, in percent of its shorter side. It stays dimmed until
+ * there is a frame, and each tick renders on the fast path, the whole drag folding into one undo entry. It keeps the
+ * system's edge gesture out of its own row so a drag that starts near the screen edge moves the thumb.
+ */
+@Composable
+private fun FrameBorderRow(frame: FrameSpec?, onChange: (FrameSpec) -> Unit, onFinished: () -> Unit) {
+    val range = frame?.borderRange() ?: (0f..FRAME_MAX_BORDER)
+    val percent = (frame?.borderValue() ?: 0f) * 100f
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .systemGestureExclusion()
+            .then(if (frame == null) Modifier.alpha(0.38f) else Modifier)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        RulerSlider(
+            value = percent,
+            valueRange = (range.start * 100f)..(range.endInclusive * 100f),
+            onChange = { if (frame != null) onChange(frame.withBorder(it / 100f)) },
+            onFinished = onFinished,
+            enabled = frame != null,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            percent.roundToInt().toString(),
+            color = if (frame != null) Accent else FgMute,
+            fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.width(24.dp),
+        )
     }
 }
 
@@ -2377,10 +3108,10 @@ private fun frameBlurLook(source: Bitmap?): ImageBitmap? {
 /** Pixels across the short side of the Blur swatch's picture: few enough that a 28dp circle shows it soft. */
 private const val FRAME_SWATCH_BLUR_PX = 12
 
-/** One Frame chip, in the crop panel's ratio chip recipe: an accent fill and label while lit, a hairline border
+/** One option chip, in the crop panel's ratio chip recipe: an accent fill and label while lit, a hairline border
  *  otherwise. */
 @Composable
-private fun FrameChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun OptionChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .height(38.dp)
@@ -2396,6 +3127,38 @@ private fun FrameChip(label: String, selected: Boolean, onClick: () -> Unit) {
             color = if (selected) Accent else FgPrimary,
             fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+        )
+    }
+}
+
+/** A single segment inside a combined sub-menu pill: an icon + label with a rounded accent fill when
+ *  selected, matching the bottom tab dock. Never wraps to a second line. */
+@Composable
+private fun PillSegment(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .height(40.dp)
+            .background(if (selected) Accent.copy(alpha = 0.22f) else Color.Transparent, pillShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = if (selected) Accent else FgDim, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            color = if (selected) Accent else FgPrimary,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
@@ -2608,49 +3371,6 @@ private fun HslSection(state: EditorUiState, vm: PhotoEditorViewModel, bandIndex
     }
 }
 
-@Composable
-private fun RotatePanel(state: EditorUiState, vm: PhotoEditorViewModel) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // 90-degree turns + flips + a reset for the fine geometry, scrolled so long labels keep their width.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ActionTile(stringResource(R.string.video_editor_rotate), Icons.AutoMirrored.Filled.RotateRight) { vm.rotate90Cw() }
-            ActionTile(stringResource(R.string.editor_flip_h), Icons.Default.Flip) { vm.toggleFlipH() }
-            ActionTile(stringResource(R.string.editor_flip_v), Icons.Default.Flip) { vm.toggleFlipV() }
-            ActionTile(stringResource(R.string.editor_geo_reset), Icons.Default.Restore) { vm.resetGeometry() }
-        }
-        GeoSlider(stringResource(R.string.editor_straighten), state.adjustments.straighten, vm::updateStraighten) { vm.finalizeAdjustments() }
-        GeoSlider(stringResource(R.string.editor_perspective_v), state.adjustments.perspectiveV, vm::updatePerspectiveV) { vm.finalizeAdjustments() }
-        GeoSlider(stringResource(R.string.editor_perspective_h), state.adjustments.perspectiveH, vm::updatePerspectiveH) { vm.finalizeAdjustments() }
-    }
-}
-
-/** A labelled bipolar slider for the fine geometry controls (straighten, keystone). */
-@Composable
-private fun GeoSlider(label: String, value: Int, onChange: (Int) -> Unit, onFinished: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(label, color = FgDim, fontSize = 12.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(76.dp))
-        Slider(
-            value = value.toFloat(),
-            onValueChange = { onChange(it.roundToInt()) },
-            onValueChangeFinished = onFinished,
-            valueRange = -100f..100f,
-            colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent, inactiveTrackColor = TrackBg),
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
 // ─── Reusable components ────────────────────────────────────────────────────
 
 /** Clean custom slider: 4dp track, 18dp thumb, no Material stop indicator. */
@@ -2796,31 +3516,6 @@ private fun FilterThumb(filter: FilterPreset, source: Bitmap?, selected: Boolean
             color = if (selected) Accent else FgMute,
             fontSize = 11.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        )
-    }
-}
-
-/** Rotate / Flip pills — match the photos page filter row recipe so the bar above
- *  the tab dock reads as the same kind of control regardless of which tool is
- *  active. Horizontal capsule shape keeps the row uniform with the adjustment chips. */
-@Composable
-private fun ActionTile(label: String, icon: ImageVector, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .height(38.dp)
-            .background(PillBg, pillShape)
-            .border(0.5.dp, PillBorder, pillShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Icon(icon, label, tint = FgDim, modifier = Modifier.size(14.dp))
-        Text(
-            label,
-            color = FgPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
         )
     }
 }

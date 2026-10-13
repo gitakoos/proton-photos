@@ -29,7 +29,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * The ratios a frame's canvas can take, in the order the shape chips show them. Original follows the photo, so it
+ * The ratios a frame's canvas can take, in the order the shape chips show them: the tall ones, then the wide ones. Original follows the photo, so it
  * resolves at layout time rather than from a declared [ratio]: the natural shape of the photo and its margins. A list
  * of its own rather than more [CropAspect] entries, since both crop tools offer every one of those as a chip.
  */
@@ -38,7 +38,10 @@ enum class FrameRatio(val label: String, val ratio: Float?) {
     OneToOne("1:1", 1f),
     FourFive("4:5", 4f / 5f),
     ThreeFour("3:4", 3f / 4f),
+    TwoThree("2:3", 2f / 3f),
     NineSixteen("9:16", 9f / 16f),
+    FourThree("4:3", 4f / 3f),
+    ThreeTwo("3:2", 3f / 2f),
     SixteenNine("16:9", 16f / 9f),
 }
 
@@ -90,6 +93,12 @@ internal const val FRAME_BLUR_SCRIM = 0x47000000
 /** Widest border a spec can ask for on one side, as a fraction of the photo's shorter side. */
 private const val FRAME_MAX_MARGIN = 1f
 
+/** Widest border the Frame tool's slider sets, as a fraction of the photo's shorter side. */
+internal const val FRAME_MAX_BORDER = 0.3f
+
+/** Narrowest border a Polaroid keeps: with none, its deeper bottom would be gone and it would read as a plain frame. */
+internal const val FRAME_MIN_CARD_BORDER = 0.01f
+
 /**
  * Less room than this along an axis, in canvas pixels, counts as none: the photo has nowhere visible to go there, and
  * a drag divided by it would be all but infinite.
@@ -135,7 +144,10 @@ internal enum class FrameShape(val ratio: FrameRatio?) {
     OneToOne(FrameRatio.OneToOne),
     FourFive(FrameRatio.FourFive),
     ThreeFour(FrameRatio.ThreeFour),
+    TwoThree(FrameRatio.TwoThree),
     NineSixteen(FrameRatio.NineSixteen),
+    FourThree(FrameRatio.FourThree),
+    ThreeTwo(FrameRatio.ThreeTwo),
     SixteenNine(FrameRatio.SixteenNine),
     Polaroid(FrameRatio.Original),
 }
@@ -177,16 +189,45 @@ internal fun frameShapeOf(spec: FrameSpec?): FrameShape {
 internal fun FrameSpec?.withShape(shape: FrameShape): FrameSpec? =
     shape.toSpec(this?.fill ?: FrameFill.Solid(FRAME_WHITE))
 
+/**
+ * The borders the slider can set on [this] frame, as fractions of the photo's shorter side: from none to
+ * [FRAME_MAX_BORDER], or for a Polaroid card from [FRAME_MIN_CARD_BORDER] to the widest its deeper bottom allows.
+ */
+internal fun FrameSpec.borderRange(): ClosedFloatingPointRange<Float> {
+    val s = clamped()
+    return if (s.bottomMargin > s.margin) {
+        FRAME_MIN_CARD_BORDER..(FRAME_MAX_MARGIN / FRAME_POLAROID_BOTTOM_FACTOR)
+    } else {
+        0f..FRAME_MAX_BORDER
+    }
+}
+
+/** The border [this] frame shows on the slider: its side margin, held to [borderRange]. */
+internal fun FrameSpec.borderValue(): Float = clamped().margin.coerceIn(borderRange())
+
+/**
+ * [this] frame with its border set to [border], held to [borderRange]; a number that is not one reads as the
+ * narrowest. A Polaroid keeps its deeper bottom in the same proportion, and the shape, the fill and the photo's size
+ * and place are kept.
+ */
+internal fun FrameSpec.withBorder(border: Float): FrameSpec {
+    val range = borderRange()
+    val side = (if (border.isNaN()) range.start else border).coerceIn(range.start, range.endInclusive)
+    val s = clamped()
+    val card = s.bottomMargin > s.margin
+    return copy(margin = side, bottomMargin = if (card) side * FRAME_POLAROID_BOTTOM_FACTOR else side)
+}
+
 /** [this] frame with [fill] around the photo, the shape and the photo's size and place kept. No frame stays none. */
 internal fun FrameSpec?.withFill(fill: FrameFill): FrameSpec? = this?.copy(fill = fill)
 
 /**
- * The fill swatches in order: white, black, then [palette]'s other colours as it lists them, each once, and last the
- * blur of the photo.
+ * The fill swatches in order: the blur of the photo, then white, black and [palette]'s other colours as it lists
+ * them, each once.
  */
 internal fun frameFills(palette: List<Int>): List<FrameFill> {
     val colours = listOf(FRAME_WHITE, FRAME_BLACK) + palette.filter { it != FRAME_WHITE && it != FRAME_BLACK }
-    return colours.distinct().map { FrameFill.Solid(it) } + FrameFill.Blur
+    return listOf<FrameFill>(FrameFill.Blur) + colours.distinct().map { FrameFill.Solid(it) }
 }
 
 /**

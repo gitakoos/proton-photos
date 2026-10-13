@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -78,6 +79,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.presentation.theme.Accent
+import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -102,10 +104,12 @@ internal fun CropPanel(
     val dispW = disp.width
     val dispH = disp.height
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Aspect ratio chips — same pill recipe as the photos page filter row.
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // The ratio names, the lit one in bold.
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            state = listState,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
             items(CropAspect.entries.toList()) { aspect ->
@@ -115,12 +119,8 @@ internal fun CropPanel(
                 val isSelected = aspect == lockedAspect
                 Box(
                     modifier = Modifier
-                        .height(38.dp)
-                        .background(
-                            if (isSelected) Accent.copy(alpha = 0.18f) else PillBg,
-                            pillShape,
-                        )
-                        .then(if (!isSelected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+                        .height(44.dp)
+                        .clip(pillShape)
                         .clickable {
                             // Tapping a chip locks the shape AND shows it, with no Apply step.
                             // Free only releases the lock and leaves the rect where the user put
@@ -146,7 +146,7 @@ internal fun CropPanel(
                                 }
                             }
                         }
-                        .padding(horizontal = 14.dp),
+                        .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -157,13 +157,14 @@ internal fun CropPanel(
                             CropAspect.Original -> stringResource(R.string.editor_filter_original)
                             else -> aspect.label
                         },
-                        color = if (isSelected) Accent else FgPrimary,
-                        fontSize = 13.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (isSelected) FgPrimary else FgMute,
+                        fontSize = 15.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                     )
                 }
             }
         }
+        LazyDots(listState)
     }
 }
 

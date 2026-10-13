@@ -338,13 +338,14 @@ class FrameGeometryTest {
         assertEquals(
             listOf(
                 null, FrameRatio.Original, FrameRatio.OneToOne, FrameRatio.FourFive, FrameRatio.ThreeFour,
-                FrameRatio.NineSixteen, FrameRatio.SixteenNine, FrameRatio.Original,
+                FrameRatio.TwoThree, FrameRatio.NineSixteen, FrameRatio.FourThree, FrameRatio.ThreeTwo,
+                FrameRatio.SixteenNine, FrameRatio.Original,
             ),
             FrameShape.entries.map { it.ratio },
         )
         assertEquals(FrameShape.Off, FrameShape.entries.first())
         assertEquals(FrameShape.Polaroid, FrameShape.entries.last())
-        assertEquals(listOf("Original", "1:1", "4:5", "3:4", "9:16", "16:9"), FrameRatio.entries.map { it.label })
+        assertEquals(listOf("Original", "1:1", "4:5", "3:4", "2:3", "9:16", "4:3", "3:2", "16:9"), FrameRatio.entries.map { it.label })
         assertNull(FrameRatio.Original.ratio)
     }
 

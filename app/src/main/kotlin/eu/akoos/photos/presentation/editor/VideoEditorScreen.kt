@@ -96,6 +96,8 @@ import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.CropRotate
+import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -218,12 +220,14 @@ private fun filmstripFrameCountFor(zoom: Float, current: Int): Int {
 
 private enum class VideoTool(val labelRes: Int, val icon: ImageVector) {
     Trim(R.string.video_editor_trim, Icons.Default.ContentCut),
-    Crop(R.string.video_editor_crop, Icons.Default.Crop),
-    Rotate(R.string.video_editor_rotate, Icons.AutoMirrored.Filled.RotateRight),
+    Crop(R.string.editor_tab_transform, Icons.Default.CropRotate),
     Filter(R.string.editor_tool_filter, Icons.Default.AutoFixHigh),
     Adjust(R.string.editor_tool_adjust, Icons.Default.Tune),
     Audio(R.string.video_editor_audio_lane, Icons.AutoMirrored.Filled.VolumeUp),
 }
+
+/** The panel the Crop and rotate tool opens from its pill, with a back arrow over it; null is the pill. */
+private enum class VideoOption { Ratio }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -271,6 +275,8 @@ fun VideoEditorScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     var activeTool by remember { mutableStateOf(VideoTool.Trim) }
+    var videoOption by remember { mutableStateOf<VideoOption?>(null) }
+    androidx.compose.runtime.LaunchedEffect(activeTool) { videoOption = null }
     // Selected clip id, hoisted here so a tap anywhere outside the track (e.g. the preview) clears it and
     // hides the clip-action pill; the cut track (TrimPanel) drives it too.
     var selectedClipId by remember { mutableStateOf<Long?>(null) }
@@ -809,6 +815,9 @@ fun VideoEditorScreen(
     androidx.activity.compose.BackHandler(enabled = hasUnsavedChanges) {
         showDiscardDialog = true
     }
+    // The ratio panel closes on Back before anything else, as its arrow does. Declared after the discard guard, so
+    // Back reaches it first.
+    androidx.activity.compose.BackHandler(enabled = videoOption != null) { videoOption = null }
 
     Column(
         Modifier.fillMaxSize().background(Bg0).statusBarsPadding(),
@@ -860,24 +869,6 @@ fun VideoEditorScreen(
                         onCopy = {},
                     )
                 }
-                activeTool == VideoTool.Crop && state.sourceWidth > 0 && state.sourceHeight > 0 && previewPlayer != null ->
-                    CropOverPlayer(
-                        player = previewPlayer,
-                        sourceWidth = state.sourceWidth,
-                        sourceHeight = state.sourceHeight,
-                        rotationDegrees = state.rotationDegrees,
-                        currentCrop = state.cropRect,
-                        lockedRatio = sourceLockRatio(
-                            lockedAspect,
-                            state.sourceWidth.coerceAtLeast(1),
-                            state.sourceHeight.coerceAtLeast(1),
-                            state.rotationDegrees,
-                        ),
-                        onCropChange = { vm.setCropRect(it) },
-                        onEditBegin = { vm.beginEdit() },
-                        onEditCommit = { vm.endEdit() },
-                        filterMatrix = state.effectiveColorMatrix4x5(),
-                    )
                 else -> if (previewPlayer != null) VideoPreview(
                     player = previewPlayer,
                     initialAspect = if (state.sourceWidth > 0 && state.sourceHeight > 0)
@@ -888,6 +879,22 @@ fun VideoEditorScreen(
                     sourceWidth = state.sourceWidth,
                     sourceHeight = state.sourceHeight,
                     filterMatrix = state.effectiveColorMatrix4x5(),
+                    // The same player under every tool; the Crop tool lays its handles over it.
+                    edit = if (activeTool == VideoTool.Crop) {
+                        VideoCropEdit(
+                            lockedRatio = sourceLockRatio(
+                                lockedAspect,
+                                state.sourceWidth.coerceAtLeast(1),
+                                state.sourceHeight.coerceAtLeast(1),
+                                state.rotationDegrees,
+                            ),
+                            onCropChange = { vm.setCropRect(it) },
+                            onEditBegin = { vm.beginEdit() },
+                            onEditCommit = { vm.endEdit() },
+                        )
+                    } else {
+                        null
+                    },
                 )
             }
             if (state.addingSource) {
@@ -948,13 +955,17 @@ fun VideoEditorScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp).wrapContentHeight(),
             ) {
                 AnimatedContent(
-                    targetState = activeTool,
+                    targetState = activeTool to videoOption,
+                    // One thing at a time: the old panel fades out, the box then eases to the new height, and
+                    // the new panel fades in as that settles.
                     transitionSpec = {
-                        (fadeIn(tween(190)) + slideInVertically(tween(230)) { it / 5 }) togetherWith
-                            (fadeOut(tween(150)) + slideOutVertically(tween(190)) { it / 5 })
+                        (
+                            (fadeIn(tween(170, delayMillis = 110)) + slideInVertically(tween(210, delayMillis = 110)) { it / 12 }) togetherWith
+                                fadeOut(tween(90))
+                            ) using androidx.compose.animation.SizeTransform(clip = false) { _, _ -> tween(210, delayMillis = 60) }
                     },
                     label = "videoPanel",
-                ) { tool ->
+                ) { (tool, option) ->
                     when (tool) {
                         VideoTool.Trim -> TrimPanel(
                             state = state,
@@ -973,13 +984,30 @@ fun VideoEditorScreen(
                                 )
                             },
                         )
-                        VideoTool.Crop -> CropPanel(
-                            state = state,
-                            vm = vm,
-                            lockedAspect = lockedAspect,
-                            onLockedAspectChange = { lockedAspect = it },
-                        )
-                        VideoTool.Rotate -> RotatePanel(state = state, vm = vm)
+                        VideoTool.Crop -> when (option) {
+                            VideoOption.Ratio -> PanelWithBack(R.string.editor_transform_ratio, onBack = { videoOption = null }) {
+                                CropPanel(
+                                    state = state,
+                                    vm = vm,
+                                    lockedAspect = lockedAspect,
+                                    onLockedAspectChange = { lockedAspect = it },
+                                )
+                            }
+                            null -> OptionPill(
+                                listOf(
+                                    PillAction(
+                                        Icons.AutoMirrored.Filled.RotateRight,
+                                        stringResource(R.string.video_editor_rotate),
+                                        { vm.rotate90Cw() },
+                                    ),
+                                    PillAction(
+                                        Icons.Default.AspectRatio,
+                                        stringResource(R.string.editor_transform_ratio),
+                                        { videoOption = VideoOption.Ratio },
+                                    ),
+                                ),
+                            )
+                        }
                         VideoTool.Filter -> FilterPanel(state = state, vm = vm, thumbnails = filmstripThumbnails)
                         VideoTool.Adjust -> AdjustPanel(state = state, vm = vm)
                         VideoTool.Audio -> AudioPanel(state = state, vm = vm, previewPlayer = previewPlayer)
@@ -1709,9 +1737,12 @@ private fun CropPanel(
 ) {
     val srcW = state.sourceWidth.coerceAtLeast(1)
     val srcH = state.sourceHeight.coerceAtLeast(1)
-    // Aspect ratio chips, the same pill recipe the photo editor's crop panel uses.
+    // The ratio names, the lit one in bold, as the photo editor's crop panel shows them.
+    val ratiosState = androidx.compose.foundation.lazy.rememberLazyListState()
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
     LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        state = ratiosState,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         items(CropAspect.entries.toList()) { aspect ->
@@ -1721,12 +1752,8 @@ private fun CropPanel(
             val isSelected = aspect == lockedAspect
             Box(
                 modifier = Modifier
-                    .height(38.dp)
-                    .background(
-                        if (isSelected) Accent.copy(alpha = 0.18f) else PillBg,
-                        pillShape,
-                    )
-                    .then(if (!isSelected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+                    .height(44.dp)
+                    .clip(pillShape)
                     .clickable {
                         // Tapping a chip locks the shape AND shows it, with no Apply step. Free and
                         // Original clear the crop back to the full frame (committed as null so the
@@ -1742,7 +1769,7 @@ private fun CropPanel(
                         }
                         vm.endEdit()
                     }
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -1753,12 +1780,14 @@ private fun CropPanel(
                         CropAspect.Original -> stringResource(R.string.editor_filter_original)
                         else -> aspect.label
                     },
-                    color = if (isSelected) Accent else FgPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                    color = if (isSelected) FgPrimary else FgMute,
+                    fontSize = 15.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 )
             }
         }
+    }
+    LazyDots(ratiosState)
     }
 }
 
@@ -1843,77 +1872,73 @@ private fun VideoFilterThumb(
     }
 }
 
-/** Colour/light adjustments panel: the same nine sliders as the photo editor's Adjust tab, styled in the
- *  video editor's pill recipe. A horizontally scrollable chip row picks one adjustment; the slider below
- *  drives its -100..100 value and the live preview tints immediately through [effectiveColorMatrix4x5]. */
+/** Colour/light adjustments panel, as the photo editor's Adjust tab: the selected adjustment's name over a row of round
+ *  icons, a ruler under it, and its value in the round that is open. A tap on the open round takes that adjustment back to
+ *  zero, a long press does it from any round, and Reset clears all. The live preview tints immediately through
+ *  [effectiveColorMatrix4x5]. */
 @Composable
 private fun AdjustPanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
     val context = LocalContext.current
     var selected by remember { mutableStateOf(VideoAdjustment.Brightness) }
     val value = selected.value(state)
     val edited = state.hasColorEdits()
+    val circlesState = androidx.compose.foundation.lazy.rememberLazyListState()
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(VideoAdjustment.entries.toList(), key = { it.name }) { adj ->
-                AdjustChip(
-                    label = context.getString(adj.labelRes),
-                    icon = adj.icon,
-                    selected = adj == selected,
-                    edited = adj.value(state) != 0,
-                    onClick = { selected = adj },
+        Box(Modifier.fillMaxWidth().height(28.dp), contentAlignment = Alignment.Center) {
+            Text(
+                context.getString(selected.labelRes),
+                color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+            if (edited) {
+                Text(
+                    context.getString(R.string.filter_reset),
+                    color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable { vm.resetColorAdjustments() }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
                 )
             }
         }
-        // The selected adjustment's name, a signed value readout, and a reset that clears every adjustment
-        // at once. Reset only shows while something is edited; the row is a fixed height so revealing it
-        // does not grow the row and jolt the whole panel up a few dp.
-        Row(
-            modifier = Modifier.fillMaxWidth().height(30.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                context.getString(selected.labelRes),
-                color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-            )
-            Text(
-                formatAdjustmentValue(value),
-                color = if (value != 0) Accent else FgMute,
-                fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-            )
-            if (edited) {
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable { vm.resetColorAdjustments() }
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(Icons.Default.Restore, null, tint = FgDim, modifier = Modifier.size(15.dp))
-                    Text(
-                        context.getString(R.string.filter_reset),
-                        color = FgPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            LazyRow(
+                state = circlesState,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp),
+            ) {
+                items(VideoAdjustment.entries.toList(), key = { it.name }) { adj ->
+                    val v = adj.value(state)
+                    ToolCircle(
+                        icon = adj.icon,
+                        label = context.getString(adj.labelRes),
+                        selected = adj == selected,
+                        modified = v != 0,
+                        valueText = v.takeIf { it != 0 }?.let { formatAdjustmentValue(it) },
+                        onClick = {
+                            if (adj == selected) {
+                                if (v != 0) adj.set(vm, 0)
+                            } else {
+                                selected = adj
+                            }
+                        },
+                        onLongClick = { adj.set(vm, 0) },
                     )
                 }
             }
+            LazyDots(circlesState)
         }
-        // House-style slider, the same recipe as the Audio panel's volume slider.
-        androidx.compose.material3.Slider(
+        RulerSlider(
             value = value.toFloat(),
-            onValueChange = { selected.set(vm, it.roundToInt()) },
             valueRange = -100f..100f,
+            onChange = { selected.set(vm, it.roundToInt()) },
+            onFinished = {},
             modifier = Modifier.fillMaxWidth(),
-            colors = androidx.compose.material3.SliderDefaults.colors(
-                thumbColor = Accent,
-                activeTrackColor = Accent,
-                inactiveTrackColor = PanelChip,
-            ),
         )
     }
 }
@@ -1937,139 +1962,8 @@ private enum class VideoAdjustment(
     Fade(R.string.editor_adj_fade, Icons.Default.Gradient, { it.adjFade }, { vm, v -> vm.setAdjFade(v) }),
 }
 
-/** One adjustment chip: the video-editor pill recipe (PillBg + PillBorder, an accent fill when selected).
- *  The icon lights accent when that adjustment is off-zero, and an unselected edited chip carries a dot. */
-@Composable
-private fun AdjustChip(
-    label: String,
-    icon: ImageVector,
-    selected: Boolean,
-    edited: Boolean,
-    onClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .height(38.dp)
-            .background(if (selected) Accent.copy(alpha = 0.22f) else PillBg, editorPillShape)
-            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, editorPillShape) else Modifier)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Icon(
-            icon,
-            null,
-            tint = if (selected || edited) Accent else FgDim,
-            modifier = Modifier.size(15.dp),
-        )
-        Text(
-            label,
-            color = if (selected) Accent else FgPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false,
-        )
-        if (edited && !selected) {
-            Box(Modifier.size(5.dp).background(Accent, CircleShape))
-        }
-    }
-}
-
 /** Signed readout for an adjustment value: "+35", "0", "-12". */
 private fun formatAdjustmentValue(v: Int): String = if (v > 0) "+$v" else v.toString()
-
-@Composable
-private fun RotatePanel(state: VideoEditorUiState, vm: VideoEditorViewModel) {
-    val context = LocalContext.current
-    // One combined capsule (same recipe as the bottom tab dock) so the rotate action, the live
-    // degrees readout and reset read as a single control rather than scattered pills. Reset steps
-    // back to 0 through the existing rotate action, so no new pipeline path is introduced.
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(PillBgOpaque, RoundedCornerShape(999.dp))
-            .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        VideoPillSegment(
-            label = context.getString(R.string.video_editor_rotate),
-            icon = Icons.AutoMirrored.Filled.RotateRight,
-            selected = false,
-            onClick = { vm.rotate90Cw() },
-            modifier = Modifier.weight(1f),
-        )
-        // Live degrees readout, decorative. Lights up in accent while the clip is rotated.
-        VideoPillSegment(
-            label = "${state.rotationDegrees}°",
-            icon = null,
-            selected = state.rotationDegrees != 0,
-            onClick = {},
-            clickable = false,
-        )
-        VideoPillSegment(
-            label = context.getString(R.string.filter_reset),
-            icon = Icons.Default.Restore,
-            selected = false,
-            onClick = { repeat(((360 - state.rotationDegrees) / 90) % 4) { vm.rotate90Cw() } },
-            enabled = state.rotationDegrees != 0,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-/** One segment inside a combined sub-menu pill: an icon + label with a rounded accent fill when
- *  selected, matching the bottom tab dock. Replicated locally because the photo editor's PillSegment
- *  is file-private. Never wraps to a second line; pass clickable=false for a decorative readout. */
-@Composable
-private fun VideoPillSegment(
-    label: String,
-    icon: ImageVector?,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    clickable: Boolean = true,
-) {
-    val tint = when {
-        !enabled -> FgDim.copy(alpha = 0.4f)
-        selected -> Accent
-        else -> FgDim
-    }
-    val textColor = when {
-        !enabled -> FgDim.copy(alpha = 0.4f)
-        selected -> Accent
-        else -> FgPrimary
-    }
-    Row(
-        modifier = modifier
-            .height(40.dp)
-            .background(
-                if (selected) Accent.copy(alpha = 0.22f) else Color.Transparent,
-                RoundedCornerShape(999.dp),
-            )
-            .then(if (clickable) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
-            .padding(horizontal = 10.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (icon != null) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-        }
-        Text(
-            label,
-            color = textColor,
-            fontSize = 12.5.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
-}
 
 @Composable
 private fun AudioPanel(state: VideoEditorUiState, vm: VideoEditorViewModel, previewPlayer: ExoPlayer?) {

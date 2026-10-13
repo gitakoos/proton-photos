@@ -2107,16 +2107,21 @@
     <string name="editor_straighten">Raddrizza</string>
     <string name="editor_text_add">Aggiungi testo</string>
     <string name="editor_text_delete">Elimina</string>
+    <string name="editor_text_color">Colore del testo</string>
+    <string name="editor_text_background">Sfondo</string>
+    <string name="editor_text_opacity">Opacità</string>
+    <string name="editor_text_corners">Angoli</string>
     <string name="editor_text_edit">Modifica</string>
-    <string name="editor_text_hint">Aggiungi testo, poi trascinalo per spostarlo e pizzica per ridimensionarlo</string>
-    <string name="editor_text_resize_hint">Trascina per spostare, pizzica per ridimensionare</string>
     <string name="editor_tool_color">Colore</string>
     <string name="editor_tool_draw">Disegna</string>
     <string name="editor_tool_text">Testo</string>
     <string name="editor_tool_frame">Cornice</string>
     <string name="editor_frame_none">Nessuna</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_hint">Pizzica per ridimensionare la foto, trascina per spostarla</string>
+    <string name="editor_frame_border">Bordo</string>
+    <string name="editor_tab_transform">Ritaglia e ruota</string>
+    <string name="editor_tab_more">Altro</string>
+    <string name="editor_transform_ratio">Proporzioni</string>
 
     <!-- Video editor -->
     <string name="video_editor_frame_failed">Impossibile salvare il fotogramma</string>

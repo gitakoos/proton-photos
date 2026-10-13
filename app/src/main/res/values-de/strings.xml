@@ -2068,16 +2068,21 @@
     <string name="editor_straighten">Ausrichten</string>
     <string name="editor_text_add">Text hinzufügen</string>
     <string name="editor_text_delete">Löschen</string>
+    <string name="editor_text_color">Textfarbe</string>
+    <string name="editor_text_background">Hintergrund</string>
+    <string name="editor_text_opacity">Deckkraft</string>
+    <string name="editor_text_corners">Rundung</string>
     <string name="editor_text_edit">Bearbeiten</string>
-    <string name="editor_text_hint">Text hinzufügen, dann ziehen zum Verschieben und mit zwei Fingern skalieren</string>
-    <string name="editor_text_resize_hint">Ziehen zum Verschieben, mit zwei Fingern skalieren</string>
     <string name="editor_tool_color">Farbe</string>
     <string name="editor_tool_draw">Zeichnen</string>
     <string name="editor_tool_text">Text</string>
     <string name="editor_tool_frame">Rahmen</string>
     <string name="editor_frame_none">Ohne</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_hint">Mit zwei Fingern das Foto skalieren, ziehen zum Verschieben</string>
+    <string name="editor_frame_border">Rand</string>
+    <string name="editor_tab_transform">Zuschneiden und drehen</string>
+    <string name="editor_tab_more">Mehr</string>
+    <string name="editor_transform_ratio">Seitenverhältnis</string>
 
     <!-- Video editor -->
     <string name="video_editor_frame_failed">Einzelbild konnte nicht gespeichert werden</string>
