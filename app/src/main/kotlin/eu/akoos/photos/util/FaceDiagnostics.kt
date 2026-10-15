@@ -141,6 +141,12 @@ object FaceDiagnostics {
     @Volatile
     private var lastHeapSkip: HeapSkip? = null
 
+    /** Batched placement runs this session and the latest one's numbers (batches, faces placed, people
+     *  opened, faces left ungrouped, run time). Empty before any. */
+    private val batchedRuns = AtomicInteger(0)
+    @Volatile
+    private var lastBatchedRun: String = ""
+
     /** Face model pairs the inference watchdog has abandoned in this process (never closed, so their
      *  memory stays until the process ends), and whether that count has stopped the background scan for the
      *  rest of the process. Written whole by the scheduler, which owns the count, so the next pass after a
@@ -197,6 +203,9 @@ object FaceDiagnostics {
     private var slowestLabel: String = "none"
     private var slowestMs: Long = 0L
 
+    /** Logcat tag of the numbers-only mirror; a published release strips every Log call. */
+    private const val LOG_TAG = "PFPFace"
+
     /** Rolling last-[RECENT_CAPACITY] processed-item lines, newest appended last, guarded by `this`. */
     private const val RECENT_CAPACITY = 25
     private val recent = ArrayDeque<String>(RECENT_CAPACITY)
@@ -206,6 +215,11 @@ object FaceDiagnostics {
         // The scanned count climbing is the frozen-vs-slow discriminator: stamp the advance time whenever
         // it moves, so the snapshot can say how long the walk has been standing still.
         if (indexed > this.indexed) lastAdvanceMs.set(SystemClock.elapsedRealtime())
+        // Progress mirrored to logcat (counts only; stripped from a published release) on a state
+        // change and every 500 scanned, so a measurement build can follow a long walk.
+        if (state != this.state || (indexed != this.indexed && indexed % 500 == 0)) {
+            android.util.Log.i(LOG_TAG, "scan state=$state indexed=$indexed total=$total")
+        }
         this.state = state
         this.indexed = indexed
         this.total = total
@@ -272,23 +286,45 @@ object FaceDiagnostics {
         atMs: Long = SystemClock.elapsedRealtime(),
     ) {
         libraryCounts = LibraryCounts(faces, ungrouped, people, named, atMs)
+        android.util.Log.i(LOG_TAG, "counts faces=$faces ungrouped=$ungrouped people=$people named=$named")
     }
 
     /** Note a full regroup starting, and what started it. */
     fun recordRegroupStarted(trigger: RegroupTrigger) {
         regroupsStarted.incrementAndGet()
         lastRegroupTrigger = trigger
+        android.util.Log.i(LOG_TAG, "regroup started trigger=$trigger")
     }
 
     /** Note a full regroup completing after [durationMs], finishing at [endMs] (elapsedRealtime). */
     fun recordRegroupCompleted(durationMs: Long, endMs: Long = SystemClock.elapsedRealtime()) {
         regroupsCompleted.incrementAndGet()
         lastRegroupCompleted = CompletedRegroup(durationMs, endMs)
+        android.util.Log.i(LOG_TAG, "regroup completed ms=$durationMs")
+    }
+
+    /** Note one batched placement run: its batches, the faces it placed, the people it opened, the groups it
+     *  merged and named, the faces it moved to Unsorted, how many it left ungrouped and how long it took. */
+    fun recordBatchedRun(
+        batches: Int,
+        placed: Int,
+        created: Int,
+        merged: Int,
+        named: Int,
+        unsorted: Int,
+        leftover: Int,
+        tookMs: Long,
+    ) {
+        batchedRuns.incrementAndGet()
+        lastBatchedRun = "batches=$batches placed=$placed opened=$created merged=$merged named=$named " +
+            "unsorted=$unsorted left=$leftover ms=$tookMs"
+        android.util.Log.i(LOG_TAG, "batched run $lastBatchedRun")
     }
 
     /** Note a full regroup given up at its timeout. */
     fun recordRegroupTimedOut() {
         regroupsTimedOut.incrementAndGet()
+        android.util.Log.i(LOG_TAG, "regroup timed out")
     }
 
     /** Note a full regroup skipped before it read a face, because it was estimated to need [needBytes] of
@@ -296,6 +332,7 @@ object FaceDiagnostics {
     fun recordRegroupHeapSkip(needBytes: Long, freeBytes: Long) {
         regroupsSkippedHeap.incrementAndGet()
         lastHeapSkip = HeapSkip(needBytes, freeBytes)
+        android.util.Log.i(LOG_TAG, "regroup heap skip needMB=${needBytes / 1_048_576} freeMB=${freeBytes / 1_048_576}")
     }
 
     /** Record how many face model pairs this process has abandoned to the watchdog, and whether the
@@ -310,6 +347,7 @@ object FaceDiagnostics {
     fun recordRegroupFailed(error: Throwable) {
         regroupsFailed.incrementAndGet()
         lastRegroupFailure = error.javaClass.simpleName.ifEmpty { error.javaClass.name.substringAfterLast('.') }
+        android.util.Log.i(LOG_TAG, "regroup failed ${lastRegroupFailure}")
     }
 
     /** Mark the foreground service session as started, once: a re-kick while it is already running does
@@ -421,6 +459,8 @@ object FaceDiagnostics {
         lastRegroupCompleted = null
         regroupsSkippedHeap.set(0)
         lastHeapSkip = null
+        batchedRuns.set(0)
+        lastBatchedRun = ""
         abandonedSessions = 0
         scanHalted = false
         fgsStartMs.set(0L)
@@ -487,6 +527,9 @@ object FaceDiagnostics {
                 append(" (need=").append(formatMb(it.needBytes)).append(" free=").append(formatMb(it.freeBytes)).append(')')
             }
             append('\n')
+            if (batchedRuns.get() > 0) {
+                append("batchedRuns=").append(batchedRuns.get()).append(" last(").append(lastBatchedRun).append(")\n")
+            }
             append("inFlight=").append(inFlightSnapshot()).append('\n')
             append("lastPark=").append(lastParkReason).append('\n')
             append("abandonedSessions=").append(abandonedSessions)
