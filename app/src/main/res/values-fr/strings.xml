@@ -2422,7 +2422,9 @@
     <string name="whats_new_260_duplicates_title">Revue des doublons</string>
     <string name="whats_new_260_duplicates_body">Pincez, faites glisser ou touchez deux fois pour agrandir une copie jusqu\'à 6 fois avant de décider quoi supprimer. « Supprimer le groupe » sélectionne d\'un coup toutes les copies d\'un groupe.</string>
     <string name="whats_new_260_intro_title">Inclut les versions de test précédentes</string>
-    <string name="whats_new_260_intro_body">Cette version contient aussi tout ce qu\'apportaient les versions de test 1 et 2. Les cartes suivantes ne montrent que les nouveautés depuis.</string>
+    <string name="whats_new_260_intro_body">Cette version contient aussi tout ce qu\'apportaient les versions de test 1 à 3. Les cartes suivantes ne montrent que les nouveautés depuis.</string>
+    <string name="whats_new_260_group_title">Regroupement des visages dans les grandes bibliothèques</string>
+    <string name="whats_new_260_group_body">Les bibliothèques de plus de trente mille visages terminent désormais leur regroupement. Les personnes apparaissent pendant le traitement, les noms que vous avez donnés restent sur leurs personnes, et le travail continue en arrière-plan quand vous quittez l\'appli.</string>
     <string name="whats_new_260_addalbum_title">Ajouter à un autre album</string>
     <string name="whats_new_260_addalbum_body">Sélectionnez des photos dans un album et choisissez « Ajouter à un autre album » dans la barre de sélection. Elles rejoignent l\'autre album et restent dans celui-ci, et le sélecteur permet de créer un nouvel album.</string>
     <string name="whats_new_260_scans_title">Analyses des grandes bibliothèques</string>

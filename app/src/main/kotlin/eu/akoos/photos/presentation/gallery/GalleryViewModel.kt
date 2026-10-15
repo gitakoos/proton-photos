@@ -843,6 +843,11 @@ class GalleryViewModel @Inject constructor(
         // immediately so flipping the toggle re-filters the grid in the very next pass.
         val itemsFlow = if (userId != null) getGalleryItems.invoke(userId).sample(300) else getGalleryItems.invokeLocalOnly().sample(300)
 
+        // Numbers-only timing of the first pass of the process: the gap from this mark to the first
+        // source value is the device scan plus the merge, then the filter pass and the first state.
+        var firstPassMarked = false
+        eu.akoos.photos.util.PerfDiagnostics.mark("gallerystream:start", 0)
+
         combine(
             itemsFlow,
             hiddenUrisFlow,
@@ -883,6 +888,9 @@ class GalleryViewModel @Inject constructor(
                 // state — the dedicated filter-change handlers recompute filteredItems
                 // themselves, so last-writer-wins here is unchanged from the inline version.
                 val snapshot = _uiState.value
+                val markFirst = !firstPassMarked
+                firstPassMarked = true
+                if (markFirst) eu.akoos.photos.util.PerfDiagnostics.mark("galleryvm:start", sources.items.size)
                 val computed = withContext(Dispatchers.Default) {
                     val items = sources.items.filter { item ->
                         // Both the hidden-vault and the timeline-folder filters read off the
@@ -927,6 +935,7 @@ class GalleryViewModel @Inject constructor(
                 // Feed the library size into the perf diagnostics buffer (count only, no content)
                 // so a tester's copied diagnostics show the heap against the library it walked.
                 eu.akoos.photos.util.PerfDiagnostics.libraryPhotoCount = computed.items.size
+                if (markFirst) eu.akoos.photos.util.PerfDiagnostics.mark("galleryvm:end", computed.items.size)
                 _uiState.update { state ->
                     state.copy(
                         isLoading = false,
@@ -939,6 +948,7 @@ class GalleryViewModel @Inject constructor(
                         albumHideCloudIds = sources.cloudInAlbum,
                     )
                 }
+                if (markFirst) eu.akoos.photos.util.PerfDiagnostics.mark("galleryready:end", computed.filtered.size)
             }
     }
 

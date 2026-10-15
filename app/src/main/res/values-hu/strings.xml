@@ -2419,7 +2419,9 @@
     <string name="whats_new_260_duplicates_title">Duplikátumok áttekintése</string>
     <string name="whats_new_260_duplicates_body">Csippentéssel, húzással vagy duplakoppintással akár 6-szorosára nagyíthatsz egy példányt, mielőtt döntesz a törlésről. A(z) „Csoport törlése” gomb a csoport összes példányát egyszerre kijelöli.</string>
     <string name="whats_new_260_intro_title">A korábbi tesztverziók is benne vannak</string>
-    <string name="whats_new_260_intro_body">Ez a verzió az 1. és 2. tesztverzió összes újdonságát is tartalmazza. A következő kártyák csak az azóta újat mutatják.</string>
+    <string name="whats_new_260_intro_body">Ez a verzió az 1., 2. és 3. tesztverzió összes újdonságát is tartalmazza. A következő kártyák csak az azóta újat mutatják.</string>
+    <string name="whats_new_260_group_title">Arcok csoportosítása nagy könyvtárakban</string>
+    <string name="whats_new_260_group_body">A harmincezernél több arcot tartalmazó könyvtárak csoportosítása most már végigfut. A személyek menet közben megjelennek, a megadott nevek a személyeiknél maradnak, a munka pedig a háttérben folytatódik, ha elhagyod az alkalmazást.</string>
     <string name="whats_new_260_addalbum_title">Hozzáadás másik albumhoz</string>
     <string name="whats_new_260_addalbum_body">Jelölj ki fotókat egy albumban, és válaszd a(z) „Hozzáadás másik albumhoz” lehetőséget a kijelölősávban. A fotók a másik albumhoz is hozzáadódnak, ebben pedig megmaradnak, a választóban új albumot is létrehozhatsz.</string>
     <string name="whats_new_260_scans_title">Vizsgálatok nagy könyvtáraknál</string>

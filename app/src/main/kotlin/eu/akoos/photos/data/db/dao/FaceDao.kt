@@ -156,6 +156,10 @@ data class PersonFaceCount(val personId: Long, val faces: Int)
 /** One kept face's id and the person it is grouped under, with no vector. */
 data class FacePersonLink(val id: String, val personId: Long)
 
+/** How many of a person's kept faces carry one confirmed [name]: a person's names are read this way so the
+ *  name most of its faces carry can be put on the group. */
+data class PersonConfirmedName(val personId: Long, val name: String, val faces: Int)
+
 /** One face reduced to its photo and its stored box: no curation, no vector. */
 data class FaceBoxRow(
     val id: String,
@@ -444,6 +448,31 @@ interface FaceDao {
             "AND rejected = 0 GROUP BY personId",
     )
     suspend fun keptFaceCountsByPerson(userId: String): List<PersonFaceCount>
+
+    /** Moves every face of [from] onto [to]: the merge of two groups of one person, one statement however
+     *  many faces they hold. */
+    @Query("UPDATE face SET personId = :to WHERE userId = :userId AND personId = :from")
+    suspend fun mergePersonInto(userId: String, from: Long, to: Long)
+
+    /** Puts every kept face that no person holds yet onto [personId], the Unsorted bucket. */
+    @Query("UPDATE face SET personId = :personId WHERE userId = :userId AND personId IS NULL AND rejected = 0")
+    suspend fun assignUnclusteredTo(userId: String, personId: Long)
+
+    /** The clearest kept face no person holds, for the cover of a new Unsorted bucket. Null when none. */
+    @Query(
+        "SELECT id FROM face WHERE userId = :userId AND personId IS NULL AND rejected = 0 " +
+            "ORDER BY score DESC LIMIT 1",
+    )
+    suspend fun topUnclusteredFace(userId: String): String?
+
+    /** For each grouped person, every confirmed name its kept faces carry and how many carry it: a small
+     *  result (one row per person and name), read without any vector. */
+    @Query(
+        "SELECT personId, manualName AS name, COUNT(*) AS faces FROM face WHERE userId = :userId " +
+            "AND personId IS NOT NULL AND rejected = 0 AND manualName IS NOT NULL AND TRIM(manualName) != '' " +
+            "GROUP BY personId, manualName",
+    )
+    suspend fun confirmedNamesByPerson(userId: String): List<PersonConfirmedName>
 
     /** Every kept, grouped face of the account as its id and person, in [allFacesByScoreDesc]'s order
      *  (clearest detection first, then id), with no vector read: the vectors follow by id. */

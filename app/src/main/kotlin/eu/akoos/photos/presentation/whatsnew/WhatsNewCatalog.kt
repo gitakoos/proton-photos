@@ -161,6 +161,22 @@ internal val WhatsNew260SecondPreview = WhatsNewRelease(
 )
 
 /**
+ * What the third 2.6.0 preview added to the second. The head entry of the list below lists only the cards added
+ * since, so a preview reader does not meet the same cards twice; the 2.6.0 release follows the second preview's
+ * cards with these, then the later previews' cards.
+ */
+internal val WhatsNew260ThirdPreview = WhatsNewRelease(
+    version = "2.6.0",
+    hero = null,
+    features = listOf(
+        WhatsNewFeature(Icons.Default.Brush, R.string.whats_new_260_editor_title, R.string.whats_new_260_editor_body),
+        WhatsNewFeature(Icons.Default.TextFields, R.string.whats_new_260_texttools_title, R.string.whats_new_260_texttools_body),
+        WhatsNewFeature(Icons.Default.Crop, R.string.whats_new_260_frame2_title, R.string.whats_new_260_frame2_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_260_videoedit_title, R.string.whats_new_260_videoedit_body, WhatsNewCategory.Improved),
+    ),
+)
+
+/**
  * What each release announced, newest first. The head of this list is what the post-update screen
  * shows, and the whole list is what Settings offers to browse.
  *
@@ -180,10 +196,7 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         hero = null,
         features = listOf(
             WhatsNewFeature(Icons.Default.Update, R.string.whats_new_260_intro_title, R.string.whats_new_260_intro_body),
-            WhatsNewFeature(Icons.Default.Brush, R.string.whats_new_260_editor_title, R.string.whats_new_260_editor_body),
-            WhatsNewFeature(Icons.Default.TextFields, R.string.whats_new_260_texttools_title, R.string.whats_new_260_texttools_body),
-            WhatsNewFeature(Icons.Default.Crop, R.string.whats_new_260_frame2_title, R.string.whats_new_260_frame2_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Movie, R.string.whats_new_260_videoedit_title, R.string.whats_new_260_videoedit_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_group_title, R.string.whats_new_260_group_body, WhatsNewCategory.Improved),
         ),
     ),
     // 2.5.0 STABLE: the whole release since 2.4.0, consolidated to its main features so someone

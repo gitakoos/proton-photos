@@ -27,6 +27,9 @@ import androidx.room.Query
 import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 
+/** People per delete statement, well inside the 999 host-variable floor of Android 11 and older. */
+private const val SUMMARY_DELETE_SLICE = 500
+
 @Dao
 interface ClusterSummaryDao {
 
@@ -58,6 +61,14 @@ interface ClusterSummaryDao {
      *  the self-check from noticing the drift. Run after any pass that removes empty people. */
     @Query("DELETE FROM cluster_summary WHERE userId = :userId AND personId NOT IN (SELECT id FROM person WHERE userId = :userId)")
     suspend fun deleteOrphansForUser(userId: String)
+
+    /** Drops the cached centroids of the people [personIds], in slices inside the host-variable limit. */
+    suspend fun deleteByPersons(personIds: Collection<Long>) {
+        for (slice in personIds.chunked(SUMMARY_DELETE_SLICE)) deleteByPersonsSlice(slice)
+    }
+
+    @Query("DELETE FROM cluster_summary WHERE personId IN (:personIds)")
+    suspend fun deleteByPersonsSlice(personIds: List<Long>)
 
     @Query("DELETE FROM cluster_summary WHERE personId = :personId")
     suspend fun deleteByPerson(personId: Long)

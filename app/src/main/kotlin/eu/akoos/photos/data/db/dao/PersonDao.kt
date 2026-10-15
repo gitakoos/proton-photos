@@ -30,6 +30,9 @@ import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.util.flatMapSqlChunks
 import kotlinx.coroutines.flow.Flow
 
+/** Person ids per recount statement, well inside the 999 host-variable floor of Android 11 and older. */
+private const val RECOUNT_SLICE = 500
+
 @Dao
 interface PersonDao {
 
@@ -71,6 +74,27 @@ interface PersonDao {
     /** Refreshes a person's cover face and cached face count after a (re)cluster. */
     @Query("UPDATE person SET coverFaceId = :coverFaceId, faceCount = :faceCount WHERE id = :id")
     suspend fun updateCoverAndCount(id: Long, coverFaceId: String?, faceCount: Int)
+
+    /** Recounts each of [ids]' cached photo count from its kept faces (distinct photos), in slices that
+     *  stay inside the host-variable limit. Faces only: a named person's manually attached photos are
+     *  not in this count, so the caller refreshes those through the manual-photo union instead. */
+    suspend fun recountPhotos(ids: Collection<Long>) {
+        for (slice in ids.chunked(RECOUNT_SLICE)) recountPhotosSlice(slice)
+    }
+
+    /** Deletes the people [ids], in slices that stay inside the host-variable limit. */
+    suspend fun deleteByIds(ids: Collection<Long>) {
+        for (slice in ids.chunked(RECOUNT_SLICE)) deleteByIdsSlice(slice)
+    }
+
+    @Query("DELETE FROM person WHERE id IN (:ids)")
+    suspend fun deleteByIdsSlice(ids: List<Long>)
+
+    @Query(
+        "UPDATE person SET faceCount = (SELECT COUNT(DISTINCT photoKey) FROM face " +
+            "WHERE face.personId = person.id AND face.rejected = 0) WHERE id IN (:ids)",
+    )
+    suspend fun recountPhotosSlice(ids: List<Long>)
 
     /** Sets only a person's cover face, for a user's explicit cover pick. */
     @Query("UPDATE person SET coverFaceId = :coverFaceId WHERE id = :id")

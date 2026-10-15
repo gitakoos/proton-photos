@@ -2538,7 +2538,9 @@
     <string name="whats_new_260_duplicates_title">Pregled dvojnikov</string>
     <string name="whats_new_260_duplicates_body">S ščipanjem, vlečenjem ali dvojnim tapom povečate kopijo do 6-krat, preden se odločite, kaj izbrisati. „Izbriši skupino“ izbere vse kopije skupine naenkrat.</string>
     <string name="whats_new_260_intro_title">Vključuje prejšnje testne različice</string>
-    <string name="whats_new_260_intro_body">Ta različica vsebuje tudi vse iz testnih različic 1 in 2. Naslednje kartice kažejo samo, kar je novega od takrat.</string>
+    <string name="whats_new_260_intro_body">Ta različica vsebuje tudi vse iz testnih različic 1 do 3. Naslednje kartice kažejo samo, kar je novega od takrat.</string>
+    <string name="whats_new_260_group_title">Združevanje obrazov v velikih knjižnicah</string>
+    <string name="whats_new_260_group_body">Knjižnice z več kot trideset tisoč obrazi se zdaj združijo v celoti. Osebe se dodajajo že med delovanjem, dana imena ostanejo pri svojih osebah, delo pa se nadaljuje v ozadju tudi po zapustitvi aplikacije.</string>
     <string name="whats_new_260_addalbum_title">Dodaj v drug album</string>
     <string name="whats_new_260_addalbum_body">V albumu izberite fotografije in izberite „Dodaj v drug album“ v vrstici izbire. Pridružijo se drugemu albumu in ostanejo v tem, v izbirniku pa lahko ustvarite tudi nov album.</string>
     <string name="whats_new_260_scans_title">Skeniranje velikih knjižnic</string>

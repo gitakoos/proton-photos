@@ -2337,7 +2337,9 @@
     <string name="whats_new_260_duplicates_title">Kopyaları inceleme</string>
     <string name="whats_new_260_duplicates_body">Bir kopyayı, neyi sileceğinize karar vermeden önce sıkıştırarak, sürükleyerek veya çift dokunarak 6 kata kadar büyütün. “Grubu sil” bir grubun tüm kopyalarını tek seferde seçer.</string>
     <string name="whats_new_260_intro_title">Önceki test sürümleri dahil</string>
-    <string name="whats_new_260_intro_body">Bu sürüm, test sürümleri 1 ve 2\'deki her şeyi de içerir. Sonraki kartlar yalnızca o günden beri yeni olanı gösterir.</string>
+    <string name="whats_new_260_intro_body">Bu sürüm, test sürümleri 1 ila 3\'teki her şeyi de içerir. Sonraki kartlar yalnızca o günden beri yeni olanı gösterir.</string>
+    <string name="whats_new_260_group_title">Büyük kitaplıklarda yüz gruplama</string>
+    <string name="whats_new_260_group_body">Otuz binden fazla yüzü olan kitaplıklar artık gruplamayı tamamlıyor. Kişiler çalışırken ortaya çıkar, verilen adlar kişilerinde kalır ve uygulamadan çıkıldıktan sonra da iş arka planda sürer.</string>
     <string name="whats_new_260_addalbum_title">Başka bir albüme ekle</string>
     <string name="whats_new_260_addalbum_body">Bir albümde fotoğrafları seçin ve seçim çubuğunda “Başka bir albüme ekle” öğesini seçin. Fotoğraflar diğer albüme katılır, bu albümde de kalır; seçicide yeni bir albüm de oluşturabilirsiniz.</string>
     <string name="whats_new_260_scans_title">Büyük kitaplıklar için taramalar</string>

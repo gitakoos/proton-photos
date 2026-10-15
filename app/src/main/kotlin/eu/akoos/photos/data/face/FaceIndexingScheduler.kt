@@ -118,6 +118,7 @@ import eu.akoos.photos.util.SourceMiss
 import eu.akoos.photos.util.SourceMissNote
 import eu.akoos.photos.util.SourcePassTally
 import eu.akoos.photos.util.SourceRetryBook
+import eu.akoos.photos.util.SyncDiagnostics
 import eu.akoos.photos.util.WalkRestart
 import eu.akoos.photos.util.WalkRetryKick
 import eu.akoos.photos.util.retryKickDelayMs
@@ -198,6 +199,26 @@ internal fun shouldGroupAtPassEnd(
     minIntervalMs: Long,
 ): Boolean =
     active && ungrouped > 0 && (!willContinue || msSinceLastGroup >= minIntervalMs)
+
+/**
+ * Whether a library of [faceCount] stored faces is grouped in batches only, never by the whole-library
+ * rebuild: the batched placement keeps memory and time bounded however many faces there are, which a full
+ * regroup stops doing past [maxFaces]. Pure so it is unit-tested without Android.
+ */
+internal fun groupsInBatchesOnly(faceCount: Int, maxFaces: Int): Boolean = faceCount > maxFaces
+
+/** Ungrouped faces from which a batched grouping that no scan is hosting runs on the foreground service: a
+ *  backlog this size takes minutes, which a process Android freezes in the background never gets. */
+internal const val FACE_GROUPING_FOREGROUND_MIN = 5_000
+
+/**
+ * Whether a batched grouping of [ungrouped] faces runs on the foreground service. Only when the user allows
+ * background indexing ([backgroundEnabled]), the backlog is big enough to outlast the app's time in the
+ * foreground, and no scan is already running ([walkRunning]), since a running scan has its own host and its
+ * own progress. Pure so it is unit-tested without Android.
+ */
+internal fun shouldHostGroupingInForeground(ungrouped: Int, backgroundEnabled: Boolean, walkRunning: Boolean): Boolean =
+    backgroundEnabled && !walkRunning && ungrouped >= FACE_GROUPING_FOREGROUND_MIN
 
 /**
  * Whether a full regroup may start. A forced one (a user naming or merging, an import handing its faces
@@ -1002,7 +1023,9 @@ class FaceIndexingScheduler @Inject constructor(
             ) {
                 lastIncrementalClusterMs = nowMs
                 groupingLock.withLock {
-                    val handled = tryAssignNewFaces(userId)
+                    // A batched run during a continuing scan leaves the merge and the Unsorted bucket for the
+                    // run that ends the walk: both are final steps over everything the scan has found.
+                    val handled = tryAssignNewFaces(userId, finalPass = !willContinue)
                     val leftover = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
                     val decidedMs = SystemClock.elapsedRealtime()
                     if (regroupAllowed(force = false, active = active(), reattachPending = reattachPending()) &&
@@ -2473,8 +2496,23 @@ class FaceIndexingScheduler @Inject constructor(
      * the caller falls back cleanly, exactly as [regroupLocked] swallows-and-continues; cancellation still
      * propagates.
      */
-    private suspend fun tryAssignNewFaces(userId: UserId?): Boolean {
+    private suspend fun tryAssignNewFaces(userId: UserId?, finalPass: Boolean = true): Boolean {
         val fenceToken = writeFence.token()
+        // A library past the whole-rebuild limit is grouped in batches at every pass, so its people grow
+        // as the scan goes and a backlog of any size is never turned away to a rebuild that cannot run.
+        val faceCount = runCatching { faceDao.countForUser(accountOf(userId)) }.getOrDefault(0)
+        if (groupsInBatchesOnly(faceCount, FULL_REGROUP_MAX_FACES)) {
+            // Only faces beyond what the last batched run left ungrouped on purpose (the weak ones that
+            // matched nobody) are new work, so a launch that finds nothing new does not read them all again.
+            val ungrouped = runCatching { faceDao.unclusteredCount(accountOf(userId)) }.getOrDefault(0)
+            if (!exceedsRegroupBaseline(ungrouped, currentRegroupBaseline(userId))) {
+                // Nothing new to place, but names put back on the faces since the last run (a restore, an
+                // import) still have to reach their groups: one aggregate, cheap enough to run every time.
+                nameBatchedGroups(userId, fenceToken)
+                return true
+            }
+            return placeBacklogInBatches(userId, fenceToken, finalPass)
+        }
         return try {
             clusterFacesUseCase.assignNewFaces(userId) { writeFence.allows(fenceToken) }
         } catch (e: kotlinx.coroutines.CancellationException) {
@@ -2492,21 +2530,138 @@ class FaceIndexingScheduler @Inject constructor(
      * Each batch is its own fenced transaction, so an import or a sign-out stops the next one; a failure
      * ends the pass quietly, since the same faces are tried again at the next one.
      */
-    private suspend fun placeBacklogInBatches(userId: UserId?, fenceToken: Long) {
-        val batch = IncrementalBatch(INCREMENTAL_BATCH_SIZE)
+    private suspend fun placeBacklogInBatches(userId: UserId?, fenceToken: Long, finalPass: Boolean = true): Boolean {
+        val account = accountOf(userId)
+        val startMs = SystemClock.elapsedRealtime()
+        var batches = 0
+        var placed = 0
+        var created = 0
+        // A big backlog with no scan running to host it goes on the foreground service, reporting the faces
+        // looked at so far, so it keeps running when the app leaves the screen and its notification moves.
+        val progressBefore = _progress.value
+        val backlogAtStart = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
+        val hosted = shouldHostGroupingInForeground(
+            ungrouped = backlogAtStart,
+            backgroundEnabled = context.settingsDataStore.data.first()[SettingsKeys.FACE_INDEX_BACKGROUND] != false,
+            walkRunning = progressBefore.state == FaceIndexingState.Running,
+        )
+        if (hosted) {
+            _progress.value = FaceIndexingProgress(FaceIndexingState.Running, 0, backlogAtStart)
+            FaceIndexingService.start(context, userId)
+        }
+        var examined = 0
+        var progressTotal = backlogAtStart
+        var sweepsDone = false
         try {
-            while (true) {
-                coroutineContext.ensureActive()
-                batch.scanned = 0
-                val handled = clusterFacesUseCase.assignNewFaces(userId, batch) { writeFence.allows(fenceToken) }
-                if (!handled || batch.scanned < batch.limit) return
-                yield()
+            for (sweep in 1..MAX_BATCH_SWEEPS) {
+                val batch = IncrementalBatch(INCREMENTAL_BATCH_SIZE)
+                // The count only ever climbs, across sweeps too: the service that hosts it stops itself once
+                // the count stands still for two minutes, so a later sweep reports its faces on top of the
+                // ones already looked at, with the total growing by what that sweep has still to read.
+                val examinedBeforeSweep = examined
+                val sweepBacklog = if (sweep == 1) backlogAtStart
+                    else runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
+                progressTotal = examinedBeforeSweep + sweepBacklog
+                while (true) {
+                    coroutineContext.ensureActive()
+                    batch.scanned = 0
+                    val handled = clusterFacesUseCase.assignNewFaces(userId, batch) { writeFence.allows(fenceToken) }
+                    if (!handled) return false
+                    batches++
+                    examined += batch.scanned
+                    if (hosted) {
+                        _progress.value = FaceIndexingProgress(FaceIndexingState.Running, examined, progressTotal)
+                    }
+                    if (batch.scanned < batch.limit) break
+                    yield()
+                }
+                placed += batch.placed
+                created += batch.created
+                // A second pass only when the first opened people, since only a new person can take a face
+                // an earlier batch found nobody for.
+                if (batch.created == 0) break
             }
+            sweepsDone = true
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
             Log.w(TAG, "batched incremental assign failed: ${e.message}")
+            return false
+        } finally {
+            // Left as it is when the sweeps finished: the closing steps below are still the hosted work, and
+            // a state that stopped reading Running would end the service before they run.
+            if (hosted && !sweepsDone) _progress.value = progressBefore
         }
+        // The steps the whole-library rebuild ends with, done on the groups the batches formed: fold together
+        // the groups that are one person (on the centroids), give the groups whose faces already carry a
+        // confirmed name that name, and route the faces nobody took to the Unsorted bucket. Only the run that
+        // ends a walk does the merge and the bucket: both are final steps over everything the scan found, and
+        // a face put in the bucket is no longer offered to the people a later run opens. While a service
+        // reports the work, a ticker keeps the count climbing through these quiet steps.
+        val ticker = if (hosted && finalPass) {
+            scope.launch {
+                var ticks = 0
+                while (true) {
+                    kotlinx.coroutines.delay(FINALIZE_TICK_MS)
+                    ticks++
+                    _progress.value = FaceIndexingProgress(
+                        FaceIndexingState.Running, examined + ticks, maxOf(progressTotal, examined + ticks),
+                    )
+                }
+            }
+        } else {
+            null
+        }
+        var merged = 0
+        var named = 0
+        var unsorted = 0
+        try {
+            if (finalPass) {
+                merged = guardedGroupingStep("merging the batched groups") {
+                    clusterFacesUseCase.mergeSimilarGroups(userId, { writeFence.allows(fenceToken) })
+                }
+            }
+            named = nameBatchedGroups(userId, fenceToken)
+            if (finalPass) {
+                unsorted = guardedGroupingStep("filling the Unsorted bucket") {
+                    clusterFacesUseCase.moveLeftoverToUnsorted(userId) { writeFence.allows(fenceToken) }
+                }
+            }
+        } finally {
+            ticker?.cancel()
+            if (hosted) _progress.value = progressBefore
+        }
+        // What is left ungrouped now is what this run could not place (weak faces, faces matching nobody)
+        // and, after a final run, nothing: the baseline the pass end measures new faces against, so a later
+        // pass does not read the same faces all again.
+        val leftover = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
+        regroupBaseline = RegroupBaseline(account, leftover, fenceToken)
+        saveWalkState(userId)
+        val tookMs = SystemClock.elapsedRealtime() - startMs
+        FaceDiagnostics.recordBatchedRun(batches, placed, created, merged, named, unsorted, leftover, tookMs)
+        SyncDiagnostics.log(
+            "faces: batched placement $batches batches, $placed faces placed, $created people opened, " +
+                "$merged merged, $named named, $unsorted to Unsorted, $leftover left ungrouped (${tookMs}ms)",
+        )
+        return true
+    }
+
+    /** Puts the confirmed names on the groups whose faces carry them ([ClusterFacesUseCase.nameGroupsFromConfirmedFaces]),
+     *  returning how many it named; 0 when it fails. */
+    private suspend fun nameBatchedGroups(userId: UserId?, fenceToken: Long): Int =
+        guardedGroupingStep("naming the batched groups") {
+            clusterFacesUseCase.nameGroupsFromConfirmedFaces(userId) { writeFence.allows(fenceToken) }
+        }
+
+    /** Runs one closing step of a batched run, giving 0 when it fails so one step failing leaves the rest to
+     *  run; cancellation still propagates. */
+    private suspend fun guardedGroupingStep(what: String, step: suspend () -> Int): Int = try {
+        step()
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        Log.w(TAG, "$what failed: ${e.message}")
+        0
     }
 
     /**
@@ -2547,6 +2702,22 @@ class FaceIndexingScheduler @Inject constructor(
         // away, so leave it to the grouping the import's caller runs once it is done.
         if (!writeFence.allows(fenceToken)) return false
         val faceCount = runCatching { faceDao.countForUser(accountOf(userId)) }.getOrDefault(0)
+        // A big library is never regrouped whole: it is grouped in batches, with no heap check to pass, no
+        // failure to back off from and nothing to time out, and a batched run that finishes counts as the
+        // grouping having completed (the params generation is recorded from it).
+        if (groupsInBatchesOnly(faceCount, FULL_REGROUP_MAX_FACES)) {
+            // A curation edit or a repeated request finds nothing new beyond the last run's leftover: the
+            // groups were edited in place, and the next batched run rebuilds the cache it clears.
+            val ungrouped = runCatching { faceDao.unclusteredCount(accountOf(userId)) }.getOrDefault(0)
+            if (!exceedsRegroupBaseline(ungrouped, currentRegroupBaseline(userId))) {
+                nameBatchedGroups(userId, fenceToken)
+                return true
+            }
+            val completed = placeBacklogInBatches(userId, fenceToken)
+            saveWalkState(userId)
+            pushLibraryCounts(userId)
+            return completed
+        }
         if (!regroupFitsHeapNow(regroupHeapNeedBytes(faceCount))) {
             lastFailedRegroupMs = SystemClock.elapsedRealtime()
             placeBacklogInBatches(userId, fenceToken)
@@ -2595,6 +2766,9 @@ class FaceIndexingScheduler @Inject constructor(
                     Log.w(TAG, "clustering timed out after ${CLUSTER_TIMEOUT_MS}ms, skipped this round")
                     lastFailedRegroupMs = SystemClock.elapsedRealtime()
                     FaceDiagnostics.recordRegroupTimedOut()
+                    // The timed-out rebuild wrote nothing, so the faces are still waiting: place them in
+                    // batches now rather than leaving them for a rebuild that has just failed.
+                    placeBacklogInBatches(userId, fenceToken)
                     false
                 }
                 // Turned away by the fence: an import or a sign-out replaced the faces it read, so it wrote
@@ -2982,6 +3156,21 @@ class FaceIndexingScheduler @Inject constructor(
         /** Ungrouped faces placed per batch when the whole-library rebuild does not fit the heap: about
          *  two megabytes of embeddings, so a batch is small next to the heap it is spared. */
         const val INCREMENTAL_BATCH_SIZE = 2_000
+
+        /** Stored faces past which a library is grouped in batches only ([groupsInBatchesOnly]): the
+         *  whole-library rebuild holds every vector at once and compares each face with every cluster, so
+         *  it costs memory and time that a phone runs out of well before the 120k faces of a big library
+         *  (measured: a 120k-face pass took the heap to 447 MB of 512 and was cut off at its 180 s ceiling
+         *  with nothing written). */
+        const val FULL_REGROUP_MAX_FACES = 30_000
+
+        /** Passes over the ungrouped faces in one batched run: a second one lets faces that matched nobody
+         *  early in the first find the people opened later in it. */
+        const val MAX_BATCH_SWEEPS = 2
+
+        /** How often the progress count ticks up through the quiet closing steps of a batched run (merge,
+         *  naming, the Unsorted bucket), well inside the two minutes the hosting service waits for progress. */
+        const val FINALIZE_TICK_MS = 10_000L
 
         /** A full regroup started from the pass end waits at least this many times as long as the last one
          *  ran, so the full regroups take at most about a tenth of the time while a large library scans. */

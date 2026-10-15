@@ -1,0 +1,448 @@
+/*
+ * Photos for Proton
+ * Copyright (C) 2026 Akoos <https://akoos.eu>
+ *
+ * Source:  https://github.com/gitakoos/proton-photos
+ * Website: https://www.photosforproton.eu
+ *
+ * This file is part of Photos for Proton.
+ *
+ * Photos for Proton is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+package eu.akoos.photos.domain.usecase
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
+import eu.akoos.photos.data.db.entity.FaceEntity
+import eu.akoos.photos.data.db.entity.PersonEntity
+import kotlinx.coroutines.test.runTest
+import me.proton.core.domain.entity.UserId
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+/**
+ * How a library too big for the whole-library rebuild gets its people: the batched placement opens the
+ * first people itself when none exist yet, rebuilds a missing or drifted centroid cache from the existing
+ * assignments instead of refusing, and keeps the cached photo count and cover of every person it touches.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class ClusterFacesBootstrapDbTest {
+
+    private val acct = "acct"
+    private val user = UserId(acct)
+    private lateinit var db: AppDatabase
+    private lateinit var cluster: ClusterFacesUseCase
+
+    @Before
+    fun setUp() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        db = Room.inMemoryDatabaseBuilder(ctx, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .setQueryExecutor { it.run() }
+            .build()
+        cluster = ClusterFacesUseCase(
+            db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.notPersonDao(),
+            db.personCoverDao(), db.clusterSummaryDao(), db,
+        )
+    }
+
+    @After
+    fun tearDown() = db.close()
+
+    /** A unit vector on [axis], nudged a little along one of twenty side axes, so faces of one identity sit
+     *  near 0.99 cosine and faces of different identities (different axes) at 0. */
+    private fun embedding(axis: Int, nudge: Int = 0): ByteArray {
+        val v = FloatArray(FACE_EMBEDDING_DIM)
+        v[axis] = 1f
+        v[200 + nudge % 20] = 0.1f
+        val buffer = ByteBuffer.allocate(FACE_EMBEDDING_DIM * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
+        for (x in normalize(v)) buffer.putFloat(x)
+        return buffer.array()
+    }
+
+    private suspend fun face(photo: String, index: Int, personId: Long?, axis: Int, nudge: Int = 0, score: Float = 0.9f) =
+        db.faceDao().upsert(
+            FaceEntity(
+                id = "$photo#$index", userId = acct, photoKey = photo,
+                left = 0.1f, top = 0.2f, right = 0.3f, bottom = 0.4f, landmarks = "",
+                embedding = embedding(axis, nudge), personId = personId, score = score,
+            ),
+        )
+
+    /** Three identities of six clear faces each (two faces per photo) and four weak faces matching nobody. */
+    private suspend fun seedLibrary() {
+        for (identity in 0 until 3) {
+            for (i in 0 until 6) face("p$identity-${i / 2}", i % 2, null, axis = identity, nudge = i)
+        }
+        for (i in 0 until 4) face("w$i", 0, null, axis = 300 + i, score = 0.3f)
+    }
+
+    private suspend fun runBatches(limit: Int): IncrementalBatch {
+        val batch = IncrementalBatch(limit)
+        do {
+            batch.scanned = 0
+            assertTrue(cluster.assignNewFaces(user, batch = batch))
+        } while (batch.scanned == batch.limit)
+        return batch
+    }
+
+    @Test
+    fun `an empty cache over ungrouped faces is bootstrapped into people by the batches`() = runTest {
+        seedLibrary()
+        assertEquals(0, db.clusterSummaryDao().countForUser(acct))
+
+        val batch = runBatches(limit = 5)
+
+        val people = db.personDao().allForUser(acct)
+        assertEquals(3, people.size)
+        assertEquals(18, batch.placed)
+        assertEquals(3, batch.created)
+        assertEquals(4, db.faceDao().unclusteredCount(acct))
+        val summaries = db.clusterSummaryDao().getAllForUser(acct)
+        assertEquals(3, summaries.size)
+        assertEquals(db.faceDao().assignedFaceCount(acct), summaries.sumOf { it.memberCount })
+    }
+
+    @Test
+    fun `a person the batches open carries its photo count and a cover face`() = runTest {
+        seedLibrary()
+
+        runBatches(limit = 100)
+
+        for (person in db.personDao().allForUser(acct)) {
+            assertEquals(3, person.faceCount)
+            val cover = person.coverFaceId
+            assertNotNull(cover)
+            assertEquals(person.id, db.faceDao().faceById(cover!!)!!.personId)
+        }
+    }
+
+    @Test
+    fun `a missing cache over existing people is rebuilt from the assignments and then used`() = runTest {
+        db.personDao().upsert(PersonEntity(id = 1L, userId = acct, faceCount = 2))
+        face("a0", 0, 1L, axis = 0)
+        face("a1", 0, 1L, axis = 0, nudge = 1)
+        face("n0", 0, null, axis = 0, nudge = 2)
+        assertEquals(0, db.clusterSummaryDao().countForUser(acct))
+
+        val batch = runBatches(limit = 10)
+
+        assertEquals(1L, db.faceDao().faceById("n0#0")!!.personId)
+        assertEquals(1, batch.placed)
+        val summaries = db.clusterSummaryDao().getAllForUser(acct)
+        assertEquals(1, summaries.size)
+        assertEquals(3, summaries.single().memberCount)
+    }
+
+    @Test
+    fun `a drifted cache is rebuilt rather than refused`() = runTest {
+        db.personDao().upsert(PersonEntity(id = 1L, userId = acct, faceCount = 2))
+        face("a0", 0, 1L, axis = 0)
+        face("a1", 0, 1L, axis = 0, nudge = 1)
+        db.clusterSummaryDao().upsert(ClusterSummaryEntity(1L, acct, embedding(axis = 0), 1, FACE_MODEL_VERSION))
+        face("n0", 0, null, axis = 0, nudge = 2)
+
+        val batch = runBatches(limit = 10)
+
+        assertEquals(1L, db.faceDao().faceById("n0#0")!!.personId)
+        assertEquals(1, batch.placed)
+        assertEquals(3, db.clusterSummaryDao().getAllForUser(acct).single().memberCount)
+    }
+
+    @Test
+    fun `an unnamed person that gains faces on new photos gets its photo count recounted`() = runTest {
+        db.personDao().upsert(PersonEntity(id = 1L, userId = acct, faceCount = 2))
+        face("a0", 0, 1L, axis = 0)
+        face("a1", 0, 1L, axis = 0, nudge = 1)
+        db.clusterSummaryDao().upsert(ClusterSummaryEntity(1L, acct, embedding(axis = 0), 2, FACE_MODEL_VERSION))
+        face("n0", 0, null, axis = 0, nudge = 2)
+        face("n1", 0, null, axis = 0, nudge = 3)
+
+        runBatches(limit = 10)
+
+        assertEquals(4, db.personDao().personById(1L)!!.faceCount)
+    }
+
+    private suspend fun personOf(faceId: String): Long = db.faceDao().faceById(faceId)!!.personId!!
+
+    @Test
+    fun `a group whose faces carry a confirmed name takes that name`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1", "p0-1#0"), "Anna")
+
+        assertEquals(1, cluster.nameGroupsFromConfirmedFaces(user))
+
+        assertEquals("Anna", db.personDao().personById(personOf("p0-0#0"))!!.displayName)
+        assertEquals(null, db.personDao().personById(personOf("p1-0#0"))!!.displayName)
+    }
+
+    @Test
+    fun `the name most of a group's faces carry wins`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1"), "Anna")
+        db.faceDao().labelFacesByIds(listOf("p0-1#0"), "Ben")
+
+        cluster.nameGroupsFromConfirmedFaces(user)
+
+        assertEquals("Anna", db.personDao().personById(personOf("p0-0#0"))!!.displayName)
+    }
+
+    @Test
+    fun `a name a person already holds is never put on a second group`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        val other = personOf("p1-0#0")
+        db.personDao().updateName(other, "Anna")
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1"), "Anna")
+
+        assertEquals(0, cluster.nameGroupsFromConfirmedFaces(user))
+
+        assertEquals(null, db.personDao().personById(personOf("p0-0#0"))!!.displayName)
+    }
+
+    @Test
+    fun `of two groups carrying the same name the one with more named faces claims it`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1", "p0-1#0"), "Anna")
+        db.faceDao().labelFacesByIds(listOf("p1-0#0"), "Anna")
+
+        assertEquals(1, cluster.nameGroupsFromConfirmedFaces(user))
+
+        assertEquals("Anna", db.personDao().personById(personOf("p0-0#0"))!!.displayName)
+        assertEquals(null, db.personDao().personById(personOf("p1-0#0"))!!.displayName)
+    }
+
+    @Test
+    fun `a write check that says no names nothing`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1"), "Anna")
+
+        assertEquals(0, cluster.nameGroupsFromConfirmedFaces(user) { false })
+
+        assertEquals(null, db.personDao().personById(personOf("p0-0#0"))!!.displayName)
+    }
+
+    @Test
+    fun `matching in slices gives the assignment one call gives`() = runTest {
+        val rnd = java.util.Random(5)
+        fun unit(): FloatArray = normalize(FloatArray(FACE_EMBEDDING_DIM) { rnd.nextGaussian().toFloat() })
+        val centroids = List(260) { unit() }
+        val samples = List(640) { i ->
+            val base = centroids[i % centroids.size]
+            val noisy = FloatArray(FACE_EMBEDDING_DIM) { base[it] + 0.03f * rnd.nextGaussian().toFloat() }
+            FaceSample(normalize(noisy), score = 0.9f, confident = i % 5 != 0)
+        }
+
+        val whole = assignIncremental(samples, centroids)
+        val sliced = assignIncrementalParallel(samples, centroids)
+
+        assertTrue(whole.any { it >= 0 })
+        assertTrue(whole.contentEquals(sliced))
+    }
+
+    /** A unit vector [degrees] round in the plane of the first two axes, nudged along a side axis, so faces
+     *  at the same angle sit near 0.99 cosine and faces a known angle apart at the cosine of that angle. */
+    private fun embeddingAt(degrees: Double, nudge: Int = 0): ByteArray {
+        val v = FloatArray(FACE_EMBEDDING_DIM)
+        v[0] = Math.cos(Math.toRadians(degrees)).toFloat()
+        v[1] = Math.sin(Math.toRadians(degrees)).toFloat()
+        v[200 + nudge % 20] = 0.05f
+        val buffer = ByteBuffer.allocate(FACE_EMBEDDING_DIM * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
+        for (x in normalize(v)) buffer.putFloat(x)
+        return buffer.array()
+    }
+
+    private suspend fun groupAt(personId: Long, degrees: Double, faces: Int, name: String? = null, other: Boolean = false) {
+        db.personDao().upsert(PersonEntity(id = personId, userId = acct, displayName = name, faceCount = faces, isOther = other))
+        for (i in 0 until faces) {
+            db.faceDao().upsert(
+                FaceEntity(
+                    id = "g$personId-$i#0", userId = acct, photoKey = "g$personId-$i",
+                    left = 0.1f, top = 0.2f, right = 0.3f, bottom = 0.4f, landmarks = "",
+                    embedding = embeddingAt(degrees, i), personId = personId, score = 0.9f,
+                ),
+            )
+        }
+    }
+
+    /** Builds the centroid cache from the assignments, the way a batched run's first call does. */
+    private suspend fun cacheTheGroups() {
+        assertTrue(cluster.assignNewFaces(user, IncrementalBatch(limit = 10)))
+    }
+
+    @Test
+    fun `two groups of one person are merged and the bigger one survives`() = runTest {
+        groupAt(1L, 0.0, faces = 4)
+        groupAt(2L, 3.0, faces = 2)
+        cacheTheGroups()
+
+        assertEquals(1, cluster.mergeSimilarGroups(user))
+
+        assertEquals(listOf(1L), db.personDao().allForUser(acct).map { it.id })
+        assertEquals(6, db.faceDao().faceCountForPerson(acct, 1L))
+        assertEquals(6, db.personDao().personById(1L)!!.faceCount)
+        val summaries = db.clusterSummaryDao().getAllForUser(acct)
+        assertEquals(1, summaries.size)
+        assertEquals(6, summaries.single().memberCount)
+    }
+
+    @Test
+    fun `groups of different people stay apart`() = runTest {
+        groupAt(1L, 0.0, faces = 3)
+        groupAt(2L, 90.0, faces = 3)
+        cacheTheGroups()
+
+        assertEquals(0, cluster.mergeSimilarGroups(user))
+
+        assertEquals(2, db.personDao().countForUser(acct))
+    }
+
+    @Test
+    fun `two groups carrying different names never merge`() = runTest {
+        groupAt(1L, 0.0, faces = 3, name = "Anna")
+        groupAt(2L, 3.0, faces = 3, name = "Ben")
+        cacheTheGroups()
+
+        assertEquals(0, cluster.mergeSimilarGroups(user))
+
+        assertEquals(2, db.personDao().countForUser(acct))
+    }
+
+    @Test
+    fun `a named group outlives a bigger unnamed one`() = runTest {
+        groupAt(1L, 0.0, faces = 5)
+        groupAt(2L, 3.0, faces = 2, name = "Anna")
+        cacheTheGroups()
+
+        assertEquals(1, cluster.mergeSimilarGroups(user))
+
+        val left = db.personDao().allForUser(acct).single()
+        assertEquals(2L, left.id)
+        assertEquals("Anna", left.displayName)
+        assertEquals(7, db.faceDao().faceCountForPerson(acct, 2L))
+    }
+
+    @Test
+    fun `two groups holding the same name are merged`() = runTest {
+        groupAt(1L, 0.0, faces = 3, name = "Anna")
+        groupAt(2L, 3.0, faces = 2, name = "Anna")
+        cacheTheGroups()
+
+        assertEquals(1, cluster.mergeSimilarGroups(user))
+
+        assertEquals("Anna", db.personDao().allForUser(acct).single().displayName)
+    }
+
+    @Test
+    fun `the Unsorted bucket takes no part in a merge`() = runTest {
+        groupAt(1L, 0.0, faces = 3)
+        groupAt(2L, 3.0, faces = 3, other = true)
+        cacheTheGroups()
+
+        assertEquals(0, cluster.mergeSimilarGroups(user))
+
+        assertEquals(2, db.personDao().countForUser(acct))
+    }
+
+    @Test
+    fun `a chain of near groups does not fuse the people at its ends`() = runTest {
+        groupAt(1L, 0.0, faces = 3)
+        groupAt(2L, 50.0, faces = 10)
+        groupAt(3L, 100.0, faces = 3)
+        cacheTheGroups()
+
+        assertEquals(1, cluster.mergeSimilarGroups(user))
+
+        assertEquals(2, db.personDao().countForUser(acct))
+        assertEquals(db.faceDao().assignedFaceCount(acct), db.clusterSummaryDao().getAllForUser(acct).sumOf { it.memberCount })
+    }
+
+    @Test
+    fun `a write check that says no merges nothing`() = runTest {
+        groupAt(1L, 0.0, faces = 4)
+        groupAt(2L, 3.0, faces = 2)
+        cacheTheGroups()
+
+        assertEquals(0, cluster.mergeSimilarGroups(user, { false }))
+
+        assertEquals(2, db.personDao().countForUser(acct))
+    }
+
+    @Test
+    fun `the faces nobody took go to one Unsorted bucket that the cache accounts for`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        assertEquals(4, db.faceDao().unclusteredCount(acct))
+
+        assertEquals(4, cluster.moveLeftoverToUnsorted(user))
+
+        assertEquals(0, db.faceDao().unclusteredCount(acct))
+        val other = db.personDao().otherPersonId(acct)!!
+        assertEquals(4, db.faceDao().faceCountForPerson(acct, other))
+        assertEquals(4, db.personDao().personById(other)!!.faceCount)
+        assertNotNull(db.personDao().personById(other)!!.coverFaceId)
+        assertEquals(db.faceDao().assignedFaceCount(acct), db.clusterSummaryDao().getAllForUser(acct).sumOf { it.memberCount })
+        assertEquals(0, cluster.moveLeftoverToUnsorted(user))
+    }
+
+    @Test
+    fun `a second pass reuses the Unsorted bucket and a face in it is never matched`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        cluster.moveLeftoverToUnsorted(user)
+        val other = db.personDao().otherPersonId(acct)!!
+        face("late", 0, null, axis = 400, score = 0.3f)
+
+        assertEquals(1, cluster.moveLeftoverToUnsorted(user))
+
+        assertEquals(other, db.personDao().otherPersonId(acct))
+        assertEquals(5, db.faceDao().faceCountForPerson(acct, other))
+        assertEquals(db.faceDao().assignedFaceCount(acct), db.clusterSummaryDao().getAllForUser(acct).sumOf { it.memberCount })
+    }
+
+    @Test
+    fun `a confirmed name on a face in the Unsorted bucket names nothing`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        cluster.moveLeftoverToUnsorted(user)
+        db.faceDao().labelFacesByIds(listOf("w0#0", "w1#0"), "Anna")
+
+        assertEquals(0, cluster.nameGroupsFromConfirmedFaces(user))
+    }
+
+    @Test
+    fun `a batch call with no cache and no people still refuses the unbatched path`() = runTest {
+        seedLibrary()
+
+        assertEquals(false, cluster.assignNewFaces(user))
+        assertEquals(0, db.personDao().countForUser(acct))
+    }
+}

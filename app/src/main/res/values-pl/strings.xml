@@ -2538,7 +2538,9 @@
     <string name="whats_new_260_duplicates_title">Przegląd duplikatów</string>
     <string name="whats_new_260_duplicates_body">Szczypnij, przeciągnij lub dotknij dwukrotnie, aby powiększyć kopię nawet 6 razy, zanim zdecydujesz, co usunąć. „Usuń grupę” zaznacza naraz wszystkie kopie grupy.</string>
     <string name="whats_new_260_intro_title">Zawiera wcześniejsze wersje testowe</string>
-    <string name="whats_new_260_intro_body">Ta wersja zawiera też wszystko z wersji testowych 1 i 2. Kolejne karty pokazują tylko to, co nowego od tamtej pory.</string>
+    <string name="whats_new_260_intro_body">Ta wersja zawiera też wszystko z wersji testowych 1 do 3. Kolejne karty pokazują tylko to, co nowego od tamtej pory.</string>
+    <string name="whats_new_260_group_title">Grupowanie twarzy w dużych bibliotekach</string>
+    <string name="whats_new_260_group_body">Biblioteki z ponad trzydziestoma tysiącami twarzy są teraz grupowane do końca. Osoby pojawiają się w trakcie pracy, nadane imiona zostają przy swoich osobach, a praca trwa w tle także po opuszczeniu aplikacji.</string>
     <string name="whats_new_260_addalbum_title">Dodaj do innego albumu</string>
     <string name="whats_new_260_addalbum_body">Zaznacz zdjęcia w albumie i wybierz „Dodaj do innego albumu” na pasku zaznaczania. Trafiają do drugiego albumu i zostają w tym, a w selektorze można utworzyć nowy album.</string>
     <string name="whats_new_260_scans_title">Skanowanie dużych bibliotek</string>

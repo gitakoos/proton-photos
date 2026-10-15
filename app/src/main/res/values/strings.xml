@@ -2460,7 +2460,9 @@
     <string name="whats_new_260_duplicates_title">Duplicate review</string>
     <string name="whats_new_260_duplicates_body">Pinch, drag or double tap to enlarge a copy up to 6x before you decide what to delete. “Delete group” selects every copy of a group at once.</string>
     <string name="whats_new_260_intro_title">Includes earlier test builds</string>
-    <string name="whats_new_260_intro_body">This build also contains everything from test builds 1 and 2. The cards that follow show only what is new since then.</string>
+    <string name="whats_new_260_intro_body">This build also contains everything from test builds 1 to 3. The cards that follow show only what is new since then.</string>
+    <string name="whats_new_260_group_title">Face grouping on big libraries</string>
+    <string name="whats_new_260_group_body">Libraries with more than thirty thousand faces now finish grouping. People fill in while it runs, the names you gave stay on their people, and it keeps going in the background once you leave the app.</string>
     <string name="whats_new_260_addalbum_title">Add to another album</string>
     <string name="whats_new_260_addalbum_body">Select photos in an album and choose “Add to another album” in the selection bar. They join the other album and stay in this one, and the picker can create a new album.</string>
     <string name="whats_new_260_scans_title">Scans for big libraries</string>
