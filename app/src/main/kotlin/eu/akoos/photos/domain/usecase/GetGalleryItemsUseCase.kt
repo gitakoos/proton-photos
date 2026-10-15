@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.shareIn
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.repository.SyncStateSnapshot
 import eu.akoos.photos.di.AppScope
+import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -47,6 +48,7 @@ import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -64,6 +66,8 @@ class GetGalleryItemsUseCase @Inject constructor(
     // One shared upstream merge per user, so the associateBy/groupBy/sort runs ONCE across all
     // collectors (Gallery, Search, Calendar, …) instead of re-running per cold subscription.
     private val cache = ConcurrentHashMap<UserId, SharedFlow<List<GalleryItem>>>()
+
+    private val firstMergeMarked = AtomicBoolean(false)
 
     @OptIn(FlowPreview::class)
     fun invoke(userId: UserId): Flow<List<GalleryItem>> =
@@ -95,7 +99,15 @@ class GetGalleryItemsUseCase @Inject constructor(
                 // period), then cached by shareIn(replay=1) for any late collector. `distinctUntilChanged`
                 // above already suppressed no-op re-emits, so a quiet library samples its one real value.
                 .sample(RECOMPUTE_THROTTLE_MS)
-                .map { merge(it.local, it.cloud, it.sync, it.hiddenLinkIds) }
+                .map { input ->
+                    // The first merge of the process is timed (library size in, size out) so a cold
+                    // start on a big library shows how long the merge takes next to the device scan.
+                    val first = firstMergeMarked.compareAndSet(false, true)
+                    if (first) PerfDiagnostics.mark("gallerymerge:start", input.local.size)
+                    merge(input.local, input.cloud, input.sync, input.hiddenLinkIds).also {
+                        if (first) PerfDiagnostics.mark("gallerymerge:end", it.size)
+                    }
+                }
                 // The merge/sort over the full library is CPU work that must not run on the
                 // collector's Main dispatcher — a decrypt burst re-emits this per write.
                 .flowOn(Dispatchers.Default)

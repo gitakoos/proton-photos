@@ -83,10 +83,23 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Privacy: every Log call is stripped from a published release. A local measurement build
+            // passes -PpfpKeepLogs to keep them readable over adb; it is never published.
+            if (!project.hasProperty("pfpKeepLogs")) {
+                proguardFiles("proguard-strip-logs.pro")
+            }
             // Apply the release-signing config only when keystore.properties is present.
             // CI / fresh clones without the keystore still build (unsigned) so contributors
             // can iterate.
             if (keystoreProps != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+        debug {
+            // A local run passes -PpfpSignWithRelease to sign the debug build (and its test APK) with the
+            // release key, so it installs over a release-signed app and keeps its data, and the release
+            // build can replace it later the same way. Never used for anything that is published.
+            if (project.hasProperty("pfpSignWithRelease") && keystoreProps != null) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }

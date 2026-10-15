@@ -58,6 +58,8 @@ object PerfDiagnostics {
     // far fewer; the cap only stops a misbehaving caller from growing the maps.
     private const val MAX_PHASES = 24
 
+    private const val LOG_TAG = "PFPPerf"
+
     private const val MAX_LABEL_CHARS = 32
     private const val START_SUFFIX = ":start"
     private const val END_SUFFIX = ":end"
@@ -205,7 +207,9 @@ object PerfDiagnostics {
         }
 
         if (phaseLines.size >= MAX_PHASE_LINES) phaseLines.removeFirst()
-        phaseLines.addLast(stamp(now, phaseLine(label, items, usedMb, maxMb, nativeMb, growthMb, tookMs)))
+        val line = stamp(now, phaseLine(label, items, usedMb, maxMb, nativeMb, growthMb, tookMs))
+        phaseLines.addLast(line)
+        tee(line)
     }
 
     /** The newest [max] phase lines, oldest first. The buffer dies with the process, so an OOM crash
@@ -308,8 +312,16 @@ object PerfDiagnostics {
 
     private fun append(now: Long, message: String) {
         if (lines.size >= MAX_LINES) lines.removeFirst()
-        lines.addLast(stamp(now, message))
+        val line = stamp(now, message)
+        lines.addLast(line)
         lastAppendedAtMs = now
+        tee(line)
+    }
+
+    /** Mirrors a numbers-only line to logcat. A published release strips every Log call, so this only
+     *  speaks in a debug build or a measurement build made with `-PpfpKeepLogs`. */
+    private fun tee(line: String) {
+        android.util.Log.i(LOG_TAG, line)
     }
 
     /** [message] behind the relative timestamp shared by the sample lines and the phase markers. */
