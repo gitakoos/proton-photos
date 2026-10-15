@@ -2551,6 +2551,7 @@ class FaceIndexingScheduler @Inject constructor(
         }
         var examined = 0
         var progressTotal = backlogAtStart
+        var sweepsDone = false
         try {
             for (sweep in 1..MAX_BATCH_SWEEPS) {
                 val batch = IncrementalBatch(INCREMENTAL_BATCH_SIZE)
@@ -2580,13 +2581,16 @@ class FaceIndexingScheduler @Inject constructor(
                 // an earlier batch found nobody for.
                 if (batch.created == 0) break
             }
+            sweepsDone = true
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
             Log.w(TAG, "batched incremental assign failed: ${e.message}")
             return false
         } finally {
-            if (hosted) _progress.value = progressBefore
+            // Left as it is when the sweeps finished: the closing steps below are still the hosted work, and
+            // a state that stopped reading Running would end the service before they run.
+            if (hosted && !sweepsDone) _progress.value = progressBefore
         }
         // The steps the whole-library rebuild ends with, done on the groups the batches formed: fold together
         // the groups that are one person (on the centroids), give the groups whose faces already carry a
