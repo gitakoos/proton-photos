@@ -2505,7 +2505,12 @@ class FaceIndexingScheduler @Inject constructor(
             // Only faces beyond what the last batched run left ungrouped on purpose (the weak ones that
             // matched nobody) are new work, so a launch that finds nothing new does not read them all again.
             val ungrouped = runCatching { faceDao.unclusteredCount(accountOf(userId)) }.getOrDefault(0)
-            if (!exceedsRegroupBaseline(ungrouped, currentRegroupBaseline(userId))) return true
+            if (!exceedsRegroupBaseline(ungrouped, currentRegroupBaseline(userId))) {
+                // Nothing new to place, but names put back on the faces since the last run (a restore, an
+                // import) still have to reach their groups: one aggregate, cheap enough to run every time.
+                nameBatchedGroups(userId, fenceToken)
+                return true
+            }
             return placeBacklogInBatches(userId, fenceToken, finalPass)
         }
         return try {
@@ -2612,9 +2617,7 @@ class FaceIndexingScheduler @Inject constructor(
                     clusterFacesUseCase.mergeSimilarGroups(userId, { writeFence.allows(fenceToken) })
                 }
             }
-            named = guardedGroupingStep("naming the batched groups") {
-                clusterFacesUseCase.nameGroupsFromConfirmedFaces(userId) { writeFence.allows(fenceToken) }
-            }
+            named = nameBatchedGroups(userId, fenceToken)
             if (finalPass) {
                 unsorted = guardedGroupingStep("filling the Unsorted bucket") {
                     clusterFacesUseCase.moveLeftoverToUnsorted(userId) { writeFence.allows(fenceToken) }
@@ -2638,6 +2641,13 @@ class FaceIndexingScheduler @Inject constructor(
         )
         return true
     }
+
+    /** Puts the confirmed names on the groups whose faces carry them ([ClusterFacesUseCase.nameGroupsFromConfirmedFaces]),
+     *  returning how many it named; 0 when it fails. */
+    private suspend fun nameBatchedGroups(userId: UserId?, fenceToken: Long): Int =
+        guardedGroupingStep("naming the batched groups") {
+            clusterFacesUseCase.nameGroupsFromConfirmedFaces(userId) { writeFence.allows(fenceToken) }
+        }
 
     /** Runs one closing step of a batched run, giving 0 when it fails so one step failing leaves the rest to
      *  run; cancellation still propagates. */
@@ -2695,7 +2705,10 @@ class FaceIndexingScheduler @Inject constructor(
             // A curation edit or a repeated request finds nothing new beyond the last run's leftover: the
             // groups were edited in place, and the next batched run rebuilds the cache it clears.
             val ungrouped = runCatching { faceDao.unclusteredCount(accountOf(userId)) }.getOrDefault(0)
-            if (!exceedsRegroupBaseline(ungrouped, currentRegroupBaseline(userId))) return true
+            if (!exceedsRegroupBaseline(ungrouped, currentRegroupBaseline(userId))) {
+                nameBatchedGroups(userId, fenceToken)
+                return true
+            }
             val completed = placeBacklogInBatches(userId, fenceToken)
             saveWalkState(userId)
             pushLibraryCounts(userId)
