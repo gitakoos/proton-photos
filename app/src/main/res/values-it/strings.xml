@@ -2459,7 +2459,9 @@
     <string name="whats_new_260_duplicates_title">Revisione dei duplicati</string>
     <string name="whats_new_260_duplicates_body">Pizzica, trascina o tocca due volte per ingrandire una copia fino a 6 volte prima di decidere cosa eliminare. “Elimina gruppo” seleziona in un colpo tutte le copie di un gruppo.</string>
     <string name="whats_new_260_intro_title">Include le versioni di test precedenti</string>
-    <string name="whats_new_260_intro_body">Questa versione contiene anche tutto delle versioni di test 1 e 2. Le schede seguenti mostrano solo le novità da allora.</string>
+    <string name="whats_new_260_intro_body">Questa versione contiene anche tutto delle versioni di test da 1 a 3. Le schede seguenti mostrano solo le novità da allora.</string>
+    <string name="whats_new_260_group_title">Raggruppamento dei volti nelle librerie grandi</string>
+    <string name="whats_new_260_group_body">Le librerie con più di trentamila volti ora completano il raggruppamento. Le persone compaiono mentre procede, i nomi che hai dato restano alle loro persone e il lavoro continua in background quando esci dall\'app.</string>
     <string name="whats_new_260_addalbum_title">Aggiungi a un altro album</string>
     <string name="whats_new_260_addalbum_body">Seleziona le foto in un album e scegli “Aggiungi a un altro album” nella barra di selezione. Entrano nell\'altro album e restano in questo, e dal selettore si può creare un nuovo album.</string>
     <string name="whats_new_260_scans_title">Scansioni per librerie grandi</string>

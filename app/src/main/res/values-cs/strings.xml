@@ -2544,7 +2544,9 @@
     <string name="whats_new_260_duplicates_title">Kontrola duplicit</string>
     <string name="whats_new_260_duplicates_body">Sevřením, tažením nebo dvojitým klepnutím zvětšíte kopii až 6krát, než se rozhodnete, co smazat. „Smazat skupinu“ vybere najednou všechny kopie skupiny.</string>
     <string name="whats_new_260_intro_title">Obsahuje dřívější testovací verze</string>
-    <string name="whats_new_260_intro_body">Tato verze obsahuje i vše z testovacích verzí 1 a 2. Následující karty ukazují jen to, co je nového od té doby.</string>
+    <string name="whats_new_260_intro_body">Tato verze obsahuje i vše z testovacích verzí 1 až 3. Následující karty ukazují jen to, co je nového od té doby.</string>
+    <string name="whats_new_260_group_title">Seskupování tváří u velkých knihoven</string>
+    <string name="whats_new_260_group_body">Knihovny s více než třiceti tisíci tvářemi se nově seskupí celé. Osoby přibývají už během práce, zadaná jména u nich zůstávají a práce pokračuje na pozadí, i když aplikaci opustíte.</string>
     <string name="whats_new_260_addalbum_title">Přidat do jiného alba</string>
     <string name="whats_new_260_addalbum_body">Vyberte v albu fotky a zvolte „Přidat do jiného alba“ v liště výběru. Fotky se přidají do druhého alba a v tomto zůstanou, a ve výběru lze vytvořit i nové album.</string>
     <string name="whats_new_260_scans_title">Skenování velkých knihoven</string>

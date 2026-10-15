@@ -2545,7 +2545,9 @@
     <string name="whats_new_260_duplicates_title">Kontrola duplikátov</string>
     <string name="whats_new_260_duplicates_body">Štipnutím, ťahaním alebo dvojitým ťuknutím zväčšíte kópiu až 6-krát, kým sa rozhodnete, čo odstrániť. „Odstrániť skupinu“ vyberie naraz všetky kópie skupiny.</string>
     <string name="whats_new_260_intro_title">Obsahuje skoršie testovacie verzie</string>
-    <string name="whats_new_260_intro_body">Táto verzia obsahuje aj všetko z testovacích verzií 1 a 2. Nasledujúce karty ukazujú len to, čo je odvtedy nové.</string>
+    <string name="whats_new_260_intro_body">Táto verzia obsahuje aj všetko z testovacích verzií 1 až 3. Nasledujúce karty ukazujú len to, čo je odvtedy nové.</string>
+    <string name="whats_new_260_group_title">Zoskupovanie tvárí vo veľkých knižniciach</string>
+    <string name="whats_new_260_group_body">Knižnice s viac ako tridsiatimi tisícmi tvárí sa teraz zoskupia celé. Osoby pribúdajú už počas práce, zadané mená zostávajú pri svojich osobách a práca pokračuje na pozadí, aj keď aplikáciu opustíte.</string>
     <string name="whats_new_260_addalbum_title">Pridať do iného albumu</string>
     <string name="whats_new_260_addalbum_body">Vyberte v albume fotky a zvoľte „Pridať do iného albumu“ v lište výberu. Fotky sa pridajú do druhého albumu a v tomto zostanú, a vo výbere možno vytvoriť aj nový album.</string>
     <string name="whats_new_260_scans_title">Skenovanie veľkých knižníc</string>

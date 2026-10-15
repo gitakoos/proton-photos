@@ -2420,7 +2420,9 @@
     <string name="whats_new_260_duplicates_title">Duplikate prüfen</string>
     <string name="whats_new_260_duplicates_body">Mit Zwei-Finger-Zoom, Ziehen oder Doppeltippen vergrößerst du eine Kopie bis auf das 6-Fache, bevor du entscheidest, was gelöscht wird. „Gruppe löschen“ markiert alle Kopien einer Gruppe auf einmal.</string>
     <string name="whats_new_260_intro_title">Enthält frühere Testversionen</string>
-    <string name="whats_new_260_intro_body">Dieser Build enthält auch alles aus den Testversionen 1 und 2. Die folgenden Karten zeigen nur, was seitdem neu ist.</string>
+    <string name="whats_new_260_intro_body">Dieser Build enthält auch alles aus den Testversionen 1 bis 3. Die folgenden Karten zeigen nur, was seitdem neu ist.</string>
+    <string name="whats_new_260_group_title">Gesichtsgruppierung bei großen Bibliotheken</string>
+    <string name="whats_new_260_group_body">Bibliotheken mit mehr als dreißigtausend Gesichtern werden jetzt vollständig gruppiert. Personen erscheinen schon während der Arbeit, die von dir vergebenen Namen bleiben bei ihren Personen, und die Arbeit läuft im Hintergrund weiter, sobald du die App verlässt.</string>
     <string name="whats_new_260_addalbum_title">Zu anderem Album hinzufügen</string>
     <string name="whats_new_260_addalbum_body">Wähle in einem Album Fotos aus und tippe in der Auswahlleiste auf „Zu anderem Album hinzufügen“. Sie kommen ins andere Album und bleiben in diesem, und in der Auswahl lässt sich ein neues Album anlegen.</string>
     <string name="whats_new_260_scans_title">Scans für große Bibliotheken</string>

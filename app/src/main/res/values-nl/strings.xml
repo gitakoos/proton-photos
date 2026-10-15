@@ -2447,7 +2447,9 @@
     <string name="whats_new_260_duplicates_title">Duplicaten bekijken</string>
     <string name="whats_new_260_duplicates_body">Knijp, sleep of dubbeltik om een kopie tot 6 keer te vergroten voordat je bepaalt wat er weg moet. “Groep verwijderen” selecteert alle kopieën van een groep in één keer.</string>
     <string name="whats_new_260_intro_title">Bevat eerdere testversies</string>
-    <string name="whats_new_260_intro_body">Deze versie bevat ook alles uit testversie 1 en 2. De kaarten hierna tonen alleen wat sindsdien nieuw is.</string>
+    <string name="whats_new_260_intro_body">Deze versie bevat ook alles uit testversie 1 tot en met 3. De kaarten hierna tonen alleen wat sindsdien nieuw is.</string>
+    <string name="whats_new_260_group_title">Gezichten groeperen in grote bibliotheken</string>
+    <string name="whats_new_260_group_body">Bibliotheken met meer dan dertigduizend gezichten worden nu helemaal gegroepeerd. Personen verschijnen terwijl het bezig is, de namen die je hebt gegeven blijven bij hun personen en het werk gaat op de achtergrond door zodra je de app verlaat.</string>
     <string name="whats_new_260_addalbum_title">Toevoegen aan ander album</string>
     <string name="whats_new_260_addalbum_body">Selecteer foto\'s in een album en kies “Toevoegen aan ander album” in de selectiebalk. Ze komen in het andere album en blijven in dit album, en in de kiezer kun je een nieuw album maken.</string>
     <string name="whats_new_260_scans_title">Scans voor grote bibliotheken</string>
