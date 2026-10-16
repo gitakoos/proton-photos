@@ -261,6 +261,7 @@ internal fun VideoControlPill(
     isScrubbing: Boolean = false,
     onScrubbingChange: (Boolean) -> Unit = {},
     onPlay: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var isPlaying  by remember { mutableStateOf(false) }
     var isMuted    by remember { mutableStateOf(false) }
@@ -290,7 +291,7 @@ internal fun VideoControlPill(
     }
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
             .background(PillBg, infoPillShape)

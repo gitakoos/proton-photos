@@ -2299,13 +2299,17 @@ fun PhotoViewerScreen(
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
+        // A landscape screen is short: the controls take less of it, and a video's info pill shares the
+        // control pill's row, so the stack covers less of the picture.
+        val chromeLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(bottom = 16.dp),
+                .padding(bottom = if (chromeLandscape) 4.dp else 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(if (chromeLandscape) 4.dp else 10.dp),
         ) {
             // Full-quality-paused hint — sits with the bottom controls and is dismissable, shown
             // only while the Wi-Fi-only-for-fullres preference skipped the auto-download on a
@@ -2345,14 +2349,97 @@ fun PhotoViewerScreen(
             // Shared across the pill and the reel filmstrip so a drag on either hides the pill's
             // paused-only frame-step buttons (a seek briefly reports the player as not playing).
             var isScrubbing by remember { mutableStateOf(false) }
+            // Info pill, always shown and unchanged; in a landscape video it sits in the control pill's row
+            val infoPill: @Composable () -> Unit = {
+                val currentItem = items.getOrNull(pagerState.currentPage)
+                Row(
+                    modifier = Modifier
+                        .background(PillBg, infoPillShape)
+                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .clickable { showMetadata = true }
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // Cloud/device badge — sits to the LEFT of the position counter, with a thin
+                    // separator. Mirrors the gallery cell badges so the user can tell at a glance
+                    // whether the currently viewed photo is in cloud + on device (green cloud),
+                    // cloud-only (white cloud), or device-only (no badge — no point showing
+                    // anything since the user is obviously looking at it).
+                    // Upgrade a stale CloudOnly to "synced" once we know the cloud linkId is
+                    // mirrored to a device file — happens after the user downloads it from this
+                    // screen but the static `items` snapshot can't reflect it.
+                    // A vaulted photo is upgraded the same way from the other side: vaulting removes the
+                    // MediaStore row that made it a Synced item, so it opens here as LocalOnly however it
+                    // was reached, and the vault's cloud-id records are the only thing left that can say
+                    // its Drive copy is still there.
+                    val effectiveSynced = currentItem is GalleryItem.Synced ||
+                        (currentItem is GalleryItem.CloudOnly &&
+                            localUriByLinkId.containsKey(currentItem.cloud.linkId)) ||
+                        (currentItem is GalleryItem.LocalOnly &&
+                            currentItem.local.uri in pairedVaultUris)
+                    when {
+                        effectiveSynced -> {
+                            Icon(
+                                Icons.Default.Cloud,
+                                contentDescription = stringResource(R.string.cd_status_backed_up_device),
+                                tint = cloudBadgeTint(CloudBadgeSurface.Pill),
+                                modifier = Modifier.size(13.dp),
+                            )
+                            Text("·", color = FgMute, fontSize = 13.sp)
+                        }
+                        currentItem is GalleryItem.CloudOnly -> {
+                            Icon(
+                                Icons.Default.Cloud,
+                                contentDescription = stringResource(R.string.cd_status_cloud_only),
+                                // Theme-reactive tint: the pill background turns near-white in
+                                // light mode, where a fixed white glyph disappears entirely.
+                                tint = FgPrimary,
+                                modifier = Modifier.size(13.dp),
+                            )
+                            Text("·", color = FgMute, fontSize = 13.sp)
+                        }
+                        else -> { /* LocalOnly — no badge */ }
+                    }
+                    Text(
+                        "${pagerState.currentPage + 1} / ${items.size}",
+                        color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                    )
+                    if (currentItem != null) {
+                        Text("·", color = FgMute, fontSize = 13.sp)
+                        Text(formatItemDate(currentItem), color = FgDim, fontSize = 13.sp)
+                    }
+                    Text("›", color = FgMute, fontSize = 15.sp)
+                }
+            }
+
             if (isVideoItem) {
-                VideoControlPill(
-                    player       = currentPlayer,
-                    videoStarted = videoStarted,
-                    isScrubbing  = isScrubbing,
-                    onScrubbingChange = { isScrubbing = it },
-                    onPlay       = { videoStarted = true },
-                )
+                if (chromeLandscape) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        VideoControlPill(
+                            player       = currentPlayer,
+                            videoStarted = videoStarted,
+                            isScrubbing  = isScrubbing,
+                            onScrubbingChange = { isScrubbing = it },
+                            onPlay       = { videoStarted = true },
+                            modifier     = Modifier.weight(1f),
+                        )
+                        infoPill()
+                        Spacer(Modifier.width(12.dp))
+                    }
+                } else {
+                    VideoControlPill(
+                        player       = currentPlayer,
+                        videoStarted = videoStarted,
+                        isScrubbing  = isScrubbing,
+                        onScrubbingChange = { isScrubbing = it },
+                        onPlay       = { videoStarted = true },
+                    )
+                }
             }
 
             // Motion-photo control pill — play or stop the embedded clip from the bottom
@@ -2455,67 +2542,7 @@ fun PhotoViewerScreen(
                 },
             )
 
-            // Info pill — always, unchanged
-            val currentItem = items.getOrNull(pagerState.currentPage)
-            Row(
-                modifier = Modifier
-                    .background(PillBg, infoPillShape)
-                    .border(0.5.dp, PillBorder, infoPillShape)
-                    .clickable { showMetadata = true }
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // Cloud/device badge — sits to the LEFT of the position counter, with a thin
-                // separator. Mirrors the gallery cell badges so the user can tell at a glance
-                // whether the currently viewed photo is in cloud + on device (green cloud),
-                // cloud-only (white cloud), or device-only (no badge — no point showing
-                // anything since the user is obviously looking at it).
-                // Upgrade a stale CloudOnly to "synced" once we know the cloud linkId is
-                // mirrored to a device file — happens after the user downloads it from this
-                // screen but the static `items` snapshot can't reflect it.
-                // A vaulted photo is upgraded the same way from the other side: vaulting removes the
-                // MediaStore row that made it a Synced item, so it opens here as LocalOnly however it
-                // was reached, and the vault's cloud-id records are the only thing left that can say
-                // its Drive copy is still there.
-                val effectiveSynced = currentItem is GalleryItem.Synced ||
-                    (currentItem is GalleryItem.CloudOnly &&
-                        localUriByLinkId.containsKey(currentItem.cloud.linkId)) ||
-                    (currentItem is GalleryItem.LocalOnly &&
-                        currentItem.local.uri in pairedVaultUris)
-                when {
-                    effectiveSynced -> {
-                        Icon(
-                            Icons.Default.Cloud,
-                            contentDescription = stringResource(R.string.cd_status_backed_up_device),
-                            tint = cloudBadgeTint(CloudBadgeSurface.Pill),
-                            modifier = Modifier.size(13.dp),
-                        )
-                        Text("·", color = FgMute, fontSize = 13.sp)
-                    }
-                    currentItem is GalleryItem.CloudOnly -> {
-                        Icon(
-                            Icons.Default.Cloud,
-                            contentDescription = stringResource(R.string.cd_status_cloud_only),
-                            // Theme-reactive tint: the pill background turns near-white in
-                            // light mode, where a fixed white glyph disappears entirely.
-                            tint = FgPrimary,
-                            modifier = Modifier.size(13.dp),
-                        )
-                        Text("·", color = FgMute, fontSize = 13.sp)
-                    }
-                    else -> { /* LocalOnly — no badge */ }
-                }
-                Text(
-                    "${pagerState.currentPage + 1} / ${items.size}",
-                    color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                )
-                if (currentItem != null) {
-                    Text("·", color = FgMute, fontSize = 13.sp)
-                    Text(formatItemDate(currentItem), color = FgDim, fontSize = 13.sp)
-                }
-                Text("›", color = FgMute, fontSize = 15.sp)
-            }
+            if (!(chromeLandscape && isVideoItem)) infoPill()
 
             // Trash action bar with Restore + Delete forever for the settled item, shown only when the
             // viewer was opened from Trash. Fades with the chrome; the Trash screen behind us runs the
