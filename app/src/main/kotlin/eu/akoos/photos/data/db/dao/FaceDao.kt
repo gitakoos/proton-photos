@@ -231,14 +231,16 @@ interface FaceDao {
 
     @Query(
         "SELECT id, photoKey, personId, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, " +
-            "`bottom` AS boxBottom, score FROM face WHERE userId = :userId AND photoKey IN (:photoKeys) " +
+            "`bottom` AS boxBottom, score FROM face WHERE photoKey IN (:photoKeys) AND +userId = :userId " +
             "AND rejected = 0 ORDER BY photoKey, score DESC",
     )
     suspend fun facesOnPhotosChunk(userId: String, photoKeys: List<String>): List<FaceOnPhoto>
 
     /** The account's faces among the given ids with their current person, so an assignment writes only
      *  this account's faces and knows which people it takes them from. Removed faces are included, since
-     *  assigning one brings it back. Chunked for the SQL host-variable limit. */
+     *  assigning one brings it back. Chunked for the SQL host-variable limit. The account term is written
+     *  `+userId` here and in the other id and photo-key list reads, so the lookup runs on the listed keys'
+     *  index: with no statistics SQLite would take the account index and read every face of the account. */
     suspend fun facesByIds(userId: String, faceIds: Collection<String>): List<FaceOnPhoto> {
         val out = ArrayList<FaceOnPhoto>()
         faceIds.toSet().forEachSqlChunk { out += facesByIdsChunk(userId, it) }
@@ -247,7 +249,7 @@ interface FaceDao {
 
     @Query(
         "SELECT id, photoKey, personId, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, " +
-            "`bottom` AS boxBottom, score FROM face WHERE userId = :userId AND id IN (:faceIds)",
+            "`bottom` AS boxBottom, score FROM face WHERE id IN (:faceIds) AND +userId = :userId",
     )
     suspend fun facesByIdsChunk(userId: String, faceIds: List<String>): List<FaceOnPhoto>
 
@@ -255,6 +257,16 @@ interface FaceDao {
      *  (centroid) to match candidates against in a "find more photos" sweep. */
     @Query("SELECT * FROM face WHERE userId = :userId AND personId = :personId AND rejected = 0")
     suspend fun facesForPerson(userId: String, personId: Long): List<FaceEntity>
+
+    /** [facesForPerson] without the embedding blob, in the same row order, so a person's next live cover
+     *  is picked without loading a recognition vector. The account term is written so it cannot pick the
+     *  account index, which would read every face of the account for each person; the person index keeps
+     *  the rows in the same order. */
+    @Query(
+        "SELECT id, photoKey, personId, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, " +
+            "`bottom` AS boxBottom, score FROM face WHERE +userId = :userId AND personId = :personId AND rejected = 0",
+    )
+    suspend fun facesForPersonLite(userId: String, personId: Long): List<FaceOnPhoto>
 
     /** Distinct photo keys a person appears in, the person filter's timeline source. */
     @Query("SELECT DISTINCT photoKey FROM face WHERE userId = :userId AND personId = :personId AND rejected = 0")
@@ -284,7 +296,7 @@ interface FaceDao {
     suspend fun rejectFacesForPersonInPhotos(userId: String, personId: Long, photoKeys: Collection<String>) =
         photoKeys.forEachSqlChunk { rejectFacesForPersonChunk(userId, personId, it) }
 
-    @Query("UPDATE face SET rejected = 1, personId = NULL WHERE userId = :userId AND personId = :personId AND photoKey IN (:photoKeys)")
+    @Query("UPDATE face SET rejected = 1, personId = NULL WHERE +userId = :userId AND personId = :personId AND photoKey IN (:photoKeys)")
     suspend fun rejectFacesForPersonChunk(userId: String, personId: Long, photoKeys: List<String>)
 
     /** Confirm the person the faces in the given photos belong to (and un-reject them, so a re-added
@@ -293,7 +305,7 @@ interface FaceDao {
     suspend fun labelFacesForPhotos(userId: String, photoKeys: Collection<String>, name: String) =
         photoKeys.forEachSqlChunk { labelFacesForPhotosChunk(userId, it, name) }
 
-    @Query("UPDATE face SET manualName = :name, rejected = 0 WHERE userId = :userId AND photoKey IN (:photoKeys)")
+    @Query("UPDATE face SET manualName = :name, rejected = 0 WHERE photoKey IN (:photoKeys) AND +userId = :userId")
     suspend fun labelFacesForPhotosChunk(userId: String, photoKeys: List<String>, name: String)
 
     /** Confirm a set of faces (by id) for a person, used when the user accepts a suggested cluster. */
@@ -355,7 +367,7 @@ interface FaceDao {
         return out
     }
 
-    @Query("SELECT id FROM face WHERE userId = :userId AND personId = :personId AND photoKey IN (:photoKeys)")
+    @Query("SELECT id FROM face WHERE +userId = :userId AND personId = :personId AND photoKey IN (:photoKeys)")
     suspend fun faceIdsForPersonInPhotosChunk(userId: String, personId: Long, photoKeys: List<String>): List<String>
 
     /** Detach faces from any person WITHOUT rejecting them, so a "not this person" removal lets them
@@ -406,7 +418,7 @@ interface FaceDao {
         return out
     }
 
-    @Query("SELECT photoKey FROM face WHERE userId = :userId AND photoKey IN (:photoKeys)")
+    @Query("SELECT photoKey FROM face WHERE photoKey IN (:photoKeys) AND +userId = :userId")
     suspend fun facePhotoKeysInChunk(userId: String, photoKeys: List<String>): List<String>
 
     /** One page of the account's faces, clearest detection first, the rebuild pass reads them a page
@@ -454,6 +466,14 @@ interface FaceDao {
     @Query("UPDATE face SET personId = :to WHERE userId = :userId AND personId = :from")
     suspend fun mergePersonInto(userId: String, from: Long, to: Long)
 
+    /** Ungroups every face of the account whose person no longer exists, one statement with no id list, and
+     *  returns how many it ungrouped. */
+    @Query(
+        "UPDATE face SET personId = NULL WHERE userId = :userId AND personId IS NOT NULL " +
+            "AND NOT EXISTS (SELECT 1 FROM person WHERE person.id = face.personId)",
+    )
+    suspend fun releaseOrphanedFaces(userId: String): Int
+
     /** Puts every kept face that no person holds yet onto [personId], the Unsorted bucket. */
     @Query("UPDATE face SET personId = :personId WHERE userId = :userId AND personId IS NULL AND rejected = 0")
     suspend fun assignUnclusteredTo(userId: String, personId: Long)
@@ -484,7 +504,7 @@ interface FaceDao {
 
     /** The account's faces among [faceIds] as id and vector, in no set order. One slice: the caller keeps
      *  [faceIds] within the host-variable limit. */
-    @Query("SELECT id, embedding FROM face WHERE userId = :userId AND id IN (:faceIds)")
+    @Query("SELECT id, embedding FROM face WHERE id IN (:faceIds) AND +userId = :userId")
     suspend fun vectorsByIdsChunk(userId: String, faceIds: List<String>): List<FaceVector>
 
     /**
@@ -503,12 +523,12 @@ interface FaceDao {
      *  caller keeps [photoKeys] within the host-variable limit. */
     @Query(
         "SELECT id, photoKey, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, `bottom` AS boxBottom " +
-            "FROM face WHERE userId = :userId AND photoKey IN (:photoKeys)",
+            "FROM face WHERE photoKey IN (:photoKeys) AND +userId = :userId",
     )
     suspend fun faceBoxesOnPhotosChunk(userId: String, photoKeys: List<String>): List<FaceBoxRow>
 
     /** The photo of each of the account's faces among [faceIds]. One slice, as [faceBoxesOnPhotosChunk]. */
-    @Query("SELECT photoKey FROM face WHERE userId = :userId AND id IN (:faceIds)")
+    @Query("SELECT photoKey FROM face WHERE id IN (:faceIds) AND +userId = :userId")
     suspend fun photoKeysOfFacesChunk(userId: String, faceIds: List<String>): List<String>
 
     /**
@@ -594,7 +614,7 @@ interface FaceDao {
     suspend fun deleteByPhotoKeys(userId: String, photoKeys: Collection<String>) =
         photoKeys.forEachSqlChunk { deleteByPhotoKeysChunk(userId, it) }
 
-    @Query("DELETE FROM face WHERE userId = :userId AND photoKey IN (:photoKeys)")
+    @Query("DELETE FROM face WHERE photoKey IN (:photoKeys) AND +userId = :userId")
     suspend fun deleteByPhotoKeysChunk(userId: String, photoKeys: List<String>)
 
     /** Removes every face for the account, for the sign-out wipe. */

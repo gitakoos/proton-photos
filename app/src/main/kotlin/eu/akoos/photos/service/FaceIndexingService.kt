@@ -196,11 +196,13 @@ class FaceIndexingService : Service() {
      * count that has stood still past [STALE_AFTER_MS] (a health park) reads the waiting line, and a walk
      * that is not running (paused, finished, idle, or waiting for its model) stops the service at once.
      * Polling rather than collecting the flow, because a park emits nothing, yet the service still has to
-     * notice the stall to switch text and to stop itself after the grace window.
+     * notice the stall to switch text and to stop itself after the grace window. A grouping that works with
+     * the count standing still beats a heartbeat instead ([faceHostSawProgress]), which counts as progress.
      */
     private fun observeProgress() {
         scope.launch {
             var lastIndexed = -1
+            var lastHeartbeat = 0L
             var lastAdvanceAt = SystemClock.elapsedRealtime()
             var lastText: String? = null
             while (isActive) {
@@ -210,8 +212,9 @@ class FaceIndexingService : Service() {
                     return@launch
                 }
                 val now = SystemClock.elapsedRealtime()
-                if (p.indexed > lastIndexed) {
-                    lastIndexed = p.indexed
+                if (faceHostSawProgress(p, lastIndexed, lastHeartbeat)) {
+                    lastIndexed = maxOf(lastIndexed, p.indexed)
+                    lastHeartbeat = maxOf(lastHeartbeat, p.heartbeat)
                     lastAdvanceAt = now
                 }
                 val staleFor = now - lastAdvanceAt
@@ -364,3 +367,12 @@ class FaceIndexingService : Service() {
  * model-less one. Pure so it is unit-tested without Android.
  */
 internal fun faceServiceHostsWalk(state: FaceIndexingState): Boolean = state == FaceIndexingState.Running
+
+/**
+ * Whether the host saw the work it hosts move since its last look, which keeps it from stopping itself: the
+ * scanned count climbed past [lastIndexed], or the heartbeat a grouping beats while that count stands still
+ * (a batch placed, a closing step under way) climbed past [lastHeartbeat]. Pure so it is unit-tested without
+ * Android.
+ */
+internal fun faceHostSawProgress(progress: FaceIndexingProgress, lastIndexed: Int, lastHeartbeat: Long): Boolean =
+    progress.indexed > lastIndexed || progress.heartbeat > lastHeartbeat

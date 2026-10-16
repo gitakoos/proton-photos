@@ -77,4 +77,9 @@ interface ClusterSummaryDao {
      *  a full build) from a populated one (an incremental update will do). */
     @Query("SELECT COUNT(*) FROM cluster_summary WHERE userId = :userId")
     suspend fun countForUser(userId: String): Int
+
+    /** The account's cached member counts summed, so a batched run can tell whether the cache is still what
+     *  it holds in memory without reading a centroid. */
+    @Query("SELECT COALESCE(SUM(memberCount), 0) FROM cluster_summary WHERE userId = :userId")
+    suspend fun memberTotalForUser(userId: String): Int
 }

@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.service
 
+import eu.akoos.photos.data.face.FaceIndexingProgress
 import eu.akoos.photos.data.face.FaceIndexingState
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -45,5 +46,25 @@ class FaceIndexingServiceRulesTest {
         listOf(FaceIndexingState.Done, FaceIndexingState.Idle, FaceIndexingState.WaitingModel).forEach { state ->
             assertFalse("$state", faceServiceHostsWalk(state))
         }
+    }
+
+    @Test
+    fun `a climbing count is progress`() {
+        assertTrue(faceHostSawProgress(FaceIndexingProgress(FaceIndexingState.Running, 11, 50), lastIndexed = 10, lastHeartbeat = 0L))
+    }
+
+    @Test
+    fun `a heartbeat with the count standing still is progress`() {
+        // The pass-end grouping of a big library: the scan count is frozen while the batches run.
+        val p = FaceIndexingProgress(FaceIndexingState.Running, 10, 50, heartbeat = 8L)
+        assertTrue(faceHostSawProgress(p, lastIndexed = 10, lastHeartbeat = 7L))
+    }
+
+    @Test
+    fun `neither moving is a stall`() {
+        val p = FaceIndexingProgress(FaceIndexingState.Running, 10, 50, heartbeat = 7L)
+        assertFalse(faceHostSawProgress(p, lastIndexed = 10, lastHeartbeat = 7L))
+        // A progress written without a beat reads 0 and never moves the heartbeat back.
+        assertFalse(faceHostSawProgress(FaceIndexingProgress(FaceIndexingState.Running, 10, 50), lastIndexed = 10, lastHeartbeat = 7L))
     }
 }

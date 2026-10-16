@@ -166,6 +166,36 @@ class MlWalkStateTest {
     }
 
     @Test
+    fun an_owed_finalize_round_trips_and_alone_keeps_the_file() {
+        val s = store()
+        s.write(MlWalkState("acct", finalizeOwed = true))
+        val read = s.read("acct")
+        assertNotNull(read)
+        assertTrue(read!!.finalizeOwed)
+        assertNull(read.baselineUngrouped)
+        s.write(MlWalkState("acct", baselineUngrouped = 4))
+        assertFalse(s.read("acct")!!.finalizeOwed)
+    }
+
+    @Test
+    fun a_file_in_the_previous_format_reads_as_nothing_saved() {
+        val file = File(File(temp.root, "ml_state"), "walk.bin")
+        file.parentFile!!.mkdirs()
+        java.io.DataOutputStream(file.outputStream()).use { out ->
+            out.writeUTF("PPMLWALK")
+            out.writeInt(1)
+            out.writeInt(273)
+            out.writeUTF("acct")
+            out.writeInt(0)
+            out.writeLong(Long.MIN_VALUE)
+            out.writeLong(Long.MIN_VALUE)
+            out.writeLong(0L)
+            out.writeInt(7)
+        }
+        assertNull(store().read("acct"))
+    }
+
+    @Test
     fun delete_removes_the_saved_state() {
         val s = store()
         s.write(MlWalkState("acct", baselineUngrouped = 3))
