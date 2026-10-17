@@ -2765,11 +2765,21 @@ class FaceIndexingScheduler @Inject constructor(
                 }
                 if (folded == null) closingFailed = true else merged += folded
                 named += nameBatchedGroups(userId, fenceToken) ?: 0
-                // The counts the batches only moved on by the photos they added, set from the faces now held.
-                val recounted = guardedGroupingStep("recounting the people's photos") {
-                    clusterFacesUseCase.recountPhotoCounts(userId) { writeFence.allows(fenceToken) }
+                // The counts an older build left wrong, set once from the faces now held. The batches keep every
+                // count right from here on (a new person starts with its photos, a person that gains faces moves
+                // on by the photos it gains), so the read of every face this takes is not repeated at each pass end.
+                val recountDone = account in context.settingsDataStore.data.first()[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty()
+                if (!recountDone) {
+                    val recounted = guardedGroupingStep("recounting the people's photos") {
+                        clusterFacesUseCase.recountPhotoCounts(userId) { writeFence.allows(fenceToken) }
+                    }
+                    if (recounted == null) closingFailed = true
+                    else if (writeFence.allows(fenceToken)) {
+                        context.settingsDataStore.edit {
+                            it[SettingsKeys.FACE_COUNTS_RECOUNTED] = it[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty() + account
+                        }
+                    }
                 }
-                if (recounted == null) closingFailed = true
                 val moved = guardedGroupingStep("filling the Unsorted bucket") {
                     clusterFacesUseCase.moveLeftoverToUnsorted(userId) { writeFence.allows(fenceToken) }
                 }

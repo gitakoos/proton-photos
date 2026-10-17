@@ -881,6 +881,9 @@ object SettingsKeys {
      */
     val FACE_INDEXING_PAUSED = booleanPreferencesKey("face_indexing_paused")
 
+    /** The accounts whose people have had their photo counts recounted once from their faces; see FaceIndexingScheduler. */
+    val FACE_COUNTS_RECOUNTED = stringSetPreferencesKey("face_counts_recounted")
+
     /**
      * When true, the face and photo-search scans run only while the phone is on external power. Absent
      * (the default) reads as OFF, so the scans run on battery as before, under the usual battery,
