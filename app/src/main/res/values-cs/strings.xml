@@ -2552,11 +2552,11 @@
     <string name="whats_new_260_addalbum_title">Přidat do jiného alba</string>
     <string name="whats_new_260_addalbum_body">Vyberte v albu fotky a zvolte „Přidat do jiného alba“ v liště výběru. Fotky se přidají do druhého alba a v tomto zůstanou, a ve výběru lze vytvořit i nové album.</string>
     <string name="whats_new_260_scans_title">Skenování velkých knihoven</string>
-    <string name="whats_new_260_scans_body">U knihoven s více než sto tisíci tvářemi se čekající tváře nově řadí ke stávajícím osobám po dávkách, místo aby zůstaly nezařazené, a fotky čekající na opakování přežijí zavření aplikace.</string>
+    <string name="whats_new_260_scans_body">U knihoven s více než třiceti tisíci tvářemi se čekající tváře nově řadí ke stávajícím osobám po dávkách, místo aby zůstaly nezařazené, a fotky čekající na opakování přežijí zavření aplikace.</string>
     <string name="whats_new_260_dragselect_title">Výběr tažením u osob</string>
     <string name="whats_new_260_dragselect_body">Podržte fotku na stránce osoby a tažením vyberte rozsah, stejně jako na časové ose a v albech.</string>
-    <string name="whats_new_260_mappins_title">Přehlednější špendlíky na mapě</string>
-    <string name="whats_new_260_mappins_body">Na klasické mapě i na mapě světa se špendlík, který by překrýval větší, zobrazí jako malá tečka, dokud nepřiblížíte tak, aby se vešel.</string>
+    <string name="whats_new_260_mappins_title">Jeden špendlík na město</string>
+    <string name="whats_new_260_mappins_body">Na klasické mapě i na mapě světa má každé město jeden špendlík s nejnovější fotkou pořízenou tam, místo špendlíku pro každou fotku.</string>
     <string name="whats_new_260_notif_title">Klidnější oznámení</string>
     <string name="whats_new_260_notif_body">Oznámení „Kontrola nových fotek…“ už nebliká, když se vrátíte do galerie.</string>
     <string name="whats_new_260_tiles_title">Dlaždice na širokém displeji</string>

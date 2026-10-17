@@ -2467,11 +2467,11 @@
     <string name="whats_new_260_addalbum_title">Aggiungi a un altro album</string>
     <string name="whats_new_260_addalbum_body">Seleziona le foto in un album e scegli “Aggiungi a un altro album” nella barra di selezione. Entrano nell\'altro album e restano in questo, e dal selettore si può creare un nuovo album.</string>
     <string name="whats_new_260_scans_title">Scansioni per librerie grandi</string>
-    <string name="whats_new_260_scans_body">Nelle librerie con oltre centomila volti, i volti in attesa vengono ora assegnati a lotti alle persone esistenti invece di restare non raggruppati, e le foto in attesa di un nuovo tentativo sopravvivono alla chiusura dell\'app.</string>
+    <string name="whats_new_260_scans_body">Nelle librerie con oltre trentamila volti, i volti in attesa vengono ora assegnati a lotti alle persone esistenti invece di restare non raggruppati, e le foto in attesa di un nuovo tentativo sopravvivono alla chiusura dell\'app.</string>
     <string name="whats_new_260_dragselect_title">Selezione trascinando nelle persone</string>
     <string name="whats_new_260_dragselect_body">Tieni premuta una foto nella pagina di una persona e trascina per selezionare un intervallo, come nella sequenza e negli album.</string>
-    <string name="whats_new_260_mappins_title">Segnaposto più ordinati</string>
-    <string name="whats_new_260_mappins_body">Sulla mappa classica e su quella del mondo, un segnaposto che ne coprirebbe uno più grande appare come un puntino finché non ingrandisci abbastanza da fargli spazio.</string>
+    <string name="whats_new_260_mappins_title">Un segnaposto per città</string>
+    <string name="whats_new_260_mappins_body">Sulla mappa classica e sul planisfero, ogni città ha un segnaposto con la foto più recente scattata lì, invece di uno per ogni foto.</string>
     <string name="whats_new_260_notif_title">Notifiche più calme</string>
     <string name="whats_new_260_notif_body">La notifica “Ricerca di nuove foto…” non lampeggia più quando torni alla galleria.</string>
     <string name="whats_new_260_tiles_title">Riquadri su schermi larghi</string>

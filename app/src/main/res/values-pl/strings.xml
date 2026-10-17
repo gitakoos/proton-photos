@@ -2546,11 +2546,11 @@
     <string name="whats_new_260_addalbum_title">Dodaj do innego albumu</string>
     <string name="whats_new_260_addalbum_body">Zaznacz zdjęcia w albumie i wybierz „Dodaj do innego albumu” na pasku zaznaczania. Trafiają do drugiego albumu i zostają w tym, a w selektorze można utworzyć nowy album.</string>
     <string name="whats_new_260_scans_title">Skanowanie dużych bibliotek</string>
-    <string name="whats_new_260_scans_body">W bibliotekach z ponad stu tysiącami twarzy oczekujące twarze są teraz przypisywane partiami do istniejących osób zamiast pozostawać niezgrupowane, a zdjęcia czekające na ponowną próbę przetrwają zamknięcie aplikacji.</string>
+    <string name="whats_new_260_scans_body">W bibliotekach z ponad trzydziestoma tysiącami twarzy oczekujące twarze są teraz przypisywane partiami do istniejących osób zamiast pozostawać niezgrupowane, a zdjęcia czekające na ponowną próbę przetrwają zamknięcie aplikacji.</string>
     <string name="whats_new_260_dragselect_title">Zaznaczanie przeciąganiem w osobach</string>
     <string name="whats_new_260_dragselect_body">Przytrzymaj zdjęcie na stronie osoby i przeciągnij, aby zaznaczyć zakres, jak na osi czasu i w albumach.</string>
-    <string name="whats_new_260_mappins_title">Czytelniejsze pinezki na mapie</string>
-    <string name="whats_new_260_mappins_body">Na klasycznej mapie i mapie świata pinezka, która zasłoniłaby większą, wyświetla się jako mała kropka, dopóki nie przybliżysz na tyle, by się zmieściła.</string>
+    <string name="whats_new_260_mappins_title">Jeden pin na miasto</string>
+    <string name="whats_new_260_mappins_body">Na klasycznej mapie i mapie świata każde miasto ma jeden pin z najnowszym zdjęciem zrobionym w tym miejscu, zamiast pinu dla każdego zdjęcia.</string>
     <string name="whats_new_260_notif_title">Spokojniejsze powiadomienia</string>
     <string name="whats_new_260_notif_body">Powiadomienie „Sprawdzanie nowych zdjęć…” nie miga już po powrocie do galerii.</string>
     <string name="whats_new_260_tiles_title">Kafelki na szerokich ekranach</string>

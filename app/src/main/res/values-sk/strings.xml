@@ -2553,11 +2553,11 @@
     <string name="whats_new_260_addalbum_title">Pridať do iného albumu</string>
     <string name="whats_new_260_addalbum_body">Vyberte v albume fotky a zvoľte „Pridať do iného albumu“ v lište výberu. Fotky sa pridajú do druhého albumu a v tomto zostanú, a vo výbere možno vytvoriť aj nový album.</string>
     <string name="whats_new_260_scans_title">Skenovanie veľkých knižníc</string>
-    <string name="whats_new_260_scans_body">Pri knižniciach s viac ako sto tisíc tvárami sa čakajúce tváre teraz zaraďujú k existujúcim osobám po dávkach namiesto toho, aby zostali nezaradené, a fotky čakajúce na opakovanie prežijú zatvorenie aplikácie.</string>
+    <string name="whats_new_260_scans_body">Pri knižniciach s viac ako tridsať tisíc tvárami sa čakajúce tváre teraz zaraďujú k existujúcim osobám po dávkach namiesto toho, aby zostali nezaradené, a fotky čakajúce na opakovanie prežijú zatvorenie aplikácie.</string>
     <string name="whats_new_260_dragselect_title">Výber ťahaním pri osobách</string>
     <string name="whats_new_260_dragselect_body">Pridržte fotku na stránke osoby a ťahaním vyberte rozsah, rovnako ako na časovej osi a v albumoch.</string>
-    <string name="whats_new_260_mappins_title">Prehľadnejšie špendlíky na mape</string>
-    <string name="whats_new_260_mappins_body">Na klasickej mape aj na mape sveta sa špendlík, ktorý by prekrýval väčší, zobrazí ako malá bodka, kým nepriblížite tak, aby sa zmestil.</string>
+    <string name="whats_new_260_mappins_title">Jeden špendlík na mesto</string>
+    <string name="whats_new_260_mappins_body">Na klasickej mape aj na mape sveta má každé mesto jeden špendlík s najnovšou fotkou odfotenou tam, namiesto špendlíka pre každú fotku.</string>
     <string name="whats_new_260_notif_title">Pokojnejšie oznámenia</string>
     <string name="whats_new_260_notif_body">Oznámenie „Hľadajú sa nové fotky…“ už nebliká, keď sa vrátite do galérie.</string>
     <string name="whats_new_260_tiles_title">Dlaždice na širokom displeji</string>

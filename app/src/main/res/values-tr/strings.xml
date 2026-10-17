@@ -2345,11 +2345,11 @@
     <string name="whats_new_260_addalbum_title">Başka bir albüme ekle</string>
     <string name="whats_new_260_addalbum_body">Bir albümde fotoğrafları seçin ve seçim çubuğunda “Başka bir albüme ekle” öğesini seçin. Fotoğraflar diğer albüme katılır, bu albümde de kalır; seçicide yeni bir albüm de oluşturabilirsiniz.</string>
     <string name="whats_new_260_scans_title">Büyük kitaplıklar için taramalar</string>
-    <string name="whats_new_260_scans_body">Yüz binden fazla yüzü olan kitaplıklarda bekleyen yüzler artık gruplanmadan kalmak yerine mevcut kişilere partiler halinde yerleştirilir; yeniden denenmeyi bekleyen fotoğraflar uygulama kapansa da korunur.</string>
+    <string name="whats_new_260_scans_body">Otuz binden fazla yüzü olan kitaplıklarda bekleyen yüzler artık gruplanmadan kalmak yerine mevcut kişilere partiler halinde yerleştirilir; yeniden denenmeyi bekleyen fotoğraflar uygulama kapansa da korunur.</string>
     <string name="whats_new_260_dragselect_title">Kişilerde sürükleyerek seçim</string>
     <string name="whats_new_260_dragselect_body">Bir kişinin sayfasında bir fotoğrafa uzun basın, sonra zaman çizelgesindeki ve albümlerdeki gibi bir aralık seçmek için sürükleyin.</string>
-    <string name="whats_new_260_mappins_title">Daha düzenli harita iğneleri</string>
-    <string name="whats_new_260_mappins_body">Klasik haritada ve dünya haritasında, daha büyük bir iğneyi örtecek iğne, sığacak kadar yakınlaştırana dek küçük bir nokta olarak görünür.</string>
+    <string name="whats_new_260_mappins_title">Şehir başına bir iğne</string>
+    <string name="whats_new_260_mappins_body">Klasik haritada ve dünya haritasında her şehir için orada çekilen en yeni fotoğrafı gösteren tek bir iğne bulunur, her fotoğraf için ayrı iğne yerine.</string>
     <string name="whats_new_260_notif_title">Daha sakin bildirimler</string>
     <string name="whats_new_260_notif_body">“Yeni fotoğraflar denetleniyor…” bildirimi, galeriye döndüğünüzde artık yanıp sönmez.</string>
     <string name="whats_new_260_tiles_title">Geniş ekranlarda kutucuklar</string>

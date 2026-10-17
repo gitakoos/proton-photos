@@ -2430,11 +2430,11 @@
     <string name="whats_new_260_addalbum_title">Ajouter à un autre album</string>
     <string name="whats_new_260_addalbum_body">Sélectionnez des photos dans un album et choisissez « Ajouter à un autre album » dans la barre de sélection. Elles rejoignent l\'autre album et restent dans celui-ci, et le sélecteur permet de créer un nouvel album.</string>
     <string name="whats_new_260_scans_title">Analyses des grandes bibliothèques</string>
-    <string name="whats_new_260_scans_body">Dans les bibliothèques de plus de cent mille visages, les visages en attente sont désormais rattachés par lots aux personnes existantes au lieu de rester non regroupés, et les photos en attente d\'un nouvel essai survivent à la fermeture de l\'appli.</string>
+    <string name="whats_new_260_scans_body">Dans les bibliothèques de plus de trente mille visages, les visages en attente sont désormais rattachés par lots aux personnes existantes au lieu de rester non regroupés, et les photos en attente d\'un nouvel essai survivent à la fermeture de l\'appli.</string>
     <string name="whats_new_260_dragselect_title">Sélection par glissement chez les personnes</string>
     <string name="whats_new_260_dragselect_body">Appuyez longuement sur une photo dans la page d\'une personne, puis glissez pour sélectionner une plage, comme dans le fil et les albums.</string>
-    <string name="whats_new_260_mappins_title">Repères de carte plus nets</string>
-    <string name="whats_new_260_mappins_body">Sur la carte classique et sur la carte du monde, un repère qui en recouvrirait un plus grand s\'affiche comme un petit point jusqu\'à ce que vous zoomiez assez pour qu\'il ait de la place.</string>
+    <string name="whats_new_260_mappins_title">Une épingle par ville</string>
+    <string name="whats_new_260_mappins_body">Sur la carte classique et le planisphère, chaque ville a une épingle avec la photo la plus récente prise là, au lieu d\'une épingle par photo.</string>
     <string name="whats_new_260_notif_title">Notifications plus calmes</string>
     <string name="whats_new_260_notif_body">La notification « Recherche de nouvelles photos… » ne clignote plus quand vous revenez à la galerie.</string>
     <string name="whats_new_260_tiles_title">Vignettes sur grands écrans</string>

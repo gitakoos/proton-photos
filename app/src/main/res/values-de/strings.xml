@@ -2428,11 +2428,11 @@
     <string name="whats_new_260_addalbum_title">Zu anderem Album hinzufügen</string>
     <string name="whats_new_260_addalbum_body">Wähle in einem Album Fotos aus und tippe in der Auswahlleiste auf „Zu anderem Album hinzufügen“. Sie kommen ins andere Album und bleiben in diesem, und in der Auswahl lässt sich ein neues Album anlegen.</string>
     <string name="whats_new_260_scans_title">Scans für große Bibliotheken</string>
-    <string name="whats_new_260_scans_body">Bei Bibliotheken mit über hunderttausend Gesichtern werden wartende Gesichter jetzt in Portionen den vorhandenen Personen zugeordnet, statt ungruppiert zu bleiben, und Fotos, die auf einen neuen Versuch warten, überstehen das Schließen der App.</string>
+    <string name="whats_new_260_scans_body">Bei Bibliotheken mit über dreißigtausend Gesichtern werden wartende Gesichter jetzt in Portionen den vorhandenen Personen zugeordnet, statt ungruppiert zu bleiben, und Fotos, die auf einen neuen Versuch warten, überstehen das Schließen der App.</string>
     <string name="whats_new_260_dragselect_title">Wischauswahl bei Personen</string>
     <string name="whats_new_260_dragselect_body">Halte auf der Seite einer Person ein Foto gedrückt und ziehe dann, um einen Bereich auszuwählen, wie im Verlauf und in Alben.</string>
-    <string name="whats_new_260_mappins_title">Aufgeräumtere Karten-Pins</string>
-    <string name="whats_new_260_mappins_body">Auf der klassischen Karte und der Weltkarte wird ein Pin, der einen größeren überdecken würde, als kleiner Punkt gezeigt, bis du so weit hineinzoomst, dass er Platz hat.</string>
+    <string name="whats_new_260_mappins_title">Ein Pin pro Stadt</string>
+    <string name="whats_new_260_mappins_body">Auf der klassischen Karte und der Weltkarte steht pro Stadt ein Pin mit dem neuesten dort aufgenommenen Foto, statt eines Pins für jedes Foto.</string>
     <string name="whats_new_260_notif_title">Ruhigere Benachrichtigungen</string>
     <string name="whats_new_260_notif_body">Die Benachrichtigung „Suche nach neuen Fotos…“ blinkt nicht mehr auf, wenn du zur Galerie zurückkehrst.</string>
     <string name="whats_new_260_tiles_title">Kacheln auf breiten Bildschirmen</string>

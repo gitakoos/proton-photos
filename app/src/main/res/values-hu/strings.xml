@@ -2427,11 +2427,11 @@
     <string name="whats_new_260_addalbum_title">Hozzáadás másik albumhoz</string>
     <string name="whats_new_260_addalbum_body">Jelölj ki fotókat egy albumban, és válaszd a(z) „Hozzáadás másik albumhoz” lehetőséget a kijelölősávban. A fotók a másik albumhoz is hozzáadódnak, ebben pedig megmaradnak, a választóban új albumot is létrehozhatsz.</string>
     <string name="whats_new_260_scans_title">Vizsgálatok nagy könyvtáraknál</string>
-    <string name="whats_new_260_scans_body">A százezernél is több arcot tartalmazó könyvtáraknál a várakozó arcok már kötegekben kerülnek a meglévő személyekhez ahelyett, hogy csoportosítatlanok maradnának, az újrapróbálásra váró fotók pedig túlélik az alkalmazás bezárását.</string>
+    <string name="whats_new_260_scans_body">A harmincezernél is több arcot tartalmazó könyvtáraknál a várakozó arcok már kötegekben kerülnek a meglévő személyekhez ahelyett, hogy csoportosítatlanok maradnának, az újrapróbálásra váró fotók pedig túlélik az alkalmazás bezárását.</string>
     <string name="whats_new_260_dragselect_title">Húzásos kijelölés személynél</string>
     <string name="whats_new_260_dragselect_body">Nyomj hosszan egy fotót egy személy oldalán, majd húzással jelölj ki egy tartományt, mint az idővonalon és az albumokban.</string>
-    <string name="whats_new_260_mappins_title">Rendezettebb térképtűk</string>
-    <string name="whats_new_260_mappins_body">A klasszikus és a világtérképen is kis ponttá válik az a tű, amely egy nagyobbat takarna, amíg annyira nem nagyítasz, hogy elférjen.</string>
+    <string name="whats_new_260_mappins_title">Városonként egy tű</string>
+    <string name="whats_new_260_mappins_body">A klasszikus és a világtérképen is városonként egy bélyegképes tű áll, az ott készült legfrissebb fotóval, nem minden fotóhoz külön.</string>
     <string name="whats_new_260_notif_title">Nyugodtabb értesítések</string>
     <string name="whats_new_260_notif_body">A(z) „Új fotók keresése…” értesítés már nem villan fel, amikor visszatérsz a galériába.</string>
     <string name="whats_new_260_tiles_title">Gyorsgombok széles képernyőn</string>

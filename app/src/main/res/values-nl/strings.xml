@@ -2455,11 +2455,11 @@
     <string name="whats_new_260_addalbum_title">Toevoegen aan ander album</string>
     <string name="whats_new_260_addalbum_body">Selecteer foto\'s in een album en kies “Toevoegen aan ander album” in de selectiebalk. Ze komen in het andere album en blijven in dit album, en in de kiezer kun je een nieuw album maken.</string>
     <string name="whats_new_260_scans_title">Scans voor grote bibliotheken</string>
-    <string name="whats_new_260_scans_body">Bij bibliotheken met meer dan honderdduizend gezichten worden wachtende gezichten nu in porties bij bestaande personen geplaatst in plaats van ongegroepeerd te blijven, en foto\'s die op een nieuwe poging wachten overleven het afsluiten van de app.</string>
+    <string name="whats_new_260_scans_body">Bij bibliotheken met meer dan dertigduizend gezichten worden wachtende gezichten nu in porties bij bestaande personen geplaatst in plaats van ongegroepeerd te blijven, en foto\'s die op een nieuwe poging wachten overleven het afsluiten van de app.</string>
     <string name="whats_new_260_dragselect_title">Slepend selecteren bij personen</string>
     <string name="whats_new_260_dragselect_body">Houd een foto op de pagina van een persoon ingedrukt en sleep om een reeks te selecteren, zoals in de tijdlijn en albums.</string>
-    <string name="whats_new_260_mappins_title">Nettere kaartmarkeringen</string>
-    <string name="whats_new_260_mappins_body">Op de klassieke kaart en de wereldkaart wordt een markering die een grotere zou bedekken als klein puntje getoond, tot je zo ver inzoomt dat er ruimte is.</string>
+    <string name="whats_new_260_mappins_title">Eén speld per stad</string>
+    <string name="whats_new_260_mappins_body">Op de klassieke kaart en de wereldkaart staat per stad één speld met de nieuwste foto die daar is gemaakt, in plaats van een speld per foto.</string>
     <string name="whats_new_260_notif_title">Rustigere meldingen</string>
     <string name="whats_new_260_notif_body">De melding “Zoeken naar nieuwe foto\'s…” knippert niet meer als je terugkeert naar de galerij.</string>
     <string name="whats_new_260_tiles_title">Tegels op brede schermen</string>

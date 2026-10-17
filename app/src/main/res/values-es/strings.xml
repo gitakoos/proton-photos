@@ -2465,11 +2465,11 @@
     <string name="whats_new_260_addalbum_title">Añadir a otro álbum</string>
     <string name="whats_new_260_addalbum_body">Selecciona fotos en un álbum y elige “Añadir a otro álbum” en la barra de selección. Se unen al otro álbum y siguen en este, y el selector permite crear un álbum nuevo.</string>
     <string name="whats_new_260_scans_title">Análisis para bibliotecas grandes</string>
-    <string name="whats_new_260_scans_body">En bibliotecas con más de cien mil caras, las caras en espera ahora se asignan por lotes a las personas existentes en lugar de quedar sin agrupar, y las fotos que esperan un reintento sobreviven al cierre de la app.</string>
+    <string name="whats_new_260_scans_body">En bibliotecas con más de treinta mil caras, las caras en espera ahora se asignan por lotes a las personas existentes en lugar de quedar sin agrupar, y las fotos que esperan un reintento sobreviven al cierre de la app.</string>
     <string name="whats_new_260_dragselect_title">Selección arrastrando en personas</string>
     <string name="whats_new_260_dragselect_body">Mantén pulsada una foto en la página de una persona y arrastra para seleccionar un rango, como en la línea de tiempo y los álbumes.</string>
-    <string name="whats_new_260_mappins_title">Marcadores del mapa más ordenados</string>
-    <string name="whats_new_260_mappins_body">En el mapa clásico y en el mapamundi, un marcador que taparía a otro mayor se muestra como un punto pequeño hasta que acercas lo suficiente para que quepa.</string>
+    <string name="whats_new_260_mappins_title">Un marcador por ciudad</string>
+    <string name="whats_new_260_mappins_body">En el mapa clásico y el mapamundi, cada ciudad tiene un marcador con la foto más reciente tomada allí, en vez de uno por foto.</string>
     <string name="whats_new_260_notif_title">Notificaciones más tranquilas</string>
     <string name="whats_new_260_notif_body">La notificación “Buscando fotos nuevas…” ya no parpadea al volver a la galería.</string>
     <string name="whats_new_260_tiles_title">Mosaicos en pantallas anchas</string>
