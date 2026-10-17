@@ -2487,4 +2487,5 @@
     <string name="viewer_saved_to_drive">Guardado en Drive</string>
     <string name="viewer_already_in_drive">Ya está en Drive</string>
     <string name="viewer_save_to_drive_failed">No se pudo guardar en Drive</string>
+    <string name="viewer_remove_shared_confirm_body">La foto se quita del álbum compartido. Se queda con el propietario del álbum y ya no se verá aquí.</string>
 </resources>

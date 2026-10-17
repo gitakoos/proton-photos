@@ -2568,4 +2568,5 @@
     <string name="viewer_saved_to_drive">Shranjeno v Drive</string>
     <string name="viewer_already_in_drive">Že v Drive</string>
     <string name="viewer_save_to_drive_failed">Shranjevanje v Drive ni uspelo</string>
+    <string name="viewer_remove_shared_confirm_body">Fotografija bo odstranjena iz deljenega albuma. Ostane pri lastniku albuma in tu ne bo več vidna.</string>
 </resources>

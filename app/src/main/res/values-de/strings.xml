@@ -2450,4 +2450,5 @@
     <string name="viewer_saved_to_drive">In Drive gespeichert</string>
     <string name="viewer_already_in_drive">Bereits in Drive</string>
     <string name="viewer_save_to_drive_failed">Speichern in Drive fehlgeschlagen</string>
+    <string name="viewer_remove_shared_confirm_body">Das Foto wird aus dem geteilten Album entfernt. Es bleibt beim Besitzer des Albums und ist hier nicht mehr zu sehen.</string>
 </resources>

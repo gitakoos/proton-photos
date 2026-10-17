@@ -2568,4 +2568,5 @@
     <string name="viewer_saved_to_drive">Zapisano na Drive</string>
     <string name="viewer_already_in_drive">Już jest na Drive</string>
     <string name="viewer_save_to_drive_failed">Nie udało się zapisać na Drive</string>
+    <string name="viewer_remove_shared_confirm_body">Zdjęcie zostanie usunięte z udostępnionego albumu. Zostaje u właściciela albumu i nie będzie tu już widoczne.</string>
 </resources>

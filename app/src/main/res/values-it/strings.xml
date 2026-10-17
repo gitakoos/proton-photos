@@ -2489,4 +2489,5 @@
     <string name="viewer_saved_to_drive">Salvato su Drive</string>
     <string name="viewer_already_in_drive">Già su Drive</string>
     <string name="viewer_save_to_drive_failed">Impossibile salvare su Drive</string>
+    <string name="viewer_remove_shared_confirm_body">La foto viene tolta dall\'album condiviso. Resta al proprietario dell\'album e qui non sarà più visibile.</string>
 </resources>

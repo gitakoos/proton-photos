@@ -2452,4 +2452,5 @@
     <string name="viewer_saved_to_drive">Enregistré dans Drive</string>
     <string name="viewer_already_in_drive">Déjà dans Drive</string>
     <string name="viewer_save_to_drive_failed">Échec de l\'enregistrement dans Drive</string>
+    <string name="viewer_remove_shared_confirm_body">La photo est retirée de l\'album partagé. Elle reste chez le propriétaire de l\'album et n\'y sera plus visible.</string>
 </resources>

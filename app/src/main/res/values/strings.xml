@@ -2490,4 +2490,5 @@
     <string name="viewer_saved_to_drive">Saved to Drive</string>
     <string name="viewer_already_in_drive">Already in Drive</string>
     <string name="viewer_save_to_drive_failed">Couldn\'t save to Drive</string>
+    <string name="viewer_remove_shared_confirm_body">This takes the photo out of the shared album. It stays with the album\'s owner, and you won\'t see it here any more.</string>
 </resources>

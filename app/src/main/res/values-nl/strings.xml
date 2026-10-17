@@ -2477,4 +2477,5 @@
     <string name="viewer_saved_to_drive">Opgeslagen in Drive</string>
     <string name="viewer_already_in_drive">Staat al in Drive</string>
     <string name="viewer_save_to_drive_failed">Opslaan in Drive mislukt</string>
+    <string name="viewer_remove_shared_confirm_body">De foto wordt uit het gedeelde album gehaald. Ze blijft bij de eigenaar van het album en is hier niet meer te zien.</string>
 </resources>

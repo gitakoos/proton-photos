@@ -2449,4 +2449,5 @@
     <string name="viewer_saved_to_drive">Elmentve a Drive-ra</string>
     <string name="viewer_already_in_drive">Már a Drive-on van</string>
     <string name="viewer_save_to_drive_failed">Nem sikerült a Drive-ra menteni</string>
+    <string name="viewer_remove_shared_confirm_body">Ez kiveszi a fotót a megosztott albumból. Az album tulajdonosánál marad, és te már nem látod itt.</string>
 </resources>

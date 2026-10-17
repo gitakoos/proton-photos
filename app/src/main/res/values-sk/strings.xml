@@ -2575,4 +2575,5 @@
     <string name="viewer_saved_to_drive">Uložené na Drive</string>
     <string name="viewer_already_in_drive">Už je na Drive</string>
     <string name="viewer_save_to_drive_failed">Nepodarilo sa uložiť na Drive</string>
+    <string name="viewer_remove_shared_confirm_body">Fotka bude odstránená zo zdieľaného albumu. Zostane u vlastníka albumu a tu už nebude vidieť.</string>
 </resources>
