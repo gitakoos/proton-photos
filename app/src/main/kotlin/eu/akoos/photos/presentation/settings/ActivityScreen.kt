@@ -239,13 +239,17 @@ fun ActivityScreen(
                                         TransferPhotoRow(uri = evt.uri, stateLabel = label, progress = frac)
                                         if (i < activeUploads.lastIndex || queuedUris.isNotEmpty()) RowDivider()
                                     }
-                                    queuedUris.forEachIndexed { i, uri ->
+                                    // Only the next few waiting photos get a row: the card sits in one grid item, so a
+                                    // row for each of thousands queued was all composed and measured together, and
+                                    // the screen stopped answering. The header above carries the full count.
+                                    val shownQueued = queuedUris.take(QUEUED_ROWS_SHOWN)
+                                    shownQueued.forEachIndexed { i, uri ->
                                         TransferPhotoRow(
                                             uri = uri,
                                             stateLabel = stringResource(R.string.upload_status_queued),
                                             progress = null,
                                         )
-                                        if (i < queuedUris.lastIndex) RowDivider()
+                                        if (i < shownQueued.lastIndex) RowDivider()
                                     }
                                 }
                             }
@@ -776,3 +780,6 @@ private fun EmptyLabel(text: String) {
         Text(text, color = FgMute, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
+
+/** Waiting photos the Activity screen draws a row for; the rest are counted in the card's header. */
+private const val QUEUED_ROWS_SHOWN = 30

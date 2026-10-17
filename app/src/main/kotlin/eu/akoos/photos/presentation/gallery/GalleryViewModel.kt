@@ -67,6 +67,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -482,6 +483,9 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
+    /** A pending end of the back-up, applied once no new photo has started for [UPLOAD_END_HOLD_MS]. */
+    private var uploadEndJob: Job? = null
+
     private fun observeBackgroundUploadProgress() {
         viewModelScope.launch {
             upload.progress.collect { evt ->
@@ -502,18 +506,35 @@ class GalleryViewModel @Inject constructor(
                     eu.akoos.photos.domain.usecase.UploadStatus.PreparingBackup -> false
                     eu.akoos.photos.domain.usecase.UploadStatus.StorageFull -> false
                 }
-                backupUploading = syncing
-                _uiState.update {
-                    it.copy(
-                        isSyncing = syncing,
-                        // The up arrow ORs the backup pipeline with any TransferCenter UPLOAD (an
-                        // editor edit-upload); downloads/offline come from observeActiveTransfers.
-                        hasActiveUpload = backupUploading || transferUploading,
-                        uploadDoneIdx = if (syncing) evt.doneIdx else 0,
-                        uploadTotalCount = if (syncing) evt.totalCount else 0,
-                    )
+                // Between two photos the pipeline reports Done and then the next one starting, which flipped this
+                // off and on again for every photo (the back-up pill vanished and slid back in with a new
+                // count each time). The end is applied only once nothing has started for a moment.
+                if (syncing) {
+                    uploadEndJob?.cancel()
+                    uploadEndJob = null
+                    applyUploadProgress(true, evt)
+                } else if (uploadEndJob == null) {
+                    uploadEndJob = viewModelScope.launch {
+                        delay(UPLOAD_END_HOLD_MS)
+                        uploadEndJob = null
+                        applyUploadProgress(false, evt)
+                    }
                 }
             }
+        }
+    }
+
+    private fun applyUploadProgress(syncing: Boolean, evt: eu.akoos.photos.domain.usecase.UploadProgress) {
+        backupUploading = syncing
+        _uiState.update {
+            it.copy(
+                isSyncing = syncing,
+                // The up arrow ORs the backup pipeline with any TransferCenter UPLOAD (an
+                // editor edit-upload); downloads/offline come from observeActiveTransfers.
+                hasActiveUpload = backupUploading || transferUploading,
+                uploadDoneIdx = if (syncing) evt.doneIdx else 0,
+                uploadTotalCount = if (syncing) evt.totalCount else 0,
+            )
         }
     }
 
@@ -1374,14 +1395,6 @@ class GalleryViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
-    }
-
-    /** Stop the in-flight background back-up from the in-app progress pill. Cooperative: the photo
-     *  currently in transit finishes and backs up, remaining queued items are not started and stay
-     *  pending for a later trigger. Never cancels the worker, so the in-flight native crypto is never
-     *  interrupted. Scheduled backups stay armed. */
-    fun cancelUpload() {
-        upload.requestStop()
     }
 
     // ── Multi-select ──────────────────────────────────────────────────────────
@@ -2814,3 +2827,6 @@ class GalleryViewModel @Inject constructor(
         return result
     }
 }
+
+/** How long a back-up that reported its end waits for the next photo before the app treats it as over. */
+private const val UPLOAD_END_HOLD_MS = 2_500L

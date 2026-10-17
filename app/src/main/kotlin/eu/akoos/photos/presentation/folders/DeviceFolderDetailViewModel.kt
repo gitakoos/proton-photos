@@ -30,7 +30,9 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.datastore.preferences.core.edit
+import eu.akoos.photos.domain.usecase.UploadStatus
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -483,6 +485,31 @@ class DeviceFolderDetailViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     init {
+        // The back-up can end without every queued photo reaching Synced (stopped from the notification or the
+        // Activity screen, a failed photo, a full Drive, no Wi-Fi), so the target is also cleared once the
+        // pipeline has been idle for a moment; a photo starting in between keeps it.
+        viewModelScope.launch {
+            var endJob: Job? = null
+            upload.progress.collect { evt ->
+                when (evt.status) {
+                    UploadStatus.Queued, UploadStatus.Compressing, UploadStatus.Encrypting,
+                    UploadStatus.Uploading, UploadStatus.PreparingBackup -> {
+                        endJob?.cancel()
+                        endJob = null
+                    }
+                    UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi -> {
+                        if (endJob == null) {
+                            endJob = launch {
+                                delay(BACKUP_TARGET_HOLD_MS)
+                                endJob = null
+                                _backupTarget.value = emptySet()
+                            }
+                        }
+                    }
+                    UploadStatus.Done -> Unit
+                }
+            }
+        }
         viewModelScope.launch { accountManager.getPrimaryUserId().collect { primaryUserId = it } }
         // Drop the progress bar once every queued photo has uploaded.
         viewModelScope.launch {
@@ -490,15 +517,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 if (p != null && p.total > 0 && p.done >= p.total) _backupTarget.value = emptySet()
             }
         }
-    }
-
-    /** Stop an in-flight folder back-up and clear this screen's progress, while leaving scheduled
-     *  auto-backup armed. Cooperative: the photo in transit finishes and backs up, remaining queued
-     *  items are not started and stay pending for a later trigger. Never cancels the worker, so the
-     *  in-flight native crypto is never interrupted. */
-    fun cancelBackup() {
-        upload.requestStop()
-        _backupTarget.value = emptySet()
     }
 
     /**
@@ -1437,3 +1455,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
         _multiStripState.value = MultiStripState.Idle
     }
 }
+
+/** How long the pipeline must stay idle before a folder's back-up target is dropped. */
+private const val BACKUP_TARGET_HOLD_MS = 12_000L
