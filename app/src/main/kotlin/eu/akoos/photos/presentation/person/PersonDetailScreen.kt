@@ -347,6 +347,7 @@ fun PersonDetailScreen(
                             typeBadgeCdRes = inputs.typeBadgeCdRes,
                             columns = cols,
                             cornerRadius = if (seamless) 0.dp else 10.dp,
+                            focus = state.focus[item.stableId],
                             onClick = {
                                 // Skip the release-tap that follows a long-press select; it would
                                 // otherwise toggle the just-anchored photo back off.

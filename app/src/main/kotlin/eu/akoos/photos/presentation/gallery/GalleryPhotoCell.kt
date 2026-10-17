@@ -63,6 +63,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -262,6 +264,15 @@ internal fun photoCellInputsFor(
  */
 private const val GRID_THUMB_PX = 320
 
+/**
+ * Where a tile's crop is anchored for a [focus] given as fractions of the photo: the point the crop window
+ * stays closest to, so a face near an edge of a wide photo is shown rather than the middle. Null, or a point
+ * outside the photo, gives the centred crop.
+ */
+internal fun cropAlignmentFor(focus: Offset?): Alignment =
+    if (focus == null || focus.x !in 0f..1f || focus.y !in 0f..1f) Alignment.Center
+    else BiasAlignment(horizontalBias = focus.x * 2f - 1f, verticalBias = focus.y * 2f - 1f)
+
 /** The single secondary corner badge kept at the compact (4-column) density tier, picked by
  *  priority (duration > offline > type > favorite). [None] means no secondary is present. */
 private enum class CompactSecondary { Duration, Offline, Type, Favorite, None }
@@ -309,6 +320,9 @@ internal fun PhotoCell(
     // Mosaic-only: reports the loaded thumbnail's intrinsic width / height so a cell with no stored
     // dimensions (a cloud photo) can size its tile from the decoded image. Null on the fixed grid.
     onIntrinsicAspect: ((Float) -> Unit)? = null,
+    // Where the tile's crop is centred, as fractions (0..1) of the photo's width and height: a photo wider
+    // or taller than the tile then shows this point instead of its middle. Null centres the crop.
+    focus: Offset? = null,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
@@ -412,6 +426,7 @@ internal fun PhotoCell(
             // swap in a muted broken-image glyph so the slot still reads as "a file that can't be
             // previewed" rather than empty space. Re-armed per source so a new bind starts clean.
             var decodeFailed by remember(resolvedImageData, stableKey) { mutableStateOf(false) }
+            val cropAlignment = remember(focus) { cropAlignmentFor(focus) }
 
             // Report the drawn thumbnail's intrinsic aspect to the mosaic grid, and clear the error
             // flag. Shared by both the OS-poster and Coil paths so mosaic sizing is identical.
@@ -451,6 +466,7 @@ internal fun PhotoCell(
                         model              = request,
                         contentDescription = null,
                         contentScale       = ContentScale.Crop,
+                        alignment          = cropAlignment,
                         onState            = onImageState,
                         modifier           = imageModifier,
                     )
@@ -476,6 +492,7 @@ internal fun PhotoCell(
                     imageLoader        = cellLoader,
                     contentDescription = null,
                     contentScale       = ContentScale.Crop,
+                    alignment          = cropAlignment,
                     onState            = onImageState,
                     modifier           = imageModifier,
                 )

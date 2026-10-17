@@ -300,6 +300,14 @@ interface FaceDao {
     )
     suspend fun facesForPersonLite(userId: String, personId: Long): List<FaceOnPhoto>
 
+    /** A person's kept faces as their photo and box, followed live, so the person's page can centre each tile on
+     *  the face rather than on the middle of the photo. */
+    @Query(
+        "SELECT id, photoKey, personId, `left` AS boxLeft, `top` AS boxTop, `right` AS boxRight, " +
+            "`bottom` AS boxBottom, score FROM face WHERE +userId = :userId AND personId = :personId AND rejected = 0",
+    )
+    fun observeFaceBoxesForPerson(userId: String, personId: Long): Flow<List<FaceOnPhoto>>
+
     /** Distinct photo keys a person appears in, the person filter's timeline source. */
     @Query("SELECT DISTINCT photoKey FROM face WHERE userId = :userId AND personId = :personId AND rejected = 0")
     fun photoKeysForPerson(userId: String, personId: Long): Flow<List<String>>
