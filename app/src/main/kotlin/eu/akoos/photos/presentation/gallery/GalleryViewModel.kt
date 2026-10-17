@@ -862,7 +862,12 @@ class GalleryViewModel @Inject constructor(
         // burst. It sits on the items flow ALONE, not the combined result: the
         // hidden-vault, hide-in-albums toggle and album-membership flows propagate
         // immediately so flipping the toggle re-filters the grid in the very next pass.
-        val itemsFlow = if (userId != null) getGalleryItems.invoke(userId).sample(300) else getGalleryItems.invokeLocalOnly().sample(300)
+        // The timeline fills from the newest device photos first and takes the whole library when the device
+        // scan, which takes seconds on a large one, has finished.
+        val itemsFlow = getGalleryItems.withQuickStart(
+            userId,
+            if (userId != null) getGalleryItems.invoke(userId) else getGalleryItems.invokeLocalOnly(),
+        ).sample(300)
 
         // Numbers-only timing of the first pass of the process: the gap from this mark to the first
         // source value is the device scan plus the merge, then the filter pass and the first state.

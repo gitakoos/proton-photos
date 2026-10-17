@@ -58,6 +58,13 @@ interface LocalMediaRepository {
     fun observeLocalMedia(): Flow<List<LocalMediaItem>>
 
     /**
+     * The [limit] newest photos and videos on the device, newest first, read on their own so a screen can
+     * fill in while the whole-library scan behind [observeLocalMedia] is still running. Not the whole
+     * device, so a reader that acts on what is absent from it must not use it. Empty when nothing can be read.
+     */
+    suspend fun newestMedia(limit: Int): List<LocalMediaItem> = emptyList()
+
+    /**
      * Every photo and video on the device, read from MediaStore after this call began, or by a scan that saw
      * the whole device, finished a minute and a half ago at most, and had no change signalled since it began.
      *
