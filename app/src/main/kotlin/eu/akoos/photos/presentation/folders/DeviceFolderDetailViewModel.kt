@@ -52,6 +52,8 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.albumMirrorFolders
+import eu.akoos.photos.data.preferences.putAlbumMirrorFolders
 import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.data.hidden.HiddenFolderProgress
 import eu.akoos.photos.data.hidden.HiddenFolderRecords
@@ -247,7 +249,9 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val openedFromVault = MutableStateFlow(false)
 
     /** True while this folder's photos also join a matching Drive album as they upload. */
-    val isMirroredAsAlbum: StateFlow<Boolean> = folderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES)
+    val isMirroredAsAlbum: StateFlow<Boolean> = combine(context.settingsDataStore.data, bucketName) { prefs, name ->
+        name.isNotEmpty() && name in prefs.albumMirrorFolders()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** True while this folder is carved out of "Back up everything". */
     val isExcludedFromBackup: StateFlow<Boolean> = folderFlag(SettingsKeys.EXCLUDED_FOLDER_NAMES)
@@ -354,7 +358,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     /** Opt this folder in or out of also surfacing as a Drive album. */
     fun toggleMirrorAsAlbum() {
-        viewModelScope.launch { setFolderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, enable = null) }
+        val name = bucketName.value
+        if (name.isEmpty()) return
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                prefs.putAlbumMirrorFolders(prefs.albumMirrorFolders().flipped(name))
+            }
+        }
     }
 
     /** Carve this folder out of "Back up everything", or put it back in. */

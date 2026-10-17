@@ -52,6 +52,8 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.albumMirrorFolders
+import eu.akoos.photos.data.preferences.putAlbumMirrorFolders
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -94,7 +96,7 @@ data class DeviceFolder(
  * once: the store also emits on unrelated writes, and each of these lands in the same drawer.
  */
 data class DeviceFolderPrefs(
-    val mirroredAsAlbum: Set<String> = emptySet(),
+    val mirroredAsAlbum: eu.akoos.photos.data.preferences.AlbumMirrorFolders = eu.akoos.photos.data.preferences.AlbumMirrorFolders(),
     val excludedFromBackup: Set<String> = emptySet(),
     val hiddenFromTimeline: Set<String> = emptySet(),
 )
@@ -317,7 +319,7 @@ class AlbumsViewModel @Inject constructor(
             context.settingsDataStore.data
                 .map { prefs ->
                     DeviceFolderPrefs(
-                        mirroredAsAlbum = prefs[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet(),
+                        mirroredAsAlbum = prefs.albumMirrorFolders(),
                         excludedFromBackup = prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet(),
                         hiddenFromTimeline = prefs[SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES] ?: emptySet(),
                     )
@@ -415,7 +417,12 @@ class AlbumsViewModel @Inject constructor(
 
     /** Opt [folderName] in or out of also surfacing as a Drive album. */
     fun toggleFolderMirrorAsAlbum(folderName: String) {
-        viewModelScope.launch { toggleFolderName(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, folderName) }
+        if (folderName.isEmpty()) return
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                prefs.putAlbumMirrorFolders(prefs.albumMirrorFolders().flipped(folderName))
+            }
+        }
     }
 
     /** Carve [folderName] out of "Back up everything", or put it back in. */

@@ -1060,7 +1060,12 @@ class SettingsViewModel @Inject constructor(
      *  picker behaviour. */
     fun setBackupEverything(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.BACKUP_EVERYTHING] = enabled }
+            context.settingsDataStore.edit {
+                it[SettingsKeys.BACKUP_EVERYTHING] = enabled
+                // Backing up everything also makes every folder a Drive album, a folder made later included; the
+                // folders the user switches off stay off.
+                if (enabled) it[SettingsKeys.ALBUM_ALL_BY_DEFAULT] = true
+            }
             _uiState.update { it.copy(backupEverything = enabled) }
             // Turning this on can make backup effectively-on with no folders selected (arm the
             // triggers); turning it off with no folders selected makes it effectively-off (tear
