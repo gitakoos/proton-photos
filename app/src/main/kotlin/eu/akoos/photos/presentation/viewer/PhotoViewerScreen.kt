@@ -409,12 +409,13 @@ fun PhotoViewerScreen(
     // Worked out off the main thread: on a library of a hundred thousand photos the two lookup maps and the list
     // compare took long enough to drop frames as the viewer opened. The viewer opens on the snapshot at once and
     // takes the reconciled list when it is ready; where reconciliation changed nothing that is the same instance.
-    var reconciled by remember(items) { mutableStateOf(items) }
-    LaunchedEffect(items, liveItems, vaultMoves) {
-        reconciled = withContext(Dispatchers.Default) {
-            applyVaultMoves(reconcileViewerItems(items, liveItems), vaultMoves)
-        }
+    var matched by remember(items) { mutableStateOf(items) }
+    LaunchedEffect(items, liveItems) {
+        matched = withContext(Dispatchers.Default) { reconcileViewerItems(items, liveItems) }
     }
+    // The vault's moves are applied on the spot, not with the matching: a moved file's page effects start in the
+    // composition that sees the move, and they must find the new path in the list they read.
+    val reconciled = remember(matched, vaultMoves) { applyVaultMoves(matched, vaultMoves) }
     // Photos deleted from inside the viewer. The snapshot the caller handed us cannot shrink on its
     // own (reconciliation swaps items in place and deliberately keeps ones the live merge no longer
     // carries, since an album view legitimately holds photos the timeline does not), so a delete has
@@ -2080,8 +2081,11 @@ fun PhotoViewerScreen(
                 if (currentItem != null) {
                     Text(formatItemDate(currentItem), color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
                     Text(
-                        java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
-                            .format(java.util.Date(currentItem.captureTimeMs)),
+                        eu.akoos.photos.presentation.util.formatTimeOfDay(
+                            currentItem.captureTimeMs,
+                            eu.akoos.photos.presentation.util.appLocale(),
+                            eu.akoos.photos.presentation.util.LocalIs24Hour.current,
+                        ),
                         color = FgDim, fontSize = 13.sp, maxLines = 1,
                     )
                 }
