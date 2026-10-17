@@ -75,7 +75,36 @@ internal class SharedQuerySource<T : Any>(
     private val onReadFailure: (Throwable) -> Unit = {},
     query: suspend () -> T,
 ) {
-    private val gate = FreshQueryGate(scope, query)
+    /** Counts every change the store has signalled, so a read can say which changes it began after. */
+    private val changeVersion = java.util.concurrent.atomic.AtomicLong()
+
+    /** What the latest finished read found, and the change count it began under and the time it finished. */
+    private class Read<T>(val value: T, val version: Long, val atMs: Long)
+
+    /** The latest finished read, kept only while the source runs, so it holds no copy the shared value
+     *  does not hold already. */
+    @Volatile private var lastRead: Read<T>? = null
+
+    /** Orders storing a finished read against the source stopping, so a read that finishes after the stop
+     *  cannot leave a copy behind. */
+    private val readLock = Any()
+
+    /** True from the moment the listener is registered until the source stops. */
+    private var listening = false
+
+    private val gate = FreshQueryGate(scope) {
+        val version = changeVersion.get()
+        val value = query()
+        synchronized(readLock) {
+            if (listening) {
+                // A read equal to the shared value is stored as that value, so one copy of the list is held.
+                val shared = latest.value
+                val kept = if (shared != null && shared == value) shared else value
+                lastRead = Read(kept, version, now())
+            }
+        }
+        value
+    }
 
     /** Change signals of the running source; null while nothing collects. */
     @Volatile private var signals: SendChannel<Unit>? = null
@@ -88,7 +117,14 @@ internal class SharedQuerySource<T : Any>(
         // Listening starts before the first read, so a change landing during it is signalled
         // rather than lost.
         val stopListening: (() -> Unit)? = try {
-            listen { pending.trySend(Unit) }
+            listen {
+                changeVersion.incrementAndGet()
+                pending.trySend(Unit)
+            }.also {
+                // A read that began before the listener was there cannot vouch for what changed meanwhile.
+                changeVersion.incrementAndGet()
+                synchronized(readLock) { listening = true }
+            }
         } catch (e: Throwable) {
             if (e is VirtualMachineError) throw e
             ensureActive()
@@ -118,7 +154,14 @@ internal class SharedQuerySource<T : Any>(
             read()
             settle(pending) { read() }
         } finally {
-            if (signals === pending) signals = null
+            if (signals === pending) {
+                signals = null
+            }
+            changeVersion.incrementAndGet()
+            synchronized(readLock) {
+                listening = false
+                lastRead = null
+            }
             stopListening?.let { stop -> runCatching { stop() } }
         }
     }.stateIn(scope, SharingStarted.WhileSubscribed(stopTimeoutMs, replayExpirationMillis = 0L), null)
@@ -130,11 +173,29 @@ internal class SharedQuerySource<T : Any>(
 
     /** Asks for a re-read. Does nothing while no one collects, since the next collector reads anyway. */
     fun requestRefresh() {
+        changeVersion.incrementAndGet()
         signals?.trySend(Unit)
     }
 
     /** A value read after this call began; see [FreshQueryGate.fresh]. Throws when the read fails. */
     suspend fun fresh(): T = gate.fresh()
+
+    /**
+     * What [fresh] answers, without the read when the source already holds one that still is it: the latest
+     * read finished no more than [maxAgeMs] ago, no change has been signalled since it began, nothing
+     * [isStale] knows of has moved, and [reusable] accepts it. Otherwise a read as [fresh] runs. While the
+     * store is quiet this lets a burst of one-shot readers (a reconcile, a backfill walk, an upload pass)
+     * share the read the source already made, instead of each running its own whole-library scan.
+     */
+    suspend fun recent(maxAgeMs: Long, reusable: (T) -> Boolean = { true }): T {
+        val held = lastRead
+        if (held != null && held.version == changeVersion.get() && now() - held.atMs <= maxAgeMs &&
+            !isStale() && reusable(held.value)
+        ) {
+            return held.value
+        }
+        return gate.fresh()
+    }
 
     /** Waits out each burst of [pending] signals, then runs [read] once for the whole burst. */
     private suspend fun settle(pending: ReceiveChannel<Unit>, read: suspend () -> Unit) {

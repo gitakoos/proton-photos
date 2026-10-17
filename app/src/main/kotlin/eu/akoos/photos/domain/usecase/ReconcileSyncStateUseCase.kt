@@ -133,12 +133,14 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // video unable to re-pair after a reinstall (its bytes no longer hash-match the original).
         val compressVideosOnUpload = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false
 
-        // A scan begun after this pass: the demotions and the gone-file drop below act on what the
+        // A scan that saw the device as it is now: the demotions and the gone-file drop below act on what the
         // device no longer holds, which a list kept from before could still show. Those steps also
-        // need the scan to have seen the whole device, and leave alone a row written since it was
-        // asked for; see [deviceFileGone]. The pairing itself works with whatever the scan found.
-        val scanStartMs = System.currentTimeMillis()
+        // need the scan to have seen the whole device, and leave alone a row written since it began (or
+        // since this pass asked, if that was earlier); see [deviceFileGone]. The pairing itself works with
+        // whatever the scan found.
+        val askedAtMs = System.currentTimeMillis()
         val scan = localRepo.freshScan()
+        val scanStartMs = if (scan.startedAtMs > 0L) minOf(askedAtMs, scan.startedAtMs) else askedAtMs
         val allLocalItems = scan.items
         if (!scan.complete) {
             Log.w(TAG, "device scan incomplete (${allLocalItems.size} items): gone-file steps skipped this pass")

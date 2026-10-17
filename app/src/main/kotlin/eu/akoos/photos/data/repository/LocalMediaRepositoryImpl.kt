@@ -79,6 +79,9 @@ private const val TAG = "LocalMediaRepository"
  *  notifications one capture or one batch delete fires cost a single scan. */
 private const val CHANGE_QUIET_MS = 250L
 
+/** How old a complete device scan may be and still answer a one-shot reader when nothing has changed. */
+private const val RECENT_SCAN_MAX_AGE_MS = 90_000L
+
 /** Longest a steady stream of changes (an import landing file by file) holds the re-scan back. */
 private const val CHANGE_MAX_WAIT_MS = 2_000L
 
@@ -393,7 +396,14 @@ class LocalMediaRepositoryImpl @Inject constructor(
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> =
         deviceMedia.shared.map { it.items }.distinctUntilChanged()
 
-    override suspend fun freshScan(): DeviceMediaScan = deviceMedia.fresh()
+    // A scan that saw the whole device, finished within [RECENT_SCAN_MAX_AGE_MS] with no change signalled since
+    // it began, answers a one-shot reader as a new one would: every reconcile, backfill walk and upload pass
+    // asked for its own whole-library read, and with a hundred thousand photos those back-to-back reads kept
+    // the app busy and its heap full while a back-up ran. A scan that could not see everything is never reused.
+    override suspend fun freshScan(): DeviceMediaScan =
+        deviceMedia.recent(RECENT_SCAN_MAX_AGE_MS) { it.complete }
+
+    override suspend fun freshScanStrict(): DeviceMediaScan = deviceMedia.fresh()
 
     /** Registers the one MediaStore observer the shared list runs on and returns its removal. */
     private fun listenForMediaChanges(signal: () -> Unit): () -> Unit {
@@ -613,7 +623,10 @@ class LocalMediaRepositoryImpl @Inject constructor(
         }
 
     private suspend fun queryAllMedia(): DeviceMediaScan = withContext(Dispatchers.IO) {
-        if (!checkMediaPermission()) return@withContext DeviceMediaScan(emptyList(), complete = false)
+        val startedAtMs = System.currentTimeMillis()
+        if (!checkMediaPermission()) {
+            return@withContext DeviceMediaScan(emptyList(), complete = false).also { it.startedAtMs = startedAtMs }
+        }
         // Read before the queries: a scan run without both grants cannot vouch for what it returned.
         val fullAccess = hasFullMediaAccess()
         eu.akoos.photos.util.PerfDiagnostics.mark("devicescan:start", 0)
@@ -709,7 +722,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
         // this query reads, so the next scan surfaces accurate type badges instead of caching a
         // dateModified of 0 that never matches the gallery's freshness check.
         localTagScanScheduler.schedule(sorted, tagCache)
-        DeviceMediaScan(sorted, complete)
+        DeviceMediaScan(sorted, complete).also { it.startedAtMs = startedAtMs }
     }
 
     /**

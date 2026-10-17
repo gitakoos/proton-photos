@@ -85,7 +85,7 @@ class FaceReapWorker @AssistedInject constructor(
         var deviceTrashUris = emptySet<String>()
         var deviceTrustworthy = false
         runCatching {
-            val scan = localMediaRepo.freshScan()
+            val scan = localMediaRepo.freshScanStrict()
             if (!scan.complete) {
                 Log.d(TAG, "device scan incomplete, skipping device reap")
                 return@runCatching
