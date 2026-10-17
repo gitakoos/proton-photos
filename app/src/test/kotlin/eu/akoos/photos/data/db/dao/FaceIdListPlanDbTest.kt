@@ -93,6 +93,8 @@ class FaceIdListPlanDbTest {
             "`bottom` AS boxBottom FROM face WHERE photoKey IN (?, ?, ?) AND +userId = ?")
         assertUses(PHOTO, "UPDATE face SET manualName = ?, rejected = 0 WHERE photoKey IN (?, ?, ?) AND +userId = ?")
         assertUses(PHOTO, "DELETE FROM face WHERE photoKey IN (?, ?, ?) AND +userId = ?")
+        assertUses(PHOTO, "SELECT DISTINCT photoKey FROM face WHERE photoKey IN (?, ?, ?) AND +userId = ? " +
+            "AND +personId = ? AND rejected = 0")
     }
 
     @Test

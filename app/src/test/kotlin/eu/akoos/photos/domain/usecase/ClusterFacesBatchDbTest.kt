@@ -29,6 +29,7 @@ import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
 import org.junit.After
@@ -190,6 +191,26 @@ class ClusterFacesBatchDbTest {
         val everything = IncrementalBatch(limit = 10)
         assertTrue(cluster.assignNewFaces(user, batch = everything))
         assertEquals(3, everything.scanned)
+    }
+
+    @Test
+    fun `a person's photo count moves by the photos gained, not the faces`() = runTest {
+        seedAnna(members = 4)
+        // A second face on a photo Anna already holds, two faces on one new photo, one face on another new
+        // photo, and one on a photo attached to Anna by hand: three of the four add a photo only if the
+        // hand-attached one is not counted twice.
+        db.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(acct, "Anna", "m1")))
+        face("a1#1", null, axis = 1)
+        face("n1#0", null, axis = 2)
+        face("n1#1", null, axis = 3)
+        face("n2#0", null, axis = 4)
+        face("m1#0", null, axis = 5)
+
+        val batch = IncrementalBatch(limit = 10)
+        assertTrue(cluster.assignNewFaces(user, batch = batch))
+
+        assertEquals(1L, db.faceDao().faceById("m1#0")!!.personId)
+        assertEquals(4 + 2, db.personDao().personById(1L)!!.faceCount)
     }
 
     @Test

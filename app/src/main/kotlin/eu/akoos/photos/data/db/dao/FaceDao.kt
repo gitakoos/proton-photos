@@ -26,6 +26,7 @@ import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.FaceEntity
+import eu.akoos.photos.util.flatMapSqlChunks
 import eu.akoos.photos.util.forEachSqlChunk
 import kotlinx.coroutines.flow.Flow
 
@@ -307,6 +308,17 @@ interface FaceDao {
             "`bottom` AS boxBottom, score FROM face WHERE +userId = :userId AND personId = :personId AND rejected = 0",
     )
     fun observeFaceBoxesForPerson(userId: String, personId: Long): Flow<List<FaceOnPhoto>>
+
+    /** Which of [photoKeys] one person already appears in, read through the photo index so it costs the keys
+     *  asked about, not every face the person has. */
+    suspend fun photoKeysHeldAmong(userId: String, personId: Long, photoKeys: Collection<String>): Set<String> =
+        photoKeys.toSet().flatMapSqlChunks { photoKeysHeldAmongChunk(userId, personId, it) }.toHashSet()
+
+    @Query(
+        "SELECT DISTINCT photoKey FROM face WHERE photoKey IN (:photoKeys) AND +userId = :userId " +
+            "AND +personId = :personId AND rejected = 0",
+    )
+    suspend fun photoKeysHeldAmongChunk(userId: String, personId: Long, photoKeys: List<String>): List<String>
 
     /** Distinct photo keys a person appears in, the person filter's timeline source. */
     @Query("SELECT DISTINCT photoKey FROM face WHERE userId = :userId AND personId = :personId AND rejected = 0")

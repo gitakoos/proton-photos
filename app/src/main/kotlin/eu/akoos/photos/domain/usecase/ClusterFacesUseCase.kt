@@ -563,6 +563,17 @@ class ClusterFacesUseCase @Inject constructor(
                 if (person.displayName?.takeIf { it.isNotBlank() } != nameByPersonId[placement.personId]) continue
                 applied.add(placement)
             }
+            // The photos each person gains: those of the added faces it does not hold yet (and, for a named
+            // person, has not attached by hand). Its cached photo count moves by that, rather than being
+            // counted again over every face it has, which on a big person read thousands of rows per batch.
+            val gainedPhotos = HashMap<Long, Int>(applied.size * 2)
+            for (placement in applied) {
+                val added = placement.faceIds.mapTo(HashSet()) { photoKeyOfFaceId(it) }
+                val held = faceDao.photoKeysHeldAmong(account, placement.personId, added)
+                val attached = nameByPersonId[placement.personId]
+                    ?.let { personManualPhotoDao.photoKeysForNameList(account, it) }.orEmpty().toHashSet()
+                gainedPhotos[placement.personId] = added.count { it !in held && it !in attached }
+            }
             for (placement in applied) faceDao.assignPersonBatch(placement.personId, placement.faceIds)
             if (applied.isNotEmpty()) {
                 clusterSummaryDao.upsertAll(
@@ -602,16 +613,12 @@ class ClusterFacesUseCase @Inject constructor(
                     ),
                 )
             }
-            // The people that gained faces get their cached photo count back in step: one statement for
-            // the unnamed ones, the manual-photo union for a named person (its attached photos count too).
-            val gained = applied.map { it.personId }
-            personDao.recountPhotos(gained.filter { nameByPersonId[it] == null })
-            for (personId in gained) {
-                val name = nameByPersonId[personId] ?: continue
-                val person = current[personId] ?: continue
-                val manual = personManualPhotoDao.photoKeysForNameList(account, name)
-                val photos = (faceDao.distinctPhotoKeysForPerson(account, personId) + manual).toHashSet().size
-                personDao.updateCoverAndCount(personId, person.coverFaceId, photos)
+            // The people that gained faces get their cached photo count moved on by the photos they gained.
+            for (placement in applied) {
+                val person = current[placement.personId] ?: continue
+                personDao.updateCoverAndCount(
+                    placement.personId, person.coverFaceId, person.faceCount + (gainedPhotos[placement.personId] ?: 0),
+                )
             }
         }
         if (!placed) {
