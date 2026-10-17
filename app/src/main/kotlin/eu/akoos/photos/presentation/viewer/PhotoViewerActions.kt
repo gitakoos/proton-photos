@@ -97,6 +97,7 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 
 @Composable
@@ -199,11 +200,11 @@ internal fun Filmstrip(
 }
 
 @Composable
-internal fun ViewerBubble(onClick: () -> Unit, content: @Composable () -> Unit) {
+internal fun ViewerBubble(onClick: () -> Unit, size: androidx.compose.ui.unit.Dp = 40.dp, content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
-            .size(40.dp)
-            .background(PillBg, bubbleShape)
+            .size(size)
+            .background(PillBgOpaque, bubbleShape)
             .border(0.5.dp, PillBorder, bubbleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
