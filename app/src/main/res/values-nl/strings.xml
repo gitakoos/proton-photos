@@ -1787,6 +1787,7 @@
     <string name="settings_ai_indexing_paused_not_charging">Gepauzeerd, wacht op de oplader</string>
     <string name="settings_ai_indexing_paused_desc">Foto\'s worden niet op gezichten doorzocht totdat je hervat.</string>
     <string name="settings_ai_indexing_progress">%1$d van %2$d foto\'s</string>
+    <string name="settings_ai_grouping_progress">%1$d van %2$d gezichten</string>
     <plurals name="settings_ai_indexing_people">
         <item quantity="one">%1$d persoon gevonden</item>
         <item quantity="other">%1$d personen gevonden</item>

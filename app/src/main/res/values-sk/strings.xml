@@ -1854,6 +1854,7 @@
     <string name="settings_ai_indexing_paused_not_charging">Pozastavené, čaká sa na nabíjačku</string>
     <string name="settings_ai_indexing_paused_desc">Fotky sa na tváre neprehľadávajú, kým nebudete pokračovať.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotiek</string>
+    <string name="settings_ai_grouping_progress">%1$d z %2$d tvárí</string>
     <plurals name="settings_ai_indexing_people">
         <item quantity="one">Nájdený %1$d človek</item>
         <item quantity="few">Nájdení %1$d ľudia</item>

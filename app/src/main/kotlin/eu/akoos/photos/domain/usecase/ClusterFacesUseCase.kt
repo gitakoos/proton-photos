@@ -1012,6 +1012,36 @@ class ClusterFacesUseCase @Inject constructor(
             moved
         }
 
+    /**
+     * Sets every person's cached photo count from the faces they hold now: the distinct photos of an unnamed group,
+     * and those plus the photos added to the name by hand for a named person. The batched placement only moves a
+     * count on by the photos each batch adds, so a group a library past the whole-rebuild limit opened (or one an
+     * older build opened with no count) keeps a wrong start until something recounts it. Written in slices of
+     * people, each in one transaction behind [writeAllowed]; returns how many people it looked at.
+     */
+    suspend fun recountPhotoCounts(userId: UserId?, writeAllowed: () -> Boolean = { true }): Int =
+        withContext(Dispatchers.Default) {
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            var looked = 0
+            for (slice in personDao.allForUser(account).chunked(RECOUNT_PEOPLE_SLICE)) {
+                coroutineContext.ensureActive()
+                appDatabase.withTransaction {
+                    if (!writeAllowed()) return@withTransaction
+                    val (named, others) = slice.partition { !it.isOther && !it.displayName.isNullOrBlank() }
+                    personDao.recountPhotos(others.map { it.id })
+                    for (person in named) {
+                        val photos = (
+                            faceDao.distinctPhotoKeysForPerson(account, person.id) +
+                                personManualPhotoDao.photoKeysForNameList(account, person.displayName!!)
+                            ).toHashSet().size
+                        if (photos != person.faceCount) personDao.updateCoverAndCount(person.id, person.coverFaceId, photos)
+                    }
+                    looked += slice.size
+                }
+            }
+            looked
+        }
+
     /** Pairs of centroids at or over the merge floor, found on [ASSIGN_WORKERS] workers: each takes every
      *  n-th row against all later ones, so the triangle of comparisons is shared out evenly. */
     private suspend fun similarPairs(centroids: List<FloatArray>): List<MergePair> {
@@ -1207,6 +1237,9 @@ class ClusterFacesUseCase @Inject constructor(
 
         /** Vectors per page when one person's centroid is summed for the cache rebuild. */
         const val SUMMARY_PAGE_SIZE = 500
+
+        /** People whose photo counts are recounted in one transaction. */
+        const val RECOUNT_PEOPLE_SLICE = 200
     }
 }
 

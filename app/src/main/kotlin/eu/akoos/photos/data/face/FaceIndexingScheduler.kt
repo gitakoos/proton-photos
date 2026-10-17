@@ -154,13 +154,15 @@ enum class FaceIndexingState { Idle, WaitingModel, Running, Paused, Done }
  * current pass; both are 0 in the states that do no walk ([FaceIndexingState.Idle],
  * [FaceIndexingState.WaitingModel]). [heartbeat] climbs while a grouping works with the count standing
  * still (a batch placed, a closing step under way), so a host watching for progress sees the work move; it
- * only ever grows within a process, and 0 means none.
+ * only ever grows within a process, and 0 means none. [grouping] says the count is faces being placed into
+ * groups rather than photos scanned.
  */
 data class FaceIndexingProgress(
     val state: FaceIndexingState,
     val indexed: Int,
     val total: Int,
     val heartbeat: Long = 0L,
+    val grouping: Boolean = false,
 )
 
 /** How large a not-yet-indexed backlog promotes the initial walk onto a foreground service with a
@@ -2656,9 +2658,12 @@ class FaceIndexingScheduler @Inject constructor(
             backgroundEnabled = context.settingsDataStore.data.first()[SettingsKeys.FACE_INDEX_BACKGROUND] != false,
             walkRunning = progressBefore.state == FaceIndexingState.Running,
         )
+        // A walk that starts while this run is hosted owns the progress from then on: this run keeps beating its
+        // heartbeat but writes no count and puts nothing back over the walk's.
+        fun hostsProgress() = hosted && !walkRunning.value
         if (hosted) {
-            _progress.value = progressOf(FaceIndexingState.Running, 0, backlogAtStart)
-            FaceIndexingService.start(context, userId)
+            _progress.value = progressOf(FaceIndexingState.Running, 0, backlogAtStart, grouping = true)
+            FaceIndexingService.start(context, userId, triggersWalk = false)
         }
         var examined = 0
         var progressTotal = backlogAtStart
@@ -2688,8 +2693,8 @@ class FaceIndexingScheduler @Inject constructor(
                     centroids = batch.centroidCount
                     openedSinceMerge += batch.created - createdBefore
                     batchesSinceMerge++
-                    if (hosted) {
-                        _progress.value = progressOf(FaceIndexingState.Running, examined, progressTotal)
+                    if (hostsProgress()) {
+                        _progress.value = progressOf(FaceIndexingState.Running, examined, progressTotal, grouping = true)
                     } else {
                         beat()
                     }
@@ -2726,7 +2731,7 @@ class FaceIndexingScheduler @Inject constructor(
         } finally {
             // Left as it is when the sweeps finished: the closing steps below are still the hosted work, and
             // a state that stopped reading Running would end the service before they run.
-            if (hosted && !sweepsDone) _progress.value = progressBefore
+            if (hostsProgress() && !sweepsDone) _progress.value = progressBefore
         }
         // The steps the whole-library rebuild ends with, done on the groups the batches formed: give the groups
         // whose faces already carry a confirmed name that name, fold together the groups that are one person
@@ -2737,13 +2742,12 @@ class FaceIndexingScheduler @Inject constructor(
         // the people a later run opens. A ticker keeps the work visible through these quiet steps: the count
         // climbing while a service reports it, the heartbeat otherwise.
         val ticker = scope.launch {
-            var ticks = 0
             while (true) {
                 kotlinx.coroutines.delay(FINALIZE_TICK_MS)
-                ticks++
-                if (hosted) {
+                if (hostsProgress()) {
+                    // The count stands still through these steps; the heartbeat each post bumps shows the host the work moves.
                     _progress.value = progressOf(
-                        FaceIndexingState.Running, examined + ticks, maxOf(progressTotal, examined + ticks),
+                        FaceIndexingState.Running, examined, maxOf(progressTotal, examined), grouping = true,
                     )
                 } else {
                     beat()
@@ -2761,6 +2765,11 @@ class FaceIndexingScheduler @Inject constructor(
                 }
                 if (folded == null) closingFailed = true else merged += folded
                 named += nameBatchedGroups(userId, fenceToken) ?: 0
+                // The counts the batches only moved on by the photos they added, set from the faces now held.
+                val recounted = guardedGroupingStep("recounting the people's photos") {
+                    clusterFacesUseCase.recountPhotoCounts(userId) { writeFence.allows(fenceToken) }
+                }
+                if (recounted == null) closingFailed = true
                 val moved = guardedGroupingStep("filling the Unsorted bucket") {
                     clusterFacesUseCase.moveLeftoverToUnsorted(userId) { writeFence.allows(fenceToken) }
                 }
@@ -2768,7 +2777,7 @@ class FaceIndexingScheduler @Inject constructor(
             }
         } finally {
             ticker.cancel()
-            if (hosted) _progress.value = progressBefore
+            if (hostsProgress()) _progress.value = progressBefore
         }
         // What is left ungrouped now is what this run could not place (weak faces, faces matching nobody)
         // and, after a final run, nothing: the baseline the pass end measures new faces against, so a later
@@ -3077,8 +3086,8 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /** [progress] set to [state], [indexed] and [total], carrying the latest beat. */
-    private fun progressOf(state: FaceIndexingState, indexed: Int, total: Int): FaceIndexingProgress =
-        FaceIndexingProgress(state, indexed, total, heartbeat.incrementAndGet())
+    private fun progressOf(state: FaceIndexingState, indexed: Int, total: Int, grouping: Boolean = false): FaceIndexingProgress =
+        FaceIndexingProgress(state, indexed, total, heartbeat.incrementAndGet(), grouping)
 
     /** Whether a full regroup may start at [nowMs] as far as the spacing after the last one goes
      *  ([fullRegroupCooledDown]). */

@@ -130,6 +130,9 @@ class FaceIndexingService : Service() {
         }
 
         intent?.getStringExtra(EXTRA_USER_ID)?.let { lastUserId = it }
+        // A start that only hosts a grouping the scheduler is running must not begin a walk of its own: that walk
+        // would publish its own progress over the grouping's, and settling to Idle would end this host mid-grouping.
+        val triggersWalk = intent?.getBooleanExtra(EXTRA_TRIGGERS_WALK, true) ?: true
 
         // Promote immediately: Android kills the service within seconds otherwise, and on Android 12+ a
         // background start cannot foreground at all, so fall back to stopping rather than crash-looping.
@@ -155,7 +158,7 @@ class FaceIndexingService : Service() {
             // just hosts the one already going.
             // A guest walk carries the local sentinel, never a fabricated UserId (that would poison the
             // per-UserId flow + crypto caches), so map it back to a null userId for indexAll.
-            lastUserId?.let { uid ->
+            lastUserId?.takeIf { triggersWalk }?.let { uid ->
                 scope.launch {
                     runCatching {
                         scheduler.indexAll(if (uid == PhotoLocationEntity.LOCAL_USER) null else UserId(uid))
@@ -315,6 +318,7 @@ class FaceIndexingService : Service() {
         const val NOTIFICATION_ID = NotificationIds.FACE_INDEXING
         const val ACTION_STOP = "eu.akoos.photos.action.STOP_FACE_INDEX"
         const val EXTRA_USER_ID = "user_id"
+        const val EXTRA_TRIGGERS_WALK = "triggers_walk"
 
         /** How often the watcher samples progress. */
         private const val POLL_MS = 2_000L
@@ -331,13 +335,15 @@ class FaceIndexingService : Service() {
          *  resume with while the process lives. */
         @Volatile private var lastUserId: String? = null
 
-        /** Idempotently start the host for [userId]. Repeated calls route through onStartCommand and stay
+        /** Idempotently start the host for [userId]; [triggersWalk] is false when only a grouping is hosted and no
+         *  walk should begin. Repeated calls route through onStartCommand and stay
          *  running; a background-start refusal on Android 12+ is swallowed since the caller cannot know it
          *  is foreground. */
-        fun start(context: Context, userId: UserId?) {
+        fun start(context: Context, userId: UserId?, triggersWalk: Boolean = true) {
             lastUserId = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             val intent = Intent(context, FaceIndexingService::class.java)
                 .putExtra(EXTRA_USER_ID, userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+                .putExtra(EXTRA_TRIGGERS_WALK, triggersWalk)
             runCatching {
                 ContextCompat.startForegroundService(context, intent)
             }.onFailure {

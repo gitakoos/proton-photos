@@ -1760,6 +1760,7 @@
     <string name="settings_ai_indexing_paused_not_charging">Pausiert, wartet auf das Ladegerät</string>
     <string name="settings_ai_indexing_paused_desc">Bis du fortsetzt, werden keine Fotos nach Gesichtern durchsucht.</string>
     <string name="settings_ai_indexing_progress">%1$d von %2$d Fotos</string>
+    <string name="settings_ai_grouping_progress">%1$d von %2$d Gesichtern</string>
     <plurals name="settings_ai_indexing_people">
         <item quantity="one">%1$d Person gefunden</item>
         <item quantity="other">%1$d Personen gefunden</item>

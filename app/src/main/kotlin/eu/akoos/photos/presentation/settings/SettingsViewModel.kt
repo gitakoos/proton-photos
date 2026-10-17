@@ -148,6 +148,8 @@ data class FaceIndexingUi(
     val total: Int,
     val blockReason: HealthBlockReason,
     val actionEnabled: Boolean,
+    /** The count is faces being placed into groups, not photos scanned. */
+    val grouping: Boolean = false,
 )
 
 /**
@@ -309,6 +311,7 @@ class SettingsViewModel @Inject constructor(
                 total = p.total,
                 blockReason = blockReason,
                 actionEnabled = !blockReason.isPersistent,
+                grouping = p.grouping,
             )
         }.stateIn(
             viewModelScope,

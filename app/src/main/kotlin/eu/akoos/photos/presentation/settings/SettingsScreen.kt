@@ -1443,7 +1443,10 @@ private fun FaceStatusCard(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    stringResource(R.string.settings_ai_indexing_progress, ui.indexed, ui.total),
+                    stringResource(
+                        if (ui.grouping) R.string.settings_ai_grouping_progress else R.string.settings_ai_indexing_progress,
+                        ui.indexed, ui.total,
+                    ),
                     color = colors.fgMute,
                     fontSize = 12.sp,
                 )

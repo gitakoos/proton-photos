@@ -30,6 +30,7 @@ import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.face.batchedRunDue
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -242,6 +243,46 @@ class ClusterFacesBootstrapDbTest {
 
         assertEquals("Anna", db.personDao().personById(personOf("p0-0#0"))!!.displayName)
         assertEquals(null, db.personDao().personById(leftBehind)!!.displayName)
+    }
+
+    @Test
+    fun `a recount sets an unnamed group's photo count from the faces it holds`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        val group = personOf("p0-0#0")
+        val row = db.personDao().personById(group)!!
+        db.personDao().updateCoverAndCount(group, row.coverFaceId, 0)
+
+        assertEquals(3, cluster.recountPhotoCounts(user))
+
+        assertEquals(3, db.personDao().personById(group)!!.faceCount)
+    }
+
+    @Test
+    fun `a recount of a named person adds the photos put on the name by hand`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1", "p0-1#0"), "Anna")
+        cluster.nameGroupsFromConfirmedFaces(user)
+        val group = personOf("p0-0#0")
+        db.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(acct, "Anna", "hand-1")))
+        db.personDao().updateCoverAndCount(group, db.personDao().personById(group)!!.coverFaceId, 0)
+
+        cluster.recountPhotoCounts(user)
+
+        assertEquals(4, db.personDao().personById(group)!!.faceCount)
+    }
+
+    @Test
+    fun `a write check that says no leaves the photo counts as they were`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        val group = personOf("p0-0#0")
+        db.personDao().updateCoverAndCount(group, db.personDao().personById(group)!!.coverFaceId, 0)
+
+        cluster.recountPhotoCounts(user) { false }
+
+        assertEquals(0, db.personDao().personById(group)!!.faceCount)
     }
 
     @Test

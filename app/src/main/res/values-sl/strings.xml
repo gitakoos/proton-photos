@@ -1851,6 +1851,7 @@
     <string name="settings_ai_indexing_paused_not_charging">Zaustavljeno, čaka na polnilnik</string>
     <string name="settings_ai_indexing_paused_desc">Fotografije se ne pregledujejo za obraze, dokler ne nadaljujete.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
+    <string name="settings_ai_grouping_progress">%1$d od %2$d obrazov</string>
     <plurals name="settings_ai_indexing_people">
         <item quantity="one">Najdena %1$d oseba</item>
         <item quantity="two">Najdeni %1$d osebi</item>
