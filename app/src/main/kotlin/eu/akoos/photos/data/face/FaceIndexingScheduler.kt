@@ -38,6 +38,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.SupervisorJob
@@ -1640,19 +1642,44 @@ class FaceIndexingScheduler @Inject constructor(
      * walk then re-detects, reattaches the names by geometry and regroups. Guest-safe: a null userId
      * rescans the local partition.
      */
-    suspend fun rescan(userId: UserId?) {
+    suspend fun rescan(userId: UserId?) = withContext(NonCancellable) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         reset()
         val secured = runCatching { captureReattachSnapshot(account) }
             .onFailure { Log.w(TAG, "rescan snapshot failed, faces kept: ${it.message}") }
             .isSuccess
         if (secured) {
-            faceDao.clearForUser(account)
-            faceScanDao.clearForUser(account)
-            runCatching { notPersonDao.clearForUser(account) }
-                .onFailure { Log.w(TAG, "rescan not-person clear failed: ${it.message}") }
+            // One transaction: faces gone with their scan markers kept would leave every photo marked as
+            // scanned and nothing to re-detect.
+            appDatabase.withTransaction {
+                faceDao.clearForUser(account)
+                faceScanDao.clearForUser(account)
+                notPersonDao.clearForUser(account)
+            }
         }
         requestIndex(userId)
+    }
+
+    /**
+     * Wipes every detected face, person, scan marker and correction for the account and starts a fresh walk
+     * (unless [thenIndex] is false). The tables go in ONE transaction and the whole call outlives the screen
+     * that asked for it: cleared one table at a time from a screen's own scope, leaving that screen stopped
+     * the wipe half-way, with the faces gone, the scan markers kept (so nothing was ever scanned again) and the
+     * people still listed.
+     */
+    suspend fun wipeFaceData(userId: UserId?, thenIndex: Boolean = true) = withContext(NonCancellable) {
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        reset()
+        appDatabase.withTransaction {
+            faceDao.clearForUser(account)
+            personDao.clearForUser(account)
+            faceScanDao.clearForUser(account)
+            personManualPhotoDao.clearForUser(account)
+            notPersonDao.clearForUser(account)
+            appDatabase.personCoverDao().clearForUser(account)
+            appDatabase.clusterSummaryDao().clearForUser(account)
+        }
+        if (thenIndex) requestIndex(userId)
     }
 
     /**

@@ -1500,14 +1500,7 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.None) }
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
-            faceIndexingScheduler.reset()
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            faceDao.clearForUser(account)
-            personDao.clearForUser(account)
-            faceScanDao.clearForUser(account)
-            personManualPhotoDao.clearForUser(account)
-            notPersonDao.clearForUser(account)
-            personCoverDao.clearForUser(account)
+            faceIndexingScheduler.wipeFaceData(accountManager.getPrimaryUserId().first(), thenIndex = false)
             faceModelManager.deleteAll()
             faceEmbeddingModelManager.deleteAll()
             _uiState.update { it.copy(faceEnabled = false, faceRecognitionAvailable = false) }
@@ -1697,18 +1690,9 @@ class SettingsViewModel @Inject constructor(
      */
     fun clearFaceIndex() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-            faceIndexingScheduler.reset()
-            faceDao.clearForUser(account)
-            personDao.clearForUser(account)
-            faceScanDao.clearForUser(account)
-            personManualPhotoDao.clearForUser(account)
-            notPersonDao.clearForUser(account)
-            personCoverDao.clearForUser(account)
             // Face recognition stays on, and indexing is automatic, so a fresh walk starts right after
             // the wipe rather than leaving a bare "0 people" until the gallery is next opened.
-            faceIndexingScheduler.requestIndex(userId)
+            faceIndexingScheduler.wipeFaceData(accountManager.getPrimaryUserId().first())
         }
     }
 
