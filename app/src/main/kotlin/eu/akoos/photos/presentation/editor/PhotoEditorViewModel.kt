@@ -69,6 +69,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.data.face.FaceDetector
 import eu.akoos.photos.data.face.FaceModelManager
 import eu.akoos.photos.data.face.FaceModelPreparation
@@ -2995,7 +2996,7 @@ class PhotoEditorViewModel @Inject constructor(
         }.getOrDefault(false)
     }
 
-    private fun insertLocalCopy(
+    private suspend fun insertLocalCopy(
         bitmap: Bitmap,
         source: EditorSource.Local,
         quality: Int,
@@ -3049,7 +3050,31 @@ class PhotoEditorViewModel @Inject constructor(
             values.put(MediaStore.Images.Media.IS_PENDING, 0)
             context.contentResolver.update(uri, values, null, null)
         }
+        recordCaptureDateIfUnset(uri, dateTakenMs)
         return uri
+    }
+
+    /**
+     * A WebP or PNG copy is not given the date written to MediaStore (the provider leaves DATE_TAKEN unset and
+     * dates the file to the day it was added), so a copy of an old photo would jump to today. Where the column
+     * did not stick, the date goes into the capture-date overrides, which the media scan reads ahead of the
+     * column, the way a download of such a file is dated.
+     */
+    private suspend fun recordCaptureDateIfUnset(uri: Uri, dateTakenMs: Long) {
+        runCatching {
+            val stored = context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns.DATE_TAKEN, MediaStore.MediaColumns.DATE_MODIFIED),
+                null, null, null,
+            )?.use { c -> if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null }
+            if (CaptureDateOverride.shouldRecord(dateTakenMs, stored?.first ?: 0L)) {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
+                    prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] =
+                        current + CaptureDateOverride.encode(uri.toString(), dateTakenMs, stored?.second)
+                }
+            }
+        }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
     }
 
     private suspend fun saveCloud(bitmap: Bitmap, source: EditorSource.Cloud, mode: SaveMode, quality: Int, editTimestampMs: Long, originalCaptureMs: Long): Uri? {
