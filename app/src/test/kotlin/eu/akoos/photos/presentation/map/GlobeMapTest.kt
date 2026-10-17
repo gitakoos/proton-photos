@@ -79,15 +79,15 @@ class GlobeMapTest {
     }
 
     @Test
-    fun a_small_library_is_plotted_whole_and_a_large_one_is_sampled_evenly() {
+    fun a_few_cities_are_plotted_whole_and_many_keep_the_busiest() {
         val few = (0 until 20).map { pin(it) }
         assertSame(few, samplePins(few))
 
+        // The pins arrive busiest city first, so the cap keeps the head of the list.
         val many = (0 until 1500).map { pin(it) }
-        val sampled = samplePins(many)
-        assertEquals(MARKER_CAP, sampled.size)
-        assertEquals("p0", sampled.first().id)
-        assertEquals("p10", sampled[1].id)
-        assertTrue(sampled.last().id.removePrefix("p").toInt() >= 1480)
+        val kept = samplePins(many)
+        assertEquals(MARKER_CAP, kept.size)
+        assertEquals("p0", kept.first().id)
+        assertEquals("p${MARKER_CAP - 1}", kept.last().id)
     }
 }

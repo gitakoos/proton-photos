@@ -255,12 +255,11 @@ fun CustomMapScreen(
         countries.associate { it.countryCode to countryName(it.countryCode, locale, it.countryName) }
     }
 
-    // The globe plots the same pins as the OSM map: one per located photo, the same cap and sampling, the same
-    // pin, thumbnail and dot. A pin shows the neutral tile until its thumbnail decodes.
+    // The globe plots the same pins as the OSM map: one per city, the same cap, the same pin and thumbnail. A pin
+    // shows the neutral tile until its thumbnail decodes.
     val shownPins = remember(pins) { samplePins(pins) }
     val pinThumbs = remember { mutableStateMapOf<String, ImageBitmap>() }
     val placeholderPin = remember(density) { ThumbnailPin.placeholder(density).asImageBitmap() }
-    val dotBitmap = remember(density, colors.accent) { ThumbnailPin.dot(density, colors.accent.toArgb()).asImageBitmap() }
     LaunchedEffect(shownPins) {
         for (pin in shownPins) {
             if (pinThumbs.containsKey(pin.id)) continue
@@ -507,8 +506,8 @@ fun CustomMapScreen(
                 drawIntoCanvas { it.nativeCanvas.drawText(label, cx + gp.x, cy + gp.y, countryPaint) }
             }
 
-            // The same pins as the OSM map: a pin where it has room, else a small dot until a zoom gives it
-            // space. The pins earlier in the list claim their room first.
+            // The same pins as the OSM map: a pin where it has room, none until a zoom gives it space. The
+            // pins earlier in the list claim their room first.
             val placements = placePins(shownPins, size.width, size.height, radius, cLat, cLng, placeholderPin.width, placeholderPin.height)
 
             // Names of populated places, biggest first, each only where it fits clear of the names and pins
@@ -562,10 +561,6 @@ fun CustomMapScreen(
                 }
             }
 
-            for (place in placements) {
-                if (place.asPin) continue
-                drawImage(dotBitmap, Offset(place.x - dotBitmap.width / 2f, place.y - dotBitmap.height / 2f), alpha = fade)
-            }
             for (place in placements) {
                 if (!place.asPin) continue
                 val image = pinThumbs[place.pin.id] ?: placeholderPin
@@ -649,21 +644,18 @@ fun CustomMapScreen(
     }
 }
 
-/** A pin placed on screen: [asPin] is true where it is drawn in full, false where it only gets a dot. */
+/** A pin placed on screen: [asPin] is true where it is drawn in full, false where it waits for room. */
 private class PinPlacement(val pin: MapPin, val x: Float, val y: Float, val asPin: Boolean) {
     /** Whether a tap at ([tapX], [tapY]) lands on this pin, or on its dot. */
     fun hit(tapX: Float, tapY: Float, density: Float, pinWidth: Int, pinHeight: Int): Boolean {
-        if (!asPin) {
-            val r = DOT_HIT_DP * density
-            return abs(tapX - x) <= r && abs(tapY - y) <= r
-        }
+        if (!asPin) return false
         return tapX in (x - pinWidth / 2f)..(x + pinWidth / 2f) && tapY in (y - pinHeight)..(y + 8f)
     }
 }
 
 /**
  * The pins on the visible face of the globe that fall on screen, each as a full pin where the ones ahead of it
- * leave room and as a dot where they do not, by the same rule the OSM map uses. Both the drawing and the tap use
+ * leave room and not at all where they do not, by the same rule the OSM map uses. Both the drawing and the tap use
  * this, so a tap always meets what is shown.
  */
 private fun placePins(

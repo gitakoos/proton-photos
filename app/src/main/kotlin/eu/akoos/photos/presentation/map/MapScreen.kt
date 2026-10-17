@@ -119,7 +119,7 @@ internal const val PIN_THUMB_PX = 120
  * it isn't already held, and — once granted or already present — kicks the one-shot GPS
  * backfill so the location table fills in while the user looks at the map.
  *
- * Each fix is plotted as a rounded-rectangle thumbnail pin (Google-Photos style). A placeholder
+ * Each city is plotted as one rounded-rectangle thumbnail pin (Google-Photos style). A placeholder
  * pin drops immediately; the thumbnail is loaded off-thread through Coil and swapped in once
  * decoded. Tapping a pin opens the full-screen place page ([onOpenPlace]) for the pin's
  * coordinates, the same located-photos view the world map and the Places browser open, so a place
@@ -300,8 +300,6 @@ fun MapScreen(
         // One shared placeholder drawable across every pin until its thumbnail decodes.
         val placeholder = BitmapDrawable(context.resources, ThumbnailPin.placeholder(density))
 
-        // The dot a pin shrinks to when a pin ahead of it in the list has the room, as on the world map.
-        val dotDrawable = BitmapDrawable(context.resources, ThumbnailPin.dot(density, focusColor))
         val markers = sampled.map { pin ->
             Marker(mapView).apply {
                 position = GeoPoint(pin.latitude, pin.longitude)
@@ -316,19 +314,14 @@ fun MapScreen(
         }
         focusMarker?.let { mapView.overlays.add(it) }
 
-        // Every pin keeps one size at every zoom. Where two would overlap, the one earlier in the list keeps its
-        // pin and the other shows as a small dot until a zoom gives it room. Tapping either opens the place.
+        // Every pin keeps one size at every zoom. Where two would overlap, the busier city, earlier in the list, keeps
+        // its pin and the other is left off the map until a zoom gives it room.
         val pinIcons = Array<android.graphics.drawable.Drawable>(markers.size) { placeholder }
         val shownAsPin = BooleanArray(markers.size) { true }
         fun showMarker(index: Int) {
             val marker = markers[index]
-            if (shownAsPin[index]) {
-                marker.icon = pinIcons[index]
-                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-            } else {
-                marker.icon = dotDrawable
-                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-            }
+            marker.icon = pinIcons[index]
+            marker.isEnabled = shownAsPin[index]
         }
         val screenPoint = android.graphics.Point()
         fun declutterPins() {
