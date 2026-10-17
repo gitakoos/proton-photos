@@ -106,7 +106,7 @@ class ClusterFacesBatchDbTest {
         assertTrue(cluster.assignNewFaces(user, batch = batch))
 
         assertEquals(2, batch.scanned)
-        assertEquals("n2#0", batch.afterId)
+        assertTrue(batch.afterRow > 0L)
         assertEquals(1L, db.faceDao().faceById("n1#0")!!.personId)
         assertEquals(1L, db.faceDao().faceById("n2#0")!!.personId)
         assertNull(db.faceDao().faceById("n3#0")!!.personId)
@@ -146,6 +146,50 @@ class ClusterFacesBatchDbTest {
         } while (batch.scanned == batch.limit)
 
         assertEquals(0, db.faceDao().unclusteredCount(acct))
+    }
+
+    private suspend fun weakFace(id: String, axis: Int) {
+        val v = FloatArray(FACE_EMBEDDING_DIM)
+        v[axis] = 1f
+        val buffer = ByteBuffer.allocate(FACE_EMBEDDING_DIM * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
+        for (x in normalize(v)) buffer.putFloat(x)
+        db.faceDao().upsert(
+            FaceEntity(
+                id = id, userId = acct, photoKey = id.substringBefore('#'),
+                left = 0.1f, top = 0.2f, right = 0.3f, bottom = 0.4f, landmarks = "",
+                embedding = buffer.array(), personId = null, score = 0.3f, blur = 1f,
+            ),
+        )
+    }
+
+    @Test
+    fun `a run that starts after a row reads only the faces stored since`() = runTest {
+        seedAnna(members = 4)
+        for (i in 1..3) weakFace("w$i#0", axis = 30 + i)
+        val first = IncrementalBatch(limit = 10)
+        do {
+            first.scanned = 0
+            assertTrue(cluster.assignNewFaces(user, batch = first))
+        } while (first.scanned == first.limit)
+        assertEquals(3, db.faceDao().unclusteredCount(acct))
+        assertTrue(first.maxRow > 0L)
+
+        face("n1#0", null, axis = 1)
+        face("n2#0", null, axis = 2)
+        assertEquals(2, db.faceDao().unclusteredCountSince(acct, first.maxRow))
+        assertEquals(5, db.faceDao().unclusteredCountSince(acct, 0L))
+
+        val later = IncrementalBatch(limit = 10).also { it.minRow = first.maxRow }
+        assertTrue(cluster.assignNewFaces(user, batch = later))
+        assertEquals(2, later.scanned)
+        assertEquals(1L, db.faceDao().faceById("n1#0")!!.personId)
+        assertEquals(1L, db.faceDao().faceById("n2#0")!!.personId)
+        assertEquals(3, db.faceDao().unclusteredCount(acct))
+        assertTrue(later.maxRow > first.maxRow)
+
+        val everything = IncrementalBatch(limit = 10)
+        assertTrue(cluster.assignNewFaces(user, batch = everything))
+        assertEquals(3, everything.scanned)
     }
 
     @Test

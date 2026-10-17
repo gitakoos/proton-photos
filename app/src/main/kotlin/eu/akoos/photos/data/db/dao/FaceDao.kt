@@ -84,6 +84,38 @@ data class UnclusteredFace(
     }
 }
 
+/** An [UnclusteredFace] with the row it is stored in ([rowId], in the order faces were stored), so a batched
+ *  run can remember how far it has looked. */
+data class UnclusteredBatchFace(
+    val id: String,
+    val embedding: ByteArray,
+    val score: Float,
+    val blur: Float?,
+    val landmarks: String,
+    val rowId: Long,
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is UnclusteredBatchFace) return false
+        return id == other.id &&
+            embedding.contentEquals(other.embedding) &&
+            score == other.score &&
+            blur == other.blur &&
+            landmarks == other.landmarks &&
+            rowId == other.rowId
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + embedding.contentHashCode()
+        result = 31 * result + score.hashCode()
+        result = 31 * result + (blur?.hashCode() ?: 0)
+        result = 31 * result + landmarks.hashCode()
+        result = 31 * result + rowId.hashCode()
+        return result
+    }
+}
+
 /**
  * One face reduced to what a face snapshot export plans with: its photo, the person it is grouped under,
  * the name confirmed for it, whether it was removed, and the byte length of its embedding. The blob
@@ -588,15 +620,22 @@ interface FaceDao {
     @Query("SELECT id, embedding, score, blur, landmarks FROM face WHERE userId = :userId AND personId IS NULL AND rejected = 0")
     suspend fun unclusteredFaces(userId: String): List<UnclusteredFace>
 
-    /** The next [limit] not-yet-grouped faces after [afterId] in id order, so a library too big for the
-     *  whole-library rebuild is placed against the cached people a bounded batch at a time. The id cursor
-     *  moves past faces that stay unplaced, so a batch of look-alike strangers never blocks the ones
-     *  behind it. Start from an empty [afterId]. */
+    /** The next [limit] not-yet-grouped faces stored after row [afterRow], in the order they were stored, so a
+     *  library too big for the whole-library rebuild is placed against the cached people a bounded batch at a
+     *  time. The row cursor moves past faces that stay unplaced, so a batch of look-alike strangers never
+     *  blocks the ones behind it. Start from 0 to read them all: rows are numbered in the order faces were
+     *  stored, so a run that remembers the last row it looked at reads only the faces that arrived since, not
+     *  the ones it left ungrouped on purpose. */
     @Query(
-        "SELECT id, embedding, score, blur, landmarks FROM face " +
-            "WHERE userId = :userId AND personId IS NULL AND rejected = 0 AND id > :afterId ORDER BY id LIMIT :limit",
+        "SELECT id, embedding, score, blur, landmarks, rowid AS rowId FROM face " +
+            "WHERE +userId = :userId AND personId IS NULL AND rejected = 0 AND rowid > :afterRow " +
+            "ORDER BY rowid LIMIT :limit",
     )
-    suspend fun unclusteredFacesBatch(userId: String, afterId: String, limit: Int): List<UnclusteredFace>
+    suspend fun unclusteredFacesBatchSince(userId: String, afterRow: Long, limit: Int): List<UnclusteredBatchFace>
+
+    /** How many not-yet-grouped faces were stored after row [minRow], the work a batched run from there has. */
+    @Query("SELECT COUNT(*) FROM face WHERE +userId = :userId AND personId IS NULL AND rejected = 0 AND rowid > :minRow")
+    suspend fun unclusteredCountSince(userId: String, minRow: Long): Int
 
     /** One page of the account's KEPT faces (not removed), id + embedding, for the hide-similar sweep so
      *  dismissing a junk cluster can also reject its look-alikes that landed in other clusters, without

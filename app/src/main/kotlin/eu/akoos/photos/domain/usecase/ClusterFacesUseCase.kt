@@ -40,6 +40,7 @@ import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.UnclusteredFace
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
@@ -65,7 +66,7 @@ data class FaceRegroupOutcome(val committed: Boolean, val leftUngrouped: Int)
 
 /**
  * The cursor of a batched incremental placement: each [ClusterFacesUseCase.assignNewFaces] call reads at
- * most [limit] ungrouped faces after [afterId], then advances [afterId] past them and reports in [scanned]
+ * most [limit] ungrouped faces after [afterRow], then advances [afterRow] past them and reports in [scanned]
  * how many it read, so the caller loops until a call reads none.
  *
  * The people a call matches against are kept here between the calls of one run, as the last committed call
@@ -75,8 +76,13 @@ data class FaceRegroupOutcome(val committed: Boolean, val leftUngrouped: Int)
  * did not make themselves (a merge).
  */
 class IncrementalBatch(val limit: Int) {
-    var afterId: String = ""
+    var afterRow: Long = 0L
     var scanned: Int = 0
+
+    /** Only faces stored after this row are read (0 reads every ungrouped face), and the highest row any call
+     *  has read so far, for the caller to remember where the next run starts. */
+    var minRow: Long = 0L
+    var maxRow: Long = 0L
 
     /** Faces this run has placed so far (onto an existing person or into a new one) and the people it has
      *  opened, summed over its calls for the one summary line the caller logs. */
@@ -430,9 +436,11 @@ class ClusterFacesUseCase @Inject constructor(
         val rows = if (batch == null) {
             faceDao.unclusteredFaces(account)
         } else {
-            faceDao.unclusteredFacesBatch(account, batch.afterId, batch.limit).also {
-                batch.scanned = it.size
-                if (it.isNotEmpty()) batch.afterId = it.last().id
+            faceDao.unclusteredFacesBatchSince(account, maxOf(batch.minRow, batch.afterRow), batch.limit).let { read ->
+                batch.scanned = read.size
+                if (read.isNotEmpty()) batch.afterRow = read.last().rowId
+                for (face in read) if (face.rowId > batch.maxRow) batch.maxRow = face.rowId
+                read.map { UnclusteredFace(it.id, it.embedding, it.score, it.blur, it.landmarks) }
             }
         }
         val idBySample = ArrayList<String>(rows.size)

@@ -178,6 +178,15 @@ class MlWalkStateTest {
     }
 
     @Test
+    fun the_last_row_a_batched_run_looked_at_round_trips_and_alone_keeps_the_file() {
+        val s = store()
+        s.write(MlWalkState("acct", groupedUpToRow = 120_000L))
+        assertEquals(120_000L, s.read("acct")!!.groupedUpToRow)
+        s.write(MlWalkState("acct", baselineUngrouped = 4))
+        assertEquals(0L, s.read("acct")!!.groupedUpToRow)
+    }
+
+    @Test
     fun a_file_in_the_previous_format_reads_as_nothing_saved() {
         val file = File(File(temp.root, "ml_state"), "walk.bin")
         file.parentFile!!.mkdirs()

@@ -2618,7 +2618,12 @@ class FaceIndexingScheduler @Inject constructor(
         // A big backlog with no scan running to host it goes on the foreground service, reporting the faces
         // looked at so far, so it keeps running when the app leaves the screen and its notification moves.
         val progressBefore = _progress.value
-        val backlogAtStart = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
+        // A run that does not end a walk looks only at the faces stored since the last one: the faces it left
+        // ungrouped on purpose are not read and matched again at every pass, which on a big library took
+        // minutes each time. The run that ends the walk reads everything once.
+        val startRow = if (finalPass) 0L else currentGroupedUpToRow(userId)
+        var runMaxRow = 0L
+        val backlogAtStart = runCatching { faceDao.unclusteredCountSince(account, startRow) }.getOrDefault(0)
         val hosted = shouldHostGroupingInForeground(
             ungrouped = backlogAtStart,
             backgroundEnabled = context.settingsDataStore.data.first()[SettingsKeys.FACE_INDEX_BACKGROUND] != false,
@@ -2636,13 +2641,13 @@ class FaceIndexingScheduler @Inject constructor(
             var openedSinceMerge = 0
             var batchesSinceMerge = 0
             for (sweep in 1..MAX_BATCH_SWEEPS) {
-                val batch = IncrementalBatch(INCREMENTAL_BATCH_SIZE)
+                val batch = IncrementalBatch(INCREMENTAL_BATCH_SIZE).also { it.minRow = startRow }
                 // The count only ever climbs, across sweeps too: the service that hosts it stops itself once
                 // the count stands still for two minutes, so a later sweep reports its faces on top of the
                 // ones already looked at, with the total growing by what that sweep has still to read.
                 val examinedBeforeSweep = examined
                 val sweepBacklog = if (sweep == 1) backlogAtStart
-                    else runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
+                    else runCatching { faceDao.unclusteredCountSince(account, startRow) }.getOrDefault(0)
                 progressTotal = examinedBeforeSweep + sweepBacklog
                 while (true) {
                     coroutineContext.ensureActive()
@@ -2652,6 +2657,7 @@ class FaceIndexingScheduler @Inject constructor(
                     if (!handled) return false
                     batches++
                     examined += batch.scanned
+                    runMaxRow = maxOf(runMaxRow, batch.maxRow)
                     centroids = batch.centroidCount
                     openedSinceMerge += batch.created - createdBefore
                     batchesSinceMerge++
@@ -2740,7 +2746,11 @@ class FaceIndexingScheduler @Inject constructor(
         // and, after a final run, nothing: the baseline the pass end measures new faces against, so a later
         // pass does not read the same faces all again.
         val leftover = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
-        regroupBaseline = RegroupBaseline(account, leftover, fenceToken, finalizeOwed = !finalPass || closingFailed)
+        regroupBaseline = RegroupBaseline(
+            account, leftover, fenceToken,
+            finalizeOwed = !finalPass || closingFailed,
+            groupedUpToRow = maxOf(currentGroupedUpToRow(userId), runMaxRow),
+        )
         saveWalkState(userId)
         val tookMs = SystemClock.elapsedRealtime() - startMs
         noteBatchedProgress(batches, examined, created, centroids, startMs)
@@ -2959,7 +2969,7 @@ class FaceIndexingScheduler @Inject constructor(
         }
         if (regroupBaseline == null) {
             saved.baselineUngrouped?.let {
-                regroupBaseline = RegroupBaseline(account, it, writeFence.token(), saved.finalizeOwed)
+                regroupBaseline = RegroupBaseline(account, it, writeFence.token(), saved.finalizeOwed, saved.groupedUpToRow)
             }
         }
     }
@@ -2980,6 +2990,7 @@ class FaceIndexingScheduler @Inject constructor(
                     lastRegroupDurationMs = lastRegroupDurationMs,
                     baselineUngrouped = currentRegroupBaseline(userId),
                     finalizeOwed = currentFinalizeOwed(userId),
+                    groupedUpToRow = currentGroupedUpToRow(userId),
                 ),
             )
         }.onFailure { Log.w(TAG, "walk state save failed: ${it.message}") }
@@ -2993,6 +3004,9 @@ class FaceIndexingScheduler @Inject constructor(
      *  closing steps owed. */
     private fun currentFinalizeOwed(userId: UserId?): Boolean = currentBaseline(userId)?.finalizeOwed == true
 
+    /** The last stored face row a batched run has looked at while the baseline is current, else 0 (read all). */
+    private fun currentGroupedUpToRow(userId: UserId?): Long = currentBaseline(userId)?.groupedUpToRow ?: 0L
+
     private fun currentBaseline(userId: UserId?): RegroupBaseline? =
         regroupBaseline?.takeIf { it.account == accountOf(userId) && writeFence.allows(it.fenceToken) }
 
@@ -3002,7 +3016,9 @@ class FaceIndexingScheduler @Inject constructor(
         val current = regroupBaseline?.takeIf { it.account == accountOf(userId) } ?: return
         val lowered = lowerRegroupBaseline(current.ungrouped, ungrouped) ?: return
         if (lowered != current.ungrouped) {
-            regroupBaseline = RegroupBaseline(current.account, lowered, current.fenceToken, current.finalizeOwed)
+            regroupBaseline = RegroupBaseline(
+                current.account, lowered, current.fenceToken, current.finalizeOwed, current.groupedUpToRow,
+            )
         }
     }
 
@@ -3265,12 +3281,14 @@ class FaceIndexingScheduler @Inject constructor(
     /** How many of [account]'s faces a completed full regroup left ungrouped, and the [writeFence] token it
      *  read them under, so the count is ignored for another account and once the face data it describes has
      *  been replaced. [finalizeOwed] marks a batched run that left its closing steps (the merge, the Unsorted
-     *  bucket) to a later run that ends a walk. */
+     *  bucket) to a later run that ends a walk, and [groupedUpToRow] the last stored face row a batched run
+     *  looked at, from which a run that does not end a walk reads on. */
     private class RegroupBaseline(
         val account: String,
         val ungrouped: Int,
         val fenceToken: Long,
         val finalizeOwed: Boolean = false,
+        val groupedUpToRow: Long = 0L,
     )
 
     private companion object {
