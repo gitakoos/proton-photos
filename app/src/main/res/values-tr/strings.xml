@@ -2363,4 +2363,8 @@
     <string name="whats_new_260_videoedit_title">Aynı tasarımda video düzenleyici</string>
     <string name="whats_new_260_videoedit_body">“Ayarla” bir cetvelin üstünde yuvarlak simgeler kullanır, kırpma ve döndürme bir sekmeyi en boy oranı listesiyle paylaşır ve kırpma çerçevesi iki parmakla yeniden boyutlandırılır. Araç değiştirirken görüntü artık titremez.</string>
     <string name="whats_new_260_more">Ayrıca HEIC, GIF ve RAW için düzenlenebilir tarih, yok sayılabilen kopya grupları, haritada yer seçici, Türkçe ve çok sayıda başka düzeltme ve kararlılık iyileştirmesi.</string>
+    <string name="viewer_save_to_drive">Drive\'ıma kaydet</string>
+    <string name="viewer_saved_to_drive">Drive\'a kaydedildi</string>
+    <string name="viewer_already_in_drive">Zaten Drive\'da</string>
+    <string name="viewer_save_to_drive_failed">Drive\'a kaydedilemedi</string>
 </resources>

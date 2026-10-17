@@ -2570,4 +2570,8 @@
     <string name="whats_new_260_videoedit_title">Editor videa ve stejném stylu</string>
     <string name="whats_new_260_videoedit_body">„Upravit“ používá kulaté ikony nad pravítkem, oříznutí a otočení sdílí jednu kartu se seznamem poměrů stran a velikost ořezového rámečku lze měnit dvěma prsty. Obraz už při přepínání nástrojů nebliká.</string>
     <string name="whats_new_260_more">Navíc upravitelné datum u HEIC, GIF a RAW, skupiny duplicit, které lze ignorovat, výběr místa na mapě, turečtina a spousta dalších oprav a vylepšení stability.</string>
+    <string name="viewer_save_to_drive">Uložit na můj Drive</string>
+    <string name="viewer_saved_to_drive">Uloženo na Drive</string>
+    <string name="viewer_already_in_drive">Už je na Drive</string>
+    <string name="viewer_save_to_drive_failed">Nepodařilo se uložit na Drive</string>
 </resources>

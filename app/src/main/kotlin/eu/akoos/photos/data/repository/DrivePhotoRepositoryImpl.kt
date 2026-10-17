@@ -357,6 +357,24 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         )
     }
 
+    override suspend fun saveSharedPhotosToOwnLibrary(
+        userId: UserId,
+        albumLinkId: String,
+        photoLinkIds: List<String>,
+    ): DrivePhotoRepository.SaveSharedPhotosOutcome {
+        val album = loadSharedWithMeAlbumsCached().firstOrNull { it.linkId == albumLinkId }
+        val shareId = album?.sharingShareId ?: error("the shared album is not known")
+        val volumeId = album.volumeId ?: error("the shared album has no volume")
+        val result = albumSharingService.saveSharedPhotosToOwnLibrary(
+            userId = userId,
+            sharingShareId = shareId,
+            sourceAlbumLinkId = albumLinkId,
+            sourceVolumeId = volumeId,
+            photoLinkIds = photoLinkIds,
+        )
+        return DrivePhotoRepository.SaveSharedPhotosOutcome(result.copiedCount, result.failedCount, result.skippedCount)
+    }
+
     override fun startSaveSharedAlbumToOwnLibrary(
         userId: UserId,
         sharingShareId: String,

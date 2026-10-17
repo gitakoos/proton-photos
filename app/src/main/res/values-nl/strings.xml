@@ -2473,4 +2473,8 @@
     <string name="whats_new_260_videoedit_title">Video-editor in hetzelfde ontwerp</string>
     <string name="whats_new_260_videoedit_body">“Aanpassen” gebruikt ronde pictogrammen boven een liniaal, bijsnijden en draaien delen één tabblad met een lijst van beeldverhoudingen, en het uitsnedekader verander je met twee vingers van formaat. Het beeld flikkert niet meer als je van gereedschap wisselt.</string>
     <string name="whats_new_260_more">Daarnaast bewerkbare datums voor HEIC, GIF en RAW, groepen met duplicaten die je kunt negeren, een plaatskiezer op de kaart, Turks en nog veel meer fixes en stabiliteitsverbeteringen.</string>
+    <string name="viewer_save_to_drive">Opslaan in mijn Drive</string>
+    <string name="viewer_saved_to_drive">Opgeslagen in Drive</string>
+    <string name="viewer_already_in_drive">Staat al in Drive</string>
+    <string name="viewer_save_to_drive_failed">Opslaan in Drive mislukt</string>
 </resources>

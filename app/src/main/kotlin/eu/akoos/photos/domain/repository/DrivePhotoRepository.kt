@@ -346,6 +346,19 @@ interface DrivePhotoRepository {
         sourceVolumeId: String,
     ): SaveSharedAlbumOutcome
 
+    /**
+     * Copies the given photos of a shared-with-me album into this user's own library, without making an album
+     * of them. The album is looked up among the cached shared albums by [albumLinkId]. A photo the library
+     * already holds is counted as skipped, not copied twice.
+     */
+    suspend fun saveSharedPhotosToOwnLibrary(
+        userId: UserId,
+        albumLinkId: String,
+        photoLinkIds: List<String>,
+    ): SaveSharedPhotosOutcome = throw UnsupportedOperationException("saveSharedPhotosToOwnLibrary")
+
+    data class SaveSharedPhotosOutcome(val copiedCount: Int, val failedCount: Int, val skippedCount: Int)
+
     data class SaveSharedAlbumOutcome(
         val newAlbumLinkId: String,
         val copiedCount: Int,

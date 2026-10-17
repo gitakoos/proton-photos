@@ -2564,4 +2564,8 @@
     <string name="whats_new_260_videoedit_title">Edytor wideo w tym samym stylu</string>
     <string name="whats_new_260_videoedit_body">„Dostosuj” używa okrągłych ikon nad linijką, kadrowanie i obracanie dzielą jedną kartę z listą proporcji, a ramkę kadru zmienisz dwoma palcami. Obraz nie migocze już przy zmianie narzędzia.</string>
     <string name="whats_new_260_more">Do tego edytowalne daty w HEIC, GIF i RAW, grupy duplikatów, które można zignorować, wybór miejsca na mapie, język turecki oraz mnóstwo innych poprawek i usprawnień stabilności.</string>
+    <string name="viewer_save_to_drive">Zapisz na moim Drive</string>
+    <string name="viewer_saved_to_drive">Zapisano na Drive</string>
+    <string name="viewer_already_in_drive">Już jest na Drive</string>
+    <string name="viewer_save_to_drive_failed">Nie udało się zapisać na Drive</string>
 </resources>

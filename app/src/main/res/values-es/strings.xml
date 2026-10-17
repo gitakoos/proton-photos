@@ -2483,4 +2483,8 @@
     <string name="whats_new_260_videoedit_title">Editor de vídeo con el mismo diseño</string>
     <string name="whats_new_260_videoedit_body">“Ajustar” usa iconos redondos sobre una regla, recortar y girar comparten una pestaña con una lista de proporciones, y el marco de recorte se redimensiona con dos dedos. La imagen ya no parpadea al cambiar de herramienta.</string>
     <string name="whats_new_260_more">Además, fechas editables en HEIC, GIF y RAW, grupos de duplicados que puedes ignorar, un selector de lugar en el mapa, turco y muchas más correcciones y mejoras de estabilidad.</string>
+    <string name="viewer_save_to_drive">Guardar en mi Drive</string>
+    <string name="viewer_saved_to_drive">Guardado en Drive</string>
+    <string name="viewer_already_in_drive">Ya está en Drive</string>
+    <string name="viewer_save_to_drive_failed">No se pudo guardar en Drive</string>
 </resources>

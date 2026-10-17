@@ -2448,4 +2448,8 @@
     <string name="whats_new_260_videoedit_title">Éditeur vidéo au même design</string>
     <string name="whats_new_260_videoedit_body">« Ajuster » utilise des icônes rondes au-dessus d\'une règle, recadrer et pivoter partagent un onglet avec une liste de formats, et le cadre de recadrage se redimensionne à deux doigts. L\'image ne scintille plus quand on change d\'outil.</string>
     <string name="whats_new_260_more">Et aussi des dates modifiables pour HEIC, GIF et RAW, des groupes de doublons à ignorer, un sélecteur de lieu sur la carte, le turc et de nombreuses autres corrections et améliorations de stabilité.</string>
+    <string name="viewer_save_to_drive">Enregistrer dans mon Drive</string>
+    <string name="viewer_saved_to_drive">Enregistré dans Drive</string>
+    <string name="viewer_already_in_drive">Déjà dans Drive</string>
+    <string name="viewer_save_to_drive_failed">Échec de l\'enregistrement dans Drive</string>
 </resources>

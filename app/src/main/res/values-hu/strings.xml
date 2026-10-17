@@ -2445,4 +2445,8 @@
     <string name="whats_new_260_videoedit_title">Videószerkesztő, ugyanazzal a kialakítással</string>
     <string name="whats_new_260_videoedit_body">Az „Igazítás” kerek ikonokat használ egy vonalzó fölött, a vágás és a forgatás egy fülön van a képarányok listájával, a vágókeret pedig két ujjal átméretezhető. A kép már nem villog eszközváltáskor.</string>
     <string name="whats_new_260_more">Ráadásul szerkeszthető dátum HEIC, GIF és RAW fájloknál, figyelmen kívül hagyható duplikátumcsoportok, helyválasztó a térképen, török nyelv, és rengeteg további javítás és stabilitási fejlesztés.</string>
+    <string name="viewer_save_to_drive">Mentés a Drive-omra</string>
+    <string name="viewer_saved_to_drive">Elmentve a Drive-ra</string>
+    <string name="viewer_already_in_drive">Már a Drive-on van</string>
+    <string name="viewer_save_to_drive_failed">Nem sikerült a Drive-ra menteni</string>
 </resources>

@@ -1726,47 +1726,12 @@ class AlbumSharingService @Inject constructor(
     ): SaveSharedAlbumResult = withContext(Dispatchers.IO) {
         val manager = apiProvider.get<DriveApiService>(userId)
 
-        // === Phase 1: pin down the caller's own photos infrastructure ============
-        val ownVolumeId = shareService.getVolumeId(userId)
-        val signingKey = cryptoHelper.getAddressSigningKey(userId)
-
-        // === Phase 2: decrypt the source album's keys ============================
-        val sharedShareBootstrap = semaphore.withPermit {
-            manager.invoke { getShareBootstrap(sharingShareId) }.valueOrThrow
-        }
-        val sharedShareKeyBytes = cryptoHelper.decryptExternalShareKey(
-            userId,
-            sharedShareBootstrap.key ?: error("Shared share bootstrap missing Key"),
-            sharedShareBootstrap.passphrase ?: error("Shared share bootstrap missing Passphrase"),
-        )
-        val sourceAlbumDetail = linkDetailHelpers
-            .batchFetchLinkDetailsViaShare(userId, sharingShareId, listOf(sourceAlbumLinkId))[sourceAlbumLinkId]
-            ?.link ?: error("Could not fetch source album link metadata")
-        val sourceAlbumKeyBytes = cryptoHelper.decryptNodeKey(
-            sourceAlbumDetail.nodeKey ?: error("Source album has no NodeKey"),
-            sourceAlbumDetail.nodePassphrase ?: error("Source album has no NodePassphrase"),
-            sharedShareKeyBytes,
-        )
+        val prep = prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId)
 
         // === Phase 3: create the new owned album =================================
         val sanitizedName = sourceAlbumDecryptedName.ifBlank { "Saved album" }
         val newAlbum = albumService.createDriveAlbum(userId, sanitizedName)
         val newAlbumLinkId = newAlbum.linkId
-
-        // === Phase 4: gather the Photos library root keys =========================
-        // Drive Photos albums are memberships, not folder children: photos live under the
-        // Photos root and albums reference them by linkId. So the copy lands in the root (a
-        // normal library photo) and a follow-up addPhotosToAlbum attaches it — copying into the
-        // album folder directly would keep the photos off the timeline.
-        val ownPhotosRootLinkId = shareService.photosRootLinkId()
-            ?: error("Photos root linkId unavailable")
-        val ownRootArmoredKey = shareService.rootLinkArmoredKey()
-            ?: error("Photos root armored key unavailable")
-        val ownRootHashKeyBytes = shareService.rootNodeHashKeyBytes()
-            ?: error("Photos root NodeHashKey unavailable")
-        val ownRootPublicKey = cryptoHelper.withCryptoLock {
-            cryptoContext.pgpCrypto.getPublicKey(ownRootArmoredKey)
-        }
 
         // === Phase 5: walk the shared album's children + copy each ===============
         val children = mutableListOf<String>()
@@ -1831,61 +1796,8 @@ class AlbumSharingService @Inject constructor(
                 continue
             }
             try {
-                val newNodePass = cryptoHelper.reencryptNodePassphraseForCopy(
-                    sourceNodePassphraseArmored = photoLink.nodePassphrase,
-                    sourceParentKeyBytes = sourceAlbumKeyBytes,
-                    targetParentPublicKeyArmored = ownRootPublicKey,
-                    signerKeyBytes = signingKey.unlockedKeyBytes,
-                )
-                val newName = cryptoHelper.reencryptLinkNameForCopy(
-                    sourceNameArmored = photoLink.name,
-                    sourceParentKeyBytes = sourceAlbumKeyBytes,
-                    targetParentPublicKeyArmored = ownRootPublicKey,
-                    signerKeyBytes = signingKey.unlockedKeyBytes,
-                )
-                val plainName = String(newName.plainBytes, Charsets.UTF_8)
-                val newNameHash = cryptoHelper.computeNameHash(plainName, ownRootHashKeyBytes)
-
-                // Reuse the source's existing contentHash. The share endpoint nests the Photo
-                // block under FileProperties.ActiveRevision (the BatchLink wrapper is null for
-                // shared-with-me fetches), so walk that first and fall back to the wrapper.
-                val sourceContentHash = photoLink.fileProperties?.activeRevision?.photo?.contentHash
-                    ?: detail.photo?.contentHash
-                val photosBlock = sourceContentHash?.let {
-                    eu.akoos.photos.data.api.dto.CopyLinkRequest.PhotosCopyData(
-                        contentHash = it,
-                        relatedPhotos = emptyList(),
-                    )
-                }
-                if (photosBlock == null) {
-                    Log.w(TAG, "saveSharedAlbumToOwnLibrary: no contentHash for $photoLinkId — will skip Photos block")
-                }
-
-                // The backend accepts NodePassphraseSignature + SignatureEmail ONLY when the
-                // source link is anonymous (blank signatureEmail, e.g. public-folder uploads);
-                // setting them on an owner-signed photo is rejected with code 2001.
-                // NameSignatureEmail is always our address (we re-signed the Name above).
-                val sourceSignatureEmail = photoLink.signatureEmail.orEmpty()
-                val sourceIsAnonymous = sourceSignatureEmail.isEmpty()
-                val nameSignatureEmail = signingKey.email
-                val signatureEmailToSend = if (sourceIsAnonymous) signingKey.email else null
-                val nodePassphraseSigToSend = if (sourceIsAnonymous) newNodePass.armoredSignature else null
-
-                val request = eu.akoos.photos.data.api.dto.CopyLinkRequest(
-                    name = newName.armoredName,
-                    hash = newNameHash,
-                    targetVolumeId = ownVolumeId,
-                    targetParentLinkId = ownPhotosRootLinkId,
-                    nodePassphrase = newNodePass.armoredPassphrase,
-                    nameSignatureEmail = nameSignatureEmail,
-                    nodePassphraseSignature = nodePassphraseSigToSend,
-                    signatureEmail = signatureEmailToSend,
-                    photos = photosBlock,
-                )
-                val resp = semaphore.withPermit {
-                    manager.invoke { copyLink(sourceVolumeId, photoLinkId, request) }.valueOrThrow
-                }
-                resp.linkId?.let { copiedLinkIds.add(it) }
+                val newLinkId = copyPhotoToOwnLibrary(userId, sourceVolumeId, photoLinkId, detail, prep)
+                newLinkId?.let { copiedLinkIds.add(it) }
                 copied++
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
@@ -1915,6 +1827,204 @@ class AlbumSharingService @Inject constructor(
             failedCount = failures.size,
             totalRequested = children.distinct().size,
         )
+    }
+
+    /** What a copy into this user's own library needs, worked out once for a source album. */
+    private class OwnLibraryCopyContext(
+        val ownVolumeId: String,
+        val signingKey: eu.akoos.photos.data.crypto.AddressSigningKey,
+        val sourceAlbumKeyBytes: ByteArray,
+        val ownPhotosRootLinkId: String,
+        val ownRootPublicKey: String,
+        val ownRootHashKeyBytes: ByteArray,
+    )
+
+    /**
+     * The keys a copy out of a shared album into this library works with: this user's own volume, signing key
+     * and Photos root, and the shared album's key decrypted through its share. The copies land in the library
+     * root, where a normal photo lives; an album only references them.
+     */
+    private suspend fun prepareOwnLibraryCopy(
+        userId: UserId,
+        sharingShareId: String,
+        sourceAlbumLinkId: String,
+    ): OwnLibraryCopyContext {
+        val manager = apiProvider.get<DriveApiService>(userId)
+
+        // === Phase 1: pin down the caller's own photos infrastructure ============
+        val ownVolumeId = shareService.getVolumeId(userId)
+        val signingKey = cryptoHelper.getAddressSigningKey(userId)
+
+        // === Phase 2: decrypt the source album's keys ============================
+        val sharedShareBootstrap = semaphore.withPermit {
+            manager.invoke { getShareBootstrap(sharingShareId) }.valueOrThrow
+        }
+        val sharedShareKeyBytes = cryptoHelper.decryptExternalShareKey(
+            userId,
+            sharedShareBootstrap.key ?: error("Shared share bootstrap missing Key"),
+            sharedShareBootstrap.passphrase ?: error("Shared share bootstrap missing Passphrase"),
+        )
+        val sourceAlbumDetail = linkDetailHelpers
+            .batchFetchLinkDetailsViaShare(userId, sharingShareId, listOf(sourceAlbumLinkId))[sourceAlbumLinkId]
+            ?.link ?: error("Could not fetch source album link metadata")
+        val sourceAlbumKeyBytes = cryptoHelper.decryptNodeKey(
+            sourceAlbumDetail.nodeKey ?: error("Source album has no NodeKey"),
+            sourceAlbumDetail.nodePassphrase ?: error("Source album has no NodePassphrase"),
+            sharedShareKeyBytes,
+        )
+
+        // === Phase 4: gather the Photos library root keys =========================
+        // Drive Photos albums are memberships, not folder children: photos live under the
+        // Photos root and albums reference them by linkId. So the copy lands in the root (a
+        // normal library photo) and a follow-up addPhotosToAlbum attaches it — copying into the
+        // album folder directly would keep the photos off the timeline.
+        val ownPhotosRootLinkId = shareService.photosRootLinkId()
+            ?: error("Photos root linkId unavailable")
+        val ownRootArmoredKey = shareService.rootLinkArmoredKey()
+            ?: error("Photos root armored key unavailable")
+        val ownRootHashKeyBytes = shareService.rootNodeHashKeyBytes()
+            ?: error("Photos root NodeHashKey unavailable")
+        val ownRootPublicKey = cryptoHelper.withCryptoLock {
+            cryptoContext.pgpCrypto.getPublicKey(ownRootArmoredKey)
+        }
+
+        return OwnLibraryCopyContext(
+            ownVolumeId = ownVolumeId,
+            signingKey = signingKey,
+            sourceAlbumKeyBytes = sourceAlbumKeyBytes,
+            ownPhotosRootLinkId = ownPhotosRootLinkId,
+            ownRootPublicKey = ownRootPublicKey,
+            ownRootHashKeyBytes = ownRootHashKeyBytes,
+        )
+    }
+
+    /**
+     * Copies one photo of a shared album into this user's Photos root and returns the new link id (null when
+     * the server gave none). Throws when the photo cannot be copied; the caller counts that as a failure.
+     */
+    private suspend fun copyPhotoToOwnLibrary(
+        userId: UserId,
+        sourceVolumeId: String,
+        photoLinkId: String,
+        detail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
+        ctx: OwnLibraryCopyContext,
+    ): String? {
+        val manager = apiProvider.get<DriveApiService>(userId)
+        val photoLink = detail?.link
+        if (photoLink?.nodePassphrase == null || photoLink.name == null) error("photo link is missing its keys")
+        val sourceAlbumKeyBytes = ctx.sourceAlbumKeyBytes
+        val signingKey = ctx.signingKey
+        val ownRootPublicKey = ctx.ownRootPublicKey
+        val ownRootHashKeyBytes = ctx.ownRootHashKeyBytes
+        val ownVolumeId = ctx.ownVolumeId
+        val ownPhotosRootLinkId = ctx.ownPhotosRootLinkId
+        val newNodePass = cryptoHelper.reencryptNodePassphraseForCopy(
+            sourceNodePassphraseArmored = photoLink.nodePassphrase,
+            sourceParentKeyBytes = sourceAlbumKeyBytes,
+            targetParentPublicKeyArmored = ownRootPublicKey,
+            signerKeyBytes = signingKey.unlockedKeyBytes,
+        )
+        val newName = cryptoHelper.reencryptLinkNameForCopy(
+            sourceNameArmored = photoLink.name,
+            sourceParentKeyBytes = sourceAlbumKeyBytes,
+            targetParentPublicKeyArmored = ownRootPublicKey,
+            signerKeyBytes = signingKey.unlockedKeyBytes,
+        )
+        val plainName = String(newName.plainBytes, Charsets.UTF_8)
+        val newNameHash = cryptoHelper.computeNameHash(plainName, ownRootHashKeyBytes)
+
+        // Reuse the source's existing contentHash. The share endpoint nests the Photo
+        // block under FileProperties.ActiveRevision (the BatchLink wrapper is null for
+        // shared-with-me fetches), so walk that first and fall back to the wrapper.
+        val sourceContentHash = photoLink.fileProperties?.activeRevision?.photo?.contentHash
+            ?: detail.photo?.contentHash
+        val photosBlock = sourceContentHash?.let {
+            eu.akoos.photos.data.api.dto.CopyLinkRequest.PhotosCopyData(
+                contentHash = it,
+                relatedPhotos = emptyList(),
+            )
+        }
+        if (photosBlock == null) {
+            Log.w(TAG, "saveSharedAlbumToOwnLibrary: no contentHash for $photoLinkId — will skip Photos block")
+        }
+
+        // The backend accepts NodePassphraseSignature + SignatureEmail ONLY when the
+        // source link is anonymous (blank signatureEmail, e.g. public-folder uploads);
+        // setting them on an owner-signed photo is rejected with code 2001.
+        // NameSignatureEmail is always our address (we re-signed the Name above).
+        val sourceSignatureEmail = photoLink.signatureEmail.orEmpty()
+        val sourceIsAnonymous = sourceSignatureEmail.isEmpty()
+        val nameSignatureEmail = signingKey.email
+        val signatureEmailToSend = if (sourceIsAnonymous) signingKey.email else null
+        val nodePassphraseSigToSend = if (sourceIsAnonymous) newNodePass.armoredSignature else null
+
+        val request = eu.akoos.photos.data.api.dto.CopyLinkRequest(
+            name = newName.armoredName,
+            hash = newNameHash,
+            targetVolumeId = ownVolumeId,
+            targetParentLinkId = ownPhotosRootLinkId,
+            nodePassphrase = newNodePass.armoredPassphrase,
+            nameSignatureEmail = nameSignatureEmail,
+            nodePassphraseSignature = nodePassphraseSigToSend,
+            signatureEmail = signatureEmailToSend,
+            photos = photosBlock,
+        )
+        val resp = semaphore.withPermit {
+            manager.invoke { copyLink(sourceVolumeId, photoLinkId, request) }.valueOrThrow
+        }
+        return resp.linkId
+    }
+
+    data class SaveSharedPhotosResult(val copiedCount: Int, val failedCount: Int, val skippedCount: Int)
+
+    /**
+     * Copies the chosen photos of a shared-with-me album into this user's own library, without making an album
+     * of them. A photo this library already holds (same content hash) is skipped rather than copied twice.
+     */
+    suspend fun saveSharedPhotosToOwnLibrary(
+        userId: UserId,
+        sharingShareId: String,
+        sourceAlbumLinkId: String,
+        sourceVolumeId: String,
+        photoLinkIds: List<String>,
+    ): SaveSharedPhotosResult = withContext(Dispatchers.IO) {
+        val ids = photoLinkIds.distinct()
+        if (ids.isEmpty()) return@withContext SaveSharedPhotosResult(0, 0, 0)
+        val prep = prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId)
+        val details = linkDetailHelpers.batchFetchLinkDetailsViaShare(userId, sharingShareId, ids)
+        val held = runCatching {
+            val hashes = ids.mapNotNull { linkId ->
+                val d = details[linkId]
+                d?.photo?.contentHash ?: d?.link?.fileProperties?.activeRevision?.photo?.contentHash
+            }
+            if (hashes.isEmpty()) emptySet() else hashes
+                .chunked(500)
+                .flatMap { photoListingDao.findExistingContentHashes(userId.id, it) }
+                .toSet()
+        }.getOrElse { e ->
+            Log.w(TAG, "saveSharedPhotosToOwnLibrary: duplicate lookup failed (${e.message}), copying everything")
+            emptySet()
+        }
+        var copied = 0
+        var failed = 0
+        var skipped = 0
+        for (linkId in ids) {
+            val d = details[linkId]
+            val hash = d?.photo?.contentHash ?: d?.link?.fileProperties?.activeRevision?.photo?.contentHash
+            if (hash != null && hash in held) {
+                skipped++
+                continue
+            }
+            try {
+                copyPhotoToOwnLibrary(userId, sourceVolumeId, linkId, d, prep)
+                copied++
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "saveSharedPhotosToOwnLibrary: copy failed linkId=$linkId msg=${e.message}", e)
+                failed++
+            }
+        }
+        SaveSharedPhotosResult(copied, failed, skipped)
     }
 
     data class SaveSharedAlbumResult(

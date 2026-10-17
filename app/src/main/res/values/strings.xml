@@ -2486,4 +2486,8 @@
     <string name="whats_new_260_videoedit_title">Video editor, same design</string>
     <string name="whats_new_260_videoedit_body">“Adjust” uses round icons over a ruler, crop and rotate are now one tab with a list of aspect ratios, and the crop frame resizes with a two-finger pinch. The picture no longer flickers when you switch tools.</string>
     <string name="whats_new_260_more">Plus editable dates for HEIC, GIF and RAW photos, duplicate groups you can ignore, a map place picker, Turkish, and lots more fixes and stability improvements.</string>
+    <string name="viewer_save_to_drive">Save to my Drive</string>
+    <string name="viewer_saved_to_drive">Saved to Drive</string>
+    <string name="viewer_already_in_drive">Already in Drive</string>
+    <string name="viewer_save_to_drive_failed">Couldn\'t save to Drive</string>
 </resources>

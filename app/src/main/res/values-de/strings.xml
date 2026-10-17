@@ -2446,4 +2446,8 @@
     <string name="whats_new_260_videoedit_title">Video-Editor im gleichen Design</string>
     <string name="whats_new_260_videoedit_body">„Anpassen“ nutzt runde Symbole über einem Lineal, Zuschneiden und Drehen teilen sich einen Tab mit einer Liste der Seitenverhältnisse, und der Zuschneiderahmen lässt sich mit zwei Fingern in der Größe ändern. Das Bild flackert beim Wechsel der Werkzeuge nicht mehr.</string>
     <string name="whats_new_260_more">Dazu bearbeitbare Daten bei HEIC, GIF und RAW, Duplikatgruppen zum Ignorieren, eine Ortsauswahl auf der Karte, Türkisch und viele weitere Korrekturen und Stabilitätsverbesserungen.</string>
+    <string name="viewer_save_to_drive">In meinem Drive speichern</string>
+    <string name="viewer_saved_to_drive">In Drive gespeichert</string>
+    <string name="viewer_already_in_drive">Bereits in Drive</string>
+    <string name="viewer_save_to_drive_failed">Speichern in Drive fehlgeschlagen</string>
 </resources>

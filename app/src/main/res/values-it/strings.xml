@@ -2485,4 +2485,8 @@
     <string name="whats_new_260_videoedit_title">Editor video con lo stesso design</string>
     <string name="whats_new_260_videoedit_body">“Regola” usa icone rotonde sopra un righello, ritaglia e ruota condividono una scheda con un elenco di proporzioni, e il riquadro di ritaglio si ridimensiona con due dita. L\'immagine non sfarfalla più quando cambi strumento.</string>
     <string name="whats_new_260_more">Inoltre date modificabili per HEIC, GIF e RAW, gruppi di duplicati da ignorare, un selettore di luogo sulla mappa, il turco e tante altre correzioni e miglioramenti di stabilità.</string>
+    <string name="viewer_save_to_drive">Salva nel mio Drive</string>
+    <string name="viewer_saved_to_drive">Salvato su Drive</string>
+    <string name="viewer_already_in_drive">Già su Drive</string>
+    <string name="viewer_save_to_drive_failed">Impossibile salvare su Drive</string>
 </resources>

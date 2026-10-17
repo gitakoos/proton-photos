@@ -2571,4 +2571,8 @@
     <string name="whats_new_260_videoedit_title">Editor videa v rovnakom štýle</string>
     <string name="whats_new_260_videoedit_body">„Upraviť“ používa okrúhle ikony nad pravítkom, orezanie a otočenie zdieľajú jednu kartu so zoznamom pomerov strán a veľkosť orezového rámčeka možno meniť dvoma prstami. Obraz už pri prepínaní nástrojov nebliká.</string>
     <string name="whats_new_260_more">Navyše upraviteľný dátum pri HEIC, GIF a RAW, skupiny duplikátov, ktoré možno ignorovať, výber miesta na mape, turečtina a množstvo ďalších opráv a vylepšení stability.</string>
+    <string name="viewer_save_to_drive">Uložiť na môj Drive</string>
+    <string name="viewer_saved_to_drive">Uložené na Drive</string>
+    <string name="viewer_already_in_drive">Už je na Drive</string>
+    <string name="viewer_save_to_drive_failed">Nepodarilo sa uložiť na Drive</string>
 </resources>

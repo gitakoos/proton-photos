@@ -2564,4 +2564,8 @@
     <string name="whats_new_260_videoedit_title">Urejevalnik videa v enaki zasnovi</string>
     <string name="whats_new_260_videoedit_body">„Prilagodi“ uporablja okrogle ikone nad ravnilom, obrezovanje in vrtenje si delita zavihek s seznamom razmerij, velikost okvirja za obrezovanje pa spremenite z dvema prstoma. Slika med menjavo orodij ne utripa več.</string>
     <string name="whats_new_260_more">Poleg tega urejljivi datumi pri HEIC, GIF in RAW, skupine dvojnikov, ki jih lahko prezrete, izbira kraja na zemljevidu, turščina in še veliko popravkov ter izboljšav stabilnosti.</string>
+    <string name="viewer_save_to_drive">Shrani v moj Drive</string>
+    <string name="viewer_saved_to_drive">Shranjeno v Drive</string>
+    <string name="viewer_already_in_drive">Že v Drive</string>
+    <string name="viewer_save_to_drive_failed">Shranjevanje v Drive ni uspelo</string>
 </resources>
