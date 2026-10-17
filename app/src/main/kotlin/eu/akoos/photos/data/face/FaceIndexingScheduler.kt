@@ -2696,6 +2696,7 @@ class FaceIndexingScheduler @Inject constructor(
                     if (batches % BATCHED_PROGRESS_LOG_EVERY == 0) {
                         noteBatchedProgress(batches, examined, created + batch.created, centroids, startMs)
                     }
+                    if (batches % BATCHED_MARK_SAVE_EVERY == 0) saveBatchedMark(userId, fenceToken, runMaxRow)
                     if (batch.scanned < batch.limit) break
                     if (midRunMergeDue(openedSinceMerge, batchesSinceMerge)) {
                         // Named first, so two groups whose faces carry different names never fuse unnamed.
@@ -2787,6 +2788,22 @@ class FaceIndexingScheduler @Inject constructor(
                 "$merged merged, $named named, $unsorted to Unsorted, $leftover left ungrouped (${tookMs}ms)",
         )
         return true
+    }
+
+    /**
+     * Records, every few batches, how far a batched run has looked, so a run the process loses part-way (the
+     * app closed, the phone restarted) resumes from there instead of reading every ungrouped face again. The
+     * closing steps stay owed, and the ungrouped baseline is whatever the last completed run left, or none.
+     * Called under [groupingLock].
+     */
+    private fun saveBatchedMark(userId: UserId?, fenceToken: Long, runMaxRow: Long) {
+        val previous = currentBaseline(userId)
+        regroupBaseline = RegroupBaseline(
+            accountOf(userId), previous?.ungrouped ?: 0, fenceToken,
+            finalizeOwed = true,
+            groupedUpToRow = maxOf(previous?.groupedUpToRow ?: 0L, runMaxRow),
+        )
+        saveWalkState(userId)
     }
 
     /** Notes how far a batched run that began at [startMs] has come, in the copied diagnostics: counts only. */
@@ -3380,6 +3397,9 @@ class FaceIndexingScheduler @Inject constructor(
 
         /** A batched run notes how far it has come in the copied diagnostics every this many batches. */
         const val BATCHED_PROGRESS_LOG_EVERY = 5
+
+        /** Batches between two saves of how far a batched run has looked; see [saveBatchedMark]. */
+        const val BATCHED_MARK_SAVE_EVERY = 5
 
         /** A full regroup started from the pass end waits at least this many times as long as the last one
          *  ran, so the full regroups take at most about a tenth of the time while a large library scans. */
