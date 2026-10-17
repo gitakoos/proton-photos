@@ -497,8 +497,10 @@
     <string name="settings_excluded_folders_desc_singular">1 vylúčený priečinok</string>
     <string name="settings_excluded_folders_desc_count">Vylúčených priečinkov: %1$d</string>
     <string name="settings_excluded_folders_title">Vylúčené priečinky</string>
-    <string name="settings_excluded_folders_intro">Fotky v týchto priečinkoch sa nezálohujú, aj keď je zapnuté „Zálohovať všetko“. Už nahraté položky zostanú na Drive.</string>
+    <string name="settings_excluded_folders_intro">Priečinky sa zálohujú, kým je zaškrtnuté Zálohovať. Zaškrtnutím Album vytvoríte z priečinka aj album na Drive. Už nahrané položky zostanú na Drive.</string>
     <string name="settings_excluded_folders_empty">V tomto zariadení sa nenašli žiadne priečinky</string>
+    <string name="settings_excluded_folders_section_backed_up">Zálohované (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Vylúčené (%1$d)</string>
     <string name="settings_excluded_folders_count_label">Vylúčených %1$d z %2$d priečinkov</string>
     <string name="settings_excluded_albums_count_label">%1$d z %2$d albumov vylúčených</string>
     <string name="settings_excluded_folders_select_all">Vylúčiť všetky</string>

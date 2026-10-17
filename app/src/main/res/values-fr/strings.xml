@@ -282,8 +282,10 @@
     <string name="settings_excluded_folders_desc_singular">1 dossier exclu</string>
     <string name="settings_excluded_folders_desc_count">%1$d dossiers exclus</string>
     <string name="settings_excluded_folders_title">Dossiers exclus</string>
-    <string name="settings_excluded_folders_intro">Les photos de ces dossiers ne seront pas sauvegardées, même si « Tout sauvegarder » est activé. Les éléments déjà envoyés restent sur Drive.</string>
+    <string name="settings_excluded_folders_intro">Les dossiers sont sauvegardés tant que Sauvegarder est coché. Cochez Album pour créer aussi un album Drive à partir d\'un dossier. Les éléments déjà envoyés restent sur Drive.</string>
     <string name="settings_excluded_folders_empty">Aucun dossier trouvé sur cet appareil</string>
+    <string name="settings_excluded_folders_section_backed_up">Sauvegardés (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Exclus (%1$d)</string>
     <string name="settings_excluded_folders_count_label">%1$d sur %2$d dossiers exclus</string>
     <string name="settings_excluded_albums_count_label">%1$d albums sur %2$d exclus</string>
     <string name="settings_excluded_folders_select_all">Tout exclure</string>

@@ -638,8 +638,10 @@
     <string name="settings_excluded_folders_desc_singular">1 klasör hariç tutuldu</string>
     <string name="settings_excluded_folders_desc_count">%1$d klasör hariç tutuldu</string>
     <string name="settings_excluded_folders_title">Hariç tutulan klasörler</string>
-    <string name="settings_excluded_folders_intro">Bu klasörlerdeki fotoğraflar, \"Her şeyi yedekle\" açıkken bile yedeklenmez. Önceden yüklenmiş öğeler Drive\'da kalır.</string>
+    <string name="settings_excluded_folders_intro">Yedekle işaretli olduğu sürece klasörler yedeklenir. Bir klasörden Drive albümü de oluşturmak için Albüm\'ü işaretleyin. Zaten yüklenmiş öğeler Drive\'da kalır.</string>
     <string name="settings_excluded_folders_empty">Bu cihazda klasör bulunamadı</string>
+    <string name="settings_excluded_folders_section_backed_up">Yedeklenen (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Hariç tutulan (%1$d)</string>
     <string name="settings_excluded_folders_count_label">%2$d klasörden %1$d tanesi hariç tutuldu</string>
     <string name="settings_excluded_albums_count_label">%2$d albümden %1$d tanesi hariç tutuldu</string>
     <string name="settings_excluded_folders_select_all">Tümünü hariç tut</string>

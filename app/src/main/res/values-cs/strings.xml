@@ -497,8 +497,10 @@
     <string name="settings_excluded_folders_desc_singular">1 vyloučená složka</string>
     <string name="settings_excluded_folders_desc_count">%1$d vyloučených složek</string>
     <string name="settings_excluded_folders_title">Vyloučené složky</string>
-    <string name="settings_excluded_folders_intro">Fotky v těchto složkách se nezálohují, i když je zapnuto \"Zálohovat vše\". Již nahrané položky zůstanou na Drive.</string>
+    <string name="settings_excluded_folders_intro">Složky se zálohují, dokud je zaškrtnuto Zálohovat. Zaškrtnutím Album vytvoříte ze složky také album na Drive. Už nahrané položky zůstanou na Drive.</string>
     <string name="settings_excluded_folders_empty">V tomto zařízení nebyly nalezeny žádné složky</string>
+    <string name="settings_excluded_folders_section_backed_up">Zálohované (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Vyloučené (%1$d)</string>
     <string name="settings_excluded_folders_count_label">Vyloučeno %1$d z %2$d složek</string>
     <string name="settings_excluded_albums_count_label">%1$d z %2$d alb vyloučeno</string>
     <string name="settings_excluded_folders_select_all">Vyloučit vše</string>

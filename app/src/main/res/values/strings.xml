@@ -681,8 +681,10 @@
     <string name="settings_excluded_folders_desc_singular">1 folder excluded</string>
     <string name="settings_excluded_folders_desc_count">%1$d folders excluded</string>
     <string name="settings_excluded_folders_title">Excluded folders</string>
-    <string name="settings_excluded_folders_intro">Photos in these folders won\'t back up, even while \"Back up everything\" is on. Already-uploaded items stay on Drive.</string>
+    <string name="settings_excluded_folders_intro">Folders are backed up unless you untick Back up. Tick Album to also create a Drive album from a folder. Items already on Drive stay there.</string>
     <string name="settings_excluded_folders_empty">No folders found on this device</string>
+    <string name="settings_excluded_folders_section_backed_up">Backed up (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Excluded (%1$d)</string>
     <string name="settings_excluded_folders_count_label">%1$d of %2$d folders excluded</string>
     <string name="settings_excluded_albums_count_label">%1$d of %2$d albums excluded</string>
     <string name="settings_excluded_folders_select_all">Exclude all</string>

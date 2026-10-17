@@ -498,8 +498,10 @@
     <string name="settings_excluded_folders_desc_singular">1 mapa izključena</string>
     <string name="settings_excluded_folders_desc_count">%1$d map izključenih</string>
     <string name="settings_excluded_folders_title">Izključene mape</string>
-    <string name="settings_excluded_folders_intro">Fotografije v teh mapah se ne varnostno kopirajo, tudi ko je vklopljeno »Varnostno kopiraj vse«. Že naloženi elementi ostanejo v Drive.</string>
+    <string name="settings_excluded_folders_intro">Mape se kopirajo, dokler je označeno Kopiraj. Z oznako Album iz mape ustvarite tudi album v Drive. Že naložene datoteke ostanejo v Drive.</string>
     <string name="settings_excluded_folders_empty">V tej napravi ni najdenih map</string>
+    <string name="settings_excluded_folders_section_backed_up">Kopirane (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Izključene (%1$d)</string>
     <string name="settings_excluded_folders_count_label">%1$d od %2$d map izključenih</string>
     <string name="settings_excluded_albums_count_label">%1$d od %2$d albumov izključenih</string>
     <string name="settings_excluded_folders_select_all">Izključi vse</string>

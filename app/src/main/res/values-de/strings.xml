@@ -282,8 +282,10 @@
     <string name="settings_excluded_folders_desc_singular">1 Ordner ausgeschlossen</string>
     <string name="settings_excluded_folders_desc_count">%1$d Ordner ausgeschlossen</string>
     <string name="settings_excluded_folders_title">Ausgeschlossene Ordner</string>
-    <string name="settings_excluded_folders_intro">Fotos in diesen Ordnern werden nicht gesichert, auch wenn „Alles sichern" aktiv ist. Bereits hochgeladene Elemente bleiben auf Drive.</string>
+    <string name="settings_excluded_folders_intro">Ordner werden gesichert, solange Sichern angehakt ist. Mit Album entsteht aus einem Ordner zusätzlich ein Drive-Album. Bereits hochgeladene Elemente bleiben in Drive.</string>
     <string name="settings_excluded_folders_empty">Keine Ordner auf diesem Gerät gefunden</string>
+    <string name="settings_excluded_folders_section_backed_up">Gesichert (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Ausgeschlossen (%1$d)</string>
     <string name="settings_excluded_folders_count_label">%1$d von %2$d Ordnern ausgeschlossen</string>
     <string name="settings_excluded_albums_count_label">%1$d von %2$d Alben ausgeschlossen</string>
     <string name="settings_excluded_folders_select_all">Alle ausschließen</string>

@@ -497,8 +497,10 @@
     <string name="settings_excluded_folders_desc_singular">Wykluczono 1 folder</string>
     <string name="settings_excluded_folders_desc_count">Wykluczono %1$d folderów</string>
     <string name="settings_excluded_folders_title">Wykluczone foldery</string>
-    <string name="settings_excluded_folders_intro">Zdjęcia w tych folderach nie będą kopiowane, nawet gdy „Kopiuj wszystko” jest włączone. Już wysłane elementy pozostają w Drive.</string>
+    <string name="settings_excluded_folders_intro">Foldery są kopiowane, dopóki Kopia jest zaznaczona. Zaznacz Album, aby z folderu utworzyć też album na Drive. Elementy już na Drive tam zostają.</string>
     <string name="settings_excluded_folders_empty">Nie znaleziono folderów na tym urządzeniu</string>
+    <string name="settings_excluded_folders_section_backed_up">Kopiowane (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Wykluczone (%1$d)</string>
     <string name="settings_excluded_folders_count_label">Wykluczono %1$d z %2$d folderów</string>
     <string name="settings_excluded_albums_count_label">%1$d z %2$d albumów wykluczono</string>
     <string name="settings_excluded_folders_select_all">Wyklucz wszystkie</string>

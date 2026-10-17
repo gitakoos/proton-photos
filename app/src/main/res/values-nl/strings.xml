@@ -367,8 +367,10 @@
     <string name="settings_excluded_folders_desc_singular">1 map uitgesloten</string>
     <string name="settings_excluded_folders_desc_count">%1$d mappen uitgesloten</string>
     <string name="settings_excluded_folders_title">Uitgesloten mappen</string>
-    <string name="settings_excluded_folders_intro">Foto\'s in deze mappen worden niet geback-upt, ook niet wanneer \"Alles back-uppen\" aanstaat. Reeds geüploade items blijven op Drive.</string>
+    <string name="settings_excluded_folders_intro">Mappen worden geback-upt zolang Back-up is aangevinkt. Vink Album aan om van een map ook een Drive-album te maken. Wat al op Drive staat, blijft daar.</string>
     <string name="settings_excluded_folders_empty">Geen mappen op dit apparaat gevonden</string>
+    <string name="settings_excluded_folders_section_backed_up">Geback-upt (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Uitgesloten (%1$d)</string>
     <string name="settings_excluded_folders_count_label">%1$d van %2$d mappen uitgesloten</string>
     <string name="settings_excluded_albums_count_label">%1$d van %2$d albums uitgesloten</string>
     <string name="settings_excluded_folders_select_all">Alles uitsluiten</string>

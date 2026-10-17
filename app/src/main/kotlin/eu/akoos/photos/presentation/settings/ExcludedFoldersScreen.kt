@@ -160,16 +160,8 @@ fun ExcludedFoldersScreen(
                             .padding(horizontal = 20.dp)
                             .padding(bottom = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.End,
                     ) {
-                        Text(
-                            stringResource(
-                                R.string.settings_excluded_folders_count_label,
-                                state.excludedCount,
-                                state.folders.size,
-                            ),
-                            color = FgDim, fontSize = 12.sp,
-                        )
                         Text(
                             stringResource(
                                 if (state.allExcluded)
@@ -188,34 +180,30 @@ fun ExcludedFoldersScreen(
                     }
                 }
 
-                // ── Folder list card ──────────────────────────────────────────
+                // ── Folder lists: the folders that are backed up, then the ones left out ───────────
                 item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .background(colors.cardBg, cardShape)
-                            .border(0.5.dp, colors.cardBorder, cardShape),
-                    ) {
-                        state.folders.forEachIndexed { i, folder ->
-                            ExcludeRow(
-                                folder   = folder,
-                                onToggle = { viewModel.toggle(folder.name) },
-                                onMirrorToggle = { viewModel.toggleMirror(folder.name) },
-                            )
-                            if (i < state.folders.lastIndex) {
-                                HorizontalDivider(
-                                    modifier  = Modifier.padding(start = 86.dp),
-                                    thickness = 0.5.dp,
-                                    color     = colors.cardBorder,
-                                )
-                            }
-                        }
-
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                        val backedUp = state.folders.filterNot { it.isExcluded }
+                        val excluded = state.folders.filter { it.isExcluded }
+                        FolderGroup(
+                            title = stringResource(R.string.settings_excluded_folders_section_backed_up, backedUp.size),
+                            folders = backedUp,
+                            onToggle = viewModel::toggle,
+                            onMirrorToggle = viewModel::toggleMirror,
+                        )
+                        if (backedUp.isNotEmpty() && excluded.isNotEmpty()) Spacer(Modifier.height(20.dp))
+                        FolderGroup(
+                            title = stringResource(R.string.settings_excluded_folders_section_excluded, excluded.size),
+                            folders = excluded,
+                            onToggle = viewModel::toggle,
+                            onMirrorToggle = viewModel::toggleMirror,
+                        )
                         if (state.folders.isEmpty()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .background(colors.cardBg, cardShape)
+                                    .border(0.5.dp, colors.cardBorder, cardShape)
                                     .padding(vertical = 32.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
@@ -236,6 +224,44 @@ fun ExcludedFoldersScreen(
             title = stringResource(R.string.settings_excluded_folders_title),
             onBack = onBack,
         )
+    }
+}
+
+/** One titled card of folders; nothing at all when there are none in it. */
+@Composable
+private fun FolderGroup(
+    title: String,
+    folders: List<ExcludedFoldersViewModel.ExcludedFolder>,
+    onToggle: (String) -> Unit,
+    onMirrorToggle: (String) -> Unit,
+) {
+    if (folders.isEmpty()) return
+    val colors = AppColors.current
+    Text(
+        title,
+        color = FgDim, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.cardBg, cardShape)
+            .border(0.5.dp, colors.cardBorder, cardShape),
+    ) {
+        folders.forEachIndexed { i, folder ->
+            ExcludeRow(
+                folder = folder,
+                onToggle = { onToggle(folder.name) },
+                onMirrorToggle = { onMirrorToggle(folder.name) },
+            )
+            if (i < folders.lastIndex) {
+                HorizontalDivider(
+                    modifier = Modifier.padding(start = 86.dp),
+                    thickness = 0.5.dp,
+                    color = colors.cardBorder,
+                )
+            }
+        }
     }
 }
 

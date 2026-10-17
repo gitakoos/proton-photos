@@ -283,8 +283,10 @@
     <string name="settings_excluded_folders_desc_singular">1 cartella esclusa</string>
     <string name="settings_excluded_folders_desc_count">%1$d cartelle escluse</string>
     <string name="settings_excluded_folders_title">Cartelle escluse</string>
-    <string name="settings_excluded_folders_intro">Le foto in queste cartelle non verranno salvate, anche con \"Salva tutto\" attivo. Gli elementi già caricati restano su Drive.</string>
+    <string name="settings_excluded_folders_intro">Le cartelle vengono salvate finché Backup è spuntato. Spunta Album per creare anche un album Drive da una cartella. Gli elementi già su Drive restano lì.</string>
     <string name="settings_excluded_folders_empty">Nessuna cartella trovata su questo dispositivo</string>
+    <string name="settings_excluded_folders_section_backed_up">Salvate (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Escluse (%1$d)</string>
     <string name="settings_excluded_folders_count_label">%1$d di %2$d cartelle escluse</string>
     <string name="settings_excluded_albums_count_label">%1$d di %2$d album esclusi</string>
     <string name="settings_excluded_folders_select_all">Escludi tutto</string>

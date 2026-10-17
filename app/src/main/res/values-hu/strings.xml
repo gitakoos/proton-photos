@@ -300,8 +300,10 @@
     <string name="settings_excluded_folders_desc_singular">1 mappa kizárva</string>
     <string name="settings_excluded_folders_desc_count">%1$d mappa kizárva</string>
     <string name="settings_excluded_folders_title">Kizárt mappák</string>
-    <string name="settings_excluded_folders_intro">Az ezekben a mappákban lévő fotók akkor sem kerülnek mentésre, ha a „Minden mentése” be van kapcsolva. A már feltöltött elemek a Drive-on maradnak.</string>
+    <string name="settings_excluded_folders_intro">A mappák mentődnek, hacsak nem veszed ki a Mentés pipát. Az Album pipával a mappából Drive-albumot is létrehozol. A már feltöltött elemek a Drive-on maradnak.</string>
     <string name="settings_excluded_folders_empty">Nem található mappa ezen az eszközön</string>
+    <string name="settings_excluded_folders_section_backed_up">Mentve (%1$d)</string>
+    <string name="settings_excluded_folders_section_excluded">Kizárva (%1$d)</string>
     <string name="settings_excluded_folders_count_label">%1$d / %2$d mappa kizárva</string>
     <string name="settings_excluded_albums_count_label">%1$d / %2$d album kizárva</string>
     <string name="settings_excluded_folders_select_all">Mind kizárása</string>
