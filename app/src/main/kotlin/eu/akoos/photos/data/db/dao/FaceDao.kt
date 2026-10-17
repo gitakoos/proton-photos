@@ -546,6 +546,11 @@ interface FaceDao {
     )
     suspend fun confirmedNamesByPerson(userId: String): List<PersonConfirmedName>
 
+    /** The people that have at least one kept face, which tells them apart from one a rescan or a model update
+     *  left behind with its name and none of its faces. */
+    @Query("SELECT DISTINCT personId FROM face WHERE userId = :userId AND personId IS NOT NULL AND rejected = 0")
+    suspend fun personIdsWithKeptFaces(userId: String): List<Long>
+
     /** Every kept, grouped face of the account as its id and person, in [allFacesByScoreDesc]'s order
      *  (clearest detection first, then id), with no vector read: the vectors follow by id. */
     @Query(

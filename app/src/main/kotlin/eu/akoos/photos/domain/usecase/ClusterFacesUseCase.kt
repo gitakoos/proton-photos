@@ -722,8 +722,15 @@ class ClusterFacesUseCase @Inject constructor(
         val rows = faceDao.confirmedNamesByPerson(account)
         if (rows.isEmpty()) return@withContext 0
         val people = personDao.allForUser(account).associateBy { it.id }
+        // A rescan or a model update keeps the people and clears their faces, so a person can still hold a name
+        // with none of its faces left; that person does not keep the name from the group that carries it now.
+        val withFaces = faceDao.personIdsWithKeptFaces(account).toHashSet()
         val claimed = HashSet<String>()
-        for (person in people.values) person.displayName?.takeIf { it.isNotBlank() }?.let { claimed.add(it) }
+        val facelessHolders = HashMap<String, MutableList<Long>>()
+        for (person in people.values) {
+            val held = person.displayName?.takeIf { it.isNotBlank() } ?: continue
+            if (person.id in withFaces) claimed.add(held) else facelessHolders.getOrPut(held) { ArrayList() }.add(person.id)
+        }
         val strongestPerPerson = rows.groupBy { it.personId }.values
             .map { names -> names.maxByOrNull { it.faces }!! }
             .sortedByDescending { it.faces }
@@ -735,6 +742,7 @@ class ClusterFacesUseCase @Inject constructor(
                 if (person.isOther || !person.displayName.isNullOrBlank() || row.name in claimed) continue
                 val manual = personManualPhotoDao.photoKeysForNameList(account, row.name)
                 val photos = (faceDao.distinctPhotoKeysForPerson(account, person.id) + manual).toHashSet().size
+                facelessHolders[row.name]?.forEach { personDao.updateName(it, null) }
                 personDao.updateName(person.id, row.name)
                 personDao.updateCoverAndCount(person.id, person.coverFaceId, photos)
                 claimed.add(row.name)

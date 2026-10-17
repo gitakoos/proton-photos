@@ -231,6 +231,20 @@ class ClusterFacesBootstrapDbTest {
     }
 
     @Test
+    fun `a person left with a name and no faces gives the name to the group that carries it`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        val leftBehind = 9_000L
+        db.personDao().upsert(PersonEntity(id = leftBehind, userId = acct, displayName = "Anna", faceCount = 5))
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1"), "Anna")
+
+        assertEquals(1, cluster.nameGroupsFromConfirmedFaces(user))
+
+        assertEquals("Anna", db.personDao().personById(personOf("p0-0#0"))!!.displayName)
+        assertEquals(null, db.personDao().personById(leftBehind)!!.displayName)
+    }
+
+    @Test
     fun `of two groups carrying the same name the one with more named faces claims it`() = runTest {
         seedLibrary()
         runBatches(limit = 100)
