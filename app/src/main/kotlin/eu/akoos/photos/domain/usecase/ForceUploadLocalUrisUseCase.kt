@@ -27,6 +27,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
+import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.QueueSource
@@ -75,64 +76,78 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
         val isAlbumAdd = albumLinkId != SettingsKeys.PENDING_ALBUM_ADD_NO_ALBUM
         val queueSource = if (isAlbumAdd) QueueSource.ALBUM_ADD else QueueSource.MANUAL
         val now = System.currentTimeMillis()
-        for (uri in uris) {
-            val existingRow = syncStateRepo.getByUri(uri)
-            // Skip seeding only when the URI is genuinely on Drive (the album-add drain joins it
-            // once it sees the cloudFileId) or is owned by another flow we must not disturb.
-            // A reinstall/re-index can leave a stale SYNCED/CLOUD_ONLY row with a null cloudFileId
-            // (never actually uploaded); that case falls through to be reseeded as LOCAL_ONLY so it
-            // uploads and then joins, instead of getting stuck.
-            val cloudFileId = existingRow?.cloudFileId
-            if (cloudFileId != null) {
-                // Already on Drive, so the upload pipeline never re-runs for it. Record the target
-                // and drain the join here directly: once the album holds the photo drop the pair,
-                // otherwise leave the target row so the upload pass's target-table drain retries it.
-                // The add reports an unsent or refused photo in its result, not by throwing, so the
-                // result decides. A single linkId per request keeps the server's per-request link cap
-                // satisfied.
-                if (isAlbumAdd) {
-                    uploadAlbumTargetDao.insertIgnore(uri, albumLinkId)
-                    runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudFileId)) }
-                        .onSuccess { result ->
-                            if (cloudFileId in result.succeededLinkIds) uploadAlbumTargetDao.deleteTarget(uri, albumLinkId)
-                        }
+        // Taken in slices: one read for a slice's rows and one write for the rows it seeds, instead of three
+        // writes per photo, each of which told every list watching the table (on a big library a back-up of a
+        // few thousand photos took minutes to queue, and the upload only began once it had).
+        for (slice in uris.chunked(QUEUE_SLICE)) {
+            val existingByUri = syncStateRepo.getByUris(slice).associateBy { it.localUri }
+            val toSeed = ArrayList<SyncState>(slice.size)
+            val albumTargets = ArrayList<UploadAlbumTargetEntity>()
+            // Photos already on Drive that join the album straight away: one network call each, run after the
+            // slice has been written, so a row read as waiting is not left to be overwritten while they run.
+            val joinNow = ArrayList<Pair<String, String>>()
+            for (uri in slice) {
+                val existingRow = existingByUri[uri]
+                // Skip seeding only when the URI is genuinely on Drive (the album-add drain joins it
+                // once it sees the cloudFileId) or is owned by another flow we must not disturb.
+                // A reinstall/re-index can leave a stale SYNCED/CLOUD_ONLY row with a null cloudFileId
+                // (never actually uploaded); that case falls through to be reseeded as LOCAL_ONLY so it
+                // uploads and then joins, instead of getting stuck.
+                val cloudFileId = existingRow?.cloudFileId
+                if (cloudFileId != null) {
+                    // Already on Drive, so the upload pipeline never re-runs for it. Record the target
+                    // and drain the join here directly: once the album holds the photo drop the pair,
+                    // otherwise leave the target row so the upload pass's target-table drain retries it.
+                    // The add reports an unsent or refused photo in its result, not by throwing, so the
+                    // result decides. A single linkId per request keeps the server's per-request link cap
+                    // satisfied.
+                    if (isAlbumAdd) {
+                        albumTargets.add(UploadAlbumTargetEntity(localUri = uri, albumLinkId = albumLinkId))
+                        joinNow.add(uri to cloudFileId)
+                    }
+                    continue
                 }
-                continue
-            }
-            if (existingRow?.status == SyncStatus.HIDDEN) continue
-            if (existingRow?.status == SyncStatus.UPLOADING) {
-                // Already uploading, so it is never seeded again: that would upload it a second time.
-                // An album-add records the target, which the upload in flight joins once it lands (or
-                // the next pass's drain, when it landed before the target was written), and stamps the
-                // intent so an upload that fails is retried as this album-add. A stamp that lands after
-                // the upload finished comes off again, since a backed-up row carries no intent.
-                if (isAlbumAdd) {
-                    uploadAlbumTargetDao.insertIgnore(uri, albumLinkId)
-                    syncStateRepo.markQueued(uri, queueSource, now)
-                    if (syncStateRepo.getByUri(uri)?.cloudFileId != null) syncStateRepo.clearQueuedForSynced(uri)
+                if (existingRow?.status == SyncStatus.HIDDEN) continue
+                if (existingRow?.status == SyncStatus.UPLOADING) {
+                    // Already uploading, so it is never seeded again: that would upload it a second time.
+                    // An album-add records the target, which the upload in flight joins once it lands (or
+                    // the next pass's drain, when it landed before the target was written), and stamps the
+                    // intent so an upload that fails is retried as this album-add. A stamp that lands after
+                    // the upload finished comes off again, since a backed-up row carries no intent.
+                    if (isAlbumAdd) {
+                        uploadAlbumTargetDao.insertIgnore(uri, albumLinkId)
+                        syncStateRepo.markQueued(uri, queueSource, now)
+                        if (syncStateRepo.getByUri(uri)?.cloudFileId != null) syncStateRepo.clearQueuedForSynced(uri)
+                    }
+                    continue
                 }
-                continue
+                toSeed.add(
+                    SyncState(
+                        localUri = uri,
+                        cloudFileId = null,
+                        localHash = existingRow?.localHash ?: "",
+                        cloudHash = null,
+                        status = SyncStatus.LOCAL_ONLY,
+                        lastSyncAttemptMs = System.currentTimeMillis(),
+                        lastSyncSuccessMs = null,
+                        backedUpAtMs = null,
+                        sizeBytes = existingRow?.sizeBytes ?: 0L,
+                    ),
+                )
+                // An album-add also records the target album so the upload pass can join it once the cloud id is
+                // known; a manual "back up now" has no target row, so its upload just backs the file up.
+                if (isAlbumAdd) albumTargets.add(UploadAlbumTargetEntity(localUri = uri, albumLinkId = albumLinkId))
             }
-            syncStateRepo.upsert(
-                SyncState(
-                    localUri = uri,
-                    cloudFileId = null,
-                    localHash = existingRow?.localHash ?: "",
-                    cloudHash = null,
-                    status = SyncStatus.LOCAL_ONLY,
-                    lastSyncAttemptMs = System.currentTimeMillis(),
-                    lastSyncSuccessMs = null,
-                    backedUpAtMs = null,
-                    sizeBytes = existingRow?.sizeBytes ?: 0L,
-                ),
-                userId,
-            )
-            // Record the explicit upload intent on the row (queued/queueSource/queuedAt): this is what
-            // the upload selector picks up, so no DataStore side-marker is needed. An album-add also
-            // records the target album so the upload pass can join it once the cloud id is known; a
-            // manual "back up now" has no target row, so its upload just backs the file up.
-            if (isAlbumAdd) uploadAlbumTargetDao.insertIgnore(uri, albumLinkId)
-            syncStateRepo.markQueued(uri, queueSource, now)
+            if (albumTargets.isNotEmpty()) uploadAlbumTargetDao.insertIgnoreAll(albumTargets)
+            // The explicit upload intent on each seeded row (queued/queueSource/queuedAt) is what the upload
+            // selector picks up, so no DataStore side-marker is needed.
+            if (toSeed.isNotEmpty()) syncStateRepo.seedAndMarkQueued(toSeed, userId, queueSource, now)
+            for ((uri, cloudFileId) in joinNow) {
+                runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, listOf(cloudFileId)) }
+                    .onSuccess { result ->
+                        if (cloudFileId in result.succeededLinkIds) uploadAlbumTargetDao.deleteTarget(uri, albumLinkId)
+                    }
+            }
         }
         // Kick the DURABLE background worker rather than uploading inline in the caller's scope:
         // an inline pass dies the moment the user leaves the screen, and never surfaces in the
@@ -145,3 +160,6 @@ class ForceUploadLocalUrisUseCase @Inject constructor(
         return uris.size
     }
 }
+
+/** Rows a back-up request reads and writes at a time, inside the SQL host-variable limit of older Android. */
+private const val QUEUE_SLICE = 500

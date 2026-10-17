@@ -37,6 +37,10 @@ interface UploadAlbumTargetDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnore(entity: UploadAlbumTargetEntity)
 
+    /** [insertIgnore] for every one of [entities] in one transaction. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnoreAll(entities: List<UploadAlbumTargetEntity>)
+
     /** Convenience overload matching the (localUri, albumLinkId) call sites. */
     suspend fun insertIgnore(localUri: String, albumLinkId: String) =
         insertIgnore(UploadAlbumTargetEntity(localUri = localUri, albumLinkId = albumLinkId))

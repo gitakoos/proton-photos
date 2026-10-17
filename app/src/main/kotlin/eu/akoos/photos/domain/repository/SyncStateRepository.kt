@@ -90,6 +90,17 @@ interface SyncStateRepository {
     /** Record an explicit upload intent on a row: mark it queued, why ([source], a
      *  [eu.akoos.photos.domain.entity.QueueSource] constant), and when ([at], epoch millis). */
     suspend fun markQueued(localUri: String, source: String, at: Long)
+
+    /** The rows for [localUris] (a uri with no row is absent), in as few reads as the SQL limit allows. */
+    suspend fun getByUris(localUris: List<String>): List<SyncState> = localUris.mapNotNull { getByUri(it) }
+
+    /** [upsert] and [markQueued] for every one of [states], in as few writes as the SQL limit allows. */
+    suspend fun seedAndMarkQueued(states: List<SyncState>, userId: UserId, source: String, at: Long) {
+        for (state in states) {
+            upsert(state, userId)
+            markQueued(state.localUri, source, at)
+        }
+    }
     /** Clear the queued flag only while the row is still LOCAL_ONLY (never on an UPLOADING /
      *  SYNCED row). */
     suspend fun clearQueued(localUri: String)

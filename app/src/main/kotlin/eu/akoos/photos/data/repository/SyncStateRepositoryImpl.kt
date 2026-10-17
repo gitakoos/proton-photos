@@ -126,6 +126,20 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun markQueued(localUri: String, source: String, at: Long) =
         dao.markQueued(localUri, source, at)
 
+    private companion object {
+        /** Rows per statement, inside the SQL host-variable limit of older Android. */
+        const val SQL_CHUNK = 500
+    }
+
+    override suspend fun getByUris(localUris: List<String>): List<SyncState> =
+        localUris.chunked(SQL_CHUNK).flatMap { chunk -> dao.getByUris(chunk).map { it.toDomain() } }
+
+    override suspend fun seedAndMarkQueued(states: List<SyncState>, userId: UserId, source: String, at: Long) {
+        states.chunked(SQL_CHUNK).forEach { chunk ->
+            dao.seedAndMarkQueued(chunk.map { it.toEntity(userId.id) }, source, at)
+        }
+    }
+
     override suspend fun clearQueued(localUri: String) = dao.clearQueued(localUri)
 
     override suspend fun clearQueuedForSynced(localUri: String) = dao.clearQueuedForSynced(localUri)
