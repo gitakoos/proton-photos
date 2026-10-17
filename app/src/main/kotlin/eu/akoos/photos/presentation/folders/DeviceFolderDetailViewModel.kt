@@ -494,27 +494,35 @@ class DeviceFolderDetailViewModel @Inject constructor(
         BackupProgress(done = done, total = target.size)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** The pending clearing of [_backupTarget]: armed when a back-up is asked for, replaced once the pipeline idles. */
+    private var targetEndJob: Job? = null
+
+    /** Clears the target after [afterMs] unless a photo starting cancels it first. */
+    private fun armBackupTargetEnd(afterMs: Long) {
+        targetEndJob?.cancel()
+        targetEndJob = viewModelScope.launch {
+            delay(afterMs)
+            targetEndJob = null
+            _backupTarget.value = emptySet()
+        }
+    }
+
     init {
         // The back-up can end without every queued photo reaching Synced (stopped from the notification or the
         // Activity screen, a failed photo, a full Drive, no Wi-Fi), so the target is also cleared once the
-        // pipeline has been idle for a moment; a photo starting in between keeps it.
+        // pipeline has been idle for a moment; a photo starting in between keeps it. A target set just now is
+        // left a longer while for the worker to start: the progress replays the idle event of the last run to a
+        // screen that has only just opened, and that must not count against a back-up asked for after it.
         viewModelScope.launch {
-            var endJob: Job? = null
             upload.progress.collect { evt ->
                 when (evt.status) {
                     UploadStatus.Queued, UploadStatus.Compressing, UploadStatus.Encrypting,
                     UploadStatus.Uploading, UploadStatus.PreparingBackup -> {
-                        endJob?.cancel()
-                        endJob = null
+                        targetEndJob?.cancel()
+                        targetEndJob = null
                     }
                     UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi -> {
-                        if (endJob == null) {
-                            endJob = launch {
-                                delay(BACKUP_TARGET_HOLD_MS)
-                                endJob = null
-                                _backupTarget.value = emptySet()
-                            }
-                        }
+                        if (targetEndJob == null && _backupTarget.value.isNotEmpty()) armBackupTargetEnd(BACKUP_TARGET_HOLD_MS)
                     }
                     UploadStatus.Done -> Unit
                 }
@@ -766,7 +774,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
             val toUpload = selected.filter { it !in syncedUris }
             val alreadyBackedUp = selected.size - toUpload.size
 
-            if (toUpload.isNotEmpty()) _backupTarget.value = toUpload.toSet()
+            if (toUpload.isNotEmpty()) {
+                _backupTarget.value = toUpload.toSet()
+                armBackupTargetEnd(BACKUP_TARGET_START_MS)
+            }
             val queued = if (toUpload.isNotEmpty()) {
                 forceUploadLocalUris.forceUpload(userId, toUpload)
             } else 0
@@ -845,7 +856,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
             val allLocal = _items.value.mapNotNull { localUriOf(it) } - _vaultedUris.value
             val toUpload = allLocal.filter { it !in syncedUris }
             val alreadyBackedUp = allLocal.size - toUpload.size
-            if (toUpload.isNotEmpty()) _backupTarget.value = toUpload.toSet()
+            if (toUpload.isNotEmpty()) {
+                _backupTarget.value = toUpload.toSet()
+                armBackupTargetEnd(BACKUP_TARGET_START_MS)
+            }
             val queued = if (toUpload.isNotEmpty()) forceUploadLocalUris.forceUpload(userId, toUpload) else 0
             onResult(UploadOutcome(queued = queued, alreadyBackedUp = alreadyBackedUp))
         }
@@ -1468,3 +1482,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
 /** How long the pipeline must stay idle before a folder's back-up target is dropped. */
 private const val BACKUP_TARGET_HOLD_MS = 12_000L
+
+/** How long a back-up just asked for may take to show its first photo before its target is dropped. */
+private const val BACKUP_TARGET_START_MS = 90_000L
