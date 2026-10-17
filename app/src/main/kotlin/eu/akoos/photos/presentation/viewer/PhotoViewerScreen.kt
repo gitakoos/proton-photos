@@ -144,7 +144,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -396,8 +398,14 @@ fun PhotoViewerScreen(
     // change the uri the snapshot holds it under. The live merge leaves vaulted photos out, so the
     // vault reports its own moves and they are applied on top. See [applyVaultMoves].
     val vaultMoves by viewModel.vaultMoves.collectAsStateWithLifecycle()
-    val reconciled = remember(items, liveItems, vaultMoves) {
-        applyVaultMoves(reconcileViewerItems(items, liveItems), vaultMoves)
+    // Worked out off the main thread: on a library of a hundred thousand photos the two lookup maps and the list
+    // compare took long enough to drop frames as the viewer opened. The viewer opens on the snapshot at once and
+    // takes the reconciled list when it is ready; where reconciliation changed nothing that is the same instance.
+    var reconciled by remember(items) { mutableStateOf(items) }
+    LaunchedEffect(items, liveItems, vaultMoves) {
+        reconciled = withContext(Dispatchers.Default) {
+            applyVaultMoves(reconcileViewerItems(items, liveItems), vaultMoves)
+        }
     }
     // Photos deleted from inside the viewer. The snapshot the caller handed us cannot shrink on its
     // own (reconciliation swaps items in place and deliberately keeps ones the live merge no longer
