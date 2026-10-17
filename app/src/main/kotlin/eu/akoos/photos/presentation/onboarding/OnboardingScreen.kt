@@ -370,6 +370,8 @@ fun OnboardingScreen(
     var excludedFolders by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var albumMirrorSelection by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var albumMirrorCustom by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
+    // Set once the user changes the album picks themselves; until then the picks follow the backup mode.
+    var albumMirrorTouched by rememberSaveable { mutableStateOf(false) }
     var stripMetadata by rememberSaveable { mutableStateOf(false) }
     var stripGps by rememberSaveable { mutableStateOf(false) }
     var stripCamera by rememberSaveable { mutableStateOf(false) }
@@ -547,11 +549,23 @@ fun OnboardingScreen(
                         )
                         OnboardingStep.AlbumMirrorOptIn -> {
                             val deviceFolders by viewModel.folders.collectAsStateWithLifecycle()
+                            // Backing up everything means every folder, so its albums are ticked to begin with (the folders
+                            // left out of the backup excepted); a user's own change is kept from then on.
+                            LaunchedEffect(backupMode, deviceFolders, excludedFolders) {
+                                if (!albumMirrorTouched) {
+                                    albumMirrorSelection = if (backupMode == BackupMode.Everything) {
+                                        deviceFolders.map { it.name }.filter { it !in excludedFolders }.toSet() + albumMirrorCustom
+                                    } else {
+                                        albumMirrorCustom
+                                    }
+                                }
+                            }
                             AlbumMirrorStep(
                                 availableBuckets = deviceFolders.map { it.name },
                                 selected = albumMirrorSelection,
                                 customNames = albumMirrorCustom,
                                 onToggle = { name ->
+                                    albumMirrorTouched = true
                                     albumMirrorSelection = if (name in albumMirrorSelection) {
                                         albumMirrorSelection - name
                                     } else {
@@ -559,10 +573,12 @@ fun OnboardingScreen(
                                     }
                                 },
                                 onAddCustom = { name ->
+                                    albumMirrorTouched = true
                                     albumMirrorCustom = albumMirrorCustom + name
                                     albumMirrorSelection = albumMirrorSelection + name
                                 },
                                 onRemoveCustom = { name ->
+                                    albumMirrorTouched = true
                                     albumMirrorCustom = albumMirrorCustom - name
                                     albumMirrorSelection = albumMirrorSelection - name
                                 },
