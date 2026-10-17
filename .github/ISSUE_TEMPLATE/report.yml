@@ -1,0 +1,76 @@
+name: Report a bug, a crash or an idea
+description: Short fields, no template to edit. Fill in what you know.
+title: ""
+labels: ["triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Photos for Proton is built by one person in spare time. A few concrete details make a report much easier to act on. Only the first four fields are required.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of report is this?
+      options:
+        - Crash (the app closed, froze or shows a black screen)
+        - Bug (something does not work the way it should)
+        - Feature request (an idea or an improvement)
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: In the app under Settings > About.
+      placeholder: "2.5.0 (272)"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Phone and Android version
+      placeholder: "Pixel 9 Pro, Android 15"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, or what would you like to see?
+      description: One or two sentences are enough.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Only for a bug or a crash.
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. ...
+  - type: dropdown
+    id: library-size
+    attributes:
+      label: How many photos are on this phone?
+      options:
+        - Under 1,000
+        - 1,000 to 10,000
+        - 10,000 to 50,000
+        - Over 50,000
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics from the app
+      description: |
+        The app writes a report with the last crash and sync and performance info, with no photos and no account data. In the app: Settings > Share diagnostics, then Copy, and paste it here. For a crash or a slow screen this is usually enough.
+      render: text
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or a screen recording
+      description: Drag and drop them into this box. Blur anything private first.
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else?
+      description: Related issues, things you tried, mockups for an idea.
