@@ -436,6 +436,15 @@ fun GalleryScreen(
     val activeFirstVisibleItemScrollOffset: () -> Int = {
         if (mosaicGrid) staggeredState.firstVisibleItemScrollOffset else gridState.firstVisibleItemScrollOffset
     }
+    // A category chip changes what the grid lists, and the grid would otherwise stay on whichever item it was
+    // anchored to, or land at the foot of the shorter list. Picking a category, or taking it off, starts at the top.
+    var shownCategory by remember { mutableStateOf(state.selectedFilter) }
+    LaunchedEffect(state.selectedFilter) {
+        if (shownCategory != state.selectedFilter) {
+            shownCategory = state.selectedFilter
+            if (mosaicGrid) staggeredState.scrollToItem(0) else gridState.scrollToItem(0)
+        }
+    }
     val albumsGridState = rememberLazyGridState()
     val tabScope = rememberCoroutineScope()
     // Two top-level tabs (Photos / Albums), hosted in a pager so they can be swiped between as well as
