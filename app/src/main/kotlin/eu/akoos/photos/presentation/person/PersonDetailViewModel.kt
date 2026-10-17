@@ -226,7 +226,7 @@ class PersonDetailViewModel @Inject constructor(
                         val matched = items.filter { it.stableId in keys }
                             .sortedByDescending { it.captureTimeMs }
                         matched to faceFocusByPhoto(boxes)
-                    }.collect { (matched, focus) ->
+                    }.distinctUntilChanged().collect { (matched, focus) ->
                         _uiState.update { it.copy(isLoading = false, items = matched, focus = focus) }
                     }
                 }

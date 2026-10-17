@@ -2299,10 +2299,17 @@ fun PhotoViewerScreen(
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
-        // A landscape screen is short: the controls take less of it, and a video's info pill shares the
-        // control pill's row, so the stack covers less of the picture.
+        // A landscape screen is short: the controls of a video take less of it, and its info pill shares the
+        // control pill's row, so the stack covers less of the picture. A photo's controls stay as they were.
+        val chromeSettled = items.getOrNull(pagerState.settledPage)
         val chromeLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
-            android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE &&
+            when (chromeSettled) {
+                is GalleryItem.LocalOnly -> chromeSettled.local.mimeType.startsWith("video/")
+                is GalleryItem.Synced    -> chromeSettled.local.mimeType.startsWith("video/")
+                is GalleryItem.CloudOnly -> chromeSettled.cloud.mimeType.startsWith("video/")
+                null -> false
+            }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
