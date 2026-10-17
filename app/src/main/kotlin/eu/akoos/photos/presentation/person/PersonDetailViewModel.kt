@@ -41,7 +41,9 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.withIndex
 import kotlinx.coroutines.launch
@@ -119,6 +121,7 @@ class PersonDetailViewModel @Inject constructor(
     private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
     private val hideSimilarFaces: eu.akoos.photos.domain.usecase.HideSimilarFacesUseCase,
     private val personCentroids: PersonCentroids,
+    private val selectionFactory: eu.akoos.photos.presentation.common.GalleryItemSelectionController.Factory,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -147,6 +150,38 @@ class PersonDetailViewModel @Inject constructor(
 
     private var loadJob: Job? = null
     private var keysJob: Job? = null
+
+    // Multi-select. The photos picked on the page run through the shared selection controller, the one the
+    // timeline, search and a place's page use, so share, add to album, add to person and delete behave the
+    // same here, with the delete permission handshake in one place.
+    val sel = selectionFactory.create(viewModelScope)
+
+    /** Whether a Proton account is signed in: the cloud actions (add to album) need one. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val selectedItems: StateFlow<Set<GalleryItem>> get() = sel.selectedItems
+    val albums get() = sel.albums
+    val shareIntent get() = sel.shareIntent
+    val actionFailure get() = sel.actionFailure
+    val isDeleting get() = sel.isDeleting
+    val pendingDeleteIntent get() = sel.pendingDeleteIntent
+
+    fun setSelection(items: Set<GalleryItem>) = sel.setSelection(items)
+    fun clearSelection() = sel.clearSelection()
+    fun selectAllPhotos() = sel.selectAll(_uiState.value.items)
+    fun shareSelected() = sel.shareSelected()
+    fun addSelectedToAlbum(albumLinkId: String, onResult: (joined: Int, queued: Int) -> Unit) =
+        sel.addSelectedToAlbum(albumLinkId, onResult)
+    fun createAlbumThenAddSelected(
+        name: String,
+        onResult: (joined: Int, queued: Int, error: String?) -> Unit,
+    ) = sel.createAlbumThenAddSelected(name, onResult)
+    fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) =
+        sel.deleteSelected(freeUpSpace, deleteFromCloud)
+    fun onDeletePermissionGranted() = sel.onDeletePermissionGranted()
+    fun clearPendingDeleteIntent() = sel.clearPendingDeleteIntent()
 
     /**
      * Observe the person's photos: the faces they appear in (minus removed ones) unioned with any
