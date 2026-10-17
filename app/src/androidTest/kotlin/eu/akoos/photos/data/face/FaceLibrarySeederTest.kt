@@ -360,6 +360,41 @@ class FaceLibrarySeederTest {
         }
     }
 
+    /**
+     * Times [eu.akoos.photos.domain.usecase.ClusterFacesUseCase.recountPhotoCounts] over the stored library: zeroes
+     * every cached photo count first, recounts, and compares the result with a direct count of each person's
+     * distinct photos. Needs the app process stopped and a DEBUG build installed (a release build renames the class).
+     */
+    @Test
+    fun timeRecount() = runBlocking<Unit> {
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, "proton_photos.db")
+            .addMigrations(*Migrations.ALL)
+            .build()
+        try {
+            val account = db.openHelper.readableDatabase
+                .query("SELECT userId FROM face GROUP BY userId ORDER BY COUNT(*) DESC LIMIT 1")
+                .use { if (it.moveToFirst()) it.getString(0) else null }
+            assertTrue("no faces stored", account != null)
+            account!!
+            db.openHelper.writableDatabase.execSQL("UPDATE person SET faceCount = 0 WHERE userId = ?", arrayOf(account))
+            val cluster = eu.akoos.photos.domain.usecase.ClusterFacesUseCase(
+                db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.notPersonDao(),
+                db.personCoverDao(), db.clusterSummaryDao(), db,
+            )
+            val startMs = android.os.SystemClock.elapsedRealtime()
+            val looked = cluster.recountPhotoCounts(me.proton.core.domain.entity.UserId(account))
+            val tookMs = android.os.SystemClock.elapsedRealtime() - startMs
+            val wrong = db.openHelper.readableDatabase.query(
+                "SELECT COUNT(*) FROM person p WHERE p.userId = ? AND p.faceCount != " +
+                    "(SELECT COUNT(DISTINCT photoKey) FROM face f WHERE f.personId = p.id AND f.rejected = 0)",
+                arrayOf(account),
+            ).use { if (it.moveToFirst()) it.getInt(0) else -1 }
+            Log.i(TAG, "recount people=$looked tookMs=$tookMs differsFromDirectCount=$wrong faces=${db.faceDao().countForUser(account)}")
+        } finally {
+            db.close()
+        }
+    }
+
     private fun unitGaussian(rnd: Random): FloatArray {
         val v = FloatArray(FACE_EMBEDDING_DIM) { rnd.nextGaussian().toFloat() }
         return normalized(v)
