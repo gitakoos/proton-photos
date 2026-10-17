@@ -225,6 +225,9 @@ object FaceDiagnostics {
     /** Logcat tag of the numbers-only mirror; a published release strips every Log call. */
     private const val LOG_TAG = "PFPFace"
 
+    /** Every this-many-th processed item is mirrored to logcat; see [recordProcessed]. */
+    private const val ITEM_LOG_EVERY = 20L
+
     /** A people-list build at least this long is mirrored to logcat, so a build that crowds out other work shows. */
     private const val SLOW_PEOPLE_BUILD_LOG_MS = 300L
 
@@ -442,7 +445,13 @@ object FaceDiagnostics {
             downloadedBytesTotal.addAndGet(downloadedBytes.coerceAtLeast(0L))
         }
         noteSlowest(label, loadMs + inferMs)
-        addRecent(buildRecentLine(label, isVideo, sizeBytes, loadMs, inferMs, downloadMs))
+        val line = buildRecentLine(label, isVideo, sizeBytes, loadMs, inferMs, downloadMs)
+        addRecent(line)
+        // One item in twenty is mirrored to logcat (stripped from a published release), so the per-item
+        // load and inference times of a long walk can be read without the tester copy.
+        if ((imagesProcessed.get() + videosProcessed.get()) % ITEM_LOG_EVERY == 0L) {
+            android.util.Log.i(LOG_TAG, "item $line")
+        }
     }
 
     @Synchronized
