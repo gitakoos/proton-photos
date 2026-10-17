@@ -90,7 +90,7 @@ import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.MotionPhotosOn
@@ -333,6 +333,14 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.awa
     }
 }
 
+/** Whether the editors take [item]: an image or a video, from its device file or its Drive copy. */
+private fun isEditableMedia(item: GalleryItem?): Boolean = when (item) {
+    is GalleryItem.LocalOnly -> item.local.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
+    is GalleryItem.Synced -> item.local.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
+    is GalleryItem.CloudOnly -> item.cloud.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
+    null -> false
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PhotoViewerScreen(
@@ -517,6 +525,7 @@ fun PhotoViewerScreen(
     val photoTags by viewModel.currentPhotoTags.collectAsStateWithLifecycle()
     val isHidden by viewModel.isHidden.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
+    val isSavingToDrive by viewModel.isSavingToDrive.collectAsStateWithLifecycle()
     val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
     // Null userId is the local-only session; ANDed into the cloud-only viewer actions below.
     val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
@@ -595,6 +604,11 @@ fun PhotoViewerScreen(
             }
             launch {
                 viewModel.offlineMessage.collect { msg ->
+                    snackbarHostState.showSnackbar(msg)
+                }
+            }
+            launch {
+                viewModel.saveToDriveMessage.collect { msg ->
                     snackbarHostState.showSnackbar(msg)
                 }
             }
@@ -1860,6 +1874,150 @@ fun PhotoViewerScreen(
             }
         }
 
+        val isLandscapeNow = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        // Share, favourite, details, edit and delete: share and delete as round buttons either side of one pill.
+        // Upright they sit under the filmstrip; turned sideways they are the compact form in the top bar, which
+        // leaves the foot of the short screen to the filmstrip and a video's controls.
+        val actionRow: @Composable (Boolean) -> Unit = actionRow@{ compact ->
+            val settledItem = items.getOrNull(pagerState.settledPage)
+            val canShare = settledItem != null && outbound.anyShareRoute
+            val canFavorite = settledItem != null && !isReadOnlyAlbum
+            val canEdit = settledItem != null && isEditableMedia(settledItem) && !isReadOnlyAlbum
+            val canDelete = settledItem != null && !isReadOnlyAlbum
+            // A photo in an album someone shared goes into this user's own Drive from here: the album's own
+            // save copies the whole album, and the share can end.
+            val canSaveToDrive = isReadOnlyAlbum && sourceAlbumLinkId != null && isSignedIn &&
+                (settledItem is GalleryItem.CloudOnly || settledItem is GalleryItem.Synced)
+            if (compact) {
+                // Turned sideways: share, details and delete (and a shared album's save) as round buttons in the
+                // top bar, the size of the buttons beside them. Favourite and edit go in the menu.
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (canShare) {
+                        ViewerBubble(onClick = {
+                            viewModel.loadPublicLink(settledItem!!)
+                            showShareSheet = true
+                        }) {
+                            Icon(Icons.Default.Share, stringResource(R.string.share_action),
+                                tint = FgPrimary, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                    if (canSaveToDrive) {
+                        ViewerBubble(onClick = { viewModel.saveToMyDrive(settledItem!!, sourceAlbumLinkId!!) }) {
+                            if (isSavingToDrive) {
+                                CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
+                                    modifier = Modifier.size(16.dp))
+                            } else {
+                                Icon(Icons.Default.CloudDownload, stringResource(R.string.viewer_save_to_drive),
+                                    tint = FgPrimary, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                    ViewerBubble(onClick = { showMetadata = true }) {
+                        Icon(Icons.Default.Info, stringResource(R.string.viewer_menu_details),
+                            tint = FgPrimary, modifier = Modifier.size(20.dp))
+                    }
+                    if (canDelete) {
+                        ViewerBubble(onClick = {
+                            if (deleteState !is PhotoViewerViewModel.DeleteState.Working) showDeleteSheet = true
+                        }) {
+                            Icon(Icons.Default.DeleteOutline, stringResource(R.string.viewer_menu_delete),
+                                tint = FgPrimary, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+                return@actionRow
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                if (canShare) {
+                    ViewerBubble(size = 48.dp, onClick = {
+                        viewModel.loadPublicLink(settledItem!!)
+                        showShareSheet = true
+                    }) {
+                        Icon(Icons.Default.Share, stringResource(R.string.share_action),
+                            tint = FgPrimary, modifier = Modifier.size(18.dp))
+                    }
+                } else {
+                    Spacer(Modifier.size(48.dp))
+                }
+                Row(
+                    modifier = Modifier
+                        .height(48.dp)
+                        .background(PillBgOpaque, infoPillShape)
+                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (canFavorite) {
+                        Box(
+                            modifier = Modifier.size(40.dp).clip(CircleShape)
+                                .clickable { viewModel.toggleFavorite(settledItem!!) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                stringResource(
+                                    if (isFavorite) R.string.cd_favorite_remove else R.string.cd_favorite_add,
+                                ),
+                                tint = if (isFavorite) Color(0xFFFF3B30) else FgPrimary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                    if (canSaveToDrive) {
+                        Box(
+                            modifier = Modifier.size(40.dp).clip(CircleShape).clickable {
+                                viewModel.saveToMyDrive(settledItem!!, sourceAlbumLinkId!!)
+                            },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isSavingToDrive) {
+                                CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
+                                    modifier = Modifier.size(18.dp))
+                            } else {
+                                Icon(Icons.Default.CloudDownload, stringResource(R.string.viewer_save_to_drive),
+                                    tint = FgPrimary, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(CircleShape).clickable { showMetadata = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.Info, stringResource(R.string.viewer_menu_details),
+                            tint = FgPrimary, modifier = Modifier.size(20.dp))
+                    }
+                    if (canEdit) {
+                        Box(
+                            modifier = Modifier.size(40.dp).clip(CircleShape)
+                                .clickable { onEditItem(settledItem!!) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.Tune, stringResource(R.string.cd_viewer_edit),
+                                tint = FgPrimary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+                if (canDelete) {
+                    ViewerBubble(size = 48.dp, onClick = { if (deleteState !is PhotoViewerViewModel.DeleteState.Working) showDeleteSheet = true }) {
+                        Icon(Icons.Default.DeleteOutline, stringResource(R.string.viewer_menu_delete),
+                            tint = FgPrimary, modifier = Modifier.size(18.dp))
+                    }
+                } else {
+                    Spacer(Modifier.size(48.dp))
+                }
+            }
+        }
+
+
         // The photo's date, with its cloud state and its place in the list, centred in the top bar. A tap opens
         // the details, where the old info pill at the bottom did.
         val datePill: @Composable () -> Unit = {
@@ -1916,20 +2074,27 @@ fun PhotoViewerScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopStart),
         ) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .padding(horizontal = 12.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                ViewerBubble(onClick = startExit) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.onboarding_back),
-                        tint = FgPrimary, modifier = Modifier.size(20.dp))
+                Box(modifier = Modifier.align(Alignment.CenterStart)) {
+                    ViewerBubble(onClick = startExit) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.onboarding_back),
+                            tint = FgPrimary, modifier = Modifier.size(20.dp))
+                    }
                 }
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) { datePill() }
+                // Centred on the screen, not in what is left between the buttons: turned sideways the right-hand
+                // group is wider, and a pill that took the room left over would slide off the middle.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(horizontal = if (isLandscapeNow) 196.dp else 56.dp),
+                ) { datePill() }
                 Row(
+                    modifier = Modifier.align(Alignment.CenterEnd),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -1938,6 +2103,7 @@ fun PhotoViewerScreen(
 
                     // A trashed item has no overflow actions (people, save to device, hide, delete),
                     // so the More menu and its trigger are left out entirely in trash mode.
+                    if (isLandscapeNow && !trashMode) actionRow(true)
                     if (trashMode) Spacer(Modifier.size(40.dp))
                     if (!trashMode) {
                     Box {
@@ -1949,7 +2115,7 @@ fun PhotoViewerScreen(
                                 CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
                                     modifier = Modifier.size(16.dp))
                             } else {
-                                Icon(Icons.Default.MoreHoriz, stringResource(R.string.viewer_menu_more),
+                                Icon(Icons.Default.MoreVert, stringResource(R.string.viewer_menu_more),
                                     tint = FgPrimary, modifier = Modifier.size(20.dp))
                             }
                         }
@@ -1970,6 +2136,35 @@ fun PhotoViewerScreen(
                             val isCloudItem = settledItem is GalleryItem.Synced ||
                                 settledItem is GalleryItem.CloudOnly
 
+                            // Turned sideways the top bar has no room for these two, which upright sit in the bottom pill.
+                            if (isLandscapeNow && settledItem != null && !isReadOnlyAlbum) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(
+                                        if (isFavorite) R.string.cd_favorite_remove else R.string.cd_favorite_add,
+                                    ), color = FgPrimary) },
+                                    leadingIcon = { Icon(
+                                        if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        null,
+                                        tint = if (isFavorite) Color(0xFFFF3B30) else Accent,
+                                        modifier = Modifier.size(20.dp),
+                                    ) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.toggleFavorite(settledItem)
+                                    },
+                                )
+                                if (isEditableMedia(settledItem)) {
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.cd_viewer_edit), color = FgPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.Tune, null,
+                                            tint = Accent, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onEditItem(settledItem)
+                                        },
+                                    )
+                                }
+                            }
                             // People in this photo: detect the faces on this photo (if not already) and
                             // pin their name tags, or take them down. The reliable path when a long
                             // press is awkward, and the only one on a photo not yet scanned.
@@ -2147,6 +2342,22 @@ fun PhotoViewerScreen(
                                     onClick = {
                                         menuExpanded = false
                                         viewModel.toggleOfflinePin(settledItem)
+                                    },
+                                )
+                            }
+                            // A photo of a shared-with-me album can be copied into this user's own Drive.
+                            if (isReadOnlyAlbum && sourceAlbumLinkId != null && isSignedIn &&
+                                (settledItem is GalleryItem.CloudOnly || settledItem is GalleryItem.Synced)
+                            ) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_save_to_drive),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.CloudDownload, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isSavingToDrive,
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.saveToMyDrive(settledItem, sourceAlbumLinkId)
                                     },
                                 )
                             }
@@ -2345,89 +2556,6 @@ fun PhotoViewerScreen(
             // Shared across the pill and the reel filmstrip so a drag on either hides the pill's
             // paused-only frame-step buttons (a seek briefly reports the player as not playing).
             var isScrubbing by remember { mutableStateOf(false) }
-            // Share, favourite, details, edit and delete, in the reference layout: share and delete as
-            // round buttons either side of one pill. A video's landscape row keeps them compact.
-            val actionRow: @Composable (Boolean) -> Unit = { compact ->
-                val canShare = settledItem != null && outbound.anyShareRoute
-                val canFavorite = settledItem != null && !isReadOnlyAlbum
-                val isEditable = when (settledItem) {
-                    is GalleryItem.LocalOnly -> settledItem.local.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
-                    is GalleryItem.Synced -> settledItem.local.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
-                    is GalleryItem.CloudOnly -> settledItem.cloud.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
-                    null -> false
-                }
-                val canEdit = settledItem != null && isEditable && !isReadOnlyAlbum
-                val canDelete = settledItem != null && !isReadOnlyAlbum
-                Row(
-                    modifier = if (compact) Modifier else Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = if (compact) Arrangement.spacedBy(8.dp) else Arrangement.SpaceBetween,
-                ) {
-                    if (canShare) {
-                        ViewerBubble(size = 48.dp, onClick = {
-                            viewModel.loadPublicLink(settledItem!!)
-                            showShareSheet = true
-                        }) {
-                            Icon(Icons.Default.Share, stringResource(R.string.share_action),
-                                tint = FgPrimary, modifier = Modifier.size(18.dp))
-                        }
-                    } else if (!compact) {
-                        Spacer(Modifier.size(48.dp))
-                    }
-                    Row(
-                        modifier = Modifier
-                            .height(48.dp)
-                            .background(PillBgOpaque, infoPillShape)
-                            .border(0.5.dp, PillBorder, infoPillShape)
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        if (canFavorite) {
-                            Box(
-                                modifier = Modifier.size(40.dp).clip(CircleShape)
-                                    .clickable { viewModel.toggleFavorite(settledItem!!) },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                    stringResource(
-                                        if (isFavorite) R.string.cd_favorite_remove else R.string.cd_favorite_add,
-                                    ),
-                                    tint = if (isFavorite) Color(0xFFFF3B30) else FgPrimary,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                        }
-                        Box(
-                            modifier = Modifier.size(40.dp).clip(CircleShape).clickable { showMetadata = true },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Default.Info, stringResource(R.string.viewer_menu_details),
-                                tint = FgPrimary, modifier = Modifier.size(20.dp))
-                        }
-                        if (canEdit) {
-                            Box(
-                                modifier = Modifier.size(40.dp).clip(CircleShape)
-                                    .clickable { onEditItem(settledItem!!) },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(Icons.Default.Tune, stringResource(R.string.cd_viewer_edit),
-                                    tint = FgPrimary, modifier = Modifier.size(20.dp))
-                            }
-                        }
-                    }
-                    if (canDelete) {
-                        ViewerBubble(size = 48.dp, onClick = { if (deleteState !is PhotoViewerViewModel.DeleteState.Working) showDeleteSheet = true }) {
-                            Icon(Icons.Default.DeleteOutline, stringResource(R.string.viewer_menu_delete),
-                                tint = FgPrimary, modifier = Modifier.size(18.dp))
-                        }
-                    } else if (!compact) {
-                        Spacer(Modifier.size(48.dp))
-                    }
-                }
-            }
-
             if (isVideoItem) {
                 if (chromeLandscape) {
                     Row(
@@ -2443,7 +2571,6 @@ fun PhotoViewerScreen(
                             onPlay       = { videoStarted = true },
                             modifier     = Modifier.weight(1f),
                         )
-                        if (!trashMode) actionRow(true)
                         Spacer(Modifier.width(12.dp))
                     }
                 } else {
@@ -2557,7 +2684,7 @@ fun PhotoViewerScreen(
                 },
             )
 
-            if (!(chromeLandscape && isVideoItem) && !trashMode) actionRow(false)
+            if (!isLandscapeNow && !trashMode) actionRow(false)
 
             // Trash action bar with Restore + Delete forever for the settled item, shown only when the
             // viewer was opened from Trash. Fades with the chrome; the Trash screen behind us runs the
