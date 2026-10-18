@@ -40,7 +40,12 @@ import eu.akoos.photos.domain.entity.LocalMediaItem
 data class DeviceMediaScan(
     val items: List<LocalMediaItem>,
     val complete: Boolean,
-)
+) {
+    /** When the read began (epoch millis), 0 when unknown: a reader that guards rows written since the scan
+     *  uses it, as a scan it is handed may be older than its own request. Not part of equality, so a re-read
+     *  that found the same files is still the same scan. */
+    var startedAtMs: Long = 0L
+}
 
 interface LocalMediaRepository {
     /**
@@ -53,7 +58,15 @@ interface LocalMediaRepository {
     fun observeLocalMedia(): Flow<List<LocalMediaItem>>
 
     /**
-     * Every photo and video on the device, read from MediaStore after this call began.
+     * The [limit] newest photos and videos on the device, newest first, read on their own so a screen can
+     * fill in while the whole-library scan behind [observeLocalMedia] is still running. Not the whole
+     * device, so a reader that acts on what is absent from it must not use it. Empty when nothing can be read.
+     */
+    suspend fun newestMedia(limit: Int): List<LocalMediaItem> = emptyList()
+
+    /**
+     * Every photo and video on the device, read from MediaStore after this call began, or by a scan that saw
+     * the whole device, finished a minute and a half ago at most, and had no change signalled since it began.
      *
      * For a one-shot reader that acts on the device as it is now (a reconcile, an upload pass, a
      * backfill walk), where the list [observeLocalMedia] holds could miss a file that just arrived
@@ -69,6 +82,10 @@ interface LocalMediaRepository {
      * the read for every step that deletes, demotes or reaps because a file is missing from it.
      */
     suspend fun freshScan(): DeviceMediaScan
+
+    /** A scan that began after this call, never one kept from before; for a step that pairs it with another
+     *  read of the same moment (the face reaper's trash query) and cannot take the risk of an older one. */
+    suspend fun freshScanStrict(): DeviceMediaScan = freshScan()
 
     fun observeTrashedMedia(): Flow<List<LocalMediaItem>>
 

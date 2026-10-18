@@ -30,7 +30,9 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.datastore.preferences.core.edit
+import eu.akoos.photos.domain.usecase.UploadStatus
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -50,6 +52,8 @@ import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.albumMirrorFolders
+import eu.akoos.photos.data.preferences.putAlbumMirrorFolders
 import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.data.hidden.HiddenFolderProgress
 import eu.akoos.photos.data.hidden.HiddenFolderRecords
@@ -245,7 +249,9 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val openedFromVault = MutableStateFlow(false)
 
     /** True while this folder's photos also join a matching Drive album as they upload. */
-    val isMirroredAsAlbum: StateFlow<Boolean> = folderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES)
+    val isMirroredAsAlbum: StateFlow<Boolean> = combine(context.settingsDataStore.data, bucketName) { prefs, name ->
+        name.isNotEmpty() && name in prefs.albumMirrorFolders()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     /** True while this folder is carved out of "Back up everything". */
     val isExcludedFromBackup: StateFlow<Boolean> = folderFlag(SettingsKeys.EXCLUDED_FOLDER_NAMES)
@@ -352,7 +358,13 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     /** Opt this folder in or out of also surfacing as a Drive album. */
     fun toggleMirrorAsAlbum() {
-        viewModelScope.launch { setFolderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, enable = null) }
+        val name = bucketName.value
+        if (name.isEmpty()) return
+        viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                prefs.putAlbumMirrorFolders(prefs.albumMirrorFolders().flipped(name))
+            }
+        }
     }
 
     /** Carve this folder out of "Back up everything", or put it back in. */
@@ -482,7 +494,40 @@ class DeviceFolderDetailViewModel @Inject constructor(
         BackupProgress(done = done, total = target.size)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** The pending clearing of [_backupTarget]: armed when a back-up is asked for, replaced once the pipeline idles. */
+    private var targetEndJob: Job? = null
+
+    /** Clears the target after [afterMs] unless a photo starting cancels it first. */
+    private fun armBackupTargetEnd(afterMs: Long) {
+        targetEndJob?.cancel()
+        targetEndJob = viewModelScope.launch {
+            delay(afterMs)
+            targetEndJob = null
+            _backupTarget.value = emptySet()
+        }
+    }
+
     init {
+        // The back-up can end without every queued photo reaching Synced (stopped from the notification or the
+        // Activity screen, a failed photo, a full Drive, no Wi-Fi), so the target is also cleared once the
+        // pipeline has been idle for a moment; a photo starting in between keeps it. A target set just now is
+        // left a longer while for the worker to start: the progress replays the idle event of the last run to a
+        // screen that has only just opened, and that must not count against a back-up asked for after it.
+        viewModelScope.launch {
+            upload.progress.collect { evt ->
+                when (evt.status) {
+                    UploadStatus.Queued, UploadStatus.Compressing, UploadStatus.Encrypting,
+                    UploadStatus.Uploading, UploadStatus.PreparingBackup -> {
+                        targetEndJob?.cancel()
+                        targetEndJob = null
+                    }
+                    UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi -> {
+                        if (targetEndJob == null && _backupTarget.value.isNotEmpty()) armBackupTargetEnd(BACKUP_TARGET_HOLD_MS)
+                    }
+                    UploadStatus.Done -> Unit
+                }
+            }
+        }
         viewModelScope.launch { accountManager.getPrimaryUserId().collect { primaryUserId = it } }
         // Drop the progress bar once every queued photo has uploaded.
         viewModelScope.launch {
@@ -490,15 +535,6 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 if (p != null && p.total > 0 && p.done >= p.total) _backupTarget.value = emptySet()
             }
         }
-    }
-
-    /** Stop an in-flight folder back-up and clear this screen's progress, while leaving scheduled
-     *  auto-backup armed. Cooperative: the photo in transit finishes and backs up, remaining queued
-     *  items are not started and stay pending for a later trigger. Never cancels the worker, so the
-     *  in-flight native crypto is never interrupted. */
-    fun cancelBackup() {
-        upload.requestStop()
-        _backupTarget.value = emptySet()
     }
 
     /**
@@ -738,7 +774,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
             val toUpload = selected.filter { it !in syncedUris }
             val alreadyBackedUp = selected.size - toUpload.size
 
-            if (toUpload.isNotEmpty()) _backupTarget.value = toUpload.toSet()
+            if (toUpload.isNotEmpty()) {
+                _backupTarget.value = toUpload.toSet()
+                armBackupTargetEnd(BACKUP_TARGET_START_MS)
+            }
             val queued = if (toUpload.isNotEmpty()) {
                 forceUploadLocalUris.forceUpload(userId, toUpload)
             } else 0
@@ -817,7 +856,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
             val allLocal = _items.value.mapNotNull { localUriOf(it) } - _vaultedUris.value
             val toUpload = allLocal.filter { it !in syncedUris }
             val alreadyBackedUp = allLocal.size - toUpload.size
-            if (toUpload.isNotEmpty()) _backupTarget.value = toUpload.toSet()
+            if (toUpload.isNotEmpty()) {
+                _backupTarget.value = toUpload.toSet()
+                armBackupTargetEnd(BACKUP_TARGET_START_MS)
+            }
             val queued = if (toUpload.isNotEmpty()) forceUploadLocalUris.forceUpload(userId, toUpload) else 0
             onResult(UploadOutcome(queued = queued, alreadyBackedUp = alreadyBackedUp))
         }
@@ -1437,3 +1479,9 @@ class DeviceFolderDetailViewModel @Inject constructor(
         _multiStripState.value = MultiStripState.Idle
     }
 }
+
+/** How long the pipeline must stay idle before a folder's back-up target is dropped. */
+private const val BACKUP_TARGET_HOLD_MS = 12_000L
+
+/** How long a back-up just asked for may take to show its first photo before its target is dropped. */
+private const val BACKUP_TARGET_START_MS = 90_000L

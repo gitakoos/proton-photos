@@ -279,7 +279,15 @@ internal fun resizeCrop(
         val newTop = (by - insideOffsetY).coerceIn(0, (boundsH - h).coerceAtLeast(0))
         return CropBox(newLeft, newTop, newLeft + w, newTop + h)
     }
-    if (ratio == null || ratio <= 0f) return resizeFree(box, handle, bx, by, minPx)
+    if (ratio == null || ratio <= 0f) {
+        // A photo smaller than the minimum has no frame that honours it: the minimum put the grabbed edge past
+        // the opposite one, outside the photo. Such a photo takes half its short side as the floor instead.
+        val free = resizeFree(box, handle, bx, by, min(minPx, min(boundsW, boundsH) / 2).coerceAtLeast(1))
+        return CropBox(
+            free.left.coerceIn(0, boundsW), free.top.coerceIn(0, boundsH),
+            free.right.coerceIn(0, boundsW), free.bottom.coerceIn(0, boundsH),
+        )
+    }
     return when (handle) {
         CropHandle.TopLeft, CropHandle.TopRight, CropHandle.BottomLeft, CropHandle.BottomRight ->
             resizeLockedCorner(box, handle, bx, by, ratio, boundsW, boundsH, minPx)

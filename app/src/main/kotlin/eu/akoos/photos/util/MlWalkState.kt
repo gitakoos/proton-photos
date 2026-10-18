@@ -41,7 +41,9 @@ class RetryRecord(val key: String, val attempts: Int, val dueEpochMs: Long)
  * What a background model walk (faces, semantic search) keeps between process starts, so a process the
  * system killed does not begin its backoffs again: the photos waiting out a retry, and, for the face walk,
  * the spacing of full regroups. Every time is wall-clock milliseconds. [account] is the partition it
- * describes.
+ * describes. [finalizeOwed] marks a batched grouping whose closing steps (merging the groups it opened,
+ * filling Unsorted) have not run yet, and [groupedUpToRow] the last stored face row a batched run has looked
+ * at, so the next one reads only the faces stored after it.
  */
 class MlWalkState(
     val account: String,
@@ -50,10 +52,12 @@ class MlWalkState(
     val lastRegroupEndEpochMs: Long? = null,
     val lastRegroupDurationMs: Long = 0L,
     val baselineUngrouped: Int? = null,
+    val finalizeOwed: Boolean = false,
+    val groupedUpToRow: Long = 0L,
 ) {
     val isEmpty: Boolean
         get() = retries.isEmpty() && lastFailedRegroupEpochMs == null && lastRegroupEndEpochMs == null &&
-            baselineUngrouped == null
+            baselineUngrouped == null && !finalizeOwed && groupedUpToRow == 0L
 }
 
 /** At most this many retry records are written or read back, so a damaged file cannot inflate the book. */
@@ -125,7 +129,7 @@ class MlWalkStateStore(private val file: File, private val appVersion: Int) {
 
     companion object {
         private const val MAGIC = "PPMLWALK"
-        private const val FORMAT = 1
+        private const val FORMAT = 3
 
         internal fun encode(output: DataOutputStream, state: MlWalkState, appVersion: Int) {
             output.writeUTF(MAGIC)
@@ -143,6 +147,8 @@ class MlWalkStateStore(private val file: File, private val appVersion: Int) {
             output.writeLong(state.lastRegroupEndEpochMs ?: NONE)
             output.writeLong(state.lastRegroupDurationMs)
             output.writeInt(state.baselineUngrouped ?: -1)
+            output.writeBoolean(state.finalizeOwed)
+            output.writeLong(state.groupedUpToRow)
         }
 
         /** The state [input] holds, or null when it is another format or another app version. A cut-short
@@ -160,7 +166,9 @@ class MlWalkStateStore(private val file: File, private val appVersion: Int) {
             val end = input.readLong().takeIf { it != NONE }
             val duration = input.readLong()
             val baseline = input.readInt().takeIf { it >= 0 }
-            return MlWalkState(account, retries, failed, end, duration.coerceAtLeast(0L), baseline)
+            val finalizeOwed = input.readBoolean()
+            val groupedUpToRow = input.readLong().coerceAtLeast(0L)
+            return MlWalkState(account, retries, failed, end, duration.coerceAtLeast(0L), baseline, finalizeOwed, groupedUpToRow)
         }
 
         private const val NONE = Long.MIN_VALUE

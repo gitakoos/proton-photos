@@ -436,6 +436,15 @@ fun GalleryScreen(
     val activeFirstVisibleItemScrollOffset: () -> Int = {
         if (mosaicGrid) staggeredState.firstVisibleItemScrollOffset else gridState.firstVisibleItemScrollOffset
     }
+    // A category chip changes what the grid lists, and the grid would otherwise stay on whichever item it was
+    // anchored to, or land at the foot of the shorter list. Picking a category, or taking it off, starts at the top.
+    var shownCategory by remember { mutableStateOf(state.selectedFilter) }
+    LaunchedEffect(state.selectedFilter) {
+        if (shownCategory != state.selectedFilter) {
+            shownCategory = state.selectedFilter
+            if (mosaicGrid) staggeredState.scrollToItem(0) else gridState.scrollToItem(0)
+        }
+    }
     val albumsGridState = rememberLazyGridState()
     val tabScope = rememberCoroutineScope()
     // Two top-level tabs (Photos / Albums), hosted in a pager so they can be swiped between as well as
@@ -1450,6 +1459,10 @@ fun GalleryScreen(
         // Background back-up surfaces as the same pill as the share, so the user sees progress (and
         // can cancel) in-app instead of only from the notification.
         val uploadActive = state.isSyncing && state.uploadTotalCount > 0
+        // The pill's X hides the back-up pill for the rest of this run; it never stops the back-up, whose
+        // progress also shows by the avatar and whose cancel is in the notification and on Activity.
+        var uploadPillHidden by remember { mutableStateOf(false) }
+        LaunchedEffect(uploadActive) { if (!uploadActive) uploadPillHidden = false }
         // Hiding a device folder from the Albums tab reports here too: it copies file by file and a
         // folder can hold thousands, so it takes the pill's count and cancel rather than a blocking
         // sheet the user would have to sit through.
@@ -1461,7 +1474,7 @@ fun GalleryScreen(
             fh != null ->
                 eu.akoos.photos.presentation.common.OperationProgress(
                     fh.done, fh.total, folderHidingTpl.format(fh.done, fh.total))
-            uploadActive ->
+            uploadActive && !uploadPillHidden ->
                 eu.akoos.photos.presentation.common.OperationProgress(
                     state.uploadDoneIdx, state.uploadTotalCount,
                     opBackingUpTpl.format(state.uploadDoneIdx, state.uploadTotalCount))
@@ -1473,7 +1486,7 @@ fun GalleryScreen(
         val galleryOpCancel: (() -> Unit)? = when {
             shS is MultiShareState.Working -> null
             fh != null -> { { viewModel.cancelFolderHide() } }
-            uploadActive -> { { viewModel.cancelUpload() } }
+            uploadActive -> { { uploadPillHidden = true } }
             else -> null
         }
         // Hold the last non-null progress so the pill can animate OUT cleanly when the work finishes,
@@ -1493,6 +1506,7 @@ fun GalleryScreen(
             eu.akoos.photos.presentation.common.OperationProgressPill(
                 progress = lastOpProgress,
                 onCancel = galleryOpCancel,
+                hidesOnly = uploadActive && fh == null,
             )
         }
 

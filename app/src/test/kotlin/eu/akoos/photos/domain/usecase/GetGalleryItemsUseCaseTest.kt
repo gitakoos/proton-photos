@@ -22,14 +22,18 @@
 
 package eu.akoos.photos.domain.usecase
 
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import eu.akoos.photos.data.db.dao.SyncStateLite
 import eu.akoos.photos.data.repository.SyncStateSnapshot
@@ -442,6 +446,59 @@ class GetGalleryItemsUseCaseTest {
         verify(exactly = 0) { cloudRepo.observeCloudPhotos(any()) }
         verify(exactly = 0) { syncSnapshot.observe(any()) }
         verify(exactly = 0) { cloudRepo.observeHiddenAlbumMemberLinkIds() }
+    }
+
+    // ─── quick start ──────────────────────────────────────────────────────────
+
+    private fun quickStartUseCase(newest: suspend () -> List<LocalMediaItem>): GetGalleryItemsUseCase {
+        val localRepo = mockk<LocalMediaRepository>()
+        coEvery { localRepo.newestMedia(any()) } coAnswers { newest() }
+        return GetGalleryItemsUseCase(
+            localRepo,
+            mockk<DrivePhotoRepository>(),
+            mockk<SyncStateSnapshot>(),
+            CoroutineScope(Dispatchers.Unconfined + CoroutineExceptionHandler { _, _ -> }),
+        )
+    }
+
+    @Test
+    fun `quick start puts the newest photos ahead of the full feed`() = runBlocking {
+        val newest = listOf(localItem("uri://new", dateTaken = 9_000L))
+        val fullList = listOf(
+            GalleryItem.LocalOnly(localItem("uri://new", dateTaken = 9_000L)),
+            GalleryItem.LocalOnly(localItem("uri://old", dateTaken = 1_000L)),
+        )
+        val full = flow {
+            delay(300)
+            emit(fullList)
+        }
+
+        val emitted = quickStartUseCase { newest }.withQuickStart(null, full).toList()
+
+        assertEquals(2, emitted.size)
+        assertEquals(listOf("uri://new"), emitted[0].filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri })
+        assertEquals(fullList, emitted[1])
+    }
+
+    @Test
+    fun `quick start never lands after the full feed`() = runBlocking {
+        val fullList = listOf(GalleryItem.LocalOnly(localItem("uri://old", dateTaken = 1_000L)))
+
+        val emitted = quickStartUseCase {
+            delay(300)
+            listOf(localItem("uri://new", dateTaken = 9_000L))
+        }.withQuickStart(null, flowOf(fullList)).toList()
+
+        assertEquals(listOf(fullList), emitted)
+    }
+
+    @Test
+    fun `quick start with nothing to read leaves just the full feed`() = runBlocking {
+        val fullList = listOf(GalleryItem.LocalOnly(localItem("uri://a")))
+
+        val emitted = quickStartUseCase { emptyList() }.withQuickStart(null, flowOf(fullList)).toList()
+
+        assertEquals(listOf(fullList), emitted)
     }
 
     // ─── lean sync rows ───────────────────────────────────────────────────────

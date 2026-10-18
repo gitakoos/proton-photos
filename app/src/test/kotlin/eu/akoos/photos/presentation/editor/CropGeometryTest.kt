@@ -899,4 +899,27 @@ class CropGeometryTest {
         // The image-space centre lands on the drawn top-left corner, not in the middle.
         assertEquals(CropHandle.TopLeft, pick(box, 50f, 50f, scale = 4f, offsetX = 50f, offsetY = 20f))
     }
+
+    @Test
+    fun `a free resize of a photo smaller than the minimum stays inside the photo`() {
+        val bounds = 16
+        val minPx = 32
+        val box = CropBox(0, 0, bounds, bounds)
+        for (handle in CropHandle.values()) {
+            for (bx in listOf(0, 4, 8, 16)) {
+                for (by in listOf(0, 4, 8, 16)) {
+                    val out = resizeCrop(box, handle, bx, by, null, bounds, bounds, minPx)
+                    assertTrue("$handle ($bx,$by) -> $out", out.left in 0..bounds && out.right in 0..bounds)
+                    assertTrue("$handle ($bx,$by) -> $out", out.top in 0..bounds && out.bottom in 0..bounds)
+                    assertTrue("$handle ($bx,$by) -> $out", out.left <= out.right && out.top <= out.bottom)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a free resize of a photo smaller than the minimum can still shrink the frame`() {
+        val out = resizeCrop(CropBox(0, 0, 16, 16), CropHandle.Right, 8, 8, null, 16, 16, 32)
+        assertEquals(CropBox(0, 0, 8, 16), out)
+    }
 }

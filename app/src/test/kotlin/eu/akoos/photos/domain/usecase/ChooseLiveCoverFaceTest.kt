@@ -72,4 +72,17 @@ class ChooseLiveCoverFaceTest {
         val chosen = chooseLiveCoverFace(stored = null, feedKeys = setOf("k2"), feedEmpty = false) { alt }
         assertEquals(alt, chosen)
     }
+
+    private class Lite(val photoKey: String)
+
+    @Test
+    fun `a face of any shape follows the same rule through its photo key`() = runTest {
+        val stored = Lite("k1")
+        val alt = Lite("k2")
+        assertSame(stored, chooseLiveCoverFace(stored, setOf("k1"), feedEmpty = false, { it.photoKey }) { error("not used") })
+        assertSame(alt, chooseLiveCoverFace(stored, setOf("k2"), feedEmpty = false, { it.photoKey }) { alt })
+        assertNull(chooseLiveCoverFace(stored, setOf("x"), feedEmpty = false, { it.photoKey }) { null })
+        assertSame(stored, chooseLiveCoverFace(stored, emptySet(), feedEmpty = true, { it.photoKey }) { error("not used") })
+        assertNull(chooseLiveCoverFace<Lite>(null, emptySet(), feedEmpty = true, { it.photoKey }) { error("not used") })
+    }
 }

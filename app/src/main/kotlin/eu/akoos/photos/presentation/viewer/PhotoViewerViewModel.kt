@@ -315,6 +315,46 @@ class PhotoViewerViewModel @Inject constructor(
     private val _downloadProgress = MutableStateFlow<DownloadProgress?>(null)
     val downloadProgress: StateFlow<DownloadProgress?> = _downloadProgress.asStateFlow()
 
+    /** One-shot result of saving a shared album's photo into this user's own Drive, for the screen to snackbar. */
+    private val _saveToDriveMessage = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+    val saveToDriveMessage: SharedFlow<String> = _saveToDriveMessage.asSharedFlow()
+
+    private val _isSavingToDrive = MutableStateFlow(false)
+    val isSavingToDrive: StateFlow<Boolean> = _isSavingToDrive.asStateFlow()
+
+    /**
+     * Copies a photo of a shared-with-me album ([albumLinkId]) into this user's own library, so it stays when the
+     * share ends. A photo the library already holds is reported as such rather than copied twice.
+     */
+    fun saveToMyDrive(item: GalleryItem, albumLinkId: String) {
+        val linkId = when (item) {
+            is GalleryItem.CloudOnly -> item.cloud.linkId
+            is GalleryItem.Synced -> item.cloud.linkId
+            is GalleryItem.LocalOnly -> return
+        }
+        if (_isSavingToDrive.value) return
+        _isSavingToDrive.value = true
+        viewModelScope.launch {
+            val message = try {
+                val userId = accountManager.getPrimaryUserId().first() ?: error("not logged in")
+                val result = cloudRepo.saveSharedPhotosToOwnLibrary(userId, albumLinkId, listOf(linkId))
+                when {
+                    result.copiedCount > 0 -> R.string.viewer_saved_to_drive
+                    result.skippedCount > 0 -> R.string.viewer_already_in_drive
+                    else -> R.string.viewer_save_to_drive_failed
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("PhotoViewerVM", "save to my drive failed: ${e.message}")
+                R.string.viewer_save_to_drive_failed
+            } finally {
+                _isSavingToDrive.value = false
+            }
+            _saveToDriveMessage.emit(context.getString(message))
+        }
+    }
+
     private val _isSavingToDevice = MutableStateFlow(false)
     val isSavingToDevice: StateFlow<Boolean> = _isSavingToDevice.asStateFlow()
 

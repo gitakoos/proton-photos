@@ -273,6 +273,7 @@ class OnboardingViewModel @Inject constructor(
         appLockTimeoutSeconds: Int,
         albumMirrorSelection: Set<String>,
         albumMirrorCustom: Set<String>,
+        albumMirrorOptOut: Set<String>,
         reauthenticate: (onAuthenticated: () -> Unit) -> Unit,
         onAppliedLocale: () -> Unit,
     ) {
@@ -283,6 +284,7 @@ class OnboardingViewModel @Inject constructor(
                 when (backupMode) {
                     BackupMode.Everything -> {
                         p[SettingsKeys.BACKUP_EVERYTHING] = true
+                        p[SettingsKeys.ALBUM_ALL_BY_DEFAULT] = true
                         p[SettingsKeys.EXCLUDED_FOLDER_NAMES] = excludedFolders
                     }
                     BackupMode.ChooseLater -> {
@@ -323,6 +325,7 @@ class OnboardingViewModel @Inject constructor(
                 // accepted but unused here: its values are already merged into
                 // albumMirrorSelection by the step composable.
                 p[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = albumMirrorSelection
+                p[SettingsKeys.ALBUM_OPT_OUT_FOLDER_NAMES] = albumMirrorOptOut
                 p[SettingsKeys.ALBUM_OPT_IN_MIGRATED] = true
                 p[SettingsKeys.ONBOARDING_COMPLETE] = true
             }
@@ -370,6 +373,8 @@ fun OnboardingScreen(
     var excludedFolders by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var albumMirrorSelection by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
     var albumMirrorCustom by rememberSaveable { mutableStateOf<Set<String>>(emptySet()) }
+    // Set once the user changes the album picks themselves; until then the picks follow the backup mode.
+    var albumMirrorTouched by rememberSaveable { mutableStateOf(false) }
     var stripMetadata by rememberSaveable { mutableStateOf(false) }
     var stripGps by rememberSaveable { mutableStateOf(false) }
     var stripCamera by rememberSaveable { mutableStateOf(false) }
@@ -547,11 +552,23 @@ fun OnboardingScreen(
                         )
                         OnboardingStep.AlbumMirrorOptIn -> {
                             val deviceFolders by viewModel.folders.collectAsStateWithLifecycle()
+                            // Backing up everything means every folder, so its albums are ticked to begin with (the folders
+                            // left out of the backup excepted); a user's own change is kept from then on.
+                            LaunchedEffect(backupMode, deviceFolders, excludedFolders) {
+                                if (!albumMirrorTouched) {
+                                    albumMirrorSelection = if (backupMode == BackupMode.Everything) {
+                                        deviceFolders.map { it.name }.filter { it !in excludedFolders }.toSet() + albumMirrorCustom
+                                    } else {
+                                        albumMirrorCustom
+                                    }
+                                }
+                            }
                             AlbumMirrorStep(
                                 availableBuckets = deviceFolders.map { it.name },
                                 selected = albumMirrorSelection,
                                 customNames = albumMirrorCustom,
                                 onToggle = { name ->
+                                    albumMirrorTouched = true
                                     albumMirrorSelection = if (name in albumMirrorSelection) {
                                         albumMirrorSelection - name
                                     } else {
@@ -559,10 +576,12 @@ fun OnboardingScreen(
                                     }
                                 },
                                 onAddCustom = { name ->
+                                    albumMirrorTouched = true
                                     albumMirrorCustom = albumMirrorCustom + name
                                     albumMirrorSelection = albumMirrorSelection + name
                                 },
                                 onRemoveCustom = { name ->
+                                    albumMirrorTouched = true
                                     albumMirrorCustom = albumMirrorCustom - name
                                     albumMirrorSelection = albumMirrorSelection - name
                                 },
@@ -694,6 +713,13 @@ fun OnboardingScreen(
                                 appLockTimeoutSeconds = appLockTimeoutSeconds,
                                 albumMirrorSelection = albumMirrorSelection,
                                 albumMirrorCustom = albumMirrorCustom,
+                                // Backing up everything makes every folder an album unless it was unticked, a folder
+                                // created later included, so the unticked ones are recorded as switched off.
+                                albumMirrorOptOut = if (backupMode == BackupMode.Everything) {
+                                    viewModel.folders.value.map { it.name }.toSet() - albumMirrorSelection - excludedFolders
+                                } else {
+                                    emptySet()
+                                },
                                 // Weakening the lock asks for the app lock prompt first, as Settings does.
                                 reauthenticate = { onAuthenticated ->
                                     showAppLockPrompt(context, onSuccess = onAuthenticated)

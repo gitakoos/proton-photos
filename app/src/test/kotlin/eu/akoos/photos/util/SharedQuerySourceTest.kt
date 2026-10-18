@@ -416,10 +416,82 @@ class SharedQuerySourceTest {
         job.cancel()
     }
 
+    @Test
+    fun `a recent read is answered from the held read while nothing has changed`() = runTest {
+        val store = FakeStore()
+        val source = source(store)
+        val job = launch { source.shared.collect { } }
+        advanceTimeBy(READ_MS + 1)
+        assertEquals(1, store.reads)
+
+        val first = async { source.recent(RECENT_MS) }
+        val second = async { source.recent(RECENT_MS) }
+        runCurrent()
+
+        assertEquals("v1", first.await())
+        assertEquals("v1", second.await())
+        assertEquals("no new read for either caller", 1, store.reads)
+        job.cancel()
+    }
+
+    @Test
+    fun `a recent read runs a new read once a change was signalled`() = runTest {
+        val store = FakeStore()
+        val source = source(store)
+        val job = launch { source.shared.collect { } }
+        advanceTimeBy(READ_MS + 1)
+        store.content = "v2"
+        store.change()
+
+        val answer = async { source.recent(RECENT_MS) }
+        advanceTimeBy(QUIET_MS + READ_MS * 3)
+
+        assertEquals("v2", answer.await())
+        assertTrue(store.reads >= 2)
+        job.cancel()
+    }
+
+    @Test
+    fun `a recent read runs a new read when the held one is too old or not reusable`() = runTest {
+        val store = FakeStore()
+        val source = source(store)
+        val job = launch { source.shared.collect { } }
+        advanceTimeBy(READ_MS + 1)
+
+        val notReusable = async { source.recent(RECENT_MS) { false } }
+        advanceTimeBy(READ_MS * 2)
+        assertEquals("v1", notReusable.await())
+        assertEquals(2, store.reads)
+
+        advanceTimeBy(RECENT_MS + 1)
+        val tooOld = async { source.recent(RECENT_MS) }
+        advanceTimeBy(READ_MS * 2)
+        assertEquals("v1", tooOld.await())
+        assertEquals(3, store.reads)
+        job.cancel()
+    }
+
+    @Test
+    fun `a recent read keeps no copy once no one collects`() = runTest {
+        val store = FakeStore()
+        val source = source(store)
+        val job = launch { source.shared.collect { } }
+        advanceTimeBy(READ_MS + 1)
+        job.cancel()
+        advanceTimeBy(STOP_MS + 1)
+
+        val answer = async { source.recent(RECENT_MS) }
+        advanceTimeBy(READ_MS * 2)
+
+        assertEquals("v1", answer.await())
+        assertEquals("the held read was dropped with the source, so this one reads", 2, store.reads)
+    }
+
     private companion object {
         const val QUIET_MS = 250L
         const val MAX_WAIT_MS = 2_000L
         const val STOP_MS = 5_000L
         const val READ_MS = 100L
+        const val RECENT_MS = 60_000L
     }
 }

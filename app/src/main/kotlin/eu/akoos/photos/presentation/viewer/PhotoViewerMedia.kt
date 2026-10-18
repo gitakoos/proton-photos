@@ -107,6 +107,7 @@ import eu.akoos.photos.presentation.theme.FgPrimary
 import androidx.compose.ui.graphics.toArgb
 import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.util.formatVideoTime
 import kotlin.math.roundToInt
@@ -261,6 +262,7 @@ internal fun VideoControlPill(
     isScrubbing: Boolean = false,
     onScrubbingChange: (Boolean) -> Unit = {},
     onPlay: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var isPlaying  by remember { mutableStateOf(false) }
     var isMuted    by remember { mutableStateOf(false) }
@@ -290,10 +292,10 @@ internal fun VideoControlPill(
     }
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
-            .background(PillBg, infoPillShape)
+            .background(PillBgOpaque, infoPillShape)
             .border(0.5.dp, PillBorder, infoPillShape)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -315,9 +317,6 @@ internal fun VideoControlPill(
                 null, tint = FgPrimary, modifier = Modifier.size(20.dp),
             )
         }
-
-        // One frame back, shown only while genuinely paused (not mid-scrub), for single-frame steps.
-        if (videoStarted && !isPlaying && !isScrubbing) FrameStepButton(player, forward = false)
 
         // Canvas draw lambdas are not composable scope — resolve the reactive color here.
         val seekColor = FgPrimary
@@ -377,9 +376,6 @@ internal fun VideoControlPill(
             drawCircle(seekColor, radius = 5.dp.toPx(), center = Offset(px, cy))
         }
 
-        // One frame forward, shown only while genuinely paused (not mid-scrub).
-        if (videoStarted && !isPlaying && !isScrubbing) FrameStepButton(player, forward = true)
-
         Text(
             if (durationMs > 0) "${formatVideoTime(currentMs)} / ${formatVideoTime(durationMs)}"
             else "0:00",
@@ -399,31 +395,6 @@ internal fun VideoControlPill(
                 modifier = Modifier.size(18.dp),
             )
         }
-    }
-}
-
-/** A single-frame step control, shown only while a video is paused. Seeks exactly one frame back or
- *  forward using the clip's frame rate (falling back to 30 fps when the container omits it); with the
- *  player on EXACT seek parameters this lands on the precise frame. */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-@Composable
-private fun FrameStepButton(player: ExoPlayer?, forward: Boolean) {
-    Box(
-        modifier = Modifier.size(24.dp).clip(CircleShape).clickable {
-            val p = player ?: return@clickable
-            val fps = p.videoFormat?.frameRate?.takeIf { it > 0f } ?: 30f
-            val frameMs = (1000f / fps).toLong().coerceAtLeast(1L)
-            val target = if (forward) p.currentPosition + frameMs else p.currentPosition - frameMs
-            p.seekTo(target.coerceIn(0L, p.duration.coerceAtLeast(0L)))
-        },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            if (forward) Icons.AutoMirrored.Filled.KeyboardArrowRight else Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-            contentDescription = null,
-            tint = FgPrimary,
-            modifier = Modifier.size(20.dp),
-        )
     }
 }
 

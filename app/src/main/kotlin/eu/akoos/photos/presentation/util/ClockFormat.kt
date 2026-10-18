@@ -107,6 +107,12 @@ fun formatDateTimeMinute(ms: Long, locale: Locale, is24Hour: Boolean): String {
     return SimpleDateFormat(pattern, locale).format(Date(ms))
 }
 
+/** A moment's time of day alone, in [locale] on a 24 or 12 hour clock as [is24Hour] says. */
+fun formatTimeOfDay(ms: Long, locale: Locale, is24Hour: Boolean): String {
+    val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, if (is24Hour) "Hm" else "hma")
+    return SimpleDateFormat(pattern, locale).format(Date(ms))
+}
+
 /** [formatDateTimeMinute] on the clock the app is showing now, for code outside a composition. */
 fun formatDateTimeMinute(ms: Long, locale: Locale = Locale.getDefault()): String =
     formatDateTimeMinute(ms, locale, ClockFormatState.is24Hour())

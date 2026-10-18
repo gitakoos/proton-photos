@@ -468,6 +468,12 @@ object SettingsKeys {
      */
     val ALBUM_OPT_IN_FOLDER_NAMES = stringSetPreferencesKey("album_opt_in_folder_names")
 
+    /** Folders the user switched the album off for while "Back up everything" makes every folder one; see [AlbumMirrorFolders]. */
+    val ALBUM_OPT_OUT_FOLDER_NAMES = stringSetPreferencesKey("album_opt_out_folder_names")
+
+    /** Set when "Back up everything" is turned on (or picked in the setup): every folder becomes a Drive album unless switched off. Absent on an install that already had it on. */
+    val ALBUM_ALL_BY_DEFAULT = booleanPreferencesKey("album_all_by_default")
+
     /**
      * One-shot migration flag. False on first launch after the opt-in feature ships;
      * the migration in `App.kt` seeds [ALBUM_OPT_IN_FOLDER_NAMES] from [ALBUM_BUCKET_MAP]
@@ -874,6 +880,9 @@ object SettingsKeys {
      * on it can turn it off from Settings and have it stay off until they turn it back on.
      */
     val FACE_INDEXING_PAUSED = booleanPreferencesKey("face_indexing_paused")
+
+    /** The accounts whose people have had their photo counts recounted once from their faces; see FaceIndexingScheduler. */
+    val FACE_COUNTS_RECOUNTED = stringSetPreferencesKey("face_counts_recounted")
 
     /**
      * When true, the face and photo-search scans run only while the phone is on external power. Absent

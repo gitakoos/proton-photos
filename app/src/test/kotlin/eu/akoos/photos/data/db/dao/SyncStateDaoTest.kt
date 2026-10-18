@@ -498,4 +498,42 @@ class SyncStateDaoTest {
         assertEquals(2, fullRowCount)
         assertEquals(fullRowCount, dao.countPendingUploads("user1").first())
     }
+
+    @Test
+    fun `seeding and queueing many rows at once leaves the same rows as doing it one by one`() = runTest {
+        val uris = (1..1200).map { "uri://bulk-$it" }
+        dao.upsert(entity("uri://bulk-7", status = SyncStatus.LOCAL_ONLY).let { it.copy(sizeBytes = 99L) })
+
+        uris.chunked(500).forEach { slice ->
+            dao.seedAndMarkQueued(slice.map { entity(it) }, source = "MANUAL", at = 5L)
+        }
+
+        assertEquals(1200, dao.countPendingUploads("user1").first())
+        val all = dao.getByUris(listOf("uri://bulk-7", "uri://bulk-1200", "uri://nothing"))
+        assertEquals(2, all.size)
+        assertTrue(all.all { it.queued && it.queueSource == "MANUAL" && it.queuedAt == 5L })
+        assertEquals(SyncStatus.LOCAL_ONLY, all.first { it.localUri == "uri://bulk-7" }.status)
+    }
+
+    @Test
+    fun `seeding leaves a row that started uploading or reached Drive since it was read`() = runTest {
+        dao.upsert(entity("uri://claimed", status = SyncStatus.UPLOADING))
+        dao.upsert(entity("uri://done", status = SyncStatus.SYNCED, cloudFileId = "c-done"))
+        dao.upsert(entity("uri://hidden", status = SyncStatus.HIDDEN))
+
+        dao.seedAndMarkQueued(
+            listOf("uri://claimed", "uri://done", "uri://hidden", "uri://new").map { entity(it) },
+            source = "MANUAL",
+            at = 7L,
+        )
+
+        val rows = dao.getByUris(listOf("uri://claimed", "uri://done", "uri://hidden", "uri://new"))
+            .associateBy { it.localUri }
+        assertEquals(SyncStatus.UPLOADING, rows.getValue("uri://claimed").status)
+        assertEquals(SyncStatus.SYNCED, rows.getValue("uri://done").status)
+        assertEquals("c-done", rows.getValue("uri://done").cloudFileId)
+        assertEquals(SyncStatus.HIDDEN, rows.getValue("uri://hidden").status)
+        assertTrue(listOf("uri://claimed", "uri://done", "uri://hidden").none { rows.getValue(it).queued })
+        assertTrue(rows.getValue("uri://new").queued)
+    }
 }

@@ -191,6 +191,28 @@ class FaceDiagnosticsFormatTest {
         assertFalse(snapshot, snapshot.contains("IllegalStateException"))
     }
 
+    @Test
+    fun the_people_list_builds_show_only_once_one_has_started_and_go_with_a_clear() {
+        assertFalse(FaceDiagnostics.snapshot(now = 0L).contains("peopleBuilds="))
+        FaceDiagnostics.recordPeopleBuildStarted()
+        FaceDiagnostics.recordPeopleBuildStarted()
+        FaceDiagnostics.recordPeopleBuildCompleted(durationMs = 900L, people = 5_700)
+        FaceDiagnostics.recordPeopleBuildStarted()
+        FaceDiagnostics.recordPeopleBuildCompleted(
+            durationMs = 300L, people = 5_701, fallbacks = 3_200, storedReadMs = 40L, fallbackMs = 200L,
+        )
+        val snapshot = FaceDiagnostics.snapshot(now = 0L)
+        assertTrue(
+            snapshot,
+            snapshot.contains(
+                "peopleBuilds=3 done=2 lastMs=300 maxMs=900 lastPeople=5701 " +
+                    "fallbacks=3200 storedMs=40 fallbackMs=200 otherMs=60\n",
+            ),
+        )
+        FaceDiagnostics.clear()
+        assertFalse(FaceDiagnostics.snapshot(now = 0L).contains("peopleBuilds="))
+    }
+
     private companion object {
         /** The detections line followed by the three grouping lines, as a fresh or cleared session prints them. */
         const val BLANK_BLOCK =

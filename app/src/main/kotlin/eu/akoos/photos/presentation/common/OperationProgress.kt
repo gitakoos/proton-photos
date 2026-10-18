@@ -98,6 +98,8 @@ fun OperationProgressPill(
     progress: OperationProgress?,
     modifier: Modifier = Modifier,
     onCancel: (() -> Unit)? = null,
+    // True when [onCancel] only hides the pill and the work carries on, so the control reads as a close.
+    hidesOnly: Boolean = false,
 ) {
     // Hold the last progress so the pill animates OUT when the work ends instead of vanishing.
     var last by remember { mutableStateOf(progress) }
@@ -160,7 +162,7 @@ fun OperationProgressPill(
             ) {
                 Icon(
                     Icons.Default.Close,
-                    contentDescription = stringResource(R.string.cancel),
+                    contentDescription = stringResource(if (hidesOnly) R.string.close else R.string.cancel),
                     tint = colors.fgMute,
                     modifier = Modifier.size(18.dp),
                 )

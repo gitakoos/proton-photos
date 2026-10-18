@@ -196,6 +196,33 @@ interface SyncStateDao {
     @Query("SELECT * FROM sync_state WHERE localUri = :localUri LIMIT 1")
     suspend fun getByUri(localUri: String): SyncStateEntity?
 
+    /** The rows for [localUris], in one read. The caller keeps the list within the host-variable limit. */
+    @Query("SELECT * FROM sync_state WHERE localUri IN (:localUris)")
+    suspend fun getByUris(localUris: List<String>): List<SyncStateEntity>
+
+    /** [markQueued] for every uri in [localUris] in one statement. The caller keeps the list within the
+     *  host-variable limit. */
+    @Query("UPDATE sync_state SET queued = 1, queueSource = :source, queuedAt = :at WHERE localUri IN (:localUris)")
+    suspend fun markQueuedAll(localUris: List<String>, source: String, at: Long)
+
+    /**
+     * Seeds each of [entities] the way [upsert] does and marks it queued for [source] at [at], all in one
+     * transaction, so a back-up of thousands of photos writes in a few steps rather than three per photo,
+     * and the lists watching the table are told once per step.
+     */
+    @Transaction
+    suspend fun seedAndMarkQueued(entities: List<SyncStateEntity>, source: String, at: Long) {
+        // The rows are read again inside the transaction: one that has started uploading, reached Drive or been
+        // hidden since the caller read it is left as it is, since seeding it would upload it a second time.
+        val existing = getByUris(entities.map { it.localUri }).associateBy { it.localUri }
+        val seeded = entities.filter { entity ->
+            val row = existing[entity.localUri]
+            row == null || (row.status != SyncStatus.UPLOADING && row.status != SyncStatus.HIDDEN && row.cloudFileId == null)
+        }
+        for (entity in seeded) upsert(entity)
+        if (seeded.isNotEmpty()) markQueuedAll(seeded.map { it.localUri }, source, at)
+    }
+
     @Query("SELECT * FROM sync_state WHERE cloudFileId = :cloudFileId LIMIT 1")
     suspend fun getByCloudId(cloudFileId: String): SyncStateEntity?
 

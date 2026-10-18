@@ -84,6 +84,8 @@ object AccountScopedPreferences {
                         // access to and would never see the effect of.
                         SettingsKeys.ALBUMS_CUSTOM_ORDER,
                         SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES,
+                        SettingsKeys.ALBUM_OPT_OUT_FOLDER_NAMES,
+                        SettingsKeys.ALBUM_ALL_BY_DEFAULT,
                         // Timeline folder and album filters are likewise per-user view preferences.
                         SettingsKeys.TIMELINE_EXCLUDED_FOLDER_NAMES,
                         SettingsKeys.TIMELINE_EXCLUDED_ALBUM_IDS,

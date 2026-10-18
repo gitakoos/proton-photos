@@ -22,7 +22,13 @@
 
 package eu.akoos.photos.presentation.person
 
+import android.app.Activity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -54,6 +60,10 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonOff
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PersonSearch
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.PhotoAlbum
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -82,7 +92,19 @@ import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
+import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.common.SelectionShareState
+import eu.akoos.photos.presentation.common.addToAlbumResultText
+import eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog
+import eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog
+import eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog
+import eu.akoos.photos.presentation.gallery.selectAllCountFor
+import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
+import eu.akoos.photos.presentation.lock.LocalAppLock
+import eu.akoos.photos.presentation.lock.runWhenOpen
+import eu.akoos.photos.presentation.people.AddToPersonFaceSheet
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
@@ -135,6 +157,7 @@ fun PersonDetailScreen(
     onMergedInto: (Long) -> Unit = {},
     /** Opens the sweep that looks for more photos of this person among the ones no face was found on. */
     onFindMore: () -> Unit = {},
+    viewModel: PersonDetailViewModel = hiltViewModel(),
 ) {
     val appColors = AppColors.current
     val gridState = rememberLazyGridState()
@@ -161,12 +184,26 @@ fun PersonDetailScreen(
     // reassign faces in a way that is not cleanly undone, so each confirms first (like the merge picker).
     var pendingRenameMerge by remember { mutableStateOf<String?>(null) }
     var pendingMove by remember { mutableStateOf<PersonUi?>(null) }
-    var selection by remember { mutableStateOf(emptySet<String>()) }
+    // The picked photos live in the shared selection controller, so the drawer's share, add-to-album,
+    // add-to-person and delete act on them; the page reads them as stable ids.
+    val selectedItems by viewModel.selectedItems.collectAsStateWithLifecycle()
+    val selection: Set<String> = remember(selectedItems) { selectedItems.mapTo(HashSet()) { it.stableId } }
     val selecting = selection.isNotEmpty()
+    fun setSelection(ids: Set<String>) = viewModel.setSelection(state.items.filter { it.stableId in ids }.toSet())
+    fun clearSelection() = viewModel.clearSelection()
 
     fun toggle(key: String) {
-        selection = if (key in selection) selection - key else selection + key
+        setSelection(if (key in selection) selection - key else selection + key)
     }
+    val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
+    val isDeleting by viewModel.isDeleting.collectAsStateWithLifecycle()
+    val cloudAlbums by viewModel.albums.collectAsStateWithLifecycle()
+    val shareState by viewModel.sel.shareState.collectAsStateWithLifecycle()
+    val pendingDeleteIntent by viewModel.pendingDeleteIntent.collectAsStateWithLifecycle()
+    var showAddToAlbumSheet by remember { mutableStateOf(false) }
+    var showCreateAlbumInline by remember { mutableStateOf(false) }
+    var showAddToPersonSheet by remember { mutableStateOf(false) }
+    var showDeleteSheet by remember { mutableStateOf(false) }
 
     // Curation can empty a person: its last photos moved to someone else, removed, or marked not a
     // person, and the Unsorted bucket empties the same way once every face is placed. An emptied grid
@@ -186,7 +223,7 @@ fun PersonDetailScreen(
         }
     }
 
-    BackHandler(enabled = selecting) { selection = emptySet() }
+    BackHandler(enabled = selecting) { clearSelection() }
 
     // Bulk actions for the current photo selection. They ride in the top header while selecting (the same
     // place the review list puts its whole-cluster actions), instead of a separate bottom bar.
@@ -195,10 +232,41 @@ fun PersonDetailScreen(
         items = remember(state.items, selection) { state.items.filter { it.stableId in selection } },
         onDone = { msg ->
             android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-            selection = emptySet()
+            clearSelection()
         },
     )
     val personSelectionActions = buildList {
+        val sharing = shareState as? SelectionShareState.Working
+        add(
+            SelectionAction(
+                icon = Icons.Default.Share,
+                label = stringResource(R.string.sel_label_share),
+                working = sharing != null,
+                progress = sharing?.let { if (it.total > 0) it.done.toFloat() / it.total else 0f },
+                enabled = sharing == null,
+                onClick = { viewModel.shareSelected() },
+                slot = PrimarySlot.Share,
+            ),
+        )
+        // Add-to-album needs a Drive destination, so it stays behind a signed-in session.
+        if (isSignedIn) {
+            add(
+                SelectionAction(
+                    icon = Icons.Default.PhotoAlbum,
+                    label = stringResource(R.string.gallery_add_to_album),
+                    onClick = { showAddToAlbumSheet = true },
+                    slot = PrimarySlot.Organize,
+                ),
+            )
+        }
+        // Adding the photos to another person runs on-device, so a guest has it too.
+        add(
+            SelectionAction(
+                icon = Icons.Default.Person,
+                label = stringResource(R.string.gallery_add_to_person),
+                onClick = { showAddToPersonSheet = true },
+            ),
+        )
         // Choosing a cover needs exactly one photo picked AND a named person (the cover is stored against
         // the name); an unnamed cluster has nowhere to keep it.
         if (selection.size == 1 && state.personName != null) {
@@ -246,6 +314,48 @@ fun PersonDetailScreen(
                 ),
             )
         }
+        add(
+            SelectionAction(
+                icon = Icons.Default.DeleteOutline,
+                label = stringResource(R.string.sel_label_delete),
+                tint = eu.akoos.photos.presentation.theme.ErrorColor,
+                enabled = !isDeleting,
+                onClick = { showDeleteSheet = true },
+                slot = PrimarySlot.Delete,
+            ),
+        )
+    }
+
+    // The system share sheet, once the selection's files are ready; it waits for the app lock.
+    val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    val appLock = LocalAppLock.current
+    LaunchedEffect(Unit) {
+        viewModel.shareIntent.collect { intent ->
+            appLock.runWhenOpen {
+                runCatching { context.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle)) }
+            }
+        }
+    }
+    // An action that did not do all it said says so; the message already reads for the user.
+    LaunchedEffect(Unit) {
+        viewModel.actionFailure.collect {
+            android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+    // The system dialog a delete of other apps' files needs (Android 11+), once the controller asks for it.
+    val deletePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) viewModel.onDeletePermissionGranted()
+        else viewModel.clearPendingDeleteIntent()
+    }
+    LaunchedEffect(pendingDeleteIntent) {
+        val pi = pendingDeleteIntent ?: return@LaunchedEffect
+        appLock.runWhenOpen {
+            runCatching {
+                deletePermissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
+            }.onFailure { viewModel.clearPendingDeleteIntent() }
+        }
     }
 
     Box(
@@ -280,7 +390,7 @@ fun PersonDetailScreen(
                     items = selectableIds,
                     indexByKey = idToIndex,
                     selected = selection,
-                    onSelectionChange = { selection = it },
+                    onSelectionChange = { setSelection(it) },
                     tapGuard = tapGuard,
                 )
                 LazyVerticalGrid(
@@ -294,7 +404,7 @@ fun PersonDetailScreen(
                         start = if (seamless) 0.dp else 20.dp,
                         end = if (seamless) 0.dp else 20.dp,
                         top = floatingHeaderContentTopPadding(),
-                        bottom = 24.dp,
+                        bottom = selectionGridBottomPadding(24.dp, selecting),
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
@@ -347,6 +457,7 @@ fun PersonDetailScreen(
                             typeBadgeCdRes = inputs.typeBadgeCdRes,
                             columns = cols,
                             cornerRadius = if (seamless) 0.dp else 10.dp,
+                            focus = state.focus[item.stableId],
                             onClick = {
                                 // Skip the release-tap that follows a long-press select; it would
                                 // otherwise toggle the just-anchored photo back off.
@@ -362,27 +473,31 @@ fun PersonDetailScreen(
             }
         }
 
+        // The picked photos' actions are the shared pull-up drawer, as on the timeline, search and a place's
+        // page, with this page's own (cover, merge, remove, not a person) beside them.
+        val selectAllCount = selectAllCountFor(total = state.items.size, selected = selection.size)
+        SelectionDrawer(
+            visible = selecting,
+            items = remember(selectedItems) { selectedItems.toList() },
+            actions = personSelectionActions,
+            onDismiss = { clearSelection() },
+            // Scrolling the grid collapses the drawer, so carrying on through the photos needs no pull first.
+            contentScrolling = gridState.isScrollInProgress,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            selectAllCount = selectAllCount,
+            onSelectAll = if (selectAllCount != null) {
+                { viewModel.selectAllPhotos() }
+            } else {
+                null
+            },
+        )
+
         // Selection puts its bulk actions in the top header (like the review list); browse mode shows the
         // person's own add + edit + overflow there instead. The two never show at once.
         if (selecting) {
             FloatingHeader(
                 title = stringResource(R.string.album_picker_selected, selection.size),
-                onBack = { selection = emptySet() },
-                trailing = {
-                    personSelectionActions.forEachIndexed { index, action ->
-                        IconBubble(
-                            icon = action.icon,
-                            contentDescription = action.label,
-                            onClick = action.onClick,
-                            diameter = 40.dp,
-                            iconSize = 18.dp,
-                            background = appColors.pillBg,
-                            borderColor = appColors.pillBorder,
-                            tint = appColors.fgPrimary,
-                            modifier = if (index == 0) Modifier else Modifier.padding(start = 8.dp),
-                        )
-                    }
-                },
+                onBack = { clearSelection() },
             )
         } else {
             // Show the person's photo tally beside the name so the header states how many photos this holds.
@@ -590,7 +705,7 @@ fun PersonDetailScreen(
             destructive = true,
             onConfirm = {
                 onRemovePhotos(selection)
-                selection = emptySet()
+                clearSelection()
                 showRemoveConfirm = false
             },
             onDismiss = { showRemoveConfirm = false },
@@ -606,7 +721,7 @@ fun PersonDetailScreen(
             onConfirm = {
                 onSetCover(key)
                 pendingCover = null
-                selection = emptySet()
+                clearSelection()
             },
             onDismiss = { pendingCover = null },
         )
@@ -663,6 +778,65 @@ fun PersonDetailScreen(
         )
     }
 
+    // Bulk delete reuses the gallery's dialog, so the options and the wording stay the same.
+    if (showDeleteSheet && selectedItems.isNotEmpty()) {
+        GalleryMultiDeleteDialog(
+            selectedItems = selectedItems,
+            onDismiss = { showDeleteSheet = false },
+            onDelete = { freeUpSpace, deleteFromCloud ->
+                showDeleteSheet = false
+                viewModel.deleteSelected(freeUpSpace, deleteFromCloud)
+            },
+        )
+    }
+    // Add to album reuses the gallery's picker: cloud-backed photos join now, device-only ones upload first.
+    if (showAddToAlbumSheet && selectedItems.isNotEmpty()) {
+        GalleryAddToAlbumDialog(
+            selectedItems = selectedItems,
+            cloudAlbums = cloudAlbums,
+            onCreateNew = {
+                showAddToAlbumSheet = false
+                showCreateAlbumInline = true
+            },
+            onCloudAlbumSelected = { album ->
+                showAddToAlbumSheet = false
+                viewModel.addSelectedToAlbum(album.linkId) { joined, queued ->
+                    android.widget.Toast.makeText(
+                        context, addToAlbumResultText(context.resources, joined, queued, album.name),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
+            onDismiss = { showAddToAlbumSheet = false },
+        )
+    }
+    if (showCreateAlbumInline) {
+        GalleryNewAlbumDialog(
+            onDismiss = { showCreateAlbumInline = false },
+            onCreate = { name ->
+                showCreateAlbumInline = false
+                viewModel.createAlbumThenAddSelected(name) { joined, queued, error ->
+                    android.widget.Toast.makeText(
+                        context, error ?: addToAlbumResultText(context.resources, joined, queued, name),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
+        )
+    }
+    // Add to person runs the same face-first flow as the timeline, on-device.
+    if (showAddToPersonSheet && selectedItems.isNotEmpty()) {
+        val personPhotos = remember(selectedItems) { selectedItems.toList() }
+        AddToPersonFaceSheet(
+            photos = personPhotos,
+            onDone = {
+                showAddToPersonSheet = false
+                clearSelection()
+            },
+            onDismiss = { showAddToPersonSheet = false },
+        )
+    }
+
     // Move a selection onto another person: pick an existing name to reassign those faces, or type a
     // new name to split them off into a new person.
     if (showMoveSelectionPicker) {
@@ -677,7 +851,7 @@ fun PersonDetailScreen(
             onCreateNew = { name ->
                 showMoveSelectionPicker = false
                 onMoveSelectionToPerson(toMove, name)
-                selection = emptySet()
+                clearSelection()
             },
             onDismiss = { showMoveSelectionPicker = false },
         )
@@ -722,7 +896,7 @@ fun PersonDetailScreen(
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = {
                 onMoveSelectionToPerson(selection, target.displayName ?: "")
-                selection = emptySet()
+                clearSelection()
                 pendingMove = null
             },
             onDismiss = { pendingMove = null },
@@ -758,7 +932,7 @@ fun PersonDetailScreen(
             destructive = true,
             onConfirm = {
                 onMarkSelectionNotPerson(selection)
-                selection = emptySet()
+                clearSelection()
                 showNotPersonConfirm = false
             },
             onDismiss = { showNotPersonConfirm = false },

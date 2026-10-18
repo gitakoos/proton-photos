@@ -289,17 +289,42 @@ class FaceGroupingPolicyTest {
         assertNull(lowerRegroupBaseline(baseline = null, ungrouped = 2))
     }
 
+    @Test
+    fun a_settled_pass_with_closing_steps_owed_groups_with_nothing_ungrouped() {
+        // A batched run during the scan left its merge and its Unsorted bucket to the run that ends the walk.
+        assertTrue(group(willContinue = false, ungrouped = 0, finalizeOwed = true))
+        // A continuing scan keeps leaving them, and a walk no longer permitted never groups.
+        assertFalse(group(willContinue = true, ungrouped = 0, sinceLastGroup = INTERVAL * 10, finalizeOwed = true))
+        assertFalse(group(active = false, willContinue = false, ungrouped = 0, finalizeOwed = true))
+        // With faces waiting a continuing pass still keeps to the interval.
+        assertFalse(group(willContinue = true, ungrouped = 5, sinceLastGroup = 0L, finalizeOwed = true))
+    }
+
+    @Test
+    fun a_batched_run_is_due_for_new_faces_or_for_owed_closing_steps_at_a_final_pass() {
+        // Faces beyond what the last run left: due, final or not.
+        assertTrue(batchedRunDue(ungrouped = 4, baseline = 3, finalizeOwed = false, finalPass = false))
+        assertTrue(batchedRunDue(ungrouped = 0, baseline = null, finalizeOwed = false, finalPass = false))
+        // Nothing new: only a final pass that owes the closing steps runs, so the merge and Unsorted happen.
+        assertFalse(batchedRunDue(ungrouped = 3, baseline = 3, finalizeOwed = false, finalPass = true))
+        assertFalse(batchedRunDue(ungrouped = 3, baseline = 3, finalizeOwed = true, finalPass = false))
+        assertTrue(batchedRunDue(ungrouped = 3, baseline = 3, finalizeOwed = true, finalPass = true))
+        assertTrue(batchedRunDue(ungrouped = 0, baseline = 0, finalizeOwed = true, finalPass = true))
+    }
+
     private fun group(
         active: Boolean = true,
         willContinue: Boolean,
         ungrouped: Int,
         sinceLastGroup: Long = 0L,
+        finalizeOwed: Boolean = false,
     ): Boolean = shouldGroupAtPassEnd(
         active = active,
         willContinue = willContinue,
         ungrouped = ungrouped,
         msSinceLastGroup = sinceLastGroup,
         minIntervalMs = INTERVAL,
+        finalizeOwed = finalizeOwed,
     )
 
     private fun regroup(

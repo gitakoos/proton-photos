@@ -40,6 +40,7 @@ import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.UnclusteredFace
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
@@ -65,18 +66,54 @@ data class FaceRegroupOutcome(val committed: Boolean, val leftUngrouped: Int)
 
 /**
  * The cursor of a batched incremental placement: each [ClusterFacesUseCase.assignNewFaces] call reads at
- * most [limit] ungrouped faces after [afterId], then advances [afterId] past them and reports in [scanned]
+ * most [limit] ungrouped faces after [afterRow], then advances [afterRow] past them and reports in [scanned]
  * how many it read, so the caller loops until a call reads none.
+ *
+ * The people a call matches against are kept here between the calls of one run, as the last committed call
+ * left them, so a run reads and unpacks the centroid cache once instead of at every batch. A call takes them
+ * only while the cache still matches them (its row count and member total, and the grouped faces), and reads
+ * the cache again otherwise; [forgetCentroids] makes the next call read it again after a write the batches
+ * did not make themselves (a merge).
  */
 class IncrementalBatch(val limit: Int) {
-    var afterId: String = ""
+    var afterRow: Long = 0L
     var scanned: Int = 0
+
+    /** Only faces stored after this row are read (0 reads every ungrouped face), and the highest row any call
+     *  has read so far, for the caller to remember where the next run starts. */
+    var minRow: Long = 0L
+    var maxRow: Long = 0L
 
     /** Faces this run has placed so far (onto an existing person or into a new one) and the people it has
      *  opened, summed over its calls for the one summary line the caller logs. */
     var placed: Int = 0
     var created: Int = 0
+
+    /** How many people the last call matched against (the Unsorted bucket aside), for the progress notes. */
+    var centroidCount: Int = 0
+
+    internal var held: PlacementCentroids? = null
+
+    /** Drops the people kept between calls, so the next call reads the centroid cache again. */
+    fun forgetCentroids() {
+        held = null
+    }
 }
+
+/**
+ * The people a placement matches faces against, unpacked from the centroid cache: per person its id, its
+ * cached member count and its centroid, in matching order, with the Unsorted bucket ([otherId]) left out.
+ * [summaryRows] and [memberTotal] describe the whole cache, the Unsorted bucket's row included, so a batched
+ * run can tell whether the cache still is what it holds.
+ */
+internal class PlacementCentroids(
+    val otherId: Long?,
+    val personIds: ArrayList<Long>,
+    val counts: ArrayList<Int>,
+    val centroids: ArrayList<FloatArray>,
+    var summaryRows: Int,
+    var memberTotal: Int,
+)
 
 /**
  * Rebuilds the account's people from scratch out of every stored face embedding, one quality-aware
@@ -362,8 +399,9 @@ class ClusterFacesUseCase @Inject constructor(
     ): Boolean = withContext(Dispatchers.Default) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
 
-        var summaries = clusterSummaryDao.getAllForUser(account)
+        val people: PlacementCentroids
         if (batch == null) {
+            val summaries = clusterSummaryDao.getAllForUser(account)
             // (1) No cache yet: nothing to match against, so a full build must seed it first.
             if (summaries.isEmpty()) return@withContext false
             // (2) A cached centroid from an older pipeline: a full rebuild re-embeds and refills.
@@ -371,46 +409,38 @@ class ClusterFacesUseCase @Inject constructor(
             // (3) The cache no longer sums to the grouped faces, so a curation edit drifted the assignments
             //     and the summaries are stale. One self-validating check standing in for scattered invalidation.
             if (summaries.sumOf { it.memberCount } != faceDao.assignedFaceCount(account)) return@withContext false
-        } else if (!cacheDescribesGroups(summaries, faceDao.assignedFaceCount(account))) {
-            // A [batch] run is how a library too big for the whole rebuild gets its people, so a cache that
-            // is missing, from an older pipeline or off the grouped faces is rebuilt from the assignments
-            // (one person's faces at a time) rather than refused. No grouped faces and no cache is a valid
-            // start: the first batch then opens the first people itself.
-            if (!rebuildSummaries(account, writeAllowed)) return@withContext false
-            summaries = clusterSummaryDao.getAllForUser(account)
-            if (!cacheDescribesGroups(summaries, faceDao.assignedFaceCount(account))) return@withContext false
+            // (4) A large unclustered backlog: a first scan or a big import groups better in one global pass.
+            val backlog = faceDao.unclusteredCount(account)
+            if (backlog > INCREMENTAL_MAX_BACKLOG) return@withContext false
+            // Nothing waiting: handled, no rebuild needed.
+            if (backlog == 0) return@withContext true
+            // The people to match against, minus the Unsorted bucket: its centroid is a grab-bag mean, and
+            // pulling a fresh face into Unsorted would rob the next rebuild of the chance to form a real
+            // person from it.
+            people = placementCentroids(summaries, personDao.otherPersonId(account)) ?: return@withContext false
+            if (people.personIds.isEmpty()) return@withContext true
+        } else {
+            // A [batch] run is how a library too big for the whole rebuild gets its people, so a cache that is
+            // missing, from an older pipeline or off the grouped faces is rebuilt from the assignments rather
+            // than refused, and the large backlog (4) is read a bounded slice at a time instead of turned away.
+            // A batched run with nobody to match against carries on: every confident face of the batch then
+            // groups among its own, which is how the first people of a big library appear.
+            people = batchCentroids(account, batch, writeAllowed) ?: return@withContext false
+            batch.centroidCount = people.personIds.size
+            if (faceDao.unclusteredCount(account) == 0) return@withContext true
         }
-        // (4) A large unclustered backlog: a first scan or a big import groups better in one global pass.
-        // A [batch] run is the answer to that backlog (the whole-library pass did not fit the heap), so it
-        // skips this bail-out and reads the backlog a bounded slice at a time instead.
-        val backlog = faceDao.unclusteredCount(account)
-        if (batch == null && backlog > INCREMENTAL_MAX_BACKLOG) return@withContext false
-        // Nothing waiting: handled, no rebuild needed.
-        if (backlog == 0) return@withContext true
-
-        // The people to match against, minus the Unsorted bucket: its centroid is a grab-bag mean, and
-        // pulling a fresh face into Unsorted would rob the next rebuild of the chance to form a real
-        // person from it. A batched run with nobody to match against carries on: every confident face of
-        // the batch then groups among its own, which is how the first people of a big library appear.
-        val otherId = personDao.otherPersonId(account)
-        val matchable = summaries.filter { it.personId != otherId }
-        if (matchable.isEmpty() && batch == null) return@withContext true
-        val centroids = ArrayList<FloatArray>(matchable.size)
-        for (row in matchable) {
-            val c = unpackEmbedding(row.centroid)
-            // A stale-width cached centroid cannot be matched against safely, so defer to a full rebuild.
-            if (c.size != FACE_EMBEDDING_DIM) return@withContext false
-            centroids.add(c)
-        }
+        val centroids = people.centroids
 
         // Only the unclustered remainder is read, graded exactly as the full pass grades a face so a weak
         // crop clears a stricter bar (see samplesForSweep).
         val rows = if (batch == null) {
             faceDao.unclusteredFaces(account)
         } else {
-            faceDao.unclusteredFacesBatch(account, batch.afterId, batch.limit).also {
-                batch.scanned = it.size
-                if (it.isNotEmpty()) batch.afterId = it.last().id
+            faceDao.unclusteredFacesBatchSince(account, maxOf(batch.minRow, batch.afterRow), batch.limit).let { read ->
+                batch.scanned = read.size
+                if (read.isNotEmpty()) batch.afterRow = read.last().rowId
+                for (face in read) if (face.rowId > batch.maxRow) batch.maxRow = face.rowId
+                read.map { UnclusteredFace(it.id, it.embedding, it.score, it.blur, it.landmarks) }
             }
         }
         val idBySample = ArrayList<String>(rows.size)
@@ -454,7 +484,7 @@ class ClusterFacesUseCase @Inject constructor(
         for (s in assignment.indices) {
             val c = assignment[s]
             if (c < 0) continue
-            val personName = nameByPersonId[matchable[c].personId]
+            val personName = nameByPersonId[people.personIds[c]]
             if (personName != null && personName in (blockedNamesByFace[idBySample[s]] ?: emptySet())) continue
             matchedByCentroid.getOrPut(c) { ArrayList() }.add(s)
         }
@@ -477,28 +507,17 @@ class ClusterFacesUseCase @Inject constructor(
 
         if (matchedByCentroid.isEmpty() && newGroups.isEmpty()) return@withContext true
 
-        val faceIdsByPerson = ArrayList<Pair<Long, List<String>>>(matchedByCentroid.size)
-        val updatedSummaries = ArrayList<ClusterSummaryEntity>(matchedByCentroid.size)
+        // Each touched person's new faces, folded centroid and count, by the matching index it joined.
+        val matchedPlacements = ArrayList<MatchedPlacement>(matchedByCentroid.size)
         val now = System.currentTimeMillis()
         for ((c, memberSamples) in matchedByCentroid) {
-            val row = matchable[c]
             var centroid = centroids[c]
-            var count = row.memberCount
+            var count = people.counts[c]
             for (s in memberSamples) {
                 centroid = incrementalCentroid(centroid, count, samples[s].embedding)
                 count++
             }
-            faceIdsByPerson.add(row.personId to memberSamples.map { idBySample[it] })
-            updatedSummaries.add(
-                ClusterSummaryEntity(
-                    personId = row.personId,
-                    userId = account,
-                    centroid = packEmbedding(centroid),
-                    memberCount = count,
-                    modelVersion = FACE_MODEL_VERSION,
-                    updatedAt = now,
-                ),
-            )
+            matchedPlacements.add(MatchedPlacement(c, people.personIds[c], memberSamples.map { idBySample[it] }, centroid, count))
         }
 
         // Each new group's face ids and its unit-mean centroid, ready to insert as a fresh unnamed person
@@ -522,13 +541,54 @@ class ClusterFacesUseCase @Inject constructor(
         // created summary is written together, so the cache stays in step with the assignments (its member
         // total keeps matching [assignedFaceCount], the incremental pass's self-check).
         var placed = false
+        var personGone = false
+        val applied = ArrayList<MatchedPlacement>(matchedPlacements.size)
+        val newPersonIds = ArrayList<Long>(newClusters.size)
         appDatabase.withTransaction {
             // Asked inside the transaction, as the full rebuild does, so the faces and people read above
             // cannot be replaced between the check and the write.
             if (!writeAllowed()) return@withTransaction
             placed = true
-            for ((personId, faceIds) in faceIdsByPerson) faceDao.assignPersonBatch(personId, faceIds)
-            if (updatedSummaries.isNotEmpty()) clusterSummaryDao.upsertAll(updatedSummaries)
+            // A curation edit may have removed or renamed a matched person since the people were read: a face
+            // put on a removed one would sit under no person and outside every screen, and one put on a person
+            // named since may be a face marked as not being that name. Those faces stay ungrouped for the next
+            // batch instead.
+            val current = personDao.peopleByIds(matchedPlacements.map { it.personId }).associateBy { it.id }
+            for (placement in matchedPlacements) {
+                val person = current[placement.personId]
+                if (person == null) {
+                    personGone = true
+                    continue
+                }
+                if (person.displayName?.takeIf { it.isNotBlank() } != nameByPersonId[placement.personId]) continue
+                applied.add(placement)
+            }
+            // The photos each person gains: those of the added faces it does not hold yet (and, for a named
+            // person, has not attached by hand). Its cached photo count moves by that, rather than being
+            // counted again over every face it has, which on a big person read thousands of rows per batch.
+            val gainedPhotos = HashMap<Long, Int>(applied.size * 2)
+            for (placement in applied) {
+                val added = placement.faceIds.mapTo(HashSet()) { photoKeyOfFaceId(it) }
+                val held = faceDao.photoKeysHeldAmong(account, placement.personId, added)
+                val attached = nameByPersonId[placement.personId]
+                    ?.let { personManualPhotoDao.photoKeysForNameList(account, it) }.orEmpty().toHashSet()
+                gainedPhotos[placement.personId] = added.count { it !in held && it !in attached }
+            }
+            for (placement in applied) faceDao.assignPersonBatch(placement.personId, placement.faceIds)
+            if (applied.isNotEmpty()) {
+                clusterSummaryDao.upsertAll(
+                    applied.map {
+                        ClusterSummaryEntity(
+                            personId = it.personId,
+                            userId = account,
+                            centroid = packEmbedding(it.centroid),
+                            memberCount = it.count,
+                            modelVersion = FACE_MODEL_VERSION,
+                            updatedAt = now,
+                        )
+                    },
+                )
+            }
             for (cluster in newClusters) {
                 val newPersonId = personDao.insert(
                     PersonEntity(
@@ -538,6 +598,7 @@ class ClusterFacesUseCase @Inject constructor(
                         faceCount = cluster.photos,
                     ),
                 )
+                newPersonIds.add(newPersonId)
                 faceDao.assignPersonBatch(newPersonId, cluster.faceIds)
                 clusterSummaryDao.upsertAll(
                     listOf(
@@ -552,31 +613,97 @@ class ClusterFacesUseCase @Inject constructor(
                     ),
                 )
             }
-            // The people that gained faces get their cached photo count back in step: one statement for
-            // the unnamed ones, the manual-photo union for a named person (its attached photos count too).
-            val gained = faceIdsByPerson.map { it.first }
-            personDao.recountPhotos(gained.filter { nameByPersonId[it] == null })
-            for (personId in gained) {
-                val name = nameByPersonId[personId] ?: continue
-                val person = personDao.personById(personId) ?: continue
-                val manual = personManualPhotoDao.photoKeysForNameList(account, name)
-                val photos = (faceDao.distinctPhotoKeysForPerson(account, personId) + manual).toHashSet().size
-                personDao.updateCoverAndCount(personId, person.coverFaceId, photos)
+            // The people that gained faces get their cached photo count moved on by the photos they gained.
+            for (placement in applied) {
+                val person = current[placement.personId] ?: continue
+                personDao.updateCoverAndCount(
+                    placement.personId, person.coverFaceId, person.faceCount + (gainedPhotos[placement.personId] ?: 0),
+                )
             }
         }
-        if (!placed) return@withContext false
-        val placedFaces = faceIdsByPerson.sumOf { it.second.size } + newClusters.sumOf { it.faceIds.size }
+        if (!placed) {
+            batch?.forgetCentroids()
+            return@withContext false
+        }
+        val placedFaces = applied.sumOf { it.faceIds.size } + newClusters.sumOf { it.faceIds.size }
         if (batch != null) {
             batch.placed += placedFaces
             batch.created += newClusters.size
+            // The people kept for the next batch follow what this one wrote; a person gone from under it
+            // leaves a row the cache may still hold, so the next batch reads the cache again.
+            if (personGone) {
+                batch.forgetCentroids()
+            } else {
+                for (placement in applied) {
+                    people.centroids[placement.index] = placement.centroid
+                    people.counts[placement.index] = placement.count
+                }
+                for ((i, cluster) in newClusters.withIndex()) {
+                    people.personIds.add(newPersonIds[i])
+                    people.counts.add(cluster.faceIds.size)
+                    people.centroids.add(cluster.centroid)
+                }
+                people.summaryRows += newClusters.size
+                people.memberTotal += placedFaces
+                batch.centroidCount = people.personIds.size
+            }
         } else {
             SyncDiagnostics.log(
-                "faces: incremental placed ${faceIdsByPerson.sumOf { it.second.size }} onto " +
-                    "${faceIdsByPerson.size} people and formed ${newClusters.size} new clusters " +
-                    "(${matchable.size} candidates)",
+                "faces: incremental placed ${applied.sumOf { it.faceIds.size }} onto " +
+                    "${applied.size} people and formed ${newClusters.size} new clusters " +
+                    "(${people.personIds.size} candidates)",
             )
         }
         true
+    }
+
+    /**
+     * The people a [batch] call matches against: the ones the run already holds while the centroid cache still
+     * is what they describe (the same rows, the same member total, and that total the grouped faces), else the
+     * cache read again, rebuilt from the assignments first when it does not describe the grouped faces. Null
+     * when the rebuild was refused or the cache still does not describe them, or a centroid has a stale width.
+     */
+    private suspend fun batchCentroids(
+        account: String,
+        batch: IncrementalBatch,
+        writeAllowed: () -> Boolean,
+    ): PlacementCentroids? {
+        val assigned = faceDao.assignedFaceCount(account)
+        batch.held?.let { held ->
+            if (held.memberTotal == assigned &&
+                held.summaryRows == clusterSummaryDao.countForUser(account) &&
+                held.memberTotal == clusterSummaryDao.memberTotalForUser(account) &&
+                held.otherId == personDao.otherPersonId(account)
+            ) {
+                return held
+            }
+        }
+        batch.held = null
+        var summaries = clusterSummaryDao.getAllForUser(account)
+        if (!cacheDescribesGroups(summaries, assigned)) {
+            // No grouped faces and no cache is a valid start: the first batch then opens the first people.
+            if (!rebuildSummaries(account, writeAllowed)) return null
+            summaries = clusterSummaryDao.getAllForUser(account)
+            if (!cacheDescribesGroups(summaries, faceDao.assignedFaceCount(account))) return null
+        }
+        return placementCentroids(summaries, personDao.otherPersonId(account))?.also { batch.held = it }
+    }
+
+    /** [summaries] unpacked into the people a placement matches against, the Unsorted bucket ([otherId])
+     *  left out, or null when a matchable centroid has a stale width and cannot be matched against safely. */
+    private fun placementCentroids(summaries: List<ClusterSummaryEntity>, otherId: Long?): PlacementCentroids? {
+        val ids = ArrayList<Long>(summaries.size)
+        val counts = ArrayList<Int>(summaries.size)
+        val centroids = ArrayList<FloatArray>(summaries.size)
+        for (row in summaries) {
+            if (row.personId == otherId) continue
+            val centroid = unpackEmbedding(row.centroid)
+            if (centroid.size != FACE_EMBEDDING_DIM) return null
+            ids.add(row.personId)
+            counts.add(row.memberCount)
+            centroids.add(centroid)
+        }
+        return PlacementCentroids(otherId, ids, counts, centroids, summaries.size, summaries.sumOf { it.memberCount })
     }
 
     /**
@@ -595,8 +722,15 @@ class ClusterFacesUseCase @Inject constructor(
         val rows = faceDao.confirmedNamesByPerson(account)
         if (rows.isEmpty()) return@withContext 0
         val people = personDao.allForUser(account).associateBy { it.id }
+        // A rescan or a model update keeps the people and clears their faces, so a person can still hold a name
+        // with none of its faces left; that person does not keep the name from the group that carries it now.
+        val withFaces = faceDao.personIdsWithKeptFaces(account).toHashSet()
         val claimed = HashSet<String>()
-        for (person in people.values) person.displayName?.takeIf { it.isNotBlank() }?.let { claimed.add(it) }
+        val facelessHolders = HashMap<String, MutableList<Long>>()
+        for (person in people.values) {
+            val held = person.displayName?.takeIf { it.isNotBlank() } ?: continue
+            if (person.id in withFaces) claimed.add(held) else facelessHolders.getOrPut(held) { ArrayList() }.add(person.id)
+        }
         val strongestPerPerson = rows.groupBy { it.personId }.values
             .map { names -> names.maxByOrNull { it.faces }!! }
             .sortedByDescending { it.faces }
@@ -608,6 +742,7 @@ class ClusterFacesUseCase @Inject constructor(
                 if (person.isOther || !person.displayName.isNullOrBlank() || row.name in claimed) continue
                 val manual = personManualPhotoDao.photoKeysForNameList(account, row.name)
                 val photos = (faceDao.distinctPhotoKeysForPerson(account, person.id) + manual).toHashSet().size
+                facelessHolders[row.name]?.forEach { personDao.updateName(it, null) }
                 personDao.updateName(person.id, row.name)
                 personDao.updateCoverAndCount(person.id, person.coverFaceId, photos)
                 claimed.add(row.name)
@@ -623,12 +758,18 @@ class ClusterFacesUseCase @Inject constructor(
      * thousands). Greedy by closeness: the closest pair at or over [FACE_CLUSTER_MERGE_THRESHOLD] merges, the
      * merged centroid (the faces' weighted mean) is compared with every other group again, and so on, so a
      * chain of near matches cannot fuse people who are far apart. Two groups carrying different names never
-     * merge, a named group outlives an unnamed one (else the bigger one stays), and the Unsorted bucket takes
-     * no part. A cache that does not describe the grouped faces is left alone: merging on it would be wrong.
+     * merge, a named group outlives an unnamed one (else the bigger one stays), an unnamed group holding a face
+     * marked as not being a named person is never folded into that person, and the Unsorted bucket takes no
+     * part. A cache that does not describe the grouped faces is rebuilt from the assignments first, and when it
+     * still does not, the merge fails rather than merge on it.
+     *
      * Written in chunks, each one transaction behind [writeAllowed] that moves the faces, drops the merged
-     * people and their centroids and refreshes the survivors' centroid and photo count together; [onTick] is
-     * called now and then so a host watching for progress sees the work move. Returns how many groups it
-     * folded into another.
+     * people and their centroids and refreshes the survivors' centroid and photo count together. The groups
+     * are read again inside each chunk, since a curation edit does not wait for a grouping: a group gone or
+     * named otherwise since the plan was made, or newly holding a face marked as not being its survivor's
+     * name, is left as it is, and a survivor's centroid and count reflect only the groups it really took in.
+     * [onTick] is called now and then so a host watching for progress sees the work move. Returns how many
+     * groups it folded into another.
      */
     suspend fun mergeSimilarGroups(
         userId: UserId?,
@@ -636,8 +777,14 @@ class ClusterFacesUseCase @Inject constructor(
         onTick: () -> Unit = {},
     ): Int = withContext(Dispatchers.Default) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val summaries = clusterSummaryDao.getAllForUser(account)
-        if (!cacheDescribesGroups(summaries, faceDao.assignedFaceCount(account))) return@withContext 0
+        var summaries = clusterSummaryDao.getAllForUser(account)
+        if (!cacheDescribesGroups(summaries, faceDao.assignedFaceCount(account))) {
+            if (!rebuildSummaries(account, writeAllowed)) return@withContext 0
+            summaries = clusterSummaryDao.getAllForUser(account)
+            check(cacheDescribesGroups(summaries, faceDao.assignedFaceCount(account))) {
+                "the centroid cache does not describe the grouped faces"
+            }
+        }
         val otherId = personDao.otherPersonId(account)
         val rows = summaries.filter { it.personId != otherId }
         val n = rows.size
@@ -649,8 +796,16 @@ class ClusterFacesUseCase @Inject constructor(
             if (centroid.size != FACE_EMBEDDING_DIM) return@withContext 0
             centroids.add(centroid)
         }
-        val counts = IntArray(n) { rows[it].memberCount }
-        val names = Array(n) { people[rows[it].personId]?.displayName?.takeIf { name -> name.isNotBlank() } }
+        // Each group's own centroid and count as read, kept apart from the merged ones the plan below grows,
+        // so a survivor's centroid can be folded again from only the groups a chunk really merges.
+        val ownCentroids = ArrayList(centroids)
+        val ownCounts = IntArray(n) { rows[it].memberCount }
+        val counts = ownCounts.copyOf()
+        val names = Array(n) { nameOf(people[rows[it].personId]) }
+        // The names each group holds a face marked as not being, grown as groups merge, so a group is never
+        // folded into a person one of its faces was marked as not being.
+        val blockedByPerson = blockedNamesByPerson(account)
+        val blocked = Array<HashSet<String>?>(n) { blockedByPerson[rows[it].personId]?.let { marked -> HashSet(marked) } }
         val alive = BooleanArray(n) { true }
         val version = IntArray(n)
         val root = IntArray(n) { it }
@@ -677,8 +832,11 @@ class ClusterFacesUseCase @Inject constructor(
                 else -> b
             }
             val dropped = if (survivor == a) b else a
+            val survivorName = names[survivor]
+            if (survivorName != null && names[dropped] == null && blocked[dropped]?.contains(survivorName) == true) continue
             centroids[survivor] = weightedMean(centroids[survivor], counts[survivor], centroids[dropped], counts[dropped])
             counts[survivor] += counts[dropped]
+            blocked[dropped]?.let { marked -> (blocked[survivor] ?: HashSet<String>().also { blocked[survivor] = it }).addAll(marked) }
             alive[dropped] = false
             root[dropped] = survivor
             version[survivor]++
@@ -704,43 +862,115 @@ class ClusterFacesUseCase @Inject constructor(
         var applied = 0
         for (chunk in groups.keys.chunked(MERGE_CHUNK)) {
             var wrote = false
+            var chunkApplied = 0
             appDatabase.withTransaction {
                 if (!writeAllowed()) return@withTransaction
                 wrote = true
+                val ids = ArrayList<Long>()
+                for (s in chunk) {
+                    ids.add(rows[s].personId)
+                    for (d in groups.getValue(s)) ids.add(rows[d].personId)
+                }
+                val current = personDao.peopleByIds(ids).associateBy { it.id }
+                val blockedNow = blockedNamesByPerson(account)
                 val droppedIds = ArrayList<Long>()
                 val unnamed = ArrayList<Long>()
                 val summariesOut = ArrayList<ClusterSummaryEntity>(chunk.size)
                 for (s in chunk) {
                     val survivorId = rows[s].personId
-                    val absorbed = groups.getValue(s)
-                    for (d in absorbed) {
-                        faceDao.mergePersonInto(account, rows[d].personId, survivorId)
-                        droppedIds.add(rows[d].personId)
+                    val survivorRow = current[survivorId] ?: continue
+                    val survivorName = names[s]
+                    if (survivorRow.isOther || nameOf(survivorRow) != survivorName) continue
+                    var centroid = ownCentroids[s]
+                    var count = ownCounts[s]
+                    var took = 0
+                    for (d in groups.getValue(s)) {
+                        val droppedId = rows[d].personId
+                        val droppedRow = current[droppedId] ?: continue
+                        val droppedName = nameOf(droppedRow)
+                        if (droppedRow.isOther || droppedName != names[d]) continue
+                        if (survivorName != null && droppedName == null &&
+                            survivorName in (blockedNow[droppedId] ?: emptySet())
+                        ) {
+                            continue
+                        }
+                        faceDao.mergePersonInto(account, droppedId, survivorId)
+                        droppedIds.add(droppedId)
+                        centroid = weightedMean(centroid, count, ownCentroids[d], ownCounts[d])
+                        count += ownCounts[d]
+                        took++
                     }
+                    if (took == 0) continue
+                    // The count read back rather than summed, so the cache matches the faces the survivor
+                    // now holds even when an edit moved one of them since the cache was read.
                     summariesOut.add(
-                        ClusterSummaryEntity(survivorId, account, packEmbedding(centroids[s]), counts[s], FACE_MODEL_VERSION, now),
+                        ClusterSummaryEntity(
+                            survivorId, account, packEmbedding(centroid),
+                            faceDao.faceCountForPerson(account, survivorId), FACE_MODEL_VERSION, now,
+                        ),
                     )
-                    val name = names[s]
-                    if (name == null) {
+                    if (survivorName == null) {
                         unnamed.add(survivorId)
                     } else {
-                        val manual = personManualPhotoDao.photoKeysForNameList(account, name)
+                        val manual = personManualPhotoDao.photoKeysForNameList(account, survivorName)
                         val photos = (faceDao.distinctPhotoKeysForPerson(account, survivorId) + manual).toHashSet().size
-                        personDao.updateCoverAndCount(survivorId, people[survivorId]?.coverFaceId, photos)
+                        personDao.updateCoverAndCount(survivorId, survivorRow.coverFaceId, photos)
                     }
-                    applied += absorbed.size
+                    chunkApplied += took
                 }
-                clusterSummaryDao.deleteByPersons(droppedIds)
-                personDao.deleteByIds(droppedIds)
-                clusterSummaryDao.upsertAll(summariesOut)
+                if (droppedIds.isNotEmpty()) {
+                    clusterSummaryDao.deleteByPersons(droppedIds)
+                    personDao.deleteByIds(droppedIds)
+                }
+                if (summariesOut.isNotEmpty()) clusterSummaryDao.upsertAll(summariesOut)
                 personDao.recountPhotos(unnamed)
             }
             if (!wrote) break
+            applied += chunkApplied
             coroutineContext.ensureActive()
             onTick()
         }
         applied
     }
+
+    /**
+     * Puts every face of the account grouped under a person that no longer exists back among the ungrouped
+     * ones, and drops the cached centroids of people that no longer exist. A curation edit does not wait for
+     * a grouping, so a batch can place faces on a person the user has just folded away; such a face sits
+     * under no person, outside every screen, until it is placed again. One transaction behind [writeAllowed];
+     * returns how many faces it put back.
+     */
+    suspend fun releaseOrphanedFaces(userId: UserId?, writeAllowed: () -> Boolean = { true }): Int =
+        withContext(Dispatchers.Default) {
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            var released = 0
+            appDatabase.withTransaction {
+                if (!writeAllowed()) return@withTransaction
+                released = faceDao.releaseOrphanedFaces(account)
+                clusterSummaryDao.deleteOrphansForUser(account)
+            }
+            released
+        }
+
+    /** For each of the account's people holding a face marked as not being someone, the names its faces
+     *  were marked as not being. */
+    private suspend fun blockedNamesByPerson(account: String): Map<Long, Set<String>> {
+        val marks = notPersonDao.allForUser(account)
+        if (marks.isEmpty()) return emptyMap()
+        val personByFace = HashMap<String, Long>()
+        for (face in faceDao.facesByIds(account, marks.map { it.faceId })) {
+            face.personId?.let { personByFace[face.id] = it }
+        }
+        val out = HashMap<Long, HashSet<String>>()
+        for (mark in marks) {
+            val personId = personByFace[mark.faceId] ?: continue
+            out.getOrPut(personId) { HashSet() }.add(mark.personName)
+        }
+        return out
+    }
+
+    /** A person's name, or null when it has none (a blank name counts as none). */
+    private fun nameOf(person: PersonEntity?): String? = person?.displayName?.takeIf { it.isNotBlank() }
 
     /**
      * Puts every face still without a person into the account's single Unsorted bucket, the way the
@@ -780,6 +1010,36 @@ class ClusterFacesUseCase @Inject constructor(
                 moved = leftover
             }
             moved
+        }
+
+    /**
+     * Sets every person's cached photo count from the faces they hold now: the distinct photos of an unnamed group,
+     * and those plus the photos added to the name by hand for a named person. The batched placement only moves a
+     * count on by the photos each batch adds, so a group a library past the whole-rebuild limit opened (or one an
+     * older build opened with no count) keeps a wrong start until something recounts it. Written in slices of
+     * people, each in one transaction behind [writeAllowed]; returns how many people it looked at.
+     */
+    suspend fun recountPhotoCounts(userId: UserId?, writeAllowed: () -> Boolean = { true }): Int =
+        withContext(Dispatchers.Default) {
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            var looked = 0
+            for (slice in personDao.allForUser(account).chunked(RECOUNT_PEOPLE_SLICE)) {
+                coroutineContext.ensureActive()
+                appDatabase.withTransaction {
+                    if (!writeAllowed()) return@withTransaction
+                    val (named, others) = slice.partition { !it.isOther && !it.displayName.isNullOrBlank() }
+                    personDao.recountPhotos(others.map { it.id })
+                    for (person in named) {
+                        val photos = (
+                            faceDao.distinctPhotoKeysForPerson(account, person.id) +
+                                personManualPhotoDao.photoKeysForNameList(account, person.displayName!!)
+                            ).toHashSet().size
+                        if (photos != person.faceCount) personDao.updateCoverAndCount(person.id, person.coverFaceId, photos)
+                    }
+                    looked += slice.size
+                }
+            }
+            looked
         }
 
     /** Pairs of centroids at or over the merge floor, found on [ASSIGN_WORKERS] workers: each takes every
@@ -977,6 +1237,9 @@ class ClusterFacesUseCase @Inject constructor(
 
         /** Vectors per page when one person's centroid is summed for the cache rebuild. */
         const val SUMMARY_PAGE_SIZE = 500
+
+        /** People whose photo counts are recounted in one transaction. */
+        const val RECOUNT_PEOPLE_SLICE = 200
     }
 }
 
@@ -1016,6 +1279,16 @@ private class MergePair(val a: Int, val b: Int, val similarity: Float, val versi
 
 /** Merges applied per transaction, so a long merge commits as it goes and a stop loses little. */
 private const val MERGE_CHUNK = 100
+
+/** A face batch's placements onto one person it matched: the matching [index] and the person's id, the faces
+ *  it takes, and its centroid and member count with those faces folded in. */
+private class MatchedPlacement(
+    val index: Int,
+    val personId: Long,
+    val faceIds: List<String>,
+    val centroid: FloatArray,
+    val count: Int,
+)
 
 /** A group of faces the batched placement opens as a new person: its member ids, unit-mean centroid, the
  *  clearest member as the cover and its distinct photo count. */

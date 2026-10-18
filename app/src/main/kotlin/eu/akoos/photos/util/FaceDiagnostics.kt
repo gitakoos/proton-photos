@@ -147,6 +147,25 @@ object FaceDiagnostics {
     @Volatile
     private var lastBatchedRun: String = ""
 
+    /** Where the batched run under way (or the last one) stood at its latest progress note: the batch, the
+     *  faces examined, the people opened, the people matched against and the time so far. Empty before any. */
+    @Volatile
+    private var batchedProgress: String = ""
+
+    /** Builds of the people list this session: started and completed, the latest and the longest one's run
+     *  time, and how many people the latest one listed. Builds that keep starting and never complete are a
+     *  people screen that never fills. */
+    private val peopleBuildsStarted = AtomicInteger(0)
+    private val peopleBuildsCompleted = AtomicInteger(0)
+    private val peopleBuildLastMs = AtomicLong(0L)
+    private val peopleBuildMaxMs = AtomicLong(0L)
+    private val peopleBuildLastCount = AtomicInteger(0)
+
+    /** Where the latest people-list build spent its time: how many people needed the per-person fallback, and
+     *  the milliseconds in the stored-cover read, in the fallbacks and in the rest of the build. */
+    @Volatile
+    private var peopleBuildLastStages: String = ""
+
     /** Face model pairs the inference watchdog has abandoned in this process (never closed, so their
      *  memory stays until the process ends), and whether that count has stopped the background scan for the
      *  rest of the process. Written whole by the scheduler, which owns the count, so the next pass after a
@@ -205,6 +224,12 @@ object FaceDiagnostics {
 
     /** Logcat tag of the numbers-only mirror; a published release strips every Log call. */
     private const val LOG_TAG = "PFPFace"
+
+    /** Every this-many-th processed item is mirrored to logcat; see [recordProcessed]. */
+    private const val ITEM_LOG_EVERY = 20L
+
+    /** A people-list build at least this long is mirrored to logcat, so a build that crowds out other work shows. */
+    private const val SLOW_PEOPLE_BUILD_LOG_MS = 300L
 
     /** Rolling last-[RECENT_CAPACITY] processed-item lines, newest appended last, guarded by `this`. */
     private const val RECENT_CAPACITY = 25
@@ -321,6 +346,39 @@ object FaceDiagnostics {
         android.util.Log.i(LOG_TAG, "batched run $lastBatchedRun")
     }
 
+    /** Note a build of the people list starting. No log line: several screens build the list at once. */
+    fun recordPeopleBuildStarted() {
+        peopleBuildsStarted.incrementAndGet()
+    }
+
+    /** Note a build of the people list completing after [durationMs] with [people] listed, [fallbacks] of
+     *  them through the per-person fallback, and [storedReadMs] and [fallbackMs] of the time spent reading
+     *  the stored covers and in the fallbacks. */
+    fun recordPeopleBuildCompleted(
+        durationMs: Long,
+        people: Int,
+        fallbacks: Int = 0,
+        storedReadMs: Long = 0L,
+        fallbackMs: Long = 0L,
+    ) {
+        peopleBuildsCompleted.incrementAndGet()
+        peopleBuildLastMs.set(durationMs)
+        peopleBuildMaxMs.accumulateAndGet(durationMs) { a, b -> maxOf(a, b) }
+        peopleBuildLastCount.set(people)
+        val otherMs = (durationMs - storedReadMs - fallbackMs).coerceAtLeast(0L)
+        val stages = "fallbacks=$fallbacks storedMs=$storedReadMs fallbackMs=$fallbackMs otherMs=$otherMs"
+        peopleBuildLastStages = stages
+        if (durationMs >= SLOW_PEOPLE_BUILD_LOG_MS) {
+            android.util.Log.i(LOG_TAG, "people build ms=$durationMs people=$people $stages")
+        }
+    }
+
+    /** Note how far the batched run under way has come: counts only, never a name or an id. */
+    fun recordBatchedProgress(batch: Int, examined: Int, opened: Int, centroids: Int, elapsedMs: Long) {
+        batchedProgress = "batch=$batch examined=$examined opened=$opened centroids=$centroids ms=$elapsedMs"
+        android.util.Log.i(LOG_TAG, "batched progress $batchedProgress")
+    }
+
     /** Note a full regroup given up at its timeout. */
     fun recordRegroupTimedOut() {
         regroupsTimedOut.incrementAndGet()
@@ -387,7 +445,13 @@ object FaceDiagnostics {
             downloadedBytesTotal.addAndGet(downloadedBytes.coerceAtLeast(0L))
         }
         noteSlowest(label, loadMs + inferMs)
-        addRecent(buildRecentLine(label, isVideo, sizeBytes, loadMs, inferMs, downloadMs))
+        val line = buildRecentLine(label, isVideo, sizeBytes, loadMs, inferMs, downloadMs)
+        addRecent(line)
+        // One item in twenty is mirrored to logcat (stripped from a published release), so the per-item
+        // load and inference times of a long walk can be read without the tester copy.
+        if ((imagesProcessed.get() + videosProcessed.get()) % ITEM_LOG_EVERY == 0L) {
+            android.util.Log.i(LOG_TAG, "item $line")
+        }
     }
 
     @Synchronized
@@ -461,6 +525,13 @@ object FaceDiagnostics {
         lastHeapSkip = null
         batchedRuns.set(0)
         lastBatchedRun = ""
+        batchedProgress = ""
+        peopleBuildsStarted.set(0)
+        peopleBuildsCompleted.set(0)
+        peopleBuildLastMs.set(0L)
+        peopleBuildMaxMs.set(0L)
+        peopleBuildLastCount.set(0)
+        peopleBuildLastStages = ""
         abandonedSessions = 0
         scanHalted = false
         fgsStartMs.set(0L)
@@ -529,6 +600,18 @@ object FaceDiagnostics {
             append('\n')
             if (batchedRuns.get() > 0) {
                 append("batchedRuns=").append(batchedRuns.get()).append(" last(").append(lastBatchedRun).append(")\n")
+            }
+            val progressNote = batchedProgress
+            if (progressNote.isNotEmpty()) append("batchedProgress=").append(progressNote).append('\n')
+            if (peopleBuildsStarted.get() > 0) {
+                append("peopleBuilds=").append(peopleBuildsStarted.get())
+                append(" done=").append(peopleBuildsCompleted.get())
+                append(" lastMs=").append(peopleBuildLastMs.get())
+                append(" maxMs=").append(peopleBuildMaxMs.get())
+                append(" lastPeople=").append(peopleBuildLastCount.get())
+                val stages = peopleBuildLastStages
+                if (stages.isNotEmpty()) append(' ').append(stages)
+                append('\n')
             }
             append("inFlight=").append(inFlightSnapshot()).append('\n')
             append("lastPark=").append(lastParkReason).append('\n')

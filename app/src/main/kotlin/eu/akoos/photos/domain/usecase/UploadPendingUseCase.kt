@@ -49,6 +49,7 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.albumMirrorFolders
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.CompressionPreferences
 import eu.akoos.photos.data.upload.MirrorOverwriteJournal
@@ -367,7 +368,7 @@ class UploadPendingUseCase @Inject constructor(
         // Per-folder cloud-album mirror opt-in. Photos always upload to the photostream
         // regardless; this set decides whether the upload path also adds the photo to
         // an auto-named album matching its source bucket (Camera, Screenshots, …).
-        val albumOptInFolders: Set<String> = prefs[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] ?: emptySet()
+        val albumOptInFolders = prefs.albumMirrorFolders()
 
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
         val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
@@ -774,7 +775,7 @@ class UploadPendingUseCase @Inject constructor(
         /** This batch was asked for by the user, so the live auto-backup re-check does not apply. */
         manualRun: Boolean,
         albumTargetUris: Set<String>,
-        albumOptInFolders: Set<String>,
+        albumOptInFolders: eu.akoos.photos.data.preferences.AlbumMirrorFolders,
         stripOnUpload: Boolean,
         compressOnUpload: Boolean,
         compressHdrPhotos: Boolean,

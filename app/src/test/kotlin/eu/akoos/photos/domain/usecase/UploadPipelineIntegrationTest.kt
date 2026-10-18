@@ -542,6 +542,13 @@ class UploadPipelineIntegrationTest {
                 first = false
                 return current?.copy(cloudFileId = null, status = SyncStatus.UPLOADING)
             }
+
+            override suspend fun getByUris(localUris: List<String>): List<SyncState> {
+                val current = syncRepo.getByUris(localUris)
+                if (!first) return current
+                first = false
+                return current.map { it.copy(cloudFileId = null, status = SyncStatus.UPLOADING) }
+            }
         }
         ForceUploadLocalUrisUseCase(context, readMidUpload, cloud, targetDao)
             .queueForAlbum(userId, albumLinkId, listOf(uri))

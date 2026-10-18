@@ -53,6 +53,13 @@ interface PersonDao {
     @Query("SELECT * FROM person WHERE id = :id LIMIT 1")
     suspend fun personById(id: Long): PersonEntity?
 
+    /** The people among [ids] that still exist, in statements inside the SQL host-variable limit. */
+    suspend fun peopleByIds(ids: Collection<Long>): List<PersonEntity> =
+        ids.toSet().flatMapSqlChunks { peopleByIdsChunk(it) }
+
+    @Query("SELECT * FROM person WHERE id IN (:ids)")
+    suspend fun peopleByIdsChunk(ids: List<Long>): List<PersonEntity>
+
     /** Every person the user has named, read before a rebuild so those names can be carried onto the
      *  new clusters instead of being lost when the person table is rebuilt. */
     @Query("SELECT * FROM person WHERE userId = :userId AND displayName IS NOT NULL")

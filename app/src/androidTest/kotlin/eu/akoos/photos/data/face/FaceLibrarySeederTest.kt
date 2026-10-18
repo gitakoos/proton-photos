@@ -254,6 +254,83 @@ class FaceLibrarySeederTest {
         }
     }
 
+    /**
+     * Adds [extra] faces to the library as it is, as a scan that is still going on would, and lets the face
+     * walk find [rescan] photos unscanned again so its next pass has work and does not end the walk: most
+     * new faces look like the identities the seed made (they match people already there), some are weak
+     * and some match nobody. Arguments: `extra` (300), `rescan` (40), `identities` (2500), `seed` (7).
+     */
+    @Test
+    fun appendFaces() = runBlocking<Unit> {
+        val extra = intArg("extra", 300)
+        val rescan = intArg("rescan", 40)
+        val identityCount = intArg("identities", 2_500)
+        val seed = (args.getString("seed")?.toLongOrNull() ?: 7L)
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, "proton_photos.db")
+            .addMigrations(*Migrations.ALL)
+            .build()
+        try {
+            val account = db.openHelper.readableDatabase
+                .query("SELECT userId FROM face GROUP BY userId ORDER BY COUNT(*) DESC LIMIT 1")
+                .use { if (it.moveToFirst()) it.getString(0) else null }
+            assertTrue("no faces stored", account != null)
+            account!!
+            val centers = Random(seed).let { r -> Array(identityCount) { unitGaussian(r) } }
+            val rnd = Random(seed + 101)
+            val photoKeys = ArrayList<String>()
+            db.openHelper.readableDatabase
+                .query("SELECT photoKey FROM face_scan WHERE userId = ? LIMIT 200", arrayOf(account))
+                .use { while (it.moveToNext()) photoKeys.add(it.getString(0)) }
+            assertTrue("no scanned photos", photoKeys.isNotEmpty())
+            val batch = ArrayList<FaceEntity>(extra)
+            for (k in 0 until extra) {
+                val role = rnd.nextDouble()
+                val embedding: FloatArray
+                val score: Float
+                val blur: Float
+                when {
+                    role < 0.60 -> {
+                        embedding = noisy(centers[rnd.nextInt(50)], SIGMA_GOOD, rnd)
+                        score = 0.62f + 0.37f * rnd.nextFloat()
+                        blur = 14f + 66f * rnd.nextFloat()
+                    }
+                    role < 0.85 -> {
+                        embedding = noisy(centers[rnd.nextInt(identityCount)], SIGMA_WEAK, rnd)
+                        score = 0.45f + 0.20f * rnd.nextFloat()
+                        blur = 3f + 8f * rnd.nextFloat()
+                    }
+                    else -> {
+                        embedding = unitGaussian(rnd)
+                        score = 0.50f + 0.25f * rnd.nextFloat()
+                        blur = 2f + 28f * rnd.nextFloat()
+                    }
+                }
+                val photoKey = photoKeys[rnd.nextInt(photoKeys.size)]
+                batch.add(
+                    FaceEntity(
+                        id = "extra${System.currentTimeMillis()}_$k#0", userId = account, photoKey = photoKey,
+                        left = 0.1f, top = 0.1f, right = 0.4f, bottom = 0.4f, landmarks = FRONTAL_LANDMARKS,
+                        embedding = pack(embedding), personId = null, score = score, blur = blur,
+                    ),
+                )
+            }
+            db.withTransaction { db.faceDao().upsert(batch) }
+            val writable = db.openHelper.writableDatabase
+            writable.execSQL(
+                "DELETE FROM face_scan WHERE userId = ? AND photoKey IN " +
+                    "(SELECT photoKey FROM face_scan WHERE userId = ? LIMIT $rescan OFFSET 100000)",
+                arrayOf(account, account),
+            )
+            Log.i(
+                TAG,
+                "appended extra=$extra rescan=$rescan faces=${db.faceDao().countForUser(account)} " +
+                    "ungrouped=${db.faceDao().unclusteredCount(account)}",
+            )
+        } finally {
+            db.close()
+        }
+    }
+
     @Test
     fun reportFaceLibrary() = runBlocking<Unit> {
         val db = Room.databaseBuilder(context, AppDatabase::class.java, "proton_photos.db")
@@ -278,6 +355,41 @@ class FaceLibrarySeederTest {
                     "assigned=${faceDao.assignedFaceCount(account)} people=${db.personDao().countForUser(account)} " +
                     "peopleWithTwoFaces=$sizes cache=${db.clusterSummaryDao().countForUser(account)}",
             )
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * Times [eu.akoos.photos.domain.usecase.ClusterFacesUseCase.recountPhotoCounts] over the stored library: zeroes
+     * every cached photo count first, recounts, and compares the result with a direct count of each person's
+     * distinct photos. Needs the app process stopped and a DEBUG build installed (a release build renames the class).
+     */
+    @Test
+    fun timeRecount() = runBlocking<Unit> {
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, "proton_photos.db")
+            .addMigrations(*Migrations.ALL)
+            .build()
+        try {
+            val account = db.openHelper.readableDatabase
+                .query("SELECT userId FROM face GROUP BY userId ORDER BY COUNT(*) DESC LIMIT 1")
+                .use { if (it.moveToFirst()) it.getString(0) else null }
+            assertTrue("no faces stored", account != null)
+            account!!
+            db.openHelper.writableDatabase.execSQL("UPDATE person SET faceCount = 0 WHERE userId = ?", arrayOf(account))
+            val cluster = eu.akoos.photos.domain.usecase.ClusterFacesUseCase(
+                db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.notPersonDao(),
+                db.personCoverDao(), db.clusterSummaryDao(), db,
+            )
+            val startMs = android.os.SystemClock.elapsedRealtime()
+            val looked = cluster.recountPhotoCounts(me.proton.core.domain.entity.UserId(account))
+            val tookMs = android.os.SystemClock.elapsedRealtime() - startMs
+            val wrong = db.openHelper.readableDatabase.query(
+                "SELECT COUNT(*) FROM person p WHERE p.userId = ? AND p.faceCount != " +
+                    "(SELECT COUNT(DISTINCT photoKey) FROM face f WHERE f.personId = p.id AND f.rejected = 0)",
+                arrayOf(account),
+            ).use { if (it.moveToFirst()) it.getInt(0) else -1 }
+            Log.i(TAG, "recount people=$looked tookMs=$tookMs differsFromDirectCount=$wrong faces=${db.faceDao().countForUser(account)}")
         } finally {
             db.close()
         }

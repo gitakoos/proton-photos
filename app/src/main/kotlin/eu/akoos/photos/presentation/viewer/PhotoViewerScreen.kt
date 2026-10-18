@@ -90,7 +90,9 @@ import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -142,7 +144,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -180,6 +184,7 @@ import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.presentation.util.findActivity
@@ -328,6 +333,14 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.awa
     }
 }
 
+/** Whether the editors take [item]: an image or a video, from its device file or its Drive copy. */
+private fun isEditableMedia(item: GalleryItem?): Boolean = when (item) {
+    is GalleryItem.LocalOnly -> item.local.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
+    is GalleryItem.Synced -> item.local.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
+    is GalleryItem.CloudOnly -> item.cloud.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
+    null -> false
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun PhotoViewerScreen(
@@ -393,9 +406,16 @@ fun PhotoViewerScreen(
     // change the uri the snapshot holds it under. The live merge leaves vaulted photos out, so the
     // vault reports its own moves and they are applied on top. See [applyVaultMoves].
     val vaultMoves by viewModel.vaultMoves.collectAsStateWithLifecycle()
-    val reconciled = remember(items, liveItems, vaultMoves) {
-        applyVaultMoves(reconcileViewerItems(items, liveItems), vaultMoves)
+    // Worked out off the main thread: on a library of a hundred thousand photos the two lookup maps and the list
+    // compare took long enough to drop frames as the viewer opened. The viewer opens on the snapshot at once and
+    // takes the reconciled list when it is ready; where reconciliation changed nothing that is the same instance.
+    var matched by remember(items) { mutableStateOf(items) }
+    LaunchedEffect(items, liveItems) {
+        matched = withContext(Dispatchers.Default) { reconcileViewerItems(items, liveItems) }
     }
+    // The vault's moves are applied on the spot, not with the matching: a moved file's page effects start in the
+    // composition that sees the move, and they must find the new path in the list they read.
+    val reconciled = remember(matched, vaultMoves) { applyVaultMoves(matched, vaultMoves) }
     // Photos deleted from inside the viewer. The snapshot the caller handed us cannot shrink on its
     // own (reconciliation swaps items in place and deliberately keeps ones the live merge no longer
     // carries, since an album view legitimately holds photos the timeline does not), so a delete has
@@ -506,6 +526,7 @@ fun PhotoViewerScreen(
     val photoTags by viewModel.currentPhotoTags.collectAsStateWithLifecycle()
     val isHidden by viewModel.isHidden.collectAsStateWithLifecycle()
     val isFavorite by viewModel.isFavorite.collectAsStateWithLifecycle()
+    val isSavingToDrive by viewModel.isSavingToDrive.collectAsStateWithLifecycle()
     val isOffline by viewModel.isOffline.collectAsStateWithLifecycle()
     // Null userId is the local-only session; ANDed into the cloud-only viewer actions below.
     val isSignedIn by viewModel.isSignedIn.collectAsStateWithLifecycle()
@@ -584,6 +605,11 @@ fun PhotoViewerScreen(
             }
             launch {
                 viewModel.offlineMessage.collect { msg ->
+                    snackbarHostState.showSnackbar(msg)
+                }
+            }
+            launch {
+                viewModel.saveToDriveMessage.collect { msg ->
                     snackbarHostState.showSnackbar(msg)
                 }
             }
@@ -1078,6 +1104,7 @@ fun PhotoViewerScreen(
     val metadataSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var showDeleteSheet by remember { mutableStateOf(false) }
+    var showRemoveFromAlbumConfirm by remember { mutableStateOf(false) }
     // stableId of the photo the running delete will take off the screen, or null when the running
     // delete only converts it (see DeletePhotoUseCase.removesFromGallery). Captured when the sheet's
     // button is pressed rather than read back when the delete finishes, so nothing depends on where
@@ -1782,7 +1809,7 @@ fun PhotoViewerScreen(
                         }
                         Row(
                             modifier = Modifier
-                                .background(PillBg, RoundedCornerShape(999.dp))
+                                .background(PillBgOpaque, RoundedCornerShape(999.dp))
                                 .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -1825,7 +1852,7 @@ fun PhotoViewerScreen(
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(999.dp))
-                                    .background(PillBg, RoundedCornerShape(999.dp))
+                                    .background(PillBgOpaque, RoundedCornerShape(999.dp))
                                     .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
                                     .clickable { viewModel.exitPanorama() }
                                     .padding(horizontal = 14.dp, vertical = 8.dp),
@@ -1849,6 +1876,222 @@ fun PhotoViewerScreen(
             }
         }
 
+        val isLandscapeNow = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        // Share, favourite, details, edit and delete: share and delete as round buttons either side of one pill.
+        // Upright they sit under the filmstrip; turned sideways they are the compact form in the top bar, which
+        // leaves the foot of the short screen to the filmstrip and a video's controls.
+        val actionRow: @Composable (Boolean) -> Unit = actionRow@{ compact ->
+            val settledItem = items.getOrNull(pagerState.settledPage)
+            val canShare = settledItem != null && outbound.anyShareRoute
+            val canFavorite = settledItem != null && !isReadOnlyAlbum
+            val canEdit = settledItem != null && isEditableMedia(settledItem) && !isReadOnlyAlbum
+            val canDelete = settledItem != null && !isReadOnlyAlbum
+            val onDrive = settledItem is GalleryItem.CloudOnly || settledItem is GalleryItem.Synced
+            // A photo in an album someone shared goes into this user's own Drive from here: the album's own
+            // save copies the whole album, and the share can end.
+            val canSaveToDrive = isReadOnlyAlbum && sourceAlbumLinkId != null && isSignedIn && onDrive
+            // Where the user may take photos out of a shared album, that is the one change offered there; it
+            // stands where delete does in their own albums.
+            val canRemoveHere = isReadOnlyAlbum && sourceAlbumLinkId != null && canRemoveFromAlbum && onDrive
+            // A shared album the user can only look at: save, details and share fill the three places.
+            val sharedViewer = canSaveToDrive && !canRemoveHere
+
+            val shareButton: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { size ->
+                ViewerBubble(size = size, onClick = {
+                    viewModel.loadPublicLink(settledItem!!)
+                    showShareSheet = true
+                }) {
+                    Icon(Icons.Default.Share, stringResource(R.string.share_action),
+                        tint = FgPrimary, modifier = Modifier.size(18.dp))
+                }
+            }
+            val saveButton: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { size ->
+                ViewerBubble(size = size, onClick = { viewModel.saveToMyDrive(settledItem!!, sourceAlbumLinkId!!) }) {
+                    if (isSavingToDrive) {
+                        CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp))
+                    } else {
+                        Icon(Icons.Default.CloudDownload, stringResource(R.string.viewer_save_to_drive),
+                            tint = FgPrimary, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+            val removeButton: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { size ->
+                ViewerBubble(size = size, onClick = { if (!isAddingToAlbum) showRemoveFromAlbumConfirm = true }) {
+                    Icon(Icons.Default.RemoveCircleOutline, stringResource(R.string.album_remove_from_album),
+                        tint = FgPrimary, modifier = Modifier.size(18.dp))
+                }
+            }
+            val deleteButton: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { size ->
+                ViewerBubble(size = size, onClick = {
+                    if (deleteState !is PhotoViewerViewModel.DeleteState.Working) showDeleteSheet = true
+                }) {
+                    Icon(Icons.Default.DeleteOutline, stringResource(R.string.viewer_menu_delete),
+                        tint = FgPrimary, modifier = Modifier.size(18.dp))
+                }
+            }
+            val infoButton: @Composable (androidx.compose.ui.unit.Dp) -> Unit = { size ->
+                ViewerBubble(size = size, onClick = { showMetadata = true }) {
+                    Icon(Icons.Default.Info, stringResource(R.string.viewer_menu_details),
+                        tint = FgPrimary, modifier = Modifier.size(20.dp))
+                }
+            }
+
+            if (compact) {
+                // Turned sideways: the actions as round buttons in the top bar, the size of the buttons beside
+                // them. Favourite and edit go in the menu.
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (canShare) shareButton(40.dp)
+                    if (canSaveToDrive) saveButton(40.dp)
+                    infoButton(40.dp)
+                    if (canRemoveHere) removeButton(40.dp)
+                    if (canDelete) deleteButton(40.dp)
+                }
+                return@actionRow
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                // Left corner: save in a shared album the user only views, otherwise share.
+                when {
+                    sharedViewer -> saveButton(48.dp)
+                    canShare -> shareButton(48.dp)
+                    else -> Spacer(Modifier.size(48.dp))
+                }
+                Row(
+                    modifier = Modifier
+                        .height(48.dp)
+                        .background(PillBgOpaque, infoPillShape)
+                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (canFavorite) {
+                        Box(
+                            modifier = Modifier.size(40.dp).clip(CircleShape)
+                                .clickable { viewModel.toggleFavorite(settledItem!!) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                stringResource(
+                                    if (isFavorite) R.string.cd_favorite_remove else R.string.cd_favorite_add,
+                                ),
+                                tint = if (isFavorite) Color(0xFFFF3B30) else FgPrimary,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                    if (canSaveToDrive && !sharedViewer) {
+                        Box(
+                            modifier = Modifier.size(40.dp).clip(CircleShape).clickable {
+                                viewModel.saveToMyDrive(settledItem!!, sourceAlbumLinkId!!)
+                            },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isSavingToDrive) {
+                                CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
+                                    modifier = Modifier.size(18.dp))
+                            } else {
+                                Icon(Icons.Default.CloudDownload, stringResource(R.string.viewer_save_to_drive),
+                                    tint = FgPrimary, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                    Box(
+                        modifier = Modifier.size(40.dp).clip(CircleShape).clickable { showMetadata = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.Info, stringResource(R.string.viewer_menu_details),
+                            tint = FgPrimary, modifier = Modifier.size(20.dp))
+                    }
+                    if (canEdit) {
+                        Box(
+                            modifier = Modifier.size(40.dp).clip(CircleShape)
+                                .clickable { onEditItem(settledItem!!) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.Tune, stringResource(R.string.cd_viewer_edit),
+                                tint = FgPrimary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+                // Right corner: share beside the save in a shared album the user only views, taking a photo out
+                // of one the user may edit, otherwise delete.
+                when {
+                    sharedViewer -> if (canShare) shareButton(48.dp) else Spacer(Modifier.size(48.dp))
+                    canRemoveHere -> removeButton(48.dp)
+                    canDelete -> deleteButton(48.dp)
+                    else -> Spacer(Modifier.size(48.dp))
+                }
+            }
+        }
+
+        // The photo's date, with its cloud state and its place in the list, centred in the top bar. A tap opens
+        // the details, where the old info pill at the bottom did.
+        val datePill: @Composable () -> Unit = {
+            val currentItem = items.getOrNull(pagerState.currentPage)
+            Row(
+                modifier = Modifier
+                    .height(40.dp)
+                    .background(PillBgOpaque, infoPillShape)
+                    .border(0.5.dp, PillBorder, infoPillShape)
+                    .clickable { showMetadata = true }
+                    .padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Cloud/device badge, as the gallery cells show it: green when the photo is on Drive and on this
+                // device, white when it is on Drive only, none when it is on the device only. A cloud-only
+                // photo whose linkId is mirrored to a device file, and a vaulted photo whose Drive copy the
+                // vault's records still name, read as synced, though the item snapshot cannot say so.
+                val effectiveSynced = currentItem is GalleryItem.Synced ||
+                    (currentItem is GalleryItem.CloudOnly &&
+                        localUriByLinkId.containsKey(currentItem.cloud.linkId)) ||
+                    (currentItem is GalleryItem.LocalOnly &&
+                        currentItem.local.uri in pairedVaultUris)
+                when {
+                    effectiveSynced -> Icon(
+                        Icons.Default.Cloud,
+                        contentDescription = stringResource(R.string.cd_status_backed_up_device),
+                        // Green, as in the grid, so a photo on Drive and on the device reads differently from one on
+                        // Drive only (white); the green of the grid is too pale on the light theme's pill.
+                        tint = if (eu.akoos.photos.presentation.theme.AppColors.current.isLight) {
+                            androidx.compose.ui.graphics.Color(0xFF1E9E48)
+                        } else {
+                            cloudBadgeTint(CloudBadgeSurface.DarkChip)
+                        },
+                        modifier = Modifier.size(16.dp),
+                    )
+                    currentItem is GalleryItem.CloudOnly -> Icon(
+                        Icons.Default.Cloud,
+                        contentDescription = stringResource(R.string.cd_status_cloud_only),
+                        tint = FgPrimary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    else -> Unit
+                }
+                if (currentItem != null) {
+                    Text(formatItemDate(currentItem), color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    Text(
+                        eu.akoos.photos.presentation.util.formatTimeOfDay(
+                            currentItem.captureTimeMs,
+                            eu.akoos.photos.presentation.util.appLocale(),
+                            eu.akoos.photos.presentation.util.LocalIs24Hour.current,
+                        ),
+                        color = FgDim, fontSize = 13.sp, maxLines = 1,
+                    )
+                }
+            }
+        }
+
         // ── Top bar (fades with overlays) ─────────────────────────────────────
         AnimatedVisibility(
             visible = showChrome,
@@ -1856,123 +2099,37 @@ fun PhotoViewerScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopStart),
         ) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .padding(horizontal = 12.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                ViewerBubble(onClick = startExit) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.onboarding_back),
-                        tint = FgPrimary, modifier = Modifier.size(20.dp))
+                Box(modifier = Modifier.align(Alignment.CenterStart)) {
+                    ViewerBubble(onClick = startExit) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.onboarding_back),
+                            tint = FgPrimary, modifier = Modifier.size(20.dp))
+                    }
                 }
+                // Centred on the screen, not in what is left between the buttons: turned sideways the right-hand
+                // group is wider, and a pill that took the room left over would slide off the middle.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(horizontal = if (isLandscapeNow) 196.dp else 56.dp),
+                ) { datePill() }
                 Row(
+                    modifier = Modifier.align(Alignment.CenterEnd),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     val isDeleting = deleteState is PhotoViewerViewModel.DeleteState.Working
                     val settledItem = items.getOrNull(pagerState.settledPage)
 
-                    // Favorite button — hidden for shared-with-me viewers because the
-                    // favorite flag is a node-level tag on the OWNER's photo, not a
-                    // private bookmark on the recipient side. Writing it from the
-                    // recipient would either fail or mutate the owner's library.
-                    if (settledItem != null && !isReadOnlyAlbum) {
-                        ViewerBubble(onClick = { viewModel.toggleFavorite(settledItem) }) {
-                            Icon(
-                                if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                stringResource(
-                                    if (isFavorite) R.string.cd_favorite_remove
-                                    else R.string.cd_favorite_add,
-                                ),
-                                tint = if (isFavorite) Color(0xFFFF3B30) else FgDim,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-
-                    // Make available offline — cloud-only photos only. A Synced/LocalOnly item
-                    // already has its bytes on the device, so there's nothing to pin. The label
-                    // names the press rather than the state, so a pinned photo announces the
-                    // removal the tap would do, the way the selection drawer's row does.
-                    if (settledItem is GalleryItem.CloudOnly && !isReadOnlyAlbum) {
-                        ViewerBubble(onClick = { viewModel.toggleOfflinePin(settledItem) }) {
-                            Icon(
-                                if (isOffline) Icons.Filled.OfflinePin else Icons.Outlined.OfflinePin,
-                                stringResource(
-                                    if (isOffline) R.string.offline_remove
-                                    else R.string.offline_make_available,
-                                ),
-                                tint = if (isOffline) Accent else FgDim,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-
-                    // Add to album — available for any item with at least a local OR cloud
-                    // representation. Cloud / Synced → cloud album add (addPhotosToAlbum API).
-                    // LocalOnly / Synced → local virtual-album membership (DataStore write,
-                    // no file move so DATE_TAKEN survives Android Q+ MediaProvider restrictions).
-                    // Add to album — hidden for shared-with-me viewers. The recipient
-                    // could in theory pin someone else's photo into one of their own
-                    // albums, but the underlying call needs cloud-side share access
-                    // and our path doesn't bridge across the recipient/owner volume
-                    // boundary. A vaulted photo is left out too: a Drive album add uploads the
-                    // device-only file first, which is the one thing the vault exists to prevent.
-                    if (settledItem != null && !isReadOnlyAlbum && outbound.addToAlbum && isSignedIn) {
-                        ViewerBubble(onClick = { showAddToAlbumSheet = true }) {
-                            if (isAddingToAlbum) {
-                                CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
-                                    modifier = Modifier.size(16.dp))
-                            } else {
-                                Icon(Icons.Default.LibraryAdd, stringResource(R.string.gallery_add_to_album),
-                                    tint = FgDim, modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-
-                    // Move to folder, the logged-out counterpart of Add to album: with no account
-                    // there is no Drive album to add to, so a device photo is relocated into another
-                    // DCIM folder instead. Q+ only (the relocation uses MediaStore), and only for an
-                    // item with a device file (LocalOnly / Synced); a cloud-only photo has none.
-                    val isOnDeviceItem = settledItem is GalleryItem.LocalOnly ||
-                        settledItem is GalleryItem.Synced
-                    if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isOnDeviceItem) {
-                        ViewerBubble(onClick = { showMoveSheet = true }) {
-                            Icon(Icons.AutoMirrored.Filled.DriveFileMove,
-                                stringResource(R.string.move_to_folder),
-                                tint = FgDim, modifier = Modifier.size(18.dp))
-                        }
-                    }
-
-                    // Edit button — images go to PhotoEditor, videos to VideoEditor. NavGraph
-                    // routes based on mimeType at click time, so we just need an editable media item.
-                    val isEditable = when (settledItem) {
-                        is GalleryItem.LocalOnly -> {
-                            val m = settledItem.local.mimeType
-                            m.startsWith("image/") || m.startsWith("video/")
-                        }
-                        is GalleryItem.Synced -> {
-                            val m = settledItem.local.mimeType
-                            m.startsWith("image/") || m.startsWith("video/")
-                        }
-                        is GalleryItem.CloudOnly -> {
-                            val m = settledItem.cloud.mimeType
-                            m.startsWith("image/") || m.startsWith("video/")
-                        }
-                        null -> false
-                    }
-                    if (settledItem != null && isEditable && !isReadOnlyAlbum) {
-                        ViewerBubble(onClick = { onEditItem(settledItem) }) {
-                            Icon(Icons.Default.Edit, stringResource(R.string.cd_viewer_edit),
-                                tint = FgPrimary, modifier = Modifier.size(18.dp))
-                        }
-                    }
-
                     // A trashed item has no overflow actions (people, save to device, hide, delete),
                     // so the More menu and its trigger are left out entirely in trash mode.
+                    if (isLandscapeNow && !trashMode) actionRow(true)
+                    if (trashMode) Spacer(Modifier.size(40.dp))
                     if (!trashMode) {
                     Box {
                         val appColors = eu.akoos.photos.presentation.theme.AppColors.current
@@ -2004,16 +2161,11 @@ fun PhotoViewerScreen(
                             val isCloudItem = settledItem is GalleryItem.Synced ||
                                 settledItem is GalleryItem.CloudOnly
 
-                            // Share opens the unified share drawer (Send to another app, Share
-                            // with people, Public link) instead of jumping straight to the OS
-                            // sheet, and opening it kicks off the public-link lookup. A guest in
-                            // someone else's album keeps the item; the drawer itself narrows
-                            // which rows it offers there. Dropped entirely once the vault has
-                            // taken every row the drawer would have drawn.
+                            // The menu lists everything the buttons around the photo do as well, so every action is in
+                            // one place whichever way the screen is turned.
                             if (settledItem != null && outbound.anyShareRoute) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.share_action),
-                                        color = FgPrimary) },
+                                    text = { Text(stringResource(R.string.share_action), color = FgPrimary) },
                                     leadingIcon = { Icon(Icons.Default.Share, null,
                                         tint = Accent, modifier = Modifier.size(20.dp)) },
                                     onClick = {
@@ -2023,10 +2175,38 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
+                            if (settledItem != null && !isReadOnlyAlbum) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(
+                                        if (isFavorite) R.string.cd_favorite_remove else R.string.cd_favorite_add,
+                                    ), color = FgPrimary) },
+                                    leadingIcon = { Icon(
+                                        if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        null,
+                                        tint = if (isFavorite) Color(0xFFFF3B30) else Accent,
+                                        modifier = Modifier.size(20.dp),
+                                    ) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.toggleFavorite(settledItem)
+                                    },
+                                )
+                                if (isEditableMedia(settledItem)) {
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.cd_viewer_edit), color = FgPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.Tune, null,
+                                            tint = Accent, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            onEditItem(settledItem)
+                                        },
+                                    )
+                                }
+                            }
                             // People in this photo: detect the faces on this photo (if not already) and
                             // pin their name tags, or take them down. The reliable path when a long
                             // press is awkward, and the only one on a photo not yet scanned.
-                            if (aiFeaturesEnabled && faceEnabled) {
+                            if (aiFeaturesEnabled && faceEnabled && !isReadOnlyAlbum) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.viewer_people_in_photo),
                                         color = FgPrimary) },
@@ -2053,8 +2233,7 @@ fun PhotoViewerScreen(
                                 )
                             }
                             androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(stringResource(R.string.viewer_menu_details),
-                                    color = FgPrimary) },
+                                text = { Text(stringResource(R.string.viewer_menu_details), color = FgPrimary) },
                                 leadingIcon = { Icon(Icons.Default.Info, null,
                                     tint = Accent, modifier = Modifier.size(20.dp)) },
                                 onClick = {
@@ -2145,6 +2324,90 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
+                            // Add to album — available for any item with at least a local OR cloud
+                            // representation. Cloud / Synced → cloud album add (addPhotosToAlbum API).
+                            // LocalOnly / Synced → local virtual-album membership (DataStore write,
+                            // no file move so DATE_TAKEN survives Android Q+ MediaProvider restrictions).
+                            // Hidden for shared-with-me viewers: the call needs cloud-side share access
+                            // that does not bridge the recipient/owner volume boundary. A vaulted photo
+                            // is left out too: a Drive album add uploads the device-only file first,
+                            // which is the one thing the vault exists to prevent.
+                            if (settledItem != null && !isReadOnlyAlbum && outbound.addToAlbum && isSignedIn) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.gallery_add_to_album),
+                                        color = FgPrimary) },
+                                    leadingIcon = {
+                                        if (isAddingToAlbum) {
+                                            CircularProgressIndicator(color = Accent, strokeWidth = 2.dp,
+                                                modifier = Modifier.size(18.dp))
+                                        } else {
+                                            Icon(Icons.Default.LibraryAdd, null,
+                                                tint = Accent, modifier = Modifier.size(20.dp))
+                                        }
+                                    },
+                                    enabled = !isAddingToAlbum,
+                                    onClick = {
+                                        menuExpanded = false
+                                        showAddToAlbumSheet = true
+                                    },
+                                )
+                            }
+                            // Move to folder, the logged-out counterpart of Add to album: with no account
+                            // there is no Drive album to add to, so a device photo is relocated into another
+                            // DCIM folder instead. Q+ only (the relocation uses MediaStore), and only for an
+                            // item with a device file (LocalOnly / Synced); a cloud-only photo has none.
+                            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                                (settledItem is GalleryItem.LocalOnly || settledItem is GalleryItem.Synced)
+                            ) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.move_to_folder),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        showMoveSheet = true
+                                    },
+                                )
+                            }
+                            // Make available offline — cloud-only photos only. A Synced/LocalOnly item
+                            // already has its bytes on the device, so there's nothing to pin. The label
+                            // names the press rather than the state, so a pinned photo announces the
+                            // removal the tap would do.
+                            if (settledItem is GalleryItem.CloudOnly && !isReadOnlyAlbum) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(
+                                        if (isOffline) R.string.offline_remove
+                                        else R.string.offline_make_available,
+                                    ), color = FgPrimary) },
+                                    leadingIcon = { Icon(
+                                        if (isOffline) Icons.Filled.OfflinePin else Icons.Outlined.OfflinePin,
+                                        null,
+                                        tint = if (isOffline) Accent else FgDim,
+                                        modifier = Modifier.size(20.dp),
+                                    ) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.toggleOfflinePin(settledItem)
+                                    },
+                                )
+                            }
+                            // A photo of a shared-with-me album can be copied into this user's own Drive.
+                            if (isReadOnlyAlbum && sourceAlbumLinkId != null && isSignedIn &&
+                                (settledItem is GalleryItem.CloudOnly || settledItem is GalleryItem.Synced)
+                            ) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_save_to_drive),
+                                        color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.CloudDownload, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isSavingToDrive,
+                                    onClick = {
+                                        menuExpanded = false
+                                        viewModel.saveToMyDrive(settledItem, sourceAlbumLinkId)
+                                    },
+                                )
+                            }
                             // "Set as album cover" is offered only when the viewer was opened from
                             // an album. No-op when the user owns the album but the cover is
                             // unchanged, because setAlbumCover is idempotent server-side.
@@ -2178,8 +2441,7 @@ fun PhotoViewerScreen(
                                     enabled = !isAddingToAlbum,
                                     onClick = {
                                         menuExpanded = false
-                                        val item = settledItem ?: return@DropdownMenuItem
-                                        viewModel.removeFromAlbum(sourceAlbumLinkId, item)
+                                        showRemoveFromAlbumConfirm = true
                                     },
                                 )
                             }
@@ -2269,13 +2531,11 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Destroying someone else's photo is not a guest's call whatever album
-                            // rights they hold, and Drive rejects it, so a shared album offers no
-                            // delete. Taking the photo out of the album, above, is the editor's route.
+                            // Destroying someone else's photo is not a guest's call whatever album rights they hold, and
+                            // Drive rejects it, so a shared album offers no delete.
                             if (!isReadOnlyAlbum) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.viewer_menu_delete),
-                                        color = ErrorColor) },
+                                    text = { Text(stringResource(R.string.viewer_menu_delete), color = ErrorColor) },
                                     leadingIcon = { Icon(Icons.Default.DeleteOutline, null,
                                         tint = ErrorColor, modifier = Modifier.size(20.dp)) },
                                     enabled = !isDeleting,
@@ -2299,13 +2559,24 @@ fun PhotoViewerScreen(
             enter = fadeIn(),
             exit = fadeOut(),
         ) {
+        // A landscape screen is short: the controls of a video take less of it, and its info pill shares the
+        // control pill's row, so the stack covers less of the picture. A photo's controls stay as they were.
+        val chromeSettled = items.getOrNull(pagerState.settledPage)
+        val chromeLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE &&
+            when (chromeSettled) {
+                is GalleryItem.LocalOnly -> chromeSettled.local.mimeType.startsWith("video/")
+                is GalleryItem.Synced    -> chromeSettled.local.mimeType.startsWith("video/")
+                is GalleryItem.CloudOnly -> chromeSettled.cloud.mimeType.startsWith("video/")
+                null -> false
+            }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(bottom = 16.dp),
+                .padding(bottom = if (chromeLandscape) 4.dp else 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(if (chromeLandscape) 4.dp else 10.dp),
         ) {
             // Full-quality-paused hint — sits with the bottom controls and is dismissable, shown
             // only while the Wi-Fi-only-for-fullres preference skipped the auto-download on a
@@ -2313,7 +2584,7 @@ fun PhotoViewerScreen(
             if (fullResBlockedByMetered && !meteredHintDismissed) {
                 Row(
                     modifier = Modifier
-                        .background(PillBg, RoundedCornerShape(999.dp))
+                        .background(PillBgOpaque, RoundedCornerShape(999.dp))
                         .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
                         .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -2346,13 +2617,31 @@ fun PhotoViewerScreen(
             // paused-only frame-step buttons (a seek briefly reports the player as not playing).
             var isScrubbing by remember { mutableStateOf(false) }
             if (isVideoItem) {
-                VideoControlPill(
-                    player       = currentPlayer,
-                    videoStarted = videoStarted,
-                    isScrubbing  = isScrubbing,
-                    onScrubbingChange = { isScrubbing = it },
-                    onPlay       = { videoStarted = true },
-                )
+                if (chromeLandscape) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        VideoControlPill(
+                            player       = currentPlayer,
+                            videoStarted = videoStarted,
+                            isScrubbing  = isScrubbing,
+                            onScrubbingChange = { isScrubbing = it },
+                            onPlay       = { videoStarted = true },
+                            modifier     = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                    }
+                } else {
+                    VideoControlPill(
+                        player       = currentPlayer,
+                        videoStarted = videoStarted,
+                        isScrubbing  = isScrubbing,
+                        onScrubbingChange = { isScrubbing = it },
+                        onPlay       = { videoStarted = true },
+                    )
+                }
             }
 
             // Motion-photo control pill — play or stop the embedded clip from the bottom
@@ -2369,7 +2658,7 @@ fun PhotoViewerScreen(
                 val motionPlaying = motionVideoFile != null
                 Row(
                     modifier = Modifier
-                        .background(PillBg, infoPillShape)
+                        .background(PillBgOpaque, infoPillShape)
                         .border(0.5.dp, PillBorder, infoPillShape)
                         .clickable(enabled = !isExtractingMotion) {
                             if (motionPlaying) viewModel.stopMotionPhoto()
@@ -2408,7 +2697,7 @@ fun PhotoViewerScreen(
                 state is PhotoViewerViewModel.ViewerState.ShowImage) {
                 Row(
                     modifier = Modifier
-                        .background(PillBg, infoPillShape)
+                        .background(PillBgOpaque, infoPillShape)
                         .border(0.5.dp, PillBorder, infoPillShape)
                         .clickable { viewModel.enterPanorama() }
                         .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -2455,67 +2744,7 @@ fun PhotoViewerScreen(
                 },
             )
 
-            // Info pill — always, unchanged
-            val currentItem = items.getOrNull(pagerState.currentPage)
-            Row(
-                modifier = Modifier
-                    .background(PillBg, infoPillShape)
-                    .border(0.5.dp, PillBorder, infoPillShape)
-                    .clickable { showMetadata = true }
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // Cloud/device badge — sits to the LEFT of the position counter, with a thin
-                // separator. Mirrors the gallery cell badges so the user can tell at a glance
-                // whether the currently viewed photo is in cloud + on device (green cloud),
-                // cloud-only (white cloud), or device-only (no badge — no point showing
-                // anything since the user is obviously looking at it).
-                // Upgrade a stale CloudOnly to "synced" once we know the cloud linkId is
-                // mirrored to a device file — happens after the user downloads it from this
-                // screen but the static `items` snapshot can't reflect it.
-                // A vaulted photo is upgraded the same way from the other side: vaulting removes the
-                // MediaStore row that made it a Synced item, so it opens here as LocalOnly however it
-                // was reached, and the vault's cloud-id records are the only thing left that can say
-                // its Drive copy is still there.
-                val effectiveSynced = currentItem is GalleryItem.Synced ||
-                    (currentItem is GalleryItem.CloudOnly &&
-                        localUriByLinkId.containsKey(currentItem.cloud.linkId)) ||
-                    (currentItem is GalleryItem.LocalOnly &&
-                        currentItem.local.uri in pairedVaultUris)
-                when {
-                    effectiveSynced -> {
-                        Icon(
-                            Icons.Default.Cloud,
-                            contentDescription = stringResource(R.string.cd_status_backed_up_device),
-                            tint = cloudBadgeTint(CloudBadgeSurface.Pill),
-                            modifier = Modifier.size(13.dp),
-                        )
-                        Text("·", color = FgMute, fontSize = 13.sp)
-                    }
-                    currentItem is GalleryItem.CloudOnly -> {
-                        Icon(
-                            Icons.Default.Cloud,
-                            contentDescription = stringResource(R.string.cd_status_cloud_only),
-                            // Theme-reactive tint: the pill background turns near-white in
-                            // light mode, where a fixed white glyph disappears entirely.
-                            tint = FgPrimary,
-                            modifier = Modifier.size(13.dp),
-                        )
-                        Text("·", color = FgMute, fontSize = 13.sp)
-                    }
-                    else -> { /* LocalOnly — no badge */ }
-                }
-                Text(
-                    "${pagerState.currentPage + 1} / ${items.size}",
-                    color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                )
-                if (currentItem != null) {
-                    Text("·", color = FgMute, fontSize = 13.sp)
-                    Text(formatItemDate(currentItem), color = FgDim, fontSize = 13.sp)
-                }
-                Text("›", color = FgMute, fontSize = 15.sp)
-            }
+            if (!isLandscapeNow && !trashMode) actionRow(false)
 
             // Trash action bar with Restore + Delete forever for the settled item, shown only when the
             // viewer was opened from Trash. Fades with the chrome; the Trash screen behind us runs the
@@ -2527,7 +2756,7 @@ fun PhotoViewerScreen(
                 ) {
                     Row(
                         modifier = Modifier
-                            .background(PillBg, infoPillShape)
+                            .background(PillBgOpaque, infoPillShape)
                             .border(0.5.dp, PillBorder, infoPillShape)
                             .clickable { if (settledItem != null) trashConfirmAction = "restore" }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -2547,7 +2776,7 @@ fun PhotoViewerScreen(
                     }
                     Row(
                         modifier = Modifier
-                            .background(PillBg, infoPillShape)
+                            .background(PillBgOpaque, infoPillShape)
                             .border(0.5.dp, PillBorder, infoPillShape)
                             .clickable { if (settledItem != null) trashConfirmAction = "delete" }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -2634,6 +2863,33 @@ fun PhotoViewerScreen(
                 },
                 onDismiss = { trashConfirmAction = null },
                 destructive = !isRestore,
+            )
+        }
+    }
+
+    // Taking a photo out of the album it was opened from, asked before it happens whichever control started it.
+    if (showRemoveFromAlbumConfirm) {
+        val removeItem = items.getOrNull(pagerState.settledPage)
+        val removeAlbumId = sourceAlbumLinkId
+        if (removeItem == null || removeAlbumId == null) {
+            showRemoveFromAlbumConfirm = false
+        } else {
+            ConfirmDialog(
+                title = stringResource(R.string.album_remove_confirm_title),
+                // In an album someone shared, the photo may exist nowhere in this library, so the usual line that the
+                // photo stays in the timeline would be untrue.
+                message = stringResource(
+                    if (isReadOnlyAlbum) R.string.viewer_remove_shared_confirm_body
+                    else R.string.album_remove_confirm_body,
+                ),
+                confirmLabel = stringResource(R.string.album_remove_from_album),
+                dismissLabel = stringResource(R.string.cancel),
+                onConfirm = {
+                    showRemoveFromAlbumConfirm = false
+                    viewModel.removeFromAlbum(removeAlbumId, removeItem)
+                },
+                onDismiss = { showRemoveFromAlbumConfirm = false },
+                destructive = true,
             )
         }
     }

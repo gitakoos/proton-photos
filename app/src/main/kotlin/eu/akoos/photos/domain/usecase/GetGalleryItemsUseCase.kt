@@ -25,6 +25,12 @@ package eu.akoos.photos.domain.usecase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -55,6 +61,9 @@ import javax.inject.Singleton
 /** Cap the merge+sort to a few runs/sec during a DB write burst (the cold cloud listing).
  *  Sub-frame-budget so the steady-state single emit is imperceptible. */
 private const val RECOMPUTE_THROTTLE_MS = 280L
+
+/** How many of the newest device photos the timeline's first list is built from; see [GetGalleryItemsUseCase.withQuickStart]. */
+private const val QUICK_START_COUNT = 2_000
 
 @Singleton
 class GetGalleryItemsUseCase @Inject constructor(
@@ -124,6 +133,42 @@ class GetGalleryItemsUseCase @Inject constructor(
                 .conflate()
                 .shareIn(appScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
         }
+
+    /**
+     * [full] (the feed from [invoke] or [invokeLocalOnly]) with a first list put ahead of it for a
+     * screen that fills in as soon as it can. The full feed waits for the scan of the whole device, which
+     * takes seconds on a library of a hundred thousand photos; this list is merged from only the newest
+     * [QUICK_START_COUNT] device photos and so is on screen well before. It is emitted only while the full
+     * feed has not yet emitted, and the full feed replaces it as soon as it does.
+     *
+     * For a screen that shows the library, never one that acts on what is absent from it: the first list
+     * lacks the older device photos.
+     */
+    fun withQuickStart(userId: UserId?, full: Flow<List<GalleryItem>>): Flow<List<GalleryItem>> = channelFlow {
+        val order = Mutex()
+        var fullSeen = false
+        val quick = launch {
+            val newest = localRepo.newestMedia(QUICK_START_COUNT)
+            if (newest.isEmpty()) return@launch
+            val items = if (userId != null) {
+                val cloud = cloudRepo.observeCloudPhotos(userId).first()
+                val sync = syncStateSnapshot.observe(userId).first()
+                val hidden = cloudRepo.observeHiddenAlbumMemberLinkIds().first()
+                withContext(Dispatchers.Default) { merge(newest, cloud, sync, hidden) }
+            } else {
+                withContext(Dispatchers.Default) { merge(newest, emptyList(), emptyList()) }
+            }
+            // Checked and sent under one lock with the full feed's own, so the list cannot land after it.
+            order.withLock { if (!fullSeen) send(items) }
+        }
+        full.collect { items ->
+            order.withLock {
+                fullSeen = true
+                quick.cancel()
+                send(items)
+            }
+        }
+    }
 
     /** Session-free gallery feed for the no-account (local-only) mode: the device's own media with
      *  no Proton session. Merges the local source against zero cloud photos and empty sync state, so

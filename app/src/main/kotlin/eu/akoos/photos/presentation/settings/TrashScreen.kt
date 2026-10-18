@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -95,7 +96,11 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.toCloudPhoto
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EmptyState
+import eu.akoos.photos.presentation.common.PrimarySlot
+import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionCheckPop
+import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.selectPressScale
 import eu.akoos.photos.presentation.common.FloatingHeader
@@ -105,6 +110,7 @@ import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 import eu.akoos.photos.presentation.theme.pillShape
 import eu.akoos.photos.presentation.util.daysUntilPurge
@@ -202,6 +208,7 @@ fun TrashScreen(
     ) {
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val contentTopPad = floatingHeaderContentTopPadding()
+        val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
 
         Column(modifier = Modifier.fillMaxSize()) {
             Spacer(Modifier.height(contentTopPad))
@@ -217,93 +224,44 @@ fun TrashScreen(
             val activeSelectionMode = if (activeIsDevice) state.device.isSelectionMode else state.cloud.isSelectionMode
             val activeSelectedCount = if (activeIsDevice) state.device.selectedCount else state.cloud.selectedCount
 
-            // ── Pill rail — same padding/spacing as the Photos + Shared rails ─────
-            LazyRow(
+            // ── Rail: the Device / Cloud toggle, centred. Restore and Delete forever live in the bottom pill and,
+            // once photos are picked, in the shared selection drawer.
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 10.dp, bottom = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(end = 8.dp),
+                    .padding(top = 10.dp, bottom = 14.dp)
+                    .heightIn(min = 38.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                // Toggle pill — flips between Device and Cloud, mirroring the Shared albums pattern.
-                // Fixed-width inner row so swapping labels (Device ↔ Cloud) doesn't reflow the
-                // siblings to the right. Hidden for a local-only session, which has no cloud tab.
+                // Flips between Device and Cloud, mirroring the Shared albums pattern. Hidden for a local-only
+                // session, which has no cloud tab.
                 if (isSignedIn) {
-                    item(key = "trash_tab_toggle") {
-                        Row(
-                            modifier = Modifier
-                                .height(38.dp)
-                                .background(colors.chipSelectedBg, pillShape)
-                                .clickable {
-                                    selectedTab = if (activeIsDevice) TrashTab.Cloud else TrashTab.Device
-                                }
-                                .padding(horizontal = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Icon(
-                                if (activeIsDevice) Icons.Default.PhoneAndroid else Icons.Default.CloudQueue,
-                                contentDescription = null,
-                                tint = colors.accent,
-                                modifier = Modifier.size(14.dp),
-                            )
-                            Text(
-                                stringResource(
-                                    if (activeIsDevice) R.string.trash_section_device else R.string.trash_section_cloud,
-                                ),
-                                color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                            )
-                            Icon(
-                                Icons.Default.SwapHoriz, contentDescription = null,
-                                tint = FgDim, modifier = Modifier.size(14.dp),
-                            )
-                        }
-                    }
-                }
-                // Restore pill — icon-only, confirmation dialog gates the action for both tabs.
-                item(key = "trash_restore") {
-                    TrashPillButton(
-                        icon = Icons.Default.Restore,
-                        contentDescription = stringResource(R.string.trash_restore),
-                        enabled = activeHasItems,
-                        accent = colors.accent,
-                        onClick = {
-                            if (activeIsDevice) showDeviceRestoreDialog = true
-                            else showCloudRestoreDialog = true
-                        },
-                    )
-                }
-                // Empty trash pill — icon-only, destructive red variant.
-                item(key = "trash_empty") {
-                    TrashPillButton(
-                        icon = Icons.Default.DeleteForever,
-                        contentDescription = stringResource(R.string.trash_empty),
-                        enabled = activeHasItems,
-                        accent = colors.errorColor,
-                        onClick = {
-                            if (activeIsDevice) showDeviceEmptyDialog = true
-                            else showCloudEmptyDialog = true
-                        },
-                    )
-                }
-                // Select-all toggle pill — only present in selection mode, appended to the end
-                // of the rail so the grid below never shifts when selection toggles on/off.
-                if (activeHasItems && activeSelectionMode) {
-                    item(key = "trash_select_all") {
-                        val allSel = if (activeIsDevice) state.device.allSelected else state.cloud.allSelected
-                        TrashPillButton(
-                            icon = if (allSel) Icons.Default.Deselect else Icons.Default.SelectAll,
-                            contentDescription = if (allSel) stringResource(R.string.gallery_deselect_all) else stringResource(R.string.select_all),
-                            enabled = true,
-                            accent = colors.accent,
-                            onClick = {
-                                if (activeIsDevice) {
-                                    if (allSel) viewModel.clearDeviceSelection() else viewModel.selectAllDevice()
-                                } else {
-                                    if (allSel) viewModel.clearCloudSelection() else viewModel.selectAllCloud()
-                                }
-                            },
+                    Row(
+                        modifier = Modifier
+                            .height(38.dp)
+                            .background(colors.chipSelectedBg, pillShape)
+                            .clickable {
+                                selectedTab = if (activeIsDevice) TrashTab.Cloud else TrashTab.Device
+                            }
+                            .padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            if (activeIsDevice) Icons.Default.PhoneAndroid else Icons.Default.CloudQueue,
+                            contentDescription = null,
+                            tint = colors.accent,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            stringResource(
+                                if (activeIsDevice) R.string.trash_section_device else R.string.trash_section_cloud,
+                            ),
+                            color = FgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        )
+                        Icon(
+                            Icons.Default.SwapHoriz, contentDescription = null,
+                            tint = FgDim, modifier = Modifier.size(14.dp),
                         )
                     }
                 }
@@ -311,7 +269,8 @@ fun TrashScreen(
 
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(bottom = 24.dp + navBottom),
+                state = gridState,
+                contentPadding = PaddingValues(bottom = 120.dp + navBottom),
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier.fillMaxSize(),
@@ -455,7 +414,86 @@ fun TrashScreen(
             }
         }
 
-        FloatingHeader(title = stringResource(R.string.trash_title), onBack = onBack)
+        val trashActiveIsDevice = selectedTab == TrashTab.Device || !isSignedIn
+        val trashSelecting = if (trashActiveIsDevice) state.device.isSelectionMode else state.cloud.isSelectionMode
+        val trashSelectedCount = if (trashActiveIsDevice) state.device.selectedCount else state.cloud.selectedCount
+        val trashHasItems = if (trashActiveIsDevice) {
+            !state.device.apiUnsupported && state.device.items.isNotEmpty()
+        } else {
+            state.cloud.items.isNotEmpty()
+        }
+        fun clearTrashSelection() {
+            if (trashActiveIsDevice) viewModel.clearDeviceSelection() else viewModel.clearCloudSelection()
+        }
+        androidx.activity.compose.BackHandler(enabled = trashSelecting) { clearTrashSelection() }
+
+        // Nothing picked: Restore and Delete forever for everything in the tab, in one pill at the foot.
+        if (!trashSelecting && trashHasItems) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp + navBottom)
+                    .background(PillBgOpaque, pillShape)
+                    .border(0.5.dp, PillBorder, pillShape)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                TrashBarButton(Icons.Default.Restore, stringResource(R.string.trash_restore), colors.accent) {
+                    if (trashActiveIsDevice) showDeviceRestoreDialog = true else showCloudRestoreDialog = true
+                }
+                TrashBarButton(Icons.Default.DeleteForever, stringResource(R.string.trash_delete_forever_confirm), colors.errorColor) {
+                    if (trashActiveIsDevice) showDeviceEmptyDialog = true else showCloudEmptyDialog = true
+                }
+            }
+        }
+
+        // Photos picked: the shared pull-up drawer, as on every other grid.
+        val selectedTrashItems: List<GalleryItem> = if (trashActiveIsDevice) {
+            state.device.items.filter { it.uri in state.device.selectedUris }.map { GalleryItem.LocalOnly(it) }
+        } else {
+            state.cloud.items.filter { it.linkId in state.cloud.selectedLinkIds }
+                .map { GalleryItem.CloudOnly(it.toCloudPhoto(state.cloud.decryptedThumbnails[it.linkId])) }
+        }
+        val trashActions = listOf(
+            SelectionAction(
+                icon = Icons.Default.Restore,
+                label = stringResource(R.string.trash_restore),
+                onClick = { if (trashActiveIsDevice) showDeviceRestoreDialog = true else showCloudRestoreDialog = true },
+                slot = PrimarySlot.Organize,
+            ),
+            SelectionAction(
+                icon = Icons.Default.DeleteForever,
+                label = stringResource(R.string.trash_delete_forever_confirm),
+                onClick = { if (trashActiveIsDevice) showDeviceEmptyDialog = true else showCloudEmptyDialog = true },
+                tint = colors.errorColor,
+                slot = PrimarySlot.Delete,
+            ),
+        )
+        val trashTotal = if (trashActiveIsDevice) state.device.items.size else state.cloud.items.size
+        val trashSelectAllCount = selectAllCountFor(total = trashTotal, selected = trashSelectedCount)
+        SelectionDrawer(
+            visible = trashSelecting,
+            items = remember(selectedTrashItems) { selectedTrashItems.toList() },
+            actions = trashActions,
+            onDismiss = { clearTrashSelection() },
+            contentScrolling = gridState.isScrollInProgress,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            selectAllCount = trashSelectAllCount,
+            onSelectAll = if (trashSelectAllCount != null) {
+                { if (trashActiveIsDevice) viewModel.selectAllDevice() else viewModel.selectAllCloud() }
+            } else {
+                null
+            },
+        )
+
+        if (trashSelecting) {
+            FloatingHeader(
+                title = stringResource(R.string.album_picker_selected, trashSelectedCount),
+                onBack = { clearTrashSelection() },
+            )
+        } else {
+            FloatingHeader(title = stringResource(R.string.trash_title), onBack = onBack)
+        }
     }
 
     if (showDeviceRestoreDialog) {
@@ -590,34 +628,25 @@ private fun CloudTrashThumbnail(
     }
 }
 
-/**
- * Pill-shaped action button styled to sit on the trash screen's top rail next to the
- * tab toggle. Matches the Shared albums filter rail visual language: 38 dp height,
- * full pill rounding, accent-tinted icon + label. Disabled state dims everything and
- * suppresses clicks.
- */
+/** One labelled action of the bottom pill: an icon and its word, tinted, with room to press. */
 @Composable
-private fun TrashPillButton(
+private fun TrashBarButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String,
-    enabled: Boolean,
-    accent: Color,
+    label: String,
+    tint: Color,
     onClick: () -> Unit,
 ) {
-    val alpha = if (enabled) 1f else 0.4f
-    Box(
+    Row(
         modifier = Modifier
-            .size(38.dp)
-            .background(PillBg, pillShape)
-            .border(0.5.dp, PillBorder, pillShape)
-            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier),
-        contentAlignment = Alignment.Center,
+            .height(44.dp)
+            .clip(pillShape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(
-            icon, contentDescription = contentDescription,
-            tint = accent.copy(alpha = alpha),
-            modifier = Modifier.size(18.dp),
-        )
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        Text(label, color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
 

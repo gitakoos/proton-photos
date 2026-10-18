@@ -148,6 +148,8 @@ data class FaceIndexingUi(
     val total: Int,
     val blockReason: HealthBlockReason,
     val actionEnabled: Boolean,
+    /** The count is faces being placed into groups, not photos scanned. */
+    val grouping: Boolean = false,
 )
 
 /**
@@ -309,6 +311,7 @@ class SettingsViewModel @Inject constructor(
                 total = p.total,
                 blockReason = blockReason,
                 actionEnabled = !blockReason.isPersistent,
+                grouping = p.grouping,
             )
         }.stateIn(
             viewModelScope,
@@ -1060,7 +1063,12 @@ class SettingsViewModel @Inject constructor(
      *  picker behaviour. */
     fun setBackupEverything(enabled: Boolean) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { it[SettingsKeys.BACKUP_EVERYTHING] = enabled }
+            context.settingsDataStore.edit {
+                it[SettingsKeys.BACKUP_EVERYTHING] = enabled
+                // Backing up everything also makes every folder a Drive album, a folder made later included; the
+                // folders the user switches off stay off.
+                if (enabled) it[SettingsKeys.ALBUM_ALL_BY_DEFAULT] = true
+            }
             _uiState.update { it.copy(backupEverything = enabled) }
             // Turning this on can make backup effectively-on with no folders selected (arm the
             // triggers); turning it off with no folders selected makes it effectively-off (tear
@@ -1500,14 +1508,7 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(faceModelPrompt = FaceModelPrompt.None) }
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
-            faceIndexingScheduler.reset()
-            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            faceDao.clearForUser(account)
-            personDao.clearForUser(account)
-            faceScanDao.clearForUser(account)
-            personManualPhotoDao.clearForUser(account)
-            notPersonDao.clearForUser(account)
-            personCoverDao.clearForUser(account)
+            faceIndexingScheduler.wipeFaceData(accountManager.getPrimaryUserId().first(), thenIndex = false)
             faceModelManager.deleteAll()
             faceEmbeddingModelManager.deleteAll()
             _uiState.update { it.copy(faceEnabled = false, faceRecognitionAvailable = false) }
@@ -1697,18 +1698,9 @@ class SettingsViewModel @Inject constructor(
      */
     fun clearFaceIndex() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first()
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-            faceIndexingScheduler.reset()
-            faceDao.clearForUser(account)
-            personDao.clearForUser(account)
-            faceScanDao.clearForUser(account)
-            personManualPhotoDao.clearForUser(account)
-            notPersonDao.clearForUser(account)
-            personCoverDao.clearForUser(account)
             // Face recognition stays on, and indexing is automatic, so a fresh walk starts right after
             // the wipe rather than leaving a bare "0 people" until the gallery is next opened.
-            faceIndexingScheduler.requestIndex(userId)
+            faceIndexingScheduler.wipeFaceData(accountManager.getPrimaryUserId().first())
         }
     }
 

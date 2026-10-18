@@ -52,4 +52,26 @@ class FaceBatchRoutingTest {
         assertTrue(groupsInBatchesOnly(faceCount = 30_001, maxFaces = 30_000))
         assertTrue(groupsInBatchesOnly(faceCount = 122_461, maxFaces = 30_000))
     }
+
+    @Test
+    fun `a library grouped in batches never falls from its pass end to a full regroup`() {
+        // A batched run that failed is tried again at the next pass instead of rerun at once as a final one.
+        assertFalse(passEndRegroups(batchedOnly = true, reattached = false, fullRegroupDue = true))
+        assertFalse(passEndRegroups(batchedOnly = true, reattached = true, fullRegroupDue = false))
+    }
+
+    @Test
+    fun `a smaller library regroups after a reattach or when the rule calls for it`() {
+        assertTrue(passEndRegroups(batchedOnly = false, reattached = true, fullRegroupDue = false))
+        assertTrue(passEndRegroups(batchedOnly = false, reattached = false, fullRegroupDue = true))
+        assertFalse(passEndRegroups(batchedOnly = false, reattached = false, fullRegroupDue = false))
+    }
+
+    @Test
+    fun `a batched run merges between batches only after many new people and enough batches`() {
+        assertTrue(midRunMergeDue(openedSinceMerge = MID_RUN_MERGE_MIN_NEW_PEOPLE, batchesSinceMerge = MID_RUN_MERGE_MIN_BATCHES))
+        assertTrue(midRunMergeDue(openedSinceMerge = 9_000, batchesSinceMerge = 40))
+        assertFalse(midRunMergeDue(openedSinceMerge = MID_RUN_MERGE_MIN_NEW_PEOPLE - 1, batchesSinceMerge = 40))
+        assertFalse(midRunMergeDue(openedSinceMerge = 9_000, batchesSinceMerge = MID_RUN_MERGE_MIN_BATCHES - 1))
+    }
 }

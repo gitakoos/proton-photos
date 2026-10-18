@@ -41,13 +41,17 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.withIndex
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
+import androidx.compose.ui.geometry.Offset
 import eu.akoos.photos.data.db.dao.FaceDao
+import eu.akoos.photos.data.db.dao.FaceOnPhoto
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PersonDao
@@ -81,6 +85,9 @@ data class PersonDetailUiState(
     val personName: String? = null,
     val isLoading: Boolean = true,
     val items: List<GalleryItem> = emptyList(),
+    /** Where each photo's tile is centred (by stable id): the middle of this person's clearest face on it, as
+     *  fractions of the photo. A photo with no usable box is absent, and its tile is centred. */
+    val focus: Map<String, Offset> = emptyMap(),
     /** True for the single "Unsorted" bucket, so the screen labels it, explains it, and offers only
      *  curation (move a real person out, mark the rest not a person) rather than naming the whole pile. */
     val isOther: Boolean = false,
@@ -114,6 +121,7 @@ class PersonDetailViewModel @Inject constructor(
     private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
     private val hideSimilarFaces: eu.akoos.photos.domain.usecase.HideSimilarFacesUseCase,
     private val personCentroids: PersonCentroids,
+    private val selectionFactory: eu.akoos.photos.presentation.common.GalleryItemSelectionController.Factory,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -142,6 +150,38 @@ class PersonDetailViewModel @Inject constructor(
 
     private var loadJob: Job? = null
     private var keysJob: Job? = null
+
+    // Multi-select. The photos picked on the page run through the shared selection controller, the one the
+    // timeline, search and a place's page use, so share, add to album, add to person and delete behave the
+    // same here, with the delete permission handshake in one place.
+    val sel = selectionFactory.create(viewModelScope)
+
+    /** Whether a Proton account is signed in: the cloud actions (add to album) need one. */
+    val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val selectedItems: StateFlow<Set<GalleryItem>> get() = sel.selectedItems
+    val albums get() = sel.albums
+    val shareIntent get() = sel.shareIntent
+    val actionFailure get() = sel.actionFailure
+    val isDeleting get() = sel.isDeleting
+    val pendingDeleteIntent get() = sel.pendingDeleteIntent
+
+    fun setSelection(items: Set<GalleryItem>) = sel.setSelection(items)
+    fun clearSelection() = sel.clearSelection()
+    fun selectAllPhotos() = sel.selectAll(_uiState.value.items)
+    fun shareSelected() = sel.shareSelected()
+    fun addSelectedToAlbum(albumLinkId: String, onResult: (joined: Int, queued: Int) -> Unit) =
+        sel.addSelectedToAlbum(albumLinkId, onResult)
+    fun createAlbumThenAddSelected(
+        name: String,
+        onResult: (joined: Int, queued: Int, error: String?) -> Unit,
+    ) = sel.createAlbumThenAddSelected(name, onResult)
+    fun deleteSelected(freeUpSpace: Boolean, deleteFromCloud: Boolean) =
+        sel.deleteSelected(freeUpSpace, deleteFromCloud)
+    fun onDeletePermissionGranted() = sel.onDeletePermissionGranted()
+    fun clearPendingDeleteIntent() = sel.clearPendingDeleteIntent()
 
     /**
      * Observe the person's photos: the faces they appear in (minus removed ones) unioned with any
@@ -180,12 +220,14 @@ class PersonDetailViewModel @Inject constructor(
                         faceDao.photoKeysForPerson(account, personId),
                         manualKeys,
                         library,
-                    ) { faceKeys, added, items ->
+                        faceDao.observeFaceBoxesForPerson(account, personId),
+                    ) { faceKeys, added, items, boxes ->
                         val keys = (faceKeys + added).toSet()
-                        items.filter { it.stableId in keys }
+                        val matched = items.filter { it.stableId in keys }
                             .sortedByDescending { it.captureTimeMs }
-                    }.collect { matched ->
-                        _uiState.update { it.copy(isLoading = false, items = matched) }
+                        matched to faceFocusByPhoto(boxes)
+                    }.distinctUntilChanged().collect { (matched, focus) ->
+                        _uiState.update { it.copy(isLoading = false, items = matched, focus = focus) }
                     }
                 }
             } catch (e: Throwable) {
@@ -659,6 +701,23 @@ class PersonDetailViewModel @Inject constructor(
  * that was open unnamed ([wasNamed] false) has just been given a name. The first read ([wasNamed] null)
  * is the page opening, which looks for one on its own.
  */
+/**
+ * The point each photo's tile is centred on: the middle of the clearest of [faces] on it, as fractions of the
+ * photo. A box stored in pixels (an older face, a coordinate past 1) or an empty one gives no point, so that
+ * photo's tile keeps its centred crop. Pure so it is unit-tested without Android.
+ */
+internal fun faceFocusByPhoto(faces: List<FaceOnPhoto>): Map<String, Offset> {
+    val best = HashMap<String, FaceOnPhoto>()
+    for (face in faces) {
+        val usable = face.boxLeft in 0f..1f && face.boxTop in 0f..1f && face.boxRight <= 1f && face.boxBottom <= 1f &&
+            face.boxRight > face.boxLeft && face.boxBottom > face.boxTop
+        if (!usable) continue
+        val held = best[face.photoKey]
+        if (held == null || face.score > held.score) best[face.photoKey] = face
+    }
+    return best.mapValues { (_, f) -> Offset((f.boxLeft + f.boxRight) / 2f, (f.boxTop + f.boxBottom) / 2f) }
+}
+
 internal fun looksForSuggestionOnNaming(wasNamed: Boolean?, isNamed: Boolean): Boolean =
     wasNamed == false && isNamed
 

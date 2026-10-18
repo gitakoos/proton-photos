@@ -646,16 +646,35 @@ fun SearchScreen(
             else -> 4
         }
         if (phase == 0) {
-            // A picker's search is empty until something is typed: no recents, albums or months offered.
-            Box(
-                modifier = Modifier.fillMaxSize().padding(top = headerPad, bottom = pickBottom),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.search_empty_idle),
-                    color = colors.fgMute,
-                    fontSize = 14.sp,
-                )
+            // A picker's search offers the people and the albums to narrow to, the way typing their name
+            // does, and no recents or months: it is looking for something by name.
+            if (people.isEmpty() && albumRow.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(top = headerPad, bottom = pickBottom),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.search_empty_idle),
+                        color = colors.fgMute,
+                        fontSize = 14.sp,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = pickBottom),
+                ) {
+                    if (people.isNotEmpty()) {
+                        item(key = "pick_people_section") {
+                            PeopleSuggestionRow(people = people, onOpenPerson = openPerson)
+                        }
+                    }
+                    if (albumRow.isNotEmpty()) {
+                        item(key = "pick_albums_section") {
+                            AlbumsRow(entries = albumRow, onOpen = openAlbum)
+                        }
+                    }
+                }
             }
         } else if (phase == 1) {
             // Idle empty state — surface "On this day" memories + a month-jump grid
@@ -1009,9 +1028,9 @@ fun SearchScreen(
 
         // The filter button floats at the bottom right, so the field above can run the full width. It takes
         // the accent while a filter the sheet holds is on, and steps aside for the selection drawer.
+        val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All || filter.mediaType != MediaType.All ||
+            filter.year != null || filter.dateFrom != null || selectedCategory != GalleryFilter.All
         if (pick == null && !isSelectionMode) {
-            val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All || filter.mediaType != MediaType.All ||
-                filter.year != null || filter.dateFrom != null || selectedCategory != GalleryFilter.All
             IconBubble(
                 icon = Icons.Filled.FilterList,
                 contentDescription = stringResource(R.string.filter_title),
@@ -1041,7 +1060,25 @@ fun SearchScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SearchTermRow(searchTerms, Modifier.fillMaxWidth())
-                searchField(Modifier.fillMaxWidth())
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    searchField(Modifier.weight(1f))
+                    // The same filter sheet the search opens elsewhere: categories, dates and, signed in, the
+                    // backed-up state.
+                    IconBubble(
+                        icon = Icons.Filled.FilterList,
+                        contentDescription = stringResource(R.string.filter_title),
+                        onClick = { showFilterSheet = true },
+                        diameter = 46.dp,
+                        iconSize = 20.dp,
+                        background = if (sheetFilterActive) colors.accent.copy(alpha = 0.18f).compositeOver(colors.bg0) else PillBg,
+                        borderColor = if (sheetFilterActive) colors.accent else PillBorder,
+                        tint = if (sheetFilterActive) colors.accent else FgPrimary,
+                    )
+                }
             }
         }
 

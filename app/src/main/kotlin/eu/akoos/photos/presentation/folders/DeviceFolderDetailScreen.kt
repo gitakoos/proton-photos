@@ -1139,6 +1139,10 @@ fun DeviceFolderDetailScreen(
         val backingUpTpl = stringResource(R.string.op_backing_up_fmt)
         val hidingTpl = stringResource(R.string.device_folder_hiding_fmt)
         val restoringTpl = stringResource(R.string.device_folder_restoring_fmt)
+        // The back-up pill's X hides it for the rest of the run and never stops the back-up, which also shows
+        // by the avatar and can be cancelled from the notification and on Activity.
+        var backupPillHidden by remember { mutableStateOf(false) }
+        LaunchedEffect(backupProgress == null) { if (backupProgress == null) backupPillHidden = false }
         val folderOp = DeviceFolderProgress.operation(
             vaultRunning = folderVault != null,
             vaultRestoring = folderVault?.restoring == true,
@@ -1151,7 +1155,7 @@ fun DeviceFolderDetailScreen(
                     fv.done, fv.total, tpl.format(fv.done, fv.total),
                 )
             }
-            DeviceFolderOperation.BackingUp -> backupProgress?.let { bp ->
+            DeviceFolderOperation.BackingUp -> backupProgress?.takeIf { !backupPillHidden }?.let { bp ->
                 eu.akoos.photos.presentation.common.OperationProgress(
                     bp.done, bp.total, backingUpTpl.format(bp.done, bp.total),
                 )
@@ -1160,12 +1164,13 @@ fun DeviceFolderDetailScreen(
         }
         val folderOpCancel: (() -> Unit)? = when (folderOp) {
             DeviceFolderOperation.Hiding, DeviceFolderOperation.Restoring -> viewModel::cancelFolderVault
-            DeviceFolderOperation.BackingUp -> viewModel::cancelBackup
+            DeviceFolderOperation.BackingUp -> { { backupPillHidden = true } }
             null -> null
         }
         eu.akoos.photos.presentation.common.OperationProgressPill(
             progress = folderOpProgress,
             onCancel = folderOpCancel,
+            hidesOnly = folderOp == DeviceFolderOperation.BackingUp,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
