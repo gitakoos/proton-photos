@@ -48,4 +48,25 @@ sealed interface FaceSweepEvent {
         val score: Float,
         val blur: Float?,
     ) : FaceSweepEvent
+
+    /** The sweep ended for [reason] with [done] of [total] photos looked at, short of the end. */
+    data class Stopped(val reason: SweepStop, val done: Int, val total: Int) : FaceSweepEvent
 }
+
+/** How a "find more photos" sweep ended, with the fixed label the copied diagnostics print. */
+enum class SweepStop(val label: String) {
+    COMPLETED("completed"),
+
+    /** The process abandoned its cap of stalled model pairs, so no more photos could be looked at. */
+    MODEL_STALLED("model-stalled"),
+    CANCELLED("cancelled"),
+    FAILED("failed"),
+}
+
+/**
+ * How a sweep whose workers have all returned ended: [done] of [total] photos looked at, and whether the
+ * process has abandoned its cap of stalled model pairs ([abandonCapReached]), which stops the workers short
+ * of the end. Pure so it is unit-tested without Android.
+ */
+internal fun sweepStopReason(done: Int, total: Int, abandonCapReached: Boolean): SweepStop =
+    if (done < total && abandonCapReached) SweepStop.MODEL_STALLED else SweepStop.COMPLETED

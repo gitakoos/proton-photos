@@ -1780,6 +1780,7 @@
     <string name="settings_face_section">Caras reconocidas</string>
     <string name="settings_face_maintenance">Mantenimiento</string>
     <string name="settings_ai_indexing_running">Analizando tus fotos</string>
+    <string name="settings_ai_grouping_running">Agrupando rostros</string>
     <string name="settings_ai_indexing_waiting">Esperando el modelo de caras</string>
     <string name="settings_ai_indexing_waiting_other">Esperando a que termine otra tarea en el dispositivo</string>
     <string name="settings_ai_indexing_paused">En pausa</string>
@@ -1835,6 +1836,8 @@
     <string name="find_more_title_named">Más fotos de %1$s</string>
     <string name="find_more_searching">Buscando fotos %1$d de %2$d</string>
     <string name="find_more_empty">No se encontraron más fotos de esta persona.</string>
+    <string name="find_more_failed">No se pudo terminar la búsqueda. Inténtalo más tarde.</string>
+    <string name="find_more_stopped">La búsqueda se detuvo antes de revisar todas las fotos. Inténtalo más tarde.</string>
     <string name="find_more_add">Añadir %1$d</string>
     <string name="viewer_people_in_photo">Personas en esta foto</string>
     <string name="viewer_face_none_found">No se encontraron caras en esta foto.</string>

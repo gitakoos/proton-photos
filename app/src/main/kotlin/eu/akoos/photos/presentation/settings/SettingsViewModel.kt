@@ -134,7 +134,11 @@ import eu.akoos.photos.util.retryOnDbTear
 import eu.akoos.photos.widget.PhotoWidgetUpdateWorker
 import eu.akoos.photos.worker.FreeUpSpaceWorker
 import eu.akoos.photos.worker.SyncWorker
+import eu.akoos.photos.util.FaceDiagnostics
 import javax.inject.Inject
+
+/** The people streams' label in the logs and the copied diagnostics. */
+private const val PEOPLE_TEAR_TAG = "SettingsPeople"
 
 /**
  * The face card's state after folding [FaceIndexingProgress] together with the live device health.
@@ -335,8 +339,8 @@ class SettingsViewModel @Inject constructor(
             // Count exactly the named people the tiles beside this figure show, so the header and the
             // row agree: unnamed clusters have no tile, and the Unsorted bucket is not a person. A guest
             // counts under the local partition, so the header matches the tiles it sits over.
-            personDao.observePeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
-                .retryOnDbTear("SettingsPeople")
+            personDao.observeNamedPeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+                .retryOnDbTear(PEOPLE_TEAR_TAG, onRetry = { FaceDiagnostics.recordDbTear(PEOPLE_TEAR_TAG, it) })
                 .map { namedPeopleCount(it) }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
@@ -347,7 +351,11 @@ class SettingsViewModel @Inject constructor(
      *  is grouped here too. */
     val people: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            observePeopleUseCase(userId, if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId))
+            observePeopleUseCase(
+                userId,
+                if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
+                namedOnly = true,
+            )
                 .map { list -> list.mapNotNull { it.toPersonUi() }.filter { !it.displayName.isNullOrBlank() } }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
@@ -371,7 +379,7 @@ class SettingsViewModel @Inject constructor(
     val faceGroupCount: StateFlow<Int> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             personDao.observePeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
-                .retryOnDbTear("SettingsPeople")
+                .retryOnDbTear(PEOPLE_TEAR_TAG, onRetry = { FaceDiagnostics.recordDbTear(PEOPLE_TEAR_TAG, it) })
                 .map { people ->
                     people.count { (!it.displayName.isNullOrBlank() && !it.isOther) || isNameableCluster(it.displayName, it.isOther, it.faceCount) }
                 }

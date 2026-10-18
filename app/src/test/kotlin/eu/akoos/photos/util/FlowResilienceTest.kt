@@ -103,4 +103,21 @@ class FlowResilienceTest {
         assertEquals(5_000L, retryBackoffMs(9))
         assertEquals("a persistently failing source stays capped, never spinning the CPU", 5_000L, retryBackoffMs(100))
     }
+
+    @Test
+    fun a_torn_cursor_window_keeps_only_its_numbers_only_text() {
+        val window = IllegalStateException(
+            "Couldn't read row 7012, col 1 from CursorWindow.  Make sure the Cursor is initialized correctly " +
+                "before accessing data from it.",
+        )
+        assertEquals("Couldn't read row 7012, col 1 from CursorWindow", dbTearMessage(window))
+        assertEquals("UNKNOWN type 9", dbTearMessage(IllegalStateException("UNKNOWN type 9")))
+    }
+
+    @Test
+    fun any_other_message_is_kept_back() {
+        assertEquals(null, dbTearMessage(IllegalStateException("IMG_2041.jpg of Anna in /DCIM/Camera")))
+        assertEquals(null, dbTearMessage(IllegalStateException()))
+        assertEquals(null, dbTearMessage(RuntimeException("SELECT * FROM person WHERE userId = 'abc'")))
+    }
 }

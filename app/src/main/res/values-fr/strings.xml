@@ -1749,6 +1749,7 @@
     <string name="settings_face_section">Visages reconnus</string>
     <string name="settings_face_maintenance">Maintenance</string>
     <string name="settings_ai_indexing_running">Analyse de vos photos</string>
+    <string name="settings_ai_grouping_running">Regroupement des visages</string>
     <string name="settings_ai_indexing_waiting">En attente du modèle de visages</string>
     <string name="settings_ai_indexing_waiting_other">En attente de la fin d\'une autre tâche sur l\'appareil</string>
     <string name="settings_ai_indexing_paused">En pause</string>
@@ -1804,6 +1805,8 @@
     <string name="find_more_title_named">Plus de photos de %1$s</string>
     <string name="find_more_searching">Recherche de photos %1$d sur %2$d</string>
     <string name="find_more_empty">Aucune autre photo de cette personne n\'a été trouvée.</string>
+    <string name="find_more_failed">Impossible de terminer la recherche. Réessayez plus tard.</string>
+    <string name="find_more_stopped">La recherche s\'est arrêtée avant d\'avoir parcouru toutes les photos. Réessayez plus tard.</string>
     <string name="find_more_add">Ajouter %1$d</string>
     <string name="viewer_people_in_photo">Personnes sur cette photo</string>
     <string name="viewer_face_none_found">Aucun visage trouvé sur cette photo.</string>

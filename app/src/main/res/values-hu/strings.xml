@@ -1743,6 +1743,7 @@
     <string name="settings_face_section">Felismert arcok</string>
     <string name="settings_face_maintenance">Karbantartás</string>
     <string name="settings_ai_indexing_running">Fotók átvizsgálása</string>
+    <string name="settings_ai_grouping_running">Arcok csoportosítása</string>
     <string name="settings_ai_indexing_waiting">Várakozás az arc-modellre</string>
     <string name="settings_ai_indexing_waiting_other">Várakozás egy másik, eszközön futó feladat befejezésére</string>
     <string name="settings_ai_indexing_paused">Szüneteltetve</string>
@@ -1798,6 +1799,8 @@
     <string name="find_more_title_named">%1$s további fotói</string>
     <string name="find_more_searching">Fotók keresése: %1$d / %2$d</string>
     <string name="find_more_empty">Nem található több fotó erről az emberről.</string>
+    <string name="find_more_failed">Nem sikerült befejezni a keresést. Próbáld újra később.</string>
+    <string name="find_more_stopped">A keresés leállt, mielőtt minden fotót átnézett volna. Próbáld újra később.</string>
     <string name="find_more_add">%1$d hozzáadása</string>
     <string name="viewer_people_in_photo">Emberek ezen a fotón</string>
     <string name="viewer_face_none_found">Nem található arc ezen a fotón.</string>

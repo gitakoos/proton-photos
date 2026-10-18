@@ -71,7 +71,7 @@ class AutoMergePagedLoadDbTest {
 
     private fun assignPersonName(db: AppDatabase) = AssignPersonNameUseCase(
         db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.notPersonDao(),
-        db.personCoverDao(), db.clusterSummaryDao(),
+        db.personCoverDao(), db.clusterSummaryDao(), db,
     )
 
     private fun useCase(db: AppDatabase) =

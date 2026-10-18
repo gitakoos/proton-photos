@@ -1835,6 +1835,7 @@
     <string name="settings_face_section">Prepoznani obrazi</string>
     <string name="settings_face_maintenance">Vzdrževanje</string>
     <string name="settings_ai_indexing_running">Pregledovanje fotografij</string>
+    <string name="settings_ai_grouping_running">Razvrščanje obrazov</string>
     <string name="settings_ai_indexing_waiting">Čakanje na model obrazov</string>
     <string name="settings_ai_indexing_waiting_other">Čakanje na dokončanje drugega opravila v napravi</string>
     <string name="settings_ai_indexing_paused">Zaustavljeno</string>
@@ -1892,6 +1893,8 @@
     <string name="find_more_title_named">Več fotografij: %1$s</string>
     <string name="find_more_searching">Iskanje fotografij %1$d od %2$d</string>
     <string name="find_more_empty">Ni bilo najdenih drugih fotografij te osebe.</string>
+    <string name="find_more_failed">Iskanja ni bilo mogoče dokončati. Poskusite pozneje.</string>
+    <string name="find_more_stopped">Iskanje se je ustavilo, preden je pregledalo vse fotografije. Poskusite pozneje.</string>
     <string name="find_more_add">Dodaj %1$d</string>
     <string name="viewer_people_in_photo">Osebe na tej fotografiji</string>
     <string name="viewer_face_none_found">Na tej fotografiji ni bilo najdenih obrazov.</string>

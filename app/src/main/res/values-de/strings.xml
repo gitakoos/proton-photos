@@ -1744,6 +1744,7 @@
     <string name="settings_face_section">Erkannte Gesichter</string>
     <string name="settings_face_maintenance">Wartung</string>
     <string name="settings_ai_indexing_running">Deine Fotos werden durchsucht</string>
+    <string name="settings_ai_grouping_running">Gesichter werden gruppiert</string>
     <string name="settings_ai_indexing_waiting">Warten auf das Gesichtsmodell</string>
     <string name="settings_ai_indexing_waiting_other">Warten, bis eine andere Aufgabe auf dem Gerät abgeschlossen ist</string>
     <string name="settings_ai_indexing_paused">Pausiert</string>
@@ -1799,6 +1800,8 @@
     <string name="find_more_title_named">Mehr Fotos von %1$s</string>
     <string name="find_more_searching">Fotos werden durchsucht: %1$d von %2$d</string>
     <string name="find_more_empty">Es wurden keine weiteren Fotos dieser Person gefunden.</string>
+    <string name="find_more_failed">Die Suche konnte nicht abgeschlossen werden. Versuche es später erneut.</string>
+    <string name="find_more_stopped">Die Suche wurde beendet, bevor alle Fotos durchsucht waren. Versuche es später erneut.</string>
     <string name="find_more_add">%1$d hinzufügen</string>
     <string name="viewer_people_in_photo">Personen auf diesem Foto</string>
     <string name="viewer_face_none_found">Keine Gesichter auf diesem Foto gefunden.</string>

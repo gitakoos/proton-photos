@@ -778,6 +778,7 @@
     <string name="face_excluded_ignored_section">Yok sayılanlar (kişi değil)</string>
     <string name="face_excluded_undo">Geri al</string>
     <string name="settings_ai_indexing_running">Fotoğrafların taranıyor</string>
+    <string name="settings_ai_grouping_running">Yüzler gruplanıyor</string>
     <string name="settings_ai_indexing_waiting">Yüz modeli bekleniyor</string>
     <string name="settings_ai_indexing_waiting_other">Cihaz üzerindeki başka bir görevin bitmesi bekleniyor</string>
     <string name="settings_ai_indexing_paused">Duraklatıldı</string>
@@ -1392,6 +1393,8 @@
     <string name="find_more_title_named">%1$s adlı kişinin diğer fotoğrafları</string>
     <string name="find_more_searching">Fotoğraflar aranıyor: %1$d / %2$d</string>
     <string name="find_more_empty">Bu kişiye ait başka fotoğraf bulunamadı.</string>
+    <string name="find_more_failed">Arama tamamlanamadı. Daha sonra tekrar dene.</string>
+    <string name="find_more_stopped">Arama tüm fotoğraflara ulaşmadan durdu. Daha sonra tekrar dene.</string>
     <string name="find_more_add">Ekle (%1$d)</string>
     <string name="person_not_a_person">Bu bir kişi değil</string>
     <string name="person_not_a_person_confirm_title">Bu grup yok sayılsın mı?</string>

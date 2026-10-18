@@ -1390,10 +1390,10 @@ private fun FaceStatusCard(
         state == FaceIndexingState.WaitingModel -> stringResource(R.string.settings_ai_indexing_waiting)
         !faceBulkIndex -> null
         waitingForOther -> stringResource(R.string.settings_ai_indexing_waiting_other)
-        else -> healthLabel ?: if (state == FaceIndexingState.Running) {
-            stringResource(R.string.settings_ai_indexing_running)
-        } else {
-            null
+        else -> healthLabel ?: when {
+            state != FaceIndexingState.Running -> null
+            ui.grouping -> stringResource(R.string.settings_ai_grouping_running)
+            else -> stringResource(R.string.settings_ai_indexing_running)
         }
     }
     val showBar = faceBulkIndex
@@ -1436,11 +1436,17 @@ private fun FaceStatusCard(
 
             if (showBar) {
                 Spacer(Modifier.height(12.dp))
-                LinearProgressIndicator(
-                    progress = { ui.indexed.toFloat() / ui.total },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = colors.accent,
-                )
+                // A grouping reports its first count once its first batch is placed; until then the bar only
+                // shows that it works.
+                if (ui.grouping && ui.indexed == 0) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = colors.accent)
+                } else {
+                    LinearProgressIndicator(
+                        progress = { ui.indexed.toFloat() / ui.total },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = colors.accent,
+                    )
+                }
                 Spacer(Modifier.height(6.dp))
                 Text(
                     stringResource(

@@ -116,6 +116,7 @@ class ReviewSuggestionsViewModel @Inject constructor(
             observePeopleUseCase(
                 userId,
                 if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
+                namedOnly = true,
             ).map { list ->
                 list.mapNotNull { it.toPersonUi() }
                     .filter { !it.displayName.isNullOrBlank() }

@@ -1838,6 +1838,7 @@
     <string name="settings_face_section">Rozpoznané tváre</string>
     <string name="settings_face_maintenance">Údržba</string>
     <string name="settings_ai_indexing_running">Prehľadávanie fotiek</string>
+    <string name="settings_ai_grouping_running">Zoskupovanie tvárí</string>
     <string name="settings_ai_indexing_waiting">Čakanie na model tvárí</string>
     <string name="settings_ai_indexing_waiting_other">Čakanie na dokončenie inej úlohy v zariadení</string>
     <string name="settings_ai_indexing_paused">Pozastavené</string>
@@ -1895,6 +1896,8 @@
     <string name="find_more_title_named">Ďalšie fotky: %1$s</string>
     <string name="find_more_searching">Prehľadávanie fotiek %1$d z %2$d</string>
     <string name="find_more_empty">Nenašli sa žiadne ďalšie fotky tejto osoby.</string>
+    <string name="find_more_failed">Hľadanie sa nepodarilo dokončiť. Skúste to neskôr.</string>
+    <string name="find_more_stopped">Hľadanie sa zastavilo skôr, než prešlo všetky fotky. Skúste to neskôr.</string>
     <string name="find_more_add">Pridať %1$d</string>
     <string name="viewer_people_in_photo">Osoby na tejto fotke</string>
     <string name="viewer_face_none_found">Na tejto fotke sa nenašli žiadne tváre.</string>

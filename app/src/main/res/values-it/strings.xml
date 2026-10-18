@@ -1779,6 +1779,7 @@
     <string name="settings_face_section">Volti riconosciuti</string>
     <string name="settings_face_maintenance">Manutenzione</string>
     <string name="settings_ai_indexing_running">Analisi delle tue foto</string>
+    <string name="settings_ai_grouping_running">Raggruppamento dei volti</string>
     <string name="settings_ai_indexing_waiting">In attesa del modello dei volti</string>
     <string name="settings_ai_indexing_waiting_other">In attesa del completamento di un\'altra attività sul dispositivo</string>
     <string name="settings_ai_indexing_paused">In pausa</string>
@@ -1834,6 +1835,8 @@
     <string name="find_more_title_named">Altre foto di %1$s</string>
     <string name="find_more_searching">Ricerca foto %1$d di %2$d</string>
     <string name="find_more_empty">Non sono state trovate altre foto di questa persona.</string>
+    <string name="find_more_failed">Impossibile completare la ricerca. Riprova più tardi.</string>
+    <string name="find_more_stopped">La ricerca si è interrotta prima di esaminare tutte le foto. Riprova più tardi.</string>
     <string name="find_more_add">Aggiungi %1$d</string>
     <string name="viewer_people_in_photo">Persone in questa foto</string>
     <string name="viewer_face_none_found">Nessun volto trovato in questa foto.</string>

@@ -390,11 +390,13 @@ class ClusterFacesUseCase @Inject constructor(
      * disturbs an existing assignment. The Unsorted bucket is excluded from the people matched against, so
      * a fresh face is never absorbed into the grab-bag. Guest-safe via the [PhotoLocationEntity.LOCAL_USER]
      * account sentinel. A placement its [writeAllowed] check refuses writes nothing and returns false, so
-     * the caller leaves the faces to a rebuild of the data as it now stands.
+     * the caller leaves the faces to a rebuild of the data as it now stands. [onTick] is called now and then
+     * while a [batch] call repairs the centroid cache, so a host watching for progress sees the work move.
      */
     suspend fun assignNewFaces(
         userId: UserId?,
         batch: IncrementalBatch? = null,
+        onTick: () -> Unit = {},
         writeAllowed: () -> Boolean = { true },
     ): Boolean = withContext(Dispatchers.Default) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
@@ -425,7 +427,7 @@ class ClusterFacesUseCase @Inject constructor(
             // than refused, and the large backlog (4) is read a bounded slice at a time instead of turned away.
             // A batched run with nobody to match against carries on: every confident face of the batch then
             // groups among its own, which is how the first people of a big library appear.
-            people = batchCentroids(account, batch, writeAllowed) ?: return@withContext false
+            people = batchCentroids(account, batch, writeAllowed, onTick) ?: return@withContext false
             batch.centroidCount = people.personIds.size
             if (faceDao.unclusteredCount(account) == 0) return@withContext true
         }
@@ -660,13 +662,14 @@ class ClusterFacesUseCase @Inject constructor(
     /**
      * The people a [batch] call matches against: the ones the run already holds while the centroid cache still
      * is what they describe (the same rows, the same member total, and that total the grouped faces), else the
-     * cache read again, rebuilt from the assignments first when it does not describe the grouped faces. Null
-     * when the rebuild was refused or the cache still does not describe them, or a centroid has a stale width.
+     * cache read again, repaired from the assignments first when it does not describe the grouped faces. Null
+     * when the repair was refused or the cache still does not describe them, or a centroid has a stale width.
      */
     private suspend fun batchCentroids(
         account: String,
         batch: IncrementalBatch,
         writeAllowed: () -> Boolean,
+        onTick: () -> Unit,
     ): PlacementCentroids? {
         val assigned = faceDao.assignedFaceCount(account)
         batch.held?.let { held ->
@@ -682,7 +685,7 @@ class ClusterFacesUseCase @Inject constructor(
         var summaries = clusterSummaryDao.getAllForUser(account)
         if (!cacheDescribesGroups(summaries, assigned)) {
             // No grouped faces and no cache is a valid start: the first batch then opens the first people.
-            if (!rebuildSummaries(account, writeAllowed)) return null
+            if (!rebuildSummaries(account, summaries, writeAllowed, onTick)) return null
             summaries = clusterSummaryDao.getAllForUser(account)
             if (!cacheDescribesGroups(summaries, faceDao.assignedFaceCount(account))) return null
         }
@@ -760,7 +763,7 @@ class ClusterFacesUseCase @Inject constructor(
      * chain of near matches cannot fuse people who are far apart. Two groups carrying different names never
      * merge, a named group outlives an unnamed one (else the bigger one stays), an unnamed group holding a face
      * marked as not being a named person is never folded into that person, and the Unsorted bucket takes no
-     * part. A cache that does not describe the grouped faces is rebuilt from the assignments first, and when it
+     * part. A cache that does not describe the grouped faces is repaired from the assignments first, and when it
      * still does not, the merge fails rather than merge on it.
      *
      * Written in chunks, each one transaction behind [writeAllowed] that moves the faces, drops the merged
@@ -779,7 +782,7 @@ class ClusterFacesUseCase @Inject constructor(
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         var summaries = clusterSummaryDao.getAllForUser(account)
         if (!cacheDescribesGroups(summaries, faceDao.assignedFaceCount(account))) {
-            if (!rebuildSummaries(account, writeAllowed)) return@withContext 0
+            if (!rebuildSummaries(account, summaries, writeAllowed, onTick)) return@withContext 0
             summaries = clusterSummaryDao.getAllForUser(account)
             check(cacheDescribesGroups(summaries, faceDao.assignedFaceCount(account))) {
                 "the centroid cache does not describe the grouped faces"
@@ -1079,17 +1082,34 @@ class ClusterFacesUseCase @Inject constructor(
         summaries.none { it.modelVersion != FACE_MODEL_VERSION } && summaries.sumOf { it.memberCount } == assigned
 
     /**
-     * Rebuilds the centroid cache from the existing assignments: each person's centroid summed from its own
-     * kept faces a page at a time ([PersonCentroids] sums the same way), so the vectors are never held
-     * together. Written in one transaction behind [writeAllowed]; returns false when the check refused it.
-     * A person none of whose vectors can be read is left out, so the caller checks the totals once more.
+     * Repairs the centroid cache [cached] from the existing assignments, only where it is off: a person with
+     * kept faces and no row, a row whose member count is not the person's kept faces or that an older face
+     * pipeline wrote, and a row for a person with no kept face left. Every other person's centroid is kept, so
+     * a curation edit that dropped a few rows costs a read of those people's faces rather than of every face.
+     * Each centroid is summed from the person's own kept faces a page at a time ([PersonCentroids] sums the same
+     * way), so the vectors are never held together, and [onTick] is called now and then. Written in one
+     * transaction behind [writeAllowed]; returns false when the check refused it. A person none of whose
+     * vectors can be read is left without a row, so the caller checks the totals once more.
      */
-    private suspend fun rebuildSummaries(account: String, writeAllowed: () -> Boolean): Boolean {
+    private suspend fun rebuildSummaries(
+        account: String,
+        cached: List<ClusterSummaryEntity>,
+        writeAllowed: () -> Boolean,
+        onTick: () -> Unit = {},
+    ): Boolean {
         val kept = faceDao.keptFaceCountsByPerson(account)
+        val cachedById = cached.associateBy { it.personId }
+        val stale = kept.filter { person ->
+            val row = cachedById[person.personId]
+            row == null || row.memberCount != person.faces || row.modelVersion != FACE_MODEL_VERSION
+        }
+        val keptIds = kept.mapTo(HashSet(kept.size * 2)) { it.personId }
+        val dropped = cachedById.keys.filterTo(ArrayList()) { it !in keptIds }
         val now = System.currentTimeMillis()
-        val rows = ArrayList<ClusterSummaryEntity>(kept.size)
-        for (person in kept) {
+        val rows = ArrayList<ClusterSummaryEntity>(stale.size)
+        for ((done, person) in stale.withIndex()) {
             coroutineContext.ensureActive()
+            if (done % SUMMARY_TICK_EVERY == 0) onTick()
             val sum = CentroidSum()
             var afterId = ""
             while (true) {
@@ -1098,14 +1118,18 @@ class ClusterFacesUseCase @Inject constructor(
                 if (page.size < SUMMARY_PAGE_SIZE) break
                 afterId = page.last().id
             }
-            val centroid = sum.centroid() ?: continue
+            val centroid = sum.centroid()
+            if (centroid == null) {
+                if (person.personId in cachedById) dropped.add(person.personId)
+                continue
+            }
             rows.add(ClusterSummaryEntity(person.personId, account, packEmbedding(centroid), person.faces, FACE_MODEL_VERSION, now))
         }
         var written = false
         appDatabase.withTransaction {
             if (!writeAllowed()) return@withTransaction
             written = true
-            clusterSummaryDao.clearForUser(account)
+            if (dropped.isNotEmpty()) clusterSummaryDao.deleteByPersons(dropped)
             if (rows.isNotEmpty()) clusterSummaryDao.upsertAll(rows)
         }
         return written
@@ -1237,6 +1261,9 @@ class ClusterFacesUseCase @Inject constructor(
 
         /** Vectors per page when one person's centroid is summed for the cache rebuild. */
         const val SUMMARY_PAGE_SIZE = 500
+
+        /** People the cache repair sums between two ticks of its progress callback. */
+        const val SUMMARY_TICK_EVERY = 64
 
         /** People whose photo counts are recounted in one transaction. */
         const val RECOUNT_PEOPLE_SLICE = 200

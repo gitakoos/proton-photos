@@ -1836,6 +1836,7 @@
     <string name="settings_face_section">Rozpoznané obličeje</string>
     <string name="settings_face_maintenance">Údržba</string>
     <string name="settings_ai_indexing_running">Prohledávání fotek</string>
+    <string name="settings_ai_grouping_running">Seskupování obličejů</string>
     <string name="settings_ai_indexing_waiting">Čekání na model obličejů</string>
     <string name="settings_ai_indexing_waiting_other">Čekání na dokončení jiné úlohy v zařízení</string>
     <string name="settings_ai_indexing_paused">Pozastaveno</string>
@@ -1893,6 +1894,8 @@
     <string name="find_more_title_named">Další fotky: %1$s</string>
     <string name="find_more_searching">Prohledávání fotek %1$d z %2$d</string>
     <string name="find_more_empty">Nebyly nalezeny žádné další fotky této osoby.</string>
+    <string name="find_more_failed">Hledání se nepodařilo dokončit. Zkuste to později.</string>
+    <string name="find_more_stopped">Hledání se zastavilo dřív, než prošlo všechny fotky. Zkuste to později.</string>
     <string name="find_more_add">Přidat %1$d</string>
     <string name="viewer_people_in_photo">Osoby na této fotce</string>
     <string name="viewer_face_none_found">Na této fotce nebyly nalezeny žádné obličeje.</string>

@@ -111,7 +111,8 @@ class AssignFacesToPersonUseCase @Inject constructor(
             faceDao.clearManualNameByIds(ids)
         }
         refresh(account, person.id, name)
-        clusterSummaryDao.deleteByPerson(person.id)
+        // Only a person whose faces changed loses its cached centroid, which the next grouping then recomputes.
+        if (faces.any { it.personId != person.id }) clusterSummaryDao.deleteByPerson(person.id)
 
         val sourceIds = faces.mapNotNullTo(HashSet()) { it.personId }
         sourceIds.remove(person.id)

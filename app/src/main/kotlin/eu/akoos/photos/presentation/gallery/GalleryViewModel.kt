@@ -611,7 +611,7 @@ class GalleryViewModel @Inject constructor(
         ) { aiOn, userId -> aiOn to userId }
             .flatMapLatest { (aiOn, userId) ->
                 if (!aiOn) flowOf(emptyList<PersonSummary>())
-                else observePeopleUseCase(userId, uiState.map { it.items }.distinctUntilChanged())
+                else observePeopleUseCase(userId, uiState.map { it.items }.distinctUntilChanged(), namedOnly = true)
             }
         viewModelScope.launch {
             peopleFlow.collectLatest { summaries ->

@@ -113,6 +113,7 @@ class NameOrMergeViewModel @Inject constructor(
             observePeopleUseCase(
                 userId,
                 if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
+                namedOnly = true,
             )
         }
         .map { summaries -> summaries.mapNotNull { it.toPersonUi() } }

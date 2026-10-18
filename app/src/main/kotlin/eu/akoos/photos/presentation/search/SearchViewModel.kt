@@ -493,7 +493,7 @@ class SearchViewModel @Inject constructor(
     ) { faceOn, userId -> faceOn to userId }
         .flatMapLatest { (faceOn, userId) ->
             if (!faceOn) flowOf(emptyList())
-            else combine(observePeopleUseCase(userId, allItems), debouncedQuery) { people, q ->
+            else combine(observePeopleUseCase(userId, allItems, namedOnly = true), debouncedQuery) { people, q ->
                 val needle = foldForMatch(q)
                 if (needle.isBlank()) emptyList()
                 else people
@@ -514,7 +514,7 @@ class SearchViewModel @Inject constructor(
     ) { aiOn, userId -> aiOn to userId }
         .flatMapLatest { (aiOn, userId) ->
             if (!aiOn) flowOf(emptyList())
-            else observePeopleUseCase(userId, allItems).map { summaries ->
+            else observePeopleUseCase(userId, allItems, namedOnly = true).map { summaries ->
                 summaries.filter { !it.displayName.isNullOrBlank() }.mapNotNull { it.toPersonUi() }
             }
         }

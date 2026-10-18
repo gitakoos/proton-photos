@@ -826,6 +826,7 @@
     <string name="face_excluded_ignored_section">Ignored (not a person)</string>
     <string name="face_excluded_undo">Undo</string>
     <string name="settings_ai_indexing_running">Scanning your photos</string>
+    <string name="settings_ai_grouping_running">Grouping faces</string>
     <string name="settings_ai_indexing_waiting">Waiting for the face model</string>
     <string name="settings_ai_indexing_waiting_other">Waiting for another on-device task to finish</string>
     <string name="settings_ai_indexing_paused">Paused</string>
@@ -1477,6 +1478,8 @@
     <string name="find_more_title_named">More photos of %1$s</string>
     <string name="find_more_searching">Searching photos %1$d of %2$d</string>
     <string name="find_more_empty">No more photos of this person were found.</string>
+    <string name="find_more_failed">The search could not finish. Try again later.</string>
+    <string name="find_more_stopped">The search stopped before it reached every photo. Try again later.</string>
     <string name="find_more_add">Add %1$d</string>
     <string name="person_not_a_person">This is not a person</string>
     <string name="person_not_a_person_confirm_title">Dismiss this group?</string>
