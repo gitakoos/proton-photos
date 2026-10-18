@@ -157,6 +157,69 @@ class PeopleTornReadTest {
         }
     }
 
+    /**
+     * The one-time photo recount over every person, run while the people table is read as the People screens read
+     * it, to count the reads it tears. Needs a DEBUG build installed and the app process stopped.
+     */
+    @Test
+    fun recountWhileObserving() = runBlocking<Unit> {
+        val db = Room.databaseBuilder(context, AppDatabase::class.java, "proton_photos.db")
+            .addMigrations(*Migrations.ALL)
+            .build()
+        try {
+            val account = db.openHelper.readableDatabase
+                .query("SELECT userId FROM face GROUP BY userId ORDER BY COUNT(*) DESC LIMIT 1")
+                .use { if (it.moveToFirst()) it.getString(0) else null }
+            assertTrue("no faces stored", account != null)
+            account!!
+            val personDao = db.personDao()
+            val cluster = eu.akoos.photos.domain.usecase.ClusterFacesUseCase(
+                db.faceDao(), personDao, db.personManualPhotoDao(), db.notPersonDao(),
+                db.personCoverDao(), db.clusterSummaryDao(), db,
+            )
+            val emissions = AtomicInteger()
+            val listReads = AtomicInteger()
+            val failures = ConcurrentLinkedQueue<String>()
+            val stream = launch(Dispatchers.IO) {
+                while (isActive) {
+                    try {
+                        personDao.observePeopleForUser(account).collect { emissions.incrementAndGet() }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        failures.add("stream " + e.javaClass.simpleName + ": " + e.message)
+                        delay(100)
+                    }
+                }
+            }
+            val loop = launch(Dispatchers.IO) {
+                while (isActive) {
+                    try {
+                        personDao.allForUser(account)
+                        listReads.incrementAndGet()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        failures.add("list " + e.javaClass.simpleName + ": " + e.message)
+                    }
+                }
+            }
+            val start = android.os.SystemClock.elapsedRealtime()
+            val looked = cluster.recountPhotoCounts(me.proton.core.domain.entity.UserId(account))
+            val took = android.os.SystemClock.elapsedRealtime() - start
+            delay(1_000)
+            stream.cancelAndJoin()
+            loop.cancelAndJoin()
+            Log.i(
+                TAG,
+                "recountWhileObserving people=$looked tookMs=$took streamEmissions=${emissions.get()} " +
+                    "listReads=${listReads.get()} tornReads=${failures.size} first=${failures.firstOrNull()}",
+            )
+        } finally {
+            db.close()
+        }
+    }
+
     private companion object {
         const val TAG = "FaceSeeder"
     }
