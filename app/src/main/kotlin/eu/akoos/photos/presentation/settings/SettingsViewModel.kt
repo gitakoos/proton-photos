@@ -336,6 +336,7 @@ class SettingsViewModel @Inject constructor(
             // row agree: unnamed clusters have no tile, and the Unsorted bucket is not a person. A guest
             // counts under the local partition, so the header matches the tiles it sits over.
             personDao.observePeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+                .retryOnDbTear("SettingsPeople")
                 .map { namedPeopleCount(it) }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), 0)
@@ -370,6 +371,7 @@ class SettingsViewModel @Inject constructor(
     val faceGroupCount: StateFlow<Int> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             personDao.observePeopleForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
+                .retryOnDbTear("SettingsPeople")
                 .map { people ->
                     people.count { (!it.displayName.isNullOrBlank() && !it.isOther) || isNameableCluster(it.displayName, it.isOther, it.faceCount) }
                 }

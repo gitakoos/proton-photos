@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.person
 
 import android.content.Context
 import android.util.Log
+import eu.akoos.photos.util.retryOnDbTear
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -244,6 +245,7 @@ class PersonDetailViewModel @Inject constructor(
      *  while the page leaves. */
     private fun observeIdentity(account: String, personId: Long): Flow<PageIdentity> =
         personDao.observePeopleForUser(account)
+            .retryOnDbTear("PersonDetailIdentity", maxAttempts = 5)
             .map { people -> people.firstOrNull { it.id == personId } }
             .withIndex()
             .filter { (index, row) -> index == 0 || row != null }

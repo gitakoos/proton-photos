@@ -41,6 +41,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.model.FaceBoxNorm
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.util.FaceDiagnostics
+import eu.akoos.photos.util.retryOnDbTear
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 
@@ -81,7 +82,7 @@ class ObservePeopleUseCase @Inject constructor(
     ): Flow<List<PersonSummary>> {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val keysMemo = AtomicReference<Pair<List<GalleryItem>, Set<String>>?>(null)
-        return combine(personDao.observePeopleForUser(account), items) { people, feed -> people to feed }
+        return combine(personDao.observePeopleForUser(account).retryOnDbTear("ObservePeople"), items) { people, feed -> people to feed }
             .mapCompleting { (people, feed) ->
                 FaceDiagnostics.recordPeopleBuildStarted()
                 val startNs = System.nanoTime()
