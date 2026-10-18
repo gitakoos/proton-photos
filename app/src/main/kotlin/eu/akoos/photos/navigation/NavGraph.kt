@@ -133,6 +133,7 @@ import eu.akoos.photos.presentation.settings.SemanticSearchScreen
 import eu.akoos.photos.presentation.settings.AppearanceSettingsScreen
 import eu.akoos.photos.presentation.settings.LandingTabScreen
 import eu.akoos.photos.presentation.settings.ClockFormatScreen
+import eu.akoos.photos.presentation.settings.ViewerSettingsScreen
 import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
 import eu.akoos.photos.presentation.settings.NotificationSettingsScreen
 import eu.akoos.photos.presentation.settings.PendingDeleteHandler
@@ -229,6 +230,7 @@ sealed class Screen(val route: String) {
     data object LandingTab : Screen("landing_tab")
     data object ThemeSettings : Screen("theme_settings")
     data object LanguageSettings : Screen("language_settings")
+    data object ViewerSettings : Screen("viewer_settings")
     data object ClockFormatSettings : Screen("clock_format_settings")
     data object NotificationSettings : Screen("notification_settings")
     data object TimelineFilter : Screen("timeline_filter")
@@ -1610,6 +1612,13 @@ fun NavGraph(
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
                 onAlbumsSettingsClick = { navController.navigate(Screen.AlbumsSettings.route) },
                 onLandingTabClick = { navController.navigate(Screen.LandingTab.route) },
+                onViewerClick = { navController.navigate(Screen.ViewerSettings.route) },
+            )
+        }
+
+        composable(Screen.ViewerSettings.route) {
+            ViewerSettingsScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 

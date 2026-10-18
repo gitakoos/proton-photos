@@ -432,6 +432,10 @@
     <string name="settings_appearance_desc">Tema, idioma, línea de tiempo y álbumes</string>
     <string name="settings_section_look">Aspecto</string>
     <string name="settings_section_library">Biblioteca</string>
+    <string name="settings_viewer">Visor de fotos</string>
+    <string name="settings_viewer_long_press">Pulsación larga en el visor de fotos</string>
+    <string name="settings_viewer_long_press_menu">Abrir el menú</string>
+    <string name="settings_viewer_long_press_menu_desc">El mismo menú que los tres puntos de la esquina superior</string>
     <string name="settings_landing_tab">Pestaña inicial</string>
     <string name="settings_landing_tab_desc">Qué pestaña se abre al iniciar la app</string>
     <string name="settings_strip_customize">Qué metadatos eliminar</string>
@@ -1260,6 +1264,9 @@
     <string name="viewer_loading">Cargando…</string>
     <string name="viewer_text_working">Leyendo el texto…</string>
     <string name="viewer_text_selectable">Mantén pulsado para seleccionar texto</string>
+    <string name="viewer_select_text">Seleccionar texto</string>
+    <string name="viewer_recognize_text">Reconocer texto</string>
+    <string name="viewer_text_off">La lectura de texto está desactivada. Activa Aprendizaje automático y Copiar texto en Ajustes.</string>
     <string name="viewer_text_none">No se ha encontrado texto en esta foto.</string>
     <string name="viewer_text_needs_full_size">Para leer el texto hace falta la foto a tamaño completo. Descárgala primero.</string>
     <string name="viewer_text_not_image">El texto solo se puede leer de fotos.</string>

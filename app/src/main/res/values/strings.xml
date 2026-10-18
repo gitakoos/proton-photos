@@ -1037,6 +1037,10 @@
     <string name="settings_appearance_desc">Theme, language, timeline and albums</string>
     <string name="settings_section_look">Look</string>
     <string name="settings_section_library">Library</string>
+    <string name="settings_viewer">Photo viewer</string>
+    <string name="settings_viewer_long_press">Long press in the photo viewer</string>
+    <string name="settings_viewer_long_press_menu">Open the menu</string>
+    <string name="settings_viewer_long_press_menu_desc">The same menu as the three dots in the top corner</string>
     <string name="settings_landing_tab">Landing tab</string>
     <string name="settings_landing_tab_desc">Which tab opens when you start the app</string>
     <string name="settings_strip_customize">Customize what gets stripped</string>
@@ -2056,6 +2060,9 @@
     <string name="viewer_loading">Loading…</string>
     <string name="viewer_text_working">Reading text…</string>
     <string name="viewer_text_selectable">Press and hold to select text</string>
+    <string name="viewer_select_text">Select text</string>
+    <string name="viewer_recognize_text">Recognize text</string>
+    <string name="viewer_text_off">Reading text is off. Turn on Machine learning and Copy text in Settings.</string>
     <string name="viewer_text_none">No text found in this photo.</string>
     <string name="viewer_text_needs_full_size">Reading text needs the full-size photo. Download it first.</string>
     <string name="viewer_text_not_image">Text can be read from photos only.</string>

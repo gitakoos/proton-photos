@@ -428,6 +428,10 @@
     <string name="settings_appearance_desc">Thème, langue, fil et albums</string>
     <string name="settings_section_look">Apparence</string>
     <string name="settings_section_library">Bibliothèque</string>
+    <string name="settings_viewer">Visionneuse de photos</string>
+    <string name="settings_viewer_long_press">Appui long dans la visionneuse</string>
+    <string name="settings_viewer_long_press_menu">Ouvrir le menu</string>
+    <string name="settings_viewer_long_press_menu_desc">Le même menu que les trois points du coin supérieur</string>
     <string name="settings_landing_tab">Onglet de démarrage</string>
     <string name="settings_landing_tab_desc">Quel onglet s\'ouvre au lancement de l\'app</string>
     <string name="settings_strip_customize">Métadonnées à supprimer</string>
@@ -1247,6 +1251,9 @@
     <string name="viewer_loading">Chargement…</string>
     <string name="viewer_text_working">Lecture du texte…</string>
     <string name="viewer_text_selectable">Appuyez longuement pour sélectionner le texte</string>
+    <string name="viewer_select_text">Sélectionner le texte</string>
+    <string name="viewer_recognize_text">Reconnaître le texte</string>
+    <string name="viewer_text_off">La lecture du texte est désactivée. Activez Apprentissage automatique et Copier le texte dans Paramètres.</string>
     <string name="viewer_text_none">Aucun texte trouvé sur cette photo.</string>
     <string name="viewer_text_needs_full_size">La lecture du texte demande la photo en taille réelle. Téléchargez-la d\'abord.</string>
     <string name="viewer_text_not_image">Le texte se lit uniquement sur les photos.</string>

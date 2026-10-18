@@ -988,6 +988,10 @@
     <string name="settings_appearance_desc">Tema, dil, zaman çizelgesi ve albümler</string>
     <string name="settings_section_look">Görünüm</string>
     <string name="settings_section_library">Kitaplık</string>
+    <string name="settings_viewer">Fotoğraf görüntüleyici</string>
+    <string name="settings_viewer_long_press">Fotoğraf görüntüleyicide uzun basma</string>
+    <string name="settings_viewer_long_press_menu">Menüyü aç</string>
+    <string name="settings_viewer_long_press_menu_desc">Üst köşedeki üç noktayla aynı menü</string>
     <string name="settings_landing_tab">Açılış sekmesi</string>
     <string name="settings_landing_tab_desc">Uygulamayı başlattığında hangi sekmenin açılacağı</string>
     <string name="settings_strip_customize">Neyin temizleneceğini özelleştir</string>
@@ -1949,6 +1953,9 @@
     <string name="viewer_loading">Yükleniyor…</string>
     <string name="viewer_text_working">Metin okunuyor…</string>
     <string name="viewer_text_selectable">Metni seçmek için basılı tut</string>
+    <string name="viewer_select_text">Metni seç</string>
+    <string name="viewer_recognize_text">Metni tanı</string>
+    <string name="viewer_text_off">Metin okuma kapalı. Ayarlar\'da Makine öğrenimi ve Metni kopyala seçeneklerini aç.</string>
     <string name="viewer_text_none">Bu fotoğrafta metin bulunamadı.</string>
     <string name="viewer_text_needs_full_size">Metin okumak için tam boyutlu fotoğraf gerekir. Önce indir.</string>
     <string name="viewer_text_not_image">Metin yalnızca fotoğraflardan okunabilir.</string>

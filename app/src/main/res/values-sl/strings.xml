@@ -676,6 +676,10 @@
     <string name="settings_appearance_desc">Tema, jezik, časovnica in albumi</string>
     <string name="settings_section_look">Videz</string>
     <string name="settings_section_library">Knjižnica</string>
+    <string name="settings_viewer">Pregledovalnik fotografij</string>
+    <string name="settings_viewer_long_press">Dolg pritisk v pregledovalniku fotografij</string>
+    <string name="settings_viewer_long_press_menu">Odpri meni</string>
+    <string name="settings_viewer_long_press_menu_desc">Isti meni kot tri pike v zgornjem kotu</string>
     <string name="settings_landing_tab">Začetni zavihek</string>
     <string name="settings_landing_tab_desc">Kateri zavihek se odpre ob zagonu aplikacije</string>
     <string name="settings_strip_customize">Prilagodi, kaj se odstrani</string>
@@ -1477,6 +1481,9 @@
     <string name="viewer_loading">Nalaganje…</string>
     <string name="viewer_text_working">Branje besedila…</string>
     <string name="viewer_text_selectable">Pridržite za izbiro besedila</string>
+    <string name="viewer_select_text">Izberi besedilo</string>
+    <string name="viewer_recognize_text">Prepoznaj besedilo</string>
+    <string name="viewer_text_off">Branje besedila je izklopljeno. V Nastavitvah vklopite Strojno učenje in Kopiranje besedila.</string>
     <string name="viewer_text_none">Na tej fotografiji ni bilo najdenega besedila.</string>
     <string name="viewer_text_needs_full_size">Za branje besedila je potrebna fotografija v polni velikosti. Najprej jo prenesite.</string>
     <string name="viewer_text_not_image">Besedilo je mogoče brati samo s fotografij.</string>

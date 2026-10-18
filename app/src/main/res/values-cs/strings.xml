@@ -675,6 +675,10 @@
     <string name="settings_appearance_desc">Motiv, jazyk, časová osa a alba</string>
     <string name="settings_section_look">Vzhled</string>
     <string name="settings_section_library">Knihovna</string>
+    <string name="settings_viewer">Prohlížeč fotek</string>
+    <string name="settings_viewer_long_press">Dlouhé stisknutí v prohlížeči fotek</string>
+    <string name="settings_viewer_long_press_menu">Otevřít nabídku</string>
+    <string name="settings_viewer_long_press_menu_desc">Stejná nabídka jako tři tečky v horním rohu</string>
     <string name="settings_landing_tab">Úvodní karta</string>
     <string name="settings_landing_tab_desc">Která karta se otevře při spuštění aplikace</string>
     <string name="settings_strip_customize">Přizpůsobit, co se odstraňuje</string>
@@ -1476,6 +1480,9 @@
     <string name="viewer_loading">Načítání…</string>
     <string name="viewer_text_working">Načítání textu…</string>
     <string name="viewer_text_selectable">Podržením vyberete text</string>
+    <string name="viewer_select_text">Vybrat text</string>
+    <string name="viewer_recognize_text">Rozpoznat text</string>
+    <string name="viewer_text_off">Čtení textu je vypnuté. V Nastavení zapněte Strojové učení a Kopírovat text.</string>
     <string name="viewer_text_none">Na této fotce nebyl nalezen žádný text.</string>
     <string name="viewer_text_needs_full_size">Ke čtení textu je potřeba fotka v plné velikosti. Nejprve ji stáhněte.</string>
     <string name="viewer_text_not_image">Text lze číst jen z fotek.</string>

@@ -451,6 +451,10 @@
     <string name="settings_appearance_desc">Téma, nyelv, idővonal és albumok</string>
     <string name="settings_section_look">Megjelenés</string>
     <string name="settings_section_library">Fotótár</string>
+    <string name="settings_viewer">Fotónézegető</string>
+    <string name="settings_viewer_long_press">Hosszú nyomás a nézegetőben</string>
+    <string name="settings_viewer_long_press_menu">Menü megnyitása</string>
+    <string name="settings_viewer_long_press_menu_desc">Ugyanaz a menü, mint a felső sarok három pontja</string>
     <string name="settings_landing_tab">Kezdő fül</string>
     <string name="settings_landing_tab_desc">Melyik fül nyíljon meg az alkalmazás indításakor</string>
     <string name="settings_strip_customize">Eltávolítandó mezők testreszabása</string>
@@ -1268,6 +1272,9 @@
     <string name="viewer_loading">Betöltés…</string>
     <string name="viewer_text_working">Szöveg beolvasása…</string>
     <string name="viewer_text_selectable">Nyomd meg és tartsd a szöveg kijelöléséhez</string>
+    <string name="viewer_select_text">Szöveg kijelölése</string>
+    <string name="viewer_recognize_text">Szöveg felismerése</string>
+    <string name="viewer_text_off">A szövegolvasás ki van kapcsolva. A Beállításokban kapcsold be a Gépi tanulást és a Szöveg másolása funkciót.</string>
     <string name="viewer_text_none">Nem található szöveg ezen a fotón.</string>
     <string name="viewer_text_needs_full_size">A szöveg beolvasásához a teljes méretű fotó kell. Töltsd le előbb.</string>
     <string name="viewer_text_not_image">Szöveget csak fotóról lehet beolvasni.</string>

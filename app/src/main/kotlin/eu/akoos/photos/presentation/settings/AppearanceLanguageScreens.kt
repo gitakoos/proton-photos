@@ -94,6 +94,7 @@ fun AppearanceSettingsScreen(
     onTimelineFilterClick: () -> Unit = {},
     onAlbumsSettingsClick: () -> Unit = {},
     onLandingTabClick: () -> Unit = {},
+    onViewerClick: () -> Unit = {},
 ) {
     SettingsSubPageScaffold(title = stringResource(R.string.settings_appearance), onBack = onBack) {
         SectionLabel(stringResource(R.string.settings_section_look))
@@ -133,11 +134,44 @@ fun AppearanceSettingsScreen(
             )
             RowDivider()
             NavRow(
+                label = stringResource(R.string.settings_viewer),
+                onClick = onViewerClick,
+            )
+            RowDivider()
+            NavRow(
                 label = stringResource(R.string.settings_landing_tab),
                 onClick = onLandingTabClick,
             )
         }
     }}
+
+/** How the photo viewer reacts to touch. Each choice of the viewer gets its own section here. */
+@Composable
+fun ViewerSettingsScreen(
+    onBack: () -> Unit,
+    viewModel: ViewerLongPressViewModel = hiltViewModel(),
+) {
+    val opensMenu by viewModel.opensMenu.collectAsStateWithLifecycle()
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_viewer), onBack = onBack) {
+        SectionLabel(stringResource(R.string.settings_viewer_long_press))
+        Spacer(Modifier.height(8.dp))
+        SettingsCard {
+            ChoiceRow(
+                label = stringResource(R.string.viewer_select_text),
+                description = null,
+                selected = !opensMenu,
+                onClick = { viewModel.set(opensMenu = false) },
+            )
+            RowDivider()
+            ChoiceRow(
+                label = stringResource(R.string.settings_viewer_long_press_menu),
+                description = stringResource(R.string.settings_viewer_long_press_menu_desc),
+                selected = opensMenu,
+                onClick = { viewModel.set(opensMenu = true) },
+            )
+        }
+    }
+}
 
 /** Theme mode (System / Light / Dark) plus the colour palette. */
 @Composable
@@ -269,6 +303,23 @@ class ClockFormatViewModel @Inject constructor(
 
     fun set(format: ClockFormat) {
         viewModelScope.launch { context.settingsDataStore.edit { it[SettingsKeys.CLOCK_FORMAT] = format.key } }
+    }
+}
+
+/** What a long press on the photo in the viewer does: select its text, or open the menu. */
+@HiltViewModel
+class ViewerLongPressViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
+) : ViewModel() {
+
+    val opensMenu: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU] == true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), false)
+
+    fun set(opensMenu: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU] = opensMenu }
+        }
     }
 }
 

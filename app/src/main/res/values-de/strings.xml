@@ -428,6 +428,10 @@
     <string name="settings_appearance_desc">Design, Sprache, Verlauf und Alben</string>
     <string name="settings_section_look">Darstellung</string>
     <string name="settings_section_library">Bibliothek</string>
+    <string name="settings_viewer">Fotoansicht</string>
+    <string name="settings_viewer_long_press">Langes Drücken in der Fotoansicht</string>
+    <string name="settings_viewer_long_press_menu">Menü öffnen</string>
+    <string name="settings_viewer_long_press_menu_desc">Dasselbe Menü wie die drei Punkte in der oberen Ecke</string>
     <string name="settings_landing_tab">Startseite</string>
     <string name="settings_landing_tab_desc">Welcher Tab beim Start der App geöffnet wird</string>
     <string name="settings_strip_customize">Welche Metadaten entfernt werden</string>
@@ -1245,6 +1249,9 @@
     <string name="viewer_loading">Wird geladen…</string>
     <string name="viewer_text_working">Text wird gelesen…</string>
     <string name="viewer_text_selectable">Zum Auswählen Text gedrückt halten</string>
+    <string name="viewer_select_text">Text auswählen</string>
+    <string name="viewer_recognize_text">Text erkennen</string>
+    <string name="viewer_text_off">Textlesen ist aus. Schalte in den Einstellungen Maschinelles Lernen und Text kopieren ein.</string>
     <string name="viewer_text_none">In diesem Foto wurde kein Text gefunden.</string>
     <string name="viewer_text_needs_full_size">Zum Lesen von Text wird das Foto in voller Größe gebraucht. Lade es zuerst herunter.</string>
     <string name="viewer_text_not_image">Text lässt sich nur aus Fotos lesen.</string>

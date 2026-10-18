@@ -515,6 +515,10 @@
     <string name="settings_appearance_desc">Thema, taal, tijdlijn en albums</string>
     <string name="settings_section_look">Uiterlijk</string>
     <string name="settings_section_library">Bibliotheek</string>
+    <string name="settings_viewer">Fotoweergave</string>
+    <string name="settings_viewer_long_press">Lang indrukken in de fotoweergave</string>
+    <string name="settings_viewer_long_press_menu">Menu openen</string>
+    <string name="settings_viewer_long_press_menu_desc">Hetzelfde menu als de drie puntjes in de bovenhoek</string>
     <string name="settings_landing_tab">Starttabblad</string>
     <string name="settings_landing_tab_desc">Welk tabblad opent bij het starten van de app</string>
     <string name="settings_strip_customize">Aanpassen wat wordt verwijderd</string>
@@ -1261,6 +1265,9 @@
     <string name="viewer_loading">Laden…</string>
     <string name="viewer_text_working">Tekst lezen…</string>
     <string name="viewer_text_selectable">Houd ingedrukt om tekst te selecteren</string>
+    <string name="viewer_select_text">Tekst selecteren</string>
+    <string name="viewer_recognize_text">Tekst herkennen</string>
+    <string name="viewer_text_off">Tekst lezen staat uit. Zet Machine learning en Tekst kopiëren aan bij Instellingen.</string>
     <string name="viewer_text_none">Geen tekst gevonden in deze foto.</string>
     <string name="viewer_text_needs_full_size">Voor het lezen van tekst is de foto op volledige grootte nodig. Download hem eerst.</string>
     <string name="viewer_text_not_image">Tekst kan alleen uit foto\'s worden gelezen.</string>

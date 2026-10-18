@@ -675,6 +675,10 @@
     <string name="settings_appearance_desc">Motyw, język, oś czasu i albumy</string>
     <string name="settings_section_look">Wygląd</string>
     <string name="settings_section_library">Biblioteka</string>
+    <string name="settings_viewer">Przeglądarka zdjęć</string>
+    <string name="settings_viewer_long_press">Długie naciśnięcie w przeglądarce zdjęć</string>
+    <string name="settings_viewer_long_press_menu">Otwórz menu</string>
+    <string name="settings_viewer_long_press_menu_desc">To samo menu co trzy kropki w górnym rogu</string>
     <string name="settings_landing_tab">Karta startowa</string>
     <string name="settings_landing_tab_desc">Która karta otwiera się po uruchomieniu aplikacji</string>
     <string name="settings_strip_customize">Dostosuj, co jest usuwane</string>
@@ -1476,6 +1480,9 @@
     <string name="viewer_loading">Wczytywanie…</string>
     <string name="viewer_text_working">Odczytywanie tekstu…</string>
     <string name="viewer_text_selectable">Naciśnij i przytrzymaj, aby zaznaczyć tekst</string>
+    <string name="viewer_select_text">Zaznacz tekst</string>
+    <string name="viewer_recognize_text">Rozpoznaj tekst</string>
+    <string name="viewer_text_off">Odczyt tekstu jest wyłączony. Włącz Uczenie maszynowe i Kopiuj tekst w Ustawieniach.</string>
     <string name="viewer_text_none">Nie znaleziono tekstu na tym zdjęciu.</string>
     <string name="viewer_text_needs_full_size">Do odczytania tekstu potrzebne jest zdjęcie w pełnym rozmiarze. Najpierw je pobierz.</string>
     <string name="viewer_text_not_image">Tekst można odczytać tylko ze zdjęć.</string>

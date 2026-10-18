@@ -681,6 +681,13 @@ class PhotoViewerViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** Whether a long press on the photo opens the top-right menu instead of selecting its text
+     *  (Settings, Appearance). Observed, so a Settings change is reflected the next time it is opened. */
+    val longPressOpensMenu: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU] == true }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
      *  the viewer offers the people-in-this-photo action, so turning faces off suppresses it while the
      *  master AI switch stays on. Observed, so a Settings change is reflected the next time the viewer

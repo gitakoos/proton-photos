@@ -212,6 +212,11 @@ object SettingsKeys {
     /** When true, an album cover that is a GIF animates; off shows a still first frame. Off by default. */
     val GIF_AUTOPLAY_COVERS = booleanPreferencesKey("gif_autoplay_covers")
 
+    /** When true, a long press on the photo in the viewer opens the top-right menu, the one its button
+     *  opens, instead of selecting the text on the photo. Off by default, so the long press keeps selecting
+     *  text unless the user switches it. */
+    val VIEWER_LONG_PRESS_OPENS_MENU = booleanPreferencesKey("viewer_long_press_opens_menu")
+
     /** true = the classic OpenStreetMap tile map; false (default) = the modern world map. */
     val MAP_STYLE_OSM = booleanPreferencesKey("map_style_osm")
 
