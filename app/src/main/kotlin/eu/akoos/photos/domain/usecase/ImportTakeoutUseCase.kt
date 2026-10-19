@@ -38,11 +38,17 @@ import eu.akoos.photos.data.db.entity.ImportAlbumMemberEntity
 import eu.akoos.photos.data.db.entity.ImportHistoryEntity
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
 import eu.akoos.photos.data.db.entity.ImportUploadedEntity
+import eu.akoos.photos.data.importer.ImportDriveMatcher
 import eu.akoos.photos.data.importer.ImportFileDate
 import eu.akoos.photos.data.importer.TakeoutZipReader
+import eu.akoos.photos.data.preferences.CompressionPreferences
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.data.repository.drive.UploadPhase
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.entity.compression.CompressionSettings
 import eu.akoos.photos.domain.importer.ImportAlbumMode
 import eu.akoos.photos.domain.importer.ImportCaptureDate
 import eu.akoos.photos.domain.importer.ImportFailure
@@ -51,6 +57,7 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.presentation.metadata.FilenameDate
 import eu.akoos.photos.util.AlbumListEventBus
 import eu.akoos.photos.util.ImportDiagnostics
+import eu.akoos.photos.util.MetadataStripConfig
 import eu.akoos.photos.util.Mp4CreationTime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -60,6 +67,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import java.util.concurrent.atomic.AtomicInteger
@@ -122,8 +130,9 @@ data class ImportSummary(
  *
  * Only the entries the review kept take part: the staged rows supply the metadata and the set to send,
  * so the walk streams a kept entry to a single temp file, stamps it with what the row knows (the caption
- * into an image's EXIF, the capture date into a video's mvhd), hashes it, uploads it, and deletes the
- * temp before the reader advances, so the whole export never has to fit on disk or in memory at once.
+ * into an image's EXIF, the capture date into a video's mvhd), compresses it with the backup's options,
+ * hashes it, uploads it, and deletes the temp before the reader advances, so the whole export never has to
+ * fit on disk or in memory at once. [ImportDriveMatcher] decides first whether Drive already holds it.
  *
  * The date/metadata mapping is factored into pure helpers on the companion so it is verifiable on the
  * JVM without Android; [uploadStaged] is the Android-facing shell that does the I/O.
@@ -141,6 +150,8 @@ class ImportTakeoutUseCase @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     private val albumListEvents: AlbumListEventBus,
     private val appDatabase: AppDatabase,
+    private val compressionStep: UploadCompressionStep,
+    private val driveMatcher: ImportDriveMatcher,
 ) {
 
     /**
@@ -203,21 +214,27 @@ class ImportTakeoutUseCase @Inject constructor(
             return summary
         }
 
-        // The content this run has already sent, keyed by Drive's HMAC ContentHash to the upload that
-        // created its link (held as a Deferred the duplicates await). It is read and written only from the
-        // sequential reader below, so a plain map needs no lock and leadership falls to the first
+        // The content this run has already resolved, keyed by the SHA-1 of the entry's archive bytes to the
+        // link it landed under (held as a Deferred the duplicates await). It is read and written only from
+        // the sequential reader below, so a plain map needs no lock and leadership falls to the first
         // occurrence in zip order, exactly as a one-at-a-time run resolved it. A second copy of the same
         // bytes later in the archive (the same photo in another export album) resolves to that link and
         // records its own album membership behind the single upload.
         val inRunUpload = HashMap<String, CompletableDeferred<String?>>()
 
+        // The backup's compression options apply to the import too; its strip options do not, and only
+        // decide whether a same-name twin of a backed-up photo counts as the same photo.
+        val prefs = context.settingsDataStore.data.first()
+        val compression = CompressionPreferences.settings(prefs)
+        val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
+
         // Bounded-parallel upload, mirroring the backup path. The zip is still read one entry at a time (a
         // single stream) and the reader does every ordered step itself (extract, metadata stamp, hash,
-        // dedup decision), but the slow network upload of a genuinely new file is offloaded to a pool of at
-        // most [IMPORT_UPLOAD_PARALLELISM], so several uploads run at once instead of strictly in turn. A
-        // permit is taken before a new file's upload and released when it finishes, which also caps how
-        // many extracted temp files exist at once. Only the upload is parallel, so the ledger, the dedup and
-        // the album membership keep their sequential meaning.
+        // dedup decision, compression), but the slow network upload of a genuinely new file is offloaded to
+        // a pool of at most [IMPORT_UPLOAD_PARALLELISM], so several uploads run at once instead of strictly
+        // in turn. A permit is taken before a new file's upload and released when it finishes, which also
+        // caps how many extracted temp files exist at once. Only the upload is parallel, so the ledger, the
+        // dedup and the album membership keep their sequential meaning.
         val uploadSemaphore = Semaphore(IMPORT_UPLOAD_PARALLELISM)
         // Progress + the skipped tally only; the per-outcome counts (imported / already-in-Drive / failed)
         // are read back from the durable ledger in buildSummary, so a resumed run still reports its whole
@@ -229,8 +246,9 @@ class ImportTakeoutUseCase @Inject constructor(
         val uploadedBytes = AtomicLong(0)
 
         val parentContext = coroutineContext[Job] ?: EmptyCoroutineContext
-        val stagedRows = if (pendingVideos.isEmpty()) emptyList() else importStagedDao.allForZip(zipId)
-        val stillsWithVideo = stagedRows.mapNotNull { it.liveOf }.toSet()
+        // Both halves of a Live Photo go up as they are: a re-encoded still or video would no longer match
+        // the other half.
+        val stillsWithVideo = importStagedDao.allForZip(zipId).mapNotNull { it.liveOf }.toSet()
         // The Drive link and the capture date of each still, read from the staged rows once the first pass
         // is done (so a still that went up before a kill counts too, and a date the first pass filled in).
         var stillLinks: Map<String, String> = emptyMap()
@@ -238,6 +256,27 @@ class ImportTakeoutUseCase @Inject constructor(
         coroutineScope {
             val uploadScope = this
             val jobs = mutableListOf<Deferred<Unit>>()
+
+            /** Records [row] as resolved by [linkId] that already held its bytes, in one transaction so a
+             *  kill cannot leave the row marked uploaded without its ledger and membership. */
+            suspend fun recordInDrive(row: ImportStagedEntity, linkId: String, sha1: String, raw: String, name: String, dateMs: Long) {
+                appDatabase.withTransaction {
+                    importStagedDao.markUploadedWithLink(zipId, row.entryName, linkId)
+                    importUploadedDao.insert(
+                        ImportUploadedEntity(
+                            runId = runId,
+                            linkId = linkId,
+                            sha1 = sha1,
+                            name = name,
+                            dateMs = dateMs,
+                            alreadyInDrive = true,
+                            sourceSha1 = raw,
+                            userId = userId.id,
+                        ),
+                    )
+                    if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, linkId)
+                }
+            }
 
             fun walk(rows: Map<String, ImportStagedEntity>) = TakeoutZipReader(openZip).forEachMediaEntry { entry, input ->
                 val name = entry.name
@@ -247,11 +286,10 @@ class ImportTakeoutUseCase @Inject constructor(
                 runBlocking(parentContext) {
                     ensureActive()
                     val temp = File.createTempFile("import_", tempSuffix(name), context.cacheDir)
-                    val sha1: String
-                    val contentHash: String?
-                    val item: LocalMediaItem
-                    val xAttr: UploadXAttrMetadata
+                    val displayName = row.title?.takeIf { it.isNotBlank() } ?: TakeoutZipReader.baseName(name)
+                    val raw: String
                     val rowDateMs: Long
+                    val plan: EntryPlan
                     try {
                         temp.outputStream().use { input.copyTo(it) }
                         val mimeType = mimeTypeFor(name)
@@ -267,33 +305,28 @@ class ImportTakeoutUseCase @Inject constructor(
                             ).also { importStagedDao.setDateMs(zipId, name, it) }
                         }
                         val captureMs = row.liveOf?.let { stillDateMs[it] } ?: rowDateMs
-                        val meta = SidecarMeta(
-                            takenMs = captureMs,
-                            lat = row.lat,
-                            lng = row.lng,
-                            description = row.description,
-                            title = row.title,
-                        )
-                        val dateMs = captureMs
-                        val tempUri = Uri.fromFile(temp).toString()
-                        // Both stamps change the bytes, so they must precede the hash: Drive's ContentHash is
-                        // computed from exactly what is uploaded. The caption write self-skips a container it
-                        // cannot address; a video whose mvhd already records the date is left as it is.
-                        row.description?.takeIf { it.isNotBlank() }?.let { desc ->
-                            runCatching {
-                                writeLocalPhotoMetadataUseCase.writeDescriptiveText(
-                                    tempUri,
-                                    description = TextTagEdit.SetTo(desc),
-                                )
-                            }
+                        // The archive's own bytes: the key a duplicate in this run, and a later run of the
+                        // same photo, is recognised by, whatever the caption, the date stamp or the
+                        // compression do to the bytes afterwards.
+                        raw = sha1Hex(temp)
+                        val leader = inRunUpload[raw]
+                        plan = if (leader != null) {
+                            EntryPlan.Duplicate(leader)
+                        } else {
+                            prepare(
+                                userId = userId,
+                                row = row,
+                                entryName = name,
+                                temp = temp,
+                                mimeType = mimeType,
+                                captureMs = captureMs,
+                                raw = raw,
+                                displayName = displayName,
+                                compression = compression,
+                                stripOnUpload = stripOnUpload,
+                                pairMember = row.liveOf != null || name in stillsWithVideo,
+                            )
                         }
-                        if (isVideo(mimeType)) {
-                            runCatching { Mp4CreationTime.stampIfChanged(temp, dateMs) }
-                        }
-                        sha1 = sha1Hex(temp)
-                        contentHash = drivePhotoRepository.cloudContentHash(sha1)
-                        item = buildLocalMediaItem(tempUri, meta, name, temp.length(), mimeType, dateMs)
-                        xAttr = buildXAttr(meta, dateMs, width = null, height = null, durationMs = null)
                     } catch (e: CancellationException) {
                         temp.delete()
                         throw e
@@ -309,125 +342,94 @@ class ImportTakeoutUseCase @Inject constructor(
                         return@runBlocking
                     }
 
-                    val displayName = row.title?.takeIf { it.isNotBlank() } ?: TakeoutZipReader.baseName(name)
-                    val leaderDeferred = contentHash?.let { inRunUpload[it] }
-                    when {
-                        // A duplicate of bytes an earlier entry this run is already uploading: do not send a
-                        // second copy. Await that upload's link and record this entry's own album membership
+                    when (plan) {
+                        // A duplicate of bytes an earlier entry this run already resolved: do not send a
+                        // second copy. Await that entry's link and record this entry's own album membership
                         // behind it. The temp is not needed here, so it goes now.
-                        leaderDeferred != null -> {
+                        is EntryPlan.Duplicate -> {
                             row.thumbPath?.let { path -> runCatching { File(path).delete() } }
                             temp.delete()
                             jobs += uploadScope.async<Unit> {
-                                val linkId = leaderDeferred.await()
+                                val linkId = plan.leader.await()
                                 if (linkId != null) {
-                                    // One transaction so a kill cannot leave the row marked uploaded without
-                                    // its ledger + membership (which would miscount it and drop it from undo).
-                                    appDatabase.withTransaction {
-                                        importStagedDao.markUploadedWithLink(zipId, name, linkId)
-                                        importUploadedDao.insert(
-                                            ImportUploadedEntity(
-                                                runId = runId,
-                                                linkId = linkId,
-                                                sha1 = sha1,
-                                                name = displayName,
-                                                dateMs = rowDateMs,
-                                                alreadyInDrive = true,
-                                            ),
-                                        )
-                                        if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, linkId)
-                                    }
+                                    recordInDrive(row, linkId, raw, raw, displayName, rowDateMs)
                                     Log.d(TAG, "entry ${processedCount.get() + 1}/$total: in-run duplicate, linked")
                                 }
                                 val done = processedCount.incrementAndGet()
                                 onProgress(ImportProgress(done, total, name, null, 0L, 0L))
                             }
                         }
-                        else -> {
-                            // Cross-run dedup: Drive already held these exact bytes before this run started.
-                            val crossRunHit = contentHash != null &&
-                                photoListingDao.findExistingContentHashes(userId.id, listOf(contentHash)).isNotEmpty()
-                            if (crossRunHit) {
-                                val crossRunLink = contentHash?.let { photoListingDao.linkIdByContentHash(userId.id, it) }
-                                Log.d(TAG, "entry ${processedCount.get() + 1}/$total: already in Drive, skipped")
-                                appDatabase.withTransaction {
-                                    importStagedDao.markUploadedWithLink(zipId, name, crossRunLink)
-                                    if (crossRunLink != null) {
+                        // Drive already held this photo before this run reached it.
+                        is EntryPlan.InDrive -> {
+                            inRunUpload[raw] = CompletableDeferred(plan.linkId)
+                            Log.d(TAG, "entry ${processedCount.get() + 1}/$total: already in Drive, skipped")
+                            recordInDrive(row, plan.linkId, plan.sha1, raw, displayName, rowDateMs)
+                            row.thumbPath?.let { path -> runCatching { File(path).delete() } }
+                            temp.delete()
+                            val done = processedCount.incrementAndGet()
+                            onProgress(ImportProgress(done, total, name, null, 0L, 0L))
+                        }
+                        // A genuinely new file: this entry leads its content. Register the Deferred before
+                        // the reader moves on so any later duplicate finds it, take a permit (bounding
+                        // concurrent uploads and live temps), and offload the upload.
+                        is EntryPlan.Upload -> {
+                            val deferred = CompletableDeferred<String?>()
+                            inRunUpload[raw] = deferred
+                            uploadSemaphore.acquire()
+                            jobs += uploadScope.async<Unit> {
+                                try {
+                                    // Time the send and surface the phase the shared upload service reports
+                                    // (encrypting, then uploading), so a debug trace shows what each photo
+                                    // is doing and how long it takes. Stripped in release.
+                                    val uploadStart = System.currentTimeMillis()
+                                    var lastPhase: UploadPhase? = null
+                                    val item = plan.item
+                                    val linkId = drivePhotoRepository.uploadFileLinked(
+                                        userId, item, plan.sha1, plan.uploadUri, plan.xAttr,
+                                        mainPhotoLinkId = row.liveOf?.let { stillLinks[it] },
+                                        extraTags = if (name in stillsWithVideo) setOf(LIVE_PHOTO_TAG) else emptySet(),
+                                    ) { phase, _, _ ->
+                                        if (phase != lastPhase) {
+                                            lastPhase = phase
+                                            val label = if (phase == UploadPhase.Encrypting) "encrypting" else "uploading"
+                                            Log.d(TAG, "${item.displayName}: $label")
+                                        }
+                                    }
+                                    uploadedBytes.addAndGet(item.sizeBytes)
+                                    Log.d(TAG, "${item.displayName}: done ${item.sizeBytes / 1024}KB in ${System.currentTimeMillis() - uploadStart}ms")
+                                    appDatabase.withTransaction {
+                                        importStagedDao.markUploadedWithLink(zipId, name, linkId)
                                         importUploadedDao.insert(
                                             ImportUploadedEntity(
                                                 runId = runId,
-                                                linkId = crossRunLink,
-                                                sha1 = sha1,
-                                                name = displayName,
+                                                linkId = linkId,
+                                                sha1 = plan.sha1,
+                                                name = item.displayName,
                                                 dateMs = rowDateMs,
-                                                alreadyInDrive = true,
+                                                sourceSha1 = raw,
+                                                userId = userId.id,
                                             ),
                                         )
+                                        if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, linkId)
                                     }
-                                    if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, crossRunLink)
-                                }
-                                row.thumbPath?.let { path -> runCatching { File(path).delete() } }
-                                temp.delete()
-                                val done = processedCount.incrementAndGet()
-                                onProgress(ImportProgress(done, total, name, null, 0L, 0L))
-                            } else {
-                                // A genuinely new file: this entry leads its content. Register the Deferred
-                                // before the reader moves on so any later duplicate finds it, take a permit
-                                // (bounding concurrent uploads and live temps), and offload the upload.
-                                val deferred = CompletableDeferred<String?>()
-                                if (contentHash != null) inRunUpload[contentHash] = deferred
-                                uploadSemaphore.acquire()
-                                jobs += uploadScope.async<Unit> {
-                                    try {
-                                        // Time the send and surface the phase the shared upload service reports
-                                        // (encrypting, then uploading), so a debug trace shows what each photo
-                                        // is doing and how long it takes. Stripped in release.
-                                        val uploadStart = System.currentTimeMillis()
-                                        var lastPhase: UploadPhase? = null
-                                        val linkId = drivePhotoRepository.uploadFileLinked(
-                                            userId, item, sha1, item.uri, xAttr,
-                                            mainPhotoLinkId = row.liveOf?.let { stillLinks[it] },
-                                            extraTags = if (name in stillsWithVideo) setOf(LIVE_PHOTO_TAG) else emptySet(),
-                                        ) { phase, _, _ ->
-                                            if (phase != lastPhase) {
-                                                lastPhase = phase
-                                                val label = if (phase == UploadPhase.Encrypting) "encrypting" else "uploading"
-                                                Log.d(TAG, "$displayName: $label")
-                                            }
-                                        }
-                                        uploadedBytes.addAndGet(item.sizeBytes)
-                                        Log.d(TAG, "$displayName: done ${item.sizeBytes / 1024}KB in ${System.currentTimeMillis() - uploadStart}ms")
-                                        appDatabase.withTransaction {
-                                            importStagedDao.markUploadedWithLink(zipId, name, linkId)
-                                            importUploadedDao.insert(
-                                                ImportUploadedEntity(
-                                                    runId = runId,
-                                                    linkId = linkId,
-                                                    sha1 = sha1,
-                                                    name = displayName,
-                                                    dateMs = rowDateMs,
-                                                ),
-                                            )
-                                            if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, linkId)
-                                        }
-                                        contentHash?.let { hash ->
-                                            runCatching { photoListingDao.seedContentHash(userId.id, linkId, hash) }
-                                        }
-                                        deferred.complete(linkId)
-                                    } catch (e: CancellationException) {
-                                        deferred.complete(null)
-                                        throw e
-                                    } catch (e: Exception) {
-                                        Log.w(TAG, "upload failed for $name: ${e.message}")
-                                        deferred.complete(null)
-                                    } finally {
-                                        if (!deferred.isCompleted) deferred.complete(null)
-                                        row.thumbPath?.let { path -> runCatching { File(path).delete() } }
-                                        temp.delete()
-                                        uploadSemaphore.release()
-                                        val done = processedCount.incrementAndGet()
-                                        onProgress(ImportProgress(done, total, name, null, 0L, 0L))
+                                    drivePhotoRepository.cloudContentHash(plan.sha1)?.let { hash ->
+                                        runCatching { photoListingDao.seedContentHash(userId.id, linkId, hash) }
                                     }
+                                    deferred.complete(linkId)
+                                } catch (e: CancellationException) {
+                                    deferred.complete(null)
+                                    throw e
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "upload failed for $name: ${e.message}")
+                                    deferred.complete(null)
+                                } finally {
+                                    if (!deferred.isCompleted) deferred.complete(null)
+                                    row.thumbPath?.let { path -> runCatching { File(path).delete() } }
+                                    plan.compressed?.delete()
+                                    temp.delete()
+                                    uploadSemaphore.release()
+                                    val done = processedCount.incrementAndGet()
+                                    onProgress(ImportProgress(done, total, name, null, 0L, 0L))
                                 }
                             }
                         }
@@ -495,6 +497,120 @@ class ImportTakeoutUseCase @Inject constructor(
             photosAddedToAlbums = summary.photosAddedToAlbums,
         )
         return summary
+    }
+
+    /** What becomes of one entry: a copy of bytes an earlier entry of this run resolved, a photo Drive
+     *  already holds under [InDrive.linkId], or an upload of the bytes at [Upload.uploadUri]. */
+    private sealed interface EntryPlan {
+        class Duplicate(val leader: CompletableDeferred<String?>) : EntryPlan
+        class InDrive(val linkId: String, val sha1: String) : EntryPlan
+        class Upload(
+            val item: LocalMediaItem,
+            val sha1: String,
+            val uploadUri: String,
+            val xAttr: UploadXAttrMetadata,
+            /** The compressed temp [uploadUri] names, or null when the extracted file itself is sent. */
+            val compressed: File?,
+        ) : EntryPlan
+    }
+
+    /**
+     * Readies the extracted [temp] of an entry no earlier entry of this run shares bytes with. The caption
+     * goes into an image's EXIF and the capture date into a video's mvhd, then the entry is looked up in
+     * Drive under its archive digest [raw] and its stamped digest. A photo that is not there yet is
+     * compressed with the backup's options (never a half of a Live Photo, [pairMember]), and the bytes to
+     * send are looked up once more. Drive's ContentHash is computed from exactly what is uploaded, so the
+     * upload carries the digest of the file it sends, and a format the compression changed renames it.
+     */
+    private suspend fun prepare(
+        userId: UserId,
+        row: ImportStagedEntity,
+        entryName: String,
+        temp: File,
+        mimeType: String,
+        captureMs: Long,
+        raw: String,
+        displayName: String,
+        compression: CompressionSettings,
+        stripOnUpload: Boolean,
+        pairMember: Boolean,
+    ): EntryPlan {
+        val tempUri = Uri.fromFile(temp).toString()
+        val caption = row.description?.takeIf { it.isNotBlank() }
+        // The caption write self-skips a container it cannot address; a video whose mvhd already records
+        // the date is left as it is.
+        caption?.let { writeCaption(tempUri, it) }
+        if (isVideo(mimeType)) {
+            runCatching { Mp4CreationTime.stampIfChanged(temp, captureMs) }
+        }
+        val stamped = if (caption == null && !isVideo(mimeType)) raw else sha1Hex(temp)
+        driveMatcher.find(
+            userId,
+            ImportDriveMatcher.Entry(listOf(raw, stamped), raw, displayName, mimeType, captureMs),
+            compression,
+            stripOnUpload,
+            confirmLedgerLink = true,
+        )?.let { return EntryPlan.InDrive(it, stamped) }
+
+        val compressed = if (pairMember) null else compress(tempUri, mimeType, captureMs, compression)
+        try {
+            // A HEIC the first caption write could not reach comes out of compression as a JPEG that can
+            // carry the caption.
+            if (compressed != null && caption != null && !isVideo(mimeType)) {
+                writeCaption(Uri.fromFile(compressed.first).toString(), caption)
+            }
+            val sent = compressed?.first ?: temp
+            val sha1 = if (compressed != null) sha1Hex(sent) else stamped
+            if (compressed != null) {
+                driveMatcher.linkByContent(userId, listOf(sha1))?.let { linkId ->
+                    sent.delete()
+                    return EntryPlan.InDrive(linkId, sha1)
+                }
+            }
+            val (uploadName, uploadMime) = UploadFormatNaming.forProducedFormat(displayName, mimeType, compressed?.second)
+            val meta = SidecarMeta(
+                takenMs = captureMs,
+                lat = row.lat,
+                lng = row.lng,
+                description = row.description,
+                title = row.title,
+            )
+            // The item keeps the extracted file as its source, so the category detection reads the
+            // original; its name, type and size follow the bytes sent.
+            val item = buildLocalMediaItem(tempUri, meta, entryName, sent.length(), mimeType, captureMs)
+                .copy(displayName = uploadName, mimeType = uploadMime)
+            val xAttr = buildXAttr(meta, captureMs, width = null, height = null, durationMs = null)
+            return EntryPlan.Upload(item, sha1, Uri.fromFile(sent).toString(), xAttr, compressed?.first)
+        } catch (e: Throwable) {
+            compressed?.first?.delete()
+            throw e
+        }
+    }
+
+    /** The backup's compression of the file at [uri]: the smaller temp and the format it holds, or null to
+     *  send the file as it is. */
+    private suspend fun compress(
+        uri: String,
+        mimeType: String,
+        captureMs: Long,
+        settings: CompressionSettings,
+    ): Pair<File, String>? {
+        if (isVideo(mimeType)) {
+            if (!compressionStep.compressesVideo(mimeType, settings)) return null
+            val attempt = compressionStep.video(uri, settings, captureMs)
+            Log.d(TAG, "video compression ${attempt.outcome} ${attempt.reason ?: ""}")
+            return attempt.file?.let { it to UploadFormatNaming.MP4 }
+        }
+        val result = compressionStep.photo(uri, mimeType, settings, MetadataStripConfig())
+        result.outcome?.let { Log.d(TAG, "photo compression $it ${result.reason ?: ""}") }
+        val file = result.file ?: return null
+        return file to (result.producedMime ?: UploadFormatNaming.JPEG)
+    }
+
+    private suspend fun writeCaption(uri: String, caption: String) {
+        runCatching {
+            writeLocalPhotoMetadataUseCase.writeDescriptiveText(uri, description = TextTagEdit.SetTo(caption))
+        }
     }
 
     /**

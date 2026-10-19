@@ -64,6 +64,14 @@ interface ImportUploadedDao {
     @Query("SELECT COUNT(*) FROM import_uploaded WHERE runId = :runId AND alreadyInDrive = 1")
     suspend fun alreadyInDriveCount(runId: String): Int
 
+    /** The Drive links any run of [userId]'s recorded for an entry whose archive bytes hash to [sourceSha1],
+     *  newest first, leaving out the ones an undo trashed. */
+    @Query(
+        "SELECT linkId FROM import_uploaded WHERE userId = :userId AND sourceSha1 = :sourceSha1 AND undone = 0 " +
+            "GROUP BY linkId ORDER BY MAX(id) DESC",
+    )
+    suspend fun linksForSource(userId: String, sourceSha1: String): List<String>
+
     /** Every Drive link the run uploaded, for a caller that only needs the identifiers. */
     @Query("SELECT linkId FROM import_uploaded WHERE runId = :runId")
     suspend fun linkIdsByRun(runId: String): List<String>

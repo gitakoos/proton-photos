@@ -27,6 +27,7 @@ import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.importer.ImportDriveMatcher
 import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.ImportFailureKind
@@ -90,7 +91,11 @@ class StageImportResumeTest {
         coEvery { dao.thumbPaths(any()) } returns emptyList()
         val drive = mockk<DrivePhotoRepository>()
         every { drive.cloudContentHash(any()) } returns null
-        useCase = StageImportUseCase(context, dao, drive, mockk<PhotoListingDao>(relaxed = true))
+        useCase = StageImportUseCase(
+            context,
+            dao,
+            ImportDriveMatcher(drive, mockk<PhotoListingDao>(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)),
+        )
     }
 
     private fun cache() = ImportScanCache(File(context.cacheDir, ImportScanCache.DIR_NAME))

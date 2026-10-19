@@ -30,17 +30,19 @@ import android.os.Build
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.ImportStagedDao
-import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.importer.ImportDriveMatcher
 import eu.akoos.photos.data.importer.ImportFileDate
 import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.data.importer.LivePhotoPairing
 import eu.akoos.photos.data.importer.TakeoutZipReader
+import eu.akoos.photos.data.preferences.CompressionPreferences
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.importer.ImportCaptureDate
 import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.domain.importer.TakeoutSidecar
-import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.presentation.metadata.FilenameDate
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.ImportDiagnostics
@@ -49,6 +51,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
@@ -102,8 +105,7 @@ data class StageResult(val staged: Int, val endedEarly: Boolean, val readPercent
 class StageImportUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val importStagedDao: ImportStagedDao,
-    private val drivePhotoRepository: DrivePhotoRepository,
-    private val photoListingDao: PhotoListingDao,
+    private val driveMatcher: ImportDriveMatcher,
 ) {
 
     /**
@@ -160,6 +162,9 @@ class StageImportUseCase @Inject constructor(
             }
 
             val thumbDir = File(context.cacheDir, THUMB_DIR).apply { mkdirs() }
+            val prefs = context.settingsDataStore.data.first()
+            val compression = CompressionPreferences.settings(prefs)
+            val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
             val reader = TakeoutZipReader(openZip)
             // Each synchronous reader callback is bridged onto the caller's job so cancellation flows in.
             val parentContext = coroutineContext[Job] ?: EmptyCoroutineContext
@@ -261,17 +266,22 @@ class StageImportUseCase @Inject constructor(
                                 null
                             }
 
-                            // Stage-time dedup: hash the same temp the thumbnail came from and ask whether Drive
-                            // already holds these exact bytes, so the review can badge a pre-existing photo before
-                            // anything uploads. Already on the worker's IO dispatcher. Any failure (no root hash
-                            // key, a listing read that throws) degrades to "treat as new": the upload pass runs its
-                            // own dedup, so a false negative costs only a redundant upload that is then resolved
-                            // without a second copy. Never fatal to staging; cancellation still propagates.
+                            // Stage-time dedup: hash the same temp the thumbnail came from and ask the matcher the
+                            // upload uses whether Drive already holds this photo, so the review can badge it before
+                            // anything uploads. Already on the worker's IO dispatcher. The badge is a hint: the
+                            // upload pass decides again, on these same archive bytes and on what it stamps into
+                            // them. Any failure degrades to "treat as new". Never fatal to staging; cancellation
+                            // still propagates.
+                            val title = meta?.title?.takeIf { it.isNotBlank() } ?: TakeoutZipReader.baseName(name)
                             val alreadyInDrive = try {
                                 val sha1 = sha1Hex(temp)
-                                val hash = drivePhotoRepository.cloudContentHash(sha1)
-                                hash != null &&
-                                    photoListingDao.findExistingContentHashes(userId.id, listOf(hash)).isNotEmpty()
+                                driveMatcher.find(
+                                    userId,
+                                    ImportDriveMatcher.Entry(listOf(sha1), sha1, title, mimeType, dateMs),
+                                    compression,
+                                    stripOnUpload,
+                                    confirmLedgerLink = false,
+                                ) != null
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {
@@ -286,7 +296,7 @@ class StageImportUseCase @Inject constructor(
                             buffer += ImportStagedEntity(
                                 zipId = zipId,
                                 entryName = name,
-                                title = meta?.title?.takeIf { it.isNotBlank() } ?: TakeoutZipReader.baseName(name),
+                                title = title,
                                 dateMs = dateMs,
                                 lat = meta?.lat,
                                 lng = meta?.lng,
@@ -384,8 +394,8 @@ class StageImportUseCase @Inject constructor(
         return if (ext.isEmpty()) null else ".$ext"
     }
 
-    /** Hex SHA-1 of [file], streamed so a large entry is never fully buffered. Mirrors the upload pass's
-     *  digest so the stage-time dedup check keys on the same content hash the upload one resolves against. */
+    /** Hex SHA-1 of [file], streamed so a large entry is never fully buffered. The upload pass takes the
+     *  same digest of the same archive bytes, so the badge and the upload look up the same key. */
     private fun sha1Hex(file: File): String {
         val digest = MessageDigest.getInstance("SHA-1")
         file.inputStream().use { stream ->

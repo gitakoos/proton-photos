@@ -56,6 +56,7 @@ import eu.akoos.photos.data.repository.drive.CloudTrashOutcome
 import eu.akoos.photos.data.repository.drive.UploadPhase
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.data.transfer.TransferCenter
+import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumChild
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -166,7 +167,7 @@ class UploadPipelineIntegrationTest {
             pendingMetadataEditDao = db.pendingMetadataEditDao(),
             photoLocationDao = db.photoLocationDao(),
             structuralStripper = UploadStructuralStripper(context),
-            videoCompression = mockk(relaxed = true),
+            compressionStep = UploadCompressionStep(context, UploadStructuralStripper(context), mockk(relaxed = true)),
             context = context,
             appScope = appScope,
             albumListEvents = albumEvents,

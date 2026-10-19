@@ -48,6 +48,7 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.data.upload.UploadImageCompressor
 import eu.akoos.photos.data.upload.VideoUploadCompressor
 import eu.akoos.photos.data.upload.compression.VideoUploadCompression
@@ -179,7 +180,7 @@ class UploadPendingUseCaseTest {
         useCase = UploadPendingUseCase(
             syncStateRepo, localRepo, cloudRepo, mockk(relaxed = true), networkObserver,
             mockk(relaxed = true), uploadAlbumTargetDao, mockk(relaxed = true), mockk(relaxed = true),
-            UploadStructuralStripper(context), videoCompression, context,
+            UploadStructuralStripper(context), UploadCompressionStep(context, UploadStructuralStripper(context), videoCompression), context,
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined + kotlinx.coroutines.CoroutineExceptionHandler { _, _ -> }),
             eu.akoos.photos.util.AlbumListEventBus(),
         )

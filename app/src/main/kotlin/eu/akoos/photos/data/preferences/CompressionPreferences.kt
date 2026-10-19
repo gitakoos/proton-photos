@@ -25,6 +25,7 @@ package eu.akoos.photos.data.preferences
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import eu.akoos.photos.domain.entity.UploadCompressionTier
+import eu.akoos.photos.domain.entity.compression.CompressionSettings
 import eu.akoos.photos.domain.entity.compression.VideoCodecChoice
 import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
 
@@ -36,6 +37,15 @@ import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
  * pins that once at startup, and until it has run the same rule applies on read.
  */
 object CompressionPreferences {
+
+    /** Every upload compression option, read once, for the backup and the import alike. */
+    fun settings(prefs: Preferences): CompressionSettings = CompressionSettings(
+        photos = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false,
+        hdr = prefs[SettingsKeys.COMPRESS_HDR_PHOTOS] ?: false,
+        tier = UploadCompressionTier.fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: -1),
+        videos = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false,
+        videoProfile = videoProfile(prefs),
+    )
 
     fun videoProfile(prefs: Preferences): VideoCompressionProfile = VideoCompressionProfile(
         codec = videoCodec(prefs),

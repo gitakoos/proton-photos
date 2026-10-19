@@ -26,7 +26,11 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.AppDatabase
+import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.importer.ImportDriveMatcher
+import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.importer.ImportAlbumMode
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -75,6 +79,7 @@ class ImportLivePhotoUploadDbTest {
     @Before
     fun setUp() {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
+        runBlocking { ctx.settingsDataStore.edit { it.clear() } }
         db = Room.inMemoryDatabaseBuilder(ctx, AppDatabase::class.java).allowMainThreadQueries().build()
         val repo = mockk<DrivePhotoRepository>(relaxed = true)
         coEvery { repo.cloudContentHash(any()) } answers { "hash-${firstArg<String>()}" }
@@ -100,6 +105,8 @@ class ImportLivePhotoUploadDbTest {
             photoListingDao = db.photoListingDao(),
             albumListEvents = AlbumListEventBus(),
             appDatabase = db,
+            compressionStep = UploadCompressionStep(ctx, UploadStructuralStripper(ctx), mockk(relaxed = true)),
+            driveMatcher = ImportDriveMatcher(repo, db.photoListingDao(), db.importUploadedDao(), mockk(relaxed = true)),
         )
     }
 
