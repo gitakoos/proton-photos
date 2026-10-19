@@ -66,6 +66,9 @@ data class WalkResult(
     }
 }
 
+/** One media entry of an archive: its path and its modified time, null when the archive records none. */
+data class MediaEntry(val name: String, val modifiedMs: Long?)
+
 /** A read failure of the place the zip is stored (as opposed to a fault in the zip's own bytes), so the
  *  reader and its callers can tell "the source dropped out" from "the archive is damaged" even though a
  *  broken zip stream also raises plain I/O errors. */
@@ -148,8 +151,14 @@ class TakeoutZipReader(private val openStream: () -> InputStream) {
     fun forEachMedia(
         onBytes: ((Long) -> Unit)? = null,
         onMedia: (entryName: String, input: InputStream) -> Unit,
+    ): WalkResult = forEachMediaEntry(onBytes) { entry, input -> onMedia(entry.name, input) }
+
+    /** [forEachMedia] with the entry's modified time as well. */
+    fun forEachMediaEntry(
+        onBytes: ((Long) -> Unit)? = null,
+        onMedia: (entry: MediaEntry, input: InputStream) -> Unit,
     ): WalkResult = walk(onBytes) { entry, zip ->
-        if (isMedia(entry.name)) onMedia(entry.name, zip)
+        if (isMedia(entry.name)) onMedia(MediaEntry(entry.name, modifiedMsOf(entry)), zip)
     }
 
     /**
@@ -287,6 +296,13 @@ class TakeoutZipReader(private val openStream: () -> InputStream) {
             }
             return true
         }
+
+        /** An entry's modified time, or null when it carries none. A zip stores DOS times, whose earliest
+         *  value (1 January 1980) is what a writer leaves when it has no time, so that day counts as none. */
+        internal fun modifiedMsOf(entry: ZipEntry): Long? = entry.time.takeIf { it > DOS_EPOCH_END_MS }
+
+        /** 1980-01-02T00:00:00Z, past 1 January 1980 at local midnight in every zone. */
+        private const val DOS_EPOCH_END_MS = 315_619_200_000L
 
         /** A real sidecar is a few kilobytes; anything past this is not one and is skipped unread. */
         private const val MAX_SIDECAR_BYTES = 1_048_576

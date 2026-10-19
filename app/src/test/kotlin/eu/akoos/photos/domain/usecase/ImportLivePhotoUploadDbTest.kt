@@ -59,7 +59,13 @@ import java.util.zip.ZipOutputStream
 @Config(sdk = [34])
 class ImportLivePhotoUploadDbTest {
 
-    private data class Sent(val name: String, val mainPhotoLinkId: String?, val extraTags: Set<Int>, val link: String)
+    private data class Sent(
+        val name: String,
+        val mainPhotoLinkId: String?,
+        val extraTags: Set<Int>,
+        val link: String,
+        val dateTaken: Long = 0L,
+    )
 
     private lateinit var db: AppDatabase
     private lateinit var useCase: ImportTakeoutUseCase
@@ -78,7 +84,7 @@ class ImportLivePhotoUploadDbTest {
             val item = secondArg<LocalMediaItem>()
             synchronized(sent) {
                 val link = "link-${sent.size + 1}"
-                sent += Sent(item.displayName, arg(5), arg(6), link)
+                sent += Sent(item.displayName, arg(5), arg(6), link, item.dateTaken)
                 link
             }
         }
@@ -100,11 +106,13 @@ class ImportLivePhotoUploadDbTest {
     @After
     fun tearDown() = db.close()
 
-    private fun zipOf(vararg names: String): ByteArray {
+    private fun zipOf(vararg names: String): ByteArray = zipWithTimes(*names.map { it to null }.toTypedArray())
+
+    private fun zipWithTimes(vararg entries: Pair<String, Long?>): ByteArray {
         val bytes = ByteArrayOutputStream()
         ZipOutputStream(bytes).use { zip ->
-            names.forEach { name ->
-                zip.putNextEntry(ZipEntry(name))
+            entries.forEach { (name, time) ->
+                zip.putNextEntry(ZipEntry(name).apply { if (time != null) this.time = time })
                 zip.write("bytes of $name".toByteArray())
                 zip.closeEntry()
             }
@@ -112,9 +120,15 @@ class ImportLivePhotoUploadDbTest {
         return bytes.toByteArray()
     }
 
-    private fun row(name: String, liveOf: String? = null, uploaded: Boolean = false, linkId: String? = null) =
+    private fun row(
+        name: String,
+        liveOf: String? = null,
+        uploaded: Boolean = false,
+        linkId: String? = null,
+        dateMs: Long? = 1_700_000_000_000L,
+    ) =
         ImportStagedEntity(
-            zipId = ZIP, entryName = name, title = name.substringAfterLast('/'), dateMs = 1_700_000_000_000L,
+            zipId = ZIP, entryName = name, title = name.substringAfterLast('/'), dateMs = dateMs,
             sizeBytes = 20, uploaded = uploaded, stagedAt = 1L, liveOf = liveOf, linkId = linkId,
         )
 
@@ -208,6 +222,35 @@ class ImportLivePhotoUploadDbTest {
 
         dao.setExcluded(ZIP, listOf("Trip/IMG_1.jpg"), false)
         assertEquals(3, dao.pendingUpload(ZIP).size)
+    }
+
+    @Test
+    fun `a row staged without a date is dated by its zip entry, never the epoch`() = runBlocking {
+        val modified = 1_623_751_200_000L
+        val zip = zipWithTimes("Trip/meme.jpg" to modified)
+        db.importStagedDao().upsert(listOf(row("Trip/meme.jpg", dateMs = null)))
+
+        val summary = upload(zip)
+
+        assertEquals(1, summary.imported)
+        assertEquals(modified, sent.single().dateTaken)
+        assertEquals(modified, db.importStagedDao().allForZip(ZIP).single().dateMs)
+        assertEquals(modified, db.importUploadedDao().pendingByRun("run-1").single().dateMs)
+    }
+
+    @Test
+    fun `a dateless video takes the date its dateless still was given`() = runBlocking {
+        val stillTime = 1_623_751_200_000L
+        val zip = zipWithTimes("Trip/IMG_1.jpg" to stillTime, "Trip/IMG_1.mp4" to stillTime + 7_200_000L)
+        db.importStagedDao().upsert(
+            listOf(row("Trip/IMG_1.jpg", dateMs = null), row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg", dateMs = null)),
+        )
+
+        upload(zip)
+
+        assertEquals(stillTime, sent.single { it.name == "IMG_1.jpg" }.dateTaken)
+        assertEquals(stillTime, sent.single { it.name == "IMG_1.mp4" }.dateTaken)
+        assertTrue(db.importStagedDao().allForZip(ZIP).all { it.dateMs != null })
     }
 
     private companion object {

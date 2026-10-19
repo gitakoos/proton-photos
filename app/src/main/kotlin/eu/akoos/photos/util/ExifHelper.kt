@@ -267,6 +267,13 @@ object ExifHelper {
         }
     }
 
+    /** The capture instant [meta] records: DateTimeOriginal, else DateTime, pinned by its offset when
+     *  the file carries one and read in [zone] otherwise. Null when neither datetime parses. */
+    fun captureMs(meta: PhotoMetadata, zone: ZoneId): Long? =
+        (meta.dateTimeOriginal ?: meta.dateTime)?.let {
+            ExifDateFormat.fromExif(it, meta.offsetTimeOriginal, zone)
+        }
+
     /** Reads the raw EXIF orientation tag (one of [ExifInterface]'s ORIENTATION_* values)
      *  from a content [uri]. Returns ORIENTATION_NORMAL when the stream can't be opened or
      *  carries no orientation. */

@@ -22,14 +22,18 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.importer.LivePhotoPairing
+import eu.akoos.photos.domain.importer.SidecarMeta
+import eu.akoos.photos.domain.importer.TakeoutSidecar
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins the pure thumbnail-name hash the staging pass keys each cached preview by. Plain JVM, no Android,
- * no I/O; the Android `stage()` shell is out of scope here.
+ * Pins the pure thumbnail-name hash the staging pass keys each cached preview by, and the dates Live
+ * Photo pairing compares. Plain JVM, no Android, no I/O; the Android `stage()` shell is out of scope here.
  */
 class StageImportUseCaseTest {
 
@@ -63,5 +67,46 @@ class StageImportUseCaseTest {
         val a = StageImportUseCase.stableName("ab", "c")
         val b = StageImportUseCase.stableName("a", "bc")
         assertNotEquals(a, b)
+    }
+
+    // ---- pairingEntries --------------------------------------------------------------------------
+
+    private val now = 4_102_444_800_000L
+    private val hour = 3_600_000L
+
+    private fun row(name: String, dateMs: Long?) =
+        ImportStagedEntity(zipId = "zip", entryName = name, dateMs = dateMs, stagedAt = 1L)
+
+    @Test fun `a pair whose file dates are an hour apart still pairs`() {
+        val rows = listOf(row("Trip/IMG_1.HEIC", 1_700_000_000_000L), row("Trip/IMG_1.MOV", 1_700_000_000_000L + hour))
+
+        val entries = StageImportUseCase.pairingEntries(rows, emptyMap(), now)
+
+        assertEquals(listOf(null, null), entries.map { it.dateMs })
+        assertEquals(mapOf("Trip/IMG_1.MOV" to "Trip/IMG_1.HEIC"), LivePhotoPairing.stillByVideo(entries))
+    }
+
+    @Test fun `pairing reads the sidecar dates, not the stored ones`() {
+        val sidecarMs = 1_600_000_000_000L
+        val index = mapOf(
+            TakeoutSidecar.sidecarKey("IMG_2.HEIC.json") to SidecarMeta(sidecarMs, null, null, null, null),
+            TakeoutSidecar.sidecarKey("IMG_2.MOV.json") to SidecarMeta(sidecarMs + 1_000L, null, null, null, null),
+        )
+        val rows = listOf(row("a/IMG_2.HEIC", 1L), row("a/IMG_2.MOV", 2 * hour))
+
+        val entries = StageImportUseCase.pairingEntries(rows, index, now)
+
+        assertEquals(listOf(sidecarMs, sidecarMs + 1_000L), entries.map { it.dateMs })
+        assertEquals(1, LivePhotoPairing.stillByVideo(entries).size)
+    }
+
+    @Test fun `sidecar dates far apart still keep two photos apart`() {
+        val index = mapOf(
+            TakeoutSidecar.sidecarKey("IMG_3.jpg.json") to SidecarMeta(1_600_000_000_000L, null, null, null, null),
+            TakeoutSidecar.sidecarKey("IMG_3.mp4.json") to SidecarMeta(1_600_000_000_000L + hour, null, null, null, null),
+        )
+        val rows = listOf(row("IMG_3.jpg", 5L), row("IMG_3.mp4", 5L))
+
+        assertTrue(LivePhotoPairing.stillByVideo(StageImportUseCase.pairingEntries(rows, index, now)).isEmpty())
     }
 }

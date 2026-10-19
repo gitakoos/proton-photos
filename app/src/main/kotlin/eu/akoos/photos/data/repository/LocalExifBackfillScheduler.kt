@@ -264,9 +264,7 @@ class LocalExifBackfillScheduler @Inject constructor(
             if (la != null && lo != null) storeLocation(entry.uri, userId, la to lo)
         }
         if (entry.needsDate) {
-            val exifMs = (meta.dateTimeOriginal ?: meta.dateTime)?.let {
-                ExifDateFormat.fromExif(it, meta.offsetTimeOriginal, ZoneId.systemDefault())
-            }
+            val exifMs = ExifHelper.captureMs(meta, ZoneId.systemDefault())
             val correction = CaptureDateOverride.captureDateCorrection(
                 rawDateTakenMs = entry.dateTaken,
                 exifMs = exifMs,

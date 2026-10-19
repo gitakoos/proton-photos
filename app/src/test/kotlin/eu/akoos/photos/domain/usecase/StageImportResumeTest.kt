@@ -147,6 +147,28 @@ class StageImportResumeTest {
     }
 
     @Test
+    fun `every staged row gets a date, the sidecar first and the entry time when nothing else has one`() {
+        val modified = 1_623_751_200_000L
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { zip ->
+            listOf("Takeout/p1.jpg", "Takeout/plain.jpg").forEach { name ->
+                zip.putNextEntry(ZipEntry(name).apply { time = modified })
+                zip.write(ByteArray(2_000).also { Random(7).nextBytes(it) })
+                zip.closeEntry()
+            }
+            zip.putNextEntry(ZipEntry("Takeout/p1.jpg.json"))
+            zip.write("""{"photoTakenTime":{"timestamp":"1609459200"}}""".toByteArray())
+            zip.closeEntry()
+        }
+
+        stage(out.toByteArray())
+
+        val dates = staged.associate { it.entryName to it.dateMs }
+        assertEquals(1_609_459_200_000L, dates["Takeout/p1.jpg"])
+        assertEquals(modified, dates["Takeout/plain.jpg"])
+    }
+
+    @Test
     fun `a pass that was not interrupted starts clean even when the same zip was staged before`() {
         val zip = zipOf(4)
         stage(zip)

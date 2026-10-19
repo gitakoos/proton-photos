@@ -38,11 +38,13 @@ import eu.akoos.photos.data.db.entity.ImportAlbumMemberEntity
 import eu.akoos.photos.data.db.entity.ImportHistoryEntity
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
 import eu.akoos.photos.data.db.entity.ImportUploadedEntity
+import eu.akoos.photos.data.importer.ImportFileDate
 import eu.akoos.photos.data.importer.TakeoutZipReader
 import eu.akoos.photos.data.repository.drive.UploadPhase
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.importer.ImportAlbumMode
+import eu.akoos.photos.domain.importer.ImportCaptureDate
 import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
@@ -229,16 +231,17 @@ class ImportTakeoutUseCase @Inject constructor(
         val parentContext = coroutineContext[Job] ?: EmptyCoroutineContext
         val stagedRows = if (pendingVideos.isEmpty()) emptyList() else importStagedDao.allForZip(zipId)
         val stillsWithVideo = stagedRows.mapNotNull { it.liveOf }.toSet()
-        val stillDateMs = stagedRows.associate { it.entryName to it.dateMs }
-        // The Drive link each uploaded still ended up under, read from the staged rows once the first pass
-        // is done (so a still that went up before a kill counts too).
+        // The Drive link and the capture date of each still, read from the staged rows once the first pass
+        // is done (so a still that went up before a kill counts too, and a date the first pass filled in).
         var stillLinks: Map<String, String> = emptyMap()
+        var stillDateMs: Map<String, Long?> = emptyMap()
         coroutineScope {
             val uploadScope = this
             val jobs = mutableListOf<Deferred<Unit>>()
 
-            fun walk(rows: Map<String, ImportStagedEntity>) = TakeoutZipReader(openZip).forEachMedia { name, input ->
-                val row = rows[name] ?: return@forEachMedia
+            fun walk(rows: Map<String, ImportStagedEntity>) = TakeoutZipReader(openZip).forEachMediaEntry { entry, input ->
+                val name = entry.name
+                val row = rows[name] ?: return@forEachMediaEntry
                 // The reader stays on the caller's job so cancellation flows in; it prepares each entry in
                 // order here and offloads only the upload to [uploadScope].
                 runBlocking(parentContext) {
@@ -248,9 +251,22 @@ class ImportTakeoutUseCase @Inject constructor(
                     val contentHash: String?
                     val item: LocalMediaItem
                     val xAttr: UploadXAttrMetadata
+                    val rowDateMs: Long
                     try {
                         temp.outputStream().use { input.copyTo(it) }
-                        val captureMs = row.liveOf?.let { stillDateMs[it] } ?: row.dateMs
+                        val mimeType = mimeTypeFor(name)
+                        // A row staged before every entry got a date is dated here, from the untouched temp.
+                        rowDateMs = row.dateMs ?: run {
+                            val nowMs = System.currentTimeMillis()
+                            ImportCaptureDate.resolve(
+                                sidecarMs = null,
+                                fileMs = { ImportFileDate.read(context, temp, mimeType) },
+                                nameMs = FilenameDate.parse(TakeoutZipReader.baseName(name), nowMs),
+                                entryModifiedMs = entry.modifiedMs,
+                                nowMs = nowMs,
+                            ).also { importStagedDao.setDateMs(zipId, name, it) }
+                        }
+                        val captureMs = row.liveOf?.let { stillDateMs[it] } ?: rowDateMs
                         val meta = SidecarMeta(
                             takenMs = captureMs,
                             lat = row.lat,
@@ -258,12 +274,11 @@ class ImportTakeoutUseCase @Inject constructor(
                             description = row.description,
                             title = row.title,
                         )
-                        val mimeType = mimeTypeFor(name)
                         val dateMs = captureMs
                         val tempUri = Uri.fromFile(temp).toString()
                         // Both stamps change the bytes, so they must precede the hash: Drive's ContentHash is
                         // computed from exactly what is uploaded. The caption write self-skips a container it
-                        // cannot address; the mvhd stamp only matters for a video with a real date.
+                        // cannot address; a video whose mvhd already records the date is left as it is.
                         row.description?.takeIf { it.isNotBlank() }?.let { desc ->
                             runCatching {
                                 writeLocalPhotoMetadataUseCase.writeDescriptiveText(
@@ -272,8 +287,8 @@ class ImportTakeoutUseCase @Inject constructor(
                                 )
                             }
                         }
-                        if (dateMs != null && isVideo(mimeType)) {
-                            runCatching { Mp4CreationTime.stamp(temp, dateMs) }
+                        if (isVideo(mimeType)) {
+                            runCatching { Mp4CreationTime.stampIfChanged(temp, dateMs) }
                         }
                         sha1 = sha1Hex(temp)
                         contentHash = drivePhotoRepository.cloudContentHash(sha1)
@@ -316,7 +331,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                                 linkId = linkId,
                                                 sha1 = sha1,
                                                 name = displayName,
-                                                dateMs = row.dateMs,
+                                                dateMs = rowDateMs,
                                                 alreadyInDrive = true,
                                             ),
                                         )
@@ -344,7 +359,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                                 linkId = crossRunLink,
                                                 sha1 = sha1,
                                                 name = displayName,
-                                                dateMs = row.dateMs,
+                                                dateMs = rowDateMs,
                                                 alreadyInDrive = true,
                                             ),
                                         )
@@ -390,7 +405,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                                     linkId = linkId,
                                                     sha1 = sha1,
                                                     name = displayName,
-                                                    dateMs = row.dateMs,
+                                                    dateMs = rowDateMs,
                                                 ),
                                             )
                                             if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, linkId)
@@ -430,6 +445,7 @@ class ImportTakeoutUseCase @Inject constructor(
             if (pendingVideos.isNotEmpty()) {
                 val after = importStagedDao.allForZip(zipId).associateBy { it.entryName }
                 stillLinks = after.values.mapNotNull { r -> r.linkId?.let { r.entryName to it } }.toMap()
+                stillDateMs = after.mapValues { it.value.dateMs }
                 // A still that is in Drive without a known link (it was resolved as already there) cannot take its
                 // video, so that video goes up as a video of its own rather than waiting for a link that never comes.
                 val ready = pendingVideos.filterValues { v -> v.liveOf?.let { after[it] }?.uploaded == true }
@@ -684,30 +700,28 @@ class ImportTakeoutUseCase @Inject constructor(
 
     companion object {
 
-        /** The capture instant to stamp: the sidecar's recorded date when it has one, else the date the
-         *  file name encodes ([FilenameDate]), else null so the upload keeps no explicit date. */
+        /** The date an entry's sidecar records, else the date its file name encodes ([FilenameDate]), else
+         *  null. Live Photo pairing compares these; the upload date is [ImportCaptureDate]'s. */
         internal fun resolveDateMs(meta: SidecarMeta?, entryName: String, nowMs: Long): Long? =
             meta?.takenMs ?: FilenameDate.parse(TakeoutZipReader.baseName(entryName), nowMs)
 
-        /** The upload item for one entry. [dateMs] null means no date was recoverable, so the item is
-         *  marked non-explicit and dated 0 rather than claiming a fabricated capture time. The display
-         *  name prefers the sidecar's title, falling back to the entry's own base name. */
+        /** The upload item for one entry, dated [dateMs] (see [ImportCaptureDate]). The display name
+         *  prefers the sidecar's title, falling back to the entry's own base name. */
         internal fun buildLocalMediaItem(
             uri: String,
             meta: SidecarMeta?,
             entryName: String,
             sizeBytes: Long,
             mimeType: String,
-            dateMs: Long?,
+            dateMs: Long,
         ): LocalMediaItem =
             LocalMediaItem(
                 uri = uri,
-                dateTaken = dateMs ?: 0L,
+                dateTaken = dateMs,
                 displayName = meta?.title?.takeIf { it.isNotBlank() } ?: TakeoutZipReader.baseName(entryName),
                 mimeType = mimeType,
                 sizeBytes = sizeBytes,
                 bucketName = null,
-                dateTakenIsExplicit = dateMs != null,
             )
 
         /** The encrypted xAttr blocks for one entry: GPS straight from the sidecar (already null when

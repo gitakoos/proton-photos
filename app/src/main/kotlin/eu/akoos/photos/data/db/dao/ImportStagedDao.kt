@@ -76,6 +76,10 @@ interface ImportStagedDao {
     @Query("UPDATE import_staged SET liveOf = :stillName WHERE zipId = :zipId AND entryName = :videoName")
     suspend fun setLiveOf(zipId: String, videoName: String, stillName: String)
 
+    /** Stores the capture date one entry is uploaded with. */
+    @Query("UPDATE import_staged SET dateMs = :dateMs WHERE zipId = :zipId AND entryName = :entryName")
+    suspend fun setDateMs(zipId: String, entryName: String, dateMs: Long)
+
     /** Records whether one entry's content already lives in Drive, so the review can badge it a skip. */
     @Query("UPDATE import_staged SET alreadyInDrive = :flag WHERE zipId = :zipId AND entryName = :entryName")
     suspend fun setAlreadyInDrive(zipId: String, entryName: String, flag: Boolean)

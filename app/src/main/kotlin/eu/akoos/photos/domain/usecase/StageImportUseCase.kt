@@ -32,12 +32,16 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.importer.ImportFileDate
 import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.data.importer.LivePhotoPairing
 import eu.akoos.photos.data.importer.TakeoutZipReader
+import eu.akoos.photos.domain.importer.ImportCaptureDate
 import eu.akoos.photos.domain.importer.ImportFailure
+import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.domain.importer.TakeoutSidecar
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.presentation.metadata.FilenameDate
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.ImportDiagnostics
 import eu.akoos.photos.util.ImportEventLog
@@ -209,7 +213,7 @@ class StageImportUseCase @Inject constructor(
             // The entry is fully processed (copied, thumbed, its temp deleted) before the reader advances,
             // one at a time, and a failure of one entry's own work is logged and skipped.
             val walk = try {
-                reader.forEachMedia(
+                reader.forEachMediaEntry(
                     onBytes = { bytes ->
                         bytesDone = bytes
                         // While stepping over entries staged by the earlier attempt nothing else ticks, so
@@ -225,8 +229,9 @@ class StageImportUseCase @Inject constructor(
                             }
                         }
                     },
-                ) { name, input ->
-                    if (name in alreadyStaged) return@forEachMedia
+                ) { entry, input ->
+                    val name = entry.name
+                    if (name in alreadyStaged) return@forEachMediaEntry
                     worked = true
                     runBlocking(parentContext) {
                         ensureActive()
@@ -234,10 +239,16 @@ class StageImportUseCase @Inject constructor(
                         try {
                             temp.outputStream().use { input.copyTo(it) }
 
-                            val meta = TakeoutSidecar.candidateMediaKeys(TakeoutZipReader.baseName(name))
-                                .firstNotNullOfOrNull { index[it] }
+                            val meta = TakeoutSidecar.lookup(index, name)
                             val mimeType = ImportTakeoutUseCase.mimeTypeFor(name)
-                            val dateMs = ImportTakeoutUseCase.resolveDateMs(meta, name, System.currentTimeMillis())
+                            val nowMs = System.currentTimeMillis()
+                            val dateMs = ImportCaptureDate.resolve(
+                                sidecarMs = meta?.takenMs,
+                                fileMs = { ImportFileDate.read(context, temp, mimeType) },
+                                nameMs = FilenameDate.parse(TakeoutZipReader.baseName(name), nowMs),
+                                entryModifiedMs = entry.modifiedMs,
+                                nowMs = nowMs,
+                            )
 
                             // Best-effort thumbnail: any decode failure leaves thumbPath null so the review shows
                             // a placeholder rather than failing the whole entry. Cancellation still propagates.
@@ -328,7 +339,7 @@ class StageImportUseCase @Inject constructor(
             // shows one photo and the upload sends the video behind it. Safe to repeat on a resumed pass.
             val livePairs = try {
                 LivePhotoPairing.stillByVideo(
-                    importStagedDao.allForZip(zipId).map { LivePhotoPairing.Entry(it.entryName, it.dateMs) },
+                    pairingEntries(importStagedDao.allForZip(zipId), index, System.currentTimeMillis()),
                 ).also { pairs -> pairs.forEach { (video, still) -> importStagedDao.setLiveOf(zipId, video, still) } }
             } catch (e: CancellationException) {
                 throw e
@@ -513,6 +524,22 @@ class StageImportUseCase @Inject constructor(
 
         /** How many staged rows to buffer before a batch insert, so the DB is not hit per entry. */
         private const val BATCH_SIZE = 50
+
+        /**
+         * The pairing input for [rows]. A still and its video record their own times in different clocks
+         * (the mvhd is often local time), hours apart, so each date comes from the sidecar or the file
+         * name only, never from the stored [ImportStagedEntity.dateMs], which may come from the file.
+         */
+        internal fun pairingEntries(
+            rows: List<ImportStagedEntity>,
+            index: Map<String, SidecarMeta>,
+            nowMs: Long,
+        ): List<LivePhotoPairing.Entry> = rows.map { row ->
+            LivePhotoPairing.Entry(
+                row.entryName,
+                ImportTakeoutUseCase.resolveDateMs(TakeoutSidecar.lookup(index, row.entryName), row.entryName, nowMs),
+            )
+        }
 
         /**
          * A deterministic, collision-free base name for the cached thumbnail of [entryName] within
