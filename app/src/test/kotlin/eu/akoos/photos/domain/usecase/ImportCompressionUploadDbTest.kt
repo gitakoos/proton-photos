@@ -32,6 +32,8 @@ import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.importer.ImportDriveMatcher
+import eu.akoos.photos.data.importer.ImportSource
+import eu.akoos.photos.data.importer.TakeoutZipReader
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.drive.LinkDetailHelpers
@@ -167,8 +169,9 @@ class ImportCompressionUploadDbTest {
     )
 
     private suspend fun upload(zip: ByteArray, runId: String = "run-1") = useCase.uploadStaged(
-        userId = userId, zipId = ZIP, runId = runId, fileName = "export.zip", albumMode = ImportAlbumMode.NONE,
-        openZip = { ByteArrayInputStream(zip) }, onProgress = {},
+        userId = userId, zipId = ZIP, runId = runId, albumMode = ImportAlbumMode.NONE,
+        source = ImportSource(TakeoutZipReader { ByteArrayInputStream(zip) }, "export.zip") { zip.size.toLong() },
+        onProgress = {},
     )
 
     @Test

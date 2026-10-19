@@ -147,7 +147,7 @@ data class ImportDetailData(
 )
 
 /**
- * Drives the Google Takeout / Ente import screen. Picking a zip takes a persistable read grant on it
+ * Drives the Google Takeout / Ente import screen. Picking a zip or folder takes a persistable read grant on it
  * (so the stage worker can reopen it after a process death), enqueues [StageImportWorker], and observes
  * both that unique work's [WorkInfo] and the rows it stages, mapping the pair into [ImportUiState].
  *
@@ -385,13 +385,14 @@ class ImportViewModel @Inject constructor(
     }
 
     /**
-     * Called with the zip the picker returned. Persists the read grant, enqueues the staging pass
-     * (unique on the uri with KEEP, so a re-pick of a still-staging zip attaches to the live run rather
-     * than a second one), and starts observing its progress and staged rows.
+     * Called with the zip or folder a picker returned. Persists the read grant, enqueues the staging
+     * pass (unique on the uri with KEEP, so a re-pick of a source still staging attaches to the live run
+     * rather than a second one), and starts observing its progress and staged rows.
      */
-    fun onZipPicked(uri: Uri) {
+    fun onSourcePicked(uri: Uri) {
         val zipUri = uri.toString()
-        // Persist read access so a stage restart after a process kill can reopen the same zip.
+        // Persist read access so a restart after a process kill can reopen the same zip or folder; a
+        // folder's grant covers every file under it.
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 uri,

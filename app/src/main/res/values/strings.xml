@@ -1229,8 +1229,9 @@
     <!-- Google Takeout import screen (English only for now; other locales follow in a later pass). -->
     <string name="import_title">Import photos</string>
     <string name="import_row_desc">Bring a Google Photos or Ente export into Proton Drive</string>
-    <string name="import_explainer">Import a Google Takeout or Ente export as a .zip. Your photos upload to Proton Drive with their original date and location.</string>
+    <string name="import_explainer">Import a Google Takeout or Ente export as a .zip or a folder. A folder of plain photos works too. Your photos upload to Proton Drive with their original date and location.</string>
     <string name="import_choose_zip">Choose Takeout .zip</string>
+    <string name="import_choose_folder">Choose folder</string>
     <string name="import_scanning">Reading the export…</string>
     <string name="import_progress_count">%1$d / %2$d</string>
     <string name="import_done_title">Import complete</string>
@@ -1239,14 +1240,14 @@
     <string name="import_done_all_present">These photos are already in your Drive, so nothing was imported.</string>
     <string name="import_done_button">Done</string>
     <string name="import_failed_title">Import failed</string>
-    <string name="import_failed_msg">Something went wrong during the import. Pick the file and try again.</string>
+    <string name="import_failed_msg">Something went wrong during the import. Pick the zip or folder and try again.</string>
     <string name="import_reason_storage">The device ran out of free storage.</string>
-    <string name="import_reason_source">The file could not be read from where it is stored.</string>
-    <string name="import_reason_archive">The zip looks damaged or incomplete.</string>
-    <string name="import_reason_other">Something went wrong while reading the zip.</string>
-    <string name="import_failed_hint_resume">Pick the file again. It continues where it stopped.</string>
+    <string name="import_reason_source">The export could not be read from where it is stored.</string>
+    <string name="import_reason_archive">The export looks damaged or incomplete.</string>
+    <string name="import_reason_other">Something went wrong while reading the export.</string>
+    <string name="import_failed_hint_resume">Pick the zip or folder again. It continues where it stopped.</string>
     <string name="import_failed_hint_archive">Try downloading that part of the export again.</string>
-    <string name="import_review_partial">%1$s Only part of the archive is listed below. Import these, then pick the zip again to add the rest.</string>
+    <string name="import_review_partial">%1$s Only part of the export is listed below. Import these, then pick the zip or folder again to add the rest.</string>
     <string name="import_scan_bytes">Reading the export: %1$s of %2$s</string>
     <string name="import_scan_notification">Reading the export: %1$d%%</string>
     <string name="import_resuming">Continuing where it stopped</string>

@@ -39,8 +39,9 @@ import eu.akoos.photos.data.db.entity.ImportHistoryEntity
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
 import eu.akoos.photos.data.db.entity.ImportUploadedEntity
 import eu.akoos.photos.data.importer.ImportDriveMatcher
+import eu.akoos.photos.data.importer.ImportEntries
 import eu.akoos.photos.data.importer.ImportFileDate
-import eu.akoos.photos.data.importer.TakeoutZipReader
+import eu.akoos.photos.data.importer.ImportSource
 import eu.akoos.photos.data.preferences.CompressionPreferences
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -74,7 +75,6 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import me.proton.core.domain.entity.UserId
 import java.io.File
-import java.io.InputStream
 import java.security.MessageDigest
 import java.time.Instant
 import javax.inject.Inject
@@ -126,7 +126,7 @@ data class ImportSummary(
 /**
  * Uploads the reviewed set of a Google Takeout / Ente import into Drive Photos, carrying the capture
  * date, GPS and caption the staging pass already resolved into each entry's row. It drives
- * [TakeoutZipReader] over the picked `.zip` and the same upload seam every other upload path uses.
+ * the picked source's reader (a `.zip` or a folder) and the same upload seam every other upload path uses.
  *
  * Only the entries the review kept take part: the staged rows supply the metadata and the set to send,
  * so the walk streams a kept entry to a single temp file, stamps it with what the row knows (the caption
@@ -159,11 +159,11 @@ class ImportTakeoutUseCase @Inject constructor(
      * the run in import history, returning a per-outcome [ImportSummary].
      *
      * The set to send is the staged rows [ImportStagedDao.pendingUpload] returns (kept and not uploaded),
-     * keyed by entry name; the walk of [openZip] streams only those entries and skips the rest unread.
+     * keyed by entry name; the walk of [source] streams only those entries and skips the rest unread.
      * Each sent entry carries the metadata its staged row already resolved. [onProgress] receives a
      * running [ImportProgress]. A single entry that fails is logged and counted, never fatal, so one
      * unreadable photo cannot abort the rest; cooperative cancellation is honoured between and during
-     * entries. [fileName] names the archive in the history row.
+     * entries. The source's display name names the run in the history row.
      *
      * A history row is written whichever way the run ends, including an empty pending set, so a finished
      * run is recorded exactly once; [runId] groups the run's per-photo undo ledger and tags that history
@@ -179,11 +179,11 @@ class ImportTakeoutUseCase @Inject constructor(
         userId: UserId,
         zipId: String,
         runId: String,
-        fileName: String,
         albumMode: ImportAlbumMode,
-        openZip: () -> InputStream,
+        source: ImportSource,
         onProgress: suspend (ImportProgress) -> Unit,
     ): ImportSummary {
+        val fileName = source.displayName
         val allPending = importStagedDao.pendingUpload(zipId)
         // A Live Photo's video goes up in a second pass, behind the still it belongs to, once the still's
         // Drive link is known; everything else is the first pass.
@@ -278,7 +278,7 @@ class ImportTakeoutUseCase @Inject constructor(
                 }
             }
 
-            fun walk(rows: Map<String, ImportStagedEntity>) = TakeoutZipReader(openZip).forEachMediaEntry { entry, input ->
+            fun walk(rows: Map<String, ImportStagedEntity>) = source.reader.forEachMediaEntry { entry, input ->
                 val name = entry.name
                 val row = rows[name] ?: return@forEachMediaEntry
                 // The reader stays on the caller's job so cancellation flows in; it prepares each entry in
@@ -286,7 +286,7 @@ class ImportTakeoutUseCase @Inject constructor(
                 runBlocking(parentContext) {
                     ensureActive()
                     val temp = File.createTempFile("import_", tempSuffix(name), context.cacheDir)
-                    val displayName = row.title?.takeIf { it.isNotBlank() } ?: TakeoutZipReader.baseName(name)
+                    val displayName = row.title?.takeIf { it.isNotBlank() } ?: ImportEntries.baseName(name)
                     val raw: String
                     val rowDateMs: Long
                     val plan: EntryPlan
@@ -299,7 +299,7 @@ class ImportTakeoutUseCase @Inject constructor(
                             ImportCaptureDate.resolve(
                                 sidecarMs = null,
                                 fileMs = { ImportFileDate.read(context, temp, mimeType) },
-                                nameMs = FilenameDate.parse(TakeoutZipReader.baseName(name), nowMs),
+                                nameMs = FilenameDate.parse(ImportEntries.baseName(name), nowMs),
                                 entryModifiedMs = entry.modifiedMs,
                                 nowMs = nowMs,
                             ).also { importStagedDao.setDateMs(zipId, name, it) }
@@ -798,7 +798,7 @@ class ImportTakeoutUseCase @Inject constructor(
     /** The temp-file suffix that keeps [entryName]'s extension (so a downstream reader can still sniff
      *  the container), or null when the name has none. */
     private fun tempSuffix(entryName: String): String? {
-        val ext = extensionOf(TakeoutZipReader.baseName(entryName))
+        val ext = extensionOf(ImportEntries.baseName(entryName))
         return if (ext.isEmpty()) null else ".$ext"
     }
 
@@ -819,7 +819,7 @@ class ImportTakeoutUseCase @Inject constructor(
         /** The date an entry's sidecar records, else the date its file name encodes ([FilenameDate]), else
          *  null. Live Photo pairing compares these; the upload date is [ImportCaptureDate]'s. */
         internal fun resolveDateMs(meta: SidecarMeta?, entryName: String, nowMs: Long): Long? =
-            meta?.takenMs ?: FilenameDate.parse(TakeoutZipReader.baseName(entryName), nowMs)
+            meta?.takenMs ?: FilenameDate.parse(ImportEntries.baseName(entryName), nowMs)
 
         /** The upload item for one entry, dated [dateMs] (see [ImportCaptureDate]). The display name
          *  prefers the sidecar's title, falling back to the entry's own base name. */
@@ -834,7 +834,7 @@ class ImportTakeoutUseCase @Inject constructor(
             LocalMediaItem(
                 uri = uri,
                 dateTaken = dateMs,
-                displayName = meta?.title?.takeIf { it.isNotBlank() } ?: TakeoutZipReader.baseName(entryName),
+                displayName = meta?.title?.takeIf { it.isNotBlank() } ?: ImportEntries.baseName(entryName),
                 mimeType = mimeType,
                 sizeBytes = sizeBytes,
                 bucketName = null,
@@ -862,7 +862,7 @@ class ImportTakeoutUseCase @Inject constructor(
         /** The MIME type [entryName]'s extension implies, over the containers a Takeout export can hold.
          *  An unknown or missing extension falls back to a generic binary type. */
         internal fun mimeTypeFor(entryName: String): String =
-            when (extensionOf(TakeoutZipReader.baseName(entryName))) {
+            when (extensionOf(ImportEntries.baseName(entryName))) {
                 "jpg", "jpeg" -> "image/jpeg"
                 "png" -> "image/png"
                 "gif" -> "image/gif"

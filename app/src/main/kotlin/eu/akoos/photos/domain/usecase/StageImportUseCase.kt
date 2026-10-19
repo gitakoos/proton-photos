@@ -32,10 +32,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
 import eu.akoos.photos.data.importer.ImportDriveMatcher
+import eu.akoos.photos.data.importer.ImportEntries
 import eu.akoos.photos.data.importer.ImportFileDate
 import eu.akoos.photos.data.importer.ImportScanCache
+import eu.akoos.photos.data.importer.ImportSource
 import eu.akoos.photos.data.importer.LivePhotoPairing
-import eu.akoos.photos.data.importer.TakeoutZipReader
 import eu.akoos.photos.data.preferences.CompressionPreferences
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -57,7 +58,6 @@ import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -85,7 +85,7 @@ data class StageProgress(
 data class StageResult(val staged: Int, val endedEarly: Boolean, val readPercent: Int)
 
 /**
- * The staging pass of the import review flow: it walks a picked Takeout/Ente `.zip` once for the
+ * The staging pass of the import review flow: it walks a picked Takeout/Ente `.zip` or folder once for the
  * sidecar index and media count, then a second time to resolve each media entry's metadata and cache a
  * small thumbnail, writing one [ImportStagedEntity] per entry. Nothing is uploaded here; the review
  * screen (a later piece) reads the staged rows, and the upload pass (a later piece) sends the kept ones.
@@ -109,10 +109,10 @@ class StageImportUseCase @Inject constructor(
 ) {
 
     /**
-     * Stages every media entry the zip [openZip] supplies under [zipId] and reports how it went.
-     * [onProgress] receives the phase, a running (done, total) and how far into the file the read is.
-     * [zipBytes] is the archive's size when the provider knows it (non-positive otherwise), used for the
-     * percentages and to recognise a saved scan as belonging to this file. [userId] is the account whose
+     * Stages every media entry of [source] (a picked `.zip` or folder) under [zipId] and reports how it
+     * went. [onProgress] receives the phase, a running (done, total) and how far into the source the read
+     * is. The source's size, when known (non-positive otherwise), drives the percentages and recognises a
+     * saved scan as belonging to this source. [userId] is the account whose
      * Drive the stage-time dedup check queries, so a row can be badged as already present before anything
      * uploads.
      *
@@ -131,11 +131,11 @@ class StageImportUseCase @Inject constructor(
     suspend fun stage(
         userId: UserId,
         zipId: String,
-        zipBytes: Long,
-        openZip: () -> InputStream,
+        source: ImportSource,
         onProgress: suspend (StageProgress) -> Unit,
     ): StageResult {
         val filesDir = context.filesDir
+        val zipBytes = source.totalBytes()
         val scanCache = ImportScanCache(File(context.cacheDir, ImportScanCache.DIR_NAME))
         val savedScan = scanCache.load(zipId, zipBytes)
         val resumed = savedScan != null
@@ -165,7 +165,7 @@ class StageImportUseCase @Inject constructor(
             val prefs = context.settingsDataStore.data.first()
             val compression = CompressionPreferences.settings(prefs)
             val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
-            val reader = TakeoutZipReader(openZip)
+            val reader = source.reader
             // Each synchronous reader callback is bridged onto the caller's job so cancellation flows in.
             val parentContext = coroutineContext[Job] ?: EmptyCoroutineContext
 
@@ -250,7 +250,7 @@ class StageImportUseCase @Inject constructor(
                             val dateMs = ImportCaptureDate.resolve(
                                 sidecarMs = meta?.takenMs,
                                 fileMs = { ImportFileDate.read(context, temp, mimeType) },
-                                nameMs = FilenameDate.parse(TakeoutZipReader.baseName(name), nowMs),
+                                nameMs = FilenameDate.parse(ImportEntries.baseName(name), nowMs),
                                 entryModifiedMs = entry.modifiedMs,
                                 nowMs = nowMs,
                             )
@@ -272,7 +272,7 @@ class StageImportUseCase @Inject constructor(
                             // upload pass decides again, on these same archive bytes and on what it stamps into
                             // them. Any failure degrades to "treat as new". Never fatal to staging; cancellation
                             // still propagates.
-                            val title = meta?.title?.takeIf { it.isNotBlank() } ?: TakeoutZipReader.baseName(name)
+                            val title = meta?.title?.takeIf { it.isNotBlank() } ?: ImportEntries.baseName(name)
                             val alreadyInDrive = try {
                                 val sha1 = sha1Hex(temp)
                                 driveMatcher.find(
@@ -390,7 +390,7 @@ class StageImportUseCase @Inject constructor(
     /** The temp-file suffix that keeps [entryName]'s extension so a decoder can still sniff the
      *  container, or null when the name has none. */
     private fun tempSuffix(entryName: String): String? {
-        val ext = ImportTakeoutUseCase.extensionOf(TakeoutZipReader.baseName(entryName))
+        val ext = ImportTakeoutUseCase.extensionOf(ImportEntries.baseName(entryName))
         return if (ext.isEmpty()) null else ".$ext"
     }
 

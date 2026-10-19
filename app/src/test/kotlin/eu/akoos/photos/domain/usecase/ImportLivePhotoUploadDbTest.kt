@@ -28,7 +28,10 @@ import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.AppDatabase
 import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.importer.FolderTestTrees
 import eu.akoos.photos.data.importer.ImportDriveMatcher
+import eu.akoos.photos.data.importer.ImportSource
+import eu.akoos.photos.data.importer.TakeoutZipReader
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -51,6 +54,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -140,8 +145,9 @@ class ImportLivePhotoUploadDbTest {
         )
 
     private suspend fun upload(zip: ByteArray) = useCase.uploadStaged(
-        userId = userId, zipId = ZIP, runId = "run-1", fileName = "export.zip", albumMode = ImportAlbumMode.NONE,
-        openZip = { ByteArrayInputStream(zip) }, onProgress = {},
+        userId = userId, zipId = ZIP, runId = "run-1", albumMode = ImportAlbumMode.NONE,
+        source = ImportSource(TakeoutZipReader { ByteArrayInputStream(zip) }, "export.zip") { zip.size.toLong() },
+        onProgress = {},
     )
 
     @Test
@@ -167,6 +173,42 @@ class ImportLivePhotoUploadDbTest {
         assertEquals(3, summary.imported)
         assertTrue(db.importStagedDao().allForZip(ZIP).all { it.uploaded })
         assertEquals(still.link, db.importStagedDao().allForZip(ZIP).single { it.entryName == "Trip/IMG_1.jpg" }.linkId)
+    }
+
+    @Test
+    fun `a picked folder uploads like a zip of it, the video joined to its still`() = runBlocking {
+        val tmp = Files.createTempDirectory("upload-folder").toFile()
+        try {
+            val root = File(tmp, "Export")
+            FolderTestTrees.write(
+                root,
+                listOf("Trip/IMG_1.jpg", "Trip/IMG_1.mp4", "Trip/solo.jpg")
+                    .associateWith { "bytes of Export/$it".toByteArray() },
+            )
+            db.importStagedDao().upsert(
+                listOf(
+                    row("Export/Trip/IMG_1.jpg"),
+                    row("Export/Trip/IMG_1.mp4", liveOf = "Export/Trip/IMG_1.jpg"),
+                    row("Export/Trip/solo.jpg"),
+                ),
+            )
+
+            val summary = useCase.uploadStaged(
+                userId = userId, zipId = ZIP, runId = "run-1", albumMode = ImportAlbumMode.NONE,
+                source = FolderTestTrees.source(root), onProgress = {},
+            )
+
+            val still = sent.single { it.name == "IMG_1.jpg" }
+            val video = sent.single { it.name == "IMG_1.mp4" }
+            assertEquals(setOf(3), still.extraTags)
+            assertEquals(still.link, video.mainPhotoLinkId)
+            assertEquals(3, summary.imported)
+            assertEquals(0, summary.skipped)
+            assertTrue(db.importStagedDao().allForZip(ZIP).all { it.uploaded })
+            assertEquals("Export", db.importHistoryDao().byRun("run-1")?.fileName)
+        } finally {
+            tmp.deleteRecursively()
+        }
     }
 
     @Test

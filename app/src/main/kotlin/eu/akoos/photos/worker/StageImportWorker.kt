@@ -27,7 +27,6 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
-import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -47,6 +46,7 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
+import eu.akoos.photos.data.importer.ImportSourceFactory
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.domain.importer.ImportFailure
@@ -55,11 +55,10 @@ import eu.akoos.photos.domain.usecase.StageImportUseCase
 import eu.akoos.photos.domain.usecase.StagePhase
 import eu.akoos.photos.domain.usecase.StageProgress
 import eu.akoos.photos.util.ImportEventLog
-import java.io.IOException
 import java.util.UUID
 
 /**
- * Stages a picked import `.zip` into the review queue as a foreground service, so the pass survives the
+ * Stages a picked import `.zip` or folder into the review queue as a foreground service, so the pass survives the
  * picker screen closing AND a process kill. The heavy lifting lives in [StageImportUseCase]; this worker
  * is the durable shell around it: the notification and the throttled progress publish. No upload happens
  * here; on success the review screen (a later piece) observes the staged rows.
@@ -67,7 +66,7 @@ import java.util.UUID
  * Uniqueness ([uniqueName], keyed on the zip uri) with [ExistingWorkPolicy.KEEP], so double-enqueuing
  * the same zip does not run two stage passes over it at once.
  *
- * Input data: [KEY_ZIP_URI], the picked zip's `content://` uri string, which is also the run's zipId
+ * Input data: [KEY_ZIP_URI], the picked zip's or folder's `content://` uri string, which is also the run's zipId
  * (its stable identity across a kill and the key the staged rows are grouped under). No account (guest)
  * is a clean no-op: there is no Drive to import into later, so nothing is staged.
  */
@@ -76,6 +75,7 @@ class StageImportWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted private val params: WorkerParameters,
     private val stageImportUseCase: StageImportUseCase,
+    private val importSourceFactory: ImportSourceFactory,
     private val accountManager: AccountManager,
 ) : CoroutineWorker(context, params) {
 
@@ -109,18 +109,13 @@ class StageImportWorker @AssistedInject constructor(
             .onFailure { Log.w(TAG, "setForeground initial failed: ${it.message}") }
 
         return try {
-            val zipBytes = zipSize(uri)
-            // The use case bridges the synchronous zip callbacks to suspend work via runBlocking, so it
+            // The use case bridges the synchronous reader callbacks to suspend work via runBlocking, so it
             // MUST run on a background dispatcher.
             val result = withContext(Dispatchers.IO) {
                 stageImportUseCase.stage(
                     userId = userId,
                     zipId = zipId,
-                    zipBytes = zipBytes,
-                    openZip = {
-                        applicationContext.contentResolver.openInputStream(uri)
-                            ?: throw IOException("cannot open zip input stream for $uri")
-                    },
+                    source = importSourceFactory.open(uri),
                     onProgress = { progress -> publish(progress) },
                 )
             }
@@ -157,15 +152,6 @@ class StageImportWorker @AssistedInject constructor(
             runCatching { NotificationManagerCompat.from(context).cancel(NotificationIds.IMPORT_STAGE) }
         }
     }
-
-    /** The archive's size in bytes when the provider reports it, else -1. */
-    private fun zipSize(uri: Uri): Long = runCatching {
-        applicationContext.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { row ->
-            if (!row.moveToFirst()) return@use -1L
-            val idx = row.getColumnIndex(OpenableColumns.SIZE)
-            if (idx >= 0 && !row.isNull(idx)) row.getLong(idx) else -1L
-        }
-    }.getOrNull() ?: -1L
 
     /** Why the system stopped this work, where the platform says (API 31+), as a short log suffix. */
     private fun stopReasonText(): String =
@@ -263,7 +249,7 @@ class StageImportWorker @AssistedInject constructor(
         const val TAG = "stage_import_worker"
         const val CHANNEL_ID = "import"
 
-        /** Input: the picked zip's content uri string, which is also the staged rows' zipId. */
+        /** Input: the picked zip's or folder's content uri string, which is also the staged rows' zipId. */
         const val KEY_ZIP_URI = "zipUri"
 
         // WorkManager progress data keys, read by an in-app staging progress surface.

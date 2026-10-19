@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.importer
 
+import eu.akoos.photos.data.importer.SourceReadException
 import java.io.EOFException
 import java.io.FileNotFoundException
 import java.io.IOException
@@ -77,6 +78,18 @@ class ImportFailureTest {
         assertTrue(described, described.contains("ZipException"))
         assertTrue(described, described.contains("bad-crc"))
         assertFalse(described, described.contains(secret))
+    }
+
+    @Test
+    fun `a revoked folder grant is the source, and its uri never reaches the log`() {
+        val revoked = SourceReadException(
+            IOException(SecurityException("Permission Denial: reading content://provider/tree/primary%3APhotos")),
+        )
+        assertEquals(ImportFailureKind.SOURCE_UNREADABLE, ImportFailure.kindOf(revoked))
+        val described = ImportFailure.describe(revoked)
+        assertTrue(described, described.startsWith("SourceReadException < IOException < SecurityException"))
+        assertTrue(described, described.contains("permission"))
+        assertFalse(described, described.contains("primary"))
     }
 
     @Test
