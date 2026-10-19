@@ -794,6 +794,21 @@
         <item quantity="other">Przesyłanie %1$d zdjęcia</item>
     </plurals>
     <string name="albums_download_all">Pobierz wszystko</string>
+    <!-- Album and device-folder contents sheet. -->
+    <string name="album_contents">Zawartość</string>
+    <string name="album_contents_size_unknown">rozmiar nieznany</string>
+    <plurals name="album_contents_total">
+        <item quantity="one">%1$d plik, %2$s</item>
+        <item quantity="few">%1$d pliki, %2$s</item>
+        <item quantity="many">%1$d plików, %2$s</item>
+        <item quantity="other">%1$d pliku, %2$s</item>
+    </plurals>
+    <plurals name="album_contents_unknown_count">
+        <item quantity="one">%1$d plik o nieznanym rozmiarze nie jest wliczony do sumy</item>
+        <item quantity="few">%1$d pliki o nieznanym rozmiarze nie są wliczone do sumy</item>
+        <item quantity="many">%1$d plików o nieznanym rozmiarze nie jest wliczonych do sumy</item>
+        <item quantity="other">%1$d pliku o nieznanym rozmiarze nie jest wliczone do sumy</item>
+    </plurals>
     <!-- Background album-download notification. -->
     <string name="album_download_channel_name">Pobieranie albumów</string>
     <string name="album_download_channel_desc">Pokazuje postęp podczas pobierania albumu w tle.</string>

@@ -36,6 +36,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
@@ -120,6 +121,7 @@ internal fun AlbumActionsSheet(
     /** Null drops the delete row, which an owner alone has. */
     onDelete: (() -> Unit)? = null,
     onSlideshow: () -> Unit,
+    onShowContents: () -> Unit,
     onSortSelected: (AlbumPhotoSortMode) -> Unit,
     /** Null drops the grouping row. */
     onGroupingSelected: ((AlbumPhotoGrouping) -> Unit)? = null,
@@ -221,6 +223,12 @@ internal fun AlbumActionsSheet(
                     icon = Icons.Default.PlayArrow,
                     title = stringResource(R.string.viewer_play_slideshow),
                     onClick = { close(onSlideshow) },
+                )
+                Spacer(Modifier.height(8.dp))
+                ActionSheetRow(
+                    icon = Icons.AutoMirrored.Filled.FormatListBulleted,
+                    title = stringResource(R.string.album_contents),
+                    onClick = { close(onShowContents) },
                 )
             }
 

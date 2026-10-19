@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Collections
@@ -81,8 +82,9 @@ import kotlinx.coroutines.launch
  * red, deleting the folder with everything it holds on the device.
  *
  * The actions group holds the folder's two back-up outcomes, a one-time upload to the stream or an
- * upload that also mirrors the folder as a Drive album, and the slideshow. The settings group
- * carries the per-folder preferences, each showing its current state as a trailing tick: the three
+ * upload that also mirrors the folder as a Drive album, the slideshow and the list of its files with
+ * their sizes. The settings group carries the per-folder preferences, each showing its current state
+ * as a trailing tick: the three
  * Settings otherwise owns alone, plus hiding the folder, which takes its card off the Albums grid and
  * moves its photos into the vault. Opened from that grid, it also offers the much lighter exclusion,
  * which takes the card off the grid and touches nothing else. Slideshow, the sort direction and the
@@ -130,6 +132,8 @@ internal fun DeviceFolderActionsSheet(
     onBackUp: ((asMirror: Boolean) -> Unit)? = null,
     /** Null where the folder holds no photos, which drops the slideshow row. */
     onSlideshow: (() -> Unit)? = null,
+    /** Opens the list of the folder's files with their sizes. Null drops the row. */
+    onShowContents: (() -> Unit)? = null,
     /** Rename the folder, offered only in a logged-out session where there is no Drive album to rename
      *  instead. A folder rename relocates its photos into a new DCIM directory, a scoped-storage move
      *  that needs Android 10+, so the row is also held to that floor. Null hides it. */
@@ -189,7 +193,7 @@ internal fun DeviceFolderActionsSheet(
             )
 
             // Backing up needs a Proton account, so its two rows are offered only when signed in.
-            val hasPhotoActions = (onBackUp != null && isSignedIn) || onSlideshow != null
+            val hasPhotoActions = (onBackUp != null && isSignedIn) || onSlideshow != null || onShowContents != null
             if (hasPhotoActions) {
                 ActionSheetSectionHeading(stringResource(R.string.action_sheet_actions_heading))
                 if (onBackUp != null && isSignedIn) {
@@ -221,6 +225,14 @@ internal fun DeviceFolderActionsSheet(
                         icon = Icons.Default.PlayArrow,
                         title = stringResource(R.string.viewer_play_slideshow),
                         onClick = { close(onSlideshow) },
+                    )
+                }
+                if (onShowContents != null) {
+                    if ((onBackUp != null && isSignedIn) || onSlideshow != null) Spacer(Modifier.height(8.dp))
+                    ActionSheetRow(
+                        icon = Icons.AutoMirrored.Filled.FormatListBulleted,
+                        title = stringResource(R.string.album_contents),
+                        onClick = { close(onShowContents) },
                     )
                 }
             }

@@ -606,6 +606,17 @@
         <item quantity="other">%1$d fotó feltöltődik</item>
     </plurals>
     <string name="albums_download_all">Összes letöltése</string>
+    <!-- Album and device-folder contents sheet. -->
+    <string name="album_contents">Tartalom</string>
+    <string name="album_contents_size_unknown">ismeretlen méret</string>
+    <plurals name="album_contents_total">
+        <item quantity="one">%1$d fájl, %2$s</item>
+        <item quantity="other">%1$d fájl, %2$s</item>
+    </plurals>
+    <plurals name="album_contents_unknown_count">
+        <item quantity="one">%1$d ismeretlen méretű fájl nincs benne az összegben</item>
+        <item quantity="other">%1$d ismeretlen méretű fájl nincs benne az összegben</item>
+    </plurals>
     <string name="album_download_channel_name">Album letöltések</string>
     <string name="album_download_channel_desc">A háttérben futó albumletöltés állapotát mutatja.</string>
     <string name="album_download_notification_title">%1$s letöltése</string>

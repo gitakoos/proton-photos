@@ -632,6 +632,17 @@
         <item quantity="other">%1$d foto\'s worden geüpload</item>
     </plurals>
     <string name="albums_download_all">Alles downloaden</string>
+    <!-- Album and device-folder contents sheet. -->
+    <string name="album_contents">Inhoud</string>
+    <string name="album_contents_size_unknown">grootte onbekend</string>
+    <plurals name="album_contents_total">
+        <item quantity="one">%1$d bestand, %2$s</item>
+        <item quantity="other">%1$d bestanden, %2$s</item>
+    </plurals>
+    <plurals name="album_contents_unknown_count">
+        <item quantity="one">%1$d bestand met onbekende grootte telt niet mee in het totaal</item>
+        <item quantity="other">%1$d bestanden met onbekende grootte tellen niet mee in het totaal</item>
+    </plurals>
     <!-- Background album-download notification. -->
     <string name="album_download_channel_name">Albumdownloads</string>
     <string name="album_download_channel_desc">Toont de voortgang tijdens het downloaden van een album op de achtergrond.</string>

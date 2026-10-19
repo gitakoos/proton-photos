@@ -1205,6 +1205,17 @@
         <item quantity="other">%1$d photos uploading</item>
     </plurals>
     <string name="albums_download_all">Download all</string>
+    <!-- Album and device-folder contents sheet. -->
+    <string name="album_contents">Contents</string>
+    <string name="album_contents_size_unknown">size unknown</string>
+    <plurals name="album_contents_total">
+        <item quantity="one">%1$d file, %2$s</item>
+        <item quantity="other">%1$d files, %2$s</item>
+    </plurals>
+    <plurals name="album_contents_unknown_count">
+        <item quantity="one">%1$d file of unknown size is not in the total</item>
+        <item quantity="other">%1$d files of unknown size are not in the total</item>
+    </plurals>
     <!-- Background album-download notification. -->
     <string name="album_download_channel_name">Album downloads</string>
     <string name="album_download_channel_desc">Shows progress while downloading an album in the background.</string>

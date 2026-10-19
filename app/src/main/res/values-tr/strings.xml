@@ -1145,6 +1145,17 @@
         <item quantity="other">%1$d fotoğraf yükleniyor</item>
     </plurals>
     <string name="albums_download_all">Tümünü indir</string>
+    <!-- Album and device-folder contents sheet. -->
+    <string name="album_contents">İçerik</string>
+    <string name="album_contents_size_unknown">boyut bilinmiyor</string>
+    <plurals name="album_contents_total">
+        <item quantity="one">%1$d dosya, %2$s</item>
+        <item quantity="other">%1$d dosya, %2$s</item>
+    </plurals>
+    <plurals name="album_contents_unknown_count">
+        <item quantity="one">Boyutu bilinmeyen %1$d dosya toplama dahil değil</item>
+        <item quantity="other">Boyutu bilinmeyen %1$d dosya toplama dahil değil</item>
+    </plurals>
     <string name="album_download_channel_name">Albüm indirmeleri</string>
     <string name="album_download_channel_desc">Bir albüm arka planda indirilirken ilerlemeyi gösterir.</string>
     <string name="album_download_notification_title">İndiriliyor: %1$s</string>
