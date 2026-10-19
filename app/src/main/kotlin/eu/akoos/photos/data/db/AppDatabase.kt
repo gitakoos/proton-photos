@@ -238,7 +238,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 46,
+    version = 47,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),

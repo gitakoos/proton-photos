@@ -46,6 +46,11 @@ import androidx.room.Index
  * claims, so the album phase can regroup the run's photos into their source albums after upload.
  * [alreadyInDrive] is set at stage time when the entry's content already lives in Drive, so the review
  * can badge it as a skip before anything uploads.
+ *
+ * A Live Photo is two entries, a still and a short video. [liveOf] marks the video's row with the entry
+ * name of its still, so the review hides it and the still's choices cover it, and the upload sends it
+ * behind the still. [linkId] is the Drive link an uploaded entry ended up under, kept so a resumed
+ * run can attach a video to a still that went up before the kill.
  */
 @Entity(
     tableName = "import_staged",
@@ -67,4 +72,6 @@ data class ImportStagedEntity(
     val stagedAt: Long,
     val albumName: String? = null,
     val alreadyInDrive: Boolean = false,
+    val liveOf: String? = null,
+    val linkId: String? = null,
 )

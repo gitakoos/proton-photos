@@ -33,6 +33,7 @@ import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
 import eu.akoos.photos.data.importer.ImportScanCache
+import eu.akoos.photos.data.importer.LivePhotoPairing
 import eu.akoos.photos.data.importer.TakeoutZipReader
 import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.TakeoutSidecar
@@ -322,6 +323,20 @@ class StageImportUseCase @Inject constructor(
                     }
                 }
             }
+
+            // A Live Photo is a still and a video; the video's row is marked with its still so the review
+            // shows one photo and the upload sends the video behind it. Safe to repeat on a resumed pass.
+            val livePairs = try {
+                LivePhotoPairing.stillByVideo(
+                    importStagedDao.allForZip(zipId).map { LivePhotoPairing.Entry(it.entryName, it.dateMs) },
+                ).also { pairs -> pairs.forEach { (video, still) -> importStagedDao.setLiveOf(zipId, video, still) } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "live photo pairing failed: ${e.message}")
+                emptyMap()
+            }
+            if (livePairs.isNotEmpty()) ImportEventLog.record(filesDir, "live photos paired=${livePairs.size}")
 
             val staged = importStagedDao.countForZip(zipId)
             val walkEndedEarly = walk.endedEarly || walk.endedShort(zipBytes)

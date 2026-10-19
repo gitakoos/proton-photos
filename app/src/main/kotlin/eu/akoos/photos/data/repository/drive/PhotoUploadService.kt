@@ -271,6 +271,12 @@ class PhotoUploadService @Inject constructor(
         sha1HexContentDigest: String,
         uploadUri: String,
         xAttrMetadata: UploadXAttrMetadata = UploadXAttrMetadata(),
+        // Set when this file is the video of a Live Photo: the link of the still it joins. Drive then keeps
+        // the two as one photo, the way its own apps and the web client store a Live Photo.
+        mainPhotoLinkId: String? = null,
+        // Category tags committed on top of what the file proves and the user picked, for example the Live
+        // Photo tag on the still of a pair.
+        extraTags: Set<Int> = emptySet(),
         onProgress: ((phase: UploadPhase, doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): String =
         withContext(Dispatchers.IO) {
@@ -319,7 +325,7 @@ class PhotoUploadService @Inject constructor(
                 Log.w(TAG, "uploadFile: chosen categories unreadable for $logRef: ${e.message}")
                 emptySet()
             }
-            val photoTags = UploadPhotoTags.mergeForCommit(detectedTags, chosenTags)
+            val photoTags = UploadPhotoTags.mergeForCommit(detectedTags, chosenTags + extraTags)
 
             // The finally block inspects the failure category (wipe vs preserve-for-resume), so
             // catch, categorise, then rethrow.
@@ -942,7 +948,7 @@ class PhotoUploadService @Inject constructor(
                     manifestSignature = manifestSignature,
                     signatureAddress  = signingKey.email,
                     xAttr             = xAttr,
-                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash, tags = photoTags.map { it.toLong() }),
+                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash, tags = photoTags.map { it.toLong() }, mainPhotoLinkId = mainPhotoLinkId),
                 )
                 retryUploadCall { _ ->
                     semaphore.withPermit {
@@ -960,7 +966,7 @@ class PhotoUploadService @Inject constructor(
                     manifestSignature = manifestSignature,
                     signatureAddress  = signingKey.email,
                     xAttr             = xAttr,
-                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash, tags = photoTags.map { it.toLong() }),
+                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash, tags = photoTags.map { it.toLong() }, mainPhotoLinkId = mainPhotoLinkId),
                     contentKeyPacket  = contentKeyPacketBase64,
                     contentKeyPacketSignature = contentKeyPacketSignature,
                     // One CommitThumbnailDto per uploaded thumbnail. Index is the negative block

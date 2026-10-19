@@ -281,7 +281,27 @@ class DrivePhotoRepositoryImpl @Inject constructor(
             doneBytes: Long,
             totalBytes: Long,
         ) -> Unit)?,
-    ): String = uploadService.uploadFile(userId, item, sha1HexContentDigest, uploadUri, xAttrMetadata, onProgress)
+    ): String = uploadService.uploadFile(
+        userId, item, sha1HexContentDigest, uploadUri, xAttrMetadata, onProgress = onProgress,
+    )
+
+    override suspend fun uploadFileLinked(
+        userId: UserId,
+        item: LocalMediaItem,
+        sha1HexContentDigest: String,
+        uploadUri: String,
+        xAttrMetadata: eu.akoos.photos.data.repository.drive.UploadXAttrMetadata,
+        mainPhotoLinkId: String?,
+        extraTags: Set<Int>,
+        onProgress: ((
+            phase: eu.akoos.photos.data.repository.drive.UploadPhase,
+            doneBytes: Long,
+            totalBytes: Long,
+        ) -> Unit)?,
+    ): String = uploadService.uploadFile(
+        userId, item, sha1HexContentDigest, uploadUri, xAttrMetadata,
+        mainPhotoLinkId = mainPhotoLinkId, extraTags = extraTags, onProgress = onProgress,
+    )
 
     override suspend fun retryPendingOrphanDeletes(userId: UserId) =
         uploadService.retryPendingOrphanDeletes(userId)

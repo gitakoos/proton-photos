@@ -1518,6 +1518,39 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v46_to_v47_addsLiveOfAndLinkId_keepsRows_andIsRepeatable() {
+        Migrations.MIGRATION_35_36.migrate(db)
+        db.execSQL(
+            "INSERT INTO import_staged (zipId, entryName, title, dateMs, sizeBytes, excluded, uploaded, stagedAt) " +
+                "VALUES ('zip-a', 'Trip/IMG_1.HEIC', 'IMG_1', 1000, 2048, 0, 0, 10)"
+        )
+
+        Migrations.MIGRATION_46_47.migrate(db)
+
+        db.query("SELECT entryName, title, liveOf, linkId FROM import_staged WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("Trip/IMG_1.HEIC", cur.getString(0))
+            assertEquals("IMG_1", cur.getString(1))
+            assertTrue("an existing row is not a Live Photo video", cur.isNull(2))
+            assertTrue("an existing row has no link", cur.isNull(3))
+        }
+        db.execSQL("UPDATE import_staged SET liveOf = 'Trip/IMG_1.HEIC', linkId = 'link-1' WHERE entryName = 'Trip/IMG_1.HEIC'")
+
+        // Re-running the migration on an already-migrated database is harmless and keeps the values.
+        Migrations.MIGRATION_46_47.migrate(db)
+        db.query("SELECT liveOf, linkId FROM import_staged WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("Trip/IMG_1.HEIC", cur.getString(0))
+            assertEquals("link-1", cur.getString(1))
+        }
+    }
+
+    @Test
+    fun migrations_registerTheV46ToV47Step() {
+        assertTrue(Migrations.ALL.any { it.startVersion == 46 && it.endVersion == 47 })
+    }
+
+    @Test
     fun migrations_registerTheV45ToV46Step() {
         assertTrue(Migrations.ALL.any { it.startVersion == 45 && it.endVersion == 46 })
     }

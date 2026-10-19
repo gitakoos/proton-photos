@@ -84,6 +84,9 @@ private const val ALBUM_ADD_CHUNK = 10
  *  at parity rather than chasing marginal fill of the pipe. */
 private const val IMPORT_UPLOAD_PARALLELISM = 3
 
+/** Drive's Live Photo category tag, committed with the still of a pair. */
+private const val LIVE_PHOTO_TAG = 3
+
 /** Live progress for one import run: how many media entries are done out of the total, the entry in
  *  flight and, while it uploads, its phase and byte curve. [phase] is null between entries. */
 data class ImportProgress(
@@ -168,9 +171,13 @@ class ImportTakeoutUseCase @Inject constructor(
         openZip: () -> InputStream,
         onProgress: suspend (ImportProgress) -> Unit,
     ): ImportSummary {
-        val pending = importStagedDao.pendingUpload(zipId).associateBy { it.entryName }
-        val total = pending.size
-        if (pending.isEmpty()) {
+        val allPending = importStagedDao.pendingUpload(zipId)
+        // A Live Photo's video goes up in a second pass, behind the still it belongs to, once the still's
+        // Drive link is known; everything else is the first pass.
+        val pending = allPending.filter { it.liveOf == null }.associateBy { it.entryName }
+        val pendingVideos = allPending.filter { it.liveOf != null }.associateBy { it.entryName }
+        val total = allPending.size
+        if (allPending.isEmpty()) {
             // Nothing left to send. A fresh run with no kept entries records a zero row; a resume whose
             // every entry was already handled before the kill reports the full run from the ledger, so a
             // completion that raced a process death is not under-counted. The album phase still runs, so a
@@ -220,12 +227,18 @@ class ImportTakeoutUseCase @Inject constructor(
         val uploadedBytes = AtomicLong(0)
 
         val parentContext = coroutineContext[Job] ?: EmptyCoroutineContext
+        val stagedRows = if (pendingVideos.isEmpty()) emptyList() else importStagedDao.allForZip(zipId)
+        val stillsWithVideo = stagedRows.mapNotNull { it.liveOf }.toSet()
+        val stillDateMs = stagedRows.associate { it.entryName to it.dateMs }
+        // The Drive link each uploaded still ended up under, read from the staged rows once the first pass
+        // is done (so a still that went up before a kill counts too).
+        var stillLinks: Map<String, String> = emptyMap()
         coroutineScope {
             val uploadScope = this
             val jobs = mutableListOf<Deferred<Unit>>()
 
-            TakeoutZipReader(openZip).forEachMedia { name, input ->
-                val row = pending[name] ?: return@forEachMedia
+            fun walk(rows: Map<String, ImportStagedEntity>) = TakeoutZipReader(openZip).forEachMedia { name, input ->
+                val row = rows[name] ?: return@forEachMedia
                 // The reader stays on the caller's job so cancellation flows in; it prepares each entry in
                 // order here and offloads only the upload to [uploadScope].
                 runBlocking(parentContext) {
@@ -237,15 +250,16 @@ class ImportTakeoutUseCase @Inject constructor(
                     val xAttr: UploadXAttrMetadata
                     try {
                         temp.outputStream().use { input.copyTo(it) }
+                        val captureMs = row.liveOf?.let { stillDateMs[it] } ?: row.dateMs
                         val meta = SidecarMeta(
-                            takenMs = row.dateMs,
+                            takenMs = captureMs,
                             lat = row.lat,
                             lng = row.lng,
                             description = row.description,
                             title = row.title,
                         )
                         val mimeType = mimeTypeFor(name)
-                        val dateMs = row.dateMs
+                        val dateMs = captureMs
                         val tempUri = Uri.fromFile(temp).toString()
                         // Both stamps change the bytes, so they must precede the hash: Drive's ContentHash is
                         // computed from exactly what is uploaded. The caption write self-skips a container it
@@ -295,7 +309,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                     // One transaction so a kill cannot leave the row marked uploaded without
                                     // its ledger + membership (which would miscount it and drop it from undo).
                                     appDatabase.withTransaction {
-                                        importStagedDao.markUploaded(zipId, name)
+                                        importStagedDao.markUploadedWithLink(zipId, name, linkId)
                                         importUploadedDao.insert(
                                             ImportUploadedEntity(
                                                 runId = runId,
@@ -306,7 +320,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                                 alreadyInDrive = true,
                                             ),
                                         )
-                                        recordAlbumMembership(runId, row, albumMode, linkId)
+                                        if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, linkId)
                                     }
                                     Log.d(TAG, "entry ${processedCount.get() + 1}/$total: in-run duplicate, linked")
                                 }
@@ -322,7 +336,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                 val crossRunLink = contentHash?.let { photoListingDao.linkIdByContentHash(userId.id, it) }
                                 Log.d(TAG, "entry ${processedCount.get() + 1}/$total: already in Drive, skipped")
                                 appDatabase.withTransaction {
-                                    importStagedDao.markUploaded(zipId, name)
+                                    importStagedDao.markUploadedWithLink(zipId, name, crossRunLink)
                                     if (crossRunLink != null) {
                                         importUploadedDao.insert(
                                             ImportUploadedEntity(
@@ -335,7 +349,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                             ),
                                         )
                                     }
-                                    recordAlbumMembership(runId, row, albumMode, crossRunLink)
+                                    if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, crossRunLink)
                                 }
                                 row.thumbPath?.let { path -> runCatching { File(path).delete() } }
                                 temp.delete()
@@ -355,7 +369,11 @@ class ImportTakeoutUseCase @Inject constructor(
                                         // is doing and how long it takes. Stripped in release.
                                         val uploadStart = System.currentTimeMillis()
                                         var lastPhase: UploadPhase? = null
-                                        val linkId = drivePhotoRepository.uploadFile(userId, item, sha1, item.uri, xAttr) { phase, _, _ ->
+                                        val linkId = drivePhotoRepository.uploadFileLinked(
+                                            userId, item, sha1, item.uri, xAttr,
+                                            mainPhotoLinkId = row.liveOf?.let { stillLinks[it] },
+                                            extraTags = if (name in stillsWithVideo) setOf(LIVE_PHOTO_TAG) else emptySet(),
+                                        ) { phase, _, _ ->
                                             if (phase != lastPhase) {
                                                 lastPhase = phase
                                                 val label = if (phase == UploadPhase.Encrypting) "encrypting" else "uploading"
@@ -365,7 +383,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                         uploadedBytes.addAndGet(item.sizeBytes)
                                         Log.d(TAG, "$displayName: done ${item.sizeBytes / 1024}KB in ${System.currentTimeMillis() - uploadStart}ms")
                                         appDatabase.withTransaction {
-                                            importStagedDao.markUploaded(zipId, name)
+                                            importStagedDao.markUploadedWithLink(zipId, name, linkId)
                                             importUploadedDao.insert(
                                                 ImportUploadedEntity(
                                                     runId = runId,
@@ -375,7 +393,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                                     dateMs = row.dateMs,
                                                 ),
                                             )
-                                            recordAlbumMembership(runId, row, albumMode, linkId)
+                                            if (row.liveOf == null) recordAlbumMembership(runId, row, albumMode, linkId)
                                         }
                                         contentHash?.let { hash ->
                                             runCatching { photoListingDao.seedContentHash(userId.id, linkId, hash) }
@@ -402,9 +420,24 @@ class ImportTakeoutUseCase @Inject constructor(
                 }
             }
 
+            walk(pending)
             // Every prepared upload is in flight or queued behind a permit; wait for them all before the
             // album phase, so every membership row the reconstruct reads is already recorded.
             jobs.awaitAll()
+
+            // The videos of the Live Photos, now that their stills are in Drive: each one joins its still.
+            // A video whose still did not go up stays pending for the next run.
+            if (pendingVideos.isNotEmpty()) {
+                val after = importStagedDao.allForZip(zipId).associateBy { it.entryName }
+                stillLinks = after.values.mapNotNull { r -> r.linkId?.let { r.entryName to it } }.toMap()
+                // A still that is in Drive without a known link (it was resolved as already there) cannot take its
+                // video, so that video goes up as a video of its own rather than waiting for a link that never comes.
+                val ready = pendingVideos.filterValues { v -> v.liveOf?.let { after[it] }?.uploaded == true }
+                if (ready.isNotEmpty()) {
+                    walk(ready)
+                    jobs.awaitAll()
+                }
+            }
         }
 
         // Upload throughput for a debug trace: total bytes actually sent over the wall time of the send

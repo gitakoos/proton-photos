@@ -42,7 +42,7 @@ interface ImportStagedDao {
     suspend fun upsert(row: ImportStagedEntity)
 
     /** Live review list for one run, newest capture first with the entry name as a stable tiebreak. */
-    @Query("SELECT * FROM import_staged WHERE zipId = :zipId ORDER BY dateMs DESC, entryName ASC")
+    @Query("SELECT * FROM import_staged WHERE zipId = :zipId AND liveOf IS NULL ORDER BY dateMs DESC, entryName ASC")
     fun observeForZip(zipId: String): Flow<List<ImportStagedEntity>>
 
     /** The entries the upload pass should send: kept by the user and not yet uploaded. */
@@ -54,7 +54,8 @@ interface ImportStagedDao {
 
     /** Flips the excluded flag for a selection of entries in one run. */
     @Query(
-        "UPDATE import_staged SET excluded = :excluded WHERE zipId = :zipId AND entryName IN (:entryNames)"
+        "UPDATE import_staged SET excluded = :excluded WHERE zipId = :zipId AND " +
+            "(entryName IN (:entryNames) OR liveOf IN (:entryNames))"
     )
     suspend fun setExcluded(zipId: String, entryNames: List<String>, excluded: Boolean)
 
@@ -62,23 +63,36 @@ interface ImportStagedDao {
     @Query("UPDATE import_staged SET uploaded = 1 WHERE zipId = :zipId AND entryName = :entryName")
     suspend fun markUploaded(zipId: String, entryName: String)
 
+    /** Marks one entry uploaded and keeps the Drive link it landed under, so a video of a Live Photo can
+     *  be attached to it even after the run was killed and resumed. */
+    @Query("UPDATE import_staged SET uploaded = 1, linkId = :linkId WHERE zipId = :zipId AND entryName = :entryName")
+    suspend fun markUploadedWithLink(zipId: String, entryName: String, linkId: String?)
+
+    /** Every row of one run, the Live Photo videos included, in no particular order. */
+    @Query("SELECT * FROM import_staged WHERE zipId = :zipId")
+    suspend fun allForZip(zipId: String): List<ImportStagedEntity>
+
+    /** Marks one entry as the video of the Live Photo whose still is [stillName]. */
+    @Query("UPDATE import_staged SET liveOf = :stillName WHERE zipId = :zipId AND entryName = :videoName")
+    suspend fun setLiveOf(zipId: String, videoName: String, stillName: String)
+
     /** Records whether one entry's content already lives in Drive, so the review can badge it a skip. */
     @Query("UPDATE import_staged SET alreadyInDrive = :flag WHERE zipId = :zipId AND entryName = :entryName")
     suspend fun setAlreadyInDrive(zipId: String, entryName: String, flag: Boolean)
 
     /** Live count of entries still queued to upload for one run, for the confirm button's total. */
-    @Query("SELECT COUNT(*) FROM import_staged WHERE zipId = :zipId AND excluded = 0 AND uploaded = 0")
+    @Query("SELECT COUNT(*) FROM import_staged WHERE zipId = :zipId AND excluded = 0 AND uploaded = 0 AND liveOf IS NULL")
     fun observeIncludedCount(zipId: String): Flow<Int>
 
     /** Live count of the genuinely new entries a confirm would upload: kept and not already in Drive.
      *  The review shows this as its headline count so a run whose archive overlaps Drive reports how many
      *  photos are actually new rather than the whole kept set. */
-    @Query("SELECT COUNT(*) FROM import_staged WHERE zipId = :zipId AND excluded = 0 AND alreadyInDrive = 0")
+    @Query("SELECT COUNT(*) FROM import_staged WHERE zipId = :zipId AND excluded = 0 AND alreadyInDrive = 0 AND liveOf IS NULL")
     fun observeNewCount(zipId: String): Flow<Int>
 
     /** Live count of the kept entries Drive already holds, so the review can report how many the run will
      *  skip as duplicates before it uploads anything. */
-    @Query("SELECT COUNT(*) FROM import_staged WHERE zipId = :zipId AND excluded = 0 AND alreadyInDrive = 1")
+    @Query("SELECT COUNT(*) FROM import_staged WHERE zipId = :zipId AND excluded = 0 AND alreadyInDrive = 1 AND liveOf IS NULL")
     fun observeAlreadyCount(zipId: String): Flow<Int>
 
     /** Whether this run's archive carried any album folder, so the review offers the album-mode toggle
@@ -91,7 +105,7 @@ interface ImportStagedDao {
      *  count them. Excluded rows drop out so the preview tracks the review's current selection. */
     @Query(
         "SELECT albumName AS name, COUNT(*) AS count FROM import_staged " +
-            "WHERE zipId = :zipId AND albumName IS NOT NULL AND excluded = 0 " +
+            "WHERE zipId = :zipId AND albumName IS NOT NULL AND excluded = 0 AND liveOf IS NULL " +
             "GROUP BY albumName ORDER BY albumName COLLATE NOCASE",
     )
     fun observeAlbumSummary(zipId: String): Flow<List<ImportAlbumCount>>
