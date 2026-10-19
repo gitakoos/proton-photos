@@ -2481,4 +2481,8 @@
     <string name="viewer_already_in_drive">Már a Drive-on van</string>
     <string name="viewer_save_to_drive_failed">Nem sikerült a Drive-ra menteni</string>
     <string name="viewer_remove_shared_confirm_body">Ez kiveszi a fotót a megosztott albumból. Az album tulajdonosánál marad, és te már nem látod itt.</string>
+    <string name="onboarding_ml_title">Okos funkciók az eszközödön</string>
+    <string name="onboarding_ml_subtitle">Embereket és tárgyakat találhatsz a fotóidon, és szöveget másolhatsz ki belőlük. Minden ezen a telefonon fut, és semmi nem hagyja el. Válaszd ki most, mit szeretnél, vagy módosítsd később a Beállításokban.</string>
+    <string name="onboarding_ml_size">%1$s letöltés</string>
+    <string name="onboarding_ml_note">A modellek egyszer töltődnek le, a beállítás után, a háttérben. A Wi-Fi ajánlott, mert Wi-Fi nélkül a letöltés mobiladatot használ.</string>
 </resources>

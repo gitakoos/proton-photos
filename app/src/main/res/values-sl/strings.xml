@@ -2600,4 +2600,8 @@
     <string name="viewer_already_in_drive">Že v Drive</string>
     <string name="viewer_save_to_drive_failed">Shranjevanje v Drive ni uspelo</string>
     <string name="viewer_remove_shared_confirm_body">Fotografija bo odstranjena iz deljenega albuma. Ostane pri lastniku albuma in tu ne bo več vidna.</string>
+    <string name="onboarding_ml_title">Pametne funkcije v vaši napravi</string>
+    <string name="onboarding_ml_subtitle">Poiščite osebe in stvari na svojih fotografijah ter iz njih kopirajte besedilo. Vse deluje na tem telefonu in nič ga ne zapusti. Izberite zdaj, kaj želite, ali pa to kasneje spremenite v Nastavitvah.</string>
+    <string name="onboarding_ml_size">Prenos %1$s</string>
+    <string name="onboarding_ml_note">Modeli se prenesejo enkrat, po nastavitvi, v ozadju. Priporočljiv je Wi-Fi, saj brez Wi-Fi prenos porabi mobilne podatke.</string>
 </resources>

@@ -2521,4 +2521,8 @@
     <string name="viewer_already_in_drive">Già su Drive</string>
     <string name="viewer_save_to_drive_failed">Impossibile salvare su Drive</string>
     <string name="viewer_remove_shared_confirm_body">La foto viene tolta dall\'album condiviso. Resta al proprietario dell\'album e qui non sarà più visibile.</string>
+    <string name="onboarding_ml_title">Funzioni intelligenti sul tuo dispositivo</string>
+    <string name="onboarding_ml_subtitle">Trova persone e cose nelle tue foto e copiane il testo. Tutto funziona su questo telefono e nulla lo lascia. Scegli ora cosa vuoi oppure cambialo più tardi nelle Impostazioni.</string>
+    <string name="onboarding_ml_size">Download da %1$s</string>
+    <string name="onboarding_ml_note">I modelli si scaricano una sola volta, dopo la configurazione, in background. Il Wi-Fi è consigliato, perché senza Wi-Fi il download usa i dati mobili.</string>
 </resources>

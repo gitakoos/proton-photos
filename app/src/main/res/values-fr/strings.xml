@@ -2484,4 +2484,8 @@
     <string name="viewer_already_in_drive">Déjà dans Drive</string>
     <string name="viewer_save_to_drive_failed">Échec de l\'enregistrement dans Drive</string>
     <string name="viewer_remove_shared_confirm_body">La photo est retirée de l\'album partagé. Elle reste chez le propriétaire de l\'album et n\'y sera plus visible.</string>
+    <string name="onboarding_ml_title">Fonctions intelligentes sur votre appareil</string>
+    <string name="onboarding_ml_subtitle">Retrouvez des personnes et des choses dans vos photos, et copiez-en le texte. Tout fonctionne sur ce téléphone et rien ne le quitte. Choisissez maintenant ce que vous voulez ou modifiez-le plus tard dans les Réglages.</string>
+    <string name="onboarding_ml_size">Téléchargement de %1$s</string>
+    <string name="onboarding_ml_note">Les modèles se téléchargent une seule fois, après la configuration, en arrière-plan. Le Wi-Fi est recommandé, car sans Wi-Fi le téléchargement utilise les données mobiles.</string>
 </resources>

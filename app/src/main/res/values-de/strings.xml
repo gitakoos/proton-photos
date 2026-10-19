@@ -2482,4 +2482,8 @@
     <string name="viewer_already_in_drive">Bereits in Drive</string>
     <string name="viewer_save_to_drive_failed">Speichern in Drive fehlgeschlagen</string>
     <string name="viewer_remove_shared_confirm_body">Das Foto wird aus dem geteilten Album entfernt. Es bleibt beim Besitzer des Albums und ist hier nicht mehr zu sehen.</string>
+    <string name="onboarding_ml_title">Smarte Funktionen auf deinem Gerät</string>
+    <string name="onboarding_ml_subtitle">Finde Personen und Dinge in deinen Fotos und kopiere Text daraus. Alles läuft auf diesem Telefon, nichts verlässt es. Wähle jetzt aus, was du möchtest, oder ändere es später in den Einstellungen.</string>
+    <string name="onboarding_ml_size">%1$s Download</string>
+    <string name="onboarding_ml_note">Die Modelle werden einmal nach der Einrichtung im Hintergrund geladen. WLAN wird empfohlen, denn ohne WLAN verbraucht der Download mobile Daten.</string>
 </resources>

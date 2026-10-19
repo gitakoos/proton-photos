@@ -2509,4 +2509,8 @@
     <string name="viewer_already_in_drive">Staat al in Drive</string>
     <string name="viewer_save_to_drive_failed">Opslaan in Drive mislukt</string>
     <string name="viewer_remove_shared_confirm_body">De foto wordt uit het gedeelde album gehaald. Ze blijft bij de eigenaar van het album en is hier niet meer te zien.</string>
+    <string name="onboarding_ml_title">Slimme functies op je apparaat</string>
+    <string name="onboarding_ml_subtitle">Vind mensen en dingen in je foto\'s en kopieer er tekst uit. Alles draait op deze telefoon en niets verlaat hem. Kies nu wat je wilt of pas het later aan in Instellingen.</string>
+    <string name="onboarding_ml_size">%1$s download</string>
+    <string name="onboarding_ml_note">De modellen worden eenmalig gedownload, na de installatie, op de achtergrond. Wifi wordt aanbevolen, want zonder wifi gebruikt de download mobiele data.</string>
 </resources>

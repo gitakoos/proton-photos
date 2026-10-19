@@ -2606,4 +2606,8 @@
     <string name="viewer_already_in_drive">Už je na Drive</string>
     <string name="viewer_save_to_drive_failed">Nepodařilo se uložit na Drive</string>
     <string name="viewer_remove_shared_confirm_body">Fotka bude odebrána ze sdíleného alba. Zůstane u vlastníka alba a tady už nebude vidět.</string>
+    <string name="onboarding_ml_title">Chytré funkce ve vašem zařízení</string>
+    <string name="onboarding_ml_subtitle">Vyhledávejte osoby a věci na svých fotkách a kopírujte z nich text. Vše běží v tomto telefonu a nic z něj neodchází. Vyberte si teď, co chcete, nebo to později změňte v Nastavení.</string>
+    <string name="onboarding_ml_size">Stažení %1$s</string>
+    <string name="onboarding_ml_note">Modely se stahují jednou, po nastavení, na pozadí. Doporučuje se Wi-Fi, protože bez Wi-Fi stahování spotřebuje mobilní data.</string>
 </resources>

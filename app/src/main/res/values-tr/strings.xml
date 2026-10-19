@@ -2399,4 +2399,8 @@
     <string name="viewer_already_in_drive">Zaten Drive\'da</string>
     <string name="viewer_save_to_drive_failed">Drive\'a kaydedilemedi</string>
     <string name="viewer_remove_shared_confirm_body">Fotoğraf paylaşılan albümden çıkarılır. Albümün sahibinde kalır ve burada artık görünmez.</string>
+    <string name="onboarding_ml_title">Cihazında akıllı özellikler</string>
+    <string name="onboarding_ml_subtitle">Fotoğraflarındaki kişileri ve nesneleri bul, içlerindeki metni kopyala. Her şey bu telefonda çalışır ve hiçbir şey telefondan çıkmaz. Ne istediğini şimdi seç ya da sonra Ayarlar\'dan değiştir.</string>
+    <string name="onboarding_ml_size">%1$s indirme</string>
+    <string name="onboarding_ml_note">Modeller kurulumdan sonra arka planda bir kez indirilir. Wi-Fi önerilir, çünkü Wi-Fi yokken indirme mobil veri kullanır.</string>
 </resources>

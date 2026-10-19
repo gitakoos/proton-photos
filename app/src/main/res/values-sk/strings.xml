@@ -2607,4 +2607,8 @@
     <string name="viewer_already_in_drive">Už je na Drive</string>
     <string name="viewer_save_to_drive_failed">Nepodarilo sa uložiť na Drive</string>
     <string name="viewer_remove_shared_confirm_body">Fotka bude odstránená zo zdieľaného albumu. Zostane u vlastníka albumu a tu už nebude vidieť.</string>
+    <string name="onboarding_ml_title">Inteligentné funkcie vo vašom zariadení</string>
+    <string name="onboarding_ml_subtitle">Vyhľadávajte osoby a veci na svojich fotkách a kopírujte z nich text. Všetko beží v tomto telefóne a nič z neho neodchádza. Vyberte si teraz, čo chcete, alebo to neskôr zmeňte v Nastaveniach.</string>
+    <string name="onboarding_ml_size">Stiahnutie %1$s</string>
+    <string name="onboarding_ml_note">Modely sa sťahujú raz, po nastavení, na pozadí. Odporúča sa Wi-Fi, pretože bez Wi-Fi sťahovanie spotrebuje mobilné dáta.</string>
 </resources>

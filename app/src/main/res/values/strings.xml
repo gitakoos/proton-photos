@@ -2522,4 +2522,8 @@
     <string name="viewer_already_in_drive">Already in Drive</string>
     <string name="viewer_save_to_drive_failed">Couldn\'t save to Drive</string>
     <string name="viewer_remove_shared_confirm_body">This takes the photo out of the shared album. It stays with the album\'s owner, and you won\'t see it here any more.</string>
+    <string name="onboarding_ml_title">Smart features on your device</string>
+    <string name="onboarding_ml_subtitle">Find people and things in your photos, and copy text from them. It all runs on this phone and nothing leaves it. Pick what you want now or change it later in Settings.</string>
+    <string name="onboarding_ml_size">%1$s download</string>
+    <string name="onboarding_ml_note">Models download once, after setup, in the background. Wi-Fi is recommended, because without Wi-Fi the download uses mobile data.</string>
 </resources>
