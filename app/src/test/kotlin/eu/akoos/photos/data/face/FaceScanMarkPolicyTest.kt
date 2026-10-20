@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.face
 
 import eu.akoos.photos.util.SourceMiss
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -58,5 +59,17 @@ class FaceScanMarkPolicyTest {
     fun a_load_that_wedged_is_marked() {
         // A decode or decrypt that ran past its watchdog is deterministic and would re-wedge next pass.
         assertTrue(shouldMarkScannedOnNullSource(loadTimedOut = true, miss = SourceMiss.TRANSIENT))
+    }
+
+    @Test
+    fun a_model_that_would_not_open_leaves_the_photo_pending() {
+        assertEquals(MlScanVerdict.STAY_PENDING, mlScanVerdict(openFailed = true, runFailed = false))
+        assertEquals(MlScanVerdict.STAY_PENDING, mlScanVerdict(openFailed = true, runFailed = true))
+    }
+
+    @Test
+    fun a_detection_that_threw_is_still_recorded() {
+        assertEquals(MlScanVerdict.RECORD_THEN_RETHROW, mlScanVerdict(openFailed = false, runFailed = true))
+        assertEquals(MlScanVerdict.RECORD, mlScanVerdict(openFailed = false, runFailed = false))
     }
 }

@@ -63,7 +63,7 @@ class LocalOverwriteGuard(private val context: Context) {
         val parsed = Uri.parse(uri)
         val originalSize = imageSize(parsed)
         val wanted = expectedSize ?: originalSize
-        return MirrorOverwriteJournal.guardedMutation(
+        val result = MirrorOverwriteJournal.guardedMutation(
             stage = {
                 journal.stage(uri) { backup ->
                     open(parsed)?.use { input ->
@@ -82,9 +82,15 @@ class LocalOverwriteGuard(private val context: Context) {
             commit = { entry -> journal.commit(entry) },
             verify = { wanted == null || imageSize(parsed) == wanted },
         )
+        fileLength(parsed)?.let { LocalRewrites.note(uri, it) }
+        return result
     }
 
     private fun open(uri: Uri): InputStream? = context.contentResolver.openInputStream(uri)
+
+    private fun fileLength(uri: Uri): Long? = runCatching {
+        context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize }
+    }.getOrNull()?.takeIf { it > 0L }
 
     private fun imageSize(uri: Uri): Pair<Int, Int>? = runCatching {
         open(uri)?.use { input ->
@@ -130,4 +136,36 @@ class LocalOverwriteGuard(private val context: Context) {
     private companion object {
         const val BUFFER = 64 * 1024
     }
+}
+
+/**
+ * The device files this process rewrote on purpose through [LocalOverwriteGuard], each with its byte
+ * length right after the rewrite. Reconcile asks here when a backed-up photo's file changed size, so the
+ * app's own strip or metadata write keeps the photo's backup stamp while a change made by another app
+ * does not. A note counts only for the size it recorded and is spent by the one question that matches
+ * it. In memory only: after a restart an own rewrite is treated like any other change, which only
+ * keeps the photo from being freed.
+ */
+object LocalRewrites {
+    private const val MAX_NOTES = 20_000
+
+    private val notes = object : LinkedHashMap<String, Long>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > MAX_NOTES
+    }
+
+    fun note(uri: String, sizeBytes: Long) {
+        if (sizeBytes <= 0L) return
+        synchronized(notes) {
+            notes.remove(uri)
+            notes[uri] = sizeBytes
+        }
+    }
+
+    /** Whether [uri] was rewritten here and is [sizeBytes] long as that rewrite left it. Either way the
+     *  note is spent. */
+    fun consume(uri: String, sizeBytes: Long): Boolean = synchronized(notes) {
+        notes.remove(uri) == sizeBytes
+    }
+
+    internal fun clear() = synchronized(notes) { notes.clear() }
 }

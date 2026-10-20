@@ -861,6 +861,8 @@ class UploadPendingUseCase @Inject constructor(
             // (below) so a failed upload never renames a file that has no Drive copy. Strip-on-upload
             // runs against the bytes independently, so a stripped + renamed photo still gets erased.
             var mirrorRenameTarget: String? = null
+            // Set once a mirror step rewrote the on-device file, whose bytes may then differ from the upload's.
+            var deviceRewritten = false
             val renamedItem = if (renameToCaptureDate) {
                 val newName = uploadRenamedName(rawLocalItem.displayName, rawLocalItem.dateTaken, System.currentTimeMillis())
                 Log.d(UPLOAD_TAG, "Rename-on-upload: '${rawLocalItem.displayName}' → '$newName'")
@@ -966,6 +968,7 @@ class UploadPendingUseCase @Inject constructor(
                     // cloud. Silent with all-files; a refused write leaves the original intact.
                     val motionMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, motionTemp)
                     if (motionMirrorLanded) {
+                        deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device motion photo wiped for ${localItem.displayName}")
                     }
                     if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, motionMirrorLanded)) {
@@ -980,6 +983,7 @@ class UploadPendingUseCase @Inject constructor(
                     // file instead. Silent with all-files; a refused write leaves the original intact.
                     val gainMapMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, gainMapTemp)
                     if (gainMapMirrorLanded) {
+                        deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device Ultra HDR photo wiped for ${localItem.displayName}")
                     }
                     if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, gainMapMirrorLanded)) {
@@ -995,6 +999,7 @@ class UploadPendingUseCase @Inject constructor(
                     // upload it as-is, so the local and the backed-up copy stay byte-identical and pair
                     // by content hash. The wipe is the last step before the upload and is idempotent,
                     // so a failed upload simply retries it.
+                    deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device original wiped for ${localItem.displayName}")
                     if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, deviceRewriteSucceeded = true)) {
                         invalidateMirroredLocation(userId, state.localUri)
@@ -1047,6 +1052,7 @@ class UploadPendingUseCase @Inject constructor(
                     // write leaves the original intact.
                     val videoMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, tmp)
                     if (videoMirrorLanded) {
+                        deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device video wiped for ${localItem.displayName}")
                     }
                     if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, videoMirrorLanded)) {
@@ -1341,6 +1347,7 @@ class UploadPendingUseCase @Inject constructor(
                     // (compression failed or not smaller) skips silently.
                     compressedFile?.let { local ->
                         if (overwriteLocalInPlace(state.localUri, local)) {
+                            deviceRewritten = true
                             Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed for ${localItem.displayName}")
                         }
                     }
@@ -1366,6 +1373,7 @@ class UploadPendingUseCase @Inject constructor(
                         .compressToTemp(context, state.localUri, compression.tier, MetadataStripConfig())
                     if (localCompressed != null) {
                         if (overwriteLocalInPlace(state.localUri, localCompressed)) {
+                            deviceRewritten = true
                             Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed (strip-free) for ${localItem.displayName}")
                         }
                         localCompressed.delete()
@@ -1383,6 +1391,7 @@ class UploadPendingUseCase @Inject constructor(
                 } else if (mirrorStripToLocal || !stripOnUpload) {
                     compressedFile?.let { local ->
                         if (overwriteLocalInPlace(state.localUri, local)) {
+                            deviceRewritten = true
                             Log.d(UPLOAD_TAG, "Mirror compress: on-device video compressed for ${localItem.displayName}")
                         }
                     }
@@ -1401,12 +1410,22 @@ class UploadPendingUseCase @Inject constructor(
             // non-cancellably so an interrupt in this window can't leave the row LOCAL_ONLY with
             // a null cloudFileId — which would re-select and re-upload the same file (a Drive
             // duplicate) on the next pass.
+            // The row records the device file as it is now, so reconcile can tell a later edit by another
+            // app from this upload's own mirror rewrite: the hash and the length of the rewritten device
+            // bytes, or the size the device reported when this upload read a file it left alone.
+            val deviceHash = if (deviceRewritten && finalUploadUri != state.localUri) {
+                computeSha1(state.localUri) ?: hash
+            } else {
+                hash
+            }
             val syncedState = state.copy(
                 cloudFileId = cloudId,
-                localHash = hash,
+                localHash = deviceHash,
                 status = SyncStatus.SYNCED,
                 lastSyncSuccessMs = System.currentTimeMillis(),
                 backedUpAtMs = System.currentTimeMillis(),
+                sizeBytes = (if (deviceRewritten) deviceFileLength(state.localUri) else null)
+                    ?: rawLocalItem.sizeBytes.takeIf { it > 0L } ?: state.sizeBytes,
             )
             withContext(NonCancellable) {
                 syncStateRepo.upsert(syncedState, userId)
@@ -2047,6 +2066,11 @@ class UploadPendingUseCase @Inject constructor(
      * `ConfigurationProvider`). The xAttr Common.Digests
      * map carries the same SHA-1 hex so a later cross-client xAttr verify lines up.
      */
+    /** The device file's length as it is now, read from the file itself rather than a scan. */
+    private fun deviceFileLength(uri: String): Long? = runCatching {
+        context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")?.use { it.statSize }
+    }.getOrNull()?.takeIf { it > 0L }
+
     private fun computeSha1(uri: String): String? {
         val digest = MessageDigest.getInstance("SHA-1")
         try {

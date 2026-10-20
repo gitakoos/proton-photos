@@ -189,6 +189,20 @@ fun shouldRunForegroundIndex(pending: Int, backgroundEnabled: Boolean): Boolean 
 internal fun shouldMarkScannedOnNullSource(loadTimedOut: Boolean, miss: SourceMiss): Boolean =
     loadTimedOut || miss == SourceMiss.PERMANENT
 
+internal enum class MlScanVerdict { STAY_PENDING, RECORD, RECORD_THEN_RETHROW }
+
+/**
+ * What a photo whose source loaded comes to once its detection is over. Face models that would not open
+ * say nothing about the photo, so it stays pending with no scan marker and waits out a transient backoff.
+ * A detection that threw on the photo itself is recorded with the faces found before the throw, so a
+ * poison photo is not retried on every pass, and the failure is then rethrown. Pure so it is unit-tested.
+ */
+internal fun mlScanVerdict(openFailed: Boolean, runFailed: Boolean): MlScanVerdict = when {
+    openFailed -> MlScanVerdict.STAY_PENDING
+    runFailed -> MlScanVerdict.RECORD_THEN_RETHROW
+    else -> MlScanVerdict.RECORD
+}
+
 /**
  * Whether a finished walk pass should group the account's waiting faces into people. It needs a walk
  * that is still permitted and at least one face not yet grouped ([ungrouped]), however many faces the
@@ -973,9 +987,9 @@ class FaceIndexingScheduler @Inject constructor(
             // then holds only the not-yet-flushed remainder. One flush runs at a time.
             val persistedThisPass = AtomicInteger(0)
             val scanFlushing = AtomicBoolean(false)
-            // A pass keeps going only while the walk is permitted, nothing has fenced its writes off, and the
-            // process has not abandoned its cap of model pairs.
-            val passLive = { active() && writeFence.allows(passToken) && !abandonCap.reached() }
+            // A pass keeps going only while the walk is permitted, nothing has fenced its writes off, the
+            // process has not abandoned its cap of model pairs, and the face models have not failed to open.
+            val passLive = { active() && writeFence.allows(passToken) && !abandonCap.reached() && !ml.openFailed }
             // Hold the shared model gate for the session-resident window, so this face pair and a
             // semantic walk's CLIP session are never both loaded at once (the large-heap OOM risk), and on
             // through the pass-end grouping, so the search model cannot load while a regroup holds every
@@ -2064,7 +2078,6 @@ class FaceIndexingScheduler @Inject constructor(
                 tally?.stayed(photoKey, miss, SystemClock.elapsedRealtime())
                 return false
             }
-            tally?.movedOn(photoKey)
             // The faces the detection accepts, built inside the bounded run and written below by this worker
             // once the run is over and the ML lock is free, so the database write never holds up another
             // photo's inference nor counts against the inference watchdog. Guarded by its own monitor: a run
@@ -2080,6 +2093,7 @@ class FaceIndexingScheduler @Inject constructor(
             // finally, so a leaked in-flight run keeps a valid bitmap rather than reading a recycled one.
             var inferMs = 0L
             var mlFailure: Throwable? = null
+            var openFailure: Throwable? = null
             try {
                 mlLock.withLock {
                     // A walk photo that waited here while the process abandoned its cap of pairs opens no
@@ -2092,7 +2106,16 @@ class FaceIndexingScheduler @Inject constructor(
                     // Lease the current pair inside the lock: a timeout below abandons exactly this pair, and the
                     // next lock holder opens the fresh one. The lease is released when the detached run ends, so
                     // the pair is never closed under it, even once this caller is cancelled mid-run.
-                    val lease = ml.beginRun()
+                    val lease = try {
+                        ml.beginRun()
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        if (!source.isRecycled) source.recycle()
+                        throw e
+                    } catch (e: Throwable) {
+                        if (!source.isRecycled) source.recycle()
+                        openFailure = e
+                        return@withLock
+                    }
                     val detector = lease.value.detector
                     val embedder = lease.value.embedder
                     val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher, onRunEnd = lease.release) {
@@ -2168,6 +2191,13 @@ class FaceIndexingScheduler @Inject constructor(
             } catch (e: Throwable) {
                 mlFailure = e
             }
+            val verdict = mlScanVerdict(openFailed = openFailure != null, runFailed = mlFailure != null)
+            if (verdict == MlScanVerdict.STAY_PENDING) {
+                Log.w(TAG, "face models would not open: ${openFailure?.message}")
+                tally?.stayed(photoKey, SourceMiss.TRANSIENT, SystemClock.elapsedRealtime())
+                return false
+            }
+            tally?.movedOn(photoKey)
             // Record the photo even when its detection threw (an OOM on a crop, a bad frame), with whatever
             // faces came before, so a poison photo is not re-decoded and retried on every later pass; a
             // face-free photo is likewise recorded once. The faces and the marker land together, and not at
@@ -2185,7 +2215,7 @@ class FaceIndexingScheduler @Inject constructor(
                 scannedKeys.add(photoKey)
                 true
             }
-            mlFailure?.let { throw it }
+            if (verdict == MlScanVerdict.RECORD_THEN_RETHROW) mlFailure?.let { throw it }
             // Append this processed item to the diagnostics ring (newest-first) and fold it into the run
             // aggregates, so the next tester copy shows per-item load / infer / dl timings and the slowest
             // item rather than only a standing count.
@@ -3341,18 +3371,27 @@ class FaceIndexingScheduler @Inject constructor(
      * holds a lease on its pair ([beginRun]) that its completion releases; [abandon] and [close] both
      * retire the live pair, which closes at once when idle, else when its last run returns. An abandoned
      * pair therefore closes itself once its wedged run ends, and the next [beginRun] opens a fresh pair,
-     * so no later run shares a session with the wedged one.
+     * so no later run shares a session with the wedged one. A pair that would not open counts no run and
+     * sets [openFailed], which ends the walk's pass.
      */
-    private class FaceMl(
+    internal class FaceMl(
         openDetector: () -> FaceDetector,
         openEmbedder: () -> FaceEmbedder,
     ) : AutoCloseable {
         private val pairs = GuardedSessionHolder { FacePair(openDetector, openEmbedder) }
 
+        @Volatile var openFailed: Boolean = false
+            private set
+
         /** Opens the live pair if needed and counts one run on it. The run's end must call the lease's
          *  release, which [boundedRun] does through its run-end callback. */
         fun beginRun(): SessionLease<FaceRun> =
-            pairs.lease { pair -> FaceRun(pair.detector(), pair.embedder()) }
+            try {
+                pairs.lease { pair -> FaceRun(pair.detector(), pair.embedder()) }
+            } catch (e: Throwable) {
+                openFailed = true
+                throw e
+            }
 
         /** The live detector's min-size drop count for the debug pass-end log; 0 before it opens. */
         fun droppedTooSmall(): Int = pairs.peek()?.droppedTooSmall() ?: 0
@@ -3365,7 +3404,7 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /** One detached run's view of a [FaceMl] pair. */
-    private class FaceRun(val detector: FaceDetector, val embedder: FaceEmbedder)
+    internal class FaceRun(val detector: FaceDetector, val embedder: FaceEmbedder)
 
     /** A detector + embedder opened lazily and closed together once no run uses them (see [FaceMl]). */
     private class FacePair(

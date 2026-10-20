@@ -204,6 +204,17 @@ internal fun syncedLocalUrisByCloudId(rows: List<SyncStateLite>): Map<String, St
         .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
         .associate { it.cloudFileId!! to it.localUri }
 
+/**
+ * Whether the viewer may run a face search of its own on [photoKey]: only when the photo holds no face
+ * row at all for [account], so a search never re-detects over faces the user removed, left ungrouped or
+ * named. Same rule as [eu.akoos.photos.presentation.people.AddToPersonFaces.canFindFaces].
+ */
+internal suspend fun viewerMayDetectFaces(
+    faceDao: eu.akoos.photos.data.db.dao.FaceDao,
+    account: String,
+    photoKey: String,
+): Boolean = faceDao.facePhotoKeysIn(account, listOf(photoKey)).isEmpty()
+
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -759,7 +770,7 @@ class PhotoViewerViewModel @Inject constructor(
     }
 
     /**
-     * Detect the faces on [item] now if it has none grouped yet, and return the people found, updating
+     * Detect the faces on [item] now if it holds no face row yet, and return the people found, updating
      * the bar. Called from a long-press on a spot with no already-known face, so tagging works on a
      * photo the background walk has not reached (the way the text read runs on demand). Empty when AI is
      * off. The detection itself runs off the main thread.
@@ -775,8 +786,8 @@ class PhotoViewerViewModel @Inject constructor(
         return list
     }
 
-    /** The grouped faces on [item] as people; when [detectIfEmpty] and none are grouped yet, scan the
-     *  photo on demand first (a no-op on one already scanned) so a face can still be found. */
+    /** The grouped faces on [item] as people; when [detectIfEmpty] and the photo holds no face row at all,
+     *  scan it on demand first so a face can still be found. */
     private suspend fun resolvePeople(
         item: GalleryItem,
         userId: me.proton.core.domain.entity.UserId?,
@@ -786,9 +797,14 @@ class PhotoViewerViewModel @Inject constructor(
         val photoKey = item.stableId
         var faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         if (faces.isEmpty() && detectIfEmpty) {
-            val scanned = runCatching {
-                withContext(Dispatchers.Default) { faceIndexingScheduler.indexPhotoOnDemand(item, userId, force = true) }
-            }.getOrDefault(false)
+            val scanned = try {
+                viewerMayDetectFaces(faceDao, account, photoKey) &&
+                    withContext(Dispatchers.Default) { faceIndexingScheduler.indexPhotoOnDemand(item, userId, force = true) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                false
+            }
             if (scanned) faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         }
         val otherId = personDao.otherPersonId(account)

@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.flow
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.upload.LocalRewrites
 import eu.akoos.photos.domain.entity.SyncProgress
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -128,6 +129,8 @@ internal class ReconcileReferencePass(
             .filter { it.status == SyncStatus.SYNCED }
             .mapNotNull { it.cloudFileId }
             .toSet()
+        var changeHashes = 0
+        var changeHashBytes = 0L
 
         for (local in localItems) {
             val existingSync = existingByUri[local.uri]
@@ -142,6 +145,26 @@ internal class ReconcileReferencePass(
                 continue
             }
             val byId = existingSync?.cloudFileId?.let { cloudByLinkId[it] }
+
+            val changeCheck = byId != null && existingSync != null &&
+                existingSync.status == SyncStatus.SYNCED &&
+                existingSync.backedUpAtMs != null &&
+                existingSync.localHash.isNotEmpty() &&
+                existingSync.sizeBytes > 0L &&
+                local.sizeBytes > 0L &&
+                existingSync.sizeBytes != local.sizeBytes
+            val hashChangeNow = changeCheck && changeHashes < DEVICE_CHANGE_HASHES_PER_PASS &&
+                (changeHashes == 0 || changeHashBytes + local.sizeBytes <= DEVICE_CHANGE_HASH_BYTES_PER_PASS)
+            if (hashChangeNow) {
+                changeHashes++
+                changeHashBytes += local.sizeBytes
+            }
+            val deviceHash: String? = if (hashChangeNow) localRepo.sha1(local.uri) else null
+            val keepStoredSize = changeCheck && deviceHash == null
+            val deviceChanged = deviceHash != null &&
+                !LocalRewrites.consume(local.uri, local.sizeBytes) &&
+                deviceHash != existingSync?.localHash &&
+                cloudRepo.cloudContentHash(deviceHash)?.let { it == byId?.contentHash } != true
 
             val storedHash = existingSync?.localHash?.takeIf { it.isNotEmpty() }
             var recomputedHash: String? = null
@@ -170,17 +193,18 @@ internal class ReconcileReferencePass(
             }
 
             val status = if (matchedCloud != null) SyncStatus.SYNCED else SyncStatus.LOCAL_ONLY
-            val contentCertain = byId != null || byContentHash != null
+            val contentCertain = byContentHash != null || (byId != null && storedHash == null)
             newStates += SyncState(
                 localUri = local.uri,
                 cloudFileId = matchedCloud?.linkId,
-                localHash = recomputedHash ?: existingSync?.localHash.orEmpty(),
+                localHash = deviceHash ?: recomputedHash ?: existingSync?.localHash.orEmpty(),
                 cloudHash = matchedCloud?.contentHash,
                 status = status,
                 lastSyncAttemptMs = System.currentTimeMillis(),
                 lastSyncSuccessMs = if (status == SyncStatus.SYNCED) System.currentTimeMillis() else null,
-                backedUpAtMs = existingSync?.backedUpAtMs ?: (if (contentCertain) System.currentTimeMillis() else null),
-                sizeBytes = local.sizeBytes,
+                backedUpAtMs = if (deviceChanged) null
+                    else existingSync?.backedUpAtMs ?: (if (contentCertain) System.currentTimeMillis() else null),
+                sizeBytes = if (keepStoredSize && existingSync != null) existingSync.sizeBytes else local.sizeBytes,
             )
             if (status == SyncStatus.LOCAL_ONLY) {
                 val src = existingSync?.queueSource
