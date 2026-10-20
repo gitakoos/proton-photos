@@ -794,21 +794,6 @@
         <item quantity="other">Nahrává se %1$d fotek</item>
     </plurals>
     <string name="albums_download_all">Stáhnout vše</string>
-    <!-- Album and device-folder contents sheet. -->
-    <string name="album_contents">Obsah</string>
-    <string name="album_contents_size_unknown">velikost neznámá</string>
-    <plurals name="album_contents_total">
-        <item quantity="one">%1$d soubor, %2$s</item>
-        <item quantity="few">%1$d soubory, %2$s</item>
-        <item quantity="many">%1$d souboru, %2$s</item>
-        <item quantity="other">%1$d souborů, %2$s</item>
-    </plurals>
-    <plurals name="album_contents_unknown_count">
-        <item quantity="one">%1$d soubor neznámé velikosti není započten do součtu</item>
-        <item quantity="few">%1$d soubory neznámé velikosti nejsou započteny do součtu</item>
-        <item quantity="many">%1$d souboru neznámé velikosti není započteno do součtu</item>
-        <item quantity="other">%1$d souborů neznámé velikosti není započteno do součtu</item>
-    </plurals>
     <!-- Background album-download notification. -->
     <string name="album_download_channel_name">Stahování alb</string>
     <string name="album_download_channel_desc">Zobrazuje průběh stahování alba na pozadí.</string>

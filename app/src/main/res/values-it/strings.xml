@@ -588,17 +588,6 @@
         <item quantity="other">%1$d foto in caricamento</item>
     </plurals>
     <string name="albums_download_all">Scarica tutto</string>
-    <!-- Album and device-folder contents sheet. -->
-    <string name="album_contents">Contenuto</string>
-    <string name="album_contents_size_unknown">dimensione sconosciuta</string>
-    <plurals name="album_contents_total">
-        <item quantity="one">%1$d file, %2$s</item>
-        <item quantity="other">%1$d file, %2$s</item>
-    </plurals>
-    <plurals name="album_contents_unknown_count">
-        <item quantity="one">%1$d file di dimensione sconosciuta non è incluso nel totale</item>
-        <item quantity="other">%1$d file di dimensione sconosciuta non sono inclusi nel totale</item>
-    </plurals>
     <string name="album_download_channel_name">Download di album</string>
     <string name="album_download_channel_desc">Mostra l\'avanzamento del download di un album in background.</string>
     <string name="album_download_notification_title">Download di %1$s</string>

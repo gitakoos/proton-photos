@@ -251,8 +251,6 @@ fun AlbumDetailScreen(
     var showShareCloudWarning by remember { mutableStateOf(false) }
     val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val albumActionsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var showAlbumContents by remember { mutableStateOf(false) }
-    val albumContentsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     // Unified photo-selection share drawer + its manage-link sheet — same as the timeline.
     var showPhotoShareSheet by remember { mutableStateOf(false) }
@@ -1401,7 +1399,6 @@ fun AlbumDetailScreen(
             onToggleExcludedFromGrid = { viewModel.toggleExcludedFromGrid() },
             onDelete = if (state.isSharedWithMe) null else ({ showDeleteAlbumConfirm = true }),
             onSlideshow = { playSlideshow() },
-            onShowContents = { showAlbumContents = true },
             onSortSelected = { mode ->
                 scope.launch { PhotoViewChoiceStore.setAlbumSort(shareCtx, state.albumLinkId, mode) }
             },
@@ -1410,16 +1407,6 @@ fun AlbumDetailScreen(
                 scope.launch { PhotoViewChoiceStore.setAlbumGrouping(shareCtx, state.albumLinkId, grouping) }
             },
             onLeaveAlbum = { showLeaveAlbumConfirm = true },
-        )
-    }
-
-    if (showAlbumContents) {
-        // Drive's stored sizes only: a device twin's file size would describe a different copy.
-        val contentsRows = remember(state.photos) { albumContentsRowsOfCloud(state.photos) }
-        AlbumContentsSheet(
-            sheetState = albumContentsSheetState,
-            rows = contentsRows,
-            onDismiss = { showAlbumContents = false },
         )
     }
 

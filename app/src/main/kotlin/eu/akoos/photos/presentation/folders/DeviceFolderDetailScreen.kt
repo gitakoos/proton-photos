@@ -95,10 +95,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.albums.AlbumContentsSheet
 import eu.akoos.photos.presentation.albums.AlbumPhotoGrouping
 import eu.akoos.photos.presentation.albums.AlbumRenameInput
-import eu.akoos.photos.presentation.albums.albumContentsRowsOfDevice
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.AddToAlbumMessage
 import eu.akoos.photos.presentation.common.ConfirmSheet
@@ -217,8 +215,6 @@ fun DeviceFolderDetailScreen(
 
     var showFolderOverflow by remember { mutableStateOf(false) }
     val folderActionsSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var showFolderContents by remember { mutableStateOf(false) }
-    val folderContentsSheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val isMirroredAsAlbum by viewModel.isMirroredAsAlbum.collectAsStateWithLifecycle()
     val isExcludedFromBackup by viewModel.isExcludedFromBackup.collectAsStateWithLifecycle()
     val isHiddenFromTimeline by viewModel.isHiddenFromTimeline.collectAsStateWithLifecycle()
@@ -1243,7 +1239,6 @@ fun DeviceFolderDetailScreen(
             // Hands the folder to the viewer already playing, opening on the first photo of the
             // current sort order.
             onSlideshow = if (hasPhotos) ({ onSlideshowClick(items) }) else null,
-            onShowContents = if (hasPhotos) ({ showFolderContents = true }) else null,
             onSortSelected = viewModel::setSortMode,
             // Saved and shown at once, so a tap on the marked chip also undoes a pinch.
             onGroupingSelected = { grouping ->
@@ -1254,15 +1249,6 @@ fun DeviceFolderDetailScreen(
             onRename = { showRenameSheet = true },
             // The device side only: the vault's side of a folder has no device file to delete.
             onDeleteFolder = if (!fromVault && hasPhotos) viewModel::requestDeleteFolder else null,
-        )
-    }
-
-    if (showFolderContents) {
-        val contentsRows = remember(items) { albumContentsRowsOfDevice(items) }
-        AlbumContentsSheet(
-            sheetState = folderContentsSheetState,
-            rows = contentsRows,
-            onDismiss = { showFolderContents = false },
         )
     }
 

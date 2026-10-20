@@ -584,17 +584,6 @@
         <item quantity="other">%1$d photos en cours d\'envoi</item>
     </plurals>
     <string name="albums_download_all">Tout télécharger</string>
-    <!-- Album and device-folder contents sheet. -->
-    <string name="album_contents">Contenu</string>
-    <string name="album_contents_size_unknown">taille inconnue</string>
-    <plurals name="album_contents_total">
-        <item quantity="one">%1$d fichier, %2$s</item>
-        <item quantity="other">%1$d fichiers, %2$s</item>
-    </plurals>
-    <plurals name="album_contents_unknown_count">
-        <item quantity="one">%1$d fichier de taille inconnue n\'est pas compté dans le total</item>
-        <item quantity="other">%1$d fichiers de taille inconnue ne sont pas comptés dans le total</item>
-    </plurals>
     <string name="album_download_channel_name">Téléchargements d\'album</string>
     <string name="album_download_channel_desc">Affiche la progression du téléchargement d\'un album en arrière-plan.</string>
     <string name="album_download_notification_title">Téléchargement de %1$s</string>

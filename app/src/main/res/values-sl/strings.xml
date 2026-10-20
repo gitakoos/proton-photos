@@ -795,21 +795,6 @@
         <item quantity="other">Nalaga se %1$d fotografij</item>
     </plurals>
     <string name="albums_download_all">Prenesi vse</string>
-    <!-- Album and device-folder contents sheet. -->
-    <string name="album_contents">Vsebina</string>
-    <string name="album_contents_size_unknown">velikost ni znana</string>
-    <plurals name="album_contents_total">
-        <item quantity="one">%1$d datoteka, %2$s</item>
-        <item quantity="two">%1$d datoteki, %2$s</item>
-        <item quantity="few">%1$d datoteke, %2$s</item>
-        <item quantity="other">%1$d datotek, %2$s</item>
-    </plurals>
-    <plurals name="album_contents_unknown_count">
-        <item quantity="one">%1$d datoteka neznane velikosti ni vključena v skupno vsoto</item>
-        <item quantity="two">%1$d datoteki neznane velikosti nista vključeni v skupno vsoto</item>
-        <item quantity="few">%1$d datoteke neznane velikosti niso vključene v skupno vsoto</item>
-        <item quantity="other">%1$d datotek neznane velikosti ni vključenih v skupno vsoto</item>
-    </plurals>
     <!-- Background album-download notification. -->
     <string name="album_download_channel_name">Prenosi albumov</string>
     <string name="album_download_channel_desc">Prikazuje potek pri prenašanju albuma v ozadju.</string>
