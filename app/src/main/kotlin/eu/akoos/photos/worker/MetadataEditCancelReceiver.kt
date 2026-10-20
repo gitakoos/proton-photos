@@ -35,9 +35,10 @@ import eu.akoos.photos.domain.usecase.CloudMetadataSaveController
 
 /**
  * Backing receiver for the metadata-edit notification's "Cancel" action. It goes through
- * [CloudMetadataSaveController.cancel], which stops the drain AND empties the queue, so the edits of a
- * cancelled batch are never picked up by a later one. Cancelling the worker alone would leave its rows
- * in place for the next run to resume.
+ * [CloudMetadataSaveController.cancel], which stops the drain AND drops every edit whose corrected copy
+ * was not uploaded yet, so those are never picked up by a later batch; an edit whose copy is already in
+ * Drive is finished instead. Cancelling the worker alone would leave every row in place for the next
+ * run to resume.
  *
  * Reaches the @Singleton controller via a Hilt EntryPoint since a BroadcastReceiver is not itself injected.
  */

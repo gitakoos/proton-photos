@@ -362,6 +362,10 @@ object SettingsKeys {
      *  VaultPasswordStore). Absent when no password is set. Machine-level: it survives a sign-out. */
     val VAULT_PASSWORD_BLOB = stringPreferencesKey("vault_password_blob")
 
+    /** User ids whose sign-out cleanup started and has not finished, so the next launch can finish it
+     *  (see SignOutCleanup.replayPlan). Machine-level: never part of the account-scoped wipe. */
+    val SIGN_OUT_CLEANUP_PENDING = stringSetPreferencesKey("sign_out_cleanup_pending")
+
     /**
      * hiddenUri → everything else the hidden photo owned that is keyed by its device uri, as a set of
      * "hiddenUri|sourceUri|favourite|userTags|coverFolder|albums" strings (same flatten as the maps

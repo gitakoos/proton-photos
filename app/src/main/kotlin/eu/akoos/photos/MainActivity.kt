@@ -84,6 +84,7 @@ import eu.akoos.photos.data.updater.InstallSessionEvents
 import eu.akoos.photos.data.updater.UpdateInstaller
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.ThemePrefsBoot
+import eu.akoos.photos.data.preferences.continueWithoutAccount
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.syncEffectivelyEnabled
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
@@ -170,18 +171,93 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var newsRepository: NewsRepository
     @Inject lateinit var hiddenVaultRestorer: HiddenVaultRestorer
     @Inject lateinit var vaultRescueNotifier: VaultRescueNotifier
+    @Inject @eu.akoos.photos.di.AppScope lateinit var appScope: kotlinx.coroutines.CoroutineScope
 
     private val vaultSignOut by lazy {
+        val restorer = hiddenVaultRestorer
+        val notifier = vaultRescueNotifier
         VaultSignOutPolicy(
-            rescue = { hiddenVaultRestorer.rescueDeviceOnly() },
-            notifyMoved = { zipName -> vaultRescueNotifier.notifyMoved(zipName) },
+            rescue = { restorer.rescueDeviceOnly() },
+            notifyMoved = { zipName -> notifier.notifyMoved(zipName) },
         )
     }
 
     /** Disables an account whose sign-in gave up before it made a session; the vault stays. */
     private suspend fun disableUnfinishedSignIn(userId: UserId) {
         vaultSignOut.markUnfinishedSignIn(userId.id)
+        eu.akoos.photos.util.SignOutCleanup.noteUnfinishedSignIn(userId.id)
         accountManager.disableAccount(userId)
+    }
+
+    /**
+     * Everything a disabled account leaves behind, in order: the work scheduled against it stops, the
+     * vault's device-only photos are rescued, then its rows, keys, preferences and decrypted caches are
+     * wiped. It runs on the app scope, so a recreated or finished Activity does not cut it short, and
+     * [persist] keeps a marker until the end, so a process killed part way finishes it on the next
+     * launch (see [replayUnfinishedSignOutCleanups]).
+     */
+    private suspend fun cleanUpAfterSignOut(
+        app: android.content.Context,
+        policy: VaultSignOutPolicy,
+        userId: UserId,
+        persist: Boolean,
+    ) {
+        val cleanup = eu.akoos.photos.util.SignOutCleanup
+        if (!cleanup.claim(userId.id)) return
+        try {
+            if (persist) signOutStep { cleanup.markPending(app, userId.id) }
+            cleanup.stopBackgroundWork(app, workManager)
+            val vault = try {
+                policy.afterSignOut(userId.id)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                eu.akoos.photos.domain.repository.VaultWipe.None
+            }
+            signOutStep { driveRepo.clearCacheForSignOut(userId, vault) }
+            signOutStep { eu.akoos.photos.data.preferences.AccountScopedPreferences.clear(app, userId) }
+            signOutStep {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    cleanup.clearDecryptedCaches(app)
+                }
+            }
+            signOutStep { cleanup.clearPending(app, userId.id) }
+        } finally {
+            cleanup.release(userId.id)
+        }
+    }
+
+    private suspend inline fun signOutStep(block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            android.util.Log.w("MainActivity", "sign-out cleanup step failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * Finishes a sign-out cleanup an earlier process started and did not end, but only while nobody is
+     * signed in and no guest session is in use: anyone present now, the same account again, another one
+     * or a guest, only loses the marker, since most of the cleanup is not scoped to the account that left.
+     */
+    private suspend fun replayUnfinishedSignOutCleanups(app: android.content.Context, policy: VaultSignOutPolicy) {
+        val cleanup = eu.akoos.photos.util.SignOutCleanup
+        val pending = cleanup.pending(app)
+        if (pending.isEmpty()) return
+        val present = accountManager.getPrimaryUserId().first()?.id
+            ?: accountManager.getAccounts().first().firstOrNull {
+                it.state != me.proton.core.account.domain.entity.AccountState.Disabled &&
+                    it.state != me.proton.core.account.domain.entity.AccountState.Removed
+            }?.userId?.id
+            ?: eu.akoos.photos.data.db.entity.PhotoLocationEntity.LOCAL_USER
+                .takeIf { app.continueWithoutAccount.first() }
+        for ((userId, step) in cleanup.replayPlan(pending, present, cleanup.runningNow())) {
+            when (step) {
+                eu.akoos.photos.util.SignOutReplay.RUN -> cleanUpAfterSignOut(app, policy, UserId(userId), persist = true)
+                eu.akoos.photos.util.SignOutReplay.DROP -> signOutStep { cleanup.clearPending(app, userId) }
+                eu.akoos.photos.util.SignOutReplay.SKIP -> Unit
+            }
+        }
     }
 
     /** The app lock over the whole screen; see [AppLockGate]. */
@@ -213,6 +289,8 @@ class MainActivity : AppCompatActivity() {
         // ProtonCore account-state handler. Without it, 2FA / two-pass accounts stall after the
         // password: LoginActivity closes on first-factor success but nothing observes the resulting
         // SecondFactorNeeded / TwoPassModeNeeded state. These observers open the right workflow.
+        val app = applicationContext
+        val policy = vaultSignOut
         accountManager.observe(this.lifecycle, Lifecycle.State.CREATED)
             .onAccountTwoPassModeNeeded { authOrchestrator.startTwoPassModeWorkflow(it) }
             .onAccountTwoPassModeFailed {
@@ -244,23 +322,13 @@ class MainActivity : AppCompatActivity() {
                 // converges here, but only the cached rows and key material were being cleared: the
                 // folder selection, album mapping, hidden folder names and queued Drive cleanups are
                 // preferences, and they stayed for whoever signed in next.
-                lifecycleScope.launch {
-                    eu.akoos.photos.util.SignOutCleanup.stopBackgroundWork(this@MainActivity, workManager)
-                    val vault = vaultSignOut.afterSignOut(it.userId.id)
-                    runCatching { driveRepo.clearCacheForSignOut(it.userId, vault) }
-                    runCatching {
-                        eu.akoos.photos.data.preferences.AccountScopedPreferences
-                            .clear(this@MainActivity, it.userId)
-                    }
-                    runCatching {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            eu.akoos.photos.util.SignOutCleanup.clearDecryptedCaches(this@MainActivity)
-                        }
-                    }
-                }
+                val persist = !eu.akoos.photos.util.SignOutCleanup.consumeUnfinishedSignIn(it.userId.id)
+                appScope.launch { cleanUpAfterSignOut(app, policy, it.userId, persist) }
             }
             .onUserKeyCheckFailed { /* corrupt user key — best to just disable and re-login */ }
             .onUserAddressKeyCheckFailed { /* same */ }
+
+        appScope.launch { replayUnfinishedSignOutCleanups(app, policy) }
 
         lifecycleScope.launch {
             // Login gate: don't arm the BG "Watching for new photos" notification before sign-in,

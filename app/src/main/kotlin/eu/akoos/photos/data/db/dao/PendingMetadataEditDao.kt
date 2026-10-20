@@ -55,6 +55,15 @@ interface PendingMetadataEditDao {
     @Query("DELETE FROM pending_metadata_edit")
     suspend fun clear()
 
+    /** The cancel path: drop the edits queued up to [enqueuedUpTo] whose corrected copy was never
+     *  uploaded. A row with a recorded copy stays, so the drain can finish it instead of leaving the
+     *  original and its copy both in Drive; a batch queued after the cancel is left alone. */
+    @Query("DELETE FROM pending_metadata_edit WHERE newLinkId IS NULL AND enqueuedAt <= :enqueuedUpTo")
+    suspend fun clearNotStarted(enqueuedUpTo: Long)
+
+    @Query("SELECT COUNT(*) FROM pending_metadata_edit")
+    suspend fun count(): Int
+
     /** Live count of pending edits, so a progress surface can show the outstanding backlog. */
     @Query("SELECT COUNT(*) FROM pending_metadata_edit")
     fun observeCount(): Flow<Int>
