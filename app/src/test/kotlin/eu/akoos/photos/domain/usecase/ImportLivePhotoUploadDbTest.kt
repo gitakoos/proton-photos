@@ -55,6 +55,7 @@ import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -80,6 +81,7 @@ class ImportLivePhotoUploadDbTest {
     private lateinit var useCase: ImportTakeoutUseCase
     private val sent = mutableListOf<Sent>()
     private val userId = UserId("user-1")
+    private var failVideoUploads = 0
 
     @Before
     fun setUp() {
@@ -92,6 +94,10 @@ class ImportLivePhotoUploadDbTest {
             repo.uploadFileLinked(any(), any(), any(), any(), any(), any(), any(), any())
         } coAnswers {
             val item = secondArg<LocalMediaItem>()
+            if (item.displayName.endsWith(".mp4") && failVideoUploads > 0) {
+                failVideoUploads--
+                throw IOException("upload failed")
+            }
             synchronized(sent) {
                 val link = "link-${sent.size + 1}"
                 sent += Sent(item.displayName, arg(5), arg(6), link, item.dateTaken)
@@ -144,10 +150,10 @@ class ImportLivePhotoUploadDbTest {
             sizeBytes = 20, uploaded = uploaded, stagedAt = 1L, liveOf = liveOf, linkId = linkId,
         )
 
-    private suspend fun upload(zip: ByteArray) = useCase.uploadStaged(
+    private suspend fun upload(zip: ByteArray, onProgress: suspend (ImportProgress) -> Unit = {}) = useCase.uploadStaged(
         userId = userId, zipId = ZIP, runId = "run-1", albumMode = ImportAlbumMode.NONE,
         source = ImportSource(TakeoutZipReader { ByteArrayInputStream(zip) }, "export.zip") { zip.size.toLong() },
-        onProgress = {},
+        onProgress = onProgress,
     )
 
     @Test
@@ -169,8 +175,13 @@ class ImportLivePhotoUploadDbTest {
         assertNull(solo.mainPhotoLinkId)
         assertTrue("a plain photo has no extra tag", solo.extraTags.isEmpty())
         assertTrue("the video is sent after the still", sent.indexOf(video) > sent.indexOf(still))
-        assertEquals(3, summary.total)
-        assertEquals(3, summary.imported)
+        assertEquals("a Live Photo counts once", 2, summary.total)
+        assertEquals(2, summary.imported)
+        assertEquals(0, summary.failed)
+        val history = db.importHistoryDao().byRun("run-1")!!
+        assertEquals(2, history.total)
+        assertEquals(2, history.uploaded)
+        assertEquals("the undo ledger keeps the video's own row", 3, db.importUploadedDao().pendingByRun("run-1").size)
         assertTrue(db.importStagedDao().allForZip(ZIP).all { it.uploaded })
         assertEquals(still.link, db.importStagedDao().allForZip(ZIP).single { it.entryName == "Trip/IMG_1.jpg" }.linkId)
     }
@@ -202,7 +213,7 @@ class ImportLivePhotoUploadDbTest {
             val video = sent.single { it.name == "IMG_1.mp4" }
             assertEquals(setOf(3), still.extraTags)
             assertEquals(still.link, video.mainPhotoLinkId)
-            assertEquals(3, summary.imported)
+            assertEquals(2, summary.imported)
             assertEquals(0, summary.skipped)
             assertTrue(db.importStagedDao().allForZip(ZIP).all { it.uploaded })
             assertEquals("Export", db.importHistoryDao().byRun("run-1")?.fileName)
@@ -300,6 +311,86 @@ class ImportLivePhotoUploadDbTest {
         assertEquals(stillTime, sent.single { it.name == "IMG_1.jpg" }.dateTaken)
         assertEquals(stillTime, sent.single { it.name == "IMG_1.mp4" }.dateTaken)
         assertTrue(db.importStagedDao().allForZip(ZIP).all { it.dateMs != null })
+    }
+
+    @Test
+    fun `progress counts a Live Photo once`() = runBlocking {
+        val zip = zipOf("Trip/IMG_1.jpg", "Trip/IMG_1.mp4", "Trip/solo.jpg")
+        db.importStagedDao().upsert(
+            listOf(row("Trip/IMG_1.jpg"), row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg"), row("Trip/solo.jpg")),
+        )
+        val progress = mutableListOf<ImportProgress>()
+
+        upload(zip) { synchronized(progress) { progress += it } }
+
+        assertEquals(2, progress.maxOf { it.total })
+        assertEquals(2, progress.last().done)
+        assertTrue(progress.all { it.done <= it.total })
+    }
+
+    @Test
+    fun `a failed video keeps its still, and the next run joins it`() = runBlocking {
+        val dao = db.importStagedDao()
+        val zip = zipOf("Trip/IMG_1.jpg", "Trip/IMG_1.mp4")
+        dao.upsert(listOf(row("Trip/IMG_1.jpg"), row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg")))
+        failVideoUploads = 1
+
+        val first = upload(zip)
+        dao.clearResolved(ZIP)
+
+        val still = sent.single()
+        assertEquals("IMG_1.jpg", still.name)
+        assertEquals(1, first.total)
+        assertEquals("an unfinished Live Photo is not an import", 0, first.imported)
+        assertEquals(0, first.skipped)
+        assertEquals(1, first.failed)
+        val kept = dao.allForZip(ZIP).single { it.entryName == "Trip/IMG_1.jpg" }
+        assertEquals("the still's row survives with its link", still.link, kept.linkId)
+        assertEquals(listOf(ZIP), dao.zipsWithPending())
+        assertEquals(1, dao.observeIncludedCount(ZIP).first())
+        assertEquals(listOf("Trip/IMG_1.jpg"), dao.observeForZip(ZIP).first().map { it.entryName })
+
+        val second = upload(zip)
+        dao.clearResolved(ZIP)
+
+        val video = sent.single { it.name == "IMG_1.mp4" }
+        assertEquals("only the video is sent again", 2, sent.size)
+        assertEquals(still.link, video.mainPhotoLinkId)
+        assertEquals(1, second.total)
+        assertEquals(1, second.imported)
+        assertTrue(dao.allForZip(ZIP).isEmpty())
+    }
+
+    @Test
+    fun `an excluded video does not keep its uploaded still`() = runBlocking {
+        val dao = db.importStagedDao()
+        dao.upsert(
+            listOf(
+                row("Trip/IMG_1.jpg", uploaded = true, linkId = "link-earlier"),
+                row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg").copy(excluded = true),
+            ),
+        )
+
+        dao.clearResolved(ZIP)
+
+        assertTrue(dao.allForZip(ZIP).isEmpty())
+    }
+
+    @Test
+    fun `a video whose still row is gone is listed and goes up on its own`() = runBlocking {
+        val dao = db.importStagedDao()
+        val zip = zipOf("Trip/IMG_1.mp4")
+        dao.upsert(listOf(row("Trip/IMG_1.mp4", liveOf = "Trip/IMG_1.jpg")))
+        assertEquals(listOf("Trip/IMG_1.mp4"), dao.observeForZip(ZIP).first().map { it.entryName })
+        assertEquals(1, dao.observeIncludedCount(ZIP).first())
+
+        val summary = upload(zip)
+
+        assertEquals(listOf("IMG_1.mp4"), sent.map { it.name })
+        assertNull(sent.single().mainPhotoLinkId)
+        assertEquals(1, summary.total)
+        assertEquals(1, summary.imported)
+        assertTrue(dao.pendingUpload(ZIP).isEmpty())
     }
 
     private companion object {

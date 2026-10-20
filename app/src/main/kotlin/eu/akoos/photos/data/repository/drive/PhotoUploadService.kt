@@ -1019,8 +1019,9 @@ class PhotoUploadService @Inject constructor(
 
             // Persist the newly uploaded photo to the local DB immediately so the
             // gallery (which observes the DB via Room Flow) shows it right away —
-            // without waiting for the next full cloud refresh.
-            photoListingDao.upsertAll(listOf(
+            // without waiting for the next full cloud refresh. The video of a Live Photo is not a
+            // photo of its own: Drive lists it only under its still, so it gets no row here.
+            if (mainPhotoLinkId == null) photoListingDao.upsertAll(listOf(
                 PhotoListingEntity(
                     linkId       = fileId,
                     shareId      = shareId,

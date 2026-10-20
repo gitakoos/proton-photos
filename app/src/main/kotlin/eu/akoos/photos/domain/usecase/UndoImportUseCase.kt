@@ -127,11 +127,7 @@ class UndoImportUseCase @Inject constructor(
             }
         }
 
-        val result = UndoResult(
-            undone = trashed.size,
-            keptChanged = plan.changed.size,
-            failed = failedTrash.size + plan.unverifiable.size + trashCallFailed,
-        )
+        val result = undoResultOf(rows, plan, trashed, failedTrash, trashCallFailed = trashCallFailed > 0)
         SyncDiagnostics.log(
             "import undo: trashed ${result.undone}, kept ${result.keptChanged} changed, failed ${result.failed}",
         )
@@ -183,4 +179,47 @@ internal fun planImportUndo(
         }
     }
     return ImportUndoPlan(toTrash, changed, unverifiable)
+}
+
+/**
+ * What an undo reports, counted in photos: a Live Photo once, although its video has a ledger row and a
+ * link of its own and is trashed with it.
+ */
+internal fun undoResultOf(
+    rows: List<ImportUploadedEntity>,
+    plan: ImportUndoPlan,
+    trashed: Set<String>,
+    failedTrash: Set<String>,
+    trashCallFailed: Boolean,
+): UndoResult {
+    val photoLinks = ledgerPhotos(rows).mapTo(HashSet()) { it.linkId }
+    fun Collection<String>.photos() = count { it in photoLinks }
+    return UndoResult(
+        undone = trashed.photos(),
+        keptChanged = plan.changed.photos(),
+        failed = failedTrash.photos() + plan.unverifiable.photos() + (if (trashCallFailed) plan.toTrash.photos() else 0),
+    )
+}
+
+private val LEDGER_STILL = Regex("\\.(heic|heif|jpe?g)$", RegexOption.IGNORE_CASE)
+private val LEDGER_MOTION = Regex("\\.(mov|mp4)$", RegexOption.IGNORE_CASE)
+
+/**
+ * A run's ledger [rows] as photos: the video of a Live Photo has a row of its own, under its still's name
+ * with the video's extension, so a video sharing its name with a still of the same outcome is that
+ * still's and is left out. Each file keeps its own date in the ledger, which can differ between the two
+ * halves, so the name alone decides.
+ */
+internal fun ledgerPhotos(rows: List<ImportUploadedEntity>): List<ImportUploadedEntity> {
+    fun stem(row: ImportUploadedEntity) = row.name.orEmpty().substringBeforeLast('.').lowercase(java.util.Locale.ROOT)
+    val stills = rows.filter { LEDGER_STILL.containsMatchIn(it.name.orEmpty()) }.groupBy { stem(it) to it.alreadyInDrive }
+    val taken = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<ImportUploadedEntity, Boolean>())
+    return rows.filterNot { row ->
+        if (!LEDGER_MOTION.containsMatchIn(row.name.orEmpty())) return@filterNot false
+        val still = stills[stem(row) to row.alreadyInDrive]
+            ?.firstOrNull { it !in taken }
+            ?: return@filterNot false
+        taken += still
+        true
+    }
 }

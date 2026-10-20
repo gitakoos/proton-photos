@@ -71,7 +71,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import me.proton.core.domain.entity.UserId
 import java.io.File
@@ -109,7 +109,7 @@ data class ImportProgress(
 )
 
 /** The tally an import run ends with. [imported] + [alreadyInDrive] + [skipped] + [failed] equals
- *  [total]: every media entry in the zip lands in exactly one of the four. [alreadyInDrive] counts an
+ *  [total]: every photo in the zip, a Live Photo once, lands in exactly one of the four. [alreadyInDrive] counts an
  *  entry whose exact bytes Drive already held, so it was resolved without an upload. [albumsCreated] and
  *  [photosAddedToAlbums] are the album-phase outcome, orthogonal to the four upload tallies (the same
  *  photo can join several albums), so they do not enter the total identity. */
@@ -122,6 +122,49 @@ data class ImportSummary(
     val albumsCreated: Int = 0,
     val photosAddedToAlbums: Int = 0,
 )
+
+/**
+ * The run's four upload tallies from its undo [ledger] and the zip's [staged] rows, counting a Live Photo
+ * once. A video's ledger row folds into its still's when the still is in this ledger too; otherwise the
+ * video stands for itself (it finished a Live Photo an earlier run started, or its still row is gone). A
+ * pending row is a photo still to send unless it is a video whose still is itself pending; a video that
+ * did not go up behind a still sent here leaves that Live Photo unfinished, so it counts as still to send.
+ * [notFound] of those pending photos are skipped (never met in the source), the rest failed.
+ */
+internal fun importTally(
+    ledger: List<ImportUploadedEntity>,
+    staged: List<ImportStagedEntity>,
+    notFound: Int,
+): ImportSummary {
+    val byName = staged.associateBy { it.entryName }
+    val ledgerLinks = ledger.mapTo(HashSet()) { it.linkId }
+    fun stillCarries(still: ImportStagedEntity?) = still?.linkId?.let { it in ledgerLinks } == true
+    val folded = staged.mapNotNullTo(HashSet()) { r ->
+        r.linkId?.takeIf { r.liveOf != null && stillCarries(byName[r.liveOf]) }
+    }
+    // A Live Photo whose still went up here while its video did not is unfinished: it counts as a photo
+    // still to send, not as an import, so the summary agrees with the review that offers it again.
+    val unfinished = staged.mapNotNullTo(HashSet()) { r ->
+        if (r.liveOf == null || r.excluded || r.uploaded) return@mapNotNullTo null
+        byName[r.liveOf]?.takeIf { stillCarries(it) }?.linkId
+    }
+    val counted = ledger.filterNot { it.linkId in folded || it.linkId in unfinished }
+    val imported = counted.count { !it.alreadyInDrive }
+    val alreadyInDrive = counted.size - imported
+    val pending = staged.count { r ->
+        if (r.excluded || r.uploaded) return@count false
+        val still = r.liveOf?.let { byName[it] } ?: return@count true
+        still.uploaded
+    }
+    val skipped = notFound.coerceIn(0, pending)
+    return ImportSummary(
+        total = imported + alreadyInDrive + pending,
+        imported = imported,
+        alreadyInDrive = alreadyInDrive,
+        skipped = skipped,
+        failed = pending - skipped,
+    )
+}
 
 /**
  * Uploads the reviewed set of a Google Takeout / Ente import into Drive Photos, carrying the capture
@@ -189,14 +232,13 @@ class ImportTakeoutUseCase @Inject constructor(
         // Drive link is known; everything else is the first pass.
         val pending = allPending.filter { it.liveOf == null }.associateBy { it.entryName }
         val pendingVideos = allPending.filter { it.liveOf != null }.associateBy { it.entryName }
-        val total = allPending.size
         if (allPending.isEmpty()) {
             // Nothing left to send. A fresh run with no kept entries records a zero row; a resume whose
             // every entry was already handled before the kill reports the full run from the ledger, so a
             // completion that raced a process death is not under-counted. The album phase still runs, so a
             // kill after the last upload but before the albums were built finishes them on this resume.
             val albums = runAlbumPhase(userId, runId, albumMode)
-            val summary = buildSummary(runId, zipId, skipped = 0)
+            val summary = buildSummary(runId, zipId, notFound = 0)
                 .copy(albumsCreated = albums.albumsCreated, photosAddedToAlbums = albums.photosAddedToAlbums)
             recordHistory(
                 runId, zipId, fileName,
@@ -236,19 +278,29 @@ class ImportTakeoutUseCase @Inject constructor(
         // caps how many extracted temp files exist at once. Only the upload is parallel, so the ledger, the
         // dedup and the album membership keep their sequential meaning.
         val uploadSemaphore = Semaphore(IMPORT_UPLOAD_PARALLELISM)
-        // Progress + the skipped tally only; the per-outcome counts (imported / already-in-Drive / failed)
-        // are read back from the durable ledger in buildSummary, so a resumed run still reports its whole
-        // self and a failure needs no separate counter here.
-        val processedCount = AtomicInteger(0)
+        // Both halves of a Live Photo go up as they are: a re-encoded still or video would no longer match
+        // the other half.
+        val staged = importStagedDao.allForZip(zipId).associateBy { it.entryName }
+        val stillsWithVideo = staged.values.mapNotNull { it.liveOf }.toSet()
+        // The photos this invocation counts, for progress and the not-found tally: a Live Photo is its
+        // still, and its video stands for itself only once the still is no longer pending. The per-outcome
+        // counts are read back from durable state in buildSummary, so a resumed run still reports its whole
+        // self.
+        val units = allPending
+            .filterNot { r -> r.liveOf != null && staged[r.liveOf]?.uploaded == false }
+            .mapTo(HashSet()) { it.entryName }
+        val total = units.size
+        val handled = ConcurrentHashMap.newKeySet<String>()
+        fun handle(name: String): Int {
+            if (name in units) handled.add(name)
+            return handled.size
+        }
         // Throughput instrumentation, stripped in release with the rest of the logs: how long the run took
         // and how many bytes it actually sent, so a slow import is legible in a debug trace.
         val runStart = System.currentTimeMillis()
         val uploadedBytes = AtomicLong(0)
 
         val parentContext = coroutineContext[Job] ?: EmptyCoroutineContext
-        // Both halves of a Live Photo go up as they are: a re-encoded still or video would no longer match
-        // the other half.
-        val stillsWithVideo = importStagedDao.allForZip(zipId).mapNotNull { it.liveOf }.toSet()
         // The Drive link and the capture date of each still, read from the staged rows once the first pass
         // is done (so a still that went up before a kill counts too, and a date the first pass filled in).
         var stillLinks: Map<String, String> = emptyMap()
@@ -337,7 +389,7 @@ class ImportTakeoutUseCase @Inject constructor(
                         // rows still pending are sent when it is retried.
                         if (e is java.io.IOException && !ImportFailure.isArchiveFault(e)) throw e
                         Log.w(TAG, "prepare failed for $name: ${e.message}")
-                        val done = processedCount.incrementAndGet()
+                        val done = handle(name)
                         onProgress(ImportProgress(done, total, name, null, 0L, 0L))
                         return@runBlocking
                     }
@@ -353,20 +405,20 @@ class ImportTakeoutUseCase @Inject constructor(
                                 val linkId = plan.leader.await()
                                 if (linkId != null) {
                                     recordInDrive(row, linkId, raw, raw, displayName, rowDateMs)
-                                    Log.d(TAG, "entry ${processedCount.get() + 1}/$total: in-run duplicate, linked")
+                                    Log.d(TAG, "entry ${handled.size + 1}/$total: in-run duplicate, linked")
                                 }
-                                val done = processedCount.incrementAndGet()
+                                val done = handle(name)
                                 onProgress(ImportProgress(done, total, name, null, 0L, 0L))
                             }
                         }
                         // Drive already held this photo before this run reached it.
                         is EntryPlan.InDrive -> {
                             inRunUpload[raw] = CompletableDeferred(plan.linkId)
-                            Log.d(TAG, "entry ${processedCount.get() + 1}/$total: already in Drive, skipped")
+                            Log.d(TAG, "entry ${handled.size + 1}/$total: already in Drive, skipped")
                             recordInDrive(row, plan.linkId, plan.sha1, raw, displayName, rowDateMs)
                             row.thumbPath?.let { path -> runCatching { File(path).delete() } }
                             temp.delete()
-                            val done = processedCount.incrementAndGet()
+                            val done = handle(name)
                             onProgress(ImportProgress(done, total, name, null, 0L, 0L))
                         }
                         // A genuinely new file: this entry leads its content. Register the Deferred before
@@ -428,7 +480,7 @@ class ImportTakeoutUseCase @Inject constructor(
                                     plan.compressed?.delete()
                                     temp.delete()
                                     uploadSemaphore.release()
-                                    val done = processedCount.incrementAndGet()
+                                    val done = handle(name)
                                     onProgress(ImportProgress(done, total, name, null, 0L, 0L))
                                 }
                             }
@@ -449,8 +501,12 @@ class ImportTakeoutUseCase @Inject constructor(
                 stillLinks = after.values.mapNotNull { r -> r.linkId?.let { r.entryName to it } }.toMap()
                 stillDateMs = after.mapValues { it.value.dateMs }
                 // A still that is in Drive without a known link (it was resolved as already there) cannot take its
-                // video, so that video goes up as a video of its own rather than waiting for a link that never comes.
-                val ready = pendingVideos.filterValues { v -> v.liveOf?.let { after[it] }?.uploaded == true }
+                // video, and neither can a still whose row is gone, so that video goes up as a video of its own
+                // rather than waiting for a link that never comes.
+                val ready = pendingVideos.filterValues { v ->
+                    val still = v.liveOf?.let { after[it] }
+                    still == null || still.uploaded
+                }
                 if (ready.isNotEmpty()) {
                     walk(ready)
                     jobs.awaitAll()
@@ -474,12 +530,11 @@ class ImportTakeoutUseCase @Inject constructor(
             Log.d(TAG, "import albums: ${albums.albumsCreated} created, ${albums.photosAddedToAlbums} added in ${System.currentTimeMillis() - albumStart}ms")
         }
 
-        // A pending entry the walk never met (the archive no longer holds it) is this run's skip count:
-        // the entries this invocation could not find. The imported and already-in-Drive tallies and the
+        // A pending photo the walk never met (the archive no longer holds it) is this run's skip count:
+        // the photos this invocation could not find. The imported and already-in-Drive tallies and the
         // run total are read back from the ledger and the staged set, so a run killed and resumed reports
         // its whole self, matching the ledger the history detail shows, not just this invocation's slice.
-        val skipped = total - processedCount.get()
-        val summary = buildSummary(runId, zipId, skipped = skipped)
+        val summary = buildSummary(runId, zipId, notFound = (units - handled).size)
             .copy(albumsCreated = albums.albumsCreated, photosAddedToAlbums = albums.photosAddedToAlbums)
         // The history row keeps its four columns, so the already-in-Drive tally folds into its skipped
         // count rather than taking a new column and a migration.
@@ -615,22 +670,12 @@ class ImportTakeoutUseCase @Inject constructor(
 
     /**
      * The run's outcome tallied from durable state rather than one invocation's counters, so a run that
-     * was killed and resumed still reports its whole self. [imported] and [alreadyInDrive] come from the
-     * run's undo ledger (every real upload, and every recorded pre-existing match); [total] is the kept
-     * staged rows for the zip; [failed] is whatever the total does not otherwise account for, never below
-     * zero. [skipped] is the entries this invocation's walk could not find in the archive, which durable
-     * state does not record, so the caller passes it in. Keeps imported + alreadyInDrive + skipped +
-     * failed equal to total.
+     * was killed and resumed still reports its whole self (see [importTally]). [notFound] is how many
+     * photos this invocation's walk could not find in the archive, which durable state does not record.
+     * Read before the worker clears the settled staged rows.
      */
-    private suspend fun buildSummary(runId: String, zipId: String, skipped: Int): ImportSummary {
-        val imported = importUploadedDao.realUploadCount(runId)
-        val alreadyInDrive = importUploadedDao.alreadyInDriveCount(runId)
-        val total = importStagedDao.includedTotal(zipId)
-        val failed = (total - imported - alreadyInDrive - skipped).coerceAtLeast(0)
-        return ImportSummary(
-            total = total, imported = imported, alreadyInDrive = alreadyInDrive, skipped = skipped, failed = failed,
-        )
-    }
+    private suspend fun buildSummary(runId: String, zipId: String, notFound: Int): ImportSummary =
+        importTally(importUploadedDao.allByRun(runId), importStagedDao.allForZip(zipId), notFound)
 
     /**
      * Records one album-membership edge for [row] when the run reconstructs albums and this entry belongs
@@ -743,17 +788,16 @@ class ImportTakeoutUseCase @Inject constructor(
      * when the run's own scope is being torn down.
      */
     suspend fun recordPartialHistory(runId: String, zipId: String, fileName: String) {
-        val imported = importUploadedDao.realUploadCount(runId)
-        val alreadyInDrive = importUploadedDao.alreadyInDriveCount(runId)
-        if (imported == 0 && alreadyInDrive == 0) return
-        val total = importStagedDao.includedTotal(zipId)
+        // The photos it never reached count as skipped, not failed.
+        val tally = importTally(importUploadedDao.allByRun(runId), importStagedDao.allForZip(zipId), Int.MAX_VALUE)
+        if (tally.imported == 0 && tally.alreadyInDrive == 0) return
         recordHistory(
             runId = runId,
             zipId = zipId,
             fileName = fileName,
-            total = total,
-            imported = imported,
-            skipped = (total - imported).coerceAtLeast(0),
+            total = tally.total,
+            imported = tally.imported,
+            skipped = tally.skipped + tally.alreadyInDrive,
             failed = 0,
         )
     }
