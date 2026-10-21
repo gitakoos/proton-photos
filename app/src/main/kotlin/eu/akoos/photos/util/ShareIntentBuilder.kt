@@ -107,4 +107,17 @@ object ShareIntentBuilder {
             }
         }
     }
+
+    /**
+     * The "Set as" intent galleries send: ACTION_ATTACH_DATA on the photo's uri, which the system's
+     * wallpaper setter and the contacts app answer. The `mimeType` extra is the one those receivers
+     * read when the uri's own type is not enough. [Intent.createChooser] carries the data uri and the
+     * read grant over to the app picked.
+     */
+    fun buildSetAsIntent(uri: Uri, mime: String): Intent =
+        Intent(Intent.ACTION_ATTACH_DATA).apply {
+            setDataAndType(uri, mime)
+            putExtra("mimeType", mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
 }

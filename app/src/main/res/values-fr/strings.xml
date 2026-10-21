@@ -365,6 +365,14 @@
     <string name="settings_strip_authorship">Supprimer l\'auteur et les droits</string>
     <string name="settings_strip_share">Supprimer les métadonnées au partage</string>
     <string name="settings_strip_share_desc">Supprime les champs sélectionnés uniquement de la copie partagée, jamais de votre original. Pour les vidéos, seule la localisation est supprimée.</string>
+    <string name="settings_external_picker">Autoriser les autres apps à choisir des photos ici</string>
+    <string name="settings_external_picker_desc">Affiche cette app là où d\'autres apps permettent de choisir une photo. Seules les photos choisies sont transmises, jamais une photo masquée, et le verrouillage de l\'app est toujours demandé d\'abord.</string>
+    <string name="picker_title_one">Choisir une photo</string>
+    <string name="picker_title_many">Choisir des photos</string>
+    <string name="picker_prepare_failed">Impossible de préparer la photo. Réessayez.</string>
+    <string name="picker_only_photos">Cette app ne demande que des photos.</string>
+    <string name="picker_only_videos">Cette app ne demande que des vidéos.</string>
+    <string name="picker_hidden_not_handed">Les photos masquées ne sont pas transmises aux autres apps.</string>
     <string name="settings_strip_format_note">Certains formats, comme le HEIC, ne peuvent pas stocker les modifications de métadonnées. Lorsque la suppression des métadonnées est activée, la copie envoyée d\'une telle photo est convertie en JPEG afin que les données sélectionnées soient réellement supprimées. La photo sur votre appareil reste inchangée.</string>
     <string name="settings_compress_photos">Compresser les photos</string>
     <string name="settings_compress_videos">Compresser les vidéos</string>
@@ -897,6 +905,7 @@
     <!-- Menu de la visionneuse -->
     <string name="viewer_menu_more">Plus</string>
     <string name="viewer_menu_save_to_device">Enregistrer sur l\'appareil</string>
+    <string name="viewer_set_as">Définir comme</string>
     <string name="viewer_menu_details">Détails</string>
     <string name="viewer_menu_delete">Supprimer</string>
     <string name="hide_confirm_action">Masquer</string>

@@ -365,6 +365,14 @@
     <string name="settings_strip_authorship">Urheber und Copyright entfernen</string>
     <string name="settings_strip_share">Metadaten beim Teilen entfernen</string>
     <string name="settings_strip_share_desc">Entfernt die ausgewählten Felder nur aus der geteilten Kopie, niemals aus dem Original. Bei Videos wird nur der Standort entfernt.</string>
+    <string name="settings_external_picker">Anderen Apps die Fotoauswahl hier erlauben</string>
+    <string name="settings_external_picker_desc">Zeigt diese App dort an, wo andere Apps die Auswahl eines Fotos anbieten. Nur die gewählten Fotos werden übergeben, nie ein verstecktes, und die App-Sperre fragt weiterhin zuerst.</string>
+    <string name="picker_title_one">Foto auswählen</string>
+    <string name="picker_title_many">Fotos auswählen</string>
+    <string name="picker_prepare_failed">Das Foto konnte nicht vorbereitet werden. Bitte erneut versuchen.</string>
+    <string name="picker_only_photos">Diese App fragt nur nach Fotos.</string>
+    <string name="picker_only_videos">Diese App fragt nur nach Videos.</string>
+    <string name="picker_hidden_not_handed">Versteckte Fotos werden nicht an andere Apps übergeben.</string>
     <string name="settings_strip_format_note">Manche Formate, etwa HEIC, können Metadaten-Änderungen nicht speichern. Wenn das Entfernen von Metadaten aktiviert ist, wird die hochgeladene Kopie eines solchen Fotos in JPEG umgewandelt, damit die ausgewählten Daten tatsächlich entfernt werden. Das Foto auf dem Gerät bleibt unverändert.</string>
     <string name="settings_compress_photos">Fotos komprimieren</string>
     <string name="settings_compress_videos">Videos komprimieren</string>
@@ -896,6 +904,7 @@
     <!-- Viewer-Menü -->
     <string name="viewer_menu_more">Mehr</string>
     <string name="viewer_menu_save_to_device">Auf Gerät speichern</string>
+    <string name="viewer_set_as">Festlegen als</string>
     <string name="viewer_menu_details">Details</string>
     <string name="viewer_menu_delete">Löschen</string>
     <string name="hide_confirm_action">Ausblenden</string>

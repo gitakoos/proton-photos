@@ -923,6 +923,14 @@
     <string name="settings_strip_authorship">Sanatçı ve telif hakkı bilgilerini kaldır</string>
     <string name="settings_strip_share">Paylaşırken meta verileri kaldır</string>
     <string name="settings_strip_share_desc">Seçili alanları yalnızca paylaşılan kopyadan kaldırır, orijinalinden asla. Videolarda yalnızca konum kaldırılır.</string>
+    <string name="settings_external_picker">Diğer uygulamaların buradan fotoğraf seçmesine izin ver</string>
+    <string name="settings_external_picker_desc">Bu uygulamayı, diğer uygulamaların fotoğraf seçtirdiği yerlerde gösterir. Yalnızca seçtiğiniz fotoğraflar aktarılır, gizli olan asla, ve uygulama kilidi yine önce sorar.</string>
+    <string name="picker_title_one">Bir fotoğraf seçin</string>
+    <string name="picker_title_many">Fotoğrafları seçin</string>
+    <string name="picker_prepare_failed">Fotoğraf hazırlanamadı. Tekrar deneyin.</string>
+    <string name="picker_only_photos">Bu uygulama yalnızca fotoğraf istiyor.</string>
+    <string name="picker_only_videos">Bu uygulama yalnızca video istiyor.</string>
+    <string name="picker_hidden_not_handed">Gizli fotoğraflar diğer uygulamalara aktarılmaz.</string>
     <string name="settings_strip_format_note">HEIC gibi bazı biçimler meta veri değişikliklerini saklayamaz. Meta veri kaldırma açıkken, seçili verilerin gerçekten kaldırılması için böyle bir fotoğrafın yüklenen kopyası JPEG\'e dönüştürülür. Cihazındaki fotoğraf değişmeden kalır.</string>
     <string name="settings_compress_photos">Fotoğrafları sıkıştır</string>
     <string name="settings_compress_videos">Videoları sıkıştır</string>
@@ -1543,6 +1551,7 @@
     <string name="viewer_people_in_photo">Bu fotoğraftaki kişiler</string>
     <string name="viewer_face_none_found">Bu fotoğrafta yüz bulunamadı.</string>
     <string name="viewer_menu_save_to_device">Cihaza kaydet</string>
+    <string name="viewer_set_as">Farklı ayarla</string>
     <string name="viewer_menu_details">Ayrıntılar</string>
     <string name="viewer_menu_delete">Sil</string>
     <string name="viewer_hidden_label">Bu cihazda gizli</string>

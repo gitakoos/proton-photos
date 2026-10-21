@@ -105,7 +105,6 @@ import eu.akoos.photos.util.MotionPhotoUtil
 import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.UserPhotoTags
-import eu.akoos.photos.util.stripForShareOrOriginal
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.originalUriForExif
 import eu.akoos.photos.util.retryOnDbTear
@@ -247,6 +246,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
     private val moveController: MoveToFolderController,
     private val labelRepo: PhotoLabelRepository,
+    private val outgoingUris: eu.akoos.photos.util.OutgoingPhotoUris,
 ) : ViewModel() {
 
     private companion object {
@@ -369,7 +369,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val _isSavingToDevice = MutableStateFlow(false)
     val isSavingToDevice: StateFlow<Boolean> = _isSavingToDevice.asStateFlow()
 
-    /** True while [shareItem] resolves a shareable URI (decrypting a cloud-only photo first).
+    /** True while [shareItem] or [setAsItem] resolves a URI (decrypting a cloud-only photo first).
      *  Drives the overflow spinner the same way [isSavingToDevice] does. */
     private val _isSharing = MutableStateFlow(false)
     val isSharing: StateFlow<Boolean> = _isSharing.asStateFlow()
@@ -378,6 +378,10 @@ class PhotoViewerViewModel @Inject constructor(
      *  chooser. replay=0 + single-buffer so a paused screen doesn't block the emit. */
     private val _shareIntent = MutableSharedFlow<android.content.Intent>(replay = 0, extraBufferCapacity = 1)
     val shareIntent: SharedFlow<android.content.Intent> = _shareIntent.asSharedFlow()
+
+    /** One-shot "Set as" intent, launched by the screen the same way as [shareIntent]. */
+    private val _setAsIntent = MutableSharedFlow<android.content.Intent>(replay = 0, extraBufferCapacity = 1)
+    val setAsIntent: SharedFlow<android.content.Intent> = _setAsIntent.asSharedFlow()
 
     /** Fires when an undo puts a deleted photo back. The viewer drops photos it deleted from its own
      *  pager, and only this tells it that one of them is worth showing again. */
@@ -2221,83 +2225,34 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
-    /** Resolves a shareable URI and emits the send intent. Local items reuse their content URI;
-     *  a cloud-only item is decrypted to the fullres cache (single-flighted) and shared via the
-     *  FileProvider, left for the TTL sweep to reclaim. */
-    fun shareItem(item: GalleryItem) {
+    /** Resolves a shareable URI and emits the send intent. */
+    fun shareItem(item: GalleryItem) = sendOut(item) { uri ->
+        val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(listOf(item))
+        _shareIntent.tryEmit(eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, listOf(uri), mime))
+    }
+
+    /** Resolves the photo the same way a share does and emits the "Set as" intent, which the system
+     *  answers with its wallpaper and contact-photo choices. */
+    fun setAsItem(item: GalleryItem) = sendOut(item) { uri ->
+        val (mime, _) = eu.akoos.photos.util.ShareIntentBuilder.shareMimeAndName(item)
+        _setAsIntent.tryEmit(eu.akoos.photos.util.ShareIntentBuilder.buildSetAsIntent(uri, mime))
+    }
+
+    /** Resolves the uri another app reads [item] through (see [eu.akoos.photos.util.OutgoingPhotoUris])
+     *  and hands it to [emit], driving the overflow spinner while a cloud original downloads. */
+    private fun sendOut(item: GalleryItem, emit: (Uri) -> Unit) {
         viewModelScope.launch {
             _isSharing.value = true
-            // Null when strip-on-share is off, so the resolved URI passes through untouched below.
-            val stripConfig = currentShareStripConfig(context)
             runCatching {
-                val uri: Uri = when (item) {
-                    is GalleryItem.LocalOnly -> localShareUri(item.local)
-                    is GalleryItem.Synced    -> localShareUri(item.local)
-                    is GalleryItem.CloudOnly -> {
-                        // Offline pin short-circuit: a pinned blob already holds the full-res
-                        // bytes in app-private storage, so share it with no network download. The
-                        // blob dir isn't a configured FileProvider root, so copy it into the
-                        // canonical fullres path the provider already exposes (a local, instant copy).
-                        val file = withContext(Dispatchers.IO) {
-                            offlineStore.findBlob(item.cloud.linkId)
-                                ?.takeIf { it.length() > 0 }
-                                ?.let { blob ->
-                                    eu.akoos.photos.data.repository.drive.PhotoDownloadService
-                                        .fullResFile(context, item.cloud)?.also { dest ->
-                                        if (!dest.exists() || dest.length() == 0L) {
-                                            dest.parentFile?.mkdirs()
-                                            blob.copyTo(dest, overwrite = true)
-                                        }
-                                    }
-                                }
-                        } ?: run {
-                            val userId = accountManager.getPrimaryUserId().first()
-                                ?: error(context.getString(R.string.viewer_not_signed_in))
-                            cloudRepo.downloadFullResPhoto(userId, item.cloud)
-                        }
-                        androidx.core.content.FileProvider.getUriForFile(
-                            context, "${context.packageName}.share.fileprovider", file,
-                        ).also {
-                            // Report the real filename to the receiver instead of the linkId.
-                            eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, item.cloud.displayName)
-                        }
-                    }
-                }
-                val (itemMime, itemName) = eu.akoos.photos.util.ShareIntentBuilder.shareMimeAndName(item)
-                val shareUri = stripForShareOrOriginal(context, uri, itemMime, itemName, stripConfig)
-                val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(listOf(item))
-                eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, listOf(shareUri), mime)
-            }.onSuccess { intent ->
-                _shareIntent.tryEmit(intent)
-            }.onFailure { e ->
+                // Null when strip-on-share is off, so the resolved URI passes through untouched.
+                outgoingUris.uriFor(item, currentShareStripConfig(context))
+            }.onSuccess(emit).onFailure { e ->
                 _transientError.value = context.getString(
                     R.string.viewer_share_failed,
                     e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                 )
             }
             _isSharing.value = false
-        }
-    }
-
-    /**
-     * The uri another app may read a device-backed photo through.
-     *
-     * A MediaStore photo already has one. A vaulted photo does not — it is an app-private `file://`
-     * that the platform refuses to put in an intent at all — so it goes out through the share
-     * provider instead, which grants the receiver that one file, serves the bytes in place, and puts
-     * no part of the vault's location in the uri it hands over.
-     */
-    private fun localShareUri(local: eu.akoos.photos.domain.entity.LocalMediaItem): Uri {
-        val parsed = Uri.parse(local.uri)
-        if (!hiddenStorage.isHiddenUri(local.uri)) return parsed
-        val file = parsed.path?.let { File(it) }?.takeIf { it.exists() }
-            ?: error(context.getString(R.string.viewer_unknown_error))
-        return androidx.core.content.FileProvider.getUriForFile(
-            context, "${context.packageName}.share.fileprovider", file,
-        ).also {
-            // The vault names its files by a private code, so report the name the photo was hidden
-            // under instead — the same substitution the cloud branch above makes.
-            eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, local.displayName)
         }
     }
 

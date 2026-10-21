@@ -130,6 +130,10 @@ import kotlinx.coroutines.launch
  *
  * Back cancels (from an opened album it steps back to the Albums page first). Photos already in the album
  * are left out, and the selection survives every switch between the tabs and an opened album.
+ *
+ * [onDone], when given, replaces the add with what the caller does with the picked photos (handing them
+ * to the app that asked for them), and [doneWorking] holds Done busy while it runs. With [singlePick] a tap
+ * replaces the pick rather than adding to it, for an app that takes one photo.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -141,6 +145,9 @@ fun GalleryPickScreen(
     onAdded: () -> Unit,
     viewModel: GalleryViewModel,
     membersViewModel: AlbumPhotoPickerViewModel = hiltViewModel(),
+    onDone: ((List<GalleryItem>) -> Unit)? = null,
+    doneWorking: Boolean = false,
+    singlePick: Boolean = false,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val thumbnailUrls by viewModel.thumbnailUrls.collectAsStateWithLifecycle()
@@ -230,7 +237,15 @@ fun GalleryPickScreen(
         }
     }
 
-    val working = addState is AddToAlbumState.Working
+    val working = addState is AddToAlbumState.Working || doneWorking
+    val toggle: (GalleryItem) -> Unit = if (!singlePick) viewModel::toggleSelection else { item ->
+        if (item in viewModel.uiState.value.selectedItems) viewModel.clearSelection()
+        else viewModel.setSelection(setOf(item))
+    }
+    val toggleGroup: (List<GalleryItem>) -> Unit = if (singlePick) { _ -> } else viewModel::toggleGroup
+    val setPicks: (Set<GalleryItem>) -> Unit = if (!singlePick) viewModel::setSelection else { next ->
+        viewModel.setSelection(singlePickOf(next, viewModel.uiState.value.selectedItems))
+    }
     val selectedCount = state.selectedItems.size
     val title = albumName.ifBlank { stringResource(R.string.album_picker_title) }
 
@@ -302,7 +317,10 @@ fun GalleryPickScreen(
                         working = working,
                         count = selectedCount,
                         pill = pill,
-                        onClick = { viewModel.addSelectedToAlbum(albumLinkId, albumName) },
+                        onClick = {
+                            if (onDone != null) onDone(selectedList)
+                            else viewModel.addSelectedToAlbum(albumLinkId, albumName)
+                        },
                     )
                 },
             )
@@ -340,10 +358,11 @@ fun GalleryPickScreen(
                             onPhotoClick = { _, _ -> },
                             selectedItems = state.selectedItems,
                             isSelectionMode = true,
-                            dragSelectEnabled = !working,
-                            onToggleSelect = viewModel::toggleSelection,
-                            onToggleGroup = viewModel::toggleGroup,
-                            onSelectionChange = viewModel::setSelection,
+                            dragSelectEnabled = !working && !singlePick,
+                            onToggleSelect = toggle,
+                            onToggleGroup = toggleGroup,
+                            groupSelectable = !singlePick,
+                            onSelectionChange = setPicks,
                             initialZoomLevel = state.initialZoomLevel,
                             gridRememberLast = state.gridRememberLast,
                             gridDefaultColumns = state.gridDefaultColumns,
@@ -373,8 +392,8 @@ fun GalleryPickScreen(
                             onPhotoClick = { _, _ -> },
                             pick = SearchPick(
                                 selected = state.selectedItems,
-                                onToggle = viewModel::toggleSelection,
-                                onSetSelection = viewModel::setSelection,
+                                onToggle = toggle,
+                                onSetSelection = setPicks,
                                 excludeLinkIds = excludeLinkIds,
                                 initialScope = searchScope,
                                 topInset = pageTop,
@@ -404,10 +423,11 @@ fun GalleryPickScreen(
                                 onPhotoClick = { _, _ -> },
                                 selectedItems = state.selectedItems,
                                 isSelectionMode = true,
-                                dragSelectEnabled = !working,
-                                onToggleSelect = viewModel::toggleSelection,
-                                onToggleGroup = viewModel::toggleGroup,
-                                onSelectionChange = viewModel::setSelection,
+                                dragSelectEnabled = !working && !singlePick,
+                                onToggleSelect = toggle,
+                                onToggleGroup = toggleGroup,
+                                groupSelectable = !singlePick,
+                                onSelectionChange = setPicks,
                                 initialZoomLevel = state.initialZoomLevel,
                                 gridRememberLast = state.gridRememberLast,
                                 gridDefaultColumns = state.gridDefaultColumns,
@@ -559,3 +579,7 @@ private fun List<Pair<String, List<GalleryItem>>>.without(
         group.filterNot { it.isIn(linkIds) }.takeIf { it.isNotEmpty() }?.let { label to it }
     }
 }
+
+/** The one pick a single-photo pick keeps out of [next]: the photo just added, else the first. */
+internal fun singlePickOf(next: Set<GalleryItem>, current: Set<GalleryItem>): Set<GalleryItem> =
+    (next.firstOrNull { it !in current } ?: next.firstOrNull())?.let { setOf(it) } ?: emptySet()

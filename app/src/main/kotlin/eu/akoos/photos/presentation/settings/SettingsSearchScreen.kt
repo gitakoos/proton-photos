@@ -192,6 +192,11 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         Screen.PrivacySecuritySettings.route,
     ),
     SettingsSearchEntry(
+        R.string.settings_external_picker, R.string.settings_privacy_security,
+        listOf("picker", "pick", "choose", "other apps", "attach", "választó", "kiválasztás", "más alkalmazások", "csatolás"),
+        Screen.PrivacySecuritySettings.route,
+    ),
+    SettingsSearchEntry(
         R.string.settings_hidden_photos, R.string.settings_privacy_security,
         listOf("hidden", "hide", "vault", "private", "secret", "conceal", "rejtett", "széf", "titkos", "elrejtés"),
         Screen.HiddenAlbum.route,

@@ -2338,6 +2338,22 @@ fun PrivacySecuritySettingsScreen(
                     indented = true,
                 )
             }
+            RowDivider()
+            // The system holds this switch (it enables the picker's manifest entry), so the row reads
+            // it from there rather than keeping a copy of its own.
+            val pickerContext = LocalContext.current
+            var externalPicker by remember {
+                mutableStateOf(eu.akoos.photos.presentation.picker.ExternalPicker.isEnabled(pickerContext))
+            }
+            ToggleRow(
+                label = stringResource(R.string.settings_external_picker),
+                description = stringResource(R.string.settings_external_picker_desc),
+                checked = externalPicker,
+                onCheckedChange = { on ->
+                    eu.akoos.photos.presentation.picker.ExternalPicker.setEnabled(pickerContext, on)
+                    externalPicker = eu.akoos.photos.presentation.picker.ExternalPicker.isEnabled(pickerContext)
+                },
+            )
             // Offline photos and the telemetry mirror are both Proton-account concepts, so the whole
             // group is hidden without a signed-in account, and its leading divider with it so guest
             // mode does not end this section on a dangling separator.

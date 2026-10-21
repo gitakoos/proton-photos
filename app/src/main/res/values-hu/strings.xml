@@ -388,6 +388,14 @@
     <string name="settings_strip_authorship">Szerző és szerzői jog eltávolítása</string>
     <string name="settings_strip_share">Metaadatok eltávolítása megosztáskor</string>
     <string name="settings_strip_share_desc">A kiválasztott mezőket csak a megosztott másolatból távolítja el, az eredetiből soha. Videóknál csak a helyadatok tűnnek el.</string>
+    <string name="settings_external_picker">Más alkalmazások választhatnak innen fotót</string>
+    <string name="settings_external_picker_desc">Az alkalmazás megjelenik ott, ahol más alkalmazásokban fotót lehet választani. Csak a kiválasztott fotók kerülnek át, rejtett soha, és az alkalmazás zárolása ilyenkor is feloldást kér.</string>
+    <string name="picker_title_one">Válassz egy fotót</string>
+    <string name="picker_title_many">Válassz fotókat</string>
+    <string name="picker_prepare_failed">A fotót nem sikerült előkészíteni. Próbáld újra.</string>
+    <string name="picker_only_photos">Ez az alkalmazás csak fotót kér.</string>
+    <string name="picker_only_videos">Ez az alkalmazás csak videót kér.</string>
+    <string name="picker_hidden_not_handed">Rejtett fotó nem adható át más alkalmazásnak.</string>
     <string name="settings_strip_format_note">Egyes formátumok, például a HEIC, nem tudják tárolni a metaadat-módosításokat. Ha a metaadat-eltávolítás be van kapcsolva, az ilyen fénykép feltöltött másolata JPEG formátumúra alakul, hogy a kiválasztott adatok valóban eltűnjenek. Az eszközön lévő fénykép változatlan marad.</string>
     <string name="settings_compress_photos">Fényképek tömörítése</string>
     <string name="settings_compress_videos">Videók tömörítése</string>
@@ -919,6 +927,7 @@
     <!-- Nézegető menü -->
     <string name="viewer_menu_more">Továbbiak</string>
     <string name="viewer_menu_save_to_device">Mentés eszközre</string>
+    <string name="viewer_set_as">Beállítás mint</string>
     <string name="viewer_menu_details">Részletek</string>
     <string name="viewer_menu_delete">Törlés</string>
     <string name="hide_confirm_action">Elrejtés</string>

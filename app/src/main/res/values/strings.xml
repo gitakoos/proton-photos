@@ -972,6 +972,14 @@
     <string name="settings_strip_authorship">Remove artist and copyright</string>
     <string name="settings_strip_share">Remove metadata when sharing</string>
     <string name="settings_strip_share_desc">Removes the selected fields from the shared copy only, never your original. For videos, only the location is removed.</string>
+    <string name="settings_external_picker">Let other apps pick photos from here</string>
+    <string name="settings_external_picker_desc">Lists this app where other apps let you choose a photo. Only the photos you pick are handed over, never a hidden one, and the app lock still asks first.</string>
+    <string name="picker_title_one">Choose a photo</string>
+    <string name="picker_title_many">Choose photos</string>
+    <string name="picker_prepare_failed">The photo could not be prepared. Try again.</string>
+    <string name="picker_only_photos">This app asks for photos only.</string>
+    <string name="picker_only_videos">This app asks for videos only.</string>
+    <string name="picker_hidden_not_handed">Hidden photos are not handed to other apps.</string>
     <string name="settings_strip_format_note">Some formats, such as HEIC, cannot store metadata changes. When metadata removal is on, the uploaded copy of such a photo is converted to JPEG so the selected data is actually removed. The photo on your device stays unchanged.</string>
     <string name="settings_compress_photos">Compress photos</string>
     <string name="settings_compress_videos">Compress videos</string>
@@ -1634,6 +1642,7 @@
     <string name="viewer_people_in_photo">People in this photo</string>
     <string name="viewer_face_none_found">No faces found on this photo.</string>
     <string name="viewer_menu_save_to_device">Save to device</string>
+    <string name="viewer_set_as">Set as</string>
     <string name="viewer_menu_details">Details</string>
     <string name="viewer_menu_delete">Delete</string>
     <string name="viewer_hidden_label">Hidden on this device</string>

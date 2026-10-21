@@ -171,6 +171,7 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var newsRepository: NewsRepository
     @Inject lateinit var hiddenVaultRestorer: HiddenVaultRestorer
     @Inject lateinit var vaultRescueNotifier: VaultRescueNotifier
+    @Inject lateinit var externalPickHandover: eu.akoos.photos.presentation.picker.ExternalPickHandover
     @Inject @eu.akoos.photos.di.AppScope lateinit var appScope: kotlinx.coroutines.CoroutineScope
 
     private val vaultSignOut by lazy {
@@ -266,6 +267,9 @@ class MainActivity : AppCompatActivity() {
     private var widgetPhotoUri by mutableStateOf<String?>(null)
     /** Request from a system "Open with" / "Edit with" intent; NavGraph routes to the editor. */
     private var externalEditRequest by mutableStateOf<ExternalEditRequest?>(null)
+    /** Another app asking for a photo; NavGraph opens the album picker and hands the picks back here. */
+    private var externalPickRequest by mutableStateOf<eu.akoos.photos.presentation.picker.PickRequest?>(null)
+    private var externalPickWorking by mutableStateOf(false)
 
     /** Foreground-resume silent refresh fires only after this long since the last successful sync. */
     // Short floor (not minutes) because the on-resume refresh is now a cheap newest-page poll for
@@ -285,6 +289,7 @@ class MainActivity : AppCompatActivity() {
         // Widget-tap URI from the launching intent (mirrored in onNewIntent for a foregrounded re-tap).
         widgetPhotoUri = intent?.getStringExtra(EXTRA_WIDGET_PHOTO_URI)
         externalEditRequest = parseExternalEditRequest(intent)
+        externalPickRequest = parseExternalPickRequest(intent)
 
         // ProtonCore account-state handler. Without it, 2FA / two-pass accounts stall after the
         // password: LoginActivity closes on first-factor success but nothing observes the resulting
@@ -506,9 +511,14 @@ class MainActivity : AppCompatActivity() {
                                     onWidgetPhotoConsumed = { widgetPhotoUri = null },
                                     externalEditRequest = externalEditRequest,
                                     onExternalEditConsumed = { externalEditRequest = null },
+                                    externalPickRequest = externalPickRequest,
+                                    externalPickWorking = externalPickWorking,
+                                    onExternalPickDone = ::answerExternalPick,
+                                    onExternalPickCancel = { finish() },
                                 )
                             }
-                            UpdaterHost(promptAllowed = !lockGate.isInert)
+                            // An update prompt would open inside the app that asked for a photo.
+                            UpdaterHost(promptAllowed = !lockGate.isInert && externalPickRequest == null)
                             if (lockGate.isInert) LockBackInterceptor()
                         }
                     }
@@ -676,6 +686,41 @@ class MainActivity : AppCompatActivity() {
         // Foregrounded widget re-tap → grab the new URI for NavGraph's LaunchedEffect.
         intent.getStringExtra(EXTRA_WIDGET_PHOTO_URI)?.let { widgetPhotoUri = it }
         parseExternalEditRequest(intent)?.let { externalEditRequest = it }
+    }
+
+    /**
+     * The photo request another app makes with GET_CONTENT or PICK, or null for any other intent. This
+     * screen is exported for the launcher, so a pick sent to it directly is answered only while the
+     * user has the picker switched on, the same as one that came through its alias.
+     */
+    private fun parseExternalPickRequest(intent: Intent?): eu.akoos.photos.presentation.picker.PickRequest? {
+        intent ?: return null
+        if (!eu.akoos.photos.presentation.picker.isPickAction(intent.action)) return null
+        if (!eu.akoos.photos.presentation.picker.ExternalPicker.isEnabled(this)) return null
+        return eu.akoos.photos.presentation.picker.pickRequestOf(intent)
+    }
+
+    /** Hands [picks] back to the asking app and closes, or says why none of them can go and stays open. */
+    private fun answerExternalPick(picks: List<eu.akoos.photos.domain.entity.GalleryItem>) {
+        val request = externalPickRequest ?: return
+        if (picks.isEmpty() || externalPickWorking) return
+        externalPickWorking = true
+        lifecycleScope.launch {
+            val answer = externalPickHandover.answer(request, picks)
+            externalPickWorking = false
+            val why = when (answer) {
+                is eu.akoos.photos.presentation.picker.PickAnswer.Ready -> {
+                    setResult(RESULT_OK, answer.intent)
+                    finish()
+                    return@launch
+                }
+                is eu.akoos.photos.presentation.picker.PickAnswer.WrongKind ->
+                    if (answer.videosOnly) R.string.picker_only_videos else R.string.picker_only_photos
+                eu.akoos.photos.presentation.picker.PickAnswer.OnlyHidden -> R.string.picker_hidden_not_handed
+                eu.akoos.photos.presentation.picker.PickAnswer.Failed -> R.string.picker_prepare_failed
+            }
+            Toast.makeText(this@MainActivity, getString(why), Toast.LENGTH_SHORT).show()
+        }
     }
 
     /**

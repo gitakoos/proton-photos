@@ -612,6 +612,14 @@
     <string name="settings_strip_authorship">Usuwaj autora i prawa autorskie</string>
     <string name="settings_strip_share">Usuwaj metadane przy udostępnianiu</string>
     <string name="settings_strip_share_desc">Usuwa wybrane pola tylko z udostępnianej kopii, nigdy z oryginału. W przypadku filmów usuwana jest tylko lokalizacja.</string>
+    <string name="settings_external_picker">Pozwól innym aplikacjom wybierać stąd zdjęcia</string>
+    <string name="settings_external_picker_desc">Pokazuje tę aplikację tam, gdzie inne aplikacje pozwalają wybrać zdjęcie. Przekazywane są tylko wybrane zdjęcia, nigdy ukryte, a blokada aplikacji i tak najpierw pyta.</string>
+    <string name="picker_title_one">Wybierz zdjęcie</string>
+    <string name="picker_title_many">Wybierz zdjęcia</string>
+    <string name="picker_prepare_failed">Nie udało się przygotować zdjęcia. Spróbuj ponownie.</string>
+    <string name="picker_only_photos">Ta aplikacja prosi tylko o zdjęcia.</string>
+    <string name="picker_only_videos">Ta aplikacja prosi tylko o filmy.</string>
+    <string name="picker_hidden_not_handed">Ukryte zdjęcia nie są przekazywane innym aplikacjom.</string>
     <string name="settings_strip_format_note">Niektóre formaty, takie jak HEIC, nie mogą przechowywać zmian metadanych. Gdy usuwanie metadanych jest włączone, wysłana kopia takiego zdjęcia jest konwertowana do formatu JPEG, aby wybrane dane zostały faktycznie usunięte. Zdjęcie na urządzeniu pozostaje bez zmian.</string>
     <string name="settings_compress_photos">Kompresuj zdjęcia</string>
     <string name="settings_compress_videos">Kompresuj filmy</string>
@@ -1152,6 +1160,7 @@
     <!-- Viewer overflow menu -->
     <string name="viewer_menu_more">Więcej</string>
     <string name="viewer_menu_save_to_device">Zapisz na urządzeniu</string>
+    <string name="viewer_set_as">Ustaw jako</string>
     <string name="viewer_menu_details">Szczegóły</string>
     <string name="viewer_menu_delete">Usuń</string>
     <string name="hide_confirm_action">Ukryj</string>

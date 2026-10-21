@@ -89,6 +89,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.MoreVert
@@ -603,6 +604,7 @@ fun PhotoViewerScreen(
     val addedToAlbumTemplate = stringResource(R.string.viewer_added_to_album)
     val coverUpdatedMessage = stringResource(R.string.album_cover_updated)
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    val setAsChooserTitle = stringResource(R.string.viewer_set_as)
     val shareContext = LocalContext.current
     val appLock = LocalAppLock.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -635,6 +637,13 @@ fun PhotoViewerScreen(
                 viewModel.shareIntent.collect { intent ->
                     appLock.runWhenOpen {
                         shareContext.startActivity(Intent.createChooser(intent, shareChooserTitle))
+                    }
+                }
+            }
+            launch {
+                viewModel.setAsIntent.collect { intent ->
+                    appLock.runWhenOpen {
+                        runCatching { shareContext.startActivity(Intent.createChooser(intent, setAsChooserTitle)) }
                     }
                 }
             }
@@ -2497,6 +2506,20 @@ fun PhotoViewerScreen(
                                     onClick = {
                                         menuExpanded = false
                                         viewModel.downloadToDevice(settledItem)
+                                    },
+                                )
+                            }
+                            // Set as hands a still to the system's wallpaper and contact-photo setters, the
+                            // way a share hands it to another app, so it is offered wherever sharing is.
+                            if (isImageMedia(settledItem)) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_set_as), color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.Wallpaper, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isSharing,
+                                    onClick = {
+                                        menuExpanded = false
+                                        settledItem?.let { viewModel.setAsItem(it) }
                                     },
                                 )
                             }

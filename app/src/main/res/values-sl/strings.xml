@@ -613,6 +613,14 @@
     <string name="settings_strip_authorship">Odstrani avtorja in avtorske pravice</string>
     <string name="settings_strip_share">Odstrani metapodatke ob deljenju</string>
     <string name="settings_strip_share_desc">Odstrani izbrana polja samo iz deljene kopije, nikoli iz izvirnika. Pri videoposnetkih se odstrani samo lokacija.</string>
+    <string name="settings_external_picker">Dovoli drugim aplikacijam izbiro fotografij od tu</string>
+    <string name="settings_external_picker_desc">Prikaže to aplikacijo tam, kjer druge aplikacije ponujajo izbiro fotografije. Predajo se samo izbrane fotografije, nikoli skrita, zaklepanje aplikacije pa še vedno najprej vpraša.</string>
+    <string name="picker_title_one">Izberite fotografijo</string>
+    <string name="picker_title_many">Izberite fotografije</string>
+    <string name="picker_prepare_failed">Fotografije ni bilo mogoče pripraviti. Poskusite znova.</string>
+    <string name="picker_only_photos">Ta aplikacija zahteva samo fotografije.</string>
+    <string name="picker_only_videos">Ta aplikacija zahteva samo videoposnetke.</string>
+    <string name="picker_hidden_not_handed">Skrite fotografije se ne predajo drugim aplikacijam.</string>
     <string name="settings_strip_format_note">Nekateri formati, na primer HEIC, ne morejo shraniti sprememb metapodatkov. Ko je odstranjevanje metapodatkov vklopljeno, se naložena kopija take fotografije pretvori v JPEG, da se izbrani podatki dejansko odstranijo. Fotografija v napravi ostane nespremenjena.</string>
     <string name="settings_compress_photos">Stisni fotografije</string>
     <string name="settings_compress_videos">Stisni videoposnetke</string>
@@ -1153,6 +1161,7 @@
     <!-- Viewer overflow menu -->
     <string name="viewer_menu_more">Več</string>
     <string name="viewer_menu_save_to_device">Shrani v napravo</string>
+    <string name="viewer_set_as">Nastavi kot</string>
     <string name="viewer_menu_details">Podrobnosti</string>
     <string name="viewer_menu_delete">Izbriši</string>
     <string name="hide_confirm_action">Skrij</string>

@@ -452,6 +452,14 @@
     <string name="settings_strip_authorship">Maker en copyright verwijderen</string>
     <string name="settings_strip_share">Metadata verwijderen bij delen</string>
     <string name="settings_strip_share_desc">Verwijdert de geselecteerde velden alleen uit de gedeelde kopie, nooit uit je origineel. Bij video\'s wordt alleen de locatie verwijderd.</string>
+    <string name="settings_external_picker">Andere apps hier foto\'s laten kiezen</string>
+    <string name="settings_external_picker_desc">Toont deze app waar andere apps je een foto laten kiezen. Alleen de foto\'s die je kiest worden doorgegeven, nooit een verborgen foto, en de app-vergrendeling vraagt nog steeds eerst.</string>
+    <string name="picker_title_one">Kies een foto</string>
+    <string name="picker_title_many">Kies foto\'s</string>
+    <string name="picker_prepare_failed">De foto kon niet worden voorbereid. Probeer het opnieuw.</string>
+    <string name="picker_only_photos">Deze app vraagt alleen om foto\'s.</string>
+    <string name="picker_only_videos">Deze app vraagt alleen om video\'s.</string>
+    <string name="picker_hidden_not_handed">Verborgen foto\'s worden niet aan andere apps doorgegeven.</string>
     <string name="settings_strip_format_note">Sommige formaten, zoals HEIC, kunnen geen metadatawijzigingen opslaan. Wanneer het verwijderen van metadata aanstaat, wordt de geüploade kopie van een dergelijke foto naar JPEG omgezet zodat de geselecteerde gegevens echt worden verwijderd. De foto op je apparaat blijft ongewijzigd.</string>
     <string name="settings_compress_photos">Foto\'s comprimeren</string>
     <string name="settings_compress_videos">Video\'s comprimeren</string>
@@ -953,6 +961,7 @@
     <!-- Viewer overflow menu -->
     <string name="viewer_menu_more">Meer</string>
     <string name="viewer_menu_save_to_device">Opslaan op apparaat</string>
+    <string name="viewer_set_as">Instellen als</string>
     <string name="viewer_menu_details">Details</string>
     <string name="viewer_menu_delete">Verwijderen</string>
     <string name="hide_confirm_action">Verbergen</string>

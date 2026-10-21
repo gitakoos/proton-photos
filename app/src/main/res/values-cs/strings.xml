@@ -612,6 +612,14 @@
     <string name="settings_strip_authorship">Odstranit autora a autorská práva</string>
     <string name="settings_strip_share">Odstranit metadata při sdílení</string>
     <string name="settings_strip_share_desc">Odstraní vybraná pole pouze ze sdílené kopie, nikdy z originálu. U videí se odstraní pouze poloha.</string>
+    <string name="settings_external_picker">Povolit jiným aplikacím vybírat fotky odsud</string>
+    <string name="settings_external_picker_desc">Zobrazí tuto aplikaci tam, kde jiné aplikace nabízejí výběr fotky. Předají se jen vybrané fotky, nikdy skrytá, a zámek aplikace se i tak nejdřív zeptá.</string>
+    <string name="picker_title_one">Vyberte fotku</string>
+    <string name="picker_title_many">Vyberte fotky</string>
+    <string name="picker_prepare_failed">Fotku se nepodařilo připravit. Zkuste to znovu.</string>
+    <string name="picker_only_photos">Tato aplikace žádá jen fotky.</string>
+    <string name="picker_only_videos">Tato aplikace žádá jen videa.</string>
+    <string name="picker_hidden_not_handed">Skryté fotky se jiným aplikacím nepředávají.</string>
     <string name="settings_strip_format_note">Některé formáty, například HEIC, nemohou uložit změny metadat. Když je odstraňování metadat zapnuté, nahraná kopie takové fotografie se převede do formátu JPEG, aby se vybraná data skutečně odstranila. Fotografie ve vašem zařízení zůstane beze změny.</string>
     <string name="settings_compress_photos">Komprimovat fotky</string>
     <string name="settings_compress_videos">Komprimovat videa</string>
@@ -1152,6 +1160,7 @@
     <!-- Viewer overflow menu -->
     <string name="viewer_menu_more">Více</string>
     <string name="viewer_menu_save_to_device">Uložit do zařízení</string>
+    <string name="viewer_set_as">Nastavit jako</string>
     <string name="viewer_menu_details">Podrobnosti</string>
     <string name="viewer_menu_delete">Smazat</string>
     <string name="hide_confirm_action">Skrýt</string>

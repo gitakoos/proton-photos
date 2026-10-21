@@ -369,6 +369,14 @@
     <string name="settings_strip_authorship">Rimuovi artista e copyright</string>
     <string name="settings_strip_share">Rimuovi metadati alla condivisione</string>
     <string name="settings_strip_share_desc">Rimuove i campi selezionati solo dalla copia condivisa, mai dall\'originale. Per i video viene rimossa solo la posizione.</string>
+    <string name="settings_external_picker">Consenti ad altre app di scegliere foto da qui</string>
+    <string name="settings_external_picker_desc">Mostra questa app dove altre app permettono di scegliere una foto. Vengono consegnate solo le foto scelte, mai una nascosta, e il blocco app viene comunque chiesto prima.</string>
+    <string name="picker_title_one">Scegli una foto</string>
+    <string name="picker_title_many">Scegli le foto</string>
+    <string name="picker_prepare_failed">Impossibile preparare la foto. Riprova.</string>
+    <string name="picker_only_photos">Questa app chiede solo foto.</string>
+    <string name="picker_only_videos">Questa app chiede solo video.</string>
+    <string name="picker_hidden_not_handed">Le foto nascoste non vengono consegnate ad altre app.</string>
     <string name="settings_strip_format_note">Alcuni formati, come HEIC, non possono memorizzare le modifiche ai metadati. Quando la rimozione dei metadati è attiva, la copia caricata di una foto di questo tipo viene convertita in JPEG in modo che i dati selezionati vengano effettivamente rimossi. La foto sul tuo dispositivo rimane invariata.</string>
     <string name="settings_compress_photos">Comprimi foto</string>
     <string name="settings_compress_videos">Comprimi video</string>
@@ -910,6 +918,7 @@
     <!-- Menu visualizzatore -->
     <string name="viewer_menu_more">Altro</string>
     <string name="viewer_menu_save_to_device">Salva sul dispositivo</string>
+    <string name="viewer_set_as">Imposta come</string>
     <string name="viewer_menu_details">Dettagli</string>
     <string name="viewer_menu_delete">Elimina</string>
     <string name="hide_confirm_action">Nascondi</string>

@@ -369,6 +369,14 @@
     <string name="settings_strip_authorship">Quitar artista y copyright</string>
     <string name="settings_strip_share">Quitar metadatos al compartir</string>
     <string name="settings_strip_share_desc">Quita los campos seleccionados solo de la copia compartida, nunca del original. En los vídeos solo se quita la ubicación.</string>
+    <string name="settings_external_picker">Permitir que otras apps elijan fotos de aquí</string>
+    <string name="settings_external_picker_desc">Muestra esta app donde otras apps permiten elegir una foto. Solo se entregan las fotos que elijas, nunca una oculta, y el bloqueo de la app sigue pidiéndose primero.</string>
+    <string name="picker_title_one">Elige una foto</string>
+    <string name="picker_title_many">Elige fotos</string>
+    <string name="picker_prepare_failed">No se pudo preparar la foto. Inténtalo de nuevo.</string>
+    <string name="picker_only_photos">Esta app solo pide fotos.</string>
+    <string name="picker_only_videos">Esta app solo pide vídeos.</string>
+    <string name="picker_hidden_not_handed">Las fotos ocultas no se entregan a otras apps.</string>
     <string name="settings_strip_format_note">Algunos formatos, como HEIC, no pueden almacenar cambios en los metadatos. Cuando la eliminación de metadatos está activada, la copia subida de una foto de este tipo se convierte a JPEG para que los datos seleccionados se eliminen realmente. La foto en tu dispositivo permanece sin cambios.</string>
     <string name="settings_compress_photos">Comprimir fotos</string>
     <string name="settings_compress_videos">Comprimir vídeos</string>
@@ -910,6 +918,7 @@
     <!-- Menú del visor -->
     <string name="viewer_menu_more">Más</string>
     <string name="viewer_menu_save_to_device">Guardar en el dispositivo</string>
+    <string name="viewer_set_as">Establecer como</string>
     <string name="viewer_menu_details">Detalles</string>
     <string name="viewer_menu_delete">Eliminar</string>
     <string name="hide_confirm_action">Ocultar</string>
