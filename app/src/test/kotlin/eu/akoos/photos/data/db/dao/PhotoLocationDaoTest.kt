@@ -80,6 +80,15 @@ class PhotoLocationDaoTest {
     }
 
     @Test
+    fun `a stored 0, 0 fix is dropped and a real one stays`() = runTest {
+        dao.upsert(listOf(fix(URI_A, lat = 0.0, lng = 0.0), fix(URI_B), fix(URI_C, lat = 0.0, lng = 10.0)))
+
+        assertEquals(1, dao.deleteNoFixRows())
+
+        assertEquals(setOf(URI_B, URI_C), dao.idsForUser(USER).toSet())
+    }
+
+    @Test
     fun `the photos not named keep their fix`() = runTest {
         dao.upsert(listOf(fix(URI_A), fix(URI_B), fix(URI_C)))
 

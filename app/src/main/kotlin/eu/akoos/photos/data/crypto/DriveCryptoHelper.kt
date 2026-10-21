@@ -60,14 +60,15 @@ private const val TAG = "DriveCrypto"
 /**
  * Extracts (latitude, longitude) from a plaintext XAttr JSON blob produced by [DriveCryptoHelper].
  * The Location block is optional (absent when the photo had no GPS), so a missing/malformed block
- * returns null. Coordinates outside the valid WGS84 ranges are rejected. Pure and main-process safe.
+ * returns null. Coordinates outside the valid WGS84 ranges, and the 0, 0 written for no fix, are rejected.
+ * Pure and main-process safe.
  */
 fun parsePhotoLocation(xAttrJson: String): Pair<Double, Double>? = runCatching {
     val location = JSONObject(xAttrJson).optJSONObject("Location") ?: return@runCatching null
     if (!location.has("Latitude") || !location.has("Longitude")) return@runCatching null
     val lat = location.getDouble("Latitude")
     val lon = location.getDouble("Longitude")
-    if (lat in -90.0..90.0 && lon in -180.0..180.0) lat to lon else null
+    if (eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lon)) lat to lon else null
 }.getOrNull()
 
 /**
@@ -809,7 +810,9 @@ class DriveCryptoHelper @Inject constructor(
         val durationSeconds = durationMillis / 1000.0
         val durationLiteral = if (durationMillis == 0L) "0" else "%.3f".format(java.util.Locale.US, durationSeconds).trimEnd('0').trimEnd('.')
         // Location block — only when the caller supplied coords (i.e. GPS not stripped).
-        val locationClause = if (latitude != null && longitude != null) {
+        val locationClause = if (latitude != null && longitude != null &&
+            eu.akoos.photos.data.db.entity.isUsableGpsFix(latitude, longitude)
+        ) {
             val lat = "%s".format(java.util.Locale.US, latitude)
             val lon = "%s".format(java.util.Locale.US, longitude)
             ""","Location":{"Latitude":$lat,"Longitude":$lon}"""

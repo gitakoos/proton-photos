@@ -60,6 +60,11 @@ interface PhotoLocationDao {
     @Query("DELETE FROM photo_location WHERE userId = :userId AND id IN (:ids)")
     suspend fun deleteByIds(userId: String, ids: List<String>)
 
+    /** Drops every stored fix at exactly 0, 0, the position written for a photo with no GPS, so no map,
+     *  place or search shows one. Cheap and idempotent: the backfills run it before each walk. */
+    @Query("DELETE FROM photo_location WHERE latitude = 0 AND longitude = 0")
+    suspend fun deleteNoFixRows(): Int
+
     /**
      * Move a photo's location row onto a new [newId], keeping its coordinates and its owner. A revealed
      * photo comes back under a fresh MediaStore uri, and the row is keyed by uri, so without this it

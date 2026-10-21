@@ -26,7 +26,6 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
-import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
@@ -129,7 +128,7 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
     private val cloudRepo: DrivePhotoRepository,
     private val accountManager: AccountManager,
     private val exifRewriter: CloudPhotoExifRewriter,
-    private val photoLabels: PhotoLabelRepository,
+    private val carryOver: CarryOverToReplacement,
 ) {
 
     sealed interface Result {
@@ -303,10 +302,9 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
                     transient = anyTransientAlbumMiss,
                 )
             }
-            // The corrected copy now stands in for the original, so the original's labels move to it
-            // before the original goes.
-            runCatching { photoLabels.rekeyFor(userId, photo.linkId, newLinkId) }
-                .onFailure { Log.w(TAG, "moving labels to $newLinkId failed: ${it.message}") }
+            // The corrected copy now stands in for the original, so the original's favourite, labels,
+            // faces and search index move to it before the original goes.
+            carryOver(userId, photo.linkId, newLinkId, original = photo)
             runCatching { cloudRepo.deleteFiles(userId, listOf(photo.linkId)) }
                 .onFailure { Log.w(TAG, "trash of original ${photo.linkId} failed: ${it.message}") }
             Result.Success

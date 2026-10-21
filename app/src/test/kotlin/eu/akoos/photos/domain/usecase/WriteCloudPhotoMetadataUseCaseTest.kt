@@ -25,6 +25,7 @@ package eu.akoos.photos.domain.usecase
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
@@ -67,6 +68,8 @@ class WriteCloudPhotoMetadataUseCaseTest {
     private lateinit var useCase: WriteCloudPhotoMetadataUseCase
     private lateinit var labelDb: TestDatabase
     private lateinit var labels: PhotoLabelRepository
+    private lateinit var carryOver: CarryOverToReplacement
+    private val faces: RekeyPhotoFacesUseCase = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -80,7 +83,8 @@ class WriteCloudPhotoMetadataUseCaseTest {
             .setQueryExecutor { it.run() }
             .build()
         labels = PhotoLabelRepository(labelDb.photoLabelDao(), accountManager)
-        useCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, rewriter, labels)
+        carryOver = CarryOverToReplacement(cloud, noListingRow(), labels, faces, mockk(relaxed = true))
+        useCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, rewriter, carryOver)
     }
 
     @After
@@ -169,6 +173,29 @@ class WriteCloudPhotoMetadataUseCaseTest {
         val newLinkId = cloud.uploadedLinkIds.single()
         assertEquals(listOf("Beach", "family"), labelDb.photoLabelDao().labelsOfPhoto(userId.id, newLinkId).map { it.label })
         assertTrue(labelDb.photoLabelDao().labelsOfPhoto(userId.id, "orig").isEmpty())
+    }
+
+    @Test
+    fun `a completed correction keeps a favourite and moves the faces to the new copy`() = runTest {
+        val original = cloudPhoto("orig").copy(tags = setOf(0))
+        cloud.add(original)
+
+        val result = useCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
+
+        assertEquals(WriteCloudPhotoMetadataUseCase.Result.Success, result)
+        val newLinkId = cloud.uploadedLinkIds.single()
+        assertEquals(listOf(newLinkId to true), cloud.favoriteCalls)
+        coVerify { faces.invoke(userId.id, "orig", newLinkId, any()) }
+    }
+
+    @Test
+    fun `a correction of a photo that was no favourite sets none`() = runTest {
+        val original = cloudPhoto("orig")
+        cloud.add(original)
+
+        useCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
+
+        assertTrue(cloud.favoriteCalls.isEmpty())
     }
 
     @Test
@@ -353,7 +380,7 @@ class WriteCloudPhotoMetadataUseCaseTest {
         val videoRewriter = RecordingExifRewriter(
             UploadXAttrMetadata(displayWidth = 1920, displayHeight = 1080, durationMillis = 5_000L),
         )
-        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter, labels)
+        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter, carryOver)
         val newCaptureMs = 1_700_000_000_000L
 
         val result = videoUseCase(original, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
@@ -385,7 +412,7 @@ class WriteCloudPhotoMetadataUseCaseTest {
         // The rewriter's xAttr carries no duration (the probe found none), so the item duration falls back
         // to the video's already-known cloud duration rather than landing at 0.
         val videoRewriter = RecordingExifRewriter(UploadXAttrMetadata(displayWidth = 1280, displayHeight = 720))
-        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter, labels)
+        val videoUseCase = WriteCloudPhotoMetadataUseCase(context, cloud, accountManager, videoRewriter, carryOver)
 
         val result = videoUseCase(original, newCaptureMs = 1_700_000_000_000L, location = LocationEdit.Unchanged)
 

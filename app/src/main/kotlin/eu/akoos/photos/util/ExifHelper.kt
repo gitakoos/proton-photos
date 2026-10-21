@@ -229,7 +229,8 @@ object ExifHelper {
             val stream = context.contentResolver.openInputStream(Uri.parse(uri))
                 ?: return PhotoMetadata()
             val exif = stream.use { ExifInterface(it) }
-            val latLon = exif.latLong
+            // A 0, 0 fix is what a camera writes when it has none, so it reads as no location.
+            val latLon = exif.latLong?.takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(it[0], it[1]) }
             PhotoMetadata(
                 make = exif.getAttribute(ExifInterface.TAG_MAKE),
                 model = exif.getAttribute(ExifInterface.TAG_MODEL),

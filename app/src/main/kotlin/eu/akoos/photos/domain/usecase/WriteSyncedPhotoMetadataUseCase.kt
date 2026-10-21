@@ -65,6 +65,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
     private val accountManager: AccountManager,
     private val syncStateRepo: SyncStateRepository,
     private val exifRewriter: CloudPhotoExifRewriter,
+    private val carryOver: CarryOverToReplacement,
 ) {
 
     sealed interface Result {
@@ -345,6 +346,10 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
             )
             syncStateRepo.clearQueuedForSynced(deviceUri)
             repaired = true
+
+            // The new copy stands in for the old one, so its favourite, labels, faces and search index
+            // move to it before the old copy goes.
+            carryOver(userId, oldLinkId, newLinkId, original = cloudPhoto)
 
             // 10. Trash the old cloud copy LAST, best-effort: the replacement is already live and paired,
             //     so a failed trash only leaves a recoverable duplicate.
