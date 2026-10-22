@@ -1812,6 +1812,7 @@
     <string name="settings_time_format_12h">12 ore</string>
     <string name="settings_ai_indexing_paused_not_charging">In pausa, in attesa del caricabatterie</string>
     <string name="settings_ai_indexing_paused_desc">Le foto non vengono analizzate per trovare volti finché non riprendi.</string>
+    <string name="settings_ai_indexing_wifi_desc">Le foto rimaste sono solo su Drive e si scaricano con il Wi-Fi. Per continuare con i dati mobili, disattiva «%1$s».</string>
     <string name="settings_ai_indexing_progress">%1$d di %2$d foto</string>
     <string name="settings_ai_grouping_progress">%1$d di %2$d volti</string>
     <plurals name="settings_ai_indexing_people">

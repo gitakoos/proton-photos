@@ -155,7 +155,8 @@ enum class FaceIndexingState { Idle, WaitingModel, Running, Paused, Done }
  * [FaceIndexingState.WaitingModel]). [heartbeat] climbs while a grouping works with the count standing
  * still (a batch placed, a closing step under way), so a host watching for progress sees the work move; it
  * only ever grows within a process, and 0 means none. [grouping] says the count is faces being placed into
- * groups rather than photos scanned.
+ * groups rather than photos scanned. [waitingForWifi] says an idle walk stopped because its remaining photos
+ * are only in Drive and the full-res downloads wait for Wi-Fi, so the card can say why it is not moving.
  */
 data class FaceIndexingProgress(
     val state: FaceIndexingState,
@@ -163,6 +164,7 @@ data class FaceIndexingProgress(
     val total: Int,
     val heartbeat: Long = 0L,
     val grouping: Boolean = false,
+    val waitingForWifi: Boolean = false,
 )
 
 /** How large a not-yet-indexed backlog promotes the initial walk onto a foreground service with a
@@ -726,8 +728,14 @@ class FaceIndexingScheduler @Inject constructor(
             context.settingsDataStore.data.collect { prefs ->
                 aiEnabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
                 paused = prefs[SettingsKeys.FACE_INDEXING_PAUSED] == true
+                val wasWifiOnly = fullresWifiOnly
                 fullresWifiOnly = prefs[SettingsKeys.FULLRES_WIFI_ONLY] ?: true
                 autoMerge = prefs[SettingsKeys.FACE_AUTO_MERGE] == true
+                // The card asks for the Wi-Fi-only switch to be turned off to go on; doing so starts the walk at
+                // once rather than leaving it waiting for a trigger that may be hours away.
+                if (shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly, fullresWifiOnly, _progress.value.waitingForWifi)) {
+                    restart.lastUserId?.let { uid -> launch { runCatching { indexAll(uid) } } }
+                }
             }
         }
     }
@@ -1164,7 +1172,11 @@ class FaceIndexingScheduler @Inject constructor(
                 mlWalkGate.release(MlRail.FACE)
             }
             pushLibraryCounts(userId)
-            FaceDiagnostics.recordSourceBacklog(transientWaiting = retryBook.size(), overBudget = tally.overBudget)
+            FaceDiagnostics.recordSourceBacklog(
+                transientWaiting = retryBook.size(),
+                overBudget = tally.overBudget,
+                deferredOffWifi = if (waitingForWifi(tally)) tally.deferred else 0,
+            )
             val indexedNow = scannedBefore + persistedThisPass.get() + scannedKeys.size
             _progress.value = when {
                 !aiEnabled -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
@@ -1180,7 +1192,11 @@ class FaceIndexingScheduler @Inject constructor(
                 // out a retry backoff). There is no immediate re-kick then, so settle to Idle rather than a
                 // Running spinner that reads as "scanning forever, stuck at N of M". The pending items stay
                 // pending: the tail re-kicks once the earliest retry is due, and any other trigger retries.
-                else -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
+                // When it is the Wi-Fi-only rule that held them, the card says so: the walk comes back on
+                // its own once the phone is on Wi-Fi ([shouldResumeFaceScanOnUnmetered]).
+                else -> FaceIndexingProgress(
+                    FaceIndexingState.Idle, indexedNow, libraryTotal, waitingForWifi = waitingForWifi(tally),
+                )
             }
         } finally {
             if (holdsGate) mlWalkGate.release(MlRail.FACE)
@@ -2581,6 +2597,10 @@ class FaceIndexingScheduler @Inject constructor(
     /** True while a walk may keep going: not stopping, AI on, not paused. */
     private fun active(): Boolean = !stopRequested && aiEnabled && !paused
 
+    /** Whether this pass's deferred photos wait for Wi-Fi ([faceWalkWaitsForWifi]). */
+    private fun waitingForWifi(tally: SourcePassTally): Boolean =
+        faceWalkWaitsForWifi(tally.deferred, fullresWifiOnly, networkObserver.currentlyOnWifi())
+
     /** Starts the pass a walk's tail owes [userId], only while it is still the account last asked for and
      *  still the signed-in one, or the guest while none is ([WalkRestart.mayRestart]). An account read that
      *  fails starts nothing. */
@@ -3548,6 +3568,15 @@ class FaceIndexingScheduler @Inject constructor(
         const val DECRYPT_TIMEOUT_MS = 20_000L
     }
 }
+
+/** Whether a pass that moved nothing on was held by the Wi-Fi-only rule: it left photos deferred while
+ *  [wifiOnly] holds and the phone is off Wi-Fi ([onWifi]). */
+internal fun faceWalkWaitsForWifi(deferred: Int, wifiOnly: Boolean, onWifi: Boolean): Boolean =
+    deferred > 0 && wifiOnly && !onWifi
+
+/** True when the Wi-Fi-only switch was just turned off while the walk sat waiting for Wi-Fi, so it goes on. */
+internal fun shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly: Boolean, nowWifiOnly: Boolean, waitingForWifi: Boolean): Boolean =
+    wasWifiOnly && !nowWifiOnly && waitingForWifi
 
 /** True only on the edge where the network becomes unmetered, so a scan deferred while off Wi-Fi
  *  resumes on reconnect rather than staying idle, without kicking on the initial replayed state. */

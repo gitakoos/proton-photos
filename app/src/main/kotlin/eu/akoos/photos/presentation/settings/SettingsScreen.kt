@@ -1367,7 +1367,9 @@ private fun FaceStatusCard(
     // progress; a small residual retrying in the background, or newly added photos, index silently and the
     // card shows just the people summary, exactly like automatic new-photo indexing. So the last few
     // un-downloadable photos, and every index after the first, no longer look stuck on re-entry.
-    val faceBulkIndex = (state == FaceIndexingState.Running || state == FaceIndexingState.Paused) &&
+    // A walk that stopped for Wi-Fi is idle but not done, so it keeps the bar and says what it waits for.
+    val waitingForWifi = state == FaceIndexingState.Idle && ui.waitingForWifi
+    val faceBulkIndex = (state == FaceIndexingState.Running || state == FaceIndexingState.Paused || waitingForWifi) &&
         (ui.total - ui.indexed).coerceAtLeast(0) >= FACE_INDEX_FOREGROUND_THRESHOLD
     val healthLabel = if (faceBulkIndex) {
         when (ui.blockReason) {
@@ -1390,6 +1392,7 @@ private fun FaceStatusCard(
         state == FaceIndexingState.WaitingModel -> stringResource(R.string.settings_ai_indexing_waiting)
         !faceBulkIndex -> null
         waitingForOther -> stringResource(R.string.settings_ai_indexing_waiting_other)
+        waitingForWifi -> stringResource(R.string.sync_deferred_waiting_wifi)
         else -> healthLabel ?: when {
             state != FaceIndexingState.Running -> null
             ui.grouping -> stringResource(R.string.settings_ai_grouping_running)
@@ -1429,6 +1432,13 @@ private fun FaceStatusCard(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     stringResource(R.string.settings_ai_indexing_paused_desc),
+                    color = colors.fgMute,
+                    fontSize = 12.5.sp,
+                )
+            } else if (waitingForWifi && faceBulkIndex) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    stringResource(R.string.settings_ai_indexing_wifi_desc, stringResource(R.string.settings_fullres_wifi_only)),
                     color = colors.fgMute,
                     fontSize = 12.5.sp,
                 )

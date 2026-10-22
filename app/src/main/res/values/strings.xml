@@ -842,6 +842,7 @@
     <string name="settings_time_format_12h">12-hour</string>
     <string name="settings_ai_indexing_paused_not_charging">Paused, waiting for the charger</string>
     <string name="settings_ai_indexing_paused_desc">Photos are not scanned for faces until you resume.</string>
+    <string name="settings_ai_indexing_wifi_desc">The photos left are only in Drive and are downloaded on Wi-Fi. To continue on mobile data, turn off “%1$s”.</string>
     <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d of %2$d faces</string>
     <plurals name="settings_ai_indexing_people">

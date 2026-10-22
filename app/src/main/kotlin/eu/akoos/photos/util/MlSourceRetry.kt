@@ -243,6 +243,7 @@ class SourcePassTally(private val book: SourceRetryBook) {
     private val permanentMisses = AtomicInteger(0)
     private val transientMisses = AtomicInteger(0)
     private val overBudgetMisses = AtomicInteger(0)
+    private val deferredMisses = AtomicInteger(0)
 
     /** How many transient failures in a row [key] has had in this process. */
     fun attempts(key: String): Int = book.attempts(key)
@@ -251,6 +252,9 @@ class SourcePassTally(private val book: SourceRetryBook) {
     val permanent: Int get() = permanentMisses.get()
     val transient: Int get() = transientMisses.get()
     val overBudget: Int get() = overBudgetMisses.get()
+
+    /** Photos left for a reason outside them ([SourceMiss.DEFERRED]): off Wi-Fi, or the walk standing down. */
+    val deferred: Int get() = deferredMisses.get()
 
     /** [key] leaves the pending set: its source loaded, or it was settled without one, [permanent] when
      *  for a permanent miss. Any retry record goes with it. */
@@ -261,7 +265,7 @@ class SourcePassTally(private val book: SourceRetryBook) {
     }
 
     /** [key] stays pending for [reason]: a transient miss is filed for a backoff from [nowMs], an
-     *  over-budget one only counted. */
+     *  over-budget or deferred one only counted. */
     fun stayed(key: String, reason: SourceMiss, nowMs: Long) {
         when (reason) {
             SourceMiss.TRANSIENT -> {
@@ -269,7 +273,8 @@ class SourcePassTally(private val book: SourceRetryBook) {
                 transientMisses.incrementAndGet()
             }
             SourceMiss.OVER_BUDGET -> overBudgetMisses.incrementAndGet()
-            SourceMiss.PERMANENT, SourceMiss.DEFERRED -> Unit
+            SourceMiss.DEFERRED -> deferredMisses.incrementAndGet()
+            SourceMiss.PERMANENT -> Unit
         }
     }
 }

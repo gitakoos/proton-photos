@@ -1868,6 +1868,7 @@
     <string name="settings_time_format_12h">12-urna</string>
     <string name="settings_ai_indexing_paused_not_charging">Zaustavljeno, čaka na polnilnik</string>
     <string name="settings_ai_indexing_paused_desc">Fotografije se ne pregledujejo za obraze, dokler ne nadaljujete.</string>
+    <string name="settings_ai_indexing_wifi_desc">Preostale fotografije so samo na Drive in se prenesejo prek Wi-Fi. Če želite nadaljevati prek mobilnih podatkov, izklopite »%1$s«.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
     <string name="settings_ai_grouping_progress">%1$d od %2$d obrazov</string>
     <plurals name="settings_ai_indexing_people">

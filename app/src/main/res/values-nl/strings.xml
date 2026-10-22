@@ -1804,6 +1804,7 @@
     <string name="settings_time_format_12h">12-uurs</string>
     <string name="settings_ai_indexing_paused_not_charging">Gepauzeerd, wacht op de oplader</string>
     <string name="settings_ai_indexing_paused_desc">Foto\'s worden niet op gezichten doorzocht totdat je hervat.</string>
+    <string name="settings_ai_indexing_wifi_desc">De resterende foto\'s staan alleen in Drive en worden via wifi gedownload. Zet ‘%1$s’ uit om via mobiele data verder te gaan.</string>
     <string name="settings_ai_indexing_progress">%1$d van %2$d foto\'s</string>
     <string name="settings_ai_grouping_progress">%1$d van %2$d gezichten</string>
     <plurals name="settings_ai_indexing_people">

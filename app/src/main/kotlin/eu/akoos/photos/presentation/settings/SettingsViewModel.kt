@@ -154,6 +154,8 @@ data class FaceIndexingUi(
     val actionEnabled: Boolean,
     /** The count is faces being placed into groups, not photos scanned. */
     val grouping: Boolean = false,
+    /** The walk stopped because its remaining photos are only in Drive and wait for Wi-Fi. */
+    val waitingForWifi: Boolean = false,
 )
 
 /**
@@ -316,6 +318,7 @@ class SettingsViewModel @Inject constructor(
                 blockReason = blockReason,
                 actionEnabled = !blockReason.isPersistent,
                 grouping = p.grouping,
+                waitingForWifi = p.waitingForWifi,
             )
         }.stateIn(
             viewModelScope,

@@ -1776,6 +1776,7 @@
     <string name="settings_time_format_12h">12 órás</string>
     <string name="settings_ai_indexing_paused_not_charging">Szüneteltetve, töltőre vár</string>
     <string name="settings_ai_indexing_paused_desc">A folytatásig az alkalmazás nem keres arcokat a fotókon.</string>
+    <string name="settings_ai_indexing_wifi_desc">A hátralévő fotók csak a Drive-on vannak, és Wi-Fi-n töltődnek le. Mobilneten a „%1$s” kikapcsolásával folytatódik.</string>
     <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>
     <string name="settings_ai_grouping_progress">%1$d / %2$d arc</string>
     <plurals name="settings_ai_indexing_people">

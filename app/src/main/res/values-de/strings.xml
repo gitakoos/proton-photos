@@ -1777,6 +1777,7 @@
     <string name="settings_time_format_12h">12-Stunden</string>
     <string name="settings_ai_indexing_paused_not_charging">Pausiert, wartet auf das Ladegerät</string>
     <string name="settings_ai_indexing_paused_desc">Bis du fortsetzt, werden keine Fotos nach Gesichtern durchsucht.</string>
+    <string name="settings_ai_indexing_wifi_desc">Die übrigen Fotos liegen nur in Drive und werden über WLAN geladen. Um über mobile Daten weiterzumachen, schalte „%1$s“ aus.</string>
     <string name="settings_ai_indexing_progress">%1$d von %2$d Fotos</string>
     <string name="settings_ai_grouping_progress">%1$d von %2$d Gesichtern</string>
     <plurals name="settings_ai_indexing_people">

@@ -1861,6 +1861,7 @@
     <string name="settings_time_format_12h">12-godzinny</string>
     <string name="settings_ai_indexing_paused_not_charging">Wstrzymano, czeka na ładowarkę</string>
     <string name="settings_ai_indexing_paused_desc">Zdjęcia nie są przeszukiwane pod kątem twarzy, dopóki nie wznowisz.</string>
+    <string name="settings_ai_indexing_wifi_desc">Pozostałe zdjęcia są tylko na Drive i pobierają się przez Wi-Fi. Aby kontynuować na danych komórkowych, wyłącz „%1$s”.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d zdjęć</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d twarzy</string>
     <plurals name="settings_ai_indexing_people">

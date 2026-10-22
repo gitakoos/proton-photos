@@ -1782,6 +1782,7 @@
     <string name="settings_time_format_12h">12 heures</string>
     <string name="settings_ai_indexing_paused_not_charging">En pause, en attente du chargeur</string>
     <string name="settings_ai_indexing_paused_desc">Les photos ne sont pas analysées pour y trouver des visages tant que vous ne reprenez pas.</string>
+    <string name="settings_ai_indexing_wifi_desc">Les photos restantes sont uniquement sur Drive et se téléchargent en Wi-Fi. Pour continuer en données mobiles, désactivez « %1$s ».</string>
     <string name="settings_ai_indexing_progress">%1$d sur %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d sur %2$d visages</string>
     <plurals name="settings_ai_indexing_people">

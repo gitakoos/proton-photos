@@ -1869,6 +1869,7 @@
     <string name="settings_time_format_12h">12hodinový</string>
     <string name="settings_ai_indexing_paused_not_charging">Pozastaveno, čeká se na nabíječku</string>
     <string name="settings_ai_indexing_paused_desc">Fotky se na obličeje neprohledávají, dokud nebudete pokračovat.</string>
+    <string name="settings_ai_indexing_wifi_desc">Zbývající fotky jsou jen na Drive a stahují se přes Wi-Fi. Chcete-li pokračovat přes mobilní data, vypněte „%1$s“.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotek</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d obličejů</string>
     <plurals name="settings_ai_indexing_people">
