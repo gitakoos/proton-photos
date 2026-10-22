@@ -1383,7 +1383,11 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
+    /** Follows the heart of the photo on screen; see [checkIfFavorite]. */
+    private var favoriteWatch: Job? = null
+
     fun checkIfFavorite(item: GalleryItem) {
+        watchCloudFavorite(item)
         viewModelScope.launch {
             val favIds = context.settingsDataStore.data
                 .map { it[SettingsKeys.FAVORITE_IDS] ?: emptySet() }
@@ -1404,6 +1408,29 @@ class PhotoViewerViewModel @Inject constructor(
                 is GalleryItem.CloudOnly -> item.cloud.tags
                 is GalleryItem.LocalOnly -> effectiveLocalTags(item, readUserTags(item.local.uri))
             }
+        }
+    }
+
+    /**
+     * Keeps the heart of a cloud-backed [item] in step with its listing row while it is on screen. A
+     * date or place edit replaces the photo with a corrected copy and sets the heart on the copy a
+     * moment after the copy appears, so a heart read once when the page settled would stay empty.
+     */
+    private fun watchCloudFavorite(item: GalleryItem) {
+        favoriteWatch?.cancel()
+        val linkId = when (item) {
+            is GalleryItem.Synced    -> item.cloud.linkId
+            is GalleryItem.CloudOnly -> item.cloud.linkId
+            is GalleryItem.LocalOnly -> return
+        }
+        favoriteWatch = viewModelScope.launch {
+            photoListingDao.observeTagsCsv(linkId)
+                .distinctUntilChanged()
+                .catch { }
+                .collect { csv ->
+                    val tags = csv?.let { if (it.isEmpty()) emptySet() else it.split(',').mapNotNull(String::toIntOrNull).toSet() }
+                    _isFavorite.value = isItemFavorite(item, emptySet(), tags)
+                }
         }
     }
 

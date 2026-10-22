@@ -228,6 +228,10 @@ interface PhotoListingDao {
     @Query("SELECT tagsCsv FROM photo_listing WHERE linkId = :linkId LIMIT 1")
     suspend fun getTagsCsv(linkId: String): String?
 
+    /** [getTagsCsv] as a stream, for a screen that has to follow a tag written after it opened. */
+    @Query("SELECT tagsCsv FROM photo_listing WHERE linkId = :linkId LIMIT 1")
+    fun observeTagsCsv(linkId: String): Flow<String?>
+
     /** Returns all linkIds currently stored for a user. Used by the smart-merge refresh strategy. */
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId")
     suspend fun getAllLinkIds(userId: String): List<String>
