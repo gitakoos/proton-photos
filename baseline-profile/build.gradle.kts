@@ -48,10 +48,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     // The Macrobenchmark instrumentation attaches to a specific variant of the target
     // app. AGP's Baseline Profile plugin auto-generates a non-minified release-like
     // variant of :app on our behalf — the producer here just needs to point at the
@@ -72,4 +68,10 @@ dependencies {
     implementation(libs.androidx.test.ext)
     implementation(libs.uiautomator)
     implementation(libs.benchmark.macro.junit4)
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
 }
