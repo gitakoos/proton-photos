@@ -1814,6 +1814,12 @@
     <string name="settings_ai_indexing_paused_not_charging">En pausa, esperando el cargador</string>
     <string name="settings_ai_indexing_paused_desc">Las fotos no se analizan en busca de caras hasta que reanudes.</string>
     <string name="settings_ai_indexing_wifi_desc">Las fotos que quedan solo están en Drive y se descargan por Wi-Fi. Para seguir con datos móviles, desactiva «%1$s».</string>
+    <string name="sdk_settings_title">Proton Drive SDK</string>
+    <string name="sdk_settings_row_desc">Probar la biblioteca de Drive de Proton en partes de la app</string>
+    <string name="sdk_settings_intro">Estos interruptores hacen que partes de la aplicación funcionen con la biblioteca de Drive de Proton en lugar del código propio de la aplicación. Están en pruebas: si la biblioteca falla, la aplicación hace lo mismo de la forma habitual, así que no se pierde nada. Cada interruptor sigue apagado hasta que lo actives.</string>
+    <string name="sdk_route_tags">Etiquetas y favoritos</string>
+    <string name="sdk_route_tags_desc">Corazones y categorías en las fotos de Drive</string>
+    <string name="sdk_route_activity">%1$s. En esta sesión: %2$d con la biblioteca, %3$d de la forma habitual.</string>
     <string name="settings_ai_indexing_progress">%1$d de %2$d fotos</string>
     <string name="settings_ai_grouping_progress">%1$d de %2$d rostros</string>
     <plurals name="settings_ai_indexing_people">

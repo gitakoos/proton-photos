@@ -954,6 +954,13 @@ object SettingsKeys {
     val DRIVE_SDK_CLIENT_UID = stringPreferencesKey("drive_sdk_client_uid")
 
     /**
+     * Send photo tags and favourites through the Drive SDK instead of the app's own requests. Off unless
+     * turned on in Settings > Proton Drive SDK; read through [eu.akoos.photos.data.sdk.SdkRouting], which
+     * falls back to the app's own requests whenever an SDK call fails.
+     */
+    val SDK_ROUTE_TAGS = booleanPreferencesKey("sdk_route_tags")
+
+    /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +
      * [eu.akoos.photos.data.repository.drive.LargeLibrarySimulator]; the production

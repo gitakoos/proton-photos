@@ -1862,6 +1862,12 @@
     <string name="settings_ai_indexing_paused_not_charging">Wstrzymano, czeka na ładowarkę</string>
     <string name="settings_ai_indexing_paused_desc">Zdjęcia nie są przeszukiwane pod kątem twarzy, dopóki nie wznowisz.</string>
     <string name="settings_ai_indexing_wifi_desc">Pozostałe zdjęcia są tylko na Drive i pobierają się przez Wi-Fi. Aby kontynuować na danych komórkowych, wyłącz „%1$s”.</string>
+    <string name="sdk_settings_title">Proton Drive SDK</string>
+    <string name="sdk_settings_row_desc">Wypróbuj bibliotekę Drive od Proton w części aplikacji</string>
+    <string name="sdk_settings_intro">Te przełączniki sprawiają, że części aplikacji działają przez bibliotekę Drive od Proton zamiast przez własny kod aplikacji. Są testowane: jeśli biblioteka zawiedzie, aplikacja zrobi to samo w zwykły sposób, więc nic nie zostanie utracone. Każdy przełącznik pozostaje wyłączony, dopóki go nie włączysz.</string>
+    <string name="sdk_route_tags">Tagi i ulubione</string>
+    <string name="sdk_route_tags_desc">Serduszka i kategorie na zdjęciach w Drive</string>
+    <string name="sdk_route_activity">%1$s. W tej sesji: %2$d przez bibliotekę, %3$d w zwykły sposób.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d zdjęć</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d twarzy</string>
     <plurals name="settings_ai_indexing_people">

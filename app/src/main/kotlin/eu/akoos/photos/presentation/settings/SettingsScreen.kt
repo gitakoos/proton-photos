@@ -216,6 +216,7 @@ fun SettingsScreen(
     onPrivacySecurityClick: () -> Unit = {},
     onPermissionsClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
+    onSdkClick: () -> Unit = {},
     onLabelsClick: () -> Unit = {},
     onRecentlyDeletedClick: () -> Unit = {},
     onFindDuplicatesClick: () -> Unit = {},
@@ -341,6 +342,10 @@ fun SettingsScreen(
                 run {
                     if (isNotEmpty()) append("\n\n")
                     append("Semantic:\n").append(eu.akoos.photos.util.SemanticDiagnostics.snapshot())
+                }
+                if (eu.akoos.photos.util.SdkDiagnostics.hasData()) {
+                    if (isNotEmpty()) append("\n\n")
+                    append("Drive SDK:\n").append(eu.akoos.photos.util.SdkDiagnostics.snapshot())
                 }
                 // The step-by-step record lives in a file, so it is there after a process kill too.
                 val importLog = runCatching { eu.akoos.photos.util.ImportEventLog.text(context.filesDir) }.getOrDefault("")
@@ -781,6 +786,18 @@ fun SettingsScreen(
                     label = stringResource(R.string.notifications_title),
                     onClick = onNotificationsClick,
                 )
+            }
+            // The Drive SDK switches need an account and a device the SDK runs on.
+            val sdkCapable = remember { eu.akoos.photos.data.sdk.SdkGate().isCapable }
+            if (state.isSignedIn && sdkCapable) {
+                Spacer(Modifier.height(12.dp))
+                SettingsCard {
+                    NavRow(
+                        label = stringResource(R.string.sdk_settings_title),
+                        description = stringResource(R.string.sdk_settings_row_desc),
+                        onClick = onSdkClick,
+                    )
+                }
             }
             Spacer(Modifier.height(12.dp))
             SettingsCard {

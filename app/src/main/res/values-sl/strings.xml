@@ -1869,6 +1869,12 @@
     <string name="settings_ai_indexing_paused_not_charging">Zaustavljeno, čaka na polnilnik</string>
     <string name="settings_ai_indexing_paused_desc">Fotografije se ne pregledujejo za obraze, dokler ne nadaljujete.</string>
     <string name="settings_ai_indexing_wifi_desc">Preostale fotografije so samo na Drive in se prenesejo prek Wi-Fi. Če želite nadaljevati prek mobilnih podatkov, izklopite »%1$s«.</string>
+    <string name="sdk_settings_title">Proton Drive SDK</string>
+    <string name="sdk_settings_row_desc">Preizkusite Protonovo knjižnico Drive za dele aplikacije</string>
+    <string name="sdk_settings_intro">S temi stikali deli aplikacije tečejo prek Protonove knjižnice Drive namesto prek lastne kode aplikacije. So v preizkusu: če knjižnica odpove, aplikacija naredi isto na običajen način, zato se nič ne izgubi. Vsako stikalo ostane izklopljeno, dokler ga ne vklopite.</string>
+    <string name="sdk_route_tags">Oznake in priljubljene</string>
+    <string name="sdk_route_tags_desc">Srčki in kategorije na fotografijah v Drive</string>
+    <string name="sdk_route_activity">%1$s. V tej seji: %2$d prek knjižnice, %3$d na običajen način.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
     <string name="settings_ai_grouping_progress">%1$d od %2$d obrazov</string>
     <plurals name="settings_ai_indexing_people">

@@ -795,6 +795,12 @@
     <string name="settings_ai_indexing_paused_not_charging">Duraklatıldı, şarj cihazı bekleniyor</string>
     <string name="settings_ai_indexing_paused_desc">Devam ettirene kadar fotoğraflar yüzler için taranmaz.</string>
     <string name="settings_ai_indexing_wifi_desc">Kalan fotoğraflar yalnızca Drive\'da ve Wi-Fi ile indirilir. Mobil veriyle devam etmek için “%1$s” ayarını kapatın.</string>
+    <string name="sdk_settings_title">Proton Drive SDK</string>
+    <string name="sdk_settings_row_desc">Uygulamanın bazı bölümleri için Proton\'un kendi Drive kitaplığını deneyin</string>
+    <string name="sdk_settings_intro">Bu anahtarlar uygulamanın bazı bölümlerini uygulamanın kendi kodu yerine Proton\'un kendi Drive kitaplığı üzerinden çalıştırır. Deneme aşamasındadırlar: kitaplık başarısız olursa uygulama aynı işi her zamanki yoldan yapar, böylece hiçbir şey kaybolmaz. Her anahtar siz açana kadar kapalı kalır.</string>
+    <string name="sdk_route_tags">Etiketler ve favoriler</string>
+    <string name="sdk_route_tags_desc">Drive\'daki fotoğraflarda kalpler ve kategoriler</string>
+    <string name="sdk_route_activity">%1$s. Bu oturumda: kitaplık üzerinden %2$d, her zamanki yoldan %3$d.</string>
     <string name="settings_ai_indexing_progress">%2$d fotoğraftan %1$d</string>
     <string name="settings_ai_grouping_progress">%2$d yüzden %1$d</string>
     <plurals name="settings_ai_indexing_people">

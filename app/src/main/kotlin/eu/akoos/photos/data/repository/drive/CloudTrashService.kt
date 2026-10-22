@@ -37,6 +37,7 @@ import eu.akoos.photos.data.api.dto.RenameLinkRequest
 import eu.akoos.photos.data.api.dto.TagRequest
 import eu.akoos.photos.data.api.dto.ThumbnailBatchRequest
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.sdk.SdkRoute
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.CloudTrashItem
 import eu.akoos.photos.domain.entity.DriveNotFoundException
@@ -156,6 +157,8 @@ class CloudTrashService @Inject constructor(
     private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
     private val perceptualHashDao: eu.akoos.photos.data.db.dao.PerceptualHashDao,
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
+    private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
+    private val sdkPhotoTagOps: eu.akoos.photos.data.sdk.SdkPhotoTagOps,
 ) {
     suspend fun deleteFiles(userId: UserId, linkIds: List<String>): CloudTrashOutcome = withContext(Dispatchers.IO) {
         if (linkIds.isEmpty()) return@withContext CloudTrashOutcome(emptySet(), emptySet())
@@ -228,17 +231,22 @@ class CloudTrashService @Inject constructor(
             val volumeId = photo.volumeId.ifEmpty { shareService.getVolumeId(userId) }
             val manager = apiProvider.get<DriveApiService>(userId)
             try {
-                if (favorite) {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            addFavorite(volumeId, photo.linkId, FavoriteRequest(photoData = null))
-                        }.valueOrThrow
-                    }
-                } else {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            deletePhotoTags(volumeId, photo.linkId, TagRequest(tags = listOf(0L)))
-                        }.valueOrThrow
+                sdkRouting.run(
+                    SdkRoute.TAGS,
+                    viaSdk = { sdkPhotoTagOps.updateTag(userId, volumeId, photo.linkId, tagId = 0, add = favorite) },
+                ) {
+                    if (favorite) {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                addFavorite(volumeId, photo.linkId, FavoriteRequest(photoData = null))
+                            }.valueOrThrow
+                        }
+                    } else {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                deletePhotoTags(volumeId, photo.linkId, TagRequest(tags = listOf(0L)))
+                            }.valueOrThrow
+                        }
                     }
                 }
                 // Reflect the change in the local DB so the gallery updates immediately,
@@ -274,17 +282,22 @@ class CloudTrashService @Inject constructor(
             val manager = apiProvider.get<DriveApiService>(userId)
             try {
                 val tag = listOf(tagId.toLong())
-                if (add) {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            addPhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
-                        }.valueOrThrow
-                    }
-                } else {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            deletePhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
-                        }.valueOrThrow
+                sdkRouting.run(
+                    SdkRoute.TAGS,
+                    viaSdk = { sdkPhotoTagOps.updateTag(userId, volumeId, photo.linkId, tagId = tagId, add = add) },
+                ) {
+                    if (add) {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                addPhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
+                            }.valueOrThrow
+                        }
+                    } else {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                deletePhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
+                            }.valueOrThrow
+                        }
                     }
                 }
                 // Reflect the change in the local DB so the gallery + category filter update
