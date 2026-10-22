@@ -49,6 +49,7 @@ import me.proton.drive.sdk.ProtonDriveClient
 import me.proton.drive.sdk.ProtonDriveSdkException
 import me.proton.drive.sdk.ProtonSdkError
 import me.proton.drive.sdk.Uploader
+import me.proton.drive.sdk.entity.AvailableNameTarget
 import me.proton.drive.sdk.entity.FileDownloaderRequest
 import me.proton.drive.sdk.entity.FileNode
 import me.proton.drive.sdk.entity.FileRevisionUploaderRequest
@@ -217,7 +218,7 @@ class MlDriveStore @Inject constructor(
             val modified = Instant.ofEpochMilli(
                 localFile.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis(),
             )
-            val existing = findChild(client, folderUid, name)
+            val existing = findChild(client, folderUid, name, AvailableNameTarget.FILE)
             val uploader = when (existing) {
                 null -> client.uploader(
                     FileUploaderRequest(
@@ -357,7 +358,7 @@ class MlDriveStore @Inject constructor(
         name: String,
         create: Boolean,
     ): Lookup {
-        when (val existing = findChild(client, parentUid, name)) {
+        when (val existing = findChild(client, parentUid, name, AvailableNameTarget.FOLDER)) {
             is FolderNode -> return Lookup.Found(existing.uid)
             null -> if (!create) return Lookup.Missing
             else -> return Lookup.NameTaken
@@ -369,7 +370,7 @@ class MlDriveStore @Inject constructor(
         } catch (t: Throwable) {
             if (!isConflict(t)) throw t
             // Another install created it between the lookup and the create.
-            when (val raced = findChild(client, parentUid, name, checkAvailability = false)) {
+            when (val raced = findChild(client, parentUid, name, AvailableNameTarget.FOLDER, checkAvailability = false)) {
                 is FolderNode -> Lookup.Found(raced.uid)
                 null -> throw t
                 else -> Lookup.NameTaken
@@ -385,9 +386,10 @@ class MlDriveStore @Inject constructor(
         client: ProtonDriveClient,
         parentUid: NodeUid,
         name: String,
+        target: AvailableNameTarget,
         checkAvailability: Boolean = true,
     ): Node? {
-        if (checkAvailability && client.getAvailableName(parentUid, name) == name) return null
+        if (checkAvailability && client.getAvailableName(parentUid, name, target) == name) return null
         for (childUid in client.enumerateFolderChildrenNodeUids(parentUid).toList()) {
             val child = client.getNode(childUid) ?: continue
             if (child.trashTime == null && child.name.getOrNull() == name) return child
