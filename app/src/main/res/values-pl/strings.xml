@@ -1867,6 +1867,8 @@
     <string name="sdk_settings_intro">Te przełączniki sprawiają, że części aplikacji działają przez bibliotekę Drive od Proton zamiast przez własny kod aplikacji. Są testowane: jeśli biblioteka zawiedzie, aplikacja zrobi to samo w zwykły sposób, więc nic nie zostanie utracone. Każdy przełącznik pozostaje wyłączony, dopóki go nie włączysz.</string>
     <string name="sdk_route_tags">Tagi i ulubione</string>
     <string name="sdk_route_tags_desc">Serduszka i kategorie na zdjęciach w Drive</string>
+    <string name="sdk_route_trash">Kosz i przywracanie</string>
+    <string name="sdk_route_trash_desc">Przenoszenie zdjęć z Drive do kosza i z powrotem</string>
     <string name="sdk_route_activity">%1$s. W tej sesji: %2$d przez bibliotekę, %3$d w zwykły sposób.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d zdjęć</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d twarzy</string>

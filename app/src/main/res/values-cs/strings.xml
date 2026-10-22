@@ -1875,6 +1875,8 @@
     <string name="sdk_settings_intro">Tyto přepínače nechají části aplikace běžet přes knihovnu Drive od Protonu místo vlastního kódu aplikace. Zkoušejí se: pokud knihovna selže, aplikace udělá totéž obvyklým způsobem, takže se nic neztratí. Každý přepínač zůstane vypnutý, dokud ho nezapnete.</string>
     <string name="sdk_route_tags">Štítky a oblíbené</string>
     <string name="sdk_route_tags_desc">Srdíčka a kategorie u fotek na Drive</string>
+    <string name="sdk_route_trash">Koš a obnovení</string>
+    <string name="sdk_route_trash_desc">Přesun fotek na Drive do koše a zpět</string>
     <string name="sdk_route_activity">%1$s. V této relaci: %2$d přes knihovnu, %3$d obvyklým způsobem.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotek</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d obličejů</string>

@@ -960,6 +960,9 @@ object SettingsKeys {
      */
     val SDK_ROUTE_TAGS = booleanPreferencesKey("sdk_route_tags")
 
+    /** Move photos to the Drive trash and back through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_TRASH = booleanPreferencesKey("sdk_route_trash")
+
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +

@@ -1877,6 +1877,8 @@
     <string name="sdk_settings_intro">Tieto prepínače nechajú časti aplikácie bežať cez knižnicu Drive od Protonu namiesto vlastného kódu aplikácie. Skúšajú sa: ak knižnica zlyhá, aplikácia urobí to isté obvyklým spôsobom, takže sa nič nestratí. Každý prepínač zostane vypnutý, kým ho nezapnete.</string>
     <string name="sdk_route_tags">Štítky a obľúbené</string>
     <string name="sdk_route_tags_desc">Srdiečka a kategórie pri fotkách na Drive</string>
+    <string name="sdk_route_trash">Kôš a obnovenie</string>
+    <string name="sdk_route_trash_desc">Presun fotiek na Drive do koša a späť</string>
     <string name="sdk_route_activity">%1$s. V tejto relácii: %2$d cez knižnicu, %3$d obvyklým spôsobom.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotiek</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d tvárí</string>

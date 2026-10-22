@@ -1818,6 +1818,8 @@
     <string name="sdk_settings_intro">Questi interruttori fanno passare alcune parti dell\'app dalla libreria Drive di Proton invece che dal codice dell\'app. Sono in prova: se la libreria non riesce, l\'app fa la stessa cosa nel modo consueto, quindi non si perde nulla. Ogni interruttore resta spento finché non lo accendi.</string>
     <string name="sdk_route_tags">Tag e preferiti</string>
     <string name="sdk_route_tags_desc">Cuori e categorie sulle foto in Drive</string>
+    <string name="sdk_route_trash">Cestino e ripristino</string>
+    <string name="sdk_route_trash_desc">Spostare le foto di Drive nel cestino e riportarle indietro</string>
     <string name="sdk_route_activity">%1$s. In questa sessione: %2$d tramite la libreria, %3$d nel modo consueto.</string>
     <string name="settings_ai_indexing_progress">%1$d di %2$d foto</string>
     <string name="settings_ai_grouping_progress">%1$d di %2$d volti</string>

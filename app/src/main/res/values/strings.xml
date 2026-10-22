@@ -848,6 +848,8 @@
     <string name="sdk_settings_intro">These switches let parts of the app run through Proton\'s own Drive library instead of the app\'s own code. They are being tried out: if the library fails, the app does the same thing its usual way, so nothing is lost. Each switch stays off until you turn it on.</string>
     <string name="sdk_route_tags">Tags and favourites</string>
     <string name="sdk_route_tags_desc">Hearts and categories on photos in Drive</string>
+    <string name="sdk_route_trash">Trash and restore</string>
+    <string name="sdk_route_trash_desc">Moving photos in Drive to the trash and back</string>
     <string name="sdk_route_activity">%1$s. This session: %2$d through the library, %3$d done the usual way.</string>
     <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d of %2$d faces</string>

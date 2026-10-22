@@ -93,6 +93,14 @@ class SdkRoutingTest {
     }
 
     @Test
+    fun `a link the server no longer holds counts as trashed, any other refusal does not`() {
+        assertTrue(linkAlreadyGone(2501L, null))
+        assertTrue(linkAlreadyGone(null, 2501L))
+        assertEquals(false, linkAlreadyGone(2511L, null))
+        assertEquals(false, linkAlreadyGone(null, null))
+    }
+
+    @Test
     fun `every Drive tag id maps to the SDK tag of the same id, added or removed`() {
         val expected = listOf(
             PhotoTag.Favorite, PhotoTag.Screenshot, PhotoTag.Video, PhotoTag.LivePhoto, PhotoTag.MotionPhoto,

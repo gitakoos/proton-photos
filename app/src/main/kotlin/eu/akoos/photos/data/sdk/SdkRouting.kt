@@ -40,6 +40,7 @@ import javax.inject.Singleton
 /** A group of Drive operations that can run through the Drive SDK, each behind its own switch. */
 enum class SdkRoute(val label: String, val key: Preferences.Key<Boolean>) {
     TAGS("tags", SettingsKeys.SDK_ROUTE_TAGS),
+    TRASH("trash", SettingsKeys.SDK_ROUTE_TRASH),
 }
 
 /**

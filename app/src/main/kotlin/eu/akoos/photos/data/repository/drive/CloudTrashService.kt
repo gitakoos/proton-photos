@@ -159,6 +159,7 @@ class CloudTrashService @Inject constructor(
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
     private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
     private val sdkPhotoTagOps: eu.akoos.photos.data.sdk.SdkPhotoTagOps,
+    private val sdkTrashOps: eu.akoos.photos.data.sdk.SdkTrashOps,
 ) {
     suspend fun deleteFiles(userId: UserId, linkIds: List<String>): CloudTrashOutcome = withContext(Dispatchers.IO) {
         if (linkIds.isEmpty()) return@withContext CloudTrashOutcome(emptySet(), emptySet())
@@ -173,18 +174,23 @@ class CloudTrashService @Inject constructor(
             // permanent-delete path below does.
             val failed = mutableSetOf<String>()
             linkIds.chunked(TRASH_BATCH).forEach { chunk ->
-                // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any Retry-After)
-                // instead of failing the whole multi-select delete.
-                val resp = retryWithBackoff {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            trashPhotos(volumeId, DeleteLinksRequest(chunk))
-                        }.valueOrThrow
+                failed += sdkRouting.run(
+                    SdkRoute.TRASH,
+                    viaSdk = { sdkTrashOps.moveToTrash(userId, volumeId, chunk) },
+                ) {
+                    // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any Retry-After)
+                    // instead of failing the whole multi-select delete.
+                    val resp = retryWithBackoff {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                trashPhotos(volumeId, DeleteLinksRequest(chunk))
+                            }.valueOrThrow
+                        }
                     }
+                    // Same per-link parsing as deleteFromCloudForever: links the server rejected
+                    // stayed on the cloud, so they must NOT be dropped locally or reported trashed.
+                    rejectedLinkIds(resp.responses)
                 }
-                // Same per-link parsing as deleteFromCloudForever: links the server rejected
-                // stayed on the cloud, so they must NOT be dropped locally or reported trashed.
-                failed += rejectedLinkIds(resp.responses)
             }
             val trashed = linkIds.toSet() - failed
             // Drop ONLY the rows the server confirmed trashed from our local photo_listing
@@ -454,28 +460,33 @@ class CloudTrashService @Inject constructor(
                 val manager = apiProvider.get<DriveApiService>(userId)
                 val failed = mutableSetOf<String>()
                 linkIds.chunked(TRASH_BATCH).forEach { chunk ->
-                    // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any
-                    // Retry-After) instead of throwing the whole restore out on a transient blip.
-                    val resp = retryWithBackoff {
-                        shareService.networkSemaphore.withPermit {
-                            manager.invoke {
-                                restoreFromTrash(volumeId, DeleteLinksRequest(chunk))
-                            }.valueOrThrow
+                    sdkRouting.run(
+                        SdkRoute.TRASH,
+                        viaSdk = { sdkTrashOps.restore(userId, volumeId, chunk) },
+                    ) {
+                        // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any
+                        // Retry-After) instead of throwing the whole restore out on a transient blip.
+                        val resp = retryWithBackoff {
+                            shareService.networkSemaphore.withPermit {
+                                manager.invoke {
+                                    restoreFromTrash(volumeId, DeleteLinksRequest(chunk))
+                                }.valueOrThrow
+                            }
                         }
+                        // restore_multiple's Codes (top-level AND per-link) are unreliable for Photos:
+                        // links the server actually restores come back non-1000 with spurious Errors,
+                        // so gating on them wrongly reported every restore as failed. The per-link
+                        // Responses array IS present in the DTO, but this server quirk makes its codes
+                        // untrustworthy for restore — so the conservative all-restored behaviour stays
+                        // and `failed` is intentionally left empty (verified: delete_multiple's codes,
+                        // by contrast, are reliable and ARE parsed in deleteFromCloudForever).
+                        // valueOrThrow has already raised any real HTTP/transport failure, so a
+                        // returning call means the batch was accepted — treat every link in it as
+                        // restored. This also keeps `restored` non-empty so the gallery refresh below
+                        // runs and the photos reappear without needing a re-login. Logged for diagnosis.
+                        Log.d(TAG, "restoreFromCloudTrash: chunk accepted code=${resp.code} " +
+                            "responses=${resp.responses.map { it.response.code to it.response.error }}")
                     }
-                    // restore_multiple's Codes (top-level AND per-link) are unreliable for Photos:
-                    // links the server actually restores come back non-1000 with spurious Errors,
-                    // so gating on them wrongly reported every restore as failed. The per-link
-                    // Responses array IS present in the DTO, but this server quirk makes its codes
-                    // untrustworthy for restore — so the conservative all-restored behaviour stays
-                    // and `failed` is intentionally left empty (verified: delete_multiple's codes,
-                    // by contrast, are reliable and ARE parsed in deleteFromCloudForever).
-                    // valueOrThrow has already raised any real HTTP/transport failure, so a
-                    // returning call means the batch was accepted — treat every link in it as
-                    // restored. This also keeps `restored` non-empty so the gallery refresh below
-                    // runs and the photos reappear without needing a re-login. Logged for diagnosis.
-                    Log.d(TAG, "restoreFromCloudTrash: chunk accepted code=${resp.code} " +
-                        "responses=${resp.responses.map { it.response.code to it.response.error }}")
                 }
                 val restored = linkIds.toSet() - failed
                 Log.d(TAG, "restoreFromCloudTrash: restored ${restored.size}/${linkIds.size} items (${failed.size} failed)")

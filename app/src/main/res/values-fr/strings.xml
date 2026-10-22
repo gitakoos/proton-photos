@@ -1788,6 +1788,8 @@
     <string name="sdk_settings_intro">Ces interrupteurs font passer certaines parties de l\'application par la bibliothèque Drive de Proton plutôt que par le code de l\'application. Ils sont à l\'essai : si la bibliothèque échoue, l\'application fait la même chose de la manière habituelle, donc rien n\'est perdu. Chaque interrupteur reste désactivé jusqu\'à ce que vous l\'activiez.</string>
     <string name="sdk_route_tags">Étiquettes et favoris</string>
     <string name="sdk_route_tags_desc">Cœurs et catégories sur les photos dans Drive</string>
+    <string name="sdk_route_trash">Corbeille et restauration</string>
+    <string name="sdk_route_trash_desc">Placer des photos de Drive dans la corbeille et les en sortir</string>
     <string name="sdk_route_activity">%1$s. Cette session : %2$d via la bibliothèque, %3$d de la manière habituelle.</string>
     <string name="settings_ai_indexing_progress">%1$d sur %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d sur %2$d visages</string>
