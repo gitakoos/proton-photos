@@ -546,6 +546,31 @@ interface FaceDao {
     )
     suspend fun confirmedNamesByPerson(userId: String): List<PersonConfirmedName>
 
+    /** Moves the kept faces of person [from] confirmed as [name] to person [to], leaving out a face marked as
+     *  not being [name] (a "not this person" removal keeps the face's old confirmation); returns how many moved. */
+    @Query(
+        "UPDATE face SET personId = :to WHERE personId = :from AND rejected = 0 AND manualName = :name " +
+            "AND NOT EXISTS (SELECT 1 FROM not_person n WHERE n.userId = face.userId AND n.personName = :name " +
+            "AND n.faceId = face.id)",
+    )
+    suspend fun moveConfirmedFaces(from: Long, to: Long, name: String): Int
+
+    /** Every confirmed name a kept face no person holds carries. */
+    @Query(
+        "SELECT DISTINCT manualName FROM face WHERE userId = :userId AND personId IS NULL AND rejected = 0 " +
+            "AND manualName IS NOT NULL AND TRIM(manualName) != ''",
+    )
+    suspend fun unclusteredConfirmedNames(userId: String): List<String>
+
+    /** Puts the kept faces no person holds that are confirmed as [name] onto person [to], leaving out a face
+     *  marked as not being [name]; returns how many. */
+    @Query(
+        "UPDATE face SET personId = :to WHERE userId = :userId AND personId IS NULL AND rejected = 0 " +
+            "AND manualName = :name AND NOT EXISTS (SELECT 1 FROM not_person n WHERE n.userId = face.userId " +
+            "AND n.personName = :name AND n.faceId = face.id)",
+    )
+    suspend fun groupUnclusteredConfirmedFaces(userId: String, name: String, to: Long): Int
+
     /** The people that have at least one kept face, which tells them apart from one a rescan or a model update
      *  left behind with its name and none of its faces. */
     @Query("SELECT DISTINCT personId FROM face WHERE userId = :userId AND personId IS NOT NULL AND rejected = 0")

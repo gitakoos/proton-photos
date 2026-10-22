@@ -39,6 +39,7 @@ import eu.akoos.photos.data.db.dao.ClusterSummaryDao
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
+import eu.akoos.photos.data.db.dao.PersonConfirmedName
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.UnclusteredFace
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
@@ -728,31 +729,105 @@ class ClusterFacesUseCase @Inject constructor(
         // A rescan or a model update keeps the people and clears their faces, so a person can still hold a name
         // with none of its faces left; that person does not keep the name from the group that carries it now.
         val withFaces = faceDao.personIdsWithKeptFaces(account).toHashSet()
-        val claimed = HashSet<String>()
+        val holderByName = HashMap<String, Long>()
         val facelessHolders = HashMap<String, MutableList<Long>>()
         for (person in people.values) {
             val held = person.displayName?.takeIf { it.isNotBlank() } ?: continue
-            if (person.id in withFaces) claimed.add(held) else facelessHolders.getOrPut(held) { ArrayList() }.add(person.id)
+            if (person.id in withFaces) holderByName[held] = person.id
+            else facelessHolders.getOrPut(held) { ArrayList() }.add(person.id)
         }
         val strongestPerPerson = rows.groupBy { it.personId }.values
             .map { names -> names.maxByOrNull { it.faces }!! }
             .sortedByDescending { it.faces }
         var named = 0
+        var gathered = 0
         appDatabase.withTransaction {
             if (!writeAllowed()) return@withTransaction
             for (row in strongestPerPerson) {
                 val person = people[row.personId] ?: continue
-                if (person.isOther || !person.displayName.isNullOrBlank() || row.name in claimed) continue
+                if (person.isOther || !person.displayName.isNullOrBlank() || row.name in holderByName) continue
                 val manual = personManualPhotoDao.photoKeysForNameList(account, row.name)
                 val photos = (faceDao.distinctPhotoKeysForPerson(account, person.id) + manual).toHashSet().size
                 facelessHolders[row.name]?.forEach { personDao.updateName(it, null) }
                 personDao.updateName(person.id, row.name)
                 personDao.updateCoverAndCount(person.id, person.coverFaceId, photos)
-                claimed.add(row.name)
+                holderByName[row.name] = person.id
                 named++
             }
+            gathered = gatherConfirmedFaces(account, rows, people, holderByName)
         }
+        // The people the gathering moved faces between have a stale centroid now; only theirs is summed again.
+        if (gathered > 0) rebuildSummaries(account, clusterSummaryDao.getAllForUser(account), writeAllowed)
         named
+    }
+
+    /**
+     * Moves every kept face confirmed under a name onto the person holding that name, the way the whole-library
+     * rebuild's [attractToNamedClusters] does: a name goes on one group only, so the faces confirmed under it
+     * that the batches put in another group (an import's faces far from the person's centroid, say), or left
+     * ungrouped, would otherwise sit outside that person for good. A group emptied this way is dropped, and the
+     * photo counts of the people involved are set again. Runs inside the caller's transaction; returns how many
+     * faces it moved.
+     */
+    private suspend fun gatherConfirmedFaces(
+        account: String,
+        rows: List<PersonConfirmedName>,
+        people: Map<Long, PersonEntity>,
+        holderByName: Map<String, Long>,
+    ): Int {
+        var moved = 0
+        val touched = LinkedHashSet<Long>()
+        val sources = LinkedHashSet<Long>()
+        for (row in rows) {
+            val holder = holderByName[row.name] ?: continue
+            if (holder == row.personId) continue
+            val count = faceDao.moveConfirmedFaces(row.personId, holder, row.name)
+            if (count == 0) continue
+            moved += count
+            touched += holder
+            sources += row.personId
+        }
+        for (name in faceDao.unclusteredConfirmedNames(account)) {
+            val holder = holderByName[name] ?: continue
+            val count = faceDao.groupUnclusteredConfirmedFaces(account, name, holder)
+            if (count == 0) continue
+            moved += count
+            touched += holder
+        }
+        if (moved == 0) return 0
+        // The names as they stand now, the ones the caller has just put on groups included.
+        val nameById = HashMap<Long, String>()
+        for ((name, id) in holderByName) nameById[id] = name
+        val emptied = ArrayList<Long>()
+        for (id in sources) {
+            val person = people[id] ?: continue
+            if (faceDao.faceCountForPerson(account, id) > 0) {
+                touched += id
+                // A group whose cover face moved away takes its clearest remaining face as the cover.
+                val cover = person.coverFaceId
+                if (cover == null || faceDao.facesByIds(account, listOf(cover)).firstOrNull()?.personId != id) {
+                    faceDao.topFaceForPerson(account, id)?.let { personDao.updateCover(id, it) }
+                }
+            } else if (!person.isOther && id !in nameById) {
+                emptied += id
+            }
+        }
+        if (emptied.isNotEmpty()) {
+            clusterSummaryDao.deleteByPersons(emptied)
+            personDao.deleteByIds(emptied)
+        }
+        val (namedPeople, unnamedPeople) = touched.mapNotNull { people[it] }
+            .partition { !it.isOther && it.id in nameById }
+        personDao.recountPhotos(unnamedPeople.map { it.id })
+        for (person in namedPeople) {
+            val photos = (
+                faceDao.distinctPhotoKeysForPerson(account, person.id) +
+                    personManualPhotoDao.photoKeysForNameList(account, nameById.getValue(person.id))
+                ).toHashSet().size
+            val stored = personDao.personById(person.id)
+            personDao.updateCoverAndCount(person.id, stored?.coverFaceId ?: person.coverFaceId, photos)
+        }
+        return moved
     }
 
     /**

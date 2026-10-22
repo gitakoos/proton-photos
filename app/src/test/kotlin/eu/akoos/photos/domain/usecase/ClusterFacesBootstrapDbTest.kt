@@ -223,12 +223,78 @@ class ClusterFacesBootstrapDbTest {
         seedLibrary()
         runBatches(limit = 100)
         val other = personOf("p1-0#0")
+        val group = personOf("p0-1#0")
         db.personDao().updateName(other, "Anna")
         db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1"), "Anna")
 
         assertEquals(0, cluster.nameGroupsFromConfirmedFaces(user))
 
-        assertEquals(null, db.personDao().personById(personOf("p0-0#0"))!!.displayName)
+        assertEquals(null, db.personDao().personById(group)!!.displayName)
+        // The faces confirmed as Anna join the person holding the name; the rest of their group stays unnamed.
+        assertEquals(other, personOf("p0-0#0"))
+        assertEquals(other, personOf("p0-0#1"))
+        assertEquals(group, personOf("p0-2#0"))
+    }
+
+    @Test
+    fun `faces confirmed under a held name that the batches grouped apart are gathered onto its person`() = runTest {
+        // An import puts the file's names on faces with no person; a batch can open a group of its own for
+        // faces far from the named person's centroid, which no step named, so they sat outside the person.
+        seedLibrary()
+        runBatches(limit = 100)
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1", "p0-1#0"), "Anna")
+        cluster.nameGroupsFromConfirmedFaces(user)
+        val anna = personOf("p0-0#0")
+        val apart = personOf("p2-0#0")
+        val apartFaces = (0 until 6).map { "p2-${it / 2}#${it % 2}" }
+        db.faceDao().labelFacesByIds(apartFaces, "Anna")
+
+        assertEquals(0, cluster.nameGroupsFromConfirmedFaces(user))
+
+        apartFaces.forEach { assertEquals(anna, personOf(it)) }
+        assertEquals("the emptied group is dropped", null, db.personDao().personById(apart))
+        assertEquals(6, db.personDao().personById(anna)!!.faceCount)
+        val summaries = db.clusterSummaryDao().getAllForUser(acct)
+        assertEquals(db.faceDao().assignedFaceCount(acct), summaries.sumOf { it.memberCount })
+        assertEquals(12, summaries.single { it.personId == anna }.memberCount)
+    }
+
+    @Test
+    fun `a face removed from a person keeps out of it though it still carries the name`() = runTest {
+        // "Not this person" unassigns the face and marks it, leaving its old confirmation on it: gathering it
+        // back would undo the removal.
+        seedLibrary()
+        runBatches(limit = 100)
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1", "p0-1#0", "p0-1#1"), "Anna")
+        cluster.nameGroupsFromConfirmedFaces(user)
+        val anna = personOf("p0-0#0")
+        db.notPersonDao().add(listOf(NotPersonEntity(acct, "Anna", "p0-1#0"), NotPersonEntity(acct, "Anna", "p0-1#1")))
+        db.faceDao().unassignFaces(listOf("p0-1#0"))
+        val elsewhere = personOf("p1-0#0")
+        db.faceDao().reassignFacesToPerson(listOf("p0-1#1"), elsewhere)
+
+        cluster.nameGroupsFromConfirmedFaces(user)
+
+        assertEquals(null, db.faceDao().faceById("p0-1#0")!!.personId)
+        assertEquals(elsewhere, personOf("p0-1#1"))
+        assertEquals(anna, personOf("p0-0#1"))
+    }
+
+    @Test
+    fun `an ungrouped face confirmed under a held name joins its person`() = runTest {
+        seedLibrary()
+        runBatches(limit = 100)
+        db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1"), "Anna")
+        cluster.nameGroupsFromConfirmedFaces(user)
+        val anna = personOf("p0-0#0")
+        face("late", 0, null, axis = 400)
+        db.faceDao().labelFacesByIds(listOf("late#0"), "Anna")
+
+        cluster.nameGroupsFromConfirmedFaces(user)
+
+        assertEquals(anna, personOf("late#0"))
+        val summaries = db.clusterSummaryDao().getAllForUser(acct)
+        assertEquals(db.faceDao().assignedFaceCount(acct), summaries.sumOf { it.memberCount })
     }
 
     @Test
@@ -291,11 +357,13 @@ class ClusterFacesBootstrapDbTest {
         runBatches(limit = 100)
         db.faceDao().labelFacesByIds(listOf("p0-0#0", "p0-0#1", "p0-1#0"), "Anna")
         db.faceDao().labelFacesByIds(listOf("p1-0#0"), "Anna")
+        val smaller = personOf("p1-0#1")
 
         assertEquals(1, cluster.nameGroupsFromConfirmedFaces(user))
 
         assertEquals("Anna", db.personDao().personById(personOf("p0-0#0"))!!.displayName)
-        assertEquals(null, db.personDao().personById(personOf("p1-0#0"))!!.displayName)
+        assertEquals(null, db.personDao().personById(smaller)!!.displayName)
+        assertEquals("its face confirmed as Anna goes to Anna", personOf("p0-0#0"), personOf("p1-0#0"))
     }
 
     @Test
