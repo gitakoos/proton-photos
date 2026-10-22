@@ -1876,6 +1876,8 @@
     <string name="sdk_route_tags_desc">Srčki in kategorije na fotografijah v Drive</string>
     <string name="sdk_route_trash">Koš in obnovitev</string>
     <string name="sdk_route_trash_desc">Premikanje fotografij v Drive v koš in nazaj</string>
+    <string name="sdk_route_download">Prenosi v polni ločljivosti</string>
+    <string name="sdk_route_download_desc">Odpiranje in shranjevanje fotografij iz Drive v polni ločljivosti</string>
     <string name="sdk_route_activity">%1$s. V tej seji: %2$d prek knjižnice, %3$d na običajen način.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
     <string name="settings_ai_grouping_progress">%1$d od %2$d obrazov</string>

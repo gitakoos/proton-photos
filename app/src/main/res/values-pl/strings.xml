@@ -1869,6 +1869,8 @@
     <string name="sdk_route_tags_desc">Serduszka i kategorie na zdjęciach w Drive</string>
     <string name="sdk_route_trash">Kosz i przywracanie</string>
     <string name="sdk_route_trash_desc">Przenoszenie zdjęć z Drive do kosza i z powrotem</string>
+    <string name="sdk_route_download">Pobieranie w pełnej rozdzielczości</string>
+    <string name="sdk_route_download_desc">Otwieranie i zapisywanie zdjęć z Drive w pełnej rozdzielczości</string>
     <string name="sdk_route_activity">%1$s. W tej sesji: %2$d przez bibliotekę, %3$d w zwykły sposób.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d zdjęć</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d twarzy</string>

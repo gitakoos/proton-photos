@@ -42,6 +42,9 @@ import eu.akoos.photos.data.api.dto.RevisionBlockDto
 import eu.akoos.photos.crypto.CryptoServiceClient
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.sdk.SdkDownloadException
+import eu.akoos.photos.data.sdk.SdkRoute
+import eu.akoos.photos.data.sdk.sdkDownloadComplete
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.util.isNotExistsApiError
 import java.io.File
@@ -88,6 +91,8 @@ class PhotoDownloadService @Inject constructor(
     private val albumCryptoChain: AlbumCryptoChain,
     private val sharedAlbumKeyStore: SharedAlbumKeyStore,
     private val photoListingDao: PhotoListingDao,
+    private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
+    private val sdkPhotoDownloadOps: eu.akoos.photos.data.sdk.SdkPhotoDownloadOps,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -216,6 +221,33 @@ class PhotoDownloadService @Inject constructor(
         // Sweep any stale .tmp from a prior aborted concat so we re-stitch cleanly.
         // (Per-block dec_*.bin files are NOT swept — they are the resume state.)
         if (tempFile.exists()) tempFile.delete()
+
+        // The Drive SDK route, for a photo on this user's own volume only: a shared album's photo needs
+        // the share-scoped fetches below. A failed, unverified or short SDK download runs those instead.
+        val ownVolume = runCatching { shareService.getVolumeId(userId) }.getOrNull()
+        if (ownVolume != null && photo.volumeId == ownVolume) {
+            val viaSdk = sdkRouting.run(
+                SdkRoute.DOWNLOAD,
+                viaSdk = {
+                    sdkPhotoDownloadOps.streamToFile(userId, photo.volumeId, photo.linkId, tempFile, onProgress, photo.sizeBytes)
+                    if (!sdkDownloadComplete(tempFile.length(), photo.sizeBytes)) {
+                        throw SdkDownloadException("got ${tempFile.length()} bytes, Drive says ${photo.sizeBytes}")
+                    }
+                    true
+                },
+            ) {
+                tempFile.delete()
+                false
+            }
+            if (viaSdk) {
+                if (!tempFile.renameTo(outputFile)) {
+                    tempFile.inputStream().use { src -> outputFile.outputStream().use { dst -> src.copyTo(dst) } }
+                    tempFile.delete()
+                }
+                onProgress?.invoke(outputFile.length(), outputFile.length())
+                return@withContext outputFile
+            }
+        }
 
         val rootLinkKeyBytes = shareService.getRootLinkKeyBytes(userId) ?: error("Cannot decrypt root link key")
         val manager = apiProvider.get<DriveApiService>(userId)

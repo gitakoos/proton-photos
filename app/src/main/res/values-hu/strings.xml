@@ -1784,6 +1784,8 @@
     <string name="sdk_route_tags_desc">Szívek és kategóriák a Drive-on lévő fotókon</string>
     <string name="sdk_route_trash">Kuka és visszaállítás</string>
     <string name="sdk_route_trash_desc">Fotók áthelyezése a Drive kukájába és vissza</string>
+    <string name="sdk_route_download">Teljes felbontású letöltés</string>
+    <string name="sdk_route_download_desc">Fotók megnyitása és mentése a Drive-ról teljes felbontásban</string>
     <string name="sdk_route_activity">%1$s. Ebben a munkamenetben: %2$d a könyvtáron át, %3$d a megszokott módon.</string>
     <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>
     <string name="settings_ai_grouping_progress">%1$d / %2$d arc</string>

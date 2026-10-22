@@ -101,6 +101,14 @@ class SdkRoutingTest {
     }
 
     @Test
+    fun `an SDK download stands only with bytes, and as many as Drive says when it says`() {
+        assertTrue(sdkDownloadComplete(actualBytes = 1234, expectedBytes = 1234))
+        assertTrue(sdkDownloadComplete(actualBytes = 1234, expectedBytes = 0))
+        assertEquals(false, sdkDownloadComplete(actualBytes = 1000, expectedBytes = 1234))
+        assertEquals(false, sdkDownloadComplete(actualBytes = 0, expectedBytes = 0))
+    }
+
+    @Test
     fun `every Drive tag id maps to the SDK tag of the same id, added or removed`() {
         val expected = listOf(
             PhotoTag.Favorite, PhotoTag.Screenshot, PhotoTag.Video, PhotoTag.LivePhoto, PhotoTag.MotionPhoto,

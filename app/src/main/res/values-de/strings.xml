@@ -1785,6 +1785,8 @@
     <string name="sdk_route_tags_desc">Herzen und Kategorien an Fotos in Drive</string>
     <string name="sdk_route_trash">Papierkorb und Wiederherstellen</string>
     <string name="sdk_route_trash_desc">Fotos in Drive in den Papierkorb verschieben und zurückholen</string>
+    <string name="sdk_route_download">Downloads in voller Auflösung</string>
+    <string name="sdk_route_download_desc">Fotos aus Drive in voller Auflösung öffnen und speichern</string>
     <string name="sdk_route_activity">%1$s. In dieser Sitzung: %2$d über die Bibliothek, %3$d auf dem üblichen Weg.</string>
     <string name="settings_ai_indexing_progress">%1$d von %2$d Fotos</string>
     <string name="settings_ai_grouping_progress">%1$d von %2$d Gesichtern</string>

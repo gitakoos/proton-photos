@@ -1821,6 +1821,8 @@
     <string name="sdk_route_tags_desc">Corazones y categorías en las fotos de Drive</string>
     <string name="sdk_route_trash">Papelera y restauración</string>
     <string name="sdk_route_trash_desc">Mover fotos de Drive a la papelera y recuperarlas</string>
+    <string name="sdk_route_download">Descargas a resolución completa</string>
+    <string name="sdk_route_download_desc">Abrir y guardar fotos de Drive a resolución completa</string>
     <string name="sdk_route_activity">%1$s. En esta sesión: %2$d con la biblioteca, %3$d de la forma habitual.</string>
     <string name="settings_ai_indexing_progress">%1$d de %2$d fotos</string>
     <string name="settings_ai_grouping_progress">%1$d de %2$d rostros</string>

@@ -802,6 +802,8 @@
     <string name="sdk_route_tags_desc">Drive\'daki fotoğraflarda kalpler ve kategoriler</string>
     <string name="sdk_route_trash">Çöp kutusu ve geri yükleme</string>
     <string name="sdk_route_trash_desc">Drive\'daki fotoğrafları çöp kutusuna taşıma ve geri alma</string>
+    <string name="sdk_route_download">Tam çözünürlüklü indirmeler</string>
+    <string name="sdk_route_download_desc">Drive\'daki fotoğrafları tam çözünürlükte açma ve kaydetme</string>
     <string name="sdk_route_activity">%1$s. Bu oturumda: kitaplık üzerinden %2$d, her zamanki yoldan %3$d.</string>
     <string name="settings_ai_indexing_progress">%2$d fotoğraftan %1$d</string>
     <string name="settings_ai_grouping_progress">%2$d yüzden %1$d</string>

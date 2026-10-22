@@ -1820,6 +1820,8 @@
     <string name="sdk_route_tags_desc">Cuori e categorie sulle foto in Drive</string>
     <string name="sdk_route_trash">Cestino e ripristino</string>
     <string name="sdk_route_trash_desc">Spostare le foto di Drive nel cestino e riportarle indietro</string>
+    <string name="sdk_route_download">Download a piena risoluzione</string>
+    <string name="sdk_route_download_desc">Aprire e salvare le foto di Drive a piena risoluzione</string>
     <string name="sdk_route_activity">%1$s. In questa sessione: %2$d tramite la libreria, %3$d nel modo consueto.</string>
     <string name="settings_ai_indexing_progress">%1$d di %2$d foto</string>
     <string name="settings_ai_grouping_progress">%1$d di %2$d volti</string>

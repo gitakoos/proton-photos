@@ -99,11 +99,13 @@ fun SdkSettingsScreen(
 private fun SdkRoute.titleRes(): Int = when (this) {
     SdkRoute.TAGS -> R.string.sdk_route_tags
     SdkRoute.TRASH -> R.string.sdk_route_trash
+    SdkRoute.DOWNLOAD -> R.string.sdk_route_download
 }
 
 private fun SdkRoute.descriptionRes(): Int = when (this) {
     SdkRoute.TAGS -> R.string.sdk_route_tags_desc
     SdkRoute.TRASH -> R.string.sdk_route_trash_desc
+    SdkRoute.DOWNLOAD -> R.string.sdk_route_download_desc
 }
 
 @HiltViewModel
