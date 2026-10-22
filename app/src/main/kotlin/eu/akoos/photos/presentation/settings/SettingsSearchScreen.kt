@@ -153,7 +153,7 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         Screen.AiSettings.route,
     ),
     SettingsSearchEntry(
-        R.string.settings_ai_import, R.string.settings_ai_section,
+        R.string.settings_face_file_link, R.string.settings_ai_section,
         listOf("import", "face file", "face index", "ppfi", "restore faces", "arcok importálása", "arcindex", "visszaállítás"),
         Screen.AiSettings.route,
         cloud = true,

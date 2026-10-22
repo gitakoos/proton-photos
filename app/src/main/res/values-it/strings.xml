@@ -1903,10 +1903,9 @@
     <string name="settings_ml_drive_save_desc">Salva una copia crittografata che i tuoi altri dispositivi possono ripristinare</string>
     <string name="settings_ml_drive_restore">Ripristina da Drive</string>
     <string name="settings_ml_drive_restore_desc">Usa i dati salvati da uno dei tuoi dispositivi invece di rianalizzare le foto</string>
-    <string name="settings_ai_import">Importa indice dei volti</string>
-    <string name="settings_face_import_desc">Carica un indice dei volti salvato in precedenza.</string>
-    <string name="settings_ai_import_confirm_title">Importare l\'indice dei volti?</string>
-    <string name="settings_ai_import_confirm_msg">Aggiunge i volti e le persone dal file a questo telefono e li raggruppa di nuovo. I tuoi volti attuali vengono mantenuti.</string>
+    <string name="settings_face_file_link">Carica i volti salvati da una versione precedente</string>
+    <string name="settings_face_file_title">Volti da una versione precedente</string>
+    <string name="settings_face_file_msg">La versione 2.5.0 e precedenti salvavano i volti con «Esporta indice dei volti» in un file chiamato photosforproton-faces.ppfi. Se hai quel file, sceglilo qui e i suoi volti e nomi tornano. I tuoi volti attuali vengono mantenuti. I salvataggi più recenti sono su Drive, in «Ripristina da Drive».</string>
     <string name="settings_ai_import_choose">Scegli</string>
     <string name="settings_ai_import_done">Importati %1$d volti, %2$d persone.</string>
     <string name="settings_ai_import_reattach">Questo indice usava un modello diverso. I suoi %1$d nomi torneranno sulle tue foto man mano che vengono analizzate.</string>

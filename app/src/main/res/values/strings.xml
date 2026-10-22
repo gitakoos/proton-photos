@@ -857,10 +857,9 @@
     <string name="settings_ml_drive_save_desc">Keep an encrypted copy your other devices can restore</string>
     <string name="settings_ml_drive_restore">Restore from Drive</string>
     <string name="settings_ml_drive_restore_desc">Use data saved by one of your devices instead of scanning again</string>
-    <string name="settings_ai_import">Import face index</string>
-    <string name="settings_face_import_desc">Load a face index you saved before.</string>
-    <string name="settings_ai_import_confirm_title">Import face index?</string>
-    <string name="settings_ai_import_confirm_msg">This adds the faces and people from the file to this phone and regroups them. Your current faces are kept.</string>
+    <string name="settings_face_file_link">Load faces saved by an earlier version</string>
+    <string name="settings_face_file_title">Faces from an earlier version</string>
+    <string name="settings_face_file_msg">Version 2.5.0 and earlier saved faces with “Export face index” into a file named photosforproton-faces.ppfi. If you have that file, choose it here and its faces and names come back. Your current faces are kept. Saves made since then are on Drive, under “Restore from Drive”.</string>
     <string name="settings_ai_import_choose">Choose</string>
     <string name="settings_ai_import_done">Imported %1$d faces, %2$d people.</string>
     <string name="settings_ai_import_reattach">This index used a different model. Its %1$d names will return to your photos as they are scanned.</string>

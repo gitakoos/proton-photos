@@ -1961,10 +1961,9 @@
     <string name="settings_ml_drive_save_desc">Shrani šifrirano kopijo, ki jo lahko obnovijo vaše druge naprave</string>
     <string name="settings_ml_drive_restore">Obnovi iz Drive</string>
     <string name="settings_ml_drive_restore_desc">Uporabi podatke, ki jih je shranila ena od vaših naprav, namesto ponovnega pregledovanja</string>
-    <string name="settings_ai_import">Uvozi indeks obrazov</string>
-    <string name="settings_face_import_desc">Naloži prej shranjen indeks obrazov.</string>
-    <string name="settings_ai_import_confirm_title">Uvozi indeks obrazov?</string>
-    <string name="settings_ai_import_confirm_msg">Doda obraze in osebe iz datoteke v ta telefon in jih znova združi. Vaši trenutni obrazi ostanejo ohranjeni.</string>
+    <string name="settings_face_file_link">Naloži obraze, shranjene s starejšo različico</string>
+    <string name="settings_face_file_title">Obrazi iz starejše različice</string>
+    <string name="settings_face_file_msg">Različica 2.5.0 in starejše so obraze z gumbom »Izvozi indeks obrazov« shranile v datoteko z imenom photosforproton-faces.ppfi. Če imate to datoteko, jo izberite tukaj in obrazi ter imena se vrnejo. Vaši trenutni obrazi ostanejo ohranjeni. Novejše shrambe so na Drive, pod »Obnovi iz Drive«.</string>
     <string name="settings_ai_import_choose">Izberi</string>
     <string name="settings_ai_import_done">Uvoženih %1$d obrazov, %2$d oseb.</string>
     <string name="settings_ai_import_reattach">Ta indeks je uporabljal drug model. Njegovih %1$d imen se bo vrnilo na vaše fotografije, ko bodo pregledane.</string>

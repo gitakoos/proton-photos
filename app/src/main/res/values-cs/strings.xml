@@ -1962,10 +1962,9 @@
     <string name="settings_ml_drive_save_desc">Uloží šifrovanou kopii, kterou mohou obnovit vaše další zařízení</string>
     <string name="settings_ml_drive_restore">Obnovit z Drive</string>
     <string name="settings_ml_drive_restore_desc">Použije data uložená jedním z vašich zařízení místo nového prohledávání</string>
-    <string name="settings_ai_import">Importovat index obličejů</string>
-    <string name="settings_face_import_desc">Načte index obličejů, který jste dříve uložili.</string>
-    <string name="settings_ai_import_confirm_title">Importovat index obličejů?</string>
-    <string name="settings_ai_import_confirm_msg">Přidá obličeje a osoby ze souboru do tohoto telefonu a znovu je seskupí. Vaše stávající obličeje zůstanou zachovány.</string>
+    <string name="settings_face_file_link">Načíst obličeje uložené starší verzí</string>
+    <string name="settings_face_file_title">Obličeje ze starší verze</string>
+    <string name="settings_face_file_msg">Verze 2.5.0 a starší ukládaly obličeje tlačítkem „Exportovat index obličejů“ do souboru s názvem photosforproton-faces.ppfi. Pokud tento soubor máte, vyberte ho zde a jeho obličeje a jména se vrátí. Vaše stávající obličeje zůstanou zachovány. Novější zálohy jsou na Drive, v části „Obnovit z Drive“.</string>
     <string name="settings_ai_import_choose">Vybrat</string>
     <string name="settings_ai_import_done">Importováno %1$d obličejů, %2$d osob.</string>
     <string name="settings_ai_import_reattach">Tento index byl vytvořen s jiným modelem. Jeho %1$d jmen se vrátí k vašim fotkám během prohledávání.</string>

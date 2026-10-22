@@ -1895,10 +1895,9 @@
     <string name="settings_ml_drive_save_desc">Slaat een versleutelde kopie op die je andere apparaten kunnen herstellen</string>
     <string name="settings_ml_drive_restore">Herstellen uit Drive</string>
     <string name="settings_ml_drive_restore_desc">Gebruikt de opgeslagen gegevens van een van je apparaten in plaats van opnieuw te scannen</string>
-    <string name="settings_ai_import">Gezichtsindex importeren</string>
-    <string name="settings_face_import_desc">Laadt een gezichtsindex die je eerder hebt opgeslagen.</string>
-    <string name="settings_ai_import_confirm_title">Gezichtsindex importeren?</string>
-    <string name="settings_ai_import_confirm_msg">Dit voegt de gezichten en personen uit het bestand toe aan deze telefoon en groepeert ze opnieuw. Je huidige gezichten blijven behouden.</string>
+    <string name="settings_face_file_link">Gezichten laden die met een eerdere versie zijn opgeslagen</string>
+    <string name="settings_face_file_title">Gezichten uit een eerdere versie</string>
+    <string name="settings_face_file_msg">Versie 2.5.0 en eerder sloegen gezichten met ‘Gezichtsindex exporteren’ op in een bestand met de naam photosforproton-faces.ppfi. Heb je dat bestand, kies het dan hier en de gezichten en namen komen terug. Je huidige gezichten blijven behouden. Nieuwere opslagen staan in Drive, onder ‘Herstellen uit Drive’.</string>
     <string name="settings_ai_import_choose">Kiezen</string>
     <string name="settings_ai_import_done">%1$d gezichten, %2$d personen geïmporteerd.</string>
     <string name="settings_ai_import_reattach">Deze index gebruikte een ander model. De %1$d namen erin keren terug naar je foto\'s zodra ze worden gescand.</string>

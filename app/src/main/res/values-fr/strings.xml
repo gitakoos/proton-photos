@@ -1873,10 +1873,9 @@
     <string name="settings_ml_drive_save_desc">Enregistre une copie chiffrée que vos autres appareils peuvent restaurer</string>
     <string name="settings_ml_drive_restore">Restaurer depuis Drive</string>
     <string name="settings_ml_drive_restore_desc">Utilise les données enregistrées par un de vos appareils au lieu de tout réanalyser</string>
-    <string name="settings_ai_import">Importer l\'index des visages</string>
-    <string name="settings_face_import_desc">Charge un index des visages que vous avez enregistré auparavant.</string>
-    <string name="settings_ai_import_confirm_title">Importer l\'index des visages ?</string>
-    <string name="settings_ai_import_confirm_msg">Ceci ajoute les visages et les personnes du fichier à ce téléphone et les regroupe. Vos visages actuels sont conservés.</string>
+    <string name="settings_face_file_link">Charger les visages enregistrés par une version précédente</string>
+    <string name="settings_face_file_title">Visages d\'une version précédente</string>
+    <string name="settings_face_file_msg">La version 2.5.0 et les précédentes enregistraient les visages avec « Exporter l\'index des visages » dans un fichier nommé photosforproton-faces.ppfi. Si vous avez ce fichier, choisissez-le ici pour récupérer ses visages et ses noms. Vos visages actuels sont conservés. Les sauvegardes plus récentes sont sur Drive, dans « Restaurer depuis Drive ».</string>
     <string name="settings_ai_import_choose">Choisir</string>
     <string name="settings_ai_import_done">%1$d visages, %2$d personnes importés.</string>
     <string name="settings_ai_import_reattach">Cet index utilisait un modèle différent. Ses %1$d noms reviendront sur vos photos au fur et à mesure de leur analyse.</string>

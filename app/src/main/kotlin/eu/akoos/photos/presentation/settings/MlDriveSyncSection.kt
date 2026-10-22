@@ -49,7 +49,6 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Merge
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -170,36 +169,41 @@ internal fun MlDriveSyncSection(
             onClick = viewModel::openRestore,
             enabled = actionsEnabled,
         )
-        RowDivider()
-        // A face file saved by an earlier version's export, which predates saving to Drive.
-        val importing by fileImport.inProgress.collectAsStateWithLifecycle()
-        var confirmFileImport by rememberSaveable { mutableStateOf(false) }
-        val pickFaceFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-            if (uri != null) fileImport.import(uri)
-        }
-        ActionRow(
-            label = stringResource(R.string.settings_ai_import),
-            description = stringResource(
-                if (importing) R.string.settings_ai_transfer_working else R.string.settings_face_import_desc,
-            ),
-            icon = Icons.Default.FileOpen,
-            onClick = { confirmFileImport = true },
-            enabled = actionsEnabled && !importing,
-        )
-        if (confirmFileImport && !LocalAppLock.current.isLocked) {
-            ConfirmDialog(
-                title = stringResource(R.string.settings_ai_import_confirm_title),
-                message = stringResource(R.string.settings_ai_import_confirm_msg),
-                confirmLabel = stringResource(R.string.settings_ai_import_choose),
-                dismissLabel = stringResource(R.string.cancel),
-                onConfirm = {
-                    confirmFileImport = false
-                    pickFaceFile.launch(arrayOf("application/octet-stream", "*/*"))
-                },
-                onDismiss = { confirmFileImport = false },
-            )
-        }
         AutoSaveRows(AutoSaveKind.ML, R.string.settings_autosave_confirm_ml)
+    }
+
+    // A face file saved by an earlier version's export, which predates saving to Drive. Kept out of the card
+    // as a link under it, so it never reads as a third way to save or restore; the dialog says what file it
+    // takes and points at Drive for anything newer.
+    val importing by fileImport.inProgress.collectAsStateWithLifecycle()
+    var explainFileImport by rememberSaveable { mutableStateOf(false) }
+    val pickFaceFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) fileImport.import(uri)
+    }
+    Spacer(Modifier.height(10.dp))
+    Text(
+        stringResource(if (importing) R.string.settings_ai_transfer_working else R.string.settings_face_file_link),
+        color = if (importing) AppColors.current.fgMute else AppColors.current.accent,
+        fontSize = 12.5.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = mode == MlDriveCardMode.ACTIONS && !starting && !importing) {
+                explainFileImport = true
+            }
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+    )
+    if (explainFileImport && !LocalAppLock.current.isLocked) {
+        ConfirmDialog(
+            title = stringResource(R.string.settings_face_file_title),
+            message = stringResource(R.string.settings_face_file_msg),
+            confirmLabel = stringResource(R.string.settings_ai_import_choose),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                explainFileImport = false
+                pickFaceFile.launch(arrayOf("application/octet-stream", "*/*"))
+            },
+            onDismiss = { explainFileImport = false },
+        )
     }
 
     val fileImportMessage by fileImport.message.collectAsStateWithLifecycle()
