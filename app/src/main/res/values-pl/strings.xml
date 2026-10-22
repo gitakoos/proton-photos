@@ -1954,6 +1954,16 @@
     <string name="settings_ml_drive_save_desc">Zapisuje zaszyfrowaną kopię, którą mogą przywrócić Twoje inne urządzenia</string>
     <string name="settings_ml_drive_restore">Przywróć z Drive</string>
     <string name="settings_ml_drive_restore_desc">Używa danych zapisanych przez jedno z Twoich urządzeń zamiast ponownego skanowania</string>
+    <string name="settings_ai_import">Importuj indeks twarzy</string>
+    <string name="settings_face_import_desc">Wczytuje wcześniej zapisany indeks twarzy.</string>
+    <string name="settings_ai_import_confirm_title">Zaimportować indeks twarzy?</string>
+    <string name="settings_ai_import_confirm_msg">Dodaje twarze i osoby z pliku do tego telefonu i grupuje je ponownie. Twoje obecne twarze zostają zachowane.</string>
+    <string name="settings_ai_import_choose">Wybierz</string>
+    <string name="settings_ai_import_done">Zaimportowano %1$d twarzy, %2$d osób.</string>
+    <string name="settings_ai_import_reattach">Ten indeks użył innego modelu. Jego %1$d nazw wróci do Twoich zdjęć w miarę ich skanowania.</string>
+    <string name="settings_ai_import_wrong_account">Ten indeks twarzy należy do innego konta i nie można go tutaj otworzyć.</string>
+    <string name="settings_ai_transfer_failed">Przesyłanie indeksu twarzy nie powiodło się.</string>
+    <string name="settings_ai_transfer_working">Pracuję…</string>
     <string name="settings_autosave_title">Zapisuj automatycznie</string>
     <string name="settings_autosave_desc">Utrzymuje kopię na Dysku aktualną w tle.</string>
     <string name="settings_autosave_after_changes">Po zmianach</string>

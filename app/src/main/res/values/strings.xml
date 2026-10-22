@@ -857,6 +857,16 @@
     <string name="settings_ml_drive_save_desc">Keep an encrypted copy your other devices can restore</string>
     <string name="settings_ml_drive_restore">Restore from Drive</string>
     <string name="settings_ml_drive_restore_desc">Use data saved by one of your devices instead of scanning again</string>
+    <string name="settings_ai_import">Import face index</string>
+    <string name="settings_face_import_desc">Load a face index you saved before.</string>
+    <string name="settings_ai_import_confirm_title">Import face index?</string>
+    <string name="settings_ai_import_confirm_msg">This adds the faces and people from the file to this phone and regroups them. Your current faces are kept.</string>
+    <string name="settings_ai_import_choose">Choose</string>
+    <string name="settings_ai_import_done">Imported %1$d faces, %2$d people.</string>
+    <string name="settings_ai_import_reattach">This index used a different model. Its %1$d names will return to your photos as they are scanned.</string>
+    <string name="settings_ai_import_wrong_account">This face index belongs to a different account and cannot be opened here.</string>
+    <string name="settings_ai_transfer_failed">Face index transfer failed.</string>
+    <string name="settings_ai_transfer_working">Working…</string>
     <string name="settings_autosave_title">Save automatically</string>
     <string name="settings_autosave_desc">Keeps the Drive copy up to date in the background.</string>
     <string name="settings_autosave_after_changes">After changes</string>

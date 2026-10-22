@@ -808,6 +808,16 @@
     <string name="settings_ml_drive_save_desc">Diğer cihazlarının geri yükleyebileceği şifreli bir kopya sakla</string>
     <string name="settings_ml_drive_restore">Drive\'dan geri yükle</string>
     <string name="settings_ml_drive_restore_desc">Yeniden taramak yerine cihazlarından birinin kaydettiği verileri kullan</string>
+    <string name="settings_ai_import">Yüz dizinini içe aktar</string>
+    <string name="settings_face_import_desc">Daha önce kaydettiğiniz bir yüz dizinini yükler.</string>
+    <string name="settings_ai_import_confirm_title">Yüz dizini içe aktarılsın mı?</string>
+    <string name="settings_ai_import_confirm_msg">Dosyadaki yüzleri ve kişileri bu telefona ekler ve yeniden gruplar. Mevcut yüzleriniz korunur.</string>
+    <string name="settings_ai_import_choose">Seç</string>
+    <string name="settings_ai_import_done">%1$d yüz, %2$d kişi içe aktarıldı.</string>
+    <string name="settings_ai_import_reattach">Bu dizin farklı bir modelle oluşturuldu. İçindeki %1$d ad, fotoğraflar tarandıkça geri gelir.</string>
+    <string name="settings_ai_import_wrong_account">Bu yüz dizini başka bir hesaba ait ve burada açılamaz.</string>
+    <string name="settings_ai_transfer_failed">Yüz dizini aktarımı başarısız oldu.</string>
+    <string name="settings_ai_transfer_working">Çalışıyor…</string>
     <string name="settings_autosave_title">Otomatik kaydet</string>
     <string name="settings_autosave_desc">Drive kopyasını arka planda güncel tutar.</string>
     <string name="settings_autosave_after_changes">Değişikliklerden sonra</string>

@@ -1868,6 +1868,16 @@
     <string name="settings_ml_drive_save_desc">Speichert eine verschlüsselte Kopie, die deine anderen Geräte wiederherstellen können</string>
     <string name="settings_ml_drive_restore">Von Drive wiederherstellen</string>
     <string name="settings_ml_drive_restore_desc">Nutzt die gespeicherten Daten eines deiner Geräte, statt erneut zu scannen</string>
+    <string name="settings_ai_import">Gesichtsindex importieren</string>
+    <string name="settings_face_import_desc">Lädt einen Gesichtsindex, den du zuvor gespeichert hast.</string>
+    <string name="settings_ai_import_confirm_title">Gesichtsindex importieren?</string>
+    <string name="settings_ai_import_confirm_msg">Dies fügt die Gesichter und Personen aus der Datei zu diesem Telefon hinzu und gruppiert sie neu. Deine aktuellen Gesichter bleiben erhalten.</string>
+    <string name="settings_ai_import_choose">Auswählen</string>
+    <string name="settings_ai_import_done">%1$d Gesichter, %2$d Personen importiert.</string>
+    <string name="settings_ai_import_reattach">Dieser Index nutzte ein anderes Modell. Seine %1$d Namen kehren zu Ihren Fotos zurück, sobald sie erneut durchsucht werden.</string>
+    <string name="settings_ai_import_wrong_account">Dieser Gesichtsindex gehört zu einem anderen Konto und kann hier nicht geöffnet werden.</string>
+    <string name="settings_ai_transfer_failed">Übertragung des Gesichtsindex fehlgeschlagen.</string>
+    <string name="settings_ai_transfer_working">Wird ausgeführt…</string>
     <string name="settings_autosave_title">Automatisch speichern</string>
     <string name="settings_autosave_desc">Hält die Kopie in Drive im Hintergrund aktuell.</string>
     <string name="settings_autosave_after_changes">Nach Änderungen</string>

@@ -1964,6 +1964,16 @@
     <string name="settings_ml_drive_save_desc">Uloží šifrovanú kópiu, ktorú môžu obnoviť vaše ďalšie zariadenia</string>
     <string name="settings_ml_drive_restore">Obnoviť z Drive</string>
     <string name="settings_ml_drive_restore_desc">Použije údaje uložené jedným z vašich zariadení namiesto nového prehľadávania</string>
+    <string name="settings_ai_import">Importovať index tvárí</string>
+    <string name="settings_face_import_desc">Načíta predtým uložený index tvárí.</string>
+    <string name="settings_ai_import_confirm_title">Importovať index tvárí?</string>
+    <string name="settings_ai_import_confirm_msg">Pridá tváre a osoby zo súboru do tohto telefónu a znova ich zoskupí. Vaše aktuálne tváre zostanú zachované.</string>
+    <string name="settings_ai_import_choose">Vybrať</string>
+    <string name="settings_ai_import_done">Importovaných %1$d tvárí, %2$d osôb.</string>
+    <string name="settings_ai_import_reattach">Tento index použil iný model. Jeho %1$d mien sa vráti k vašim fotkám počas ich prehľadávania.</string>
+    <string name="settings_ai_import_wrong_account">Tento index tvárí patrí k inému účtu a nie je možné ho tu otvoriť.</string>
+    <string name="settings_ai_transfer_failed">Prenos indexu tvárí zlyhal.</string>
+    <string name="settings_ai_transfer_working">Pracujem…</string>
     <string name="settings_autosave_title">Ukladať automaticky</string>
     <string name="settings_autosave_desc">Udržiava kópiu na Disku aktuálnu na pozadí.</string>
     <string name="settings_autosave_after_changes">Po zmenách</string>

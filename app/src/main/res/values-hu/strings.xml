@@ -1867,6 +1867,16 @@
     <string name="settings_ml_drive_save_desc">Titkosított másolatot ment, amelyet a többi eszközöd visszaállíthat</string>
     <string name="settings_ml_drive_restore">Visszaállítás a Drive-ról</string>
     <string name="settings_ml_drive_restore_desc">Egy eszközöd mentését tölti be az újravizsgálás helyett</string>
+    <string name="settings_ai_import">Arc-index importálása</string>
+    <string name="settings_face_import_desc">Betölt egy korábban mentett arc-indexet.</string>
+    <string name="settings_ai_import_confirm_title">Arc-index importálása?</string>
+    <string name="settings_ai_import_confirm_msg">Hozzáadja a fájlban lévő arcokat és embereket ehhez a telefonhoz, majd újracsoportosítja őket. A jelenlegi arcaid megmaradnak.</string>
+    <string name="settings_ai_import_choose">Tallózás</string>
+    <string name="settings_ai_import_done">%1$d arc, %2$d ember importálva.</string>
+    <string name="settings_ai_import_reattach">Ez az index másik modellel készült. A benne lévő %1$d név visszakerül a fotóidra, ahogy azok újra feldolgozásra kerülnek.</string>
+    <string name="settings_ai_import_wrong_account">Ez az arc-index egy másik fiókhoz tartozik, és itt nem nyitható meg.</string>
+    <string name="settings_ai_transfer_failed">Az arc-index átvitele sikertelen.</string>
+    <string name="settings_ai_transfer_working">Folyamatban…</string>
     <string name="settings_autosave_title">Automatikus mentés</string>
     <string name="settings_autosave_desc">A háttérben naprakészen tartja a Drive-másolatot.</string>
     <string name="settings_autosave_after_changes">Változás után</string>

@@ -1904,6 +1904,16 @@
     <string name="settings_ml_drive_save_desc">Guarda una copia cifrada que tus otros dispositivos pueden restaurar</string>
     <string name="settings_ml_drive_restore">Restaurar desde Drive</string>
     <string name="settings_ml_drive_restore_desc">Usa los datos guardados por uno de tus dispositivos en lugar de volver a analizar</string>
+    <string name="settings_ai_import">Importar índice de caras</string>
+    <string name="settings_face_import_desc">Carga un índice de caras que guardaste antes.</string>
+    <string name="settings_ai_import_confirm_title">¿Importar índice de caras?</string>
+    <string name="settings_ai_import_confirm_msg">Esto añade las caras y personas del archivo a este teléfono y las reagrupa. Tus caras actuales se conservan.</string>
+    <string name="settings_ai_import_choose">Elegir</string>
+    <string name="settings_ai_import_done">Importadas %1$d caras, %2$d personas.</string>
+    <string name="settings_ai_import_reattach">Este índice usó un modelo diferente. Sus %1$d nombres volverán a tus fotos a medida que se analicen.</string>
+    <string name="settings_ai_import_wrong_account">Este índice de caras pertenece a otra cuenta y no se puede abrir aquí.</string>
+    <string name="settings_ai_transfer_failed">Error al transferir el índice de caras.</string>
+    <string name="settings_ai_transfer_working">Procesando…</string>
     <string name="settings_autosave_title">Guardar automáticamente</string>
     <string name="settings_autosave_desc">Mantiene la copia de Drive actualizada en segundo plano.</string>
     <string name="settings_autosave_after_changes">Tras cambios</string>

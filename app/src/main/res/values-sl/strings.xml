@@ -1961,6 +1961,16 @@
     <string name="settings_ml_drive_save_desc">Shrani šifrirano kopijo, ki jo lahko obnovijo vaše druge naprave</string>
     <string name="settings_ml_drive_restore">Obnovi iz Drive</string>
     <string name="settings_ml_drive_restore_desc">Uporabi podatke, ki jih je shranila ena od vaših naprav, namesto ponovnega pregledovanja</string>
+    <string name="settings_ai_import">Uvozi indeks obrazov</string>
+    <string name="settings_face_import_desc">Naloži prej shranjen indeks obrazov.</string>
+    <string name="settings_ai_import_confirm_title">Uvozi indeks obrazov?</string>
+    <string name="settings_ai_import_confirm_msg">Doda obraze in osebe iz datoteke v ta telefon in jih znova združi. Vaši trenutni obrazi ostanejo ohranjeni.</string>
+    <string name="settings_ai_import_choose">Izberi</string>
+    <string name="settings_ai_import_done">Uvoženih %1$d obrazov, %2$d oseb.</string>
+    <string name="settings_ai_import_reattach">Ta indeks je uporabljal drug model. Njegovih %1$d imen se bo vrnilo na vaše fotografije, ko bodo pregledane.</string>
+    <string name="settings_ai_import_wrong_account">Ta indeks obrazov pripada drugemu računu in ga tukaj ni mogoče odpreti.</string>
+    <string name="settings_ai_transfer_failed">Prenos indeksa obrazov ni uspel.</string>
+    <string name="settings_ai_transfer_working">Poteka…</string>
     <string name="settings_autosave_title">Samodejno shranjevanje</string>
     <string name="settings_autosave_desc">Ohranja kopijo v Driveu posodobljeno v ozadju.</string>
     <string name="settings_autosave_after_changes">Po spremembah</string>
