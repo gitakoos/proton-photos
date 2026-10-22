@@ -23,11 +23,13 @@
 package eu.akoos.photos.util
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.channels.SendChannel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -73,6 +75,7 @@ internal class SharedQuerySource<T : Any>(
     private val isStale: () -> Boolean = { false },
     private val now: () -> Long = { System.nanoTime() / 1_000_000L },
     private val onReadFailure: (Throwable) -> Unit = {},
+    private val onEvent: (String) -> Unit = {},
     query: suspend () -> T,
 ) {
     /** Counts every change the store has signalled, so a read can say which changes it began after. */
@@ -92,18 +95,34 @@ internal class SharedQuerySource<T : Any>(
     /** True from the moment the listener is registered until the source stops. */
     private var listening = false
 
+    /** A read under way, and the change count it began under, so [recent] can wait for it instead of
+     *  queueing a second whole read right behind it. */
+    private class InFlight<T>(val version: Long, val result: CompletableDeferred<T>)
+
+    @Volatile private var inFlight: InFlight<T>? = null
+
     private val gate = FreshQueryGate(scope) {
         val version = changeVersion.get()
-        val value = query()
-        synchronized(readLock) {
-            if (listening) {
-                // A read equal to the shared value is stored as that value, so one copy of the list is held.
-                val shared = latest.value
-                val kept = if (shared != null && shared == value) shared else value
-                lastRead = Read(kept, version, now())
+        val running = InFlight(version, CompletableDeferred<T>())
+        inFlight = running
+        try {
+            val value = query()
+            synchronized(readLock) {
+                if (listening) {
+                    // A read equal to the shared value is stored as that value, so one copy of the list is held.
+                    val shared = latest.value
+                    val kept = if (shared != null && shared == value) shared else value
+                    lastRead = Read(kept, version, now())
+                }
             }
+            running.result.complete(value)
+            value
+        } catch (e: Throwable) {
+            running.result.completeExceptionally(e)
+            throw e
+        } finally {
+            if (inFlight === running) inFlight = null
         }
-        value
     }
 
     /** Change signals of the running source; null while nothing collects. */
@@ -119,6 +138,7 @@ internal class SharedQuerySource<T : Any>(
         val stopListening: (() -> Unit)? = try {
             listen {
                 changeVersion.incrementAndGet()
+                onEvent("signal")
                 pending.trySend(Unit)
             }.also {
                 // A read that began before the listener was there cannot vouch for what changed meanwhile.
@@ -174,11 +194,15 @@ internal class SharedQuerySource<T : Any>(
     /** Asks for a re-read. Does nothing while no one collects, since the next collector reads anyway. */
     fun requestRefresh() {
         changeVersion.incrementAndGet()
+        onEvent("refresh")
         signals?.trySend(Unit)
     }
 
     /** A value read after this call began; see [FreshQueryGate.fresh]. Throws when the read fails. */
-    suspend fun fresh(): T = gate.fresh()
+    suspend fun fresh(): T {
+        onEvent("fresh")
+        return gate.fresh()
+    }
 
     /**
      * What [fresh] answers, without the read when the source already holds one that still is it: the latest
@@ -186,14 +210,42 @@ internal class SharedQuerySource<T : Any>(
      * [isStale] knows of has moved, and [reusable] accepts it. Otherwise a read as [fresh] runs. While the
      * store is quiet this lets a burst of one-shot readers (a reconcile, a backfill walk, an upload pass)
      * share the read the source already made, instead of each running its own whole-library scan.
+     *
+     * A read still under way is waited for and answered in the same way, while the source listens and no
+     * change has been signalled since it began: [fresh] would only queue another whole read behind it.
      */
     suspend fun recent(maxAgeMs: Long, reusable: (T) -> Boolean = { true }): T {
         val held = lastRead
-        if (held != null && held.version == changeVersion.get() && now() - held.atMs <= maxAgeMs &&
-            !isStale() && reusable(held.value)
-        ) {
-            return held.value
+        val version = changeVersion.get()
+        val miss = when {
+            held == null -> "none"
+            held.version != version -> "changed"
+            now() - held.atMs > maxAgeMs -> "old"
+            isStale() -> "stale"
+            !reusable(held.value) -> "partial"
+            else -> null
         }
+        if (miss == null) {
+            onEvent("reuse-held")
+            return held!!.value
+        }
+        val running = inFlight
+        if (running != null && running.version == version && synchronized(readLock) { listening } && !isStale()) {
+            val value = try {
+                running.result.await()
+            } catch (e: CancellationException) {
+                currentCoroutineContext().ensureActive()
+                null
+            } catch (e: Throwable) {
+                if (e is VirtualMachineError) throw e
+                null
+            }
+            if (value != null && changeVersion.get() == version && reusable(value)) {
+                onEvent("reuse-joined")
+                return value
+            }
+        }
+        onEvent("miss-$miss")
         return gate.fresh()
     }
 

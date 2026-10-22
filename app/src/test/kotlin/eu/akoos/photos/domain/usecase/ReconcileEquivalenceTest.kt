@@ -611,6 +611,32 @@ class ReconcileEquivalenceTest {
 
         override suspend fun clearManualQueue(): Int =
             real.clearManualQueue().also { calls += "clearManualQueue changed=$it" }
+
+        // The batched writes are logged one entry per row, as the per-row calls the reference pass makes,
+        // so the logs still line up row by row; the tables compared after the pass check what they wrote.
+        override suspend fun updateDomainColumnsIfNotSyncedWithCloudAll(states: List<SyncState>, userId: UserId): Set<String> =
+            real.updateDomainColumnsIfNotSyncedWithCloudAll(states, userId).also { untouched ->
+                for (state in states) {
+                    calls += "guardedUpdate ${userId.id} ${describe(state)} changed=${if (state.localUri in untouched) 0 else 1}"
+                }
+            }
+
+        override suspend fun markQueuedAll(localUris: List<String>, source: String, at: Long) {
+            for (uri in localUris) calls += "markQueued $uri $source ${stamp(at)}"
+            real.markQueuedAll(localUris, source, at)
+        }
+
+        override suspend fun clearQueuedForSyncedAll(localUris: List<String>) {
+            for (uri in localUris) calls += "clearQueuedForSynced $uri"
+            real.clearQueuedForSyncedAll(localUris)
+        }
+
+        // A read of the rows the queue clean-up filters to, where the reference reads the whole table and
+        // filters it the same way; logged as that read so the two logs line up.
+        override suspend fun getLocalOnly(userId: UserId): List<SyncState> {
+            calls += "observeAll ${userId.id}"
+            return real.getLocalOnly(userId)
+        }
     }
 
     private companion object {

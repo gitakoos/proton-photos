@@ -39,6 +39,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -89,6 +90,21 @@ class ReconcileSyncStateUseCaseTest {
         coEvery { localRepo.confirmedGone(any()) } answers { firstArg<Collection<String>>().toSet() }
         cloudRepo = mockk(relaxed = true)
         syncStateRepo = mockk(relaxed = true)
+        // The batched writes and the LOCAL_ONLY read answer as their per-row forms do, so the tests verify
+        // one call per row whichever form a pass uses.
+        coEvery { syncStateRepo.markQueuedAll(any(), any(), any()) } coAnswers {
+            for (uri in firstArg<List<String>>()) syncStateRepo.markQueued(uri, secondArg(), thirdArg())
+        }
+        coEvery { syncStateRepo.clearQueuedForSyncedAll(any()) } coAnswers {
+            for (uri in firstArg<List<String>>()) syncStateRepo.clearQueuedForSynced(uri)
+        }
+        coEvery { syncStateRepo.updateDomainColumnsIfNotSyncedWithCloudAll(any(), any()) } coAnswers {
+            firstArg<List<SyncState>>().filter { syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(it, secondArg()) == 0 }
+                .mapTo(HashSet()) { it.localUri }
+        }
+        coEvery { syncStateRepo.getLocalOnly(any()) } coAnswers {
+            syncStateRepo.observeAll(firstArg()).first().filter { it.status == SyncStatus.LOCAL_ONLY }
+        }
         // Strict: the pairing rows are the only listing read a pass may make.
         listingDao = mockk()
 

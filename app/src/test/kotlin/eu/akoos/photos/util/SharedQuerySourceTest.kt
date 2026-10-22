@@ -487,6 +487,72 @@ class SharedQuerySourceTest {
         assertEquals("the held read was dropped with the source, so this one reads", 2, store.reads)
     }
 
+    @Test
+    fun `a recent read waits for a read under way instead of queueing another`() = runTest {
+        val store = FakeStore()
+        val source = source(store)
+        val job = launch { source.shared.collect { } }
+        runCurrent()
+        assertEquals("the collector's read is under way", 1, store.reads)
+
+        val answer = async { source.recent(RECENT_MS) }
+        advanceTimeBy(READ_MS * 3)
+
+        assertEquals("v1", answer.await())
+        assertEquals("the recent read must share the read under way", 1, store.reads)
+        job.cancel()
+    }
+
+    @Test
+    fun `a recent read does not take a read under way that began before a change`() = runTest {
+        val store = FakeStore()
+        val source = source(store)
+        val job = launch { source.shared.collect { } }
+        runCurrent()
+        store.content = "v2"
+        store.change()
+
+        val answer = async { source.recent(RECENT_MS) }
+        advanceTimeBy(QUIET_MS + READ_MS * 4)
+
+        assertEquals("v2", answer.await())
+        assertTrue(store.reads >= 2)
+        job.cancel()
+    }
+
+    @Test
+    fun `a recent read does not take a read under way that a change passed`() = runTest {
+        val store = FakeStore()
+        val source = source(store)
+        val job = launch { source.shared.collect { } }
+        runCurrent()
+        val answer = async { source.recent(RECENT_MS) }
+        runCurrent()
+        store.content = "v2"
+        store.change()
+        advanceTimeBy(QUIET_MS + READ_MS * 4)
+
+        assertEquals("a change landing while the read ran must not be missed", "v2", answer.await())
+        job.cancel()
+    }
+
+    @Test
+    fun `a recent read does not take a read under way while no one listens`() = runTest {
+        // With no listener no change can be signalled, so a read begun before the call cannot vouch for it.
+        val store = FakeStore()
+        val source = source(store)
+        val oneShot = async { source.fresh() }
+        runCurrent()
+        assertEquals(1, store.reads)
+
+        val answer = async { source.recent(RECENT_MS) }
+        advanceTimeBy(READ_MS * 3)
+
+        assertEquals("v1", oneShot.await())
+        assertEquals("v1", answer.await())
+        assertEquals("the recent read must run its own read", 2, store.reads)
+    }
+
     private companion object {
         const val QUIET_MS = 250L
         const val MAX_WAIT_MS = 2_000L

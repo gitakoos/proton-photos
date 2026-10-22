@@ -311,27 +311,21 @@ class ReconcileSyncStateUseCase @Inject constructor(
         syncStateRepo.upsertAll(rest, userId)
         // A guarded update that changed no row means the row is SYNCED now (the upload won the race),
         // so its uri must not be re-queued below: a finished upload is never queued for a duplicate.
-        val skippedDemotionUris = mutableSetOf<String>()
-        for (state in guardedDemotions) {
-            if (syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(state, userId) == 0) {
-                skippedDemotionUris += state.localUri
-            }
-        }
+        val skippedDemotionUris = syncStateRepo.updateDomainColumnsIfNotSyncedWithCloudAll(guardedDemotions, userId)
         // Now that the fresh rows are durable, stamp each newly-unmatched in-scope local as
-        // queued=AUTO_FOLDER (why it is up for backup + when). markQueued is a per-row UPDATE, so it
+        // queued=AUTO_FOLDER (why it is up for backup + when). The stamp is an UPDATE of existing rows, so it
         // must run AFTER the upsert that created the row. The processor selects on LOCAL_ONLY AND
         // queued, so this stamp is what makes a folder-selected backup upload.
         val autoFolderNow = System.currentTimeMillis()
-        for (uri in freshAutoFolderUris) {
-            if (uri in skippedDemotionUris) continue
-            syncStateRepo.markQueued(uri, eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER, autoFolderNow)
-        }
+        syncStateRepo.markQueuedAll(
+            freshAutoFolderUris.filter { it !in skippedDemotionUris },
+            eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER,
+            autoFolderNow,
+        )
         // RULE 1: clear the queued flag on every row paired to a cloud copy this pass. Unguarded
         // (clearQueuedForSynced) because these rows are known backed up; a still-pending upload's
         // intent is never touched here (those rows are LOCAL_ONLY, not in this set).
-        for (uri in pairedSyncedUris) {
-            syncStateRepo.clearQueuedForSynced(uri)
-        }
+        syncStateRepo.clearQueuedForSyncedAll(pairedSyncedUris)
 
         // Every in-scope local this pass wrote a row for; the out-of-scope de-queue below spares these.
         val inScopeUris: Set<String> = newStates.mapTo(HashSet(newStates.size)) { it.localUri }
@@ -467,7 +461,12 @@ class ReconcileSyncStateUseCase @Inject constructor(
             val localHashHex: String? = storedHash
                 ?: if (initialListingComplete && cloudByHash.isNotEmpty())
                     localRepo.sha1(local.uri).also { recomputedHash = it } else null
-            val byContentHash = localHashHex?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+            // A row its cloud id already pairs, and already stamped backed up, comes out the same whatever the
+            // hash match says (the id wins the match and the stamp is kept), so its hash is not looked up:
+            // turning a hash into the Drive form is a keyed HMAC per photo, every pass.
+            val hashDecides = byId == null || existingSync?.backedUpAtMs == null
+            val byContentHash = localHashHex?.takeIf { hashDecides }
+                ?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
 
             // captureTime in the cloud listing is Unix seconds; LocalMediaItem.dateTaken is ms.
             val localCaptureTimeSec = local.dateTaken / 1000L
@@ -595,7 +594,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // never on a row queued since the scan began (a "back up now" on a photo taken mid-pass).
         // The scan's word is then checked by a lookup by id, which alone drops the row: a torn read can
         // skip a file, and a trashed one is still restorable.
-        val goneQueued = syncStateRepo.observeAll(userId).first()
+        val goneQueued = syncStateRepo.getLocalOnly(userId)
             .filter {
                 it.status == SyncStatus.LOCAL_ONLY && it.queued &&
                     deviceFileGone(it, scanComplete, allLocalUris, scanStartMs)
@@ -611,7 +610,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // recovery below. Their row sets are disjoint (this pass is queued rows with a null/AUTO_FOLDER
         // source, the next is un-queued rows with a MANUAL/ALBUM_ADD/EDITOR source), so the clearQueued
         // writes here never fall into that filter and a single read is enough.
-        val afterDropSnapshot = syncStateRepo.observeAll(userId).first()
+        val afterDropSnapshot = syncStateRepo.getLocalOnly(userId)
 
         // De-queue stale LOCAL_ONLY entries for items no longer in scope (e.g. the user unchecked
         // their folder/album from the backup selection). The queue is the source of truth, so clearing

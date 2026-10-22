@@ -31,6 +31,7 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.flatMapSqlChunks
+import eu.akoos.photos.util.forEachSqlChunk
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -143,6 +144,23 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun clearQueued(localUri: String) = dao.clearQueued(localUri)
 
     override suspend fun clearQueuedForSynced(localUri: String) = dao.clearQueuedForSynced(localUri)
+
+    override suspend fun clearQueuedForSyncedAll(localUris: List<String>) =
+        localUris.forEachSqlChunk { chunk -> dao.clearQueuedForSyncedAll(chunk) }
+
+    override suspend fun markQueuedAll(localUris: List<String>, source: String, at: Long) =
+        localUris.forEachSqlChunk { chunk -> dao.markQueuedAll(chunk, source, at) }
+
+    override suspend fun updateDomainColumnsIfNotSyncedWithCloudAll(states: List<SyncState>, userId: UserId): Set<String> {
+        val untouched = HashSet<String>()
+        states.forEachSqlChunk { chunk ->
+            untouched += dao.updateDomainColumnsIfNotSyncedWithCloudAll(chunk.map { it.toEntity(userId.id) })
+        }
+        return untouched
+    }
+
+    override suspend fun getLocalOnly(userId: UserId): List<SyncState> =
+        dao.getLocalOnly(userId.id).map { it.toDomain() }
 
     override suspend fun getQueueSource(localUri: String): String? = dao.getQueueSource(localUri)
 

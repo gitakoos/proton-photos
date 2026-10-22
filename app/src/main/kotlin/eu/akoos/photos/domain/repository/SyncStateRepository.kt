@@ -23,6 +23,7 @@
 package eu.akoos.photos.domain.repository
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
@@ -91,6 +92,21 @@ interface SyncStateRepository {
      *  [eu.akoos.photos.domain.entity.QueueSource] constant), and when ([at], epoch millis). */
     suspend fun markQueued(localUri: String, source: String, at: Long)
 
+    /** [markQueued] for every one of [localUris], in as few writes as the SQL limit allows. */
+    suspend fun markQueuedAll(localUris: List<String>, source: String, at: Long) {
+        for (uri in localUris) markQueued(uri, source, at)
+    }
+
+    /** [updateDomainColumnsIfNotSyncedWithCloud] for each of [states], in as few transactions as the SQL
+     *  limit allows; returns the uris left untouched because the row is a finished upload by now. */
+    suspend fun updateDomainColumnsIfNotSyncedWithCloudAll(states: List<SyncState>, userId: UserId): Set<String> =
+        states.filterTo(ArrayList()) { updateDomainColumnsIfNotSyncedWithCloud(it, userId) == 0 }
+            .mapTo(HashSet()) { it.localUri }
+
+    /** [userId]'s LOCAL_ONLY rows, the ones still to back up. */
+    suspend fun getLocalOnly(userId: UserId): List<SyncState> =
+        observeAll(userId).first().filter { it.status == SyncStatus.LOCAL_ONLY }
+
     /** The rows for [localUris] (a uri with no row is absent), in as few reads as the SQL limit allows. */
     suspend fun getByUris(localUris: List<String>): List<SyncState> = localUris.mapNotNull { getByUri(it) }
 
@@ -106,6 +122,10 @@ interface SyncStateRepository {
     suspend fun clearQueued(localUri: String)
     /** Unguarded queued clear for the success / pairing path, where the row is known backed up. */
     suspend fun clearQueuedForSynced(localUri: String)
+    /** [clearQueuedForSynced] for every one of [localUris], in as few writes as the SQL limit allows. */
+    suspend fun clearQueuedForSyncedAll(localUris: List<String>) {
+        for (uri in localUris) clearQueuedForSynced(uri)
+    }
     /** The reason a row was queued (a [eu.akoos.photos.domain.entity.QueueSource] constant), or null.
      *  Read on a failure demotion so the re-queue preserves the row's original source. */
     suspend fun getQueueSource(localUri: String): String?

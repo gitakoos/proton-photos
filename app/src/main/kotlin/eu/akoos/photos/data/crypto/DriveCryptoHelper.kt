@@ -24,6 +24,7 @@ package eu.akoos.photos.data.crypto
 
 import android.util.Base64
 import android.util.Log
+import eu.akoos.photos.util.toLowerHex
 import me.proton.core.crypto.common.context.CryptoContext
 import me.proton.core.crypto.common.pgp.PGPHeader
 import me.proton.core.crypto.common.pgp.PacketType
@@ -729,18 +730,29 @@ class DriveCryptoHelper @Inject constructor(
     fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
 
     /** Hex-encoded SHA-256. */
-    fun sha256Hex(data: ByteArray): String = sha256(data).joinToString("") { "%02x".format(it) }
+    fun sha256Hex(data: ByteArray): String = sha256(data).toLowerHex()
 
     /**
      * HMAC-SHA256 of the plaintext name with the raw NodeHashKey bytes — the Hash field in album /
      * link creation, letting the server look up links by name without learning the plaintext.
      */
     fun computeNameHash(plaintextName: String, nodeHashKeyBytes: ByteArray): String {
-        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
-        mac.init(javax.crypto.spec.SecretKeySpec(nodeHashKeyBytes, "HmacSHA256"))
-        val hmac = mac.doFinal(plaintextName.toByteArray(Charsets.UTF_8))
-        return hmac.joinToString("") { "%02x".format(it) }
+        val mac = nameHashMac(nodeHashKeyBytes)
+        return mac.doFinal(plaintextName.toByteArray(Charsets.UTF_8)).toLowerHex()
     }
+
+    /** This thread's HMAC for [keyBytes], set up once per key: reconcile hashes every photo of the library
+     *  with the same key on every pass. A Mac is not thread-safe, hence one per thread; doFinal resets it. */
+    private fun nameHashMac(keyBytes: ByteArray): javax.crypto.Mac {
+        val held = nameHashMacs.get()
+        if (held != null && held.first.contentEquals(keyBytes)) return held.second
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        mac.init(javax.crypto.spec.SecretKeySpec(keyBytes, "HmacSHA256"))
+        nameHashMacs.set(keyBytes.copyOf() to mac)
+        return mac
+    }
+
+    private val nameHashMacs = ThreadLocal<Pair<ByteArray, javax.crypto.Mac>?>()
 
     /**
      * Signs the revision manifest — the raw SHA-256 bytes of every block (32 × count) concatenated
