@@ -244,6 +244,8 @@ class PhotoDownloadService @Inject constructor(
                     tempFile.inputStream().use { src -> outputFile.outputStream().use { dst -> src.copyTo(dst) } }
                     tempFile.delete()
                 }
+                // The blocks and sidecar an interrupted download of the app's own left behind are moot now.
+                dropBlockResumeState(cacheDir, photo.linkId)
                 onProgress?.invoke(outputFile.length(), outputFile.length())
                 return@withContext outputFile
             }
@@ -765,6 +767,14 @@ class PhotoDownloadService @Inject constructor(
     private fun blockDecFile(cacheDir: File, linkId: String, index: Int): File =
         File(cacheDir, "dec_${linkId}_${index}.bin")
 
+    /** Deletes [linkId]'s resume state: every `dec_<linkId>_<index>.bin` (an exact name match, so another
+     *  photo whose id starts the same is left alone) and its hash sidecar. */
+    private fun dropBlockResumeState(cacheDir: File, linkId: String) {
+        cacheDir.listFiles { _, name -> isBlockDecFileOf(name, linkId) }?.forEach { it.delete() }
+        blockHashSidecar(cacheDir, linkId).delete()
+        File(cacheDir, "$linkId.hashes.tmp").delete()
+    }
+
     /**
      * Per-revision sidecar listing the encrypted + decrypted SHA-256 of every block in
      * index order. Written once after a successful manifest verification so a later
@@ -950,4 +960,12 @@ class PhotoDownloadService @Inject constructor(
             if (deleted > 0) Log.d(TAG, "pruneStaleFullResCache: removed $deleted stale fullres file(s)")
         }
     }
+}
+
+/** Whether [name] is one of [linkId]'s decrypted block files, `dec_<linkId>_<index>.bin`. */
+internal fun isBlockDecFileOf(name: String, linkId: String): Boolean {
+    val prefix = "dec_${linkId}_"
+    if (!name.startsWith(prefix) || !name.endsWith(".bin")) return false
+    val index = name.substring(prefix.length, name.length - ".bin".length)
+    return index.isNotEmpty() && index.all { it.isDigit() }
 }

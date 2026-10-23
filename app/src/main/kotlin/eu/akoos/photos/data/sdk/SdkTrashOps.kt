@@ -33,22 +33,33 @@ import javax.inject.Singleton
  * Moving photos to the Drive trash, back, and out of it for good through the Drive SDK's Photos client, one
  * batch at a time, answering as the app's own requests do: [moveToTrash] and [deleteForever] return the
  * links the server refused, a link it no longer holds counting as done, and [restore] returns nothing,
- * since the server's per-link answers to a Photos restore come back wrong for links it did restore. Run
- * only through [SdkRouting] ([SdkRoute.TRASH]).
+ * since the server's per-link answers to a Photos restore come back wrong for links it did restore. Each
+ * link the server finished is handed to `onDone` as its answer arrives, so a call that fails partway lets
+ * the caller's own request take only the links still left. Run only through [SdkRouting] ([SdkRoute.TRASH]).
  */
 @Singleton
 class SdkTrashOps @Inject constructor(
     private val clientProvider: SdkDriveClientProvider,
 ) {
-    suspend fun moveToTrash(userId: UserId, volumeId: String, linkIds: List<String>): Set<String> =
+    suspend fun moveToTrash(
+        userId: UserId,
+        volumeId: String,
+        linkIds: List<String>,
+        onDone: (linkId: String) -> Unit = {},
+    ): Set<String> =
         clientProvider.withPhotosClient(userId) { client ->
-            refusedLinks(client.trashNodes(nodeUids(volumeId, linkIds)))
+            refusedLinks(client.trashNodes(nodeUids(volumeId, linkIds)), onDone)
         } ?: throw SdkTrashException("the SDK cannot run on this device")
 
     /** Deletes trashed photos permanently; the explicit list only, never the whole trash. */
-    suspend fun deleteForever(userId: UserId, volumeId: String, linkIds: List<String>): Set<String> =
+    suspend fun deleteForever(
+        userId: UserId,
+        volumeId: String,
+        linkIds: List<String>,
+        onDone: (linkId: String) -> Unit = {},
+    ): Set<String> =
         clientProvider.withPhotosClient(userId) { client ->
-            refusedLinks(client.deleteNodes(nodeUids(volumeId, linkIds)))
+            refusedLinks(client.deleteNodes(nodeUids(volumeId, linkIds)), onDone)
         } ?: throw SdkTrashException("the SDK cannot run on this device")
 
     suspend fun restore(userId: UserId, volumeId: String, linkIds: List<String>) {
@@ -58,13 +69,16 @@ class SdkTrashOps @Inject constructor(
         } ?: throw SdkTrashException("the SDK cannot run on this device")
     }
 
-    private suspend fun refusedLinks(results: Flow<NodeResultPair>): Set<String> {
+    private suspend fun refusedLinks(results: Flow<NodeResultPair>, onDone: (String) -> Unit): Set<String> {
         val refused = mutableSetOf<String>()
         results.collect { result ->
+            val linkId = (result.nodeUid as LegacyNodeUid).linkId
             if (result is NodeResultPair.Failure &&
                 !linkAlreadyGone(result.error.error?.primaryCode, result.error.error?.secondaryCode)
             ) {
-                refused += (result.nodeUid as LegacyNodeUid).linkId
+                refused += linkId
+            } else {
+                onDone(linkId)
             }
         }
         return refused

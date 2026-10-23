@@ -199,16 +199,20 @@ class CloudTrashService @Inject constructor(
             // permanent-delete path below does.
             val failed = mutableSetOf<String>()
             linkIds.chunked(TRASH_BATCH).forEach { chunk ->
+                // Links the SDK already trashed before it failed; the app's own request takes the rest.
+                val doneBySdk = HashSet<String>()
                 failed += sdkRouting.run(
                     SdkRoute.TRASH,
-                    viaSdk = { sdkTrashOps.moveToTrash(userId, volumeId, chunk) },
+                    viaSdk = { sdkTrashOps.moveToTrash(userId, volumeId, chunk) { doneBySdk += it } },
                 ) {
+                    val rest = chunk.filterNot { it in doneBySdk }
+                    if (rest.isEmpty()) return@run emptySet()
                     // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any Retry-After)
                     // instead of failing the whole multi-select delete.
                     val resp = retryWithBackoff {
                         shareService.networkSemaphore.withPermit {
                             manager.invoke {
-                                trashPhotos(volumeId, DeleteLinksRequest(chunk))
+                                trashPhotos(volumeId, DeleteLinksRequest(rest))
                             }.valueOrThrow
                         }
                     }
@@ -569,16 +573,20 @@ class CloudTrashService @Inject constructor(
                 val manager = apiProvider.get<DriveApiService>(userId)
                 val failed = mutableSetOf<String>()
                 linkIds.chunked(TRASH_BATCH).forEach { chunk ->
+                    // Links the SDK already deleted before it failed; the app's own request takes the rest.
+                    val doneBySdk = HashSet<String>()
                     failed += sdkRouting.run(
                         SdkRoute.TRASH,
-                        viaSdk = { sdkTrashOps.deleteForever(userId, volumeId, chunk) },
+                        viaSdk = { sdkTrashOps.deleteForever(userId, volumeId, chunk) { doneBySdk += it } },
                     ) {
+                        val rest = chunk.filterNot { it in doneBySdk }
+                        if (rest.isEmpty()) return@run emptySet()
                         // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any
                         // Retry-After) instead of failing the whole permanent-delete batch.
                         val resp = retryWithBackoff {
                             shareService.networkSemaphore.withPermit {
                                 manager.invoke {
-                                    deleteForever(volumeId, DeleteLinksRequest(chunk))
+                                    deleteForever(volumeId, DeleteLinksRequest(rest))
                                 }.valueOrThrow
                             }
                         }

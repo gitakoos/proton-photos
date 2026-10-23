@@ -334,7 +334,10 @@ class PhotoUploadService @Inject constructor(
 
             // The Drive SDK route. A committed SDK upload goes through the same steps the app's own
             // upload ends with; an SDK failure that left nothing on Drive runs the app's own upload.
-            if (sdkRouting.isOn(eu.akoos.photos.data.sdk.SdkRoute.UPLOAD)) {
+            // A resume record from an interrupted upload of the app's own names a draft already on
+            // Drive, which only that path can finish, so the SDK steps aside rather than orphan it.
+            val ownDraftPending = UploadResumeManifest.load(tempDir) != null
+            if (!ownDraftPending && sdkRouting.isOn(eu.akoos.photos.data.sdk.SdkRoute.UPLOAD)) {
                 val sdkVolumeId = shareService.getVolumeId(userId)
                 val sdkShareId = shareService.getShareId(userId, sdkVolumeId)
                 val viaSdk = sdkRouting.run(
