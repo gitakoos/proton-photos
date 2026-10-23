@@ -1783,7 +1783,7 @@
     <string name="sdk_route_tags">Címkék és kedvencek</string>
     <string name="sdk_route_tags_desc">Szívek és kategóriák a Drive-on lévő fotókon</string>
     <string name="sdk_route_trash">Kuka és visszaállítás</string>
-    <string name="sdk_route_trash_desc">Fotók áthelyezése a Drive kukájába és vissza</string>
+    <string name="sdk_route_trash_desc">Fotók áthelyezése a Drive kukájába és vissza, és végleges törlésük</string>
     <string name="sdk_route_download">Teljes felbontású letöltés</string>
     <string name="sdk_route_download_desc">Fotók megnyitása és mentése a Drive-ról teljes felbontásban</string>
     <string name="sdk_route_upload">Mentés és feltöltés</string>

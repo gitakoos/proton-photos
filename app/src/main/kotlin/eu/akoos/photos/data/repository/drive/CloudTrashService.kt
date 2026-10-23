@@ -533,18 +533,23 @@ class CloudTrashService @Inject constructor(
                 val manager = apiProvider.get<DriveApiService>(userId)
                 val failed = mutableSetOf<String>()
                 linkIds.chunked(TRASH_BATCH).forEach { chunk ->
-                    // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any
-                    // Retry-After) instead of failing the whole permanent-delete batch.
-                    val resp = retryWithBackoff {
-                        shareService.networkSemaphore.withPermit {
-                            manager.invoke {
-                                deleteForever(volumeId, DeleteLinksRequest(chunk))
-                            }.valueOrThrow
+                    failed += sdkRouting.run(
+                        SdkRoute.TRASH,
+                        viaSdk = { sdkTrashOps.deleteForever(userId, volumeId, chunk) },
+                    ) {
+                        // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any
+                        // Retry-After) instead of failing the whole permanent-delete batch.
+                        val resp = retryWithBackoff {
+                            shareService.networkSemaphore.withPermit {
+                                manager.invoke {
+                                    deleteForever(volumeId, DeleteLinksRequest(chunk))
+                                }.valueOrThrow
+                            }
                         }
+                        // delete_multiple's per-link codes are reliable (unlike restore): links the
+                        // server rejected stay in trash and must remain selected so the user can retry.
+                        rejectedLinkIds(resp.responses)
                     }
-                    // delete_multiple's per-link codes are reliable (unlike restore): links the
-                    // server rejected stay in trash and must remain selected so the user can retry.
-                    failed += rejectedLinkIds(resp.responses)
                 }
                 val deleted = linkIds.toSet() - failed
                 Log.d(TAG, "deleteFromCloudForever: permanently deleted ${deleted.size}/${linkIds.size} items (${failed.size} failed)")

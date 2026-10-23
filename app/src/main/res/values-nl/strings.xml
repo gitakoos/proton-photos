@@ -1811,7 +1811,7 @@
     <string name="sdk_route_tags">Tags en favorieten</string>
     <string name="sdk_route_tags_desc">Hartjes en categorieën op foto\'s in Drive</string>
     <string name="sdk_route_trash">Prullenbak en terugzetten</string>
-    <string name="sdk_route_trash_desc">Foto\'s in Drive naar de prullenbak verplaatsen en terugzetten</string>
+    <string name="sdk_route_trash_desc">Foto\'s in Drive naar de prullenbak verplaatsen en terugzetten, en definitief verwijderen</string>
     <string name="sdk_route_download">Downloads in volledige resolutie</string>
     <string name="sdk_route_download_desc">Foto\'s uit Drive in volledige resolutie openen en opslaan</string>
     <string name="sdk_route_upload">Back-up en uploaden</string>

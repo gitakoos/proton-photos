@@ -1789,7 +1789,7 @@
     <string name="sdk_route_tags">Étiquettes et favoris</string>
     <string name="sdk_route_tags_desc">Cœurs et catégories sur les photos dans Drive</string>
     <string name="sdk_route_trash">Corbeille et restauration</string>
-    <string name="sdk_route_trash_desc">Placer des photos de Drive dans la corbeille et les en sortir</string>
+    <string name="sdk_route_trash_desc">Déplacer des photos de Drive vers la corbeille et les en sortir, et les supprimer définitivement</string>
     <string name="sdk_route_download">Téléchargements en pleine résolution</string>
     <string name="sdk_route_download_desc">Ouvrir et enregistrer des photos de Drive en pleine résolution</string>
     <string name="sdk_route_upload">Sauvegarde et envoi</string>

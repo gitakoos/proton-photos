@@ -849,7 +849,7 @@
     <string name="sdk_route_tags">Tags and favourites</string>
     <string name="sdk_route_tags_desc">Hearts and categories on photos in Drive</string>
     <string name="sdk_route_trash">Trash and restore</string>
-    <string name="sdk_route_trash_desc">Moving photos in Drive to the trash and back</string>
+    <string name="sdk_route_trash_desc">Moving photos in Drive to the trash and back, and deleting them for good</string>
     <string name="sdk_route_download">Full-resolution downloads</string>
     <string name="sdk_route_download_desc">Opening and saving photos from Drive in full resolution</string>
     <string name="sdk_route_upload">Backup and upload</string>

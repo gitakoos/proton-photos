@@ -1878,7 +1878,7 @@
     <string name="sdk_route_tags">Štítky a obľúbené</string>
     <string name="sdk_route_tags_desc">Srdiečka a kategórie pri fotkách na Drive</string>
     <string name="sdk_route_trash">Kôš a obnovenie</string>
-    <string name="sdk_route_trash_desc">Presun fotiek na Drive do koša a späť</string>
+    <string name="sdk_route_trash_desc">Presun fotiek na Drive do koša a späť a ich trvalé odstránenie</string>
     <string name="sdk_route_download">Sťahovanie v plnom rozlíšení</string>
     <string name="sdk_route_download_desc">Otváranie a ukladanie fotiek z Drive v plnom rozlíšení</string>
     <string name="sdk_route_upload">Záloha a nahrávanie</string>

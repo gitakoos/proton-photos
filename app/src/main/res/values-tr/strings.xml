@@ -801,7 +801,7 @@
     <string name="sdk_route_tags">Etiketler ve favoriler</string>
     <string name="sdk_route_tags_desc">Drive\'daki fotoğraflarda kalpler ve kategoriler</string>
     <string name="sdk_route_trash">Çöp kutusu ve geri yükleme</string>
-    <string name="sdk_route_trash_desc">Drive\'daki fotoğrafları çöp kutusuna taşıma ve geri alma</string>
+    <string name="sdk_route_trash_desc">Drive\'daki fotoğrafları çöp kutusuna taşıma, geri alma ve kalıcı olarak silme</string>
     <string name="sdk_route_download">Tam çözünürlüklü indirmeler</string>
     <string name="sdk_route_download_desc">Drive\'daki fotoğrafları tam çözünürlükte açma ve kaydetme</string>
     <string name="sdk_route_upload">Yedekleme ve yükleme</string>
