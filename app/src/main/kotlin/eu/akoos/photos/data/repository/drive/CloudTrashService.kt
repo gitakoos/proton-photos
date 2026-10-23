@@ -40,6 +40,7 @@ import eu.akoos.photos.data.api.dto.RenameLinkRequest
 import eu.akoos.photos.data.api.dto.TagRequest
 import eu.akoos.photos.data.api.dto.ThumbnailBatchRequest
 import eu.akoos.photos.data.db.dao.PhotoListingDao
+import eu.akoos.photos.data.sdk.SdkRoute
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.CloudTrashItem
 import eu.akoos.photos.domain.entity.DriveNotFoundException
@@ -107,6 +108,20 @@ internal fun rejectedLinkIds(
     .map { it.linkId }
     .toSet()
 
+/**
+ * Whether adding a favourite through the Drive SDK leaves the photo where it is: only for a photo on the
+ * user's own volume filed directly under the photos root, since the SDK moves or copies any other photo
+ * into that root as part of the favourite. Anything unknown answers false.
+ */
+internal fun sdkFavoriteKeepsPhotoInPlace(
+    photoVolumeId: String,
+    ownVolumeId: String?,
+    parentLinkId: String?,
+    photosRootLinkId: String?,
+): Boolean =
+    !ownVolumeId.isNullOrEmpty() && photoVolumeId == ownVolumeId &&
+        !photosRootLinkId.isNullOrEmpty() && parentLinkId == photosRootLinkId
+
 /** Which key set a photo rename may use, decided from the photo's wire parent. */
 internal enum class RenameParent {
     /** Wire parent is the photos root, so the root link key and the root NodeHashKey both apply. */
@@ -159,6 +174,9 @@ class CloudTrashService @Inject constructor(
     private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
     private val perceptualHashDao: eu.akoos.photos.data.db.dao.PerceptualHashDao,
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
+    private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
+    private val sdkPhotoTagOps: eu.akoos.photos.data.sdk.SdkPhotoTagOps,
+    private val sdkTrashOps: eu.akoos.photos.data.sdk.SdkTrashOps,
 ) {
     private val _trashCountChanges = MutableSharedFlow<Int>(extraBufferCapacity = 16)
 
@@ -181,18 +199,23 @@ class CloudTrashService @Inject constructor(
             // permanent-delete path below does.
             val failed = mutableSetOf<String>()
             linkIds.chunked(TRASH_BATCH).forEach { chunk ->
-                // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any Retry-After)
-                // instead of failing the whole multi-select delete.
-                val resp = retryWithBackoff {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            trashPhotos(volumeId, DeleteLinksRequest(chunk))
-                        }.valueOrThrow
+                failed += sdkRouting.run(
+                    SdkRoute.TRASH,
+                    viaSdk = { sdkTrashOps.moveToTrash(userId, volumeId, chunk) },
+                ) {
+                    // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any Retry-After)
+                    // instead of failing the whole multi-select delete.
+                    val resp = retryWithBackoff {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                trashPhotos(volumeId, DeleteLinksRequest(chunk))
+                            }.valueOrThrow
+                        }
                     }
+                    // Same per-link parsing as deleteFromCloudForever: links the server rejected
+                    // stayed on the cloud, so they must NOT be dropped locally or reported trashed.
+                    rejectedLinkIds(resp.responses)
                 }
-                // Same per-link parsing as deleteFromCloudForever: links the server rejected
-                // stayed on the cloud, so they must NOT be dropped locally or reported trashed.
-                failed += rejectedLinkIds(resp.responses)
             }
             val trashed = linkIds.toSet() - failed
             // Drop ONLY the rows the server confirmed trashed from our local photo_listing
@@ -240,17 +263,31 @@ class CloudTrashService @Inject constructor(
             val volumeId = photo.volumeId.ifEmpty { shareService.getVolumeId(userId) }
             val manager = apiProvider.get<DriveApiService>(userId)
             try {
-                if (favorite) {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            addFavorite(volumeId, photo.linkId, FavoriteRequest(photoData = null))
-                        }.valueOrThrow
-                    }
-                } else {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            deletePhotoTags(volumeId, photo.linkId, TagRequest(tags = listOf(0L)))
-                        }.valueOrThrow
+                // A favourite added through the SDK moves or copies a photo that is not in the user's own
+                // timeline into it, which the app's own request never does; such a photo stays on that path.
+                val sdkKeepsPlace = !favorite || sdkFavoriteKeepsPhotoInPlace(
+                    photoVolumeId = volumeId,
+                    ownVolumeId = runCatching { shareService.getVolumeId(userId) }.getOrNull(),
+                    parentLinkId = photoListingDao.getByLinkId(photo.linkId)?.parentLinkId,
+                    photosRootLinkId = shareService.photosRootLinkId(),
+                )
+                sdkRouting.run(
+                    SdkRoute.TAGS,
+                    viaSdk = { sdkPhotoTagOps.updateTag(userId, volumeId, photo.linkId, tagId = 0, add = favorite) },
+                    on = sdkKeepsPlace,
+                ) {
+                    if (favorite) {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                addFavorite(volumeId, photo.linkId, FavoriteRequest(photoData = null))
+                            }.valueOrThrow
+                        }
+                    } else {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                deletePhotoTags(volumeId, photo.linkId, TagRequest(tags = listOf(0L)))
+                            }.valueOrThrow
+                        }
                     }
                 }
                 // Reflect the change in the local DB so the gallery updates immediately,
@@ -286,17 +323,22 @@ class CloudTrashService @Inject constructor(
             val manager = apiProvider.get<DriveApiService>(userId)
             try {
                 val tag = listOf(tagId.toLong())
-                if (add) {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            addPhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
-                        }.valueOrThrow
-                    }
-                } else {
-                    shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            deletePhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
-                        }.valueOrThrow
+                sdkRouting.run(
+                    SdkRoute.TAGS,
+                    viaSdk = { sdkPhotoTagOps.updateTag(userId, volumeId, photo.linkId, tagId = tagId, add = add) },
+                ) {
+                    if (add) {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                addPhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
+                            }.valueOrThrow
+                        }
+                    } else {
+                        shareService.networkSemaphore.withPermit {
+                            manager.invoke {
+                                deletePhotoTags(volumeId, photo.linkId, TagRequest(tags = tag))
+                            }.valueOrThrow
+                        }
                     }
                 }
                 // Reflect the change in the local DB so the gallery + category filter update
@@ -453,28 +495,33 @@ class CloudTrashService @Inject constructor(
                 val manager = apiProvider.get<DriveApiService>(userId)
                 val failed = mutableSetOf<String>()
                 linkIds.chunked(TRASH_BATCH).forEach { chunk ->
-                    // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any
-                    // Retry-After) instead of throwing the whole restore out on a transient blip.
-                    val resp = retryWithBackoff {
-                        shareService.networkSemaphore.withPermit {
-                            manager.invoke {
-                                restoreFromTrash(volumeId, DeleteLinksRequest(chunk))
-                            }.valueOrThrow
+                    sdkRouting.run(
+                        SdkRoute.TRASH,
+                        viaSdk = { sdkTrashOps.restore(userId, volumeId, chunk) },
+                    ) {
+                        // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any
+                        // Retry-After) instead of throwing the whole restore out on a transient blip.
+                        val resp = retryWithBackoff {
+                            shareService.networkSemaphore.withPermit {
+                                manager.invoke {
+                                    restoreFromTrash(volumeId, DeleteLinksRequest(chunk))
+                                }.valueOrThrow
+                            }
                         }
+                        // restore_multiple's Codes (top-level AND per-link) are unreliable for Photos:
+                        // links the server actually restores come back non-1000 with spurious Errors,
+                        // so gating on them wrongly reported every restore as failed. The per-link
+                        // Responses array IS present in the DTO, but this server quirk makes its codes
+                        // untrustworthy for restore — so the conservative all-restored behaviour stays
+                        // and `failed` is intentionally left empty (verified: delete_multiple's codes,
+                        // by contrast, are reliable and ARE parsed in deleteFromCloudForever).
+                        // valueOrThrow has already raised any real HTTP/transport failure, so a
+                        // returning call means the batch was accepted — treat every link in it as
+                        // restored. This also keeps `restored` non-empty so the gallery refresh below
+                        // runs and the photos reappear without needing a re-login. Logged for diagnosis.
+                        Log.d(TAG, "restoreFromCloudTrash: chunk accepted code=${resp.code} " +
+                            "responses=${resp.responses.map { it.response.code to it.response.error }}")
                     }
-                    // restore_multiple's Codes (top-level AND per-link) are unreliable for Photos:
-                    // links the server actually restores come back non-1000 with spurious Errors,
-                    // so gating on them wrongly reported every restore as failed. The per-link
-                    // Responses array IS present in the DTO, but this server quirk makes its codes
-                    // untrustworthy for restore — so the conservative all-restored behaviour stays
-                    // and `failed` is intentionally left empty (verified: delete_multiple's codes,
-                    // by contrast, are reliable and ARE parsed in deleteFromCloudForever).
-                    // valueOrThrow has already raised any real HTTP/transport failure, so a
-                    // returning call means the batch was accepted — treat every link in it as
-                    // restored. This also keeps `restored` non-empty so the gallery refresh below
-                    // runs and the photos reappear without needing a re-login. Logged for diagnosis.
-                    Log.d(TAG, "restoreFromCloudTrash: chunk accepted code=${resp.code} " +
-                        "responses=${resp.responses.map { it.response.code to it.response.error }}")
                 }
                 val restored = linkIds.toSet() - failed
                 if (restored.isNotEmpty()) _trashCountChanges.tryEmit(-restored.size)
@@ -522,18 +569,23 @@ class CloudTrashService @Inject constructor(
                 val manager = apiProvider.get<DriveApiService>(userId)
                 val failed = mutableSetOf<String>()
                 linkIds.chunked(TRASH_BATCH).forEach { chunk ->
-                    // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any
-                    // Retry-After) instead of failing the whole permanent-delete batch.
-                    val resp = retryWithBackoff {
-                        shareService.networkSemaphore.withPermit {
-                            manager.invoke {
-                                deleteForever(volumeId, DeleteLinksRequest(chunk))
-                            }.valueOrThrow
+                    failed += sdkRouting.run(
+                        SdkRoute.TRASH,
+                        viaSdk = { sdkTrashOps.deleteForever(userId, volumeId, chunk) },
+                    ) {
+                        // Wrap each chunk so a 429 / 5xx backs off and retries (honouring any
+                        // Retry-After) instead of failing the whole permanent-delete batch.
+                        val resp = retryWithBackoff {
+                            shareService.networkSemaphore.withPermit {
+                                manager.invoke {
+                                    deleteForever(volumeId, DeleteLinksRequest(chunk))
+                                }.valueOrThrow
+                            }
                         }
+                        // delete_multiple's per-link codes are reliable (unlike restore): links the
+                        // server rejected stay in trash and must remain selected so the user can retry.
+                        rejectedLinkIds(resp.responses)
                     }
-                    // delete_multiple's per-link codes are reliable (unlike restore): links the
-                    // server rejected stay in trash and must remain selected so the user can retry.
-                    failed += rejectedLinkIds(resp.responses)
                 }
                 val deleted = linkIds.toSet() - failed
                 if (deleted.isNotEmpty()) _trashCountChanges.tryEmit(-deleted.size)

@@ -235,6 +235,7 @@ sealed class Screen(val route: String) {
     data object ViewerSettings : Screen("viewer_settings")
     data object ClockFormatSettings : Screen("clock_format_settings")
     data object NotificationSettings : Screen("notification_settings")
+    data object SdkSettings : Screen("sdk_settings")
     data object TimelineFilter : Screen("timeline_filter")
     data object TimelineLayout : Screen("timeline_layout")
     data object TimelineOnThisDay : Screen("timeline_on_this_day")
@@ -1594,6 +1595,7 @@ fun NavGraph(
                 onPrivacySecurityClick    = { navController.navigate(Screen.PrivacySecuritySettings.route) },
                 onPermissionsClick        = { navController.navigate(Screen.Permissions.route) },
                 onNotificationsClick      = { navController.navigate(Screen.NotificationSettings.route) },
+                onSdkClick                = { navController.navigate(Screen.SdkSettings.route) },
                 onLabelsClick             = { navController.navigate(Screen.LabelsSettings.route) },
                 onRecentlyDeletedClick    = { navController.navigate(Screen.Trash.route) },
                 onFindDuplicatesClick     = { navController.navigate(Screen.DuplicateFinder.route) },
@@ -1725,6 +1727,12 @@ fun NavGraph(
 
         composable(Screen.LanguageSettings.route) {
             LanguageSettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.SdkSettings.route) {
+            eu.akoos.photos.presentation.settings.SdkSettingsScreen(
                 onBack = { navController.popBackStack() },
             )
         }

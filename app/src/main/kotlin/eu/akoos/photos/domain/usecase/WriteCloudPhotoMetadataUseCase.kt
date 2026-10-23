@@ -243,6 +243,10 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
                     Log.w(TAG, "upload failed for ${photo.linkId}: ${e.message}")
                     return@withContext Result.Failed("upload failed: ${e.message}", transient = isTransientApiError(e))
                 }
+                // The corrected copy must be a new photo: the original is trashed below.
+                if (newLinkId == photo.linkId) {
+                    return@withContext Result.Failed("upload returned the original photo; original kept")
+                }
                 if (newLinkId.isBlank()) return@withContext Result.Failed("upload returned no link id")
 
                 // Persist the new link the moment the upload is verified, BEFORE any album re-add or

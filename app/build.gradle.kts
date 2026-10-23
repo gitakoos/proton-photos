@@ -131,14 +131,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-        // Apply Hilt @ApplicationContext / @Inject etc. to BOTH the value parameter and the
-        // backing field. Without this Kotlin 2.x emits a deprecation warning per inject site
-        // (KT-73255). Behaviour matches what Hilt's KSP processor expects.
-        freeCompilerArgs += "-Xannotation-default-target=param-property"
-    }
-
     buildFeatures {
         compose = true
         buildConfig = true
@@ -152,6 +144,16 @@ android {
         unitTests.isIncludeAndroidResources = true
         // The Robolectric database tests share one test JVM; its default heap runs out part way through the suite.
         unitTests.all { it.maxHeapSize = "2g" }
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        // Apply Hilt @ApplicationContext / @Inject etc. to BOTH the value parameter and the
+        // backing field. Without this Kotlin 2.x emits a deprecation warning per inject site
+        // (KT-73255). Behaviour matches what Hilt's KSP processor expects.
+        freeCompilerArgs.add("-Xannotation-default-target=param-property")
     }
 }
 

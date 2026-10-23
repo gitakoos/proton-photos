@@ -56,6 +56,8 @@ import me.proton.drive.sdk.CoreUserAddressResolver
 import me.proton.drive.sdk.LoggerProvider
 import me.proton.drive.sdk.ProtonDriveClient
 import me.proton.drive.sdk.ProtonDriveSdk
+import me.proton.drive.sdk.ProtonPhotosClient
+import me.proton.drive.sdk.ProtonSdkClient
 import me.proton.drive.sdk.entity.ClientCreateRequest
 import okhttp3.HttpUrl
 import javax.inject.Inject
@@ -65,13 +67,14 @@ import javax.inject.Singleton
 class SdkClientClosedException : IllegalStateException("Drive client closed")
 
 /**
- * Builds and caches one Proton Drive SDK [ProtonDriveClient] (the My files client) per user. The auth
+ * Builds and caches the Proton Drive SDK clients per user: the My files [ProtonDriveClient] and the
+ * Photos [ProtonPhotosClient], each made on first use. The auth
  * dependencies come from the sign-in stack already in the graph, and the address resolvers ship inside
  * the SDK, so no extra Proton wiring is needed.
  *
- * Every call runs through [withClient], which counts it as in flight, so a sign-out never frees the
- * native client under a call: [close] refuses the account from then on, and [remove] waits for the calls
- * still running before it closes the client, or leaves the close to the last of them.
+ * Every call runs through [withClient] or [withPhotosClient], which count it as in flight, so a sign-out
+ * never frees a native client under a call: [close] refuses the account from then on, and [remove] waits
+ * for the calls still running before it closes each client, or leaves the close to the last of them.
  *
  * The SDK's native library loads the first time [ProtonDriveSdk] is touched, which happens only in
  * [create] and only once [SdkGate] has cleared the device. Injecting this provider never loads it.
@@ -88,7 +91,7 @@ class SdkDriveClientProvider @Inject constructor(
     @BaseProtonApiUrl private val baseApiUrl: HttpUrl,
 ) {
     private val mutex = Mutex()
-    private val clients = mutableMapOf<UserId, HeldClient>()
+    private val clients = mutableMapOf<Pair<UserId, ClientKind>, HeldClient>()
 
     /** The accounts whose client is closed, each with the session it was closed under, null when it had none. */
     private val closed = mutableMapOf<UserId, String?>()
@@ -98,9 +101,16 @@ class SdkDriveClientProvider @Inject constructor(
      * rules out. The call counts as in flight until [block] returns, so [remove] never closes the client
      * under it. Throws [SdkClientClosedException] for an account whose client is closed ([close]).
      */
-    suspend fun <T> withClient(userId: UserId, block: suspend (ProtonDriveClient) -> T): T? {
+    suspend fun <T> withClient(userId: UserId, block: suspend (ProtonDriveClient) -> T): T? =
+        withHeld(userId, ClientKind.DRIVE) { block(it as ProtonDriveClient) }
+
+    /** [withClient] for [userId]'s Photos client, the one that reads and writes the photo library. */
+    suspend fun <T> withPhotosClient(userId: UserId, block: suspend (ProtonPhotosClient) -> T): T? =
+        withHeld(userId, ClientKind.PHOTOS) { block(it as ProtonPhotosClient) }
+
+    private suspend fun <T> withHeld(userId: UserId, kind: ClientKind, block: suspend (ProtonSdkClient) -> T): T? {
         if (!sdkGate.isCapable) return null
-        val held = getOrCreate(userId)
+        val held = getOrCreate(userId, kind)
         try {
             return block(held.client)
         } finally {
@@ -112,9 +122,10 @@ class SdkDriveClientProvider @Inject constructor(
      * The client of [userId] with one more call counted on it, created when there is none yet. Refuses an
      * account whose client is closed, so nothing makes a new client for an account that is signing out.
      */
-    private suspend fun getOrCreate(userId: UserId): HeldClient = mutex.withLock {
+    private suspend fun getOrCreate(userId: UserId, kind: ClientKind): HeldClient = mutex.withLock {
         if (isClosedLocked(userId)) throw SdkClientClosedException()
-        val held = clients[userId] ?: create(userId).also { clients[userId] = it }
+        val key = userId to kind
+        val held = clients[key] ?: create(userId, kind).also { clients[key] = it }
         // A retired client leaves the map in the same step, so one found here always takes the call.
         if (!held.lease.enter()) throw SdkClientClosedException()
         held
@@ -125,29 +136,42 @@ class SdkDriveClientProvider @Inject constructor(
         if (closeNow) shutDown(held)
     }
 
-    private suspend fun create(userId: UserId): HeldClient {
+    private suspend fun create(userId: UserId, kind: ClientKind): HeldClient {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         try {
-            val client = ProtonDriveSdk.protonDriveClientCreate(
-                coroutineScope = scope,
-                userId = userId,
-                apiProvider = apiProvider,
-                request = ClientCreateRequest(
-                    baseUrl = baseApiUrl.toString(),
-                    loggerProvider = loggerProvider(),
-                    bindingsLanguage = "kotlin",
-                    uid = sdkClientUid(installClientUid(), userId.id),
-                ),
-                userAddressResolver = CoreUserAddressResolver(
-                    userId = userId,
-                    cryptoContext = cryptoContext,
-                    userAddressRepository = userAddressRepository,
-                ),
-                publicAddressResolver = CorePublicAddressResolver(
-                    userId = userId,
-                    publicAddressRepository = publicAddressRepository,
-                ),
+            val request = ClientCreateRequest(
+                baseUrl = baseApiUrl.toString(),
+                loggerProvider = loggerProvider(),
+                bindingsLanguage = "kotlin",
+                uid = sdkClientUid(installClientUid(), userId.id),
             )
+            val userAddressResolver = CoreUserAddressResolver(
+                userId = userId,
+                cryptoContext = cryptoContext,
+                userAddressRepository = userAddressRepository,
+            )
+            val publicAddressResolver = CorePublicAddressResolver(
+                userId = userId,
+                publicAddressRepository = publicAddressRepository,
+            )
+            val client: ProtonSdkClient = when (kind) {
+                ClientKind.DRIVE -> ProtonDriveSdk.protonDriveClientCreate(
+                    coroutineScope = scope,
+                    userId = userId,
+                    apiProvider = apiProvider,
+                    request = request,
+                    userAddressResolver = userAddressResolver,
+                    publicAddressResolver = publicAddressResolver,
+                )
+                ClientKind.PHOTOS -> ProtonDriveSdk.protonPhotosClientCreate(
+                    coroutineScope = scope,
+                    userId = userId,
+                    apiProvider = apiProvider,
+                    request = request,
+                    userAddressResolver = userAddressResolver,
+                    publicAddressResolver = publicAddressResolver,
+                )
+            }
             return HeldClient(client, scope)
         } catch (t: Throwable) {
             scope.cancel()
@@ -217,22 +241,29 @@ class SdkDriveClientProvider @Inject constructor(
     }
 
     /**
-     * Closes and drops [userId]'s client and its scope, so a later sign-in never reuses them, after closing
-     * the account to new calls ([close]). A call still running keeps the client: this waits for such calls,
-     * at most [IN_FLIGHT_WAIT_MS], and a client still in use by then is closed by the last call out, never
-     * under one.
+     * Closes and drops [userId]'s clients and their scopes, so a later sign-in never reuses them, after
+     * closing the account to new calls ([close]). A call still running keeps its client: this waits for
+     * such calls, at most [IN_FLIGHT_WAIT_MS] in all, and a client still in use by then is closed by the
+     * last call out, never under one.
      */
     suspend fun remove(userId: UserId) {
         close(userId)
-        val (held, closeNow) = mutex.withLock {
-            val held = clients.remove(userId) ?: return
-            held to held.lease.retire()
+        val retired = mutex.withLock {
+            ClientKind.entries.mapNotNull { kind ->
+                val held = clients.remove(userId to kind) ?: return@mapNotNull null
+                held to held.lease.retire()
+            }
         }
-        if (closeNow) {
-            shutDown(held)
-            return
+        val busy = retired.mapNotNull { (held, closeNow) ->
+            if (closeNow) {
+                shutDown(held)
+                null
+            } else {
+                held
+            }
         }
-        val idle = withTimeoutOrNull(IN_FLIGHT_WAIT_MS) { held.lease.idle.first { it } }
+        if (busy.isEmpty()) return
+        val idle = withTimeoutOrNull(IN_FLIGHT_WAIT_MS) { busy.forEach { held -> held.lease.idle.first { it } } }
         if (idle == null) Log.w(TAG, "Drive client still in use, its last call closes it")
     }
 
@@ -254,8 +285,11 @@ class SdkDriveClientProvider @Inject constructor(
         LoggerProvider.Level.ERROR -> Log.ERROR
     }
 
+    /** Which of an account's two SDK clients. */
+    private enum class ClientKind { DRIVE, PHOTOS }
+
     /** One account's client, the scope it was created on, and its calls in flight. */
-    private class HeldClient(val client: ProtonDriveClient, val scope: CoroutineScope) {
+    private class HeldClient(val client: ProtonSdkClient, val scope: CoroutineScope) {
         val lease = SdkClientLease()
     }
 
