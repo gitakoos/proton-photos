@@ -269,12 +269,13 @@ class PhotoViewerViewModel @Inject constructor(
     sealed class ViewerState {
         /**
          * Identity of the item this state was computed for (cloud linkId / local URI, or null for
-         * Loading/Error). [PhotoViewerScreen] checks it so the brief post-swipe window where
-         * settledPage has changed but state hasn't doesn't flash the previous photo.
+         * Error and the first Loading). [PhotoViewerScreen] checks it so the brief post-swipe window
+         * where settledPage has changed but state hasn't doesn't flash the previous photo.
          */
         abstract val itemKey: String?
 
-        data object Loading : ViewerState() { override val itemKey: String? = null }
+        /** Waiting on [itemKey]'s first frame; a cloud photo with no thumbnail waits here for its download. */
+        data class Loading(override val itemKey: String? = null) : ViewerState()
         data class ShowImage(
             val model: Any,
             override val itemKey: String?,
@@ -314,7 +315,7 @@ class PhotoViewerViewModel @Inject constructor(
         data class NeedsPermission(val pendingIntent: android.app.PendingIntent) : StripState()
     }
 
-    private val _state = MutableStateFlow<ViewerState>(ViewerState.Loading)
+    private val _state = MutableStateFlow<ViewerState>(ViewerState.Loading())
     val state: StateFlow<ViewerState> = _state.asStateFlow()
 
     private val _isDownloading = MutableStateFlow(false)
@@ -2363,7 +2364,7 @@ class PhotoViewerViewModel @Inject constructor(
             // Thumbnail placeholder while downloading full-res (videos too).
             _state.value = ViewerState.ShowImage(thumbUrl, itemKey = itemKey)
         } else {
-            _state.value = ViewerState.Loading
+            _state.value = ViewerState.Loading(itemKey)
         }
 
         viewModelScope.launch {
@@ -2378,7 +2379,7 @@ class PhotoViewerViewModel @Inject constructor(
             if (pinned != null && pinned.length() > 0) {
                 val pinnedUri = Uri.fromFile(pinned)
                 _cloudFullResSize.value = pinned.length()
-                if (_state.value.itemKey != itemKey) return@launch
+                if (!cloudLoadStillCurrent(_state.value, itemKey)) return@launch
                 _state.value = if (isVideo)
                     ViewerState.ShowVideo(pinnedUri, itemKey = itemKey, isFullRes = true)
                 else
@@ -2399,7 +2400,7 @@ class PhotoViewerViewModel @Inject constructor(
                 _fullResBlockedByMetered.value = true
                 _isDownloading.value = false
                 _downloadProgress.value = null
-                if (thumbUrl == null && _state.value.itemKey == itemKey) {
+                if (thumbUrl == null && cloudLoadStillCurrent(_state.value, itemKey)) {
                     _state.value = ViewerState.Error(context.getString(R.string.viewer_wifi_for_full_quality))
                 }
                 return@launch
@@ -2419,9 +2420,9 @@ class PhotoViewerViewModel @Inject constructor(
                     // Publish the resolved on-disk size so the details sheet can fall back
                     // to it when CloudPhoto.sizeBytes is 0 (server-side gap for videos).
                     _cloudFullResSize.value = file.length()
-                    // Drop a late blob if the user swiped away. Strict `!=` (no `?: itemKey`): a
-                    // null itemKey during a swap must NOT pass the guard and flash the old photo.
-                    if (_state.value.itemKey != itemKey) return@fold
+                    // Drop a late blob if the user swiped away. A null itemKey during a swap must NOT
+                    // pass the guard and flash the old photo.
+                    if (!cloudLoadStillCurrent(_state.value, itemKey)) return@fold
                     _state.value = if (isVideo)
                         ViewerState.ShowVideo(fileUri, itemKey = itemKey, isFullRes = true)
                     else
@@ -2434,7 +2435,7 @@ class PhotoViewerViewModel @Inject constructor(
                     else _cloudVideoMeta.value = readVideoMeta(file)
                 },
                 onFailure = { e ->
-                    if (thumbUrl == null && _state.value.itemKey == itemKey) {
+                    if (thumbUrl == null && cloudLoadStillCurrent(_state.value, itemKey)) {
                         _state.value = ViewerState.Error(eu.akoos.photos.util.sanitizeErrorMessage(e.message))
                     }
                     // else keep showing thumbnail silently
@@ -2443,3 +2444,11 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 }
+
+/**
+ * Whether a cloud photo's load that finished for [itemKey] may still replace [current]: only while the
+ * viewer shows, or waits on, that same photo. A photo with no thumbnail waits in [ViewerState.Loading]
+ * keyed to it, so its own download still lands; another photo's state, or one with no key, drops it.
+ */
+internal fun cloudLoadStillCurrent(current: PhotoViewerViewModel.ViewerState, itemKey: String): Boolean =
+    current.itemKey == itemKey
