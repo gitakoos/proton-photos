@@ -108,6 +108,20 @@ internal fun rejectedLinkIds(
     .map { it.linkId }
     .toSet()
 
+/**
+ * Whether adding a favourite through the Drive SDK leaves the photo where it is: only for a photo on the
+ * user's own volume filed directly under the photos root, since the SDK moves or copies any other photo
+ * into that root as part of the favourite. Anything unknown answers false.
+ */
+internal fun sdkFavoriteKeepsPhotoInPlace(
+    photoVolumeId: String,
+    ownVolumeId: String?,
+    parentLinkId: String?,
+    photosRootLinkId: String?,
+): Boolean =
+    !ownVolumeId.isNullOrEmpty() && photoVolumeId == ownVolumeId &&
+        !photosRootLinkId.isNullOrEmpty() && parentLinkId == photosRootLinkId
+
 /** Which key set a photo rename may use, decided from the photo's wire parent. */
 internal enum class RenameParent {
     /** Wire parent is the photos root, so the root link key and the root NodeHashKey both apply. */
@@ -249,9 +263,18 @@ class CloudTrashService @Inject constructor(
             val volumeId = photo.volumeId.ifEmpty { shareService.getVolumeId(userId) }
             val manager = apiProvider.get<DriveApiService>(userId)
             try {
+                // A favourite added through the SDK moves or copies a photo that is not in the user's own
+                // timeline into it, which the app's own request never does; such a photo stays on that path.
+                val sdkKeepsPlace = !favorite || sdkFavoriteKeepsPhotoInPlace(
+                    photoVolumeId = volumeId,
+                    ownVolumeId = runCatching { shareService.getVolumeId(userId) }.getOrNull(),
+                    parentLinkId = photoListingDao.getByLinkId(photo.linkId)?.parentLinkId,
+                    photosRootLinkId = shareService.photosRootLinkId(),
+                )
                 sdkRouting.run(
                     SdkRoute.TAGS,
                     viaSdk = { sdkPhotoTagOps.updateTag(userId, volumeId, photo.linkId, tagId = 0, add = favorite) },
+                    on = sdkKeepsPlace,
                 ) {
                     if (favorite) {
                         shareService.networkSemaphore.withPermit {

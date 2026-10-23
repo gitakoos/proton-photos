@@ -294,6 +294,11 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                 restore()
                 return@withContext Result.Failed("upload returned no link id")
             }
+            // The corrected copy must be a new photo: the old cloud copy is trashed below.
+            if (newLinkId == oldLinkId) {
+                restore()
+                return@withContext Result.Failed("upload returned the original photo; original kept")
+            }
 
             // Persist the new link the moment the upload is verified, BEFORE the album re-add, re-pair,
             // and trash, so a process kill from here on resumes from the recorded link (the simpler

@@ -69,9 +69,10 @@ class SdkUploadException(message: String) : IllegalStateException(message)
 /**
  * Photo uploads through the Drive SDK's Photos client: the SDK creates the draft, encrypts and uploads the
  * blocks and commits the revision, fed the plaintext stream and the same thumbnails, SHA-1, times, tags and
- * metadata sections the app's own upload commits. [findUploaded] answers whether a photo is already on
- * Drive, so a failure that came after the commit is never uploaded a second time. Run only through
- * [SdkRouting] ([SdkRoute.UPLOAD]).
+ * metadata sections the app's own upload commits. [findUploaded] lists the photos already on Drive with
+ * the same name and content, taken before and after an upload, so a failure that came after the commit is
+ * never uploaded a second time and a photo that was there before is never taken for the new one. Run only
+ * through [SdkRouting] ([SdkRoute.UPLOAD]).
  */
 @Singleton
 class SdkPhotoUploadOps @Inject constructor(
@@ -130,16 +131,50 @@ class SdkPhotoUploadOps @Inject constructor(
             }
         } ?: throw SdkUploadException("the SDK cannot run on this device")
 
-    /** The photo named [name] with content [sha1] already on Drive, live and committed, or null. */
-    suspend fun findUploaded(userId: UserId, name: String, sha1: ByteArray): SdkUploadResult? =
+    /** The photos named [name] with content [sha1] on Drive, live and committed, by link id. */
+    suspend fun findUploaded(userId: UserId, name: String, sha1: ByteArray): List<SdkUploadResult> =
         clientProvider.withPhotosClient(userId) { client ->
-            client.findPhotoDuplicates(name) { sha1 }.firstNotNullOfOrNull { uid ->
-                val node = client.getNode(uid) as? FileNode ?: return@firstNotNullOfOrNull null
-                if (node.trashTime != null) return@firstNotNullOfOrNull null
-                val revision = node.activeRevision?.uid as? LegacyRevisionUid ?: return@firstNotNullOfOrNull null
-                SdkUploadResult((uid as? LegacyNodeUid ?: return@firstNotNullOfOrNull null).linkId, revision.revisionId)
+            client.findPhotoDuplicates(name) { sha1 }.mapNotNull { uid ->
+                val node = client.getNode(uid) as? FileNode ?: return@mapNotNull null
+                if (node.trashTime != null) return@mapNotNull null
+                val revision = node.activeRevision?.uid as? LegacyRevisionUid ?: return@mapNotNull null
+                SdkUploadResult((uid as? LegacyNodeUid ?: return@mapNotNull null).linkId, revision.revisionId)
             }
-        }
+        } ?: throw SdkUploadException("the SDK cannot run on this device")
+}
+
+/** What a failed SDK upload left on Drive, read from the matching photos before and after it. */
+internal sealed interface SdkUploadAfterFailure {
+    /** The upload committed after all; this is the photo it made. */
+    data class Committed(val photo: SdkUploadResult) : SdkUploadAfterFailure
+
+    /** Nothing new is on Drive, so the app's own upload can run. */
+    data object NothingCommitted : SdkUploadAfterFailure
+
+    /** Whether the upload committed cannot be told, so nothing may upload it again now. */
+    data object Unknown : SdkUploadAfterFailure
+}
+
+/**
+ * Reads [before] and [after] (the matching photos on Drive, null when that lookup failed). Only a photo
+ * missing from [before] can be the one this upload made, so a photo that was already there, such as the
+ * original a metadata correction re-uploads under the same name and content, is never taken for it.
+ */
+internal fun sdkUploadAfterFailure(
+    before: List<SdkUploadResult>?,
+    after: List<SdkUploadResult>?,
+): SdkUploadAfterFailure {
+    if (after == null) return SdkUploadAfterFailure.Unknown
+    if (before == null) {
+        return if (after.isEmpty()) SdkUploadAfterFailure.NothingCommitted else SdkUploadAfterFailure.Unknown
+    }
+    val known = before.mapTo(HashSet()) { it.linkId }
+    val fresh = after.filter { it.linkId !in known }
+    return when (fresh.size) {
+        0 -> SdkUploadAfterFailure.NothingCommitted
+        1 -> SdkUploadAfterFailure.Committed(fresh.single())
+        else -> SdkUploadAfterFailure.Unknown
+    }
 }
 
 /** [hex] as bytes: a lowercase SHA-1 hex string. */

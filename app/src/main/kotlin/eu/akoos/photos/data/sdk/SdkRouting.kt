@@ -37,6 +37,13 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Thrown by an SDK call that failed without knowing whether its change reached Drive. The app's own path
+ * must not run in its place, since it could do the change a second time; the caller fails and tries again
+ * later, once the change shows up on Drive or is known to be missing.
+ */
+class SdkOutcomeUnknownException(message: String, cause: Throwable?) : IllegalStateException(message, cause)
+
 /** A group of Drive operations that can run through the Drive SDK, each behind its own switch. */
 enum class SdkRoute(val label: String, val key: Preferences.Key<Boolean>) {
     TAGS("tags", SettingsKeys.SDK_ROUTE_TAGS),
@@ -73,10 +80,12 @@ class SdkRouting @Inject constructor(
 
     /**
      * Runs [viaSdk] when [route] is on, else [fallback]. A failed SDK call is counted and [fallback] runs
-     * in its place; cancellation and fatal VM errors are not failures and pass through.
+     * in its place; cancellation and fatal VM errors are not failures and pass through, and an
+     * [SdkOutcomeUnknownException] is counted and passes through without [fallback]. [on] false keeps an
+     * operation the SDK would handle differently on the app's own path whatever the switch says.
      */
-    suspend fun <T> run(route: SdkRoute, viaSdk: suspend () -> T, fallback: suspend () -> T): T =
-        runRouted(route.label, isOn(route), viaSdk, fallback)
+    suspend fun <T> run(route: SdkRoute, viaSdk: suspend () -> T, on: Boolean = true, fallback: suspend () -> T): T =
+        runRouted(route.label, on && isOn(route), viaSdk, fallback)
 }
 
 /** [SdkRouting.run] with the switch already read, apart from Android so it is tested directly. */
@@ -92,6 +101,9 @@ internal suspend fun <T> runRouted(
     } catch (e: CancellationException) {
         throw e
     } catch (e: VirtualMachineError) {
+        throw e
+    } catch (e: SdkOutcomeUnknownException) {
+        SdkDiagnostics.recordFallback(label, e)
         throw e
     } catch (e: Throwable) {
         SdkDiagnostics.recordFallback(label, e)

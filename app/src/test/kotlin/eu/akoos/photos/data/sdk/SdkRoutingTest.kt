@@ -126,4 +126,21 @@ class SdkRoutingTest {
             assertEquals("link", uid.linkId)
         }
     }
+
+    @Test
+    fun `an SDK outcome that cannot be confirmed never runs the app's own path`() = runTest {
+        var fallbackCalls = 0
+        try {
+            runRouted<String>(
+                "upload",
+                on = true,
+                viaSdk = { throw SdkOutcomeUnknownException("unknown", null) },
+                fallback = { fallbackCalls++; "own" },
+            )
+            fail("expected the unknown outcome to pass through")
+        } catch (e: SdkOutcomeUnknownException) {
+            assertEquals(0, fallbackCalls)
+            assertEquals(1, SdkDiagnostics.fallbackCount("upload"))
+        }
+    }
 }

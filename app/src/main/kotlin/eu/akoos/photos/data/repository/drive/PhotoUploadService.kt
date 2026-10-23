@@ -1218,21 +1218,31 @@ class PhotoUploadService @Inject constructor(
             sha1 = sha1,
             onProgress = onProgress?.let { report -> { done, total -> report(UploadPhase.Uploading, done, total) } },
         )
+        // The matching photos already on Drive, so a failure below can tell a photo this upload made from
+        // one that was there before (a metadata correction re-uploads under the original's name and bytes).
+        val before = findUploadedOrNull(userId, item.displayName, sha1)
         val result = try {
             sdkPhotoUploadOps.upload(userId, upload)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            val already = try {
-                sdkPhotoUploadOps.findUploaded(userId, item.displayName, sha1)
-            } catch (lookup: CancellationException) {
-                throw lookup
-            } catch (lookup: Throwable) {
-                null
+            val after = findUploadedOrNull(userId, item.displayName, sha1)
+            when (val outcome = eu.akoos.photos.data.sdk.sdkUploadAfterFailure(before, after)) {
+                is eu.akoos.photos.data.sdk.SdkUploadAfterFailure.Committed -> outcome.photo
+                eu.akoos.photos.data.sdk.SdkUploadAfterFailure.NothingCommitted -> throw e
+                eu.akoos.photos.data.sdk.SdkUploadAfterFailure.Unknown ->
+                    throw eu.akoos.photos.data.sdk.SdkOutcomeUnknownException("upload outcome unknown", e)
             }
-            already ?: throw e
         }
         return SdkUploadedPhoto(result.linkId, result.revisionId, thumbnails[me.proton.drive.sdk.entity.ThumbnailType.THUMBNAIL])
+    }
+
+    private suspend fun findUploadedOrNull(userId: UserId, name: String, sha1: ByteArray) = try {
+        sdkPhotoUploadOps.findUploaded(userId, name, sha1)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        null
     }
 
     /**
