@@ -24,6 +24,9 @@ package eu.akoos.photos.data.repository.drive
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
@@ -157,6 +160,14 @@ class CloudTrashService @Inject constructor(
     private val perceptualHashDao: eu.akoos.photos.data.db.dao.PerceptualHashDao,
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
 ) {
+    private val _trashCountChanges = MutableSharedFlow<Int>(extraBufferCapacity = 16)
+
+    /**
+     * How many photos each finished trash (+), restore or permanent delete (-) moved in or out of the
+     * Drive trash, so a cached trash count follows at once instead of waiting for its next fetch.
+     */
+    val trashCountChanges: SharedFlow<Int> = _trashCountChanges.asSharedFlow()
+
     suspend fun deleteFiles(userId: UserId, linkIds: List<String>): CloudTrashOutcome = withContext(Dispatchers.IO) {
         if (linkIds.isEmpty()) return@withContext CloudTrashOutcome(emptySet(), emptySet())
         try {
@@ -207,6 +218,7 @@ class CloudTrashService @Inject constructor(
                 // photo for ~a minute) can't re-add the rows we just removed and flash the green-cloud
                 // badge back on in the timeline / device folders.
                 photoStreamService.markRecentlyTrashed(trashed.toList())
+                _trashCountChanges.tryEmit(trashed.size)
             }
             Log.d(TAG, "deleteFiles: trashed ${trashed.size}/${linkIds.size} photos + cleared local rows (${failed.size} failed)")
             CloudTrashOutcome(trashed, failed)
@@ -465,6 +477,7 @@ class CloudTrashService @Inject constructor(
                         "responses=${resp.responses.map { it.response.code to it.response.error }}")
                 }
                 val restored = linkIds.toSet() - failed
+                if (restored.isNotEmpty()) _trashCountChanges.tryEmit(-restored.size)
                 Log.d(TAG, "restoreFromCloudTrash: restored ${restored.size}/${linkIds.size} items (${failed.size} failed)")
                 // Lift the just-trashed guard for the restored ids, or the refresh below would
                 // keep skipping them (they'd stay invisible until the trash window expires).
@@ -523,6 +536,7 @@ class CloudTrashService @Inject constructor(
                     failed += rejectedLinkIds(resp.responses)
                 }
                 val deleted = linkIds.toSet() - failed
+                if (deleted.isNotEmpty()) _trashCountChanges.tryEmit(-deleted.size)
                 Log.d(TAG, "deleteFromCloudForever: permanently deleted ${deleted.size}/${linkIds.size} items (${failed.size} failed)")
                 // A permanently deleted photo can never come back, so drop its on-device per-photo
                 // side rows now (all keyed by the linkId): face rows + scan markers, its perceptual
