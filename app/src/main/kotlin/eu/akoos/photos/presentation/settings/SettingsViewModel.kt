@@ -415,6 +415,7 @@ class SettingsViewModel @Inject constructor(
         observeBackedUpBytes()
         observeTrashedCount()
         observeCloudTrashOnSession()
+        observeCloudTrashChanges()
         observeUploadProgress()
         observeExcludedFolders()
         observeVaultedCount()
@@ -930,6 +931,15 @@ class SettingsViewModel @Inject constructor(
                     }
                     if (userId != null) loadCloudTrashCount()
                 }
+        }
+    }
+
+    /** Moves the cached Drive trash count by every trash, restore or permanent delete as it finishes. */
+    private fun observeCloudTrashChanges() {
+        viewModelScope.launch {
+            cloudTrashService.trashCountChanges.collect { delta ->
+                _uiState.update { it.copy(cloudTrashCount = shiftedTrashCount(it.cloudTrashCount, delta)) }
+            }
         }
     }
 
@@ -2186,6 +2196,9 @@ private data class LocalStorage(
 )
 
 private const val CLOUD_TRASH_TTL_MS = 5L * 60L * 1000L
+
+/** A cached trash count moved by [delta]; an unknown count stays unknown until its fetch. */
+internal fun shiftedTrashCount(count: Int?, delta: Int): Int? = count?.let { (it + delta).coerceAtLeast(0) }
 
 /** Shortest pause between two reads of the backup totals, each a pass over the user's whole listing. */
 private const val BACKUP_TOTALS_MIN_INTERVAL_MS = 1_000L
