@@ -144,4 +144,17 @@ class NameOrMergeRulesTest {
         assertEquals(2 to 2, NameOrMergeRules.faceStack(4))
         assertEquals(2 to 8, NameOrMergeRules.faceStack(10))
     }
+
+    @Test
+    fun `the people most alike to the face lead, the rest keep their order after them`() {
+        val list = listOf(person(1, "Anna"), person(2, "Béla"), person(3, "Cili"), person(4, "Dani"))
+        val ranked = NameOrMergeRules.mostAlikeFirst(list, mapOf(3L to 0.81f, 1L to 0.42f))
+        assertEquals(listOf(3L, 1L, 2L, 4L), ranked.map { it.personId })
+    }
+
+    @Test
+    fun `with nothing to compare the list keeps its own order`() {
+        val list = listOf(person(1, "Anna"), person(2, "Béla"))
+        assertEquals(list, NameOrMergeRules.mostAlikeFirst(list, emptyMap()))
+    }
 }
