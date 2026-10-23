@@ -336,8 +336,10 @@ class PhotoUploadService @Inject constructor(
             // upload ends with; an SDK failure that left nothing on Drive runs the app's own upload.
             // A resume record from an interrupted upload of the app's own names a draft already on
             // Drive, which only that path can finish, so the SDK steps aside rather than orphan it.
+            // A photo with no capture date, or one before 1970, stays on that path too: the SDK files
+            // a missing time under the upload moment, which would lift the photo to today.
             val ownDraftPending = UploadResumeManifest.load(tempDir) != null
-            if (!ownDraftPending && sdkRouting.isOn(eu.akoos.photos.data.sdk.SdkRoute.UPLOAD)) {
+            if (sdkMayUpload(item.dateTaken, ownDraftPending) && sdkRouting.isOn(eu.akoos.photos.data.sdk.SdkRoute.UPLOAD)) {
                 val sdkVolumeId = shareService.getVolumeId(userId)
                 val sdkShareId = shareService.getShareId(userId, sdkVolumeId)
                 val viaSdk = sdkRouting.run(
@@ -1132,6 +1134,8 @@ class PhotoUploadService @Inject constructor(
                 sizeBytes    = item.sizeBytes,
                 revisionId   = revisionId,
                 thumbnailUrl = localThumbnailUrl,
+                // Both upload paths file the photo under the photos root.
+                parentLinkId = shareService.photosRootLinkId(),
                 // Seed the committed categories so the photo keeps them the moment it turns
                 // Synced. A backed-up photo reads its categories from this row, not from the
                 // device-side choice, so leaving the column empty until the next cloud refresh
@@ -1530,3 +1534,10 @@ class PhotoUploadService @Inject constructor(
     }
 
 }
+
+/**
+ * Whether an upload may go through the Drive SDK at all: not while a draft of the app's own upload waits on
+ * Drive ([ownDraftPending]), which only that path can finish, and not for a photo with no capture date or one
+ * before 1970 ([dateTakenMs] not above zero), which the SDK would file under the upload moment instead.
+ */
+internal fun sdkMayUpload(dateTakenMs: Long, ownDraftPending: Boolean): Boolean = !ownDraftPending && dateTakenMs > 0
