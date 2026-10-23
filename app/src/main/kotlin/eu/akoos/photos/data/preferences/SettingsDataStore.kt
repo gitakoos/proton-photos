@@ -966,6 +966,9 @@ object SettingsKeys {
     /** Download photos at full resolution through the Drive SDK; see [SDK_ROUTE_TAGS]. */
     val SDK_ROUTE_DOWNLOAD = booleanPreferencesKey("sdk_route_download")
 
+    /** Back up and upload photos through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_UPLOAD = booleanPreferencesKey("sdk_route_upload")
+
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +

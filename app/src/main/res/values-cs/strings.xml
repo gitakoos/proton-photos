@@ -1879,6 +1879,8 @@
     <string name="sdk_route_trash_desc">Přesun fotek na Drive do koše a zpět</string>
     <string name="sdk_route_download">Stahování v plném rozlišení</string>
     <string name="sdk_route_download_desc">Otevírání a ukládání fotek z Drive v plném rozlišení</string>
+    <string name="sdk_route_upload">Záloha a nahrávání</string>
+    <string name="sdk_route_upload_desc">Odesílání fotek na Drive, při záloze i každém jiném nahrávání</string>
     <string name="sdk_route_activity">%1$s. V této relaci: %2$d přes knihovnu, %3$d obvyklým způsobem.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotek</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d obličejů</string>

@@ -42,6 +42,7 @@ enum class SdkRoute(val label: String, val key: Preferences.Key<Boolean>) {
     TAGS("tags", SettingsKeys.SDK_ROUTE_TAGS),
     TRASH("trash", SettingsKeys.SDK_ROUTE_TRASH),
     DOWNLOAD("download", SettingsKeys.SDK_ROUTE_DOWNLOAD),
+    UPLOAD("upload", SettingsKeys.SDK_ROUTE_UPLOAD),
 }
 
 /**

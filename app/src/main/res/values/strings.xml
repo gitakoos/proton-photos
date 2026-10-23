@@ -852,6 +852,8 @@
     <string name="sdk_route_trash_desc">Moving photos in Drive to the trash and back</string>
     <string name="sdk_route_download">Full-resolution downloads</string>
     <string name="sdk_route_download_desc">Opening and saving photos from Drive in full resolution</string>
+    <string name="sdk_route_upload">Backup and upload</string>
+    <string name="sdk_route_upload_desc">Sending photos to Drive, for backup and every other upload</string>
     <string name="sdk_route_activity">%1$s. This session: %2$d through the library, %3$d done the usual way.</string>
     <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d of %2$d faces</string>

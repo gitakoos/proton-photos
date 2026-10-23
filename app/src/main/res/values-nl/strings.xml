@@ -1814,6 +1814,8 @@
     <string name="sdk_route_trash_desc">Foto\'s in Drive naar de prullenbak verplaatsen en terugzetten</string>
     <string name="sdk_route_download">Downloads in volledige resolutie</string>
     <string name="sdk_route_download_desc">Foto\'s uit Drive in volledige resolutie openen en opslaan</string>
+    <string name="sdk_route_upload">Back-up en uploaden</string>
+    <string name="sdk_route_upload_desc">Foto\'s naar Drive sturen, voor de back-up en elke andere upload</string>
     <string name="sdk_route_activity">%1$s. Deze sessie: %2$d via de bibliotheek, %3$d op de gebruikelijke manier.</string>
     <string name="settings_ai_indexing_progress">%1$d van %2$d foto\'s</string>
     <string name="settings_ai_grouping_progress">%1$d van %2$d gezichten</string>

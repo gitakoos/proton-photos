@@ -1878,6 +1878,8 @@
     <string name="sdk_route_trash_desc">Premikanje fotografij v Drive v koš in nazaj</string>
     <string name="sdk_route_download">Prenosi v polni ločljivosti</string>
     <string name="sdk_route_download_desc">Odpiranje in shranjevanje fotografij iz Drive v polni ločljivosti</string>
+    <string name="sdk_route_upload">Varnostna kopija in nalaganje</string>
+    <string name="sdk_route_upload_desc">Pošiljanje fotografij v Drive, pri varnostnem kopiranju in vsakem drugem nalaganju</string>
     <string name="sdk_route_activity">%1$s. V tej seji: %2$d prek knjižnice, %3$d na običajen način.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
     <string name="settings_ai_grouping_progress">%1$d od %2$d obrazov</string>

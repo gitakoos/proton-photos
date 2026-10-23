@@ -1792,6 +1792,8 @@
     <string name="sdk_route_trash_desc">Placer des photos de Drive dans la corbeille et les en sortir</string>
     <string name="sdk_route_download">Téléchargements en pleine résolution</string>
     <string name="sdk_route_download_desc">Ouvrir et enregistrer des photos de Drive en pleine résolution</string>
+    <string name="sdk_route_upload">Sauvegarde et envoi</string>
+    <string name="sdk_route_upload_desc">Envoyer des photos vers Drive, pour la sauvegarde et tout autre envoi</string>
     <string name="sdk_route_activity">%1$s. Cette session : %2$d via la bibliothèque, %3$d de la manière habituelle.</string>
     <string name="settings_ai_indexing_progress">%1$d sur %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d sur %2$d visages</string>
