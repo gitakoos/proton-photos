@@ -22,8 +22,10 @@
 
 package eu.akoos.photos.domain.usecase
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.ClusterSummaryDao
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.NotPersonDao
@@ -48,39 +50,46 @@ class AssignPersonNameUseCase @Inject constructor(
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
     private val clusterSummaryDao: ClusterSummaryDao,
+    private val appDatabase: AppDatabase,
 ) {
     suspend operator fun invoke(account: String, fromPersonId: Long, rawName: String): Long =
         withContext(Dispatchers.IO) {
             val name = rawName.trim()
             if (name.isEmpty()) return@withContext -1L
-            val target = personDao.namedPeopleForUser(account)
-                .firstOrNull { it.displayName == name && it.id != fromPersonId }?.id ?: fromPersonId
-            val faceIds = faceDao.faceIdsForPerson(account, fromPersonId)
-            if (target != fromPersonId && faceIds.isNotEmpty()) faceDao.reassignFacesToPerson(faceIds, target)
-            if (faceIds.isNotEmpty()) faceDao.labelFacesByIds(faceIds, name)
-            val oldName = personDao.personById(fromPersonId)?.displayName
-            if (!oldName.isNullOrBlank() && oldName != name) {
-                personManualPhotoDao.rename(account, oldName, name)
-                faceDao.renameManualName(account, oldName, name)
-                notPersonDao.rename(account, oldName, name)
-                personCoverDao.rename(account, oldName, name)
-            }
-            personDao.updateName(target, name)
-            val manual = personManualPhotoDao.photoKeysForNameList(account, name)
-            val count = (faceDao.distinctPhotoKeysForPerson(account, target) + manual).toHashSet().size
-            val cover = resolveCover(account, target, name)
-            personDao.updateCoverAndCount(target, cover, count)
-            if (target != fromPersonId) {
-                personDao.updateCoverAndCount(fromPersonId, null, 0)
-                personDao.deleteEmpty(account)
-                // The target absorbed the source's faces, so its stored centroid + count are stale, and
-                // the removed source leaves an orphan summary. Drop both: the next clustering pass then
-                // recomputes the target, and no stale centroid can pull a new face onto a dead person.
-                clusterSummaryDao.deleteByPerson(target)
-                clusterSummaryDao.deleteOrphansForUser(account)
-            }
-            target
+            // One transaction, so the people lists read the fold once it is whole and a failed write leaves both
+            // people as they were.
+            appDatabase.withTransaction { fold(account, fromPersonId, name) }
         }
+
+    private suspend fun fold(account: String, fromPersonId: Long, name: String): Long {
+        val target = personDao.namedPeopleForUser(account)
+            .firstOrNull { it.displayName == name && it.id != fromPersonId }?.id ?: fromPersonId
+        val faceIds = faceDao.faceIdsForPerson(account, fromPersonId)
+        if (target != fromPersonId && faceIds.isNotEmpty()) faceDao.reassignFacesToPerson(faceIds, target)
+        if (faceIds.isNotEmpty()) faceDao.labelFacesByIds(faceIds, name)
+        val oldName = personDao.personById(fromPersonId)?.displayName
+        if (!oldName.isNullOrBlank() && oldName != name) {
+            personManualPhotoDao.rename(account, oldName, name)
+            faceDao.renameManualName(account, oldName, name)
+            notPersonDao.rename(account, oldName, name)
+            personCoverDao.rename(account, oldName, name)
+        }
+        personDao.updateName(target, name)
+        val manual = personManualPhotoDao.photoKeysForNameList(account, name)
+        val count = (faceDao.distinctPhotoKeysForPerson(account, target) + manual).toHashSet().size
+        val cover = resolveCover(account, target, name)
+        personDao.updateCoverAndCount(target, cover, count)
+        if (target != fromPersonId) {
+            personDao.updateCoverAndCount(fromPersonId, null, 0)
+            personDao.deleteEmpty(account)
+            // The target absorbed the source's faces, so its stored centroid + count are stale, and
+            // the removed source leaves an orphan summary. Drop both: the next clustering pass then
+            // recomputes the target, and no stale centroid can pull a new face onto a dead person.
+            clusterSummaryDao.deleteByPerson(target)
+            clusterSummaryDao.deleteOrphansForUser(account)
+        }
+        return target
+    }
 
     /** The surviving person's cover face: their chosen cover when its photo is still one of their
      *  faces, else the clearest face. */

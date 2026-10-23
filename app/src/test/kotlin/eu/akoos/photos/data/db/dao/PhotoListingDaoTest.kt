@@ -312,6 +312,19 @@ class PhotoListingDaoTest {
     }
 
     @Test
+    fun `observeTagsCsv follows a tag written after the stream opened`() = runTest {
+        // The viewer reads the heart of the photo on screen from this, so a heart set on a corrected
+        // copy a moment after it appears still shows.
+        dao.upsertAll(listOf(entity("copy")))
+        assertEquals("", dao.observeTagsCsv("copy").first())
+
+        dao.upsertAll(listOf(entity("copy").copy(tagsCsv = "0")))
+
+        assertEquals("0", dao.observeTagsCsv("copy").first())
+        assertNull(dao.observeTagsCsv("gone").first())
+    }
+
+    @Test
     fun `observeOwnStreamPickerRows filters by userId`() = runTest {
         dao.upsertAll(listOf(entity("link1", "user1"), entity("link2", "user2")))
 

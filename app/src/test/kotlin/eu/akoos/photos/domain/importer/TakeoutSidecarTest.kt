@@ -217,4 +217,13 @@ class TakeoutSidecarTest {
     @Test fun `a padded album folder name is trimmed`() {
         assertEquals("Vacation", TakeoutSidecar.albumFolderOf("Takeout/Google Photos/ Vacation /IMG_8.jpg"))
     }
+
+    @Test fun `lookup finds a folder-prefixed entry's sidecar by its base name`() {
+        val meta = SidecarMeta(1_609_459_200_000L, null, null, "beach", null)
+        val index = mapOf(TakeoutSidecar.sidecarKey("IMG_9.jpg.supplemental-metadata.json") to meta)
+
+        assertEquals(meta, TakeoutSidecar.lookup(index, "Takeout/Google Photos/Trip/IMG_9.jpg"))
+        assertEquals(meta, TakeoutSidecar.lookup(index, "IMG_9.jpg"))
+        assertNull(TakeoutSidecar.lookup(index, "Trip/IMG_10.jpg"))
+    }
 }

@@ -30,13 +30,21 @@ import android.os.Build
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.ImportStagedDao
-import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.importer.ImportDriveMatcher
+import eu.akoos.photos.data.importer.ImportEntries
+import eu.akoos.photos.data.importer.ImportFileDate
 import eu.akoos.photos.data.importer.ImportScanCache
-import eu.akoos.photos.data.importer.TakeoutZipReader
+import eu.akoos.photos.data.importer.ImportSource
+import eu.akoos.photos.data.importer.LivePhotoPairing
+import eu.akoos.photos.data.preferences.CompressionPreferences
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.importer.ImportCaptureDate
 import eu.akoos.photos.domain.importer.ImportFailure
+import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.domain.importer.TakeoutSidecar
-import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.presentation.metadata.FilenameDate
 import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.ImportDiagnostics
 import eu.akoos.photos.util.ImportEventLog
@@ -44,12 +52,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -77,7 +85,7 @@ data class StageProgress(
 data class StageResult(val staged: Int, val endedEarly: Boolean, val readPercent: Int)
 
 /**
- * The staging pass of the import review flow: it walks a picked Takeout/Ente `.zip` once for the
+ * The staging pass of the import review flow: it walks a picked Takeout/Ente `.zip` or folder once for the
  * sidecar index and media count, then a second time to resolve each media entry's metadata and cache a
  * small thumbnail, writing one [ImportStagedEntity] per entry. Nothing is uploaded here; the review
  * screen (a later piece) reads the staged rows, and the upload pass (a later piece) sends the kept ones.
@@ -97,15 +105,14 @@ data class StageResult(val staged: Int, val endedEarly: Boolean, val readPercent
 class StageImportUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val importStagedDao: ImportStagedDao,
-    private val drivePhotoRepository: DrivePhotoRepository,
-    private val photoListingDao: PhotoListingDao,
+    private val driveMatcher: ImportDriveMatcher,
 ) {
 
     /**
-     * Stages every media entry the zip [openZip] supplies under [zipId] and reports how it went.
-     * [onProgress] receives the phase, a running (done, total) and how far into the file the read is.
-     * [zipBytes] is the archive's size when the provider knows it (non-positive otherwise), used for the
-     * percentages and to recognise a saved scan as belonging to this file. [userId] is the account whose
+     * Stages every media entry of [source] (a picked `.zip` or folder) under [zipId] and reports how it
+     * went. [onProgress] receives the phase, a running (done, total) and how far into the source the read
+     * is. The source's size, when known (non-positive otherwise), drives the percentages and recognises a
+     * saved scan as belonging to this source. [userId] is the account whose
      * Drive the stage-time dedup check queries, so a row can be badged as already present before anything
      * uploads.
      *
@@ -124,11 +131,11 @@ class StageImportUseCase @Inject constructor(
     suspend fun stage(
         userId: UserId,
         zipId: String,
-        zipBytes: Long,
-        openZip: () -> InputStream,
+        source: ImportSource,
         onProgress: suspend (StageProgress) -> Unit,
     ): StageResult {
         val filesDir = context.filesDir
+        val zipBytes = source.totalBytes()
         val scanCache = ImportScanCache(File(context.cacheDir, ImportScanCache.DIR_NAME))
         val savedScan = scanCache.load(zipId, zipBytes)
         val resumed = savedScan != null
@@ -155,7 +162,10 @@ class StageImportUseCase @Inject constructor(
             }
 
             val thumbDir = File(context.cacheDir, THUMB_DIR).apply { mkdirs() }
-            val reader = TakeoutZipReader(openZip)
+            val prefs = context.settingsDataStore.data.first()
+            val compression = CompressionPreferences.settings(prefs)
+            val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
+            val reader = source.reader
             // Each synchronous reader callback is bridged onto the caller's job so cancellation flows in.
             val parentContext = coroutineContext[Job] ?: EmptyCoroutineContext
 
@@ -208,7 +218,7 @@ class StageImportUseCase @Inject constructor(
             // The entry is fully processed (copied, thumbed, its temp deleted) before the reader advances,
             // one at a time, and a failure of one entry's own work is logged and skipped.
             val walk = try {
-                reader.forEachMedia(
+                reader.forEachMediaEntry(
                     onBytes = { bytes ->
                         bytesDone = bytes
                         // While stepping over entries staged by the earlier attempt nothing else ticks, so
@@ -224,8 +234,9 @@ class StageImportUseCase @Inject constructor(
                             }
                         }
                     },
-                ) { name, input ->
-                    if (name in alreadyStaged) return@forEachMedia
+                ) { entry, input ->
+                    val name = entry.name
+                    if (name in alreadyStaged) return@forEachMediaEntry
                     worked = true
                     runBlocking(parentContext) {
                         ensureActive()
@@ -233,10 +244,16 @@ class StageImportUseCase @Inject constructor(
                         try {
                             temp.outputStream().use { input.copyTo(it) }
 
-                            val meta = TakeoutSidecar.candidateMediaKeys(TakeoutZipReader.baseName(name))
-                                .firstNotNullOfOrNull { index[it] }
+                            val meta = TakeoutSidecar.lookup(index, name)
                             val mimeType = ImportTakeoutUseCase.mimeTypeFor(name)
-                            val dateMs = ImportTakeoutUseCase.resolveDateMs(meta, name, System.currentTimeMillis())
+                            val nowMs = System.currentTimeMillis()
+                            val dateMs = ImportCaptureDate.resolve(
+                                sidecarMs = meta?.takenMs,
+                                fileMs = { ImportFileDate.read(context, temp, mimeType) },
+                                nameMs = FilenameDate.parse(ImportEntries.baseName(name), nowMs),
+                                entryModifiedMs = entry.modifiedMs,
+                                nowMs = nowMs,
+                            )
 
                             // Best-effort thumbnail: any decode failure leaves thumbPath null so the review shows
                             // a placeholder rather than failing the whole entry. Cancellation still propagates.
@@ -249,17 +266,22 @@ class StageImportUseCase @Inject constructor(
                                 null
                             }
 
-                            // Stage-time dedup: hash the same temp the thumbnail came from and ask whether Drive
-                            // already holds these exact bytes, so the review can badge a pre-existing photo before
-                            // anything uploads. Already on the worker's IO dispatcher. Any failure (no root hash
-                            // key, a listing read that throws) degrades to "treat as new": the upload pass runs its
-                            // own dedup, so a false negative costs only a redundant upload that is then resolved
-                            // without a second copy. Never fatal to staging; cancellation still propagates.
+                            // Stage-time dedup: hash the same temp the thumbnail came from and ask the matcher the
+                            // upload uses whether Drive already holds this photo, so the review can badge it before
+                            // anything uploads. Already on the worker's IO dispatcher. The badge is a hint: the
+                            // upload pass decides again, on these same archive bytes and on what it stamps into
+                            // them. Any failure degrades to "treat as new". Never fatal to staging; cancellation
+                            // still propagates.
+                            val title = meta?.title?.takeIf { it.isNotBlank() } ?: ImportEntries.baseName(name)
                             val alreadyInDrive = try {
                                 val sha1 = sha1Hex(temp)
-                                val hash = drivePhotoRepository.cloudContentHash(sha1)
-                                hash != null &&
-                                    photoListingDao.findExistingContentHashes(userId.id, listOf(hash)).isNotEmpty()
+                                driveMatcher.find(
+                                    userId,
+                                    ImportDriveMatcher.Entry(listOf(sha1), sha1, title, mimeType, dateMs),
+                                    compression,
+                                    stripOnUpload,
+                                    confirmLedgerLink = false,
+                                ) != null
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {
@@ -274,7 +296,7 @@ class StageImportUseCase @Inject constructor(
                             buffer += ImportStagedEntity(
                                 zipId = zipId,
                                 entryName = name,
-                                title = meta?.title?.takeIf { it.isNotBlank() } ?: TakeoutZipReader.baseName(name),
+                                title = title,
                                 dateMs = dateMs,
                                 lat = meta?.lat,
                                 lng = meta?.lng,
@@ -323,6 +345,20 @@ class StageImportUseCase @Inject constructor(
                 }
             }
 
+            // A Live Photo is a still and a video; the video's row is marked with its still so the review
+            // shows one photo and the upload sends the video behind it. Safe to repeat on a resumed pass.
+            val livePairs = try {
+                LivePhotoPairing.stillByVideo(
+                    pairingEntries(importStagedDao.allForZip(zipId), index, System.currentTimeMillis()),
+                ).also { pairs -> pairs.forEach { (video, still) -> importStagedDao.setLiveOf(zipId, video, still) } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "live photo pairing failed: ${e.message}")
+                emptyMap()
+            }
+            if (livePairs.isNotEmpty()) ImportEventLog.record(filesDir, "live photos paired=${livePairs.size}")
+
             val staged = importStagedDao.countForZip(zipId)
             val walkEndedEarly = walk.endedEarly || walk.endedShort(zipBytes)
             val endedEarly = scanEndedEarly || walkEndedEarly
@@ -354,12 +390,12 @@ class StageImportUseCase @Inject constructor(
     /** The temp-file suffix that keeps [entryName]'s extension so a decoder can still sniff the
      *  container, or null when the name has none. */
     private fun tempSuffix(entryName: String): String? {
-        val ext = ImportTakeoutUseCase.extensionOf(TakeoutZipReader.baseName(entryName))
+        val ext = ImportTakeoutUseCase.extensionOf(ImportEntries.baseName(entryName))
         return if (ext.isEmpty()) null else ".$ext"
     }
 
-    /** Hex SHA-1 of [file], streamed so a large entry is never fully buffered. Mirrors the upload pass's
-     *  digest so the stage-time dedup check keys on the same content hash the upload one resolves against. */
+    /** Hex SHA-1 of [file], streamed so a large entry is never fully buffered. The upload pass takes the
+     *  same digest of the same archive bytes, so the badge and the upload look up the same key. */
     private fun sha1Hex(file: File): String {
         val digest = MessageDigest.getInstance("SHA-1")
         file.inputStream().use { stream ->
@@ -498,6 +534,22 @@ class StageImportUseCase @Inject constructor(
 
         /** How many staged rows to buffer before a batch insert, so the DB is not hit per entry. */
         private const val BATCH_SIZE = 50
+
+        /**
+         * The pairing input for [rows]. A still and its video record their own times in different clocks
+         * (the mvhd is often local time), hours apart, so each date comes from the sidecar or the file
+         * name only, never from the stored [ImportStagedEntity.dateMs], which may come from the file.
+         */
+        internal fun pairingEntries(
+            rows: List<ImportStagedEntity>,
+            index: Map<String, SidecarMeta>,
+            nowMs: Long,
+        ): List<LivePhotoPairing.Entry> = rows.map { row ->
+            LivePhotoPairing.Entry(
+                row.entryName,
+                ImportTakeoutUseCase.resolveDateMs(TakeoutSidecar.lookup(index, row.entryName), row.entryName, nowMs),
+            )
+        }
 
         /**
          * A deterministic, collision-free base name for the cached thumbnail of [entryName] within

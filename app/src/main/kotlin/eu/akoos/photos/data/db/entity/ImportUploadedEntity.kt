@@ -40,10 +40,15 @@ import androidx.room.PrimaryKey
  * been trashed so a repeated undo skips it. [alreadyInDrive] marks a photo the run did not upload because
  * an identical one already lived in Drive; the row then carries that pre-existing link, so the history can
  * badge it as skipped and an undo passes it by rather than trashing a photo the run never created.
+ *
+ * [sourceSha1] is the digest of the entry as the archive holds it, before any caption, date stamp or
+ * compression changed the bytes, and [userId] the account the run sent it to, so a later run of the same
+ * photo is recognised even when the bytes it sent cannot be reproduced. Both are null on a row recorded
+ * before they existed.
  */
 @Entity(
     tableName = "import_uploaded",
-    indices = [Index("runId")],
+    indices = [Index("runId"), Index(value = ["userId", "sourceSha1"])],
 )
 data class ImportUploadedEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -54,4 +59,6 @@ data class ImportUploadedEntity(
     val dateMs: Long? = null,
     val undone: Boolean = false,
     val alreadyInDrive: Boolean = false,
+    val sourceSha1: String? = null,
+    val userId: String? = null,
 )

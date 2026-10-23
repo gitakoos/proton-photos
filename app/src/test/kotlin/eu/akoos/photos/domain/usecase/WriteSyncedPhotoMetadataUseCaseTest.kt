@@ -24,6 +24,7 @@ package eu.akoos.photos.domain.usecase
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.Flow
@@ -74,6 +75,7 @@ class WriteSyncedPhotoMetadataUseCaseTest {
     private lateinit var accountManager: AccountManager
     private lateinit var rewriter: FakeExifRewriter
     private lateinit var useCase: WriteSyncedPhotoMetadataUseCase
+    private val faces: RekeyPhotoFacesUseCase = mockk(relaxed = true)
 
     @Before
     fun setUp() {
@@ -83,7 +85,10 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         accountManager = mockk()
         every { accountManager.getPrimaryUserId() } returns flowOf(userId)
         rewriter = FakeExifRewriter()
-        useCase = WriteSyncedPhotoMetadataUseCase(context, cloud, accountManager, sync, rewriter)
+        useCase = WriteSyncedPhotoMetadataUseCase(
+            context, cloud, accountManager, sync, rewriter,
+            CarryOverToReplacement(cloud, noListingRow(), mockk(relaxed = true), faces, mockk(relaxed = true)),
+        )
     }
 
     private fun cloudPhoto(linkId: String) = CloudPhoto(
@@ -169,6 +174,22 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         assertEquals(newLinkId, row.cloudFileId)
         assertEquals(expectedSha1, row.localHash)
         assertFalse("the editor queue intent must be cleared once paired", row.queued)
+    }
+
+    @Test
+    fun `a synced correction keeps the favourite and the faces on the new copy`() = runTest {
+        val original = cloudPhoto("orig").copy(tags = setOf(0))
+        cloud.add(original)
+        val deviceUri = "content://media/43"
+        registerContent(deviceUri, "edited".toByteArray())
+        sync.seed(syncedRow(deviceUri, "orig", localHash = "old-hash"))
+
+        val result = useCase(original, deviceUri, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
+
+        assertEquals(WriteSyncedPhotoMetadataUseCase.Result.Success, result)
+        val newLinkId = cloud.uploadedLinkIds.single()
+        assertEquals(listOf(newLinkId to true), cloud.favoriteCalls)
+        coVerify { faces.invoke(userId.id, "orig", newLinkId, any()) }
     }
 
     @Test
@@ -479,7 +500,10 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         val videoRewriter = FakeExifRewriter(
             UploadXAttrMetadata(displayWidth = 1920, displayHeight = 1080, durationMillis = 5_000L),
         )
-        val videoUseCase = WriteSyncedPhotoMetadataUseCase(context, cloud, accountManager, sync, videoRewriter)
+        val videoUseCase = WriteSyncedPhotoMetadataUseCase(
+            context, cloud, accountManager, sync, videoRewriter,
+            CarryOverToReplacement(cloud, noListingRow(), mockk(relaxed = true), faces, mockk(relaxed = true)),
+        )
 
         val result = videoUseCase(original, deviceUri, newCaptureMs = newCaptureMs, location = LocationEdit.Unchanged)
 

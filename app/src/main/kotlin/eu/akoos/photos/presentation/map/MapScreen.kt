@@ -519,11 +519,14 @@ fun MapScreen(
 }
 
 /**
- * Luminance-invert colour filter that turns the light MAPNIK tiles into a dark basemap (dark land
- * and water, readable labels). Saturation is muted afterwards so the inverted hues don't read as
- * garish neon.
+ * Colour filter that turns the light MAPNIK tiles into a dark basemap (dark land and water, readable
+ * labels). The invert is followed by a half turn of hue, so water stays blue and vegetation green instead
+ * of turning orange and purple, and saturation is muted afterwards so the colours don't read as neon.
  */
-internal fun darkTileFilter(): android.graphics.ColorMatrixColorFilter {
+internal fun darkTileFilter(): android.graphics.ColorMatrixColorFilter =
+    android.graphics.ColorMatrixColorFilter(darkTileMatrix())
+
+internal fun darkTileMatrix(): android.graphics.ColorMatrix {
     val m = android.graphics.ColorMatrix(
         floatArrayOf(
             -1f, 0f, 0f, 0f, 255f,
@@ -532,8 +535,18 @@ internal fun darkTileFilter(): android.graphics.ColorMatrixColorFilter {
             0f, 0f, 0f, 1f, 0f,
         ),
     )
+    m.postConcat(
+        android.graphics.ColorMatrix(
+            floatArrayOf(
+                -0.574f, 1.430f, 0.144f, 0f, 0f,
+                0.426f, 0.430f, 0.144f, 0f, 0f,
+                0.426f, 1.430f, -0.856f, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f,
+            ),
+        ),
+    )
     m.postConcat(android.graphics.ColorMatrix().apply { setSaturation(0.55f) })
-    return android.graphics.ColorMatrixColorFilter(m)
+    return m
 }
 
 /**

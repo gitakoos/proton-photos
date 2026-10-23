@@ -60,6 +60,10 @@ object FaceDiagnostics {
     @Volatile
     var total: Int = 0
 
+    /** Whether [indexed] and [total] count faces a grouping has placed rather than photos scanned. */
+    @Volatile
+    var grouping: Boolean = false
+
     /** What the last sign-in did with a prior guest scan this session: ADOPT carried the guest's people
      *  and faces across to the account, DISCARD dropped them because the account already had its own,
      *  each with the counts it moved. "none" until a real migration runs. Set only through
@@ -96,12 +100,15 @@ object FaceDiagnostics {
      *  is a format the decoder cannot read. Atomic: several workers increment it. */
     private val permanentSkips = AtomicInteger(0)
 
-    /** As of the last pass end: photos waiting out a retry backoff after a transient load failure, and
-     *  photos that pass left for the next one because its download budget was spent. */
+    /** As of the last pass end: photos waiting out a retry backoff after a transient load failure,
+     *  photos that pass left for the next one because its download budget was spent, and photos only in
+     *  Drive it left because the phone was off Wi-Fi with full-res on Wi-Fi only. */
     @Volatile
     private var transientWaiting = 0
     @Volatile
     private var overBudget = 0
+    @Volatile
+    private var deferredOffWifi = 0
 
     /** elapsedRealtime the [indexed] counter last climbed, so the snapshot can say how long the walk has
      *  been standing still. 0 until it first advances. This is THE frozen-vs-slow discriminator. */
@@ -151,6 +158,19 @@ object FaceDiagnostics {
      *  faces examined, the people opened, the people matched against and the time so far. Empty before any. */
     @Volatile
     private var batchedProgress: String = ""
+
+    /** The ungrouped faces the latest batched run set out to read and whether it was a final run. Empty before any. */
+    @Volatile
+    private var batchedStart: String = ""
+
+    /** How the latest "find more photos" sweep ended and how far it got. Empty before any. */
+    @Volatile
+    private var lastSweep: String = ""
+
+    /** The latest database read a concurrent write tore: the stream's tag, the exception class and the
+     *  framework's own numbers-only message ([dbTearMessage]). Empty before any. */
+    @Volatile
+    private var lastDbTear: String = ""
 
     /** Builds of the people list this session: started and completed, the latest and the longest one's run
      *  time, and how many people the latest one listed. Builds that keep starting and never complete are a
@@ -235,8 +255,9 @@ object FaceDiagnostics {
     private const val RECENT_CAPACITY = 25
     private val recent = ArrayDeque<String>(RECENT_CAPACITY)
 
-    /** Record the current walk state and progress; called wherever the scheduler updates its flow. */
-    fun record(state: String, indexed: Int, total: Int) {
+    /** Record the current walk state and progress, and whether it counts faces being grouped; called wherever
+     *  the scheduler updates its flow. */
+    fun record(state: String, indexed: Int, total: Int, grouping: Boolean = false) {
         // The scanned count climbing is the frozen-vs-slow discriminator: stamp the advance time whenever
         // it moves, so the snapshot can say how long the walk has been standing still.
         if (indexed > this.indexed) lastAdvanceMs.set(SystemClock.elapsedRealtime())
@@ -248,6 +269,7 @@ object FaceDiagnostics {
         this.state = state
         this.indexed = indexed
         this.total = total
+        this.grouping = grouping
     }
 
     /** Record what a sign-in did with a prior guest scan: the action name plus the people and face
@@ -289,11 +311,12 @@ object FaceDiagnostics {
         permanentSkips.incrementAndGet()
     }
 
-    /** Record, at a pass end, how many photos wait out a retry backoff and how many the pass left over
-     *  its download budget. */
-    fun recordSourceBacklog(transientWaiting: Int, overBudget: Int) {
+    /** Record, at a pass end, how many photos wait out a retry backoff, how many the pass left over its
+     *  download budget, and how many it left waiting for Wi-Fi. */
+    fun recordSourceBacklog(transientWaiting: Int, overBudget: Int, deferredOffWifi: Int = 0) {
         this.transientWaiting = transientWaiting
         this.overBudget = overBudget
+        this.deferredOffWifi = deferredOffWifi
     }
 
     /** Add the faces one successful detect() returned to the running total. */
@@ -377,6 +400,23 @@ object FaceDiagnostics {
     fun recordBatchedProgress(batch: Int, examined: Int, opened: Int, centroids: Int, elapsedMs: Long) {
         batchedProgress = "batch=$batch examined=$examined opened=$opened centroids=$centroids ms=$elapsedMs"
         android.util.Log.i(LOG_TAG, "batched progress $batchedProgress")
+    }
+
+    /** Note a batched run starting: the ungrouped faces it sets out to read and whether it is a final run. */
+    fun recordBatchedRunStart(ungrouped: Int, finalPass: Boolean) {
+        batchedStart = "ungrouped=$ungrouped final=${if (finalPass) "yes" else "no"}"
+    }
+
+    /** Note how a "find more photos" sweep ended ([reason], a fixed label) with [done] of [total] photos looked at. */
+    fun recordSweepStop(reason: String, done: Int, total: Int) {
+        lastSweep = "$reason done=$done total=$total"
+    }
+
+    /** Note a read of the stream [tag] (a fixed code label) that a concurrent write tore: the exception class
+     *  and, only when it is the framework's numbers-only cursor window text, its message ([dbTearMessage]). */
+    fun recordDbTear(tag: String, error: Throwable) {
+        val name = error.javaClass.simpleName.ifEmpty { error.javaClass.name.substringAfterLast('.') }
+        lastDbTear = "$tag $name" + (dbTearMessage(error)?.let { " ($it)" } ?: "")
     }
 
     /** Note a full regroup given up at its timeout. */
@@ -503,12 +543,14 @@ object FaceDiagnostics {
         state = "Idle"
         indexed = 0
         total = 0
+        grouping = false
         migration = "none"
         unloadableLocal.set(0)
         watchdogTimeouts.set(0)
         permanentSkips.set(0)
         transientWaiting = 0
         overBudget = 0
+        deferredOffWifi = 0
         inFlight.clear()
         lastParkReason = "none"
         lastAdvanceMs.set(0L)
@@ -526,6 +568,9 @@ object FaceDiagnostics {
         batchedRuns.set(0)
         lastBatchedRun = ""
         batchedProgress = ""
+        batchedStart = ""
+        lastSweep = ""
+        lastDbTear = ""
         peopleBuildsStarted.set(0)
         peopleBuildsCompleted.set(0)
         peopleBuildLastMs.set(0L)
@@ -565,14 +610,16 @@ object FaceDiagnostics {
         return buildString {
             append("state=").append(state).append('\n')
             append("indexed=").append(indexed).append('/').append(total)
-            append(" pending=").append(pending).append('\n')
+            append(" pending=").append(pending)
+            append(" counting=").append(if (grouping) "faces" else "photos").append('\n')
             append("migration=").append(migration).append('\n')
             append("lastAdvance=").append(lastAdvance).append('\n')
             append("skippedUnloadable=").append(unloadableLocal.get()).append('\n')
             append("watchdogSkips=").append(watchdogTimeouts.get()).append('\n')
             append("permanentSkipped=").append(permanentSkips.get())
             append(" transientWaiting=").append(transientWaiting)
-            append(" overBudget=").append(overBudget).append('\n')
+            append(" overBudget=").append(overBudget)
+            append(" waitingForWifi=").append(deferredOffWifi).append('\n')
             append("facesDetected=").append(facesDetected.get()).append('\n')
             append("storedFaces=").append(countText(counts?.faces))
             append(" ungrouped=").append(countText(counts?.ungrouped))
@@ -601,8 +648,14 @@ object FaceDiagnostics {
             if (batchedRuns.get() > 0) {
                 append("batchedRuns=").append(batchedRuns.get()).append(" last(").append(lastBatchedRun).append(")\n")
             }
+            val startNote = batchedStart
+            if (startNote.isNotEmpty()) append("batchedStart=").append(startNote).append('\n')
             val progressNote = batchedProgress
             if (progressNote.isNotEmpty()) append("batchedProgress=").append(progressNote).append('\n')
+            val sweepNote = lastSweep
+            if (sweepNote.isNotEmpty()) append("lastSweep=").append(sweepNote).append('\n')
+            val tearNote = lastDbTear
+            if (tearNote.isNotEmpty()) append("lastDbTear=").append(tearNote).append('\n')
             if (peopleBuildsStarted.get() > 0) {
                 append("peopleBuilds=").append(peopleBuildsStarted.get())
                 append(" done=").append(peopleBuildsCompleted.get())

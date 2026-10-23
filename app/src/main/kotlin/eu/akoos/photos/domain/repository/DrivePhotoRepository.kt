@@ -183,6 +183,27 @@ interface DrivePhotoRepository {
     ): String
 
     /**
+     * Uploads one half of a Live Photo. The still is sent with [extraTags] holding the Live Photo tag; the
+     * video is sent with [mainPhotoLinkId] set to the link the still ended up under, so Drive keeps the pair
+     * as one photo with a related video. Everything else is as [uploadFile].
+     */
+    suspend fun uploadFileLinked(
+        userId: UserId,
+        item: LocalMediaItem,
+        sha1HexContentDigest: String,
+        uploadUri: String = item.uri,
+        xAttrMetadata: eu.akoos.photos.data.repository.drive.UploadXAttrMetadata =
+            eu.akoos.photos.data.repository.drive.UploadXAttrMetadata(),
+        mainPhotoLinkId: String? = null,
+        extraTags: Set<Int> = emptySet(),
+        onProgress: ((
+            phase: eu.akoos.photos.data.repository.drive.UploadPhase,
+            doneBytes: Long,
+            totalBytes: Long,
+        ) -> Unit)? = null,
+    ): String = uploadFile(userId, item, sha1HexContentDigest, uploadUri, xAttrMetadata, onProgress)
+
+    /**
      * Retries any uncommitted-node cleanup deletes that failed during an earlier upload failure.
      * A non-retryable upload best-effort deletes the just-created file node; if that delete also
      * fails it is persisted, and this drains that queue so a failed cleanup never leaves an

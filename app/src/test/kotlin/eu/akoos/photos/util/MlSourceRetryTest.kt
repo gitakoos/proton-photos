@@ -137,6 +137,7 @@ class MlSourceRetryTest {
         tally.stayed("d", SourceMiss.DEFERRED, nowMs = 0L)
         assertEquals(1, tally.transient)
         assertEquals(1, tally.overBudget)
+        assertEquals(1, tally.deferred)
         assertEquals(0, tally.moved)
         assertEquals(1, book.attempts("t"))
         assertEquals(0, book.attempts("o"))

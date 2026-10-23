@@ -228,6 +228,10 @@ interface PhotoListingDao {
     @Query("SELECT tagsCsv FROM photo_listing WHERE linkId = :linkId LIMIT 1")
     suspend fun getTagsCsv(linkId: String): String?
 
+    /** [getTagsCsv] as a stream, for a screen that has to follow a tag written after it opened. */
+    @Query("SELECT tagsCsv FROM photo_listing WHERE linkId = :linkId LIMIT 1")
+    fun observeTagsCsv(linkId: String): Flow<String?>
+
     /** Returns all linkIds currently stored for a user. Used by the smart-merge refresh strategy. */
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId")
     suspend fun getAllLinkIds(userId: String): List<String>
@@ -284,6 +288,18 @@ interface PhotoListingDao {
      *  the run, matching [findExistingContentHashes] on scope: same userId, same volume-scoped hash. */
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId AND contentHash = :contentHash LIMIT 1")
     suspend fun linkIdByContentHash(userId: String, contentHash: String): String?
+
+    /** The link of an own-stream photo of this user's named one of [names] and captured in the second
+     *  [captureSec], or null. The (userId, captureTime) index narrows it to that second. */
+    @Query(
+        "SELECT linkId FROM photo_listing WHERE userId = :userId AND captureTime = :captureSec " +
+            "AND isChildOfAlbum = 0 AND displayName IN (:names) LIMIT 1",
+    )
+    suspend fun linkIdByNameAndCapture(userId: String, names: List<String>, captureSec: Long): String?
+
+    /** Whether this user's library holds a row for [linkId]. */
+    @Query("SELECT EXISTS(SELECT 1 FROM photo_listing WHERE userId = :userId AND linkId = :linkId)")
+    suspend fun hasLink(userId: String, linkId: String): Boolean
 
     /** Writes [contentHash] onto a just-uploaded link when the row is present and carries none yet, so a
      *  later import recognises the same bytes and dedups them. The WHERE guard makes it a no-op once a

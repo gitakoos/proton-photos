@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -69,13 +70,14 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.db.entity.ImportHistoryEntity
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.PrimaryButton
+import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.SettingsSubPageScaffold
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.viewer.formatMsWithTime
 
 /**
- * Picks a Google Takeout / Ente `.zip` and walks it through the import queue: staging progress, a
+ * Picks a Google Takeout / Ente `.zip` or folder and walks it through the import queue: staging progress, a
  * reviewable thumbnail grid, and (once wired) the upload. The heavy lifting is the workers'; this
  * screen only launches the picker and renders [ImportUiState]. Reached from a Settings row shown only
  * when signed in, so no account gate is repeated here.
@@ -103,10 +105,14 @@ fun ImportScreen(
     // concrete zip types are hints and `*/*` keeps the file selectable everywhere.
     val pickLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
-    ) { uri -> uri?.let(viewModel::onZipPicked) }
+    ) { uri -> uri?.let(viewModel::onSourcePicked) }
     val launchPicker: () -> Unit = {
         pickLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "*/*"))
     }
+    val folderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> uri?.let(viewModel::onSourcePicked) }
+    val launchFolderPicker: () -> Unit = { folderLauncher.launch(null) }
 
     // The review grid draws its own floating header and full-height grid, so it stands outside the
     // scrolling sub-page scaffold the other states share.
@@ -156,12 +162,7 @@ fun ImportScreen(
                                 textAlign = TextAlign.Center,
                             )
                             Spacer(Modifier.height(20.dp))
-                            PrimaryButton(
-                                label = stringResource(R.string.import_choose_zip),
-                                onClick = launchPicker,
-                                icon = Icons.Default.Download,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            ImportSourceButtons(onPickZip = launchPicker, onPickFolder = launchFolderPicker)
                         }
                     }
                     if (history.isNotEmpty()) {
@@ -285,12 +286,7 @@ fun ImportScreen(
                         }
                     }
                     Spacer(Modifier.height(16.dp))
-                    PrimaryButton(
-                        label = stringResource(R.string.import_choose_zip),
-                        onClick = launchPicker,
-                        icon = Icons.Default.Download,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    ImportSourceButtons(onPickZip = launchPicker, onPickFolder = launchFolderPicker)
                 }
 
                 // Review is handled above, outside the scaffold.
@@ -512,6 +508,24 @@ private fun ImportHistoryRow(
             )
         }
     }
+}
+
+/** The two ways to pick an export: one `.zip`, or a folder of exported or plain photo files. */
+@Composable
+private fun ImportSourceButtons(onPickZip: () -> Unit, onPickFolder: () -> Unit) {
+    PrimaryButton(
+        label = stringResource(R.string.import_choose_zip),
+        onClick = onPickZip,
+        icon = Icons.Default.Download,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(10.dp))
+    SecondaryButton(
+        label = stringResource(R.string.import_choose_folder),
+        onClick = onPickFolder,
+        icon = Icons.Outlined.FolderOpen,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /** The plain-language account of why an import stopped, by what kind of failure it was. */

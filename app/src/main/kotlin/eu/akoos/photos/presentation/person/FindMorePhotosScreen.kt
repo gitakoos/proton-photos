@@ -93,7 +93,7 @@ fun FindMorePhotosScreen(
     ) {
         if (state.found.isEmpty() && !state.running) {
             Text(
-                stringResource(R.string.find_more_empty),
+                stringResource(state.stopNotice ?: R.string.find_more_empty),
                 color = FgMute,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
@@ -131,6 +131,17 @@ fun FindMorePhotosScreen(
                                 color = colors.accent,
                             )
                         }
+                    }
+                }
+                val notice = state.stopNotice
+                if (!state.running && notice != null) {
+                    item(span = { GridItemSpan(maxLineSpan) }, key = "sweep_notice") {
+                        Text(
+                            stringResource(notice),
+                            color = colors.fgMute,
+                            fontSize = 12.5.sp,
+                            modifier = Modifier.padding(bottom = 10.dp),
+                        )
                     }
                 }
                 items(items = state.found, key = { it.faceId }) { found ->

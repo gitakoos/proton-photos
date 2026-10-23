@@ -125,6 +125,14 @@ class CloudGpsBackfillScheduler @Inject constructor(
             // Photos in a client-side hidden album are kept out of the proactive geocode; snapshot the
             // member set once so the walk stays consistent across its pages.
             val hiddenLinkIds = albumService.observeHiddenAlbumMemberLinkIds().first()
+            // A fix at exactly 0, 0 is a photo with no GPS; one stored before that was recognised goes here.
+            try {
+                photoLocationDao.deleteNoFixRows()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "dropping 0, 0 fixes failed: ${e.message}")
+            }
             while (true) {
                 // Defer this background walk while the phone is hot, low on battery, or in the power saver; it
                 // resumes on its own once conditions clear. Not gated on interaction: it runs quietly in the

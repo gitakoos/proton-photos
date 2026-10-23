@@ -11,5 +11,14 @@
                 <action android:name="eu.akoos.photos.CLIP_SPIKE" />
             </intent-filter>
         </receiver>
+        <!-- Debug-only face file check (export a 2.5.0 face file, compare face data). DUMP keeps it to adb. -->
+        <receiver
+            android:name="eu.akoos.photos.facefile.FaceFileCheckReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP">
+            <intent-filter>
+                <action android:name="eu.akoos.photos.FACE_FILE_CHECK" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

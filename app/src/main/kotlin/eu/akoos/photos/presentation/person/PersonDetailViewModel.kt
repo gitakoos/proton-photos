@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.person
 
 import android.content.Context
 import android.util.Log
+import eu.akoos.photos.util.retryOnDbTear
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -74,9 +75,13 @@ import eu.akoos.photos.domain.usecase.rankSuggestionCandidates
 import eu.akoos.photos.domain.usecase.unpackEmbedding
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.toPersonUi
+import eu.akoos.photos.util.FaceDiagnostics
 import javax.inject.Inject
 
 private const val TAG = "PersonDetailVM"
+
+/** The page title's stream label in the logs and the copied diagnostics. */
+private const val IDENTITY_TEAR_TAG = "PersonDetailIdentity"
 
 data class PersonDetailUiState(
     /** The person the page shows, set as soon as it starts loading. */
@@ -243,8 +248,8 @@ class PersonDetailViewModel @Inject constructor(
      *  disappears later (merged away, or an emptied Unsorted bucket) emits nothing, so the title holds
      *  while the page leaves. */
     private fun observeIdentity(account: String, personId: Long): Flow<PageIdentity> =
-        personDao.observePeopleForUser(account)
-            .map { people -> people.firstOrNull { it.id == personId } }
+        personDao.observePersonForUser(account, personId)
+            .retryOnDbTear(IDENTITY_TEAR_TAG, maxAttempts = 5, onRetry = { FaceDiagnostics.recordDbTear(IDENTITY_TEAR_TAG, it) })
             .withIndex()
             .filter { (index, row) -> index == 0 || row != null }
             .map { (_, row) ->

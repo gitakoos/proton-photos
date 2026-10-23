@@ -203,9 +203,10 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     }
 
     /** Privacy-safe crash record: the exception TYPES and code stack frames only. Never the exception
-     *  message and never a full framework dump, so a URI, file path, display name, or email can't leak
-     *  into a shared log (mirrors the SyncDiagnostics rule). No device/app header here; the Settings
-     *  copy adds the model and version. */
+     *  message (bar a cursor window's own numbers-only text, [eu.akoos.photos.util.dbTearMessage]) and
+     *  never a full framework dump, so a URI, file path, display name, or email can't leak into a shared
+     *  log (mirrors the SyncDiagnostics rule). No device/app header here; the Settings copy adds the model
+     *  and version. */
     private fun writeCrashLog(throwable: Throwable) {
         val file = eu.akoos.photos.util.CrashLogStore.file(filesDir).apply { parentFile?.mkdirs() }
         if (file.length() > 128L * 1024) file.writeText("")
@@ -215,7 +216,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
             var depth = 0
             while (t != null && depth < 8) {
                 if (depth > 0) append("caused by ")
-                append(t.javaClass.name).append('\n')
+                append(t.javaClass.name)
+                eu.akoos.photos.util.dbTearMessage(t)?.let { append(": ").append(it) }
+                append('\n')
                 for (frame in t.stackTrace.take(12)) append("    at ").append(frame.toString()).append('\n')
                 t = t.cause
                 depth++

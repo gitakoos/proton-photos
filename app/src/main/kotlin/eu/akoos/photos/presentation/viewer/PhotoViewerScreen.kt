@@ -89,6 +89,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.PrivacyTip
+import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.MoreVert
@@ -113,6 +114,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.pluralStringResource
@@ -132,6 +136,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -158,6 +163,7 @@ import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.OfflinePin
@@ -333,6 +339,14 @@ private suspend fun androidx.compose.ui.input.pointer.AwaitPointerEventScope.awa
     }
 }
 
+/** Whether [item] is a still image rather than a video. */
+private fun isImageMedia(item: GalleryItem?): Boolean = when (item) {
+    is GalleryItem.LocalOnly -> item.local.mimeType.startsWith("image/")
+    is GalleryItem.Synced -> item.local.mimeType.startsWith("image/")
+    is GalleryItem.CloudOnly -> item.cloud.mimeType.startsWith("image/")
+    null -> false
+}
+
 /** Whether the editors take [item]: an image or a video, from its device file or its Drive copy. */
 private fun isEditableMedia(item: GalleryItem?): Boolean = when (item) {
     is GalleryItem.LocalOnly -> item.local.mimeType.let { it.startsWith("image/") || it.startsWith("video/") }
@@ -485,6 +499,8 @@ fun PhotoViewerScreen(
     // Copy-text gate: the master switch and the per-feature Copy text opt-in together. With it off the
     // long press to read is inert, so no OCR model is ever fetched from the viewer.
     val copyTextEnabled by viewModel.copyTextEnabled.collectAsStateWithLifecycle()
+    // Settings, Appearance: a long press opens the top-right menu instead of selecting text.
+    val longPressOpensMenu by viewModel.longPressOpensMenu.collectAsStateWithLifecycle()
     // Per-feature face gate: the people-in-this-photo action needs this AND the master switch.
     val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
     // The people the face index found on the settled photo, and whether their name tags are pinned over
@@ -588,6 +604,7 @@ fun PhotoViewerScreen(
     val addedToAlbumTemplate = stringResource(R.string.viewer_added_to_album)
     val coverUpdatedMessage = stringResource(R.string.album_cover_updated)
     val shareChooserTitle = stringResource(R.string.share_chooser_title)
+    val setAsChooserTitle = stringResource(R.string.viewer_set_as)
     val shareContext = LocalContext.current
     val appLock = LocalAppLock.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -620,6 +637,13 @@ fun PhotoViewerScreen(
                 viewModel.shareIntent.collect { intent ->
                     appLock.runWhenOpen {
                         shareContext.startActivity(Intent.createChooser(intent, shareChooserTitle))
+                    }
+                }
+            }
+            launch {
+                viewModel.setAsIntent.collect { intent ->
+                    appLock.runWhenOpen {
+                        runCatching { shareContext.startActivity(Intent.createChooser(intent, setAsChooserTitle)) }
                     }
                 }
             }
@@ -894,9 +918,11 @@ fun PhotoViewerScreen(
         // A panorama and an inline motion clip each put their own frame on screen under their own
         // placement, so the fit the overlay works from would not be the one the user is looking at.
         // A photo the device hide keeps behind a blur is not one to lift words off either.
-        val blocked = isPanoramaMode ||
-            motionVideoFile != null ||
-            (settledLinkId != null && settledLinkId in hiddenCloudLinkIds)
+        val blocked = viewerTextReadBlocked(
+            panorama = isPanoramaMode,
+            motionClip = motionVideoFile != null,
+            hiddenBlurred = settledLinkId != null && settledLinkId in hiddenCloudLinkIds,
+        )
         if (!blocked) {
             textHaptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
             textJob?.cancel()
@@ -1261,15 +1287,26 @@ fun PhotoViewerScreen(
     // a tap, double tap, long press, or upward drag they do not consume lands here.
     val rootReadText   by rememberUpdatedState(readTextOnPhoto)
     val rootCopyTextOn by rememberUpdatedState(copyTextEnabled)
+    val rootOpensMenu  by rememberUpdatedState(longPressOpensMenu)
     val rootTextState  by rememberUpdatedState(textState)
     val rootMetaShown  by rememberUpdatedState(showMetadata)
     val rootScale      by rememberUpdatedState(scale)
     val rootSlideshow  by rememberUpdatedState(isPlaying)
+    // The top-right menu's open state, held here so a long press opens the same menu the button does. The
+    // bars' bounds tell a press on a control from one on the photo, and are zero while a bar is not shown.
+    var menuExpanded by remember { mutableStateOf(false) }
+    var topBarBounds by remember { mutableStateOf(Rect.Zero) }
+    var bottomBarBounds by remember { mutableStateOf(Rect.Zero) }
+    var viewerOrigin by remember { mutableStateOf(Offset.Zero) }
+    val rootTopBar by rememberUpdatedState(topBarBounds)
+    val rootBottomBar by rememberUpdatedState(bottomBarBounds)
+    val rootOrigin by rememberUpdatedState(viewerOrigin)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Bg0)
             .onSizeChanged { containerSize = it }
+            .onGloballyPositioned { viewerOrigin = it.positionInRoot() }
             // Sees every press and lift first and consumes none, for the video chrome's auto-hide.
             .observeTouches(viewerTouches)
             .pointerInput("viewer-taps") {
@@ -1280,8 +1317,31 @@ fun PhotoViewerScreen(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val slop = viewConfiguration.touchSlop
                     val longPressMs = viewConfiguration.longPressTimeoutMillis
-                    val readIfAllowed = {
-                        if (rootCopyTextOn && rootTextState !is ViewerTextState.Showing && !rootMetaShown) rootReadText()
+                    val longPress = { pressAt: Offset ->
+                        val onControls = rootTopBar.translate(-rootOrigin).contains(pressAt) ||
+                            rootBottomBar.translate(-rootOrigin).contains(pressAt)
+                        when (viewerLongPressAction(
+                            opensMenu = rootOpensMenu,
+                            trashMode = trashMode,
+                            copyTextEnabled = rootCopyTextOn,
+                            textShowing = rootTextState is ViewerTextState.Showing,
+                            metadataShown = rootMetaShown,
+                            onControls = onControls,
+                        )) {
+                            ViewerLongPressAction.ReadText -> rootReadText()
+                            ViewerLongPressAction.OpenMenu -> {
+                                textHaptics.performHapticFeedback(
+                                    androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress,
+                                )
+                                // The menu hangs off the top bar, so the bar comes up with it, and a
+                                // running slideshow stops as it does for a tap rather than turning the
+                                // page under an open menu.
+                                if (rootSlideshow) isPlaying = false
+                                showOverlays = true
+                                menuExpanded = true
+                            }
+                            ViewerLongPressAction.None -> Unit
+                        }
                     }
                     val toggleChrome = {
                         if (rootTextState is ViewerTextState.Showing) {
@@ -1315,7 +1375,7 @@ fun PhotoViewerScreen(
                         }
                     }
                     when (val first = awaitViewerTapOutcome(down.id, down.position, slop, longPressMs)) {
-                        ViewerTapOutcome.HeldLong -> readIfAllowed()
+                        ViewerTapOutcome.HeldLong -> longPress(down.position)
                         ViewerTapOutcome.Cancelled -> Unit
                         // A tap whose up a control consumed (a chrome button) belongs to that control,
                         // so tapping the top or bottom bar uses the button without also hiding the bar.
@@ -1327,7 +1387,7 @@ fun PhotoViewerScreen(
                                 toggleChrome()
                             } else when (awaitViewerTapOutcome(second.id, second.position, slop, longPressMs)) {
                                 is ViewerTapOutcome.Lifted -> zoomToward(second.position)
-                                ViewerTapOutcome.HeldLong -> { toggleChrome(); readIfAllowed() }
+                                ViewerTapOutcome.HeldLong -> { toggleChrome(); longPress(second.position) }
                                 ViewerTapOutcome.Cancelled -> toggleChrome()
                             }
                         }
@@ -2099,8 +2159,10 @@ fun PhotoViewerScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopStart),
         ) {
+            DisposableEffect(Unit) { onDispose { topBarBounds = Rect.Zero } }
             Box(
                 modifier = Modifier
+                    .onGloballyPositioned { topBarBounds = it.boundsInRoot() }
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .padding(horizontal = 12.dp, vertical = 12.dp),
@@ -2133,7 +2195,9 @@ fun PhotoViewerScreen(
                     if (!trashMode) {
                     Box {
                         val appColors = eu.akoos.photos.presentation.theme.AppColors.current
-                        var menuExpanded by remember { mutableStateOf(false) }
+                        // The open state outlives this button, so the menu still closes when the bar
+                        // goes away under it.
+                        DisposableEffect(Unit) { onDispose { menuExpanded = false } }
                         ViewerBubble(onClick = { menuExpanded = true }) {
                             val anyInFlight = isDeleting || isSavingToDevice || isSharing
                             if (anyInFlight) {
@@ -2151,31 +2215,19 @@ fun PhotoViewerScreen(
                             containerColor = appColors.cardBg,
                             border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
                         ) {
-                            // Menu order runs from the most-reached actions to the destructive ones:
-                            // share, then the metadata cluster (details, edit, strip), then the album
-                            // and storage actions, then playback, and finally hide and delete at the
-                            // bottom where an accidental tap is least likely.
+                            // Menu order: the favourite and edit listed turned sideways, then the people and
+                            // metadata cluster, then the album and storage actions, then playback, and hide
+                            // at the bottom where an accidental tap is least likely.
 
                             // Synced / CloudOnly carry a Drive linkId, LocalOnly does not, so the
                             // album actions below need a cloud-backed item.
                             val isCloudItem = settledItem is GalleryItem.Synced ||
                                 settledItem is GalleryItem.CloudOnly
 
-                            // The menu lists everything the buttons around the photo do as well, so every action is in
-                            // one place whichever way the screen is turned.
-                            if (settledItem != null && outbound.anyShareRoute) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.share_action), color = FgPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.Share, null,
-                                        tint = Accent, modifier = Modifier.size(20.dp)) },
-                                    onClick = {
-                                        menuExpanded = false
-                                        viewModel.loadPublicLink(settledItem)
-                                        showShareSheet = true
-                                    },
-                                )
-                            }
-                            if (settledItem != null && !isReadOnlyAlbum) {
+                            // The menu holds what the buttons around the photo do not show. Share, details, save to
+                            // Drive, taking a photo out of a shared album and delete are buttons in both layouts;
+                            // favourite and edit are buttons only upright, so turned sideways they are listed here.
+                            if (isLandscapeNow && settledItem != null && !isReadOnlyAlbum) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(
                                         if (isFavorite) R.string.cd_favorite_remove else R.string.cd_favorite_add,
@@ -2232,15 +2284,6 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(stringResource(R.string.viewer_menu_details), color = FgPrimary) },
-                                leadingIcon = { Icon(Icons.Default.Info, null,
-                                    tint = Accent, modifier = Modifier.size(20.dp)) },
-                                onClick = {
-                                    menuExpanded = false
-                                    showMetadata = true
-                                },
-                            )
                             // Add labels opens the selection drawer's sheet for the photo on screen.
                             // Offered where the details sheet shows the labels box: not on a vaulted,
                             // hidden or shared photo.
@@ -2260,6 +2303,28 @@ fun PhotoViewerScreen(
                                     onClick = {
                                         menuExpanded = false
                                         addLabelsAction.onClick()
+                                    },
+                                )
+                            }
+                            // Recognize text runs the read the long press starts, so it is in reach however the
+                            // long press is set. Offered for an image shown as itself, not a panorama, an inline
+                            // motion clip, or a photo the device hide keeps behind a blur. With Copy text off the
+                            // item says where to turn it on, so no model is fetched from here.
+                            if (isImageMedia(settledItem) && !viewerTextReadBlocked(
+                                    panorama = isPanoramaMode,
+                                    motionClip = motionVideoFile != null,
+                                    hiddenBlurred = menuLinkId != null && menuLinkId in hiddenCloudLinkIds,
+                                )
+                            ) {
+                                val copyTextOffMessage = stringResource(R.string.viewer_text_off)
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_recognize_text), color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.TextFields, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        if (copyTextEnabled) readTextOnPhoto()
+                                        else scope.launch { snackbarHostState.showSnackbar(copyTextOffMessage) }
                                     },
                                 )
                             }
@@ -2392,22 +2457,6 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // A photo of a shared-with-me album can be copied into this user's own Drive.
-                            if (isReadOnlyAlbum && sourceAlbumLinkId != null && isSignedIn &&
-                                (settledItem is GalleryItem.CloudOnly || settledItem is GalleryItem.Synced)
-                            ) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.viewer_save_to_drive),
-                                        color = FgPrimary) },
-                                    leadingIcon = { Icon(Icons.Default.CloudDownload, null,
-                                        tint = Accent, modifier = Modifier.size(20.dp)) },
-                                    enabled = !isSavingToDrive,
-                                    onClick = {
-                                        menuExpanded = false
-                                        viewModel.saveToMyDrive(settledItem, sourceAlbumLinkId)
-                                    },
-                                )
-                            }
                             // "Set as album cover" is offered only when the viewer was opened from
                             // an album. No-op when the user owns the album but the cover is
                             // unchanged, because setAlbumCover is idempotent server-side.
@@ -2429,10 +2478,9 @@ fun PhotoViewerScreen(
                             }
                             // Taking the photo back out of the album it was opened from, the one
                             // route that does not mean backing out to the grid and long-pressing.
-                            // Gated on the album's write grant rather than ownership, so an editor
-                            // on a shared album keeps this while the rest of the mutating menu
-                            // stays hidden.
-                            if (sourceAlbumLinkId != null && canRemoveFromAlbum && isCloudItem) {
+                            // An editor on a shared album has this as a button beside the photo, so
+                            // the menu lists it for the albums the user owns.
+                            if (sourceAlbumLinkId != null && canRemoveFromAlbum && isCloudItem && !isReadOnlyAlbum) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.album_remove_from_album),
                                         color = ErrorColor) },
@@ -2458,6 +2506,20 @@ fun PhotoViewerScreen(
                                     onClick = {
                                         menuExpanded = false
                                         viewModel.downloadToDevice(settledItem)
+                                    },
+                                )
+                            }
+                            // Set as hands a still to the system's wallpaper and contact-photo setters, the
+                            // way a share hands it to another app, so it is offered wherever sharing is.
+                            if (isImageMedia(settledItem)) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.viewer_set_as), color = FgPrimary) },
+                                    leadingIcon = { Icon(Icons.Default.Wallpaper, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    enabled = !isSharing,
+                                    onClick = {
+                                        menuExpanded = false
+                                        settledItem?.let { viewModel.setAsItem(it) }
                                     },
                                 )
                             }
@@ -2531,20 +2593,6 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Destroying someone else's photo is not a guest's call whatever album rights they hold, and
-                            // Drive rejects it, so a shared album offers no delete.
-                            if (!isReadOnlyAlbum) {
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.viewer_menu_delete), color = ErrorColor) },
-                                    leadingIcon = { Icon(Icons.Default.DeleteOutline, null,
-                                        tint = ErrorColor, modifier = Modifier.size(20.dp)) },
-                                    enabled = !isDeleting,
-                                    onClick = {
-                                        menuExpanded = false
-                                        showDeleteSheet = true
-                                    },
-                                )
-                            }
                         }
                     }
                     }
@@ -2570,8 +2618,10 @@ fun PhotoViewerScreen(
                 is GalleryItem.CloudOnly -> chromeSettled.cloud.mimeType.startsWith("video/")
                 null -> false
             }
+        DisposableEffect(Unit) { onDispose { bottomBarBounds = Rect.Zero } }
         Column(
             modifier = Modifier
+                .onGloballyPositioned { bottomBarBounds = it.boundsInRoot() }
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(bottom = if (chromeLandscape) 4.dp else 16.dp),

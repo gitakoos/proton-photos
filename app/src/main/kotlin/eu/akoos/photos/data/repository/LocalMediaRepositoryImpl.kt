@@ -40,6 +40,7 @@ import androidx.core.content.ContextCompat
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.util.toLowerHex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -412,6 +413,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
         stopTimeoutMs = SHARE_STOP_TIMEOUT_MS,
         isStale = { lastScanEnvironment.let { it != null && it != mediaEnvironment() } },
         onReadFailure = { Log.w(TAG, "device media scan failed: ${it.message}") },
+        onEvent = { eu.akoos.photos.util.PerfDiagnostics.count("devicescan-$it") },
     ) {
         lastScanEnvironment = mediaEnvironment()
         queryAllMedia()
@@ -596,7 +598,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
             if (e is kotlinx.coroutines.CancellationException) throw e
             return@withContext null
         }
-        digest.digest().joinToString("") { "%02x".format(it) }
+        digest.digest().toLowerHex()
     }
 
     override suspend fun queryByUri(uri: String): LocalMediaItem? = withContext(Dispatchers.IO) {

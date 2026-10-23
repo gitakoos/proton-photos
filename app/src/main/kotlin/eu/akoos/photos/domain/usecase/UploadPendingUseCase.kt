@@ -55,15 +55,14 @@ import eu.akoos.photos.data.preferences.CompressionPreferences
 import eu.akoos.photos.data.upload.MirrorOverwriteJournal
 import eu.akoos.photos.data.upload.UploadImageCompressor
 import eu.akoos.photos.data.upload.VideoUploadCompressor
-import eu.akoos.photos.data.upload.compression.VideoUploadCompression
+import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.domain.entity.QueueSource
 import eu.akoos.photos.domain.entity.StorageFullException
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
-import eu.akoos.photos.domain.entity.UploadCompressionTier
 import eu.akoos.photos.domain.entity.compression.CompressionOutcome
 import eu.akoos.photos.domain.entity.compression.CompressionSkipReason
-import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
+import eu.akoos.photos.domain.entity.compression.CompressionSettings
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -99,17 +98,6 @@ private val UPLOAD_TEMP_PREFIXES = listOf(
 /** Only upload temps older than this are swept, so an in-flight upload or a recently-preserved
  *  resume dir (both freshly created) is never removed; the age gate is the whole safety. */
 private val STALE_UPLOAD_TEMP_MS = java.util.concurrent.TimeUnit.DAYS.toMillis(3)
-
-/**
- * Process-wide gate serialising video transcodes to one at a time. A device has a single
- * hardware video encoder, so two concurrent transcodes (possible with [UPLOAD_PARALLELISM]
- * in-flight uploads) would fail or thrash. File-level so the limit holds across every upload
- * coroutine and batch regardless of how many use-case instances exist.
- *
- * A video hands its upload slot back while it waits for and runs the transcode (see [releasedWhile]),
- * so photos keep uploading behind a long transcode.
- */
-private val videoTranscodeGate = Semaphore(1)
 
 /** Compressible videos per batch allowed past the video lane at once, which bounds the temp copies on
  *  disk. Taken before the upload slot, so a video waiting here holds nothing a photo needs. */
@@ -195,7 +183,7 @@ class UploadPendingUseCase @Inject constructor(
     private val pendingMetadataEditDao: eu.akoos.photos.data.db.dao.PendingMetadataEditDao,
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
     private val structuralStripper: UploadStructuralStripper,
-    private val videoCompression: VideoUploadCompression,
+    private val compressionStep: UploadCompressionStep,
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
@@ -371,15 +359,10 @@ class UploadPendingUseCase @Inject constructor(
         val albumOptInFolders = prefs.albumMirrorFolders()
 
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
-        val compressOnUpload = prefs[SettingsKeys.COMPRESS_ON_UPLOAD] ?: false
-        val compressHdrPhotos = prefs[SettingsKeys.COMPRESS_HDR_PHOTOS] ?: false
-        val compressTier = UploadCompressionTier
-            .fromOrdinalOrDefault(prefs[SettingsKeys.COMPRESS_UPLOAD_TIER] ?: -1)
         // #108: the video path re-encodes at its own tier, seeded from the shared value on upgrade.
-        val videoProfile = CompressionPreferences.videoProfile(prefs)
+        val compression = CompressionPreferences.settings(prefs)
         val mirrorStripToLocal = prefs[SettingsKeys.MIRROR_STRIP_TO_LOCAL] ?: false
         val mirrorCompressToLocal = prefs[SettingsKeys.MIRROR_COMPRESS_TO_LOCAL] ?: false
-        val compressVideosOnUpload = prefs[SettingsKeys.COMPRESS_VIDEO_ON_UPLOAD] ?: false
         val renameToCaptureDate = prefs[SettingsKeys.RENAME_TO_CAPTURE_DATE] ?: false
         val deleteLocalAfterBackup = prefs[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] ?: false
         // Authorship has no upload preference of its own, so it rides on the software one: the
@@ -681,7 +664,7 @@ class UploadPendingUseCase @Inject constructor(
             // cancellation: a stop keeps the remaining rows from starting while an upload already running
             // finishes.
             val (videos, others) = pending.partition { state ->
-                compressVideosOnUpload && mimeByUri[state.localUri]?.startsWith("video/") == true
+                compression.videos && mimeByUri[state.localUri]?.startsWith("video/") == true
             }
             val shouldStop = { stopRequested.get() || storageFullHit.get() }
             suspend fun upload(state: SyncState) = uploadSemaphore.withPermit {
@@ -695,13 +678,9 @@ class UploadPendingUseCase @Inject constructor(
                     albumTargetUris = albumTargetUris,
                     albumOptInFolders = albumOptInFolders,
                     stripOnUpload = stripOnUpload,
-                    compressOnUpload = compressOnUpload,
-                    compressHdrPhotos = compressHdrPhotos,
-                    compressTier = compressTier,
-                    videoProfile = videoProfile,
+                    compression = compression,
                     mirrorStripToLocal = mirrorStripToLocal,
                     mirrorCompressToLocal = mirrorCompressToLocal,
-                    compressVideosOnUpload = compressVideosOnUpload,
                     renameToCaptureDate = renameToCaptureDate,
                     deleteLocalAfterBackup = deleteLocalAfterBackup,
                     stripConfig = stripConfig,
@@ -777,13 +756,9 @@ class UploadPendingUseCase @Inject constructor(
         albumTargetUris: Set<String>,
         albumOptInFolders: eu.akoos.photos.data.preferences.AlbumMirrorFolders,
         stripOnUpload: Boolean,
-        compressOnUpload: Boolean,
-        compressHdrPhotos: Boolean,
-        compressTier: UploadCompressionTier,
-        videoProfile: VideoCompressionProfile,
+        compression: CompressionSettings,
         mirrorStripToLocal: Boolean,
         mirrorCompressToLocal: Boolean,
-        compressVideosOnUpload: Boolean,
         renameToCaptureDate: Boolean,
         deleteLocalAfterBackup: Boolean,
         stripConfig: MetadataStripConfig,
@@ -886,6 +861,8 @@ class UploadPendingUseCase @Inject constructor(
             // (below) so a failed upload never renames a file that has no Drive copy. Strip-on-upload
             // runs against the bytes independently, so a stripped + renamed photo still gets erased.
             var mirrorRenameTarget: String? = null
+            // Set once a mirror step rewrote the on-device file, whose bytes may then differ from the upload's.
+            var deviceRewritten = false
             val renamedItem = if (renameToCaptureDate) {
                 val newName = uploadRenamedName(rawLocalItem.displayName, rawLocalItem.dateTaken, System.currentTimeMillis())
                 Log.d(UPLOAD_TAG, "Rename-on-upload: '${rawLocalItem.displayName}' → '$newName'")
@@ -991,6 +968,7 @@ class UploadPendingUseCase @Inject constructor(
                     // cloud. Silent with all-files; a refused write leaves the original intact.
                     val motionMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, motionTemp)
                     if (motionMirrorLanded) {
+                        deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device motion photo wiped for ${localItem.displayName}")
                     }
                     if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, motionMirrorLanded)) {
@@ -1005,6 +983,7 @@ class UploadPendingUseCase @Inject constructor(
                     // file instead. Silent with all-files; a refused write leaves the original intact.
                     val gainMapMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, gainMapTemp)
                     if (gainMapMirrorLanded) {
+                        deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device Ultra HDR photo wiped for ${localItem.displayName}")
                     }
                     if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, gainMapMirrorLanded)) {
@@ -1020,6 +999,7 @@ class UploadPendingUseCase @Inject constructor(
                     // upload it as-is, so the local and the backed-up copy stay byte-identical and pair
                     // by content hash. The wipe is the last step before the upload and is idempotent,
                     // so a failed upload simply retries it.
+                    deviceRewritten = true
                     Log.d(UPLOAD_TAG, "Mirror strip: on-device original wiped for ${localItem.displayName}")
                     if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, deviceRewriteSucceeded = true)) {
                         invalidateMirroredLocation(userId, state.localUri)
@@ -1037,7 +1017,7 @@ class UploadPendingUseCase @Inject constructor(
                             .needsStripTranscode(
                                 localItem.mimeType,
                                 stripOnUpload,
-                                compressOnUpload,
+                                compression.photos,
                                 isMotionPhoto = { structuralStripper.isMotionPhotoUpload(state.localUri) },
                             )
                     ) {
@@ -1072,6 +1052,7 @@ class UploadPendingUseCase @Inject constructor(
                     // write leaves the original intact.
                     val videoMirrorLanded = mirrorStripToLocal && overwriteLocalInPlace(state.localUri, tmp)
                     if (videoMirrorLanded) {
+                        deviceRewritten = true
                         Log.d(UPLOAD_TAG, "Mirror strip: on-device video wiped for ${localItem.displayName}")
                     }
                     if (mirrorRemovedDeviceGps(stripOnUpload && stripConfig.stripGps, mirrorStripToLocal, videoMirrorLanded)) {
@@ -1100,55 +1081,45 @@ class UploadPendingUseCase @Inject constructor(
             // only the primary frame and re-encodes a plain JPEG, which would silently drop the motion
             // trailer. Skip compression for one (the stripped/original bytes upload as-is, keeping the
             // motion). Detection reuses MotionPhotoUtil against the exact bytes about to be compressed.
-            val compressIsMotionPhoto = compressOnUpload &&
-                localItem.mimeType.startsWith("image/") &&
-                structuralStripper.isMotionPhotoUpload(strippedUploadUri)
-            if (compressIsMotionPhoto) {
-                Log.d(UPLOAD_TAG, "Skipping image compression for motion photo ${localItem.displayName}; motion preserved")
-                logCompression(state.localUri, "photo", CompressionOutcome.SKIPPED, CompressionSkipReason.MOTION_PHOTO, localItem.sizeBytes)
-            }
             // An Ultra HDR still is the same story with a gain map in place of a clip: the compressor
             // decodes only the primary frame, so re-encoding drops the appended gain map and the photo
-            // loses its HDR rendition. Skip compression for one so the stripped/original bytes upload
-            // whole. Detection reuses UltraHdrUtil against the exact bytes about to be compressed.
-            val compressHasGainMap = !compressIsMotionPhoto &&
-                eu.akoos.photos.data.upload.UploadImageCompressor.skipsCompressionForGainMap(
-                    localItem.mimeType,
-                    compressOnUpload,
-                    compressHdrPhotos,
-                    hasGainMap = { structuralStripper.hasGainMapUpload(strippedUploadUri) },
-                )
-            if (compressHasGainMap) {
-                Log.d(UPLOAD_TAG, "Skipping image compression for Ultra HDR ${localItem.displayName}; gain map preserved")
-                logCompression(state.localUri, "photo", CompressionOutcome.SKIPPED, CompressionSkipReason.ULTRA_HDR, localItem.sizeBytes)
+            // loses its HDR rendition, so one is skipped too unless the HDR opt-in is on. Both probes
+            // read the exact bytes about to be compressed.
+            //
+            // The compressor rebuilds the output JPEG's EXIF from the source it recompresses, so it
+            // must honour the strip directly: when the source is a format the strip step could not
+            // rewrite (HEIC), strippedUploadUri fell back to the untouched original and copying its
+            // EXIF unfiltered would re-inject the GPS / camera tags the user asked to remove. Pass
+            // the effective config so those groups are dropped; a no-op when strip-on-upload is off,
+            // so a non-stripping upload still carries the full EXIF byte-for-byte as before.
+            val compressStripConfig = if (stripOnUpload) stripConfig else MetadataStripConfig()
+            val photoCompression = compressionStep.photo(strippedUploadUri, localItem.mimeType, compression, compressStripConfig)
+            val compressIsMotionPhoto = photoCompression.isMotionPhoto
+            when (photoCompression.reason) {
+                CompressionSkipReason.MOTION_PHOTO ->
+                    Log.d(UPLOAD_TAG, "Skipping image compression for motion photo ${localItem.displayName}; motion preserved")
+                CompressionSkipReason.ULTRA_HDR ->
+                    Log.d(UPLOAD_TAG, "Skipping image compression for Ultra HDR ${localItem.displayName}; gain map preserved")
+                else -> Unit
             }
-            val uploadUri: String = if (compressOnUpload && !compressIsMotionPhoto && !compressHasGainMap &&
-                localItem.mimeType.startsWith("image/")
-            ) {
-                // The compressor rebuilds the output JPEG's EXIF from the source it recompresses, so it
-                // must honour the strip directly: when the source is a format the strip step could not
-                // rewrite (HEIC), strippedUploadUri fell back to the untouched original and copying its
-                // EXIF unfiltered would re-inject the GPS / camera tags the user asked to remove. Pass
-                // the effective config so those groups are dropped; a no-op when strip-on-upload is off,
-                // so a non-stripping upload still carries the full EXIF byte-for-byte as before.
-                val compressStripConfig = if (stripOnUpload) stripConfig else MetadataStripConfig()
-                val outcome = UploadImageCompressor.compress(context, strippedUploadUri, compressTier, compressStripConfig)
-                logCompression(state.localUri, "photo", outcome.outcome, outcome.reason, outcome.sourceBytes, outcome.file?.length())
-                val compressed = outcome.file
-                if (compressed != null) {
-                    compressedFile = compressed
-                    producedMime = UploadImageCompressor.JPEG_MIME
-                    // The stripped temp (if any) is now superseded by the compressed copy, so delete
-                    // it so a strip+compress pass doesn't leak the intermediate. The compressed file is
-                    // the only temp we still need, tracked for cleanup in the finally below.
-                    strippedFile?.delete()
-                    strippedFile = null
-                    Log.d(UPLOAD_TAG, "Compressed ${localItem.displayName} for upload (tier=${compressTier.name})")
-                    android.net.Uri.fromFile(compressed).toString()
-                } else {
-                    strippedUploadUri
-                }
-            } else if (compressVideosOnUpload && localItem.mimeType.startsWith("video/")) {
+            photoCompression.outcome?.let { outcome ->
+                logCompression(
+                    state.localUri, "photo", outcome, photoCompression.reason,
+                    photoCompression.sourceBytes ?: localItem.sizeBytes, photoCompression.file?.length(),
+                )
+            }
+            val photoCompressed = photoCompression.file
+            val uploadUri: String = if (photoCompressed != null) {
+                compressedFile = photoCompressed
+                producedMime = photoCompression.producedMime
+                // The stripped temp (if any) is now superseded by the compressed copy, so delete
+                // it so a strip+compress pass doesn't leak the intermediate. The compressed file is
+                // the only temp we still need, tracked for cleanup in the finally below.
+                strippedFile?.delete()
+                strippedFile = null
+                Log.d(UPLOAD_TAG, "Compressed ${localItem.displayName} for upload (tier=${compression.tier.name})")
+                android.net.Uri.fromFile(photoCompressed).toString()
+            } else if (compressionStep.compressesVideo(localItem.mimeType, compression)) {
                 // Probe, plan and transcode behind the process-wide gate, with this item's upload slot
                 // handed back meanwhile so photos keep uploading. A stopped worker cancels the
                 // transcode. Without a file the original uploads; the diagnostics line says why.
@@ -1169,17 +1140,15 @@ class UploadPendingUseCase @Inject constructor(
                 }
                 val attempt = uploadSlot.releasedWhile {
                     emitPhase(UploadStatus.Queued, localItem.sizeBytes)
-                    videoTranscodeGate.withPermit {
-                        videoCompression.compress(
-                            sourceUri = strippedUploadUri,
-                            profile = videoProfile,
-                            captureDateMs = localItem.dateTaken,
-                            onPlanned = { plan ->
-                                emitPhase(UploadStatus.Compressing, localItem.sizeBytes, VideoUploadCompressor.Progress(0f, plan.codec, null))
-                            },
-                            onProgress = { emitPhase(UploadStatus.Compressing, localItem.sizeBytes, it) },
-                        )
-                    }.also { emitPhase(UploadStatus.Queued, it.file?.length() ?: localItem.sizeBytes) }
+                    compressionStep.video(
+                        uri = strippedUploadUri,
+                        settings = compression,
+                        captureMs = localItem.dateTaken,
+                        onPlanned = { plan ->
+                            emitPhase(UploadStatus.Compressing, localItem.sizeBytes, VideoUploadCompressor.Progress(0f, plan.codec, null))
+                        },
+                        onProgress = { emitPhase(UploadStatus.Compressing, localItem.sizeBytes, it) },
+                    ).also { emitPhase(UploadStatus.Queued, it.file?.length() ?: localItem.sizeBytes) }
                 }
                 // Back to the pre-network phase for the encrypt that follows.
                 emitPhase(UploadStatus.Encrypting, attempt.file?.length() ?: localItem.sizeBytes)
@@ -1357,7 +1326,7 @@ class UploadPendingUseCase @Inject constructor(
             // crash-safe (stage a backup, truncate-write, restore on failure), so the original is never
             // left partial. Independent of the strip mirror: the local ends up COMPRESSED, and stripped
             // only when mirrorStripToLocal is also on.
-            val mirrorCompressImage = compressOnUpload && mirrorCompressToLocal &&
+            val mirrorCompressImage = compression.photos && mirrorCompressToLocal &&
                 localItem.mimeType.startsWith("image/")
             if (
                 mirrorCompressImage &&
@@ -1378,14 +1347,15 @@ class UploadPendingUseCase @Inject constructor(
                     // (compression failed or not smaller) skips silently.
                     compressedFile?.let { local ->
                         if (overwriteLocalInPlace(state.localUri, local)) {
+                            deviceRewritten = true
                             Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed for ${localItem.displayName}")
                         }
                     }
                 } else if (!compressIsMotionPhoto &&
                     !eu.akoos.photos.data.upload.UploadImageCompressor.skipsCompressionForGainMap(
                         localItem.mimeType,
-                        compressOnUpload,
-                        compressHdrPhotos,
+                        compression.photos,
+                        compression.hdr,
                         hasGainMap = { structuralStripper.hasGainMapUpload(state.localUri) },
                     )
                 ) {
@@ -1400,9 +1370,10 @@ class UploadPendingUseCase @Inject constructor(
                     // compress the on-device original but not to strip it, so it must retain the full
                     // metadata the untouched original carries.
                     val localCompressed = eu.akoos.photos.data.upload.UploadImageCompressor
-                        .compressToTemp(context, state.localUri, compressTier, MetadataStripConfig())
+                        .compressToTemp(context, state.localUri, compression.tier, MetadataStripConfig())
                     if (localCompressed != null) {
                         if (overwriteLocalInPlace(state.localUri, localCompressed)) {
+                            deviceRewritten = true
                             Log.d(UPLOAD_TAG, "Mirror compress: on-device original compressed (strip-free) for ${localItem.displayName}")
                         }
                         localCompressed.delete()
@@ -1412,7 +1383,7 @@ class UploadPendingUseCase @Inject constructor(
             // Mirror-compress the on-device video: reuse the already-transcoded temp, never re-transcode.
             // Safe to mirror when the local content matches that temp: strip mirrored (both stripped) or
             // strip-upload off (neither stripped).
-            if (compressVideosOnUpload && mirrorCompressToLocal && localItem.mimeType.startsWith("video/")) {
+            if (compression.videos && mirrorCompressToLocal && localItem.mimeType.startsWith("video/")) {
                 if (!UploadFormatNaming.isMp4(localItem.mimeType)) {
                     // The transcode always writes MP4, so a .mov, .3gp or .webm original would end up with
                     // bytes that contradict its name and MediaStore type. Leave it untouched.
@@ -1420,6 +1391,7 @@ class UploadPendingUseCase @Inject constructor(
                 } else if (mirrorStripToLocal || !stripOnUpload) {
                     compressedFile?.let { local ->
                         if (overwriteLocalInPlace(state.localUri, local)) {
+                            deviceRewritten = true
                             Log.d(UPLOAD_TAG, "Mirror compress: on-device video compressed for ${localItem.displayName}")
                         }
                     }
@@ -1438,12 +1410,22 @@ class UploadPendingUseCase @Inject constructor(
             // non-cancellably so an interrupt in this window can't leave the row LOCAL_ONLY with
             // a null cloudFileId — which would re-select and re-upload the same file (a Drive
             // duplicate) on the next pass.
+            // The row records the device file as it is now, so reconcile can tell a later edit by another
+            // app from this upload's own mirror rewrite: the hash and the length of the rewritten device
+            // bytes, or the size the device reported when this upload read a file it left alone.
+            val deviceHash = if (deviceRewritten && finalUploadUri != state.localUri) {
+                computeSha1(state.localUri) ?: hash
+            } else {
+                hash
+            }
             val syncedState = state.copy(
                 cloudFileId = cloudId,
-                localHash = hash,
+                localHash = deviceHash,
                 status = SyncStatus.SYNCED,
                 lastSyncSuccessMs = System.currentTimeMillis(),
                 backedUpAtMs = System.currentTimeMillis(),
+                sizeBytes = (if (deviceRewritten) deviceFileLength(state.localUri) else null)
+                    ?: rawLocalItem.sizeBytes.takeIf { it > 0L } ?: state.sizeBytes,
             )
             withContext(NonCancellable) {
                 syncStateRepo.upsert(syncedState, userId)
@@ -2084,6 +2066,11 @@ class UploadPendingUseCase @Inject constructor(
      * `ConfigurationProvider`). The xAttr Common.Digests
      * map carries the same SHA-1 hex so a later cross-client xAttr verify lines up.
      */
+    /** The device file's length as it is now, read from the file itself rather than a scan. */
+    private fun deviceFileLength(uri: String): Long? = runCatching {
+        context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")?.use { it.statSize }
+    }.getOrNull()?.takeIf { it > 0L }
+
     private fun computeSha1(uri: String): String? {
         val digest = MessageDigest.getInstance("SHA-1")
         try {

@@ -54,3 +54,11 @@ data class PhotoLocationEntity(
  * there, in the sea off West Africa, so the maps and the places grouping leave such a fix out.
  */
 fun PhotoLocationEntity.isNullIsland(): Boolean = latitude == 0.0 && longitude == 0.0
+
+/**
+ * Whether [latitude] and [longitude] are a real position: inside the WGS84 ranges and not exactly 0, 0,
+ * which a camera or an app writes when it has no fix. Every read of a photo's GPS goes through this, so a
+ * photo without a real position shows no place instead of the sea off West Africa.
+ */
+fun isUsableGpsFix(latitude: Double, longitude: Double): Boolean =
+    latitude in -90.0..90.0 && longitude in -180.0..180.0 && !(latitude == 0.0 && longitude == 0.0)

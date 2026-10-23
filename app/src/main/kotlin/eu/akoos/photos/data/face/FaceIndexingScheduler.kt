@@ -155,7 +155,8 @@ enum class FaceIndexingState { Idle, WaitingModel, Running, Paused, Done }
  * [FaceIndexingState.WaitingModel]). [heartbeat] climbs while a grouping works with the count standing
  * still (a batch placed, a closing step under way), so a host watching for progress sees the work move; it
  * only ever grows within a process, and 0 means none. [grouping] says the count is faces being placed into
- * groups rather than photos scanned.
+ * groups rather than photos scanned. [waitingForWifi] says an idle walk stopped because its remaining photos
+ * are only in Drive and the full-res downloads wait for Wi-Fi, so the card can say why it is not moving.
  */
 data class FaceIndexingProgress(
     val state: FaceIndexingState,
@@ -163,6 +164,7 @@ data class FaceIndexingProgress(
     val total: Int,
     val heartbeat: Long = 0L,
     val grouping: Boolean = false,
+    val waitingForWifi: Boolean = false,
 )
 
 /** How large a not-yet-indexed backlog promotes the initial walk onto a foreground service with a
@@ -188,6 +190,20 @@ fun shouldRunForegroundIndex(pending: Int, backgroundEnabled: Boolean): Boolean 
  */
 internal fun shouldMarkScannedOnNullSource(loadTimedOut: Boolean, miss: SourceMiss): Boolean =
     loadTimedOut || miss == SourceMiss.PERMANENT
+
+internal enum class MlScanVerdict { STAY_PENDING, RECORD, RECORD_THEN_RETHROW }
+
+/**
+ * What a photo whose source loaded comes to once its detection is over. Face models that would not open
+ * say nothing about the photo, so it stays pending with no scan marker and waits out a transient backoff.
+ * A detection that threw on the photo itself is recorded with the faces found before the throw, so a
+ * poison photo is not retried on every pass, and the failure is then rethrown. Pure so it is unit-tested.
+ */
+internal fun mlScanVerdict(openFailed: Boolean, runFailed: Boolean): MlScanVerdict = when {
+    openFailed -> MlScanVerdict.STAY_PENDING
+    runFailed -> MlScanVerdict.RECORD_THEN_RETHROW
+    else -> MlScanVerdict.RECORD
+}
 
 /**
  * Whether a finished walk pass should group the account's waiting faces into people. It needs a walk
@@ -235,6 +251,26 @@ internal const val FACE_GROUPING_FOREGROUND_MIN = 5_000
  */
 internal fun shouldHostGroupingInForeground(ungrouped: Int, backgroundEnabled: Boolean, walkRunning: Boolean): Boolean =
     backgroundEnabled && !walkRunning && ungrouped >= FACE_GROUPING_FOREGROUND_MIN
+
+/**
+ * Whether a batched grouping writes its count of faces over [current], the progress as it stands now: only a run
+ * that was [hosted] ([shouldHostGroupingInForeground], decided on the progress it began under), and only while
+ * [current] is still a grouping's count. A walk pass that starts meanwhile writes its photos count, which the run
+ * then never puts anything back over. Decided on the progress rather than on whether a walk is running, since the
+ * grouping a pass with nothing left to scan runs is hosted from inside that walk. Pure so it is unit-tested
+ * without Android.
+ */
+internal fun groupingOwnsProgress(hosted: Boolean, current: FaceIndexingProgress): Boolean = hosted && current.grouping
+
+/**
+ * Whether a grouping run of [trigger] is a final one, taking a batched grouping's closing steps (the merge, the
+ * recount and the Unsorted bucket): only the run that ends a walk, from a pass with nothing left to scan or one
+ * about to stop. A run a naming, a merge, an assignment or an import asks for, the viewer's and a find-more
+ * scan's, and one while the scan goes on leave those steps, and any an earlier run left owed, to the walk.
+ * Pure so it is unit-tested without Android.
+ */
+internal fun groupingRunEndsWalk(trigger: RegroupTrigger): Boolean =
+    trigger == RegroupTrigger.DRAINED || trigger == RegroupTrigger.PASS_SETTLED
 
 /**
  * Whether a full regroup may start. A forced one (a user naming or merging, an import handing its faces
@@ -405,6 +441,16 @@ internal fun lowerRegroupBaseline(baseline: Int?, ungrouped: Int): Int? =
  */
 internal fun batchedRunDue(ungrouped: Int, baseline: Int?, finalizeOwed: Boolean, finalPass: Boolean): Boolean =
     exceedsRegroupBaseline(ungrouped, baseline) || (finalPass && finalizeOwed)
+
+/**
+ * Whether a batched grouping's owed closing steps ([finalizeOwed]) may be taken now: not within [backoffMs] of
+ * the last grouping that failed ([msSinceLastFailure], null when none has), so a closing step that keeps failing
+ * is tried again after the backoff rather than at every pass end and every retry kick. A failure stamped after
+ * the caller read its clock reads as negative and still holds them back. Pure so it is unit-tested without
+ * Android.
+ */
+internal fun closingStepsDue(finalizeOwed: Boolean, msSinceLastFailure: Long?, backoffMs: Long): Boolean =
+    finalizeOwed && (msSinceLastFailure == null || msSinceLastFailure >= backoffMs)
 
 /**
  * Whether the pass-end grouping goes on from its placement to a full regroup: never for a library grouped in
@@ -644,8 +690,9 @@ class FaceIndexingScheduler @Inject constructor(
      *  drain without re-clustering on every pass. */
     @Volatile private var lastIncrementalClusterMs = 0L
 
-    /** When a full regroup last timed out or threw (elapsedRealtime), or null when none has, so the
-     *  pass-end grouping backs off a failing regroup instead of retrying it on every settled pass. */
+    /** When a full regroup last timed out or threw, or a batched run's closing step failed (elapsedRealtime),
+     *  or null when none has, so the pass-end grouping backs off a failing regroup instead of retrying it on
+     *  every settled pass. */
     @Volatile private var lastFailedRegroupMs: Long? = null
 
     /** When the last full regroup completed (elapsedRealtime), or null before any has, and how long it
@@ -672,7 +719,7 @@ class FaceIndexingScheduler @Inject constructor(
         watchNetworkResume()
         // Mirror every progress emit into the copied diagnostics, so a scan standing still short of the
         // end is legible there rather than a blind spot.
-        scope.launch { progress.collect { FaceDiagnostics.record(it.state.name, it.indexed, it.total) } }
+        scope.launch { progress.collect { FaceDiagnostics.record(it.state.name, it.indexed, it.total, it.grouping) } }
     }
 
     /** Keep [aiEnabled] / [paused] current so a mid-walk toggle is seen on the next per-photo check. */
@@ -681,8 +728,14 @@ class FaceIndexingScheduler @Inject constructor(
             context.settingsDataStore.data.collect { prefs ->
                 aiEnabled = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
                 paused = prefs[SettingsKeys.FACE_INDEXING_PAUSED] == true
+                val wasWifiOnly = fullresWifiOnly
                 fullresWifiOnly = prefs[SettingsKeys.FULLRES_WIFI_ONLY] ?: true
                 autoMerge = prefs[SettingsKeys.FACE_AUTO_MERGE] == true
+                // The card asks for the Wi-Fi-only switch to be turned off to go on; doing so starts the walk at
+                // once rather than leaving it waiting for a trigger that may be hours away.
+                if (shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly, fullresWifiOnly, _progress.value.waitingForWifi)) {
+                    restart.lastUserId?.let { uid -> launch { runCatching { indexAll(uid) } } }
+                }
             }
         }
     }
@@ -845,7 +898,7 @@ class FaceIndexingScheduler @Inject constructor(
                     val paramsOutdated =
                         (prefs[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] ?: 0) != FACE_CLUSTER_PARAMS_VERSION
                     if (BuildConfig.DEBUG || reattached || paramsOutdated) {
-                        val grouped = cluster(userId, RegroupTrigger.DRAINED) { true }
+                        val grouped = cluster(userId, RegroupTrigger.DRAINED)
                         if (paramsOutdated && grouped) {
                             context.settingsDataStore.edit {
                                 it[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] = FACE_CLUSTER_PARAMS_VERSION
@@ -942,9 +995,9 @@ class FaceIndexingScheduler @Inject constructor(
             // then holds only the not-yet-flushed remainder. One flush runs at a time.
             val persistedThisPass = AtomicInteger(0)
             val scanFlushing = AtomicBoolean(false)
-            // A pass keeps going only while the walk is permitted, nothing has fenced its writes off, and the
-            // process has not abandoned its cap of model pairs.
-            val passLive = { active() && writeFence.allows(passToken) && !abandonCap.reached() }
+            // A pass keeps going only while the walk is permitted, nothing has fenced its writes off, the
+            // process has not abandoned its cap of model pairs, and the face models have not failed to open.
+            val passLive = { active() && writeFence.allows(passToken) && !abandonCap.reached() && !ml.openFailed }
             // Hold the shared model gate for the session-resident window, so this face pair and a
             // semantic walk's CLIP session are never both loaded at once (the large-heap OOM risk), and on
             // through the pass-end grouping, so the search model cannot load while a regroup holds every
@@ -1073,7 +1126,7 @@ class FaceIndexingScheduler @Inject constructor(
                     ungrouped = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0),
                     msSinceLastGroup = nowMs - lastIncrementalClusterMs,
                     minIntervalMs = INCREMENTAL_CLUSTER_MIN_INTERVAL_MS,
-                    finalizeOwed = currentFinalizeOwed(userId),
+                    finalizeOwed = finalizeDueNow(userId),
                 )
             ) {
                 lastIncrementalClusterMs = nowMs
@@ -1119,7 +1172,11 @@ class FaceIndexingScheduler @Inject constructor(
                 mlWalkGate.release(MlRail.FACE)
             }
             pushLibraryCounts(userId)
-            FaceDiagnostics.recordSourceBacklog(transientWaiting = retryBook.size(), overBudget = tally.overBudget)
+            FaceDiagnostics.recordSourceBacklog(
+                transientWaiting = retryBook.size(),
+                overBudget = tally.overBudget,
+                deferredOffWifi = if (waitingForWifi(tally)) tally.deferred else 0,
+            )
             val indexedNow = scannedBefore + persistedThisPass.get() + scannedKeys.size
             _progress.value = when {
                 !aiEnabled -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
@@ -1135,7 +1192,11 @@ class FaceIndexingScheduler @Inject constructor(
                 // out a retry backoff). There is no immediate re-kick then, so settle to Idle rather than a
                 // Running spinner that reads as "scanning forever, stuck at N of M". The pending items stay
                 // pending: the tail re-kicks once the earliest retry is due, and any other trigger retries.
-                else -> FaceIndexingProgress(FaceIndexingState.Idle, indexedNow, libraryTotal)
+                // When it is the Wi-Fi-only rule that held them, the card says so: the walk comes back on
+                // its own once the phone is on Wi-Fi ([shouldResumeFaceScanOnUnmetered]).
+                else -> FaceIndexingProgress(
+                    FaceIndexingState.Idle, indexedNow, libraryTotal, waitingForWifi = waitingForWifi(tally),
+                )
             }
         } finally {
             if (holdsGate) mlWalkGate.release(MlRail.FACE)
@@ -1316,9 +1377,10 @@ class FaceIndexingScheduler @Inject constructor(
 
     /** Re-run clustering now (e.g. right after the user named or merged a person) so the name attracts
      *  its other faces without waiting for the next scan pass. Forced, so it runs even while paused, though
-     *  not while names wait to be reattached, short of their grace ([regroupAllowed]). */
+     *  not while names wait to be reattached, short of their grace ([regroupAllowed]). Never a final run
+     *  ([groupingRunEndsWalk]). */
     fun requestRecluster(userId: UserId?) {
-        scope.launch { runCatching { cluster(userId, RegroupTrigger.REQUEST, force = true) { !walkRunning.value } } }
+        scope.launch { runCatching { cluster(userId, RegroupTrigger.REQUEST, force = true) } }
     }
 
     /**
@@ -1328,7 +1390,7 @@ class FaceIndexingScheduler @Inject constructor(
      * ([regroupAllowed]).
      */
     suspend fun regroupNow(userId: UserId?): Boolean =
-        cluster(userId, RegroupTrigger.REQUEST, force = true) { !walkRunning.value }
+        cluster(userId, RegroupTrigger.REQUEST, force = true)
 
     /**
      * Scan just the photo now on screen, so the viewer can offer a face to tag before the background
@@ -1399,8 +1461,8 @@ class FaceIndexingScheduler @Inject constructor(
         // of their grace ([regroupAllowed]): the faces then stay unplaced until the reattach puts the names
         // back and groups. Under the grouping lock, like every grouping.
         groupingLock.withLock {
-            // A scan still running owes the closing steps of a batched grouping to the run that ends it.
-            val finalPass = !walkRunning.value
+            // The closing steps of a batched grouping stay with the run that ends a walk.
+            val finalPass = groupingRunEndsWalk(RegroupTrigger.ON_DEMAND)
             if (!tryAssignNewFaces(userId, finalPass) &&
                 regroupAllowed(
                     force = true,
@@ -1595,17 +1657,28 @@ class FaceIndexingScheduler @Inject constructor(
                     }
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            FaceDiagnostics.recordSweepStop(SweepStop.CANCELLED.label, done.get(), items.size)
+            throw e
+        } catch (e: Throwable) {
+            FaceDiagnostics.recordSweepStop(SweepStop.FAILED.label, done.get(), items.size)
+            throw e
         } finally {
             // Leaving the screen cancels the sweep while a detached run may still be inside the pair; the
             // close then waits for that run to return rather than freeing its sessions under it.
             runCatching { ml.close() }
         }
+        // Workers stop short of the end once the process has abandoned its cap of stalled model pairs.
+        val stop = sweepStopReason(done.get(), items.size, abandonCap.reached())
+        FaceDiagnostics.recordSweepStop(stop.label, done.get(), items.size)
+        if (stop != SweepStop.COMPLETED) send(FaceSweepEvent.Stopped(stop, done.get(), items.size))
         // The sweep added faces to photos the walk had left faceless, so group them once the sweep
         // drains: a newly persisted face then surfaces under the right person on its own, the same way
         // the background walk clusters from its drained branch. Forced, since "Find more photos" is a
         // user action that must group its results even while background indexing is paused. Skipped
-        // when nothing was persisted.
-        if (newFaces.get() > 0) cluster(userId, RegroupTrigger.ON_DEMAND, force = true) { !walkRunning.value }
+        // when nothing was persisted. On the scheduler's own scope, so the screen ends with the sweep
+        // rather than waiting for a grouping that runs meanwhile.
+        if (newFaces.get() > 0) scope.launch { runCatching { cluster(userId, RegroupTrigger.ON_DEMAND, force = true) } }
     }.flowOn(Dispatchers.Default)
 
     /**
@@ -2021,7 +2094,6 @@ class FaceIndexingScheduler @Inject constructor(
                 tally?.stayed(photoKey, miss, SystemClock.elapsedRealtime())
                 return false
             }
-            tally?.movedOn(photoKey)
             // The faces the detection accepts, built inside the bounded run and written below by this worker
             // once the run is over and the ML lock is free, so the database write never holds up another
             // photo's inference nor counts against the inference watchdog. Guarded by its own monitor: a run
@@ -2037,6 +2109,7 @@ class FaceIndexingScheduler @Inject constructor(
             // finally, so a leaked in-flight run keeps a valid bitmap rather than reading a recycled one.
             var inferMs = 0L
             var mlFailure: Throwable? = null
+            var openFailure: Throwable? = null
             try {
                 mlLock.withLock {
                     // A walk photo that waited here while the process abandoned its cap of pairs opens no
@@ -2049,7 +2122,16 @@ class FaceIndexingScheduler @Inject constructor(
                     // Lease the current pair inside the lock: a timeout below abandons exactly this pair, and the
                     // next lock holder opens the fresh one. The lease is released when the detached run ends, so
                     // the pair is never closed under it, even once this caller is cancelled mid-run.
-                    val lease = ml.beginRun()
+                    val lease = try {
+                        ml.beginRun()
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        if (!source.isRecycled) source.recycle()
+                        throw e
+                    } catch (e: Throwable) {
+                        if (!source.isRecycled) source.recycle()
+                        openFailure = e
+                        return@withLock
+                    }
                     val detector = lease.value.detector
                     val embedder = lease.value.embedder
                     val completed = boundedRun(ML_TIMEOUT_MS, mlDispatcher, onRunEnd = lease.release) {
@@ -2125,6 +2207,13 @@ class FaceIndexingScheduler @Inject constructor(
             } catch (e: Throwable) {
                 mlFailure = e
             }
+            val verdict = mlScanVerdict(openFailed = openFailure != null, runFailed = mlFailure != null)
+            if (verdict == MlScanVerdict.STAY_PENDING) {
+                Log.w(TAG, "face models would not open: ${openFailure?.message}")
+                tally?.stayed(photoKey, SourceMiss.TRANSIENT, SystemClock.elapsedRealtime())
+                return false
+            }
+            tally?.movedOn(photoKey)
             // Record the photo even when its detection threw (an OOM on a crop, a bad frame), with whatever
             // faces came before, so a poison photo is not re-decoded and retried on every later pass; a
             // face-free photo is likewise recorded once. The faces and the marker land together, and not at
@@ -2142,7 +2231,7 @@ class FaceIndexingScheduler @Inject constructor(
                 scannedKeys.add(photoKey)
                 true
             }
-            mlFailure?.let { throw it }
+            if (verdict == MlScanVerdict.RECORD_THEN_RETHROW) mlFailure?.let { throw it }
             // Append this processed item to the diagnostics ring (newest-first) and fold it into the run
             // aggregates, so the next tester copy shows per-item load / infer / dl timings and the slowest
             // item rather than only a standing count.
@@ -2508,6 +2597,10 @@ class FaceIndexingScheduler @Inject constructor(
     /** True while a walk may keep going: not stopping, AI on, not paused. */
     private fun active(): Boolean = !stopRequested && aiEnabled && !paused
 
+    /** Whether this pass's deferred photos wait for Wi-Fi ([faceWalkWaitsForWifi]). */
+    private fun waitingForWifi(tally: SourcePassTally): Boolean =
+        faceWalkWaitsForWifi(tally.deferred, fullresWifiOnly, networkObserver.currentlyOnWifi())
+
     /** Starts the pass a walk's tail owes [userId], only while it is still the account last asked for and
      *  still the signed-in one, or the guest while none is ([WalkRestart.mayRestart]). An account read that
      *  fails starts nothing. */
@@ -2601,7 +2694,7 @@ class FaceIndexingScheduler @Inject constructor(
             // matched nobody) are new work, so a launch that finds nothing new does not read them all again,
             // unless a run that ends the walk still owes the closing steps an earlier run left.
             val ungrouped = runCatching { faceDao.unclusteredCount(accountOf(userId)) }.getOrDefault(0)
-            if (!batchedRunDue(ungrouped, currentRegroupBaseline(userId), currentFinalizeOwed(userId), finalPass)) {
+            if (!batchedRunDue(ungrouped, currentRegroupBaseline(userId), finalizeDueNow(userId), finalPass)) {
                 // Nothing new to place, but names put back on the faces since the last run (a restore, an
                 // import) still have to reach their groups: one aggregate, cheap enough to run every time.
                 nameBatchedGroups(userId, fenceToken)
@@ -2653,14 +2746,15 @@ class FaceIndexingScheduler @Inject constructor(
         val startRow = if (finalPass) 0L else currentGroupedUpToRow(userId)
         var runMaxRow = 0L
         val backlogAtStart = runCatching { faceDao.unclusteredCountSince(account, startRow) }.getOrDefault(0)
+        FaceDiagnostics.recordBatchedRunStart(backlogAtStart, finalPass)
         val hosted = shouldHostGroupingInForeground(
             ungrouped = backlogAtStart,
             backgroundEnabled = context.settingsDataStore.data.first()[SettingsKeys.FACE_INDEX_BACKGROUND] != false,
             walkRunning = progressBefore.state == FaceIndexingState.Running,
         )
-        // A walk that starts while this run is hosted owns the progress from then on: this run keeps beating its
-        // heartbeat but writes no count and puts nothing back over the walk's.
-        fun hostsProgress() = hosted && !walkRunning.value
+        // A walk pass that starts while this run is hosted owns the progress from then on: this run keeps beating
+        // its heartbeat but writes no count and puts nothing back over the walk's.
+        fun hostsProgress() = groupingOwnsProgress(hosted, _progress.value)
         if (hosted) {
             _progress.value = progressOf(FaceIndexingState.Running, 0, backlogAtStart, grouping = true)
             FaceIndexingService.start(context, userId, triggersWalk = false)
@@ -2685,7 +2779,9 @@ class FaceIndexingScheduler @Inject constructor(
                     coroutineContext.ensureActive()
                     batch.scanned = 0
                     val createdBefore = batch.created
-                    val handled = clusterFacesUseCase.assignNewFaces(userId, batch) { writeFence.allows(fenceToken) }
+                    val handled = clusterFacesUseCase.assignNewFaces(userId, batch, onTick = { beat() }) {
+                        writeFence.allows(fenceToken)
+                    }
                     if (!handled) return false
                     batches++
                     examined += batch.scanned
@@ -2793,6 +2889,8 @@ class FaceIndexingScheduler @Inject constructor(
         // and, after a final run, nothing: the baseline the pass end measures new faces against, so a later
         // pass does not read the same faces all again.
         val leftover = runCatching { faceDao.unclusteredCount(account) }.getOrDefault(0)
+        // A closing step that failed is tried again once the failure backoff has passed ([closingStepsDue]).
+        if (closingFailed) lastFailedRegroupMs = SystemClock.elapsedRealtime()
         regroupBaseline = RegroupBaseline(
             account, leftover, fenceToken,
             finalizeOwed = !finalPass || closingFailed,
@@ -2856,21 +2954,20 @@ class FaceIndexingScheduler @Inject constructor(
     /**
      * Group every stored face into people while the walk is still permitted to run (a forced call runs
      * regardless), queued behind any grouping already running ([groupingLock]), and not while names wait
-     * to be reattached, a forced call short of their grace ([regroupAllowed]); see [regroupLocked].
-     * [finalPass] is asked once the lock is held, so a scan that started or ended while this waited counts.
+     * to be reattached, a forced call short of their grace ([regroupAllowed]); see [regroupLocked]. Whether it
+     * is a final run follows from [trigger] ([groupingRunEndsWalk]).
      */
     private suspend fun cluster(
         userId: UserId?,
         trigger: RegroupTrigger,
         force: Boolean = false,
-        finalPass: () -> Boolean,
     ): Boolean {
         if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) return false
         return groupingLock.withLock {
             // Checked again once the lock is held: the walk may have been paused, or names staged by an
             // import or a rescan, while this waited.
             if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) false
-            else regroupLocked(userId, trigger, finalPass())
+            else regroupLocked(userId, trigger, groupingRunEndsWalk(trigger))
         }
     }
 
@@ -2911,7 +3008,7 @@ class FaceIndexingScheduler @Inject constructor(
             // groups were edited in place, and the next batched run rebuilds the cache it clears. A run that
             // ends a walk still takes the closing steps an earlier run left owed.
             val ungrouped = runCatching { faceDao.unclusteredCount(accountOf(userId)) }.getOrDefault(0)
-            if (!batchedRunDue(ungrouped, currentRegroupBaseline(userId), currentFinalizeOwed(userId), finalPass)) {
+            if (!batchedRunDue(ungrouped, currentRegroupBaseline(userId), finalizeDueNow(userId), finalPass)) {
                 nameBatchedGroups(userId, fenceToken)
                 return true
             }
@@ -3066,6 +3163,13 @@ class FaceIndexingScheduler @Inject constructor(
     /** Whether the last batched run over [userId]'s faces, while its baseline is still current, left its
      *  closing steps owed. */
     private fun currentFinalizeOwed(userId: UserId?): Boolean = currentBaseline(userId)?.finalizeOwed == true
+
+    /** Whether [userId]'s owed closing steps may be taken now, outside the failure backoff ([closingStepsDue]). */
+    private fun finalizeDueNow(userId: UserId?): Boolean = closingStepsDue(
+        finalizeOwed = currentFinalizeOwed(userId),
+        msSinceLastFailure = lastFailedRegroupMs?.let { SystemClock.elapsedRealtime() - it },
+        backoffMs = FULL_REGROUP_FAILURE_BACKOFF_MS,
+    )
 
     /** The last stored face row a batched run has looked at while the baseline is current, else 0 (read all). */
     private fun currentGroupedUpToRow(userId: UserId?): Long = currentBaseline(userId)?.groupedUpToRow ?: 0L
@@ -3287,18 +3391,27 @@ class FaceIndexingScheduler @Inject constructor(
      * holds a lease on its pair ([beginRun]) that its completion releases; [abandon] and [close] both
      * retire the live pair, which closes at once when idle, else when its last run returns. An abandoned
      * pair therefore closes itself once its wedged run ends, and the next [beginRun] opens a fresh pair,
-     * so no later run shares a session with the wedged one.
+     * so no later run shares a session with the wedged one. A pair that would not open counts no run and
+     * sets [openFailed], which ends the walk's pass.
      */
-    private class FaceMl(
+    internal class FaceMl(
         openDetector: () -> FaceDetector,
         openEmbedder: () -> FaceEmbedder,
     ) : AutoCloseable {
         private val pairs = GuardedSessionHolder { FacePair(openDetector, openEmbedder) }
 
+        @Volatile var openFailed: Boolean = false
+            private set
+
         /** Opens the live pair if needed and counts one run on it. The run's end must call the lease's
          *  release, which [boundedRun] does through its run-end callback. */
         fun beginRun(): SessionLease<FaceRun> =
-            pairs.lease { pair -> FaceRun(pair.detector(), pair.embedder()) }
+            try {
+                pairs.lease { pair -> FaceRun(pair.detector(), pair.embedder()) }
+            } catch (e: Throwable) {
+                openFailed = true
+                throw e
+            }
 
         /** The live detector's min-size drop count for the debug pass-end log; 0 before it opens. */
         fun droppedTooSmall(): Int = pairs.peek()?.droppedTooSmall() ?: 0
@@ -3311,7 +3424,7 @@ class FaceIndexingScheduler @Inject constructor(
     }
 
     /** One detached run's view of a [FaceMl] pair. */
-    private class FaceRun(val detector: FaceDetector, val embedder: FaceEmbedder)
+    internal class FaceRun(val detector: FaceDetector, val embedder: FaceEmbedder)
 
     /** A detector + embedder opened lazily and closed together once no run uses them (see [FaceMl]). */
     private class FacePair(
@@ -3455,6 +3568,15 @@ class FaceIndexingScheduler @Inject constructor(
         const val DECRYPT_TIMEOUT_MS = 20_000L
     }
 }
+
+/** Whether a pass that moved nothing on was held by the Wi-Fi-only rule: it left photos deferred while
+ *  [wifiOnly] holds and the phone is off Wi-Fi ([onWifi]). */
+internal fun faceWalkWaitsForWifi(deferred: Int, wifiOnly: Boolean, onWifi: Boolean): Boolean =
+    deferred > 0 && wifiOnly && !onWifi
+
+/** True when the Wi-Fi-only switch was just turned off while the walk sat waiting for Wi-Fi, so it goes on. */
+internal fun shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly: Boolean, nowWifiOnly: Boolean, waitingForWifi: Boolean): Boolean =
+    wasWifiOnly && !nowWifiOnly && waitingForWifi
 
 /** True only on the edge where the network becomes unmetered, so a scan deferred while off Wi-Fi
  *  resumes on reconnect rather than staying idle, without kicking on the initial replayed state. */

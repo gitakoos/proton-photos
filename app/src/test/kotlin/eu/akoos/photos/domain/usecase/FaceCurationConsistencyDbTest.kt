@@ -61,7 +61,7 @@ class FaceCurationConsistencyDbTest {
             .build()
         assign = AssignPersonNameUseCase(
             db.faceDao(), db.personDao(), db.personManualPhotoDao(),
-            db.notPersonDao(), db.personCoverDao(), db.clusterSummaryDao(),
+            db.notPersonDao(), db.personCoverDao(), db.clusterSummaryDao(), db,
         )
     }
 

@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.usecase.UndoResult
+import eu.akoos.photos.domain.usecase.ledgerPhotos
 import eu.akoos.photos.presentation.common.CloudPhotoCell
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.DestructiveButton
@@ -229,9 +230,11 @@ private fun ImportDetailSummary(detail: ImportDetailData, modifier: Modifier = M
     val colors = AppColors.current
     val entry = detail.entry
     // Derived from the run's own ledger so the split holds even when the capped history no longer carries
-    // this run's summary row: imported counts the rows the run uploaded, alreadyInDrive the deduped rows.
-    val alreadyCount = detail.alreadyInDriveLinkIds.size
-    val importedCount = detail.rows.count { !it.alreadyInDrive }
+    // this run's summary row: imported counts the photos the run uploaded, alreadyInDrive the deduped ones,
+    // a Live Photo once, as the history row and the Done card count it.
+    val photos = ledgerPhotos(detail.rows)
+    val alreadyCount = photos.filter { it.alreadyInDrive }.mapTo(HashSet()) { it.linkId }.size
+    val importedCount = photos.count { !it.alreadyInDrive }
     // The history row folds already-in-Drive matches into its skipped total, so subtract them back out for
     // a true skipped figure and give the deduped matches their own row instead.
     val skippedCount = if (entry != null) (entry.skipped - alreadyCount).coerceAtLeast(0) else 0

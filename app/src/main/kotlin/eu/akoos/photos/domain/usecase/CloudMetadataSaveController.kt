@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -195,12 +196,44 @@ class CloudMetadataSaveController @Inject constructor(
         dismissedFlow.value = true
     }
 
-    /** Stops the drain and hides the progress surface. The queue is cleared, since a user cancel abandons
-     *  the pending edits and a later enqueue must not resume them; any in-flight synced row self-heals
-     *  through the existing sync_state recovery. */
+    /** Stops the drain and hides the progress surface at once. The edits that had not uploaded their
+     *  corrected copy are dropped, so a later enqueue never resumes them. An edit whose copy is already
+     *  in Drive is finished by a fresh drain (album re-add, then the original trashed), since dropping it
+     *  would leave the original and its copy both in Drive. */
     fun cancel() {
         dismissedFlow.value = true
+        val cancelledAt = System.currentTimeMillis()
         WorkManager.getInstance(context).cancelUniqueWork(MetadataEditWorker.UNIQUE_NAME)
-        appScope.launch { dao.clear() }
+        appScope.launch {
+            cancelPendingEdits(
+                dao = dao,
+                cancelledAt = cancelledAt,
+                awaitStopped = {
+                    withTimeoutOrNull(CANCEL_STOP_WAIT_MS) { MetadataEditWorker.activeDrains.first { it == 0 } }
+                },
+                enqueue = { MetadataEditWorker.enqueue(context) },
+            )
+        }
     }
+
+    private companion object {
+        const val CANCEL_STOP_WAIT_MS = 10_000L
+    }
+}
+
+/**
+ * The queue side of a cancel. Waits for the cancelled drain to stop first, so a copy it records while
+ * stopping is not lost to the delete, then drops every edit queued by [cancelledAt] that has no copy in
+ * Drive. Whatever is left had its copy uploaded (or was queued after the cancel) and is handed back to
+ * the drain through [enqueue].
+ */
+internal suspend fun cancelPendingEdits(
+    dao: PendingMetadataEditDao,
+    cancelledAt: Long,
+    awaitStopped: suspend () -> Unit,
+    enqueue: () -> Unit,
+) {
+    awaitStopped()
+    dao.clearNotStarted(cancelledAt)
+    if (dao.count() > 0) enqueue()
 }

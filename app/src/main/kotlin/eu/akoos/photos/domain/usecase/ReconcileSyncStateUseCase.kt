@@ -44,6 +44,7 @@ import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoPairingRow
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.upload.LocalRewrites
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.entity.SyncProgress
@@ -68,6 +69,11 @@ private const val CLOUD_ABSENCE_GRACE_MS = 15 * 60 * 1000L
 /** Failed reads of the cloud listing retried, after a growing pause, before a pass gives up. A
  *  whole-library read that lands mid-write can fail on a window refill the next read gets past. */
 private const val CLOUD_READ_RETRIES = 5L
+
+/** Backed-up files whose size changed that one pass re-hashes, and the bytes it reads for them. The
+ *  rest keep their old stored size, so a later pass still sees the change. */
+internal const val DEVICE_CHANGE_HASHES_PER_PASS = 256
+internal const val DEVICE_CHANGE_HASH_BYTES_PER_PASS = 1L shl 30
 
 /**
  * Pairs the device's photos with their cloud copies and records the outcome in sync_state.
@@ -305,27 +311,21 @@ class ReconcileSyncStateUseCase @Inject constructor(
         syncStateRepo.upsertAll(rest, userId)
         // A guarded update that changed no row means the row is SYNCED now (the upload won the race),
         // so its uri must not be re-queued below: a finished upload is never queued for a duplicate.
-        val skippedDemotionUris = mutableSetOf<String>()
-        for (state in guardedDemotions) {
-            if (syncStateRepo.updateDomainColumnsIfNotSyncedWithCloud(state, userId) == 0) {
-                skippedDemotionUris += state.localUri
-            }
-        }
+        val skippedDemotionUris = syncStateRepo.updateDomainColumnsIfNotSyncedWithCloudAll(guardedDemotions, userId)
         // Now that the fresh rows are durable, stamp each newly-unmatched in-scope local as
-        // queued=AUTO_FOLDER (why it is up for backup + when). markQueued is a per-row UPDATE, so it
+        // queued=AUTO_FOLDER (why it is up for backup + when). The stamp is an UPDATE of existing rows, so it
         // must run AFTER the upsert that created the row. The processor selects on LOCAL_ONLY AND
         // queued, so this stamp is what makes a folder-selected backup upload.
         val autoFolderNow = System.currentTimeMillis()
-        for (uri in freshAutoFolderUris) {
-            if (uri in skippedDemotionUris) continue
-            syncStateRepo.markQueued(uri, eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER, autoFolderNow)
-        }
+        syncStateRepo.markQueuedAll(
+            freshAutoFolderUris.filter { it !in skippedDemotionUris },
+            eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER,
+            autoFolderNow,
+        )
         // RULE 1: clear the queued flag on every row paired to a cloud copy this pass. Unguarded
         // (clearQueuedForSynced) because these rows are known backed up; a still-pending upload's
         // intent is never touched here (those rows are LOCAL_ONLY, not in this set).
-        for (uri in pairedSyncedUris) {
-            syncStateRepo.clearQueuedForSynced(uri)
-        }
+        syncStateRepo.clearQueuedForSyncedAll(pairedSyncedUris)
 
         // Every in-scope local this pass wrote a row for; the out-of-scope de-queue below spares these.
         val inScopeUris: Set<String> = newStates.mapTo(HashSet(newStates.size)) { it.localUri }
@@ -413,6 +413,8 @@ class ReconcileSyncStateUseCase @Inject constructor(
             .filter { it.status == SyncStatus.SYNCED }
             .mapNotNull { it.cloudFileId }
             .toSet()
+        var changeHashes = 0
+        var changeHashBytes = 0L
 
         for (local in localItems) {
             val existingSync = existingByUri[local.uri]
@@ -429,6 +431,25 @@ class ReconcileSyncStateUseCase @Inject constructor(
             if (existingSync?.status == SyncStatus.UPLOADING) continue
             val byId = existingSync?.cloudFileId?.let { cloudByLinkId[it] }
 
+            // A backed-up file another app edited in place keeps its uri and so its pairing; only its size
+            // shows the change. Such a file is re-hashed: bytes that match the stored hash or the cloud
+            // copy, or a rewrite this process made, keep the backup stamp, anything else loses it so free-up
+            // space never deletes bytes Drive does not hold. Nothing is re-uploaded. A file this pass does
+            // not hash keeps its old stored size, so a later pass looks again.
+            val changeCheck = byId != null && existingSync != null && sizeChangedSinceBackup(existingSync, local.sizeBytes)
+            val hashChangeNow = changeCheck && changeHashes < DEVICE_CHANGE_HASHES_PER_PASS &&
+                (changeHashes == 0 || changeHashBytes + local.sizeBytes <= DEVICE_CHANGE_HASH_BYTES_PER_PASS)
+            if (hashChangeNow) {
+                changeHashes++
+                changeHashBytes += local.sizeBytes
+            }
+            val deviceHash: String? = if (hashChangeNow) localRepo.sha1(local.uri) else null
+            val keepStoredSize = changeCheck && deviceHash == null
+            val deviceChanged = deviceHash != null &&
+                !LocalRewrites.consume(local.uri, local.sizeBytes) &&
+                deviceHash != existingSync?.localHash &&
+                cloudRepo.cloudContentHash(deviceHash)?.let { it == byId?.contentHash } != true
+
             // Content hash is the AUTHORITATIVE matcher: it compares the actual file bytes (the local
             // bare SHA-1 converted to Drive's HMAC ContentHash), so it pairs the same photo whatever
             // its name and (unlike name+size) can't be fooled into pairing two DIFFERENT files that
@@ -440,7 +461,12 @@ class ReconcileSyncStateUseCase @Inject constructor(
             val localHashHex: String? = storedHash
                 ?: if (initialListingComplete && cloudByHash.isNotEmpty())
                     localRepo.sha1(local.uri).also { recomputedHash = it } else null
-            val byContentHash = localHashHex?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
+            // A row its cloud id already pairs, and already stamped backed up, comes out the same whatever the
+            // hash match says (the id wins the match and the stamp is kept), so its hash is not looked up:
+            // turning a hash into the Drive form is a keyed HMAC per photo, every pass.
+            val hashDecides = byId == null || existingSync?.backedUpAtMs == null
+            val byContentHash = localHashHex?.takeIf { hashDecides }
+                ?.let { cloudRepo.cloudContentHash(it) }?.let { cloudByHash[it] }
 
             // captureTime in the cloud listing is Unix seconds; LocalMediaItem.dateTaken is ms.
             val localCaptureTimeSec = local.dateTaken / 1000L
@@ -490,17 +516,21 @@ class ReconcileSyncStateUseCase @Inject constructor(
             // on Drive (e.g. paired after a reinstall) becomes reclaimable, but ONLY for a
             // content-certain match (direct cloud id or content-hash). A name/date-only match is not
             // proof the bytes are on Drive, so its stamp stays null and free-up-space leaves it alone.
-            val contentCertain = byId != null || byContentHash != null
+            // A direct cloud id counts only for a row with no stored hash to check it by (a download);
+            // a stored hash must itself match a cloud copy, so a name-paired row or a file whose stamp
+            // was taken off above never earns one through its cloud id alone.
+            val contentCertain = byContentHash != null || (byId != null && storedHash == null)
             newStates += SyncState(
                 localUri = local.uri,
                 cloudFileId = matchedCloud?.linkId,
-                localHash = recomputedHash ?: existingSync?.localHash.orEmpty(),
+                localHash = deviceHash ?: recomputedHash ?: existingSync?.localHash.orEmpty(),
                 cloudHash = matchedCloud?.contentHash,
                 status = status,
                 lastSyncAttemptMs = System.currentTimeMillis(),
                 lastSyncSuccessMs = if (status == SyncStatus.SYNCED) System.currentTimeMillis() else null,
-                backedUpAtMs = existingSync?.backedUpAtMs ?: (if (contentCertain) System.currentTimeMillis() else null),
-                sizeBytes = local.sizeBytes,
+                backedUpAtMs = if (deviceChanged) null
+                    else existingSync?.backedUpAtMs ?: (if (contentCertain) System.currentTimeMillis() else null),
+                sizeBytes = existingSync?.takeIf { keepStoredSize }?.sizeBytes ?: local.sizeBytes,
             )
             // An in-scope local that needs backing up gets an AUTO_FOLDER queue stamp (after the upsert
             // below). This fires for a brand-new LOCAL_ONLY row AND for an existing LOCAL_ONLY row whose
@@ -564,7 +594,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // never on a row queued since the scan began (a "back up now" on a photo taken mid-pass).
         // The scan's word is then checked by a lookup by id, which alone drops the row: a torn read can
         // skip a file, and a trashed one is still restorable.
-        val goneQueued = syncStateRepo.observeAll(userId).first()
+        val goneQueued = syncStateRepo.getLocalOnly(userId)
             .filter {
                 it.status == SyncStatus.LOCAL_ONLY && it.queued &&
                     deviceFileGone(it, scanComplete, allLocalUris, scanStartMs)
@@ -580,7 +610,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // recovery below. Their row sets are disjoint (this pass is queued rows with a null/AUTO_FOLDER
         // source, the next is un-queued rows with a MANUAL/ALBUM_ADD/EDITOR source), so the clearQueued
         // writes here never fall into that filter and a single read is enough.
-        val afterDropSnapshot = syncStateRepo.observeAll(userId).first()
+        val afterDropSnapshot = syncStateRepo.getLocalOnly(userId)
 
         // De-queue stale LOCAL_ONLY entries for items no longer in scope (e.g. the user unchecked
         // their folder/album from the backup selection). The queue is the source of truth, so clearing
@@ -660,6 +690,19 @@ internal fun uploadRewritesBytes(
     compressVideosOnUpload: Boolean,
 ): Boolean = stripOnUpload ||
     if (mimeType.startsWith("video/")) compressVideosOnUpload else compressPhotosOnUpload
+
+/**
+ * Whether [state], a backed-up row, names a device file whose size is no longer the one recorded for it,
+ * the one cheap sign that another app rewrote the file in place. Only a row whose stored hash can be
+ * compared qualifies; a download or an editor placeholder, which store no hash or no size, never does.
+ */
+internal fun sizeChangedSinceBackup(state: SyncState, deviceSizeBytes: Long): Boolean =
+    state.status == SyncStatus.SYNCED &&
+        state.backedUpAtMs != null &&
+        state.localHash.isNotEmpty() &&
+        state.sizeBytes > 0L &&
+        deviceSizeBytes > 0L &&
+        state.sizeBytes != deviceSizeBytes
 
 /**
  * Pure gate for reconcile's downloads-only name+date re-pair. Returns the cloud twin's linkId to

@@ -62,6 +62,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.net.toUri
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.presentation.util.findActivity
 import eu.akoos.photos.BuildConfig
 import kotlinx.coroutines.flow.first
@@ -133,6 +134,7 @@ import eu.akoos.photos.presentation.settings.SemanticSearchScreen
 import eu.akoos.photos.presentation.settings.AppearanceSettingsScreen
 import eu.akoos.photos.presentation.settings.LandingTabScreen
 import eu.akoos.photos.presentation.settings.ClockFormatScreen
+import eu.akoos.photos.presentation.settings.ViewerSettingsScreen
 import eu.akoos.photos.presentation.settings.LanguageSettingsScreen
 import eu.akoos.photos.presentation.settings.NotificationSettingsScreen
 import eu.akoos.photos.presentation.settings.PendingDeleteHandler
@@ -195,6 +197,7 @@ sealed class Screen(val route: String) {
     data object Viewer : Screen("viewer")
     data object AlbumDetail : Screen("album_detail")
     data object AlbumPhotoPicker : Screen("album_photo_picker")
+    data object ExternalPick : Screen("external_pick")
     data object SyncFolders : Screen("sync_folders")
     data object DeviceFolderDetail : Screen("device_folder_detail")
     data object ExcludedFolders : Screen("excluded_folders")
@@ -229,8 +232,10 @@ sealed class Screen(val route: String) {
     data object LandingTab : Screen("landing_tab")
     data object ThemeSettings : Screen("theme_settings")
     data object LanguageSettings : Screen("language_settings")
+    data object ViewerSettings : Screen("viewer_settings")
     data object ClockFormatSettings : Screen("clock_format_settings")
     data object NotificationSettings : Screen("notification_settings")
+    data object SdkSettings : Screen("sdk_settings")
     data object TimelineFilter : Screen("timeline_filter")
     data object TimelineLayout : Screen("timeline_layout")
     data object TimelineOnThisDay : Screen("timeline_on_this_day")
@@ -381,6 +386,12 @@ fun NavGraph(
      *  of Gallery so the back press lands the user on their gallery. */
     externalEditRequest: ExternalEditRequest? = null,
     onExternalEditConsumed: () -> Unit = {},
+    /** Set by MainActivity when another app asks for a photo (GET_CONTENT / PICK). The album picker
+     *  opens as the only screen, and [onExternalPickDone] hands its photos back. */
+    externalPickRequest: eu.akoos.photos.presentation.picker.PickRequest? = null,
+    externalPickWorking: Boolean = false,
+    onExternalPickDone: (List<GalleryItem>) -> Unit = {},
+    onExternalPickCancel: () -> Unit = {},
     navViewModel: NavViewModel = hiltViewModel(),
 ) {
     val navController = rememberNavController()
@@ -647,6 +658,20 @@ fun NavGraph(
             navController.navigate(Screen.PhotoEditor.route) {
                 popUpTo(navController.graph.id) { inclusive = true }
             }
+        }
+    }
+
+    // Another app asking for a photo gets the album picker as the only screen, so back returns to it,
+    // signed in or not. An app not set up yet answers with nothing rather than open sign-in or the
+    // setup wizard inside the asking app.
+    LaunchedEffect(externalPickRequest, startupRouteForExternal) {
+        if (externalPickRequest == null) return@LaunchedEffect
+        when (startupRouteForExternal) {
+            StartupRoute.Ready, StartupRoute.LocalOnly -> navController.navigate(Screen.ExternalPick.route) {
+                popUpTo(navController.graph.id) { inclusive = true }
+            }
+            StartupRoute.NotLoggedIn, StartupRoute.NeedsOnboarding -> onExternalPickCancel()
+            StartupRoute.Unknown -> Unit
         }
     }
 
@@ -1537,6 +1562,27 @@ fun NavGraph(
             }
         }
 
+        composable(Screen.ExternalPick.route) {
+            val request = externalPickRequest
+            if (request == null) {
+                LaunchedEffect(Unit) { onExternalPickCancel() }
+            } else {
+                GalleryPickScreen(
+                    albumLinkId = "",
+                    albumName = stringResource(
+                        if (request.allowMultiple) R.string.picker_title_many else R.string.picker_title_one,
+                    ),
+                    excludeLinkIds = emptySet(),
+                    onBack = onExternalPickCancel,
+                    onAdded = {},
+                    viewModel = hiltViewModel(),
+                    onDone = onExternalPickDone,
+                    doneWorking = externalPickWorking,
+                    singlePick = !request.allowMultiple,
+                )
+            }
+        }
+
         val settingsPage: @Composable (Boolean) -> Unit = { more ->
             SettingsScreen(
                 more                      = more,
@@ -1549,6 +1595,7 @@ fun NavGraph(
                 onPrivacySecurityClick    = { navController.navigate(Screen.PrivacySecuritySettings.route) },
                 onPermissionsClick        = { navController.navigate(Screen.Permissions.route) },
                 onNotificationsClick      = { navController.navigate(Screen.NotificationSettings.route) },
+                onSdkClick                = { navController.navigate(Screen.SdkSettings.route) },
                 onLabelsClick             = { navController.navigate(Screen.LabelsSettings.route) },
                 onRecentlyDeletedClick    = { navController.navigate(Screen.Trash.route) },
                 onFindDuplicatesClick     = { navController.navigate(Screen.DuplicateFinder.route) },
@@ -1610,6 +1657,13 @@ fun NavGraph(
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
                 onAlbumsSettingsClick = { navController.navigate(Screen.AlbumsSettings.route) },
                 onLandingTabClick = { navController.navigate(Screen.LandingTab.route) },
+                onViewerClick = { navController.navigate(Screen.ViewerSettings.route) },
+            )
+        }
+
+        composable(Screen.ViewerSettings.route) {
+            ViewerSettingsScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -1673,6 +1727,12 @@ fun NavGraph(
 
         composable(Screen.LanguageSettings.route) {
             LanguageSettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.SdkSettings.route) {
+            eu.akoos.photos.presentation.settings.SdkSettingsScreen(
                 onBack = { navController.popBackStack() },
             )
         }

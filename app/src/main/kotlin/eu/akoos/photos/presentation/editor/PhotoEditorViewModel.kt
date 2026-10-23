@@ -87,6 +87,7 @@ import eu.akoos.photos.util.MotionPhotoUtil
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import javax.inject.Inject
 
 /** What we're editing — drives the save flow. */
@@ -368,6 +369,11 @@ enum class SaveMode { Overwrite, Copy }
  */
 internal fun overwriteCoercesToCopy(overwritable: Boolean, isMotionPhoto: Boolean): Boolean =
     !overwritable || isMotionPhoto
+
+/** Fails a save whose `Bitmap.compress` reported false, so a partly written file is rolled back or removed. */
+internal fun requireEncoded(ok: Boolean) {
+    if (!ok) throw IOException("The edited image could not be encoded")
+}
 
 /**
  * The pixel size an export downscales to: the longest edge capped at [maxDim], aspect preserved, and
@@ -2882,7 +2888,7 @@ class PhotoEditorViewModel @Inject constructor(
         dateTakenMs: Long,
     ): Uri? {
         val copyUri = hiddenStorage.create("jpg", dateTakenMs) { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            requireEncoded(bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out))
         } ?: error("Could not write the copy into the hidden area")
         // Re-inject the source's EXIF so the copy is a metadata-complete twin except for the pixels,
         // matching what a copy of any other device photo keeps.
@@ -2919,7 +2925,7 @@ class PhotoEditorViewModel @Inject constructor(
         // same backup on the next launch.
         LocalOverwriteGuard(context).run(source.uri, expectedSize = bitmap.width to bitmap.height) {
             context.contentResolver.openOutputStream(srcUri, "wt")?.use { out ->
-                bitmap.compress(format, quality, out)
+                requireEncoded(bitmap.compress(format, quality, out))
             } ?: error("openOutputStream returned null for $srcUri")
             // Re-inject the original's EXIF onto the just-written file, forcing NORMAL orientation and the
             // edited pixel size. Never fails the save (the helper swallows unsupported-format / IO errors).
@@ -3028,27 +3034,32 @@ class PhotoEditorViewModel @Inject constructor(
         }
         val uri = context.contentResolver.insert(collection, values)
             ?: error("MediaStore insert failed")
-        context.contentResolver.openOutputStream(uri)?.use { out ->
-            bitmap.compress(format, quality, out)
-        } ?: error("openOutputStream returned null")
-        // Re-inject the original's EXIF (capture time, camera, GPS) into the fresh copy while it is still
-        // pending, so the published file is a metadata-complete twin of the original except the pixels.
-        // A local copy keeps the full original EXIF (strip-on-upload governs only the cloud copy). The
-        // source may be a foreign External URI whose EXIF can't be read; the helper tolerates that.
-        val originalExif = ExifHelper.readExifSnapshot(context, source.uri)
-        if (originalExif != null) {
-            runCatching {
-                context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
-                    ExifHelper.copyExifPreservingOrientation(
-                        originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
-                    )
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                requireEncoded(bitmap.compress(format, quality, out))
+            } ?: error("openOutputStream returned null")
+            // Re-inject the original's EXIF (capture time, camera, GPS) into the fresh copy while it is still
+            // pending, so the published file is a metadata-complete twin of the original except the pixels.
+            // A local copy keeps the full original EXIF (strip-on-upload governs only the cloud copy). The
+            // source may be a foreign External URI whose EXIF can't be read; the helper tolerates that.
+            val originalExif = ExifHelper.readExifSnapshot(context, source.uri)
+            if (originalExif != null) {
+                runCatching {
+                    context.contentResolver.openFileDescriptor(uri, "rw")?.use { pfd ->
+                        ExifHelper.copyExifPreservingOrientation(
+                            originalExif, pfd.fileDescriptor, bitmap.width, bitmap.height,
+                        )
+                    }
                 }
             }
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            values.clear()
-            values.put(MediaStore.Images.Media.IS_PENDING, 0)
-            context.contentResolver.update(uri, values, null, null)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                context.contentResolver.update(uri, values, null, null)
+            }
+        } catch (e: Exception) {
+            runCatching { context.contentResolver.delete(uri, null, null) }
+            throw e
         }
         recordCaptureDateIfUnset(uri, dateTakenMs)
         return uri
@@ -3080,10 +3091,10 @@ class PhotoEditorViewModel @Inject constructor(
     private suspend fun saveCloud(bitmap: Bitmap, source: EditorSource.Cloud, mode: SaveMode, quality: Int, editTimestampMs: Long, originalCaptureMs: Long): Uri? {
         val cacheDir = File(context.cacheDir, "editor").also { it.mkdirs() }
         val tempFile = File(cacheDir, "edit_${editTimestampMs}.jpg")
-        FileOutputStream(tempFile).use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
-        }
         try {
+            FileOutputStream(tempFile).use { out ->
+                requireEncoded(bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out))
+            }
             val userId = accountManager.getPrimaryUserId().first()
                 ?: error("Not signed in")
             val tempUri = Uri.fromFile(tempFile)
@@ -3205,10 +3216,10 @@ class PhotoEditorViewModel @Inject constructor(
     ): CloudUploadResult {
         val cacheDir = File(context.cacheDir, "editor").also { it.mkdirs() }
         val tempFile = File(cacheDir, "synced_${editTimestampMs}.jpg")
-        FileOutputStream(tempFile).use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
-        }
         try {
+            FileOutputStream(tempFile).use { out ->
+                requireEncoded(bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out))
+            }
             val tempUri = Uri.fromFile(tempFile)
             val displayName = when (mode) {
                 SaveMode.Overwrite -> cloud.displayName

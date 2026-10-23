@@ -24,6 +24,7 @@ package eu.akoos.photos.data.crypto
 
 import android.util.Base64
 import android.util.Log
+import eu.akoos.photos.util.toLowerHex
 import me.proton.core.crypto.common.context.CryptoContext
 import me.proton.core.crypto.common.pgp.PGPHeader
 import me.proton.core.crypto.common.pgp.PacketType
@@ -60,14 +61,15 @@ private const val TAG = "DriveCrypto"
 /**
  * Extracts (latitude, longitude) from a plaintext XAttr JSON blob produced by [DriveCryptoHelper].
  * The Location block is optional (absent when the photo had no GPS), so a missing/malformed block
- * returns null. Coordinates outside the valid WGS84 ranges are rejected. Pure and main-process safe.
+ * returns null. Coordinates outside the valid WGS84 ranges, and the 0, 0 written for no fix, are rejected.
+ * Pure and main-process safe.
  */
 fun parsePhotoLocation(xAttrJson: String): Pair<Double, Double>? = runCatching {
     val location = JSONObject(xAttrJson).optJSONObject("Location") ?: return@runCatching null
     if (!location.has("Latitude") || !location.has("Longitude")) return@runCatching null
     val lat = location.getDouble("Latitude")
     val lon = location.getDouble("Longitude")
-    if (lat in -90.0..90.0 && lon in -180.0..180.0) lat to lon else null
+    if (eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lon)) lat to lon else null
 }.getOrNull()
 
 /**
@@ -728,18 +730,29 @@ class DriveCryptoHelper @Inject constructor(
     fun sha256(data: ByteArray): ByteArray = MessageDigest.getInstance("SHA-256").digest(data)
 
     /** Hex-encoded SHA-256. */
-    fun sha256Hex(data: ByteArray): String = sha256(data).joinToString("") { "%02x".format(it) }
+    fun sha256Hex(data: ByteArray): String = sha256(data).toLowerHex()
 
     /**
      * HMAC-SHA256 of the plaintext name with the raw NodeHashKey bytes — the Hash field in album /
      * link creation, letting the server look up links by name without learning the plaintext.
      */
     fun computeNameHash(plaintextName: String, nodeHashKeyBytes: ByteArray): String {
-        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
-        mac.init(javax.crypto.spec.SecretKeySpec(nodeHashKeyBytes, "HmacSHA256"))
-        val hmac = mac.doFinal(plaintextName.toByteArray(Charsets.UTF_8))
-        return hmac.joinToString("") { "%02x".format(it) }
+        val mac = nameHashMac(nodeHashKeyBytes)
+        return mac.doFinal(plaintextName.toByteArray(Charsets.UTF_8)).toLowerHex()
     }
+
+    /** This thread's HMAC for [keyBytes], set up once per key: reconcile hashes every photo of the library
+     *  with the same key on every pass. A Mac is not thread-safe, hence one per thread; doFinal resets it. */
+    private fun nameHashMac(keyBytes: ByteArray): javax.crypto.Mac {
+        val held = nameHashMacs.get()
+        if (held != null && held.first.contentEquals(keyBytes)) return held.second
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        mac.init(javax.crypto.spec.SecretKeySpec(keyBytes, "HmacSHA256"))
+        nameHashMacs.set(keyBytes.copyOf() to mac)
+        return mac
+    }
+
+    private val nameHashMacs = ThreadLocal<Pair<ByteArray, javax.crypto.Mac>?>()
 
     /**
      * Signs the revision manifest — the raw SHA-256 bytes of every block (32 × count) concatenated
@@ -809,7 +822,9 @@ class DriveCryptoHelper @Inject constructor(
         val durationSeconds = durationMillis / 1000.0
         val durationLiteral = if (durationMillis == 0L) "0" else "%.3f".format(java.util.Locale.US, durationSeconds).trimEnd('0').trimEnd('.')
         // Location block — only when the caller supplied coords (i.e. GPS not stripped).
-        val locationClause = if (latitude != null && longitude != null) {
+        val locationClause = if (latitude != null && longitude != null &&
+            eu.akoos.photos.data.db.entity.isUsableGpsFix(latitude, longitude)
+        ) {
             val lat = "%s".format(java.util.Locale.US, latitude)
             val lon = "%s".format(java.util.Locale.US, longitude)
             ""","Location":{"Latitude":$lat,"Longitude":$lon}"""

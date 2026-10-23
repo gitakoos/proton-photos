@@ -173,9 +173,14 @@ object CoreModule {
     @Singleton
     fun provideAppStore(): AppStore = AppStore.GooglePlay
 
+    /**
+     * The least an account must be to sign in. External, as the official Drive app sets it: a Proton
+     * account signed up with another provider's email and no Proton address signs in as it is, instead
+     * of being sent to create one; an account with a Proton address meets it too.
+     */
     @Provides
     @Singleton
-    fun provideAccountType(): AccountType = AccountType.Internal
+    fun provideAccountType(): AccountType = AccountType.External
 
     @Provides
     @Singleton

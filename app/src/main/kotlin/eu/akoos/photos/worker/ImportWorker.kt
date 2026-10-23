@@ -27,7 +27,6 @@ import android.content.Context
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
-import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -49,6 +48,7 @@ import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.ImportStagedDao
+import eu.akoos.photos.data.importer.ImportSourceFactory
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.domain.importer.ImportAlbumMode
@@ -59,11 +59,10 @@ import eu.akoos.photos.util.ImportEventLog
 import eu.akoos.photos.domain.usecase.ImportProgress
 import eu.akoos.photos.domain.usecase.ImportSummary
 import eu.akoos.photos.domain.usecase.ImportTakeoutUseCase
-import java.io.IOException
 import java.util.UUID
 
 /**
- * Uploads the review-kept entries of a picked import `.zip` into the primary account's Drive Photos as
+ * Uploads the review-kept entries of a picked import `.zip` or folder into the primary account's Drive Photos as
  * a foreground service, so the run survives the picker screen closing AND a process kill. The heavy
  * lifting lives in [ImportTakeoutUseCase]; this worker is the durable shell around it: the notification
  * and the progress publish.
@@ -75,7 +74,7 @@ import java.util.UUID
  * Uniqueness ([uniqueName], keyed on the zip uri) with [ExistingWorkPolicy.KEEP] so double-enqueuing
  * the same zip does not run two imports over it at once.
  *
- * Input data: [KEY_ZIP_URI], the picked zip's `content://` uri string, which is also the run's [zipId]
+ * Input data: [KEY_ZIP_URI], the picked zip's or folder's `content://` uri string, which is also the run's [zipId]
  * (its stable identity across a kill). No account (guest) is a clean no-op: there is no Drive to import
  * into, so the worker returns success without touching anything.
  */
@@ -84,6 +83,7 @@ class ImportWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted private val params: WorkerParameters,
     private val importTakeoutUseCase: ImportTakeoutUseCase,
+    private val importSourceFactory: ImportSourceFactory,
     private val importStagedDao: ImportStagedDao,
     private val accountManager: AccountManager,
 ) : CoroutineWorker(context, params) {
@@ -133,19 +133,15 @@ class ImportWorker @AssistedInject constructor(
         var terminalPosted = false
         ImportEventLog.record(context.filesDir, "upload ${if (runAttemptCount > 0) "retry attempt=$runAttemptCount" else "start"}")
         return try {
-            // The use case bridges the synchronous zip callbacks to suspend work via runBlocking, so it
+            // The use case bridges the synchronous reader callbacks to suspend work via runBlocking, so it
             // MUST run on a background dispatcher, never the main-safe worker default alone.
             val summary = withContext(Dispatchers.IO) {
                 importTakeoutUseCase.uploadStaged(
                     userId = userId,
                     zipId = zipId,
                     runId = runId,
-                    fileName = resolveFileName(uri),
                     albumMode = albumMode,
-                    openZip = {
-                        applicationContext.contentResolver.openInputStream(uri)
-                            ?: throw IOException("cannot open zip input stream for $uri")
-                    },
+                    source = importSourceFactory.open(uri),
                     onProgress = { progress -> publish(progress) },
                 )
             }
@@ -187,7 +183,7 @@ class ImportWorker @AssistedInject constructor(
                 "upload stopped" + if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) " reason=$stopReason" else "",
             )
             withContext(NonCancellable) {
-                runCatching { importTakeoutUseCase.recordPartialHistory(runId, zipId, resolveFileName(uri)) }
+                runCatching { importTakeoutUseCase.recordPartialHistory(runId, zipId, importSourceFactory.displayName(uri)) }
             }
             throw e
         } catch (e: Exception) {
@@ -209,30 +205,6 @@ class ImportWorker @AssistedInject constructor(
                 runCatching { NotificationManagerCompat.from(context).cancel(NotificationIds.IMPORT) }
             }
         }
-    }
-
-    /**
-     * The display name to record the run under: the provider's own name for [uri] where it exposes one
-     * (the picker's `content://` document), else the uri's last path segment, else the raw uri string.
-     * Best-effort and never fatal, so a provider that answers nothing still yields a usable label.
-     */
-    private fun resolveFileName(uri: Uri): String {
-        val fromProvider = runCatching {
-            applicationContext.contentResolver.query(
-                uri,
-                arrayOf(OpenableColumns.DISPLAY_NAME),
-                null,
-                null,
-                null,
-            )?.use { row ->
-                if (!row.moveToFirst()) return@use null
-                val idx = row.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0) row.getString(idx) else null
-            }
-        }.getOrNull()
-        return fromProvider?.takeIf { it.isNotBlank() }
-            ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
-            ?: uri.toString()
     }
 
     /**
@@ -332,7 +304,7 @@ class ImportWorker @AssistedInject constructor(
         const val TAG = "import_worker"
         const val CHANNEL_ID = "import"
 
-        /** Input: the picked zip's content uri string, which is also the resume ledger's zipId. */
+        /** Input: the picked zip's or folder's content uri string, which is also the resume ledger's zipId. */
         const val KEY_ZIP_URI = "zipUri"
 
         /** Input: the run id minted at confirm time, grouping this run's uploaded-photo undo ledger. */

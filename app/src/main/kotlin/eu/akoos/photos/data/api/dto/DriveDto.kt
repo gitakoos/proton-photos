@@ -275,6 +275,8 @@ data class PhotoMetaDto(
     @SerialName("CaptureTime") val captureTime: Long,
     @SerialName("ContentHash") val contentHash: String? = null,
     @SerialName("Tags") val tags: List<Long> = emptyList(),
+    /** Set on the video of a Live Photo: the link of the still it belongs to, so Drive keeps the pair as one photo. */
+    @SerialName("MainPhotoLinkID") val mainPhotoLinkId: String? = null,
 )
 
 @Serializable

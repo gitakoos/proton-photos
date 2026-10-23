@@ -189,6 +189,28 @@ internal val WhatsNew260FourthPreview = WhatsNewRelease(
 )
 
 /**
+ * What the fifth 2.6.0 preview added to the fourth. The head entry of the list below lists only the cards added
+ * since, so a preview reader does not meet the same cards twice; the 2.6.0 release follows the fourth preview's
+ * cards with these, then the later previews' cards.
+ */
+internal val WhatsNew260FifthPreview = WhatsNewRelease(
+    version = "2.6.0",
+    hero = null,
+    features = listOf(
+        WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_260_savedrive_title, R.string.whats_new_260_savedrive_body),
+        WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_mirror_title, R.string.whats_new_260_mirror_body),
+        WhatsNewFeature(Icons.Default.Visibility, R.string.whats_new_260_viewerlayout_title, R.string.whats_new_260_viewerlayout_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_260_bigscan_title, R.string.whats_new_260_bigscan_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_groupfix_title, R.string.whats_new_260_groupfix_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_260_trashpick_title, R.string.whats_new_260_trashpick_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Place, R.string.whats_new_260_mappins_title, R.string.whats_new_260_mappins_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_personpage_title, R.string.whats_new_260_personpage_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Notifications, R.string.whats_new_260_backuppill_title, R.string.whats_new_260_backuppill_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Crop, R.string.whats_new_260_copyfix_title, R.string.whats_new_260_copyfix_body, WhatsNewCategory.Improved),
+    ),
+)
+
+/**
  * What each release announced, newest first. The head of this list is what the post-update screen
  * shows, and the whole list is what Settings offers to browse.
  *
@@ -208,16 +230,15 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         hero = null,
         features = listOf(
             WhatsNewFeature(Icons.Default.Update, R.string.whats_new_260_intro_title, R.string.whats_new_260_intro_body),
-            WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_260_savedrive_title, R.string.whats_new_260_savedrive_body),
-            WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_mirror_title, R.string.whats_new_260_mirror_body),
-            WhatsNewFeature(Icons.Default.Visibility, R.string.whats_new_260_viewerlayout_title, R.string.whats_new_260_viewerlayout_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Schedule, R.string.whats_new_260_bigscan_title, R.string.whats_new_260_bigscan_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_groupfix_title, R.string.whats_new_260_groupfix_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.DeleteSweep, R.string.whats_new_260_trashpick_title, R.string.whats_new_260_trashpick_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Place, R.string.whats_new_260_mappins_title, R.string.whats_new_260_mappins_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_personpage_title, R.string.whats_new_260_personpage_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Notifications, R.string.whats_new_260_backuppill_title, R.string.whats_new_260_backuppill_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Crop, R.string.whats_new_260_copyfix_title, R.string.whats_new_260_copyfix_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Settings, R.string.whats_new_260_sdk_title, R.string.whats_new_260_sdk_body),
+            WhatsNewFeature(Icons.Default.PhoneAndroid, R.string.whats_new_260_setas_title, R.string.whats_new_260_setas_body),
+            WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_260_folderimport_title, R.string.whats_new_260_folderimport_body),
+            WhatsNewFeature(Icons.Default.AutoAwesome, R.string.whats_new_260_mlsetup_title, R.string.whats_new_260_mlsetup_body),
+            WhatsNewFeature(Icons.Default.TextFields, R.string.whats_new_260_longpress_title, R.string.whats_new_260_longpress_body),
+            WhatsNewFeature(Icons.Default.Visibility, R.string.whats_new_260_nothumb_title, R.string.whats_new_260_nothumb_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_260_external_title, R.string.whats_new_260_external_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Place, R.string.whats_new_260_nullisland_title, R.string.whats_new_260_nullisland_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_likeness_title, R.string.whats_new_260_likeness_body, WhatsNewCategory.Improved),
         ),
     ),
     // 2.5.0 STABLE: the whole release since 2.4.0, consolidated to its main features so someone

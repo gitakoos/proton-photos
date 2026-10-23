@@ -27,8 +27,6 @@ import eu.akoos.photos.domain.importer.SidecarMeta
 import eu.akoos.photos.domain.importer.TakeoutSidecar
 import kotlinx.coroutines.CancellationException
 import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
-import java.io.EOFException
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -66,9 +64,12 @@ data class WalkResult(
     }
 }
 
-/** A read failure of the place the zip is stored (as opposed to a fault in the zip's own bytes), so the
- *  reader and its callers can tell "the source dropped out" from "the archive is damaged" even though a
- *  broken zip stream also raises plain I/O errors. */
+/** One media entry of an export: its path and its modified time, null when the source records none. */
+data class MediaEntry(val name: String, val modifiedMs: Long?)
+
+/** A read failure of the place the export is stored (as opposed to a fault in the export's own bytes), so
+ *  the readers and their callers can tell "the source dropped out" from "the archive is damaged" even
+ *  though a broken zip stream also raises plain I/O errors. */
 class SourceReadException(cause: IOException) : IOException(cause.message, cause)
 
 /**
@@ -102,36 +103,24 @@ data class TakeoutScan(
  * where, rather than throwing away everything read so far. Any other failure (the place the zip is read
  * from stops answering) is rethrown for the caller to retry.
  */
-class TakeoutZipReader(private val openStream: () -> InputStream) {
+class TakeoutZipReader(private val openStream: () -> InputStream) : ImportSourceReader {
 
     /**
      * Pass 1: the sidecar metadata index plus the media count, both from the same walk. The index is
      * keyed by [TakeoutSidecar.sidecarKey] so a media file resolves to its entry via
      * [TakeoutSidecar.candidateMediaKeys]. Only `.json` entries small enough to be a real sidecar are
      * read, and only those [TakeoutSidecar.parse] turns into a [SidecarMeta] carrying a date, GPS or
-     * description are kept. An album folder's `metadata.json` holds just a title, so it parses to an
-     * empty record and falls out of the index on its own. The media count is every entry pass 2 will
-     * hand back (the same extension allow-list [forEachMedia] uses), so it is the progress denominator.
+     * description are kept (see [SidecarIndexBuilder]). The media count is every entry pass 2 will hand
+     * back (the same extension allow-list [forEachMedia] uses), so it is the progress denominator.
      * [onBytes] receives the running count of file bytes consumed after each entry.
      */
-    fun scan(onBytes: ((Long) -> Unit)? = null): TakeoutScan {
-        val index = HashMap<String, SidecarMeta>()
-        var mediaCount = 0
+    override fun scan(onBytes: ((Long) -> Unit)?): TakeoutScan {
+        val index = SidecarIndexBuilder()
         val walk = walk(onBytes) { entry, zip ->
             val name = entry.name
-            if (isJson(name)) {
-                val bytes = readBounded(zip, MAX_SIDECAR_BYTES)
-                if (bytes != null) {
-                    val meta = TakeoutSidecar.parse(String(bytes, Charsets.UTF_8))
-                    if (meta != null && meta.isUsable()) {
-                        index[TakeoutSidecar.sidecarKey(baseName(name))] = meta
-                    }
-                }
-            } else if (isMedia(name)) {
-                mediaCount++
-            }
+            if (isJson(name)) index.offerSidecar(name, zip) else if (isMedia(name)) index.countMedia()
         }
-        return TakeoutScan(index, mediaCount, walk)
+        return index.build(walk)
     }
 
     /** The sidecar index alone, for a caller that does not need the media count. Delegates to [scan]. */
@@ -139,17 +128,17 @@ class TakeoutZipReader(private val openStream: () -> InputStream) {
 
     /**
      * Pass 2: invokes [onMedia] once per media entry (by extension allow-list, never a `.json`), in the
-     * zip's own order, with the entry name and a stream positioned at that entry's bytes. The stream is a
+     * zip's own order, with the entry and a stream positioned at that entry's bytes. The stream is a
      * non-closing view of the underlying [ZipInputStream]: the reader owns the zip's lifecycle and advances
      * to the next entry after the callback returns, so a callback that closes its stream cannot break the
      * walk. The callback must read what it needs synchronously (typically copying to a temp file).
      * [onBytes] receives the running count of file bytes consumed after each entry.
      */
-    fun forEachMedia(
-        onBytes: ((Long) -> Unit)? = null,
-        onMedia: (entryName: String, input: InputStream) -> Unit,
+    override fun forEachMediaEntry(
+        onBytes: ((Long) -> Unit)?,
+        onMedia: (entry: MediaEntry, input: InputStream) -> Unit,
     ): WalkResult = walk(onBytes) { entry, zip ->
-        if (isMedia(entry.name)) onMedia(entry.name, zip)
+        if (isMedia(entry.name)) onMedia(MediaEntry(entry.name, modifiedMsOf(entry)), zip)
     }
 
     /**
@@ -196,28 +185,6 @@ class TakeoutZipReader(private val openStream: () -> InputStream) {
         return WalkResult(damaged, endedBy != null, endedBy, counting.count, entries)
     }
 
-    /** True when this record carries something worth importing rather than being an album title stub. */
-    private fun SidecarMeta.isUsable(): Boolean =
-        takenMs != null || lat != null || lng != null || description != null
-
-    /**
-     * Reads the current entry from [input] into memory, or null once it exceeds [cap] bytes (too large to
-     * be a sidecar). The caller closes the entry afterwards, discarding any unread tail.
-     */
-    private fun readBounded(input: InputStream, cap: Int): ByteArray? {
-        val out = ByteArrayOutputStream()
-        val chunk = ByteArray(READ_CHUNK)
-        var total = 0
-        while (true) {
-            val n = input.read(chunk)
-            if (n < 0) break
-            total += n
-            if (total > cap) return null
-            out.write(chunk, 0, n)
-        }
-        return out.toByteArray()
-    }
-
     /**
      * A view over the zip stream whose [close] is a no-op. The media callback reads through this while the
      * reader keeps ownership of the real stream, so closing it never severs the walk from its next entry.
@@ -244,21 +211,6 @@ class TakeoutZipReader(private val openStream: () -> InputStream) {
         }
     }
 
-    /** Raises any failure of the underlying source as a [SourceReadException]. */
-    private class SourceStream(delegate: InputStream) : FilterInputStream(delegate) {
-        override fun read(): Int = tagged { super.read() }
-
-        override fun read(b: ByteArray, off: Int, len: Int): Int = tagged { super.read(b, off, len) }
-
-        override fun skip(n: Long): Long = tagged { super.skip(n) }
-
-        private inline fun <T> tagged(block: () -> T): T = try {
-            block()
-        } catch (e: IOException) {
-            throw SourceReadException(e)
-        }
-    }
-
     /** Counts the bytes taken from the file itself (compressed, before inflating), which is what a
      *  percentage of the file's size needs. */
     private class CountingInputStream(delegate: InputStream) : FilterInputStream(delegate) {
@@ -280,42 +232,22 @@ class TakeoutZipReader(private val openStream: () -> InputStream) {
         private fun isZipFault(e: Throwable): Boolean {
             if (ImportFailure.isArchiveFault(e)) return true
             if (e !is IOException) return false
-            var cur: Throwable? = e
-            while (cur != null) {
-                if (cur is SourceReadException) return false
-                cur = cur.cause
-            }
-            return true
+            return !ImportEntries.isSourceFault(e)
         }
 
-        /** A real sidecar is a few kilobytes; anything past this is not one and is skipped unread. */
-        private const val MAX_SIDECAR_BYTES = 1_048_576
+        /** An entry's modified time, or null when it carries none. A zip stores DOS times, whose earliest
+         *  value (1 January 1980) is what a writer leaves when it has no time, so that day counts as none. */
+        internal fun modifiedMsOf(entry: ZipEntry): Long? = entry.time.takeIf { it > DOS_EPOCH_END_MS }
 
-        private const val READ_CHUNK = 8_192
+        /** 1980-01-02T00:00:00Z, past 1 January 1980 at local midnight in every zone. */
+        private const val DOS_EPOCH_END_MS = 315_619_200_000L
 
         private const val READ_BUFFER = 64 * 1024
 
-        /** Media containers a Takeout export can hold, including Google's `.mp` motion-photo track. */
-        private val MEDIA_EXTENSIONS = setOf(
-            "jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "avif", "tif", "tiff",
-            "bmp", "dng", "mp4", "mov", "m4v", "3gp", "3gpp", "mkv", "webm", "avi", "mp",
-        )
+        internal fun baseName(path: String): String = ImportEntries.baseName(path)
 
-        /** The file name of a zip [path], with any forward-slash directory prefix removed. */
-        internal fun baseName(path: String): String {
-            val slash = path.lastIndexOf('/')
-            return if (slash >= 0) path.substring(slash + 1) else path
-        }
+        internal fun isJson(name: String): Boolean = ImportEntries.isJson(name)
 
-        internal fun isJson(name: String): Boolean =
-            baseName(name).endsWith(".json", ignoreCase = true)
-
-        internal fun isMedia(name: String): Boolean = extensionOf(baseName(name)) in MEDIA_EXTENSIONS
-
-        private fun extensionOf(base: String): String {
-            val dot = base.lastIndexOf('.')
-            if (dot < 0 || dot == base.length - 1) return ""
-            return base.substring(dot + 1).lowercase()
-        }
+        internal fun isMedia(name: String): Boolean = ImportEntries.isMedia(name)
     }
 }

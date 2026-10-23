@@ -1518,6 +1518,83 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
+    fun migrate_v46_to_v47_addsLiveOfAndLinkId_keepsRows_andIsRepeatable() {
+        Migrations.MIGRATION_35_36.migrate(db)
+        db.execSQL(
+            "INSERT INTO import_staged (zipId, entryName, title, dateMs, sizeBytes, excluded, uploaded, stagedAt) " +
+                "VALUES ('zip-a', 'Trip/IMG_1.HEIC', 'IMG_1', 1000, 2048, 0, 0, 10)"
+        )
+
+        Migrations.MIGRATION_46_47.migrate(db)
+
+        db.query("SELECT entryName, title, liveOf, linkId FROM import_staged WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("Trip/IMG_1.HEIC", cur.getString(0))
+            assertEquals("IMG_1", cur.getString(1))
+            assertTrue("an existing row is not a Live Photo video", cur.isNull(2))
+            assertTrue("an existing row has no link", cur.isNull(3))
+        }
+        db.execSQL("UPDATE import_staged SET liveOf = 'Trip/IMG_1.HEIC', linkId = 'link-1' WHERE entryName = 'Trip/IMG_1.HEIC'")
+
+        // Re-running the migration on an already-migrated database is harmless and keeps the values.
+        Migrations.MIGRATION_46_47.migrate(db)
+        db.query("SELECT liveOf, linkId FROM import_staged WHERE zipId = 'zip-a'").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("Trip/IMG_1.HEIC", cur.getString(0))
+            assertEquals("link-1", cur.getString(1))
+        }
+    }
+
+    @Test
+    fun migrate_v47_to_v48_addsSourceSha1AndUserIdToLedger_keepsRows_andIsRepeatable() {
+        Migrations.MIGRATION_35_36.migrate(db)
+        Migrations.MIGRATION_36_37.migrate(db)
+        Migrations.MIGRATION_37_38.migrate(db)
+        db.execSQL(
+            "INSERT INTO import_uploaded (runId, linkId, sha1, name, dateMs, undone, alreadyInDrive) " +
+                "VALUES ('run-1', 'link-1', 'sha-1', 'a.jpg', 1000, 0, 0)"
+        )
+
+        Migrations.MIGRATION_47_48.migrate(db)
+
+        db.query("SELECT runId, linkId, sha1, name, sourceSha1, userId FROM import_uploaded").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("run-1", cur.getString(0))
+            assertEquals("link-1", cur.getString(1))
+            assertEquals("sha-1", cur.getString(2))
+            assertEquals("a.jpg", cur.getString(3))
+            assertTrue("an existing row has no source digest", cur.isNull(4))
+            assertTrue("an existing row has no account", cur.isNull(5))
+        }
+        db.query(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'index_import_uploaded_userId_sourceSha1'"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(1, cur.getInt(0))
+        }
+        db.execSQL("UPDATE import_uploaded SET sourceSha1 = 'raw-1', userId = 'user-1' WHERE linkId = 'link-1'")
+
+        // Re-running the migration on an already-migrated database is harmless and keeps the values.
+        Migrations.MIGRATION_47_48.migrate(db)
+        db.query("SELECT sourceSha1, userId, COUNT(*) FROM import_uploaded").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("raw-1", cur.getString(0))
+            assertEquals("user-1", cur.getString(1))
+            assertEquals(1, cur.getInt(2))
+        }
+    }
+
+    @Test
+    fun migrations_registerTheV47ToV48Step() {
+        assertTrue(Migrations.ALL.any { it.startVersion == 47 && it.endVersion == 48 })
+    }
+
+    @Test
+    fun migrations_registerTheV46ToV47Step() {
+        assertTrue(Migrations.ALL.any { it.startVersion == 46 && it.endVersion == 47 })
+    }
+
+    @Test
     fun migrations_registerTheV45ToV46Step() {
         assertTrue(Migrations.ALL.any { it.startVersion == 45 && it.endVersion == 46 })
     }

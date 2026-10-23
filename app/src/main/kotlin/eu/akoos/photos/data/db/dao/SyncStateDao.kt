@@ -193,6 +193,33 @@ interface SyncStateDao {
         for (entity in entities) upsert(entity)
     }
 
+    /** [updateDomainColumnsIfNotSyncedWithCloud] for each of [entities] in one transaction; returns the uris
+     *  it left untouched because the row is a finished upload by now. */
+    @Transaction
+    suspend fun updateDomainColumnsIfNotSyncedWithCloudAll(entities: List<SyncStateEntity>): List<String> {
+        val untouched = ArrayList<String>()
+        for (entity in entities) {
+            val changed = updateDomainColumnsIfNotSyncedWithCloud(
+                localUri = entity.localUri,
+                userId = entity.userId,
+                cloudFileId = entity.cloudFileId,
+                localHash = entity.localHash,
+                cloudHash = entity.cloudHash,
+                status = entity.status,
+                lastSyncAttemptMs = entity.lastSyncAttemptMs,
+                lastSyncSuccessMs = entity.lastSyncSuccessMs,
+                backedUpAtMs = entity.backedUpAtMs,
+                sizeBytes = entity.sizeBytes,
+            )
+            if (changed == 0) untouched += entity.localUri
+        }
+        return untouched
+    }
+
+    /** [userId]'s rows still to back up. Every queue clean-up step of reconcile reads only these. */
+    @Query("SELECT * FROM sync_state WHERE userId = :userId AND status = 'LOCAL_ONLY'")
+    suspend fun getLocalOnly(userId: String): List<SyncStateEntity>
+
     @Query("SELECT * FROM sync_state WHERE localUri = :localUri LIMIT 1")
     suspend fun getByUri(localUri: String): SyncStateEntity?
 
@@ -318,6 +345,14 @@ interface SyncStateDao {
      *  upload; that is [clearQueued]'s LOCAL_ONLY-guarded job. */
     @Query("UPDATE sync_state SET queued = 0, queueSource = NULL, queuedAt = NULL WHERE localUri = :localUri")
     suspend fun clearQueuedForSynced(localUri: String)
+
+    /** [clearQueuedForSynced] for every uri in [localUris] in one statement, writing only a row that still
+     *  carries some intent. The caller keeps the list within the host-variable limit. */
+    @Query(
+        "UPDATE sync_state SET queued = 0, queueSource = NULL, queuedAt = NULL " +
+            "WHERE localUri IN (:localUris) AND (queued != 0 OR queueSource IS NOT NULL OR queuedAt IS NOT NULL)"
+    )
+    suspend fun clearQueuedForSyncedAll(localUris: List<String>)
 
     /**
      * De-queue every not-yet-started MANUAL upload, returning the rows changed. Backs the user-cancel

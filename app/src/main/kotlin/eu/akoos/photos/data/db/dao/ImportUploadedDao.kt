@@ -53,16 +53,17 @@ interface ImportUploadedDao {
     @Query("SELECT * FROM import_uploaded WHERE runId = :runId AND undone = 0 AND alreadyInDrive = 0")
     suspend fun pendingRealUploadsByRun(runId: String): List<ImportUploadedEntity>
 
-    /** How many of the run's ledger rows are real uploads, not a recorded pre-existing match. The run's
-     *  imported tally read straight from durable state, so a resumed completion counts every upload the
-     *  run ever sent rather than only the ones this session handled. */
-    @Query("SELECT COUNT(*) FROM import_uploaded WHERE runId = :runId AND alreadyInDrive = 0")
-    suspend fun realUploadCount(runId: String): Int
+    /** Every ledger row of the run, undone or not, the durable state its summary is tallied from. */
+    @Query("SELECT * FROM import_uploaded WHERE runId = :runId")
+    suspend fun allByRun(runId: String): List<ImportUploadedEntity>
 
-    /** How many of the run's ledger rows record a photo Drive already held, its already-in-Drive tally,
-     *  read back for the same resumed-completion accounting as [realUploadCount]. */
-    @Query("SELECT COUNT(*) FROM import_uploaded WHERE runId = :runId AND alreadyInDrive = 1")
-    suspend fun alreadyInDriveCount(runId: String): Int
+    /** The Drive links any run of [userId]'s recorded for an entry whose archive bytes hash to [sourceSha1],
+     *  newest first, leaving out the ones an undo trashed. */
+    @Query(
+        "SELECT linkId FROM import_uploaded WHERE userId = :userId AND sourceSha1 = :sourceSha1 AND undone = 0 " +
+            "GROUP BY linkId ORDER BY MAX(id) DESC",
+    )
+    suspend fun linksForSource(userId: String, sourceSha1: String): List<String>
 
     /** Every Drive link the run uploaded, for a caller that only needs the identifiers. */
     @Query("SELECT linkId FROM import_uploaded WHERE runId = :runId")

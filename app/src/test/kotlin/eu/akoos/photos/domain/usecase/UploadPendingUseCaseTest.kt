@@ -48,6 +48,7 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.upload.UploadCompressionStep
 import eu.akoos.photos.data.upload.UploadImageCompressor
 import eu.akoos.photos.data.upload.VideoUploadCompressor
 import eu.akoos.photos.data.upload.compression.VideoUploadCompression
@@ -179,7 +180,7 @@ class UploadPendingUseCaseTest {
         useCase = UploadPendingUseCase(
             syncStateRepo, localRepo, cloudRepo, mockk(relaxed = true), networkObserver,
             mockk(relaxed = true), uploadAlbumTargetDao, mockk(relaxed = true), mockk(relaxed = true),
-            UploadStructuralStripper(context), videoCompression, context,
+            UploadStructuralStripper(context), UploadCompressionStep(context, UploadStructuralStripper(context), videoCompression), context,
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined + kotlinx.coroutines.CoroutineExceptionHandler { _, _ -> }),
             eu.akoos.photos.util.AlbumListEventBus(),
         )
@@ -394,6 +395,26 @@ class UploadPendingUseCaseTest {
         coVerify {
             syncStateRepo.upsert(
                 match { it.status == SyncStatus.SYNCED && it.cloudFileId == "new-cloud-id" },
+                userId,
+            )
+        }
+    }
+
+    @Test
+    fun `the SYNCED row records the size the device reported when the upload read the file`() = runTest {
+        // The row's stored size came from an earlier scan; the file grew before this upload read it. The
+        // backed-up row must carry the size of the bytes that went up, or the next reconcile would take
+        // the difference for an edit by another app and keep the photo from ever being freed.
+        val state = syncState("uri://1", SyncStatus.LOCAL_ONLY)
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(state))
+        coEvery { localRepo.queryByUri("uri://1") } returns localItem("uri://1").copy(sizeBytes = 2048L)
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "new-cloud-id"
+
+        useCase(userId)
+
+        coVerify {
+            syncStateRepo.upsert(
+                match { it.status == SyncStatus.SYNCED && it.cloudFileId == "new-cloud-id" && it.sizeBytes == 2048L },
                 userId,
             )
         }

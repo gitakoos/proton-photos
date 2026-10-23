@@ -182,7 +182,7 @@ fun FloatingHeader(
                         }
                     }
                     if (hasMenu && menuExpanded) {
-                        menuItems?.forEach { (label, action) ->
+                        menuItems.forEach { (label, action) ->
                             Text(
                                 text = label,
                                 color = colors.fgPrimary,

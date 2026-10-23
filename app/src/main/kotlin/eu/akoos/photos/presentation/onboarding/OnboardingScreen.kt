@@ -104,6 +104,7 @@ import eu.akoos.photos.presentation.onboarding.steps.FaqStep
 import eu.akoos.photos.presentation.onboarding.steps.FolderPickerStep
 import eu.akoos.photos.presentation.onboarding.steps.AllFilesAccessStep
 import eu.akoos.photos.presentation.onboarding.steps.ManageMediaStep
+import eu.akoos.photos.presentation.onboarding.steps.MlIntroStep
 import eu.akoos.photos.presentation.onboarding.steps.MirrorOptInStep
 import eu.akoos.photos.presentation.onboarding.steps.NotificationsStep
 import eu.akoos.photos.presentation.onboarding.steps.PhotosAccessStep
@@ -112,7 +113,9 @@ import eu.akoos.photos.presentation.onboarding.steps.WelcomeStep
 import eu.akoos.photos.presentation.settings.ThemeMode
 import eu.akoos.photos.presentation.settings.ThemePalette
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.service.ModelDownloadService
 import eu.akoos.photos.util.MediaPermissions
+import eu.akoos.photos.util.ModelDownloadKind
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -266,6 +269,9 @@ class OnboardingViewModel @Inject constructor(
         renameOnUpload: Boolean,
         mirrorToLocal: Boolean,
         deleteAfterBackup: Boolean,
+        mlFace: Boolean,
+        mlSemantic: Boolean,
+        mlOcr: Boolean,
         themeMode: ThemeMode,
         palette: ThemePalette,
         language: String,
@@ -309,6 +315,7 @@ class OnboardingViewModel @Inject constructor(
                 p[SettingsKeys.RENAME_TO_CAPTURE_DATE] = renameOnUpload
                 p[SettingsKeys.MIRROR_STRIP_TO_LOCAL] = mirrorToLocal
                 p[SettingsKeys.DELETE_LOCAL_AFTER_BACKUP] = deleteAfterBackup
+                if (mlFace || mlSemantic || mlOcr) p[SettingsKeys.AI_FEATURES_ENABLED] = true
                 p[SettingsKeys.THEME_MODE] = themeMode.storageKey
                 p[SettingsKeys.THEME_PALETTE] = palette.storageKey
                 p[SettingsKeys.LANGUAGE] = language
@@ -335,6 +342,11 @@ class OnboardingViewModel @Inject constructor(
             // leave the boot store stale.
             ThemePrefsBoot.write(context, themeMode.storageKey)
             LanguagePrefsBoot.write(context, language)
+            // Each chosen feature fetches its models on the download service, which records the
+            // consent, queues the kinds one behind another and turns the feature on once the files verify.
+            if (mlFace) ModelDownloadService.start(context, ModelDownloadKind.FACE)
+            if (mlSemantic) ModelDownloadService.start(context, ModelDownloadKind.SEMANTIC)
+            if (mlOcr) ModelDownloadService.start(context, ModelDownloadKind.OCR)
             onAppliedLocale()
         }
 
@@ -382,6 +394,9 @@ fun OnboardingScreen(
     var stripSoftware by rememberSaveable { mutableStateOf(false) }
     var renameOnUpload by rememberSaveable { mutableStateOf(false) }
     var deleteAfterBackup by rememberSaveable { mutableStateOf(false) }
+    var mlFace by rememberSaveable { mutableStateOf(false) }
+    var mlSemantic by rememberSaveable { mutableStateOf(false) }
+    var mlOcr by rememberSaveable { mutableStateOf(false) }
     // Theme / palette / language are read from the VM (DataStore-backed) instead of
     // shadow `rememberSaveable` state — the live setters below already persist to
     // DataStore, so a single source of truth keeps the picker UI consistent with the
@@ -426,7 +441,7 @@ fun OnboardingScreen(
     val showNotifications = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
     // Step list — order is About → Welcome → FAQ → Appearance → Photos perm →
-    // Backup mode → conditional Folder picker → Privacy → App lock → Notifications →
+    // Backup mode → conditional Folder picker → Privacy → Machine learning → App lock → Notifications →
     // Manage media → Done. Photos perm comes before the folder picker so when
     // we hit that step MediaStore can actually enumerate buckets; otherwise the
     // list would render empty.
@@ -449,6 +464,7 @@ fun OnboardingScreen(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && backupMode != BackupMode.NothingForNow) {
             add(OnboardingStep.MirrorOptIn)
         }
+        add(OnboardingStep.MachineLearning)
         add(OnboardingStep.AppLock)
         if (showNotifications) add(OnboardingStep.Notifications)
         if (showManageMedia) add(OnboardingStep.ManageMedia)
@@ -616,6 +632,14 @@ fun OnboardingScreen(
                                 )
                             },
                         )
+                        OnboardingStep.MachineLearning -> MlIntroStep(
+                            face = mlFace,
+                            semantic = mlSemantic,
+                            ocr = mlOcr,
+                            onFaceChange = { mlFace = it },
+                            onSemanticChange = { mlSemantic = it },
+                            onOcrChange = { mlOcr = it },
+                        )
                         OnboardingStep.AppLock -> AppLockStep(
                             enabled = appLockEnabled,
                             timeoutSeconds = appLockTimeoutSeconds,
@@ -706,6 +730,9 @@ fun OnboardingScreen(
                                 renameOnUpload = renameOnUpload,
                                 mirrorToLocal = mirrorToLocal,
                                 deleteAfterBackup = deleteAfterBackup,
+                                mlFace = mlFace,
+                                mlSemantic = mlSemantic,
+                                mlOcr = mlOcr,
                                 themeMode = themeMode,
                                 palette = palette,
                                 language = language,
@@ -756,7 +783,7 @@ fun OnboardingScreen(
 
 private enum class OnboardingStep {
     About, Welcome, Faq, Appearance, PhotosAccess, AllFilesAccess, BackupMode, FolderPicker,
-    AlbumMirrorOptIn, Privacy, MirrorOptIn, AppLock, Notifications, ManageMedia, Done,
+    AlbumMirrorOptIn, Privacy, MirrorOptIn, MachineLearning, AppLock, Notifications, ManageMedia, Done,
 }
 
 private fun hasMediaPermission(context: Context): Boolean =

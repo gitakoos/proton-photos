@@ -41,6 +41,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.model.FaceBoxNorm
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.util.FaceDiagnostics
+import eu.akoos.photos.util.retryOnDbTear
 import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 
@@ -75,24 +76,35 @@ class ObservePeopleUseCase @Inject constructor(
     private val faceDao: FaceDao,
 ) {
 
+    /**
+     * The account's people as summaries; [namedOnly] reads only the people carrying a name
+     * ([PersonDao.observeNamedPeopleForUser]), for a surface that keeps no other, with the same people in the
+     * same order once the caller has dropped the blank names. The copied diagnostics time the full builds only.
+     */
     operator fun invoke(
         userId: UserId?,
         items: Flow<List<GalleryItem>>,
+        namedOnly: Boolean = false,
     ): Flow<List<PersonSummary>> {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val keysMemo = AtomicReference<Pair<List<GalleryItem>, Set<String>>?>(null)
-        return combine(personDao.observePeopleForUser(account), items) { people, feed -> people to feed }
+        val rows = if (namedOnly) personDao.observeNamedPeopleForUser(account) else personDao.observePeopleForUser(account)
+        return combine(rows.retryOnDbTear(TEAR_TAG, onRetry = { FaceDiagnostics.recordDbTear(TEAR_TAG, it) }), items) { people, feed ->
+            people to feed
+        }
             .mapCompleting { (people, feed) ->
-                FaceDiagnostics.recordPeopleBuildStarted()
+                if (!namedOnly) FaceDiagnostics.recordPeopleBuildStarted()
                 val startNs = System.nanoTime()
                 val build = buildSummaries(account, people, feed, keysMemo)
-                FaceDiagnostics.recordPeopleBuildCompleted(
-                    durationMs = (System.nanoTime() - startNs) / NANOS_PER_MS,
-                    people = build.summaries.size,
-                    fallbacks = build.fallbacks,
-                    storedReadMs = build.storedReadNs / NANOS_PER_MS,
-                    fallbackMs = build.fallbackNs / NANOS_PER_MS,
-                )
+                if (!namedOnly) {
+                    FaceDiagnostics.recordPeopleBuildCompleted(
+                        durationMs = (System.nanoTime() - startNs) / NANOS_PER_MS,
+                        people = build.summaries.size,
+                        fallbacks = build.fallbacks,
+                        storedReadMs = build.storedReadNs / NANOS_PER_MS,
+                        fallbackMs = build.fallbackNs / NANOS_PER_MS,
+                    )
+                }
                 build.summaries
             }
             .distinctUntilChanged()
@@ -244,6 +256,9 @@ private class PeopleBuild(
 )
 
 private const val NANOS_PER_MS = 1_000_000L
+
+/** The people stream's label in the logs and the copied diagnostics. */
+private const val TEAR_TAG = "ObservePeople"
 
 /** The least and the most a people-list build rests after it, and how many times its own run time it rests
  *  in between. The least also caps a list that keeps changing at four builds a second. */

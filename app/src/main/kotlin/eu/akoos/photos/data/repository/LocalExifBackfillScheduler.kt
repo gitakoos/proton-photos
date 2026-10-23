@@ -130,6 +130,14 @@ class LocalExifBackfillScheduler @Inject constructor(
             .getOrDefault(emptyList())
         if (items.isEmpty()) return
 
+        // A fix at exactly 0, 0 is a photo with no GPS; one stored before that was recognised goes here.
+        try {
+            photoLocationDao.deleteNoFixRows()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "dropping 0, 0 fixes failed: ${e.message}")
+        }
         // Recorded dates the walk finds void, dropped in the same edit that writes the corrections.
         val voided = HashSet<String>()
         // Entries recorded before the map carried a modified time, taken over rather than dropped.
@@ -264,9 +272,7 @@ class LocalExifBackfillScheduler @Inject constructor(
             if (la != null && lo != null) storeLocation(entry.uri, userId, la to lo)
         }
         if (entry.needsDate) {
-            val exifMs = (meta.dateTimeOriginal ?: meta.dateTime)?.let {
-                ExifDateFormat.fromExif(it, meta.offsetTimeOriginal, ZoneId.systemDefault())
-            }
+            val exifMs = ExifHelper.captureMs(meta, ZoneId.systemDefault())
             val correction = CaptureDateOverride.captureDateCorrection(
                 rawDateTakenMs = entry.dateTaken,
                 exifMs = exifMs,

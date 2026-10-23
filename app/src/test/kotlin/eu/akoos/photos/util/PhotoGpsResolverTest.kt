@@ -29,7 +29,7 @@ import org.junit.Test
 /**
  * Pure coverage for the ISO 6709 parse a device video's location resolves through: the first two
  * signed numbers are latitude and longitude, a trailing altitude is dropped, and a string without a
- * coordinate pair yields null. No Android is instantiated.
+ * coordinate pair, or a 0, 0 fix, yields null. Also the shared usable-fix rule. No Android is instantiated.
  */
 class PhotoGpsResolverTest {
 
@@ -51,5 +51,19 @@ class PhotoGpsResolverTest {
     @Test
     fun `a string with no coordinate pair is null`() {
         assertNull(PhotoGpsResolver.parseIso6709("not a location"))
+    }
+
+    @Test
+    fun `a 0, 0 fix is no location`() {
+        assertNull(PhotoGpsResolver.parseIso6709("+00.0000+000.0000/"))
+    }
+
+    @Test
+    fun `only a position inside the ranges and away from 0, 0 is usable`() {
+        assertEquals(false, eu.akoos.photos.data.db.entity.isUsableGpsFix(0.0, 0.0))
+        assertEquals(false, eu.akoos.photos.data.db.entity.isUsableGpsFix(91.0, 10.0))
+        assertEquals(false, eu.akoos.photos.data.db.entity.isUsableGpsFix(Double.NaN, 10.0))
+        assertEquals(true, eu.akoos.photos.data.db.entity.isUsableGpsFix(0.0, 10.0))
+        assertEquals(true, eu.akoos.photos.data.db.entity.isUsableGpsFix(47.4979, 19.0402))
     }
 }

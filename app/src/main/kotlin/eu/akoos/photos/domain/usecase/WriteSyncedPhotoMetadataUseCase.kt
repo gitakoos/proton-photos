@@ -65,6 +65,7 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
     private val accountManager: AccountManager,
     private val syncStateRepo: SyncStateRepository,
     private val exifRewriter: CloudPhotoExifRewriter,
+    private val carryOver: CarryOverToReplacement,
 ) {
 
     sealed interface Result {
@@ -184,10 +185,12 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
         // restore() puts the row back to a safe SYNCED state on the ORIGINAL link, with the ORIGINAL
         // hash, and clears the queued flag. This is the correct failure restore because reconcile and
         // the upload selector LEAVE SYNCED rows ALONE:
-        //  - ReconcileSyncStateUseCase.kt:206-210 uses the STORED localHash for any row that has one and
-        //    only recomputes a hash when it is empty (post-reinstall); it NEVER re-hashes a SYNCED row's
-        //    device file to detect a byte change, and LOCAL_MODIFIED is never assigned anywhere
-        //    (SyncStatus.kt:29 defines it, nothing sets it).
+        //  - ReconcileSyncStateUseCase pairs by the STORED localHash and only recomputes it when it is
+        //    empty (post-reinstall). It re-hashes a SYNCED row's device file only when the file's size no
+        //    longer matches the row, and even then keeps the row SYNCED on its link and never re-uploads
+        //    it: bytes that match neither the stored hash nor the cloud copy, and that this process did not
+        //    rewrite through LocalOverwriteGuard, only lose the row's backedUpAtMs. LOCAL_MODIFIED is never
+        //    assigned anywhere (SyncStatus.kt:29 defines it, nothing sets it).
         //  - The SYNCED-demotion pass (ReconcileSyncStateUseCase.kt:302-329) only demotes on the cloud
         //    copy going missing from the listing (→ LOCAL_ONLY) or the local file going missing
         //    (→ CLOUD_ONLY); neither fires here since the old cloud copy is never trashed on a failure
@@ -195,8 +198,8 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
         //  - The upload selector claims only "LOCAL_ONLY AND queued" rows (SyncStateDao.kt:65-66, 157-158).
         // So restoring to SYNCED(oldLinkId) with the queue cleared means no selector ever picks the row
         // up: no re-upload, hence NO duplicate. The edit simply did not take on the cloud and stays
-        // retryable. (localHash is left as the original; even if a later reconcile recomputes it from the
-        // edited bytes, byId still matches oldLinkId so the row stays SYNCED and is never re-uploaded.)
+        // retryable. (localHash is left as the original; a later reconcile that re-hashes the edited bytes
+        // still matches oldLinkId by id, so the row stays SYNCED and is never re-uploaded.)
         suspend fun restore() {
             syncStateRepo.upsert(existing.copy(status = SyncStatus.SYNCED), userId)
             syncStateRepo.clearQueuedForSynced(deviceUri)
@@ -291,6 +294,11 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
                 restore()
                 return@withContext Result.Failed("upload returned no link id")
             }
+            // The corrected copy must be a new photo: the old cloud copy is trashed below.
+            if (newLinkId == oldLinkId) {
+                restore()
+                return@withContext Result.Failed("upload returned the original photo; original kept")
+            }
 
             // Persist the new link the moment the upload is verified, BEFORE the album re-add, re-pair,
             // and trash, so a process kill from here on resumes from the recorded link (the simpler
@@ -343,6 +351,10 @@ class WriteSyncedPhotoMetadataUseCase @Inject constructor(
             )
             syncStateRepo.clearQueuedForSynced(deviceUri)
             repaired = true
+
+            // The new copy stands in for the old one, so its favourite, labels, faces and search index
+            // move to it before the old copy goes.
+            carryOver(userId, oldLinkId, newLinkId, original = cloudPhoto)
 
             // 10. Trash the old cloud copy LAST, best-effort: the replacement is already live and paired,
             //     so a failed trash only leaves a recoverable duplicate.

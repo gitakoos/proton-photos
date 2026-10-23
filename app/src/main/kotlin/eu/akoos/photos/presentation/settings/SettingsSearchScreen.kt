@@ -153,6 +153,12 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         Screen.AiSettings.route,
     ),
     SettingsSearchEntry(
+        R.string.settings_face_file_link, R.string.settings_ai_section,
+        listOf("import", "face file", "face index", "ppfi", "restore faces", "arcok importálása", "arcindex", "visszaállítás"),
+        Screen.AiSettings.route,
+        cloud = true,
+    ),
+    SettingsSearchEntry(
         R.string.settings_ai_ocr, R.string.settings_ai_section,
         listOf("text", "ocr", "copy text", "read text", "scan", "szöveg"),
         Screen.AiSettings.route,
@@ -189,6 +195,11 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
     SettingsSearchEntry(
         R.string.settings_strip_share, R.string.settings_privacy_security,
         listOf("metadata", "exif", "strip", "share", "sharing", "location", "gps", "megosztás", "metaadat", "helyadat"),
+        Screen.PrivacySecuritySettings.route,
+    ),
+    SettingsSearchEntry(
+        R.string.settings_external_picker, R.string.settings_privacy_security,
+        listOf("picker", "pick", "choose", "other apps", "attach", "választó", "kiválasztás", "más alkalmazások", "csatolás"),
         Screen.PrivacySecuritySettings.route,
     ),
     SettingsSearchEntry(
@@ -242,6 +253,11 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         R.string.gallery_tab_albums, R.string.settings_appearance,
         listOf("albums", "cover size", "columns", "collection", "default filter", "albumok", "borító"),
         Screen.AlbumsSettings.route,
+    ),
+    SettingsSearchEntry(
+        R.string.settings_viewer_long_press, R.string.settings_viewer,
+        listOf("long press", "hold", "press and hold", "menu", "one hand", "viewer", "text", "select", "copy", "ocr", "hosszú nyomás", "nyomva tartás", "menü", "szöveg", "kijelölés", "másolás"),
+        Screen.ViewerSettings.route,
     ),
 
     // ── Help & about ───────────────────────────────────────────────────────────

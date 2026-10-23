@@ -116,6 +116,9 @@ enum class UploadPhase { Encrypting, Uploading }
  *  - [durationMillis]: video length for xAttr Media, read from the source container. Null falls back
  *    to the [eu.akoos.photos.domain.entity.LocalMediaItem] duration.
  */
+/** A photo the Drive SDK committed, with the grid thumbnail it was sent with. */
+internal class SdkUploadedPhoto(val linkId: String, val revisionId: String, val thumbnailBytes: ByteArray?)
+
 data class UploadXAttrMetadata(
     val latitude: Double? = null,
     val longitude: Double? = null,
@@ -252,6 +255,8 @@ class PhotoUploadService @Inject constructor(
     // Injected lazily because CloudTrashService itself depends on this service: the favourite is
     // carried by its setCloudFavorite, and a direct reference would close the graph into a cycle.
     private val cloudTrashService: dagger.Lazy<CloudTrashService>,
+    private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
+    private val sdkPhotoUploadOps: eu.akoos.photos.data.sdk.SdkPhotoUploadOps,
     private val photoLabels: PhotoLabelRepository,
     @ApplicationContext private val context: Context,
 ) {
@@ -271,6 +276,12 @@ class PhotoUploadService @Inject constructor(
         sha1HexContentDigest: String,
         uploadUri: String,
         xAttrMetadata: UploadXAttrMetadata = UploadXAttrMetadata(),
+        // Set when this file is the video of a Live Photo: the link of the still it joins. Drive then keeps
+        // the two as one photo, the way its own apps and the web client store a Live Photo.
+        mainPhotoLinkId: String? = null,
+        // Category tags committed on top of what the file proves and the user picked, for example the Live
+        // Photo tag on the still of a pair.
+        extraTags: Set<Int> = emptySet(),
         onProgress: ((phase: UploadPhase, doneBytes: Long, totalBytes: Long) -> Unit)? = null,
     ): String =
         withContext(Dispatchers.IO) {
@@ -319,7 +330,34 @@ class PhotoUploadService @Inject constructor(
                 Log.w(TAG, "uploadFile: chosen categories unreadable for $logRef: ${e.message}")
                 emptySet()
             }
-            val photoTags = UploadPhotoTags.mergeForCommit(detectedTags, chosenTags)
+            val photoTags = UploadPhotoTags.mergeForCommit(detectedTags, chosenTags + extraTags)
+
+            // The Drive SDK route. A committed SDK upload goes through the same steps the app's own
+            // upload ends with; an SDK failure that left nothing on Drive runs the app's own upload.
+            // A resume record from an interrupted upload of the app's own names a draft already on
+            // Drive, which only that path can finish, so the SDK steps aside rather than orphan it.
+            // A photo with no capture date, or one before 1970, stays on that path too: the SDK files
+            // a missing time under the upload moment, which would lift the photo to today.
+            val ownDraftPending = UploadResumeManifest.load(tempDir) != null
+            if (sdkMayUpload(item.dateTaken, ownDraftPending) && sdkRouting.isOn(eu.akoos.photos.data.sdk.SdkRoute.UPLOAD)) {
+                val sdkVolumeId = shareService.getVolumeId(userId)
+                val sdkShareId = shareService.getShareId(userId, sdkVolumeId)
+                val viaSdk = sdkRouting.run(
+                    eu.akoos.photos.data.sdk.SdkRoute.UPLOAD,
+                    viaSdk = {
+                        uploadViaSdk(userId, item, uploadUri, hash, xAttrMetadata, photoTags, sdkVolumeId, mainPhotoLinkId, onProgress)
+                    },
+                ) { null }
+                if (viaSdk != null) {
+                    recordCommittedUpload(
+                        userId, item, viaSdk.linkId, sdkShareId, sdkVolumeId, viaSdk.revisionId,
+                        viaSdk.thumbnailBytes, photoTags, mainPhotoLinkId,
+                    )
+                    onProgress?.invoke(UploadPhase.Uploading, item.sizeBytes, item.sizeBytes)
+                    runCatching { tempDir.deleteRecursively() }
+                    return@withContext viaSdk.linkId
+                }
+            }
 
             // The finally block inspects the failure category (wipe vs preserve-for-resume), so
             // catch, categorise, then rethrow.
@@ -942,7 +980,7 @@ class PhotoUploadService @Inject constructor(
                     manifestSignature = manifestSignature,
                     signatureAddress  = signingKey.email,
                     xAttr             = xAttr,
-                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash, tags = photoTags.map { it.toLong() }),
+                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash, tags = photoTags.map { it.toLong() }, mainPhotoLinkId = mainPhotoLinkId),
                 )
                 retryUploadCall { _ ->
                     semaphore.withPermit {
@@ -960,7 +998,7 @@ class PhotoUploadService @Inject constructor(
                     manifestSignature = manifestSignature,
                     signatureAddress  = signingKey.email,
                     xAttr             = xAttr,
-                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash, tags = photoTags.map { it.toLong() }),
+                    photo             = PhotoMetaDto(captureTime = item.dateTaken / 1000L, contentHash = photoContentHash, tags = photoTags.map { it.toLong() }, mainPhotoLinkId = mainPhotoLinkId),
                     contentKeyPacket  = contentKeyPacketBase64,
                     contentKeyPacketSignature = contentKeyPacketSignature,
                     // One CommitThumbnailDto per uploaded thumbnail. Index is the negative block
@@ -992,75 +1030,7 @@ class PhotoUploadService @Inject constructor(
             orphanFileId = null
             orphanShareId = null
 
-            // Track this upload so refreshCloudPhotos doesn't delete it if the photo
-            // stream is temporarily unavailable. Persisted so a process restart between this
-            // upload and the next refresh can't drop it either.
-            recentUploadsTracker.record(fileId)
-
-            // Cache thumbnail locally so the gallery shows it immediately after upload —
-            // without waiting for the next full cloud refresh to decrypt it from the server.
-            val localThumbnailUrl: String? = if (thumbnailBytes != null) {
-                runCatching {
-                    val thumbCacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
-                    val thumbFile = File(thumbCacheDir, "thumb_$fileId.jpg")
-                    thumbFile.writeBytes(thumbnailBytes)
-                    "file://${thumbFile.absolutePath}"
-                }.getOrElse { e ->
-                    Log.w(TAG, "uploadFile: failed to cache thumbnail: ${e.message}")
-                    null
-                }
-            } else null
-
-            // Persist the newly uploaded photo to the local DB immediately so the
-            // gallery (which observes the DB via Room Flow) shows it right away —
-            // without waiting for the next full cloud refresh.
-            photoListingDao.upsertAll(listOf(
-                PhotoListingEntity(
-                    linkId       = fileId,
-                    shareId      = shareId,
-                    volumeId     = volumeId,
-                    userId       = userId.id,
-                    captureTime  = item.dateTaken / 1000L,
-                    displayName  = item.displayName,
-                    mimeType     = item.mimeType,
-                    sizeBytes    = item.sizeBytes,
-                    revisionId   = revisionId,
-                    thumbnailUrl = localThumbnailUrl,
-                    // Seed the committed categories so the photo keeps them the moment it turns
-                    // Synced. A backed-up photo reads its categories from this row, not from the
-                    // device-side choice, so leaving the column empty until the next cloud refresh
-                    // would blank the very categories this upload just carried up.
-                    tagsCsv      = photoTags.sorted().joinToString(","),
-                    // Seed the video length straight from MediaStore (already milliseconds) so our own
-                    // uploads show a duration pill immediately, without waiting for the xAttr backfill.
-                    durationMs   = item.duration.takeIf { item.mimeType.startsWith("video/") && it > 0 },
-                )
-            ))
-            // Also seed the in-memory thumbnail store so a CloudOnly cell paints the just-uploaded
-            // thumbnail immediately (e.g. after the device copy is deleted, turning a Synced photo
-            // cloud-only), without waiting for a decrypt or an app relaunch to seed it from the DB.
-            localThumbnailUrl?.let { thumbnailUrlStore.put(fileId, it) }
-            // The photo now has a Drive link, so a heart it was given while it lived only on the
-            // device has somewhere to go. Tag 0 travels on the favourite endpoint of its own and
-            // never inside the commit payload, so it is applied here instead of being merged into
-            // photoTags. NonCancellable, and swallowing its own failures, because the bytes are
-            // already committed: a heart that does not land is a missing heart on one photo, never a
-            // failed upload and never a second attempt at one.
-            withContext(NonCancellable) {
-                carryFavoriteToCloud(
-                    userId = userId,
-                    localUri = item.uri,
-                    item = item,
-                    fileId = fileId,
-                    shareId = shareId,
-                    volumeId = volumeId,
-                    revisionId = revisionId,
-                )
-                // Labels put on the device photo follow it to its Drive identity, the key its Synced
-                // item carries from now on.
-                runCatching { photoLabels.rekeyFor(userId, item.uri, fileId) }
-                    .onFailure { Log.w(TAG, "uploadFile: moving labels to fileId=$fileId failed: ${it.message}") }
-            }
+            recordCommittedUpload(userId, item, fileId, shareId, volumeId, revisionId, thumbnailBytes, photoTags, mainPhotoLinkId)
             Log.d(TAG, "uploadFile: completed fileId=$fileId, persisted to DB")
             // Success: wipe tempDir now that the bytes are committed to the CDN. Done
             // INSIDE the success branch (not a finally) so the failure branches below
@@ -1111,6 +1081,176 @@ class PhotoUploadService @Inject constructor(
                 throw e
             }
         }
+
+    /**
+     * Everything an upload does once Drive holds the committed photo, whichever path committed it: the
+     * photo is guarded against a refresh that runs before the stream lists it, its thumbnail and listing
+     * row are seeded so the gallery shows it at once, a heart it had on the device follows it, and its
+     * labels move to its Drive identity.
+     */
+    private suspend fun recordCommittedUpload(
+        userId: UserId,
+        item: LocalMediaItem,
+        fileId: String,
+        shareId: String,
+        volumeId: String,
+        revisionId: String,
+        thumbnailBytes: ByteArray?,
+        photoTags: Collection<Int>,
+        mainPhotoLinkId: String?,
+    ) {
+        // Track this upload so refreshCloudPhotos doesn't delete it if the photo
+        // stream is temporarily unavailable. Persisted so a process restart between this
+        // upload and the next refresh can't drop it either.
+        recentUploadsTracker.record(fileId)
+
+        // Cache thumbnail locally so the gallery shows it immediately after upload —
+        // without waiting for the next full cloud refresh to decrypt it from the server.
+        val localThumbnailUrl: String? = if (thumbnailBytes != null) {
+            runCatching {
+                val thumbCacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
+                val thumbFile = File(thumbCacheDir, "thumb_$fileId.jpg")
+                thumbFile.writeBytes(thumbnailBytes)
+                "file://${thumbFile.absolutePath}"
+            }.getOrElse { e ->
+                Log.w(TAG, "uploadFile: failed to cache thumbnail: ${e.message}")
+                null
+            }
+        } else null
+
+        // Persist the newly uploaded photo to the local DB immediately so the
+        // gallery (which observes the DB via Room Flow) shows it right away —
+        // without waiting for the next full cloud refresh. The video of a Live Photo is not a
+        // photo of its own: Drive lists it only under its still, so it gets no row here.
+        if (mainPhotoLinkId == null) photoListingDao.upsertAll(listOf(
+            PhotoListingEntity(
+                linkId       = fileId,
+                shareId      = shareId,
+                volumeId     = volumeId,
+                userId       = userId.id,
+                captureTime  = item.dateTaken / 1000L,
+                displayName  = item.displayName,
+                mimeType     = item.mimeType,
+                sizeBytes    = item.sizeBytes,
+                revisionId   = revisionId,
+                thumbnailUrl = localThumbnailUrl,
+                // Both upload paths file the photo under the photos root.
+                parentLinkId = shareService.photosRootLinkId(),
+                // Seed the committed categories so the photo keeps them the moment it turns
+                // Synced. A backed-up photo reads its categories from this row, not from the
+                // device-side choice, so leaving the column empty until the next cloud refresh
+                // would blank the very categories this upload just carried up.
+                tagsCsv      = photoTags.sorted().joinToString(","),
+                // Seed the video length straight from MediaStore (already milliseconds) so our own
+                // uploads show a duration pill immediately, without waiting for the xAttr backfill.
+                durationMs   = item.duration.takeIf { item.mimeType.startsWith("video/") && it > 0 },
+            )
+        ))
+        // Also seed the in-memory thumbnail store so a CloudOnly cell paints the just-uploaded
+        // thumbnail immediately (e.g. after the device copy is deleted, turning a Synced photo
+        // cloud-only), without waiting for a decrypt or an app relaunch to seed it from the DB.
+        localThumbnailUrl?.let { thumbnailUrlStore.put(fileId, it) }
+        // The photo now has a Drive link, so a heart it was given while it lived only on the
+        // device has somewhere to go. Tag 0 travels on the favourite endpoint of its own and
+        // never inside the commit payload, so it is applied here instead of being merged into
+        // photoTags. NonCancellable, and swallowing its own failures, because the bytes are
+        // already committed: a heart that does not land is a missing heart on one photo, never a
+        // failed upload and never a second attempt at one.
+        withContext(NonCancellable) {
+            carryFavoriteToCloud(
+                userId = userId,
+                localUri = item.uri,
+                item = item,
+                fileId = fileId,
+                shareId = shareId,
+                volumeId = volumeId,
+                revisionId = revisionId,
+            )
+            // Labels put on the device photo follow it to its Drive identity, the key its Synced
+            // item carries from now on.
+            runCatching { photoLabels.rekeyFor(userId, item.uri, fileId) }
+                .onFailure { Log.w(TAG, "uploadFile: moving labels to fileId=$fileId failed: ${it.message}") }
+        }
+    }
+
+    /**
+     * [item] through the Drive SDK, with the same thumbnails, SHA-1, times, tags and metadata sections
+     * the app's own upload commits. When the SDK fails, a photo it may still have committed is looked for
+     * on Drive first: found, it is the result; not found, the failure stands and the app's own upload runs.
+     */
+    private suspend fun uploadViaSdk(
+        userId: UserId,
+        item: LocalMediaItem,
+        uploadUri: String,
+        sha1Hex: String,
+        xAttrMetadata: UploadXAttrMetadata,
+        photoTags: Collection<Int>,
+        volumeId: String,
+        mainPhotoLinkId: String?,
+        onProgress: ((phase: UploadPhase, doneBytes: Long, totalBytes: Long) -> Unit)?,
+    ): SdkUploadedPhoto {
+        val isImage = item.mimeType.startsWith("image/")
+        val thumbnails = LinkedHashMap<me.proton.drive.sdk.entity.ThumbnailType, ByteArray>()
+        if (isImage || item.mimeType.startsWith("video/")) {
+            runCatching { generateThumbnailBytes(uploadUri, item.mimeType, THUMBNAIL_DEFAULT_MAX_PX) }.getOrNull()
+                ?.let { thumbnails[me.proton.drive.sdk.entity.ThumbnailType.THUMBNAIL] = it }
+        }
+        val wantPhotoThumbnail = isImage &&
+            (item.width > THUMBNAIL_PHOTO_MAX_PX || item.height > THUMBNAIL_PHOTO_MAX_PX || (item.width == 0 && item.height == 0))
+        if (wantPhotoThumbnail) {
+            runCatching { generateImageThumbnailBytes(uploadUri, item.mimeType, THUMBNAIL_PHOTO_MAX_PX, THUMBNAIL_PHOTO_MAX_BYTES) }
+                .getOrNull()?.let { thumbnails[me.proton.drive.sdk.entity.ThumbnailType.PREVIEW] = it }
+        }
+        val sha1 = eu.akoos.photos.data.sdk.hexToBytes(sha1Hex)
+        val upload = eu.akoos.photos.data.sdk.SdkPhotoUpload(
+            uploadUri = uploadUri,
+            name = item.displayName,
+            mediaType = item.mimeType,
+            fileSize = item.sizeBytes,
+            time = item.dateTaken.takeIf { it > 0 }?.let { Instant.ofEpochMilli(it) },
+            mainPhotoUid = mainPhotoLinkId?.let { me.proton.drive.sdk.entity.LegacyNodeUid(volumeId = volumeId, linkId = it).value },
+            tags = photoTags.mapNotNull { me.proton.drive.sdk.entity.PhotoTag.fromLong(it.toLong()) },
+            additionalMetadata = eu.akoos.photos.data.sdk.sdkAdditionalMetadata(
+                width = xAttrMetadata.displayWidth ?: item.width,
+                height = xAttrMetadata.displayHeight ?: item.height,
+                durationMillis = xAttrMetadata.durationMillis ?: item.duration,
+                latitude = xAttrMetadata.latitude,
+                longitude = xAttrMetadata.longitude,
+                cameraCaptureTimeIso = xAttrMetadata.cameraCaptureTimeIso,
+                cameraDevice = xAttrMetadata.cameraDevice,
+                cameraOrientation = xAttrMetadata.cameraOrientation,
+                subjectCoordinates = xAttrMetadata.subjectCoordinates,
+            ),
+            thumbnails = thumbnails,
+            sha1 = sha1,
+            onProgress = onProgress?.let { report -> { done, total -> report(UploadPhase.Uploading, done, total) } },
+        )
+        // The matching photos already on Drive, so a failure below can tell a photo this upload made from
+        // one that was there before (a metadata correction re-uploads under the original's name and bytes).
+        val before = findUploadedOrNull(userId, item.displayName, sha1)
+        val result = try {
+            sdkPhotoUploadOps.upload(userId, upload)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            val after = findUploadedOrNull(userId, item.displayName, sha1)
+            when (val outcome = eu.akoos.photos.data.sdk.sdkUploadAfterFailure(before, after)) {
+                is eu.akoos.photos.data.sdk.SdkUploadAfterFailure.Committed -> outcome.photo
+                eu.akoos.photos.data.sdk.SdkUploadAfterFailure.NothingCommitted -> throw e
+                eu.akoos.photos.data.sdk.SdkUploadAfterFailure.Unknown ->
+                    throw eu.akoos.photos.data.sdk.SdkOutcomeUnknownException("upload outcome unknown", e)
+            }
+        }
+        return SdkUploadedPhoto(result.linkId, result.revisionId, thumbnails[me.proton.drive.sdk.entity.ThumbnailType.THUMBNAIL])
+    }
+
+    private suspend fun findUploadedOrNull(userId: UserId, name: String, sha1: ByteArray) = try {
+        sdkPhotoUploadOps.findUploaded(userId, name, sha1)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Throwable) {
+        null
+    }
 
     /**
      * Byte count of the file [uri] points at, taken straight off its descriptor.
@@ -1394,3 +1534,10 @@ class PhotoUploadService @Inject constructor(
     }
 
 }
+
+/**
+ * Whether an upload may go through the Drive SDK at all: not while a draft of the app's own upload waits on
+ * Drive ([ownDraftPending]), which only that path can finish, and not for a photo with no capture date or one
+ * before 1970 ([dateTakenMs] not above zero), which the SDK would file under the upload moment instead.
+ */
+internal fun sdkMayUpload(dateTakenMs: Long, ownDraftPending: Boolean): Boolean = !ownDraftPending && dateTakenMs > 0

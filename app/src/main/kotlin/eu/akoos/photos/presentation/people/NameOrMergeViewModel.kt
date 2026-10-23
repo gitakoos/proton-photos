@@ -30,14 +30,18 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import eu.akoos.photos.R
+import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.domain.usecase.AddPhotosToPersonUseCase
 import eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase
 import eu.akoos.photos.domain.usecase.AssignPersonNameUseCase
+import eu.akoos.photos.domain.usecase.CentroidSum
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
+import eu.akoos.photos.domain.usecase.PersonCentroids
+import eu.akoos.photos.domain.usecase.cosineSimilarity
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.toPersonUi
 import kotlinx.coroutines.CancellationException
@@ -50,10 +54,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -79,6 +86,8 @@ class NameOrMergeViewModel @Inject constructor(
     private val assignPersonName: AssignPersonNameUseCase,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val personDao: PersonDao,
+    private val faceDao: FaceDao,
+    private val personCentroids: PersonCentroids,
 ) : ViewModel() {
 
     /** How an action ended. [subjectKey] names the subject it was started on, its face or its group, and
@@ -101,24 +110,74 @@ class NameOrMergeViewModel @Inject constructor(
         ) : Outcome
     }
 
-    /** The group the sheet is open on, left out of its own list. */
-    private val subjectPersonId = MutableStateFlow<Long?>(null)
+    /** What the sheet is open on; a group is also left out of its own list. */
+    private val subject = MutableStateFlow<NameOrMergeSubject?>(null)
 
-    /**
-     * The named people to choose from, most photographed first, without the Unsorted bucket or the group
-     * being named. The session is the outer flow, so a sign-in or a sign-out re-reads the list in place.
-     */
-    val people: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
+    /** The session's account and its named people, most photographed first, without the Unsorted bucket
+     *  or the group being named. The session is the outer flow, so a sign-in or a sign-out re-reads it. */
+    private val pickable = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             observePeopleUseCase(
                 userId,
                 if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
-            )
+                namedOnly = true,
+            ).map { summaries -> (userId?.id ?: PhotoLocationEntity.LOCAL_USER) to summaries.mapNotNull { it.toPersonUi() } }
         }
-        .map { summaries -> summaries.mapNotNull { it.toPersonUi() } }
-        .combine(subjectPersonId) { list, subjectId -> NameOrMergeRules.pickablePeople(list, subjectId) }
+        .combine(subject) { (account, list), subject ->
+            Pickable(account, subject, NameOrMergeRules.pickablePeople(list, (subject as? NameOrMergeSubject.Group)?.personId))
+        }
+
+    /** How alike each pickable person is to the subject, read again only when the subject or the set of
+     *  people changes, not on every refresh of the list while a scan runs. Empty until the first read, so
+     *  the list shows at once in its own order. */
+    private val likeness = pickable
+        .map { Triple(it.account, it.subject, it.people.mapTo(HashSet()) { person -> person.personId }) }
+        .distinctUntilChanged()
+        .mapLatest { (account, subject, personIds) -> likenessTo(account, subject, personIds) }
+        .onStart { emit(emptyMap()) }
+
+    /** The named people to choose from, the most alike to the subject first and the rest after them, most
+     *  photographed first. */
+    val people: StateFlow<List<PersonUi>> = pickable
+        .combine(likeness) { current, scores -> NameOrMergeRules.mostAlikeFirst(current.people, scores) }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    private data class Pickable(val account: String, val subject: NameOrMergeSubject?, val people: List<PersonUi>)
+
+    /**
+     * The cosine of each of [personIds]' mean faces to [subject]'s: the face itself, the mean of a
+     * selection's chosen faces, or the group's own mean face. Empty when the subject has no readable face,
+     * which leaves the list in its own order.
+     */
+    private suspend fun likenessTo(account: String, subject: NameOrMergeSubject?, personIds: Set<Long>): Map<Long, Float> =
+        try {
+            val groupId = (subject as? NameOrMergeSubject.Group)?.personId
+            val centroids = personCentroids.load(account, exactFor = groupId) { it in personIds || it == groupId }
+            val target = when (subject) {
+                is NameOrMergeSubject.Group -> centroids[subject.personId]
+                is NameOrMergeSubject.Face -> meanFace(account, listOf(subject.faceId))
+                is NameOrMergeSubject.Faces -> meanFace(account, subject.faces.map { it.faceId })
+                null -> null
+            }
+            if (target == null) emptyMap()
+            else personIds.mapNotNull { id -> centroids[id]?.let { id to cosineSimilarity(target, it) } }.toMap()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.w(TAG, "people left unranked: ${e.javaClass.simpleName}")
+            emptyMap()
+        }
+
+    /** The normalised mean of [faceIds]' vectors, or null when none is readable. */
+    private suspend fun meanFace(account: String, faceIds: List<String>): FloatArray? {
+        if (faceIds.isEmpty()) return null
+        val sum = CentroidSum()
+        faceIds.chunked(FACE_ID_CHUNK).forEach { chunk ->
+            faceDao.vectorsByIdsChunk(account, chunk).forEach { sum.add(it.embedding) }
+        }
+        return sum.centroid()
+    }
 
     private val _outcomes = MutableSharedFlow<Outcome>(extraBufferCapacity = 1)
 
@@ -132,7 +191,7 @@ class NameOrMergeViewModel @Inject constructor(
 
     /** Points the list at [subject], leaving a group out of its own choices. */
     fun bind(subject: NameOrMergeSubject) {
-        subjectPersonId.value = (subject as? NameOrMergeSubject.Group)?.personId
+        this.subject.value = subject
     }
 
     /**
@@ -234,6 +293,9 @@ class NameOrMergeViewModel @Inject constructor(
 
     private companion object {
         const val TAG = "NameOrMergeVM"
+
+        /** Face ids per vector read, well under the SQL host-variable limit. */
+        const val FACE_ID_CHUNK = 500
     }
 }
 
@@ -257,6 +319,14 @@ internal object NameOrMergeRules {
      *  never the group itself ([subjectPersonId]). The given order is kept. */
     fun pickablePeople(people: List<PersonUi>, subjectPersonId: Long?): List<PersonUi> =
         people.filter { !it.isOther && !it.displayName.isNullOrBlank() && it.personId != subjectPersonId }
+
+    /** [people] with those scored in [likeness] first, the most alike leading, and everyone without a score
+     *  after them in the order given. */
+    fun mostAlikeFirst(people: List<PersonUi>, likeness: Map<Long, Float>): List<PersonUi> {
+        if (likeness.isEmpty()) return people
+        val (scored, rest) = people.partition { it.personId in likeness }
+        return scored.sortedByDescending { likeness.getValue(it.personId) } + rest
+    }
 
     /** What naming group [fromPersonId] reports, given the person it ended up as: a rename when it kept
      *  its own id, a merge when it folded into someone else. */

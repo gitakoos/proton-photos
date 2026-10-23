@@ -159,6 +159,14 @@ class ReconcileEquivalenceTest {
                     assertTrue("the rules fixture never reached '$expected'", expected in calls)
                 }
                 assertTrue("the rules fixture must recompute a hash", reference.sha1Reads.isNotEmpty())
+                assertTrue(
+                    "an edited backed-up file keeps its pairing and loses its stamp",
+                    reference.table.any { it.startsWith("content://m/28|${userId.id}|L28|s28-edited|") && "|SYNCED|" in it && it.contains("|null|2000|") },
+                )
+                assertTrue(
+                    "the same bytes at a new size keep their stamp",
+                    reference.table.any { it.startsWith("content://m/29|${userId.id}|L29|s29|") && it.contains("|12345|2000|") },
+                )
             }
         }
     }
@@ -353,6 +361,8 @@ class ReconcileEquivalenceTest {
             deviceFile("content://m/25", "back.jpg"),
             deviceFile("content://m/26", "album-only.jpg"),
             deviceFile("content://m/27", "conflict.jpg", sec = BASE_SEC + 27),
+            deviceFile("content://m/28", "edited.jpg", size = 2000L),
+            deviceFile("content://m/29", "resized.jpg", size = 2000L),
         )
         val listing = listOf(
             listed("L1", "cloud-name-1.jpg", hash = "hmac-x1"),
@@ -373,6 +383,8 @@ class ReconcileEquivalenceTest {
             listed("L24", "zero.jpg", sec = 0L, size = 0L),
             listed("L25", "back.jpg"),
             listed("L27", "conflict.jpg", sec = BASE_SEC + 27, hash = "hmac-other27"),
+            listed("L28", "edited.jpg", hash = "hmac-s28"),
+            listed("L29", "resized.jpg", hash = "hmac-s29"),
             listed("L99", "gone-from-device.jpg"),
             listed("L92", "fresh-download.jpg"),
             // Look-alikes the stream leaves out: an album-only row and another account's row.
@@ -400,6 +412,9 @@ class ReconcileEquivalenceTest {
             row("content://m/25", SyncStatus.CLOUD_ONLY, cloudId = "L25"),
             row("content://m/26", SyncStatus.SYNCED, cloudId = "Lalbum"),
             row("content://m/27", SyncStatus.CONFLICT),
+            // Backed-up files whose size changed: one edited by another app, one with the same bytes.
+            row("content://m/28", SyncStatus.SYNCED, cloudId = "L28", localHash = "s28", backedUpAtMs = 12_345L, lastSuccess = longAgo),
+            row("content://m/29", SyncStatus.SYNCED, cloudId = "L29", localHash = "s29", backedUpAtMs = 12_345L, lastSuccess = longAgo),
             // Rows whose file is no longer on the device.
             row("content://m/99", SyncStatus.SYNCED, cloudId = "L7", lastSuccess = longAgo),
             row("content://m/98", SyncStatus.LOCAL_ONLY, queued = true, source = QueueSource.AUTO_FOLDER),
@@ -413,7 +428,10 @@ class ReconcileEquivalenceTest {
             row("content://m/91", SyncStatus.LOCAL_ONLY, queued = true, source = QueueSource.MANUAL, queuedAt = midPass),
             row("content://b/1", SyncStatus.SYNCED, cloudId = "Lb1", user = otherUser),
         )
-        val sha1 = mapOf("content://m/3" to "s3", "content://m/19" to "unknown", "content://m/24" to "s2")
+        val sha1 = mapOf(
+            "content://m/3" to "s3", "content://m/19" to "unknown", "content://m/24" to "s2",
+            "content://m/28" to "s28-edited", "content://m/29" to "s29",
+        )
         return Fixture(name, now, device, listing, rows, sha1, settings)
     }
 
@@ -593,6 +611,32 @@ class ReconcileEquivalenceTest {
 
         override suspend fun clearManualQueue(): Int =
             real.clearManualQueue().also { calls += "clearManualQueue changed=$it" }
+
+        // The batched writes are logged one entry per row, as the per-row calls the reference pass makes,
+        // so the logs still line up row by row; the tables compared after the pass check what they wrote.
+        override suspend fun updateDomainColumnsIfNotSyncedWithCloudAll(states: List<SyncState>, userId: UserId): Set<String> =
+            real.updateDomainColumnsIfNotSyncedWithCloudAll(states, userId).also { untouched ->
+                for (state in states) {
+                    calls += "guardedUpdate ${userId.id} ${describe(state)} changed=${if (state.localUri in untouched) 0 else 1}"
+                }
+            }
+
+        override suspend fun markQueuedAll(localUris: List<String>, source: String, at: Long) {
+            for (uri in localUris) calls += "markQueued $uri $source ${stamp(at)}"
+            real.markQueuedAll(localUris, source, at)
+        }
+
+        override suspend fun clearQueuedForSyncedAll(localUris: List<String>) {
+            for (uri in localUris) calls += "clearQueuedForSynced $uri"
+            real.clearQueuedForSyncedAll(localUris)
+        }
+
+        // A read of the rows the queue clean-up filters to, where the reference reads the whole table and
+        // filters it the same way; logged as that read so the two logs line up.
+        override suspend fun getLocalOnly(userId: UserId): List<SyncState> {
+            calls += "observeAll ${userId.id}"
+            return real.getLocalOnly(userId)
+        }
     }
 
     private companion object {

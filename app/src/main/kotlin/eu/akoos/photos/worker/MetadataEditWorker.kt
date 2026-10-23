@@ -46,7 +46,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.TimeUnit
@@ -120,6 +122,15 @@ class MetadataEditWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        activeDrains.update { it + 1 }
+        try {
+            return drain()
+        } finally {
+            activeDrains.update { it - 1 }
+        }
+    }
+
+    private suspend fun drain(): Result {
         // The queue is the source of truth. An empty queue is a valid no-op run: APPEND_OR_REPLACE can
         // enqueue a second run after the first already drained everything.
         val initialRows = dao.getAll()
@@ -312,7 +323,7 @@ class MetadataEditWorker @AssistedInject constructor(
         } catch (e: CancellationException) {
             // Cooperative cancellation (the Cancel action, or the controller's cancel path). WorkManager
             // treats it as cancelled. The remaining rows are left untouched here: the controller's cancel
-            // path clears the queue, and a plain cancelled run would otherwise re-enqueue and re-drain.
+            // path drops the ones with no uploaded copy and re-drains the rest.
             Log.d(TAG, "metadata edit drain cancelled")
             throw e
         } catch (e: Exception) {
@@ -336,8 +347,8 @@ class MetadataEditWorker @AssistedInject constructor(
     private fun buildForegroundInfo(done: Int, total: Int): ForegroundInfo {
         ensureChannel(context)
 
-        // The receiver cancels the drain and empties the queue, so a cancelled batch is not resumed by a
-        // later one; a plain WorkManager cancel would leave its rows behind.
+        // The receiver cancels the drain and drops the edits with no uploaded copy, so a later batch does
+        // not resume them; a plain WorkManager cancel would leave its rows behind.
         val cancelIntent = PendingIntent.getBroadcast(
             context,
             0,
@@ -359,7 +370,7 @@ class MetadataEditWorker @AssistedInject constructor(
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            // Cancel action: cancels this worker and clears the queue, so doWork's CancellationException
+            // Cancel action: cancels this worker and drops the edits not started, so doWork's CancellationException
             // catch handles teardown of the run itself.
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
@@ -378,6 +389,11 @@ class MetadataEditWorker @AssistedInject constructor(
     }
 
     companion object {
+        /** How many drains of this process are inside doWork right now. A cancel reads it to know when
+         *  the cancelled drain has really returned, which WorkManager's own state does not say: that
+         *  turns CANCELLED as soon as the cancel is requested. */
+        internal val activeDrains = MutableStateFlow(0)
+
         const val TAG = "metadata_edit_worker"
         const val UNIQUE_NAME = "metadata_edit"
         const val CHANNEL_ID = "metadata_edit"

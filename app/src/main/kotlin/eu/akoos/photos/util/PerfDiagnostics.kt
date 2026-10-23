@@ -74,6 +74,10 @@ object PerfDiagnostics {
     // Highest values seen per phase, which outlive the ring once it has rolled past them.
     private val phasePeaks = LinkedHashMap<String, PhasePeak>()
 
+    // How often each fixed event label happened this process lifetime, for the counts no phase mark shows
+    // (why a scan was reused or run again, what asked for it).
+    private val counters = LinkedHashMap<String, Int>()
+
     private class PhasePeak {
         var marks = 0
         var maxItems = 0
@@ -212,6 +216,14 @@ object PerfDiagnostics {
         tee(line)
     }
 
+    /** Count one [event], a fixed label like [mark]'s, never a name, path or id. */
+    @Synchronized
+    fun count(event: String) {
+        val label = phaseLabel(event)
+        if (label !in counters && counters.size >= MAX_PHASES * 2) return
+        counters[label] = (counters[label] ?: 0) + 1
+    }
+
     /** The newest [max] phase lines, oldest first. The buffer dies with the process, so an OOM crash
      *  keeps which phase was running only when the crash record carries this tail. */
     @Synchronized
@@ -295,10 +307,15 @@ object PerfDiagnostics {
                 append('\n').append(peakLine(base, peak.marks, peak.maxItems, peak.maxHeapMb, peak.maxGrowthMb))
             }
         }
+        if (counters.isNotEmpty()) {
+            if (isNotEmpty()) append('\n')
+            append("counts: ")
+            counters.entries.joinTo(this, " ") { "${it.key}=${it.value}" }
+        }
     }
 
     @Synchronized
-    fun isEmpty(): Boolean = lines.isEmpty() && phaseLines.isEmpty()
+    fun isEmpty(): Boolean = lines.isEmpty() && phaseLines.isEmpty() && counters.isEmpty()
 
     @Synchronized
     fun clear() {
@@ -306,6 +323,7 @@ object PerfDiagnostics {
         phaseLines.clear()
         openPhases.clear()
         phasePeaks.clear()
+        counters.clear()
         startedAtMs = 0L
         lastAppendedAtMs = 0L
     }

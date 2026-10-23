@@ -48,4 +48,29 @@ class FaceScanNetworkResumeTest {
     fun `does not kick when the connection drops to metered`() {
         assertFalse(shouldResumeFaceScanOnUnmetered(wasUnmetered = true, nowUnmetered = false))
     }
+
+    @Test
+    fun `a pass held by the Wi-Fi-only rule says it waits for Wi-Fi`() {
+        assertTrue(faceWalkWaitsForWifi(deferred = 21_856, wifiOnly = true, onWifi = false))
+    }
+
+    @Test
+    fun `nothing deferred, the rule off, or already on Wi-Fi is not a wait for Wi-Fi`() {
+        assertFalse(faceWalkWaitsForWifi(deferred = 0, wifiOnly = true, onWifi = false))
+        assertFalse(faceWalkWaitsForWifi(deferred = 12, wifiOnly = false, onWifi = false))
+        // On Wi-Fi a deferral means the walk stood down, not that it waits for a connection.
+        assertFalse(faceWalkWaitsForWifi(deferred = 12, wifiOnly = true, onWifi = true))
+    }
+
+    @Test
+    fun `turning the Wi-Fi-only switch off while the walk waits for Wi-Fi starts it`() {
+        assertTrue(shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly = true, nowWifiOnly = false, waitingForWifi = true))
+    }
+
+    @Test
+    fun `the switch kicks nothing when the walk is not waiting or the switch did not go off`() {
+        assertFalse(shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly = true, nowWifiOnly = false, waitingForWifi = false))
+        assertFalse(shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly = false, nowWifiOnly = false, waitingForWifi = true))
+        assertFalse(shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly = false, nowWifiOnly = true, waitingForWifi = true))
+    }
 }

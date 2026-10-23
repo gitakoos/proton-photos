@@ -82,40 +82,33 @@ class ImportTakeoutUseCaseTest {
 
     // ---- buildLocalMediaItem ---------------------------------------------------------------------
 
-    @Test fun `buildLocalMediaItem marks a known date explicit and an unknown date not`() {
+    @Test fun `buildLocalMediaItem carries the resolved date as an explicit one`() {
         val withDate = ImportTakeoutUseCase.buildLocalMediaItem(
             uri = "file:///t.jpg", meta = null, entryName = "t.jpg",
             sizeBytes = 10L, mimeType = "image/jpeg", dateMs = jan2021Ms,
         )
         assertEquals(jan2021Ms, withDate.dateTaken)
         assertTrue(withDate.dateTakenIsExplicit)
-
-        val noDate = ImportTakeoutUseCase.buildLocalMediaItem(
-            uri = "file:///t.jpg", meta = null, entryName = "t.jpg",
-            sizeBytes = 10L, mimeType = "image/jpeg", dateMs = null,
-        )
-        assertEquals(0L, noDate.dateTaken)
-        assertFalse(noDate.dateTakenIsExplicit)
     }
 
     @Test fun `buildLocalMediaItem takes the sidecar title but falls back to the base name`() {
         val titled = ImportTakeoutUseCase.buildLocalMediaItem(
             uri = "file:///x", meta = meta(title = "Sunset over the bay.jpg"),
             entryName = "Takeout/Google Photos/IMG_1.jpg",
-            sizeBytes = 1L, mimeType = "image/jpeg", dateMs = null,
+            sizeBytes = 1L, mimeType = "image/jpeg", dateMs = jan2021Ms,
         )
         assertEquals("Sunset over the bay.jpg", titled.displayName)
 
         val blankTitle = ImportTakeoutUseCase.buildLocalMediaItem(
             uri = "file:///x", meta = meta(title = "   "),
             entryName = "Takeout/Google Photos/IMG_1.jpg",
-            sizeBytes = 1L, mimeType = "image/jpeg", dateMs = null,
+            sizeBytes = 1L, mimeType = "image/jpeg", dateMs = jan2021Ms,
         )
         assertEquals("IMG_1.jpg", blankTitle.displayName)
 
         val noMeta = ImportTakeoutUseCase.buildLocalMediaItem(
             uri = "file:///x", meta = null, entryName = "Album/clip.mp4",
-            sizeBytes = 1L, mimeType = "video/mp4", dateMs = null,
+            sizeBytes = 1L, mimeType = "video/mp4", dateMs = jan2021Ms,
         )
         assertEquals("clip.mp4", noMeta.displayName)
     }
@@ -123,7 +116,7 @@ class ImportTakeoutUseCaseTest {
     @Test fun `buildLocalMediaItem carries the mime and sizes through with a null bucket`() {
         val item = ImportTakeoutUseCase.buildLocalMediaItem(
             uri = "file:///x", meta = null, entryName = "clip.mp4",
-            sizeBytes = 4242L, mimeType = "video/mp4", dateMs = null,
+            sizeBytes = 4242L, mimeType = "video/mp4", dateMs = jan2021Ms,
         )
         assertEquals("video/mp4", item.mimeType)
         assertEquals(4242L, item.sizeBytes)

@@ -749,5 +749,36 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40, MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45, MIGRATION_45_46)
+    /** v46 to v47: an import's staged video can belong to a Live Photo (`liveOf` names its still), and an
+     *  uploaded entry keeps the Drive link it landed under (`linkId`). Both columns are added only when absent. */
+    val MIGRATION_46_47 = object : Migration(46, 47) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            val columns = db.query("PRAGMA table_info(`import_staged`)").use { cur ->
+                val nameIndex = cur.getColumnIndex("name")
+                buildSet { while (cur.moveToNext()) add(cur.getString(nameIndex)) }
+            }
+            if ("liveOf" !in columns) db.execSQL("ALTER TABLE `import_staged` ADD COLUMN `liveOf` TEXT")
+            if ("linkId" !in columns) db.execSQL("ALTER TABLE `import_staged` ADD COLUMN `linkId` TEXT")
+        }
+    }
+
+    /** v47 to v48: an import ledger row records the digest of the entry as the archive held it (`sourceSha1`)
+     *  and the account it went to (`userId`), behind one index on the pair. Existing rows keep both null. The
+     *  columns are added only when absent. */
+    val MIGRATION_47_48 = object : Migration(47, 48) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            val columns = db.query("PRAGMA table_info(`import_uploaded`)").use { cur ->
+                val nameIndex = cur.getColumnIndex("name")
+                buildSet { while (cur.moveToNext()) add(cur.getString(nameIndex)) }
+            }
+            if ("sourceSha1" !in columns) db.execSQL("ALTER TABLE `import_uploaded` ADD COLUMN `sourceSha1` TEXT")
+            if ("userId" !in columns) db.execSQL("ALTER TABLE `import_uploaded` ADD COLUMN `userId` TEXT")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_import_uploaded_userId_sourceSha1` " +
+                    "ON `import_uploaded` (`userId`, `sourceSha1`)"
+            )
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40, MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48)
 }

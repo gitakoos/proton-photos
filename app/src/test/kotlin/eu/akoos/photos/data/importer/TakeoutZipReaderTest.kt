@@ -285,4 +285,24 @@ class TakeoutZipReaderTest {
 
         assertEquals("one fresh stream per pass", 2, opens)
     }
+
+    @Test fun `forEachMediaEntry carries each entry's modified time, and the DOS epoch as none`() {
+        val modified = 1_623_751_200_000L
+        val dosEpoch = java.time.LocalDateTime.of(1980, 1, 1, 0, 0)
+            .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val bytes = ByteArrayOutputStream().also { out ->
+            ZipOutputStream(out).use { zip ->
+                listOf("dated.jpg" to modified, "zeroed.jpg" to dosEpoch, "skip.json" to modified).forEach { (name, time) ->
+                    zip.putNextEntry(ZipEntry(name).apply { this.time = time })
+                    zip.write(payload(1, 8))
+                    zip.closeEntry()
+                }
+            }
+        }.toByteArray()
+
+        val seen = mutableListOf<MediaEntry>()
+        reader(bytes).forEachMediaEntry { entry, _ -> seen += entry }
+
+        assertEquals(listOf(MediaEntry("dated.jpg", modified), MediaEntry("zeroed.jpg", null)), seen)
+    }
 }

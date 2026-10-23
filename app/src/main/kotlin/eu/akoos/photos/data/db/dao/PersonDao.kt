@@ -49,6 +49,19 @@ interface PersonDao {
     @Query("SELECT * FROM person WHERE userId = :userId ORDER BY faceCount DESC")
     fun observePeopleForUser(userId: String): Flow<List<PersonEntity>>
 
+    /** [observePeopleForUser] narrowed to the people carrying a name, in the same order, for the surfaces
+     *  that show or count named people only: a write then re-reads those rows rather than every group. A
+     *  name of spaces still comes through, so the caller's own blank check stays what decides. */
+    @Query(
+        "SELECT * FROM person WHERE userId = :userId AND displayName IS NOT NULL AND displayName != '' " +
+            "ORDER BY faceCount DESC, id",
+    )
+    fun observeNamedPeopleForUser(userId: String): Flow<List<PersonEntity>>
+
+    /** Live stream of one of the account's people, or null while there is none of that id. */
+    @Query("SELECT * FROM person WHERE userId = :userId AND id = :id LIMIT 1")
+    fun observePersonForUser(userId: String, id: Long): Flow<PersonEntity?>
+
     /** One person by id, or null. */
     @Query("SELECT * FROM person WHERE id = :id LIMIT 1")
     suspend fun personById(id: Long): PersonEntity?

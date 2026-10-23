@@ -23,10 +23,14 @@
 package eu.akoos.photos.presentation.person
 
 import android.content.Context
+import android.util.Log
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.R
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +57,8 @@ import eu.akoos.photos.domain.usecase.unpackEmbedding
 import javax.inject.Inject
 import kotlin.math.sqrt
 
+private const val TAG = "FindMorePhotosVM"
+
 /** One photo the sweep found that matches the person: shown for review, persisted only when picked. */
 data class FoundPhoto(val faceId: String, val item: GalleryItem, val match: FaceSweepEvent.Match)
 
@@ -62,6 +68,8 @@ data class FindMoreUiState(
     val total: Int = 0,
     val found: List<FoundPhoto> = emptyList(),
     val personName: String? = null,
+    /** Why the search ended before it looked at every photo, shown once it is over; null when it finished. */
+    @StringRes val stopNotice: Int? = null,
 )
 
 /**
@@ -93,54 +101,69 @@ class FindMorePhotosViewModel @Inject constructor(
         if (started) return
         started = true
         sweepJob = viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first()
-            // Faces off: nothing to sweep, so end the run without touching the index.
-            val prefs = context.settingsDataStore.data.first()
-            val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
-            if (!faceOn) { _uiState.value = _uiState.value.copy(running = false); return@launch }
-            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-            val name = personDao.personById(personId)?.displayName
-            _uiState.value = _uiState.value.copy(personName = name)
-
-            val centroid = withContext(Dispatchers.Default) {
-                meanEmbedding(faceDao.facesForPerson(account, personId))
+            // A read or a scan that throws ends the search with a message instead of the app.
+            try {
+                sweep(personId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "find more failed: ${e.javaClass.simpleName}")
+                _uiState.value = _uiState.value.copy(stopNotice = R.string.find_more_failed)
+            } finally {
+                _uiState.value = _uiState.value.copy(running = false)
             }
-            // The person has no usable faces to match against, so there is nothing to look for.
-            if (centroid == null) { _uiState.value = _uiState.value.copy(running = false); return@launch }
+        }
+    }
 
-            // A snapshot of the library, to resolve a matched photo key to the item the grid draws.
-            val library = runCatching {
-                (if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId)).first()
-            }.getOrDefault(emptyList())
-            val byKey = library.associateBy { it.stableId }
+    private suspend fun sweep(personId: Long) {
+        val userId = accountManager.getPrimaryUserId().first()
+        // Faces off: nothing to sweep, so end the run without touching the index.
+        val prefs = context.settingsDataStore.data.first()
+        val faceOn = prefs[SettingsKeys.AI_FEATURES_ENABLED] == true && prefs[SettingsKeys.FACE_ENABLED] == true
+        if (!faceOn) return
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        val name = personDao.personById(personId)?.displayName
+        _uiState.value = _uiState.value.copy(personName = name)
 
-            // Photos already on this person (their faces, plus any manually attached), so a photo the
-            // user has already added never reappears as a suggestion to add again.
-            val alreadyIn = buildSet {
-                addAll(faceDao.distinctPhotoKeysForPerson(account, personId))
-                if (!name.isNullOrBlank()) addAll(personManualPhotoDao.photoKeysForNameList(account, name))
-            }
+        val centroid = withContext(Dispatchers.Default) {
+            meanEmbedding(faceDao.facesForPerson(account, personId))
+        }
+        // The person has no usable faces to match against, so there is nothing to look for.
+        if (centroid == null) return
 
-            faceIndexingScheduler.sweepFacelessForPerson(userId, centroid, FACE_SUGGEST_THRESHOLD)
-                .collect { event ->
-                    when (event) {
-                        is FaceSweepEvent.Progress ->
-                            _uiState.value = _uiState.value.copy(done = event.done, total = event.total)
-                        is FaceSweepEvent.Match -> {
-                            val item = byKey[event.photoKey] ?: return@collect
-                            if (item.stableId in alreadyIn) return@collect
-                            val faceId = "${event.photoKey}#${event.index}"
-                            // One card per photo, keeping the first (clearest) match on it.
-                            if (_uiState.value.found.none { it.item.stableId == item.stableId }) {
-                                _uiState.value = _uiState.value.copy(
-                                    found = _uiState.value.found + FoundPhoto(faceId, item, event),
-                                )
-                            }
+        // A snapshot of the library, to resolve a matched photo key to the item the grid draws.
+        val library = runCatching {
+            (if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId)).first()
+        }.getOrDefault(emptyList())
+        val byKey = library.associateBy { it.stableId }
+
+        // Photos already on this person (their faces, plus any manually attached), so a photo the
+        // user has already added never reappears as a suggestion to add again.
+        val alreadyIn = buildSet {
+            addAll(faceDao.distinctPhotoKeysForPerson(account, personId))
+            if (!name.isNullOrBlank()) addAll(personManualPhotoDao.photoKeysForNameList(account, name))
+        }
+
+        faceIndexingScheduler.sweepFacelessForPerson(userId, centroid, FACE_SUGGEST_THRESHOLD)
+            .collect { event ->
+                when (event) {
+                    is FaceSweepEvent.Progress ->
+                        _uiState.value = _uiState.value.copy(done = event.done, total = event.total)
+                    is FaceSweepEvent.Stopped ->
+                        _uiState.value = _uiState.value.copy(stopNotice = R.string.find_more_stopped)
+                    is FaceSweepEvent.Match -> {
+                        val item = byKey[event.photoKey] ?: return@collect
+                        if (item.stableId in alreadyIn) return@collect
+                        val faceId = "${event.photoKey}#${event.index}"
+                        // One card per photo, keeping the first (clearest) match on it.
+                        if (_uiState.value.found.none { it.item.stableId == item.stableId }) {
+                            _uiState.value = _uiState.value.copy(
+                                found = _uiState.value.found + FoundPhoto(faceId, item, event),
+                            )
                         }
                     }
                 }
-            _uiState.value = _uiState.value.copy(running = false)
-        }
+            }
     }
 
     /** Persist the picked matches as faces of the person: written with the person's id AND name, so they

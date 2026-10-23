@@ -35,8 +35,10 @@ interface PhotoLocationDao {
     @Upsert
     suspend fun upsert(items: List<PhotoLocationEntity>)
 
-    /** Live stream of every located photo for the account — the map view's source. */
-    @Query("SELECT * FROM photo_location WHERE userId = :userId")
+    /** Live stream of every located photo for the account — the map view's source. A fix at exactly
+     *  0, 0 is a photo with no GPS, left out here as well as dropped by [deleteNoFixRows], so one stored
+     *  before that was recognised never shows while it waits for the next walk to clear it. */
+    @Query("SELECT * FROM photo_location WHERE userId = :userId AND NOT (latitude = 0 AND longitude = 0)")
     fun observeForUser(userId: String): Flow<List<PhotoLocationEntity>>
 
     /** Ids already located, so a backfill can skip them without re-reading EXIF. */
@@ -44,8 +46,12 @@ interface PhotoLocationDao {
     suspend fun idsForUser(userId: String): List<String>
 
     /** The stored GPS fix for one photo (by its cloud linkId), or null if not located yet. Used by
-     *  the details sheet to show a cloud-only photo's place without re-decrypting its XAttr. */
-    @Query("SELECT * FROM photo_location WHERE userId = :userId AND id = :id LIMIT 1")
+     *  the details sheet to show a cloud-only photo's place without re-decrypting its XAttr. A 0, 0 fix
+     *  reads as none, as in [observeForUser]. */
+    @Query(
+        "SELECT * FROM photo_location WHERE userId = :userId AND id = :id " +
+            "AND NOT (latitude = 0 AND longitude = 0) LIMIT 1",
+    )
     suspend fun getById(userId: String, id: String): PhotoLocationEntity?
 
     /**
@@ -59,6 +65,11 @@ interface PhotoLocationDao {
      */
     @Query("DELETE FROM photo_location WHERE userId = :userId AND id IN (:ids)")
     suspend fun deleteByIds(userId: String, ids: List<String>)
+
+    /** Drops every stored fix at exactly 0, 0, the position written for a photo with no GPS, so no map,
+     *  place or search shows one. Cheap and idempotent: the backfills run it before each walk. */
+    @Query("DELETE FROM photo_location WHERE latitude = 0 AND longitude = 0")
+    suspend fun deleteNoFixRows(): Int
 
     /**
      * Move a photo's location row onto a new [newId], keeping its coordinates and its owner. A revealed

@@ -153,9 +153,50 @@ class FaceDiagnosticsFormatTest {
     }
 
     @Test
+    fun the_progress_line_says_whether_it_counts_photos_or_faces() {
+        FaceDiagnostics.record("Running", 70_654, 70_664)
+        assertTrue(FaceDiagnostics.snapshot(now = 0L).contains("indexed=70654/70664 pending=10 counting=photos\n"))
+        FaceDiagnostics.record("Running", 0, 60_135, grouping = true)
+        assertTrue(FaceDiagnostics.snapshot(now = 0L).contains("indexed=0/60135 pending=60135 counting=faces\n"))
+        FaceDiagnostics.clear()
+        assertTrue(FaceDiagnostics.snapshot(now = 0L).contains("indexed=0/0 pending=0 counting=photos\n"))
+    }
+
+    @Test
+    fun a_batched_run_start_a_sweep_end_and_a_torn_read_print_once_recorded_and_go_with_a_clear() {
+        val blank = FaceDiagnostics.snapshot(now = 0L)
+        assertFalse(blank, blank.contains("batchedStart=") || blank.contains("lastSweep=") || blank.contains("lastDbTear="))
+        FaceDiagnostics.recordBatchedRunStart(ungrouped = 60_135, finalPass = true)
+        FaceDiagnostics.recordSweepStop("model-stalled", done = 120, total = 29_000)
+        FaceDiagnostics.recordDbTear(
+            "ObservePeople",
+            IllegalStateException("Couldn't read row 7012, col 1 from CursorWindow.  Make sure the Cursor is initialized"),
+        )
+        val snapshot = FaceDiagnostics.snapshot(now = 0L)
+        assertTrue(snapshot, snapshot.contains("batchedStart=ungrouped=60135 final=yes\n"))
+        assertTrue(snapshot, snapshot.contains("lastSweep=model-stalled done=120 total=29000\n"))
+        assertTrue(
+            snapshot,
+            snapshot.contains("lastDbTear=ObservePeople IllegalStateException (Couldn't read row 7012, col 1 from CursorWindow)\n"),
+        )
+        assertFalse(snapshot, snapshot.contains("Make sure"))
+        FaceDiagnostics.clear()
+        val cleared = FaceDiagnostics.snapshot(now = 0L)
+        assertFalse(cleared, cleared.contains("batchedStart=") || cleared.contains("lastSweep=") || cleared.contains("lastDbTear="))
+    }
+
+    @Test
+    fun a_torn_read_with_any_other_message_prints_its_class_only() {
+        FaceDiagnostics.recordDbTear("SettingsPeople", IllegalStateException("IMG_2041.jpg of Anna"))
+        val snapshot = FaceDiagnostics.snapshot(now = 0L)
+        assertTrue(snapshot, snapshot.contains("lastDbTear=SettingsPeople IllegalStateException\n"))
+        assertFalse(snapshot, snapshot.contains("Anna"))
+    }
+
+    @Test
     fun source_deferrals_read_zero_before_anything_is_recorded() {
         val snapshot = FaceDiagnostics.snapshot(now = 0L)
-        assertTrue(snapshot, snapshot.contains("watchdogSkips=0\npermanentSkipped=0 transientWaiting=0 overBudget=0\nfacesDetected=0\n"))
+        assertTrue(snapshot, snapshot.contains("watchdogSkips=0\npermanentSkipped=0 transientWaiting=0 overBudget=0 waitingForWifi=0\nfacesDetected=0\n"))
     }
 
     @Test
@@ -166,16 +207,23 @@ class FaceDiagnosticsFormatTest {
         // A later pass end replaces the backlog rather than adding to it.
         FaceDiagnostics.recordSourceBacklog(transientWaiting = 5, overBudget = 90)
         val snapshot = FaceDiagnostics.snapshot(now = 0L)
-        assertTrue(snapshot, snapshot.contains("permanentSkipped=2 transientWaiting=5 overBudget=90\n"))
+        assertTrue(snapshot, snapshot.contains("permanentSkipped=2 transientWaiting=5 overBudget=90 waitingForWifi=0\n"))
+    }
+
+    @Test
+    fun source_deferrals_print_the_photos_waiting_for_wifi() {
+        FaceDiagnostics.recordSourceBacklog(transientWaiting = 0, overBudget = 0, deferredOffWifi = 21856)
+        val snapshot = FaceDiagnostics.snapshot(now = 0L)
+        assertTrue(snapshot, snapshot.contains("overBudget=0 waitingForWifi=21856\n"))
     }
 
     @Test
     fun clear_resets_the_source_deferrals() {
         FaceDiagnostics.recordPermanentSkip()
-        FaceDiagnostics.recordSourceBacklog(transientWaiting = 7, overBudget = 120)
+        FaceDiagnostics.recordSourceBacklog(transientWaiting = 7, overBudget = 120, deferredOffWifi = 40)
         FaceDiagnostics.clear()
         val snapshot = FaceDiagnostics.snapshot(now = 0L)
-        assertTrue(snapshot, snapshot.contains("permanentSkipped=0 transientWaiting=0 overBudget=0\n"))
+        assertTrue(snapshot, snapshot.contains("permanentSkipped=0 transientWaiting=0 overBudget=0 waitingForWifi=0\n"))
     }
 
     @Test

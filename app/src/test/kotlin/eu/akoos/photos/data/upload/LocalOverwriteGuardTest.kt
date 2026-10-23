@@ -54,6 +54,7 @@ class LocalOverwriteGuardTest {
         context = ApplicationProvider.getApplicationContext()
         photo = File(context.cacheDir, "guarded.jpg").also { it.writeBytes(original) }
         journalDir().deleteRecursively()
+        LocalRewrites.clear()
     }
 
     private fun journalDir() = File(context.filesDir, MirrorOverwriteJournal.DIR_NAME)
@@ -107,6 +108,34 @@ class LocalOverwriteGuardTest {
         assertTrue(thrown is IOException)
         assertTrue(photo.readBytes().contentEquals(original))
         assertEquals(0, journalFiles())
+    }
+
+    @Test
+    fun `a completed rewrite is noted with the size it left`() {
+        guard().run(uri) {
+            context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("edited".toByteArray()) }
+        }
+        assertFalse(LocalRewrites.consume(uri, original.size.toLong()))
+
+        guard().run(uri) {
+            context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write("edited again".toByteArray()) }
+        }
+        assertTrue(LocalRewrites.consume(uri, "edited again".length.toLong()))
+        assertFalse("a note is spent once", LocalRewrites.consume(uri, "edited again".length.toLong()))
+    }
+
+    @Test
+    fun `a rolled-back rewrite is not noted`() {
+        runCatching {
+            guard().run(uri) {
+                context.contentResolver.openOutputStream(Uri.parse(uri), "wt")!!.use { it.write(1) }
+                throw IOException("process out of space")
+            }
+        }
+        runCatching { guard().run<Unit>(uri) { throw SecurityException("needs consent") } }
+
+        assertFalse(LocalRewrites.consume(uri, 1L))
+        assertFalse(LocalRewrites.consume(uri, original.size.toLong()))
     }
 
     @Test

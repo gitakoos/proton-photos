@@ -212,6 +212,11 @@ object SettingsKeys {
     /** When true, an album cover that is a GIF animates; off shows a still first frame. Off by default. */
     val GIF_AUTOPLAY_COVERS = booleanPreferencesKey("gif_autoplay_covers")
 
+    /** When true, a long press on the photo in the viewer opens the top-right menu, the one its button
+     *  opens, instead of selecting the text on the photo. Off by default, so the long press keeps selecting
+     *  text unless the user switches it. */
+    val VIEWER_LONG_PRESS_OPENS_MENU = booleanPreferencesKey("viewer_long_press_opens_menu")
+
     /** true = the classic OpenStreetMap tile map; false (default) = the modern world map. */
     val MAP_STYLE_OSM = booleanPreferencesKey("map_style_osm")
 
@@ -356,6 +361,10 @@ object SettingsKeys {
     /** The optional vault password, encrypted under a key that never leaves the Android Keystore (see
      *  VaultPasswordStore). Absent when no password is set. Machine-level: it survives a sign-out. */
     val VAULT_PASSWORD_BLOB = stringPreferencesKey("vault_password_blob")
+
+    /** User ids whose sign-out cleanup started and has not finished, so the next launch can finish it
+     *  (see SignOutCleanup.replayPlan). Machine-level: never part of the account-scoped wipe. */
+    val SIGN_OUT_CLEANUP_PENDING = stringSetPreferencesKey("sign_out_cleanup_pending")
 
     /**
      * hiddenUri → everything else the hidden photo owned that is keyed by its device uri, as a set of
@@ -943,6 +952,22 @@ object SettingsKeys {
      * through [eu.akoos.photos.data.sdk.SdkDriveClientProvider].
      */
     val DRIVE_SDK_CLIENT_UID = stringPreferencesKey("drive_sdk_client_uid")
+
+    /**
+     * Send photo tags and favourites through the Drive SDK instead of the app's own requests. Off unless
+     * turned on in Settings > Proton Drive SDK; read through [eu.akoos.photos.data.sdk.SdkRouting], which
+     * falls back to the app's own requests whenever an SDK call fails.
+     */
+    val SDK_ROUTE_TAGS = booleanPreferencesKey("sdk_route_tags")
+
+    /** Move photos to the Drive trash and back through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_TRASH = booleanPreferencesKey("sdk_route_trash")
+
+    /** Download photos at full resolution through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_DOWNLOAD = booleanPreferencesKey("sdk_route_download")
+
+    /** Back up and upload photos through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_UPLOAD = booleanPreferencesKey("sdk_route_upload")
 
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated

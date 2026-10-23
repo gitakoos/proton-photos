@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.face
 
+import eu.akoos.photos.util.FaceDiagnostics.RegroupTrigger
 import eu.akoos.photos.util.SourceRetryBook
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -310,6 +311,47 @@ class FaceGroupingPolicyTest {
         assertFalse(batchedRunDue(ungrouped = 3, baseline = 3, finalizeOwed = true, finalPass = false))
         assertTrue(batchedRunDue(ungrouped = 3, baseline = 3, finalizeOwed = true, finalPass = true))
         assertTrue(batchedRunDue(ungrouped = 0, baseline = 0, finalizeOwed = true, finalPass = true))
+    }
+
+    @Test
+    fun only_the_run_that_ends_a_walk_is_a_final_one() {
+        assertTrue(groupingRunEndsWalk(RegroupTrigger.DRAINED))
+        assertTrue(groupingRunEndsWalk(RegroupTrigger.PASS_SETTLED))
+        // A naming, merge, assignment or import, the viewer's and find-more scans, and a scan still going on.
+        assertFalse(groupingRunEndsWalk(RegroupTrigger.REQUEST))
+        assertFalse(groupingRunEndsWalk(RegroupTrigger.ON_DEMAND))
+        assertFalse(groupingRunEndsWalk(RegroupTrigger.PASS_CONTINUING))
+    }
+
+    @Test
+    fun a_user_edit_with_closing_steps_owed_runs_no_batched_run_and_the_walk_end_does() {
+        // Nothing new waits, an earlier run left its merge and Unsorted bucket owed.
+        assertFalse(batchedRunDue(3, 3, finalizeOwed = true, finalPass = groupingRunEndsWalk(RegroupTrigger.REQUEST)))
+        assertFalse(batchedRunDue(3, 3, finalizeOwed = true, finalPass = groupingRunEndsWalk(RegroupTrigger.ON_DEMAND)))
+        assertTrue(batchedRunDue(3, 3, finalizeOwed = true, finalPass = groupingRunEndsWalk(RegroupTrigger.DRAINED)))
+        assertTrue(batchedRunDue(3, 3, finalizeOwed = true, finalPass = groupingRunEndsWalk(RegroupTrigger.PASS_SETTLED)))
+        // New faces are placed after an edit too, without the closing steps.
+        assertTrue(batchedRunDue(4, 3, finalizeOwed = true, finalPass = groupingRunEndsWalk(RegroupTrigger.REQUEST)))
+    }
+
+    @Test
+    fun owed_closing_steps_wait_out_the_backoff_after_a_failure() {
+        assertTrue(closingStepsDue(finalizeOwed = true, msSinceLastFailure = null, backoffMs = BACKOFF))
+        assertFalse(closingStepsDue(finalizeOwed = true, msSinceLastFailure = 0L, backoffMs = BACKOFF))
+        assertFalse(closingStepsDue(finalizeOwed = true, msSinceLastFailure = BACKOFF - 1, backoffMs = BACKOFF))
+        // A failure stamped after the caller read its clock still holds them back.
+        assertFalse(closingStepsDue(finalizeOwed = true, msSinceLastFailure = -1L, backoffMs = BACKOFF))
+        assertTrue(closingStepsDue(finalizeOwed = true, msSinceLastFailure = BACKOFF, backoffMs = BACKOFF))
+        assertFalse(closingStepsDue(finalizeOwed = false, msSinceLastFailure = null, backoffMs = BACKOFF))
+    }
+
+    @Test
+    fun a_walk_end_inside_the_backoff_neither_groups_for_nor_runs_the_owed_closing_steps() {
+        val due = closingStepsDue(finalizeOwed = true, msSinceLastFailure = BACKOFF / 2, backoffMs = BACKOFF)
+        assertFalse(group(willContinue = false, ungrouped = 0, finalizeOwed = due))
+        assertFalse(batchedRunDue(3, 3, finalizeOwed = due, finalPass = true))
+        // New faces are still placed meanwhile.
+        assertTrue(batchedRunDue(4, 3, finalizeOwed = due, finalPass = true))
     }
 
     private fun group(

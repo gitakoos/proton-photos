@@ -229,7 +229,8 @@ object ExifHelper {
             val stream = context.contentResolver.openInputStream(Uri.parse(uri))
                 ?: return PhotoMetadata()
             val exif = stream.use { ExifInterface(it) }
-            val latLon = exif.latLong
+            // A 0, 0 fix is what a camera writes when it has none, so it reads as no location.
+            val latLon = exif.latLong?.takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(it[0], it[1]) }
             PhotoMetadata(
                 make = exif.getAttribute(ExifInterface.TAG_MAKE),
                 model = exif.getAttribute(ExifInterface.TAG_MODEL),
@@ -266,6 +267,13 @@ object ExifHelper {
             PhotoMetadata()
         }
     }
+
+    /** The capture instant [meta] records: DateTimeOriginal, else DateTime, pinned by its offset when
+     *  the file carries one and read in [zone] otherwise. Null when neither datetime parses. */
+    fun captureMs(meta: PhotoMetadata, zone: ZoneId): Long? =
+        (meta.dateTimeOriginal ?: meta.dateTime)?.let {
+            ExifDateFormat.fromExif(it, meta.offsetTimeOriginal, zone)
+        }
 
     /** Reads the raw EXIF orientation tag (one of [ExifInterface]'s ORIENTATION_* values)
      *  from a content [uri]. Returns ORIENTATION_NORMAL when the stream can't be opened or

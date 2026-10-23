@@ -181,6 +181,10 @@ object TakeoutSidecar {
         return out.toList()
     }
 
+    /** The sidecar of the media entry at [entryPath] in an index keyed by [sidecarKey], or null. */
+    fun lookup(index: Map<String, SidecarMeta>, entryPath: String): SidecarMeta? =
+        candidateMediaKeys(entryPath.substringAfterLast('/')).firstNotNullOfOrNull { index[it] }
+
     /**
      * The export album a media entry at [entryPath] belongs to, or null when it belongs to none. The
      * album is the media file's immediate parent folder, which serves both layouts an import accepts: a

@@ -23,9 +23,12 @@
 package eu.akoos.photos.util
 
 import android.content.Context
+import androidx.datastore.preferences.core.edit
 import androidx.work.WorkManager
 import coil.imageLoader
 import eu.akoos.photos.data.importer.ImportScanCache
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.StageImportUseCase
 import eu.akoos.photos.service.BackgroundSyncService
 import eu.akoos.photos.worker.AlbumDownloadWorker
@@ -33,6 +36,8 @@ import eu.akoos.photos.worker.ImportWorker
 import eu.akoos.photos.worker.MetadataEditWorker
 import eu.akoos.photos.worker.SyncWorker
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.flow.first
 
 /**
  * The parts of leaving an account that are plain files and scheduled work, in one place both ways out
@@ -80,4 +85,58 @@ object SignOutCleanup {
         loader.memoryCache?.clear()
         loader.diskCache?.clear()
     }
+
+    private val running = ConcurrentHashMap.newKeySet<String>()
+    private val unfinishedSignIns = ConcurrentHashMap.newKeySet<String>()
+
+    /** Claims the cleanup of [userId] for this process; false while another run of it is still going. */
+    fun claim(userId: String): Boolean = running.add(userId)
+
+    fun release(userId: String) {
+        running.remove(userId)
+    }
+
+    /** Notes that [userId] is being disabled because its sign-in gave up, so its cleanup is not
+     *  replayed by a later launch: that one leaves the vault alone, and a replay could not tell. */
+    fun noteUnfinishedSignIn(userId: String) {
+        unfinishedSignIns += userId
+    }
+
+    fun consumeUnfinishedSignIn(userId: String): Boolean = unfinishedSignIns.remove(userId)
+
+    suspend fun markPending(context: Context, userId: String) {
+        context.settingsDataStore.edit { p ->
+            p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING] = p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty() + userId
+        }
+    }
+
+    suspend fun clearPending(context: Context, userId: String) {
+        context.settingsDataStore.edit { p ->
+            val left = p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty() - userId
+            if (left.isEmpty()) p.remove(SettingsKeys.SIGN_OUT_CLEANUP_PENDING)
+            else p[SettingsKeys.SIGN_OUT_CLEANUP_PENDING] = left
+        }
+    }
+
+    suspend fun pending(context: Context): Set<String> =
+        context.settingsDataStore.data.first()[SettingsKeys.SIGN_OUT_CLEANUP_PENDING].orEmpty()
+
+    fun runningNow(): Set<String> = running.toSet()
+
+    /**
+     * What a launch does with each cleanup an earlier process started and never finished. It runs again
+     * only while nobody is signed in ([presentUserId] null), since most of it is not scoped to the
+     * account that left and would land on whoever is there now; with anybody present, the same account
+     * signed back in or another one, the entry is dropped. A cleanup still running here is left to it.
+     */
+    fun replayPlan(pending: Set<String>, presentUserId: String?, running: Set<String>): Map<String, SignOutReplay> =
+        pending.associateWith { userId ->
+            when {
+                userId in running -> SignOutReplay.SKIP
+                presentUserId == null -> SignOutReplay.RUN
+                else -> SignOutReplay.DROP
+            }
+        }
 }
+
+enum class SignOutReplay { RUN, DROP, SKIP }

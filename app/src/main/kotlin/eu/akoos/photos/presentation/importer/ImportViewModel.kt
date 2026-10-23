@@ -27,6 +27,7 @@ package eu.akoos.photos.presentation.importer
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -51,6 +52,7 @@ import eu.akoos.photos.domain.usecase.UndoImportUseCase
 import eu.akoos.photos.domain.usecase.UndoResult
 import eu.akoos.photos.worker.ImportWorker
 import eu.akoos.photos.worker.StageImportWorker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -73,6 +75,8 @@ import me.proton.core.domain.entity.UserId
 import java.io.File
 import java.util.UUID
 import javax.inject.Inject
+
+private const val TAG = "ImportViewModel"
 
 /** What the import screen shows, derived from the stage worker's live [WorkInfo] and the staged rows. */
 sealed interface ImportUiState {
@@ -147,7 +151,7 @@ data class ImportDetailData(
 )
 
 /**
- * Drives the Google Takeout / Ente import screen. Picking a zip takes a persistable read grant on it
+ * Drives the Google Takeout / Ente import screen. Picking a zip or folder takes a persistable read grant on it
  * (so the stage worker can reopen it after a process death), enqueues [StageImportWorker], and observes
  * both that unique work's [WorkInfo] and the rows it stages, mapping the pair into [ImportUiState].
  *
@@ -385,13 +389,14 @@ class ImportViewModel @Inject constructor(
     }
 
     /**
-     * Called with the zip the picker returned. Persists the read grant, enqueues the staging pass
-     * (unique on the uri with KEEP, so a re-pick of a still-staging zip attaches to the live run rather
-     * than a second one), and starts observing its progress and staged rows.
+     * Called with the zip or folder a picker returned. Persists the read grant, enqueues the staging
+     * pass (unique on the uri with KEEP, so a re-pick of a source still staging attaches to the live run
+     * rather than a second one), and starts observing its progress and staged rows.
      */
-    fun onZipPicked(uri: Uri) {
+    fun onSourcePicked(uri: Uri) {
         val zipUri = uri.toString()
-        // Persist read access so a stage restart after a process kill can reopen the same zip.
+        // Persist read access so a restart after a process kill can reopen the same zip or folder; a
+        // folder's grant covers every file under it.
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 uri,
@@ -422,7 +427,15 @@ class ImportViewModel @Inject constructor(
     private fun setExcluded(entryNames: List<String>, excluded: Boolean) {
         if (entryNames.isEmpty()) return
         val zipId = currentZipId.value ?: return
-        viewModelScope.launch { importStagedDao.setExcluded(zipId, entryNames, excluded) }
+        viewModelScope.launch {
+            try {
+                importStagedDao.setExcluded(zipId, entryNames, excluded)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "setExcluded failed for ${entryNames.size} entries: ${e.message}")
+            }
+        }
     }
 
     /**

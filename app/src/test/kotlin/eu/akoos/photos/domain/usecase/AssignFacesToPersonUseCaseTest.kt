@@ -185,6 +185,19 @@ class AssignFacesToPersonUseCaseTest {
     }
 
     @Test
+    fun `faces confirmed on the person they already sit on keep its summary`() = runTest {
+        person(1L, "Anna", faceCount = 2)
+        face("p1#0", 1L)
+        face("p2#0", 1L)
+        summary(1L)
+
+        assign(user, listOf("p1#0"), Existing(1L), recluster = false)
+
+        assertEquals("Anna", db.faceDao().faceById("p1#0")!!.manualName)
+        assertEquals(listOf(1L), db.clusterSummaryDao().getAllForUser(acct).map { it.personId })
+    }
+
+    @Test
     fun `an unnamed target clears the old confirmation and the Unsorted bucket is refused`() = runTest {
         person(1L, "Anna", faceCount = 2)
         person(2L, null, faceCount = 1)

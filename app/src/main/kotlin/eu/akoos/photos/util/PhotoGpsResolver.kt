@@ -68,7 +68,7 @@ object PhotoGpsResolver {
         }.getOrNull()
         val lat = meta?.gpsLatitude ?: return null
         val lng = meta?.gpsLongitude ?: return null
-        return lat to lng
+        return (lat to lng).takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lng) }
     }
 
     /**
@@ -102,7 +102,7 @@ object PhotoGpsResolver {
         val m = ISO_6709.find(value) ?: return null
         val lat = m.groupValues[1].toDoubleOrNull() ?: return null
         val lng = m.groupValues[2].toDoubleOrNull() ?: return null
-        return lat to lng
+        return (lat to lng).takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(lat, lng) }
     }
 
     /**
@@ -115,6 +115,7 @@ object PhotoGpsResolver {
         linkId: String,
     ): Pair<Double, Double>? {
         val row = runCatching { dao.getById(userId, linkId) }.getOrNull() ?: return null
-        return row.latitude to row.longitude
+        return (row.latitude to row.longitude)
+            .takeIf { eu.akoos.photos.data.db.entity.isUsableGpsFix(row.latitude, row.longitude) }
     }
 }

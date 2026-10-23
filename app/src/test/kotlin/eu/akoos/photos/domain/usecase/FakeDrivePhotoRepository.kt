@@ -286,7 +286,13 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         photo: CloudPhoto,
         newName: String,
     ): String = error("unused")
-    override suspend fun setCloudFavorite(userId: UserId, photo: CloudPhoto, favorite: Boolean): Boolean = false
+    /** Every favourite write, as (linkId, favorite). */
+    val favoriteCalls = mutableListOf<Pair<String, Boolean>>()
+
+    override suspend fun setCloudFavorite(userId: UserId, photo: CloudPhoto, favorite: Boolean): Boolean {
+        favoriteCalls += photo.linkId to favorite
+        return true
+    }
     override suspend fun setCloudTag(userId: UserId, photo: CloudPhoto, tagId: Int, add: Boolean): Boolean = false
     override suspend fun deleteAlbum(userId: UserId, albumLinkId: String, deletePhotosToo: Boolean) {}
     override suspend fun removePhotosFromAlbum(

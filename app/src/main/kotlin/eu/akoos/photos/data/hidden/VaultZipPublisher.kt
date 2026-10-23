@@ -42,7 +42,7 @@ class VaultZipPublisher @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
 
-    /** Copies [source] to Downloads as [displayName]. True only when the copy has the source's length. */
+    /** Copies [source] to Downloads as [displayName]. True only when the copy has the source's length and is no longer pending. */
     fun publish(source: File, displayName: String): Boolean = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) publishViaMediaStore(source, displayName)
         else publishToPublicDirectory(source, displayName)
@@ -68,7 +68,10 @@ class VaultZipPublisher @Inject constructor(
                 return false
             }
             val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-            resolver.update(uri, done, null, null)
+            if (resolver.update(uri, done, null, null) != 1) {
+                resolver.delete(uri, null, null)
+                return false
+            }
             return true
         } catch (e: Exception) {
             runCatching { resolver.delete(uri, null, null) }

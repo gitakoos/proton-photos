@@ -62,3 +62,14 @@ fun <T> Flow<T>.retryOnDbTear(
 /** Capped linear backoff between re-subscribes: 500ms, 1s, 1.5s, … up to a 5s ceiling, so a source
  *  that keeps failing can't spin the CPU in a tight re-subscribe loop. */
 internal fun retryBackoffMs(attempt: Long): Long = (500L * (attempt + 1)).coerceAtMost(5_000L)
+
+/** The two texts the platform's cursor window throws a torn read with, which carry numbers only. */
+private val CURSOR_WINDOW_TEAR = Regex("""Couldn't read row -?\d+, col -?\d+ from CursorWindow|UNKNOWN type -?\d+""")
+
+/**
+ * The part of [error]'s message that says how a cursor window read failed (the row and column it could not
+ * read, or the slot type it found), or null when the message holds no such text. Only that matched text is
+ * returned, never the rest of a message, so a statement or a value never leaves the device with it.
+ */
+fun dbTearMessage(error: Throwable): String? =
+    error.message?.let { CURSOR_WINDOW_TEAR.find(it)?.value }

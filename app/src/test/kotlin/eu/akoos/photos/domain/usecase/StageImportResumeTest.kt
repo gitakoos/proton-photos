@@ -27,6 +27,10 @@ import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.dao.ImportStagedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.ImportStagedEntity
+import eu.akoos.photos.data.importer.FolderTestTrees
+import eu.akoos.photos.data.importer.ImportDriveMatcher
+import eu.akoos.photos.data.importer.ImportSource
+import eu.akoos.photos.data.importer.TakeoutZipReader
 import eu.akoos.photos.data.importer.ImportScanCache
 import eu.akoos.photos.domain.importer.ImportFailure
 import eu.akoos.photos.domain.importer.ImportFailureKind
@@ -41,6 +45,7 @@ import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
+import java.nio.file.Files
 import java.util.Random
 import java.util.concurrent.CancellationException
 import java.util.zip.ZipEntry
@@ -90,7 +95,11 @@ class StageImportResumeTest {
         coEvery { dao.thumbPaths(any()) } returns emptyList()
         val drive = mockk<DrivePhotoRepository>()
         every { drive.cloudContentHash(any()) } returns null
-        useCase = StageImportUseCase(context, dao, drive, mockk<PhotoListingDao>(relaxed = true))
+        useCase = StageImportUseCase(
+            context,
+            dao,
+            ImportDriveMatcher(drive, mockk<PhotoListingDao>(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)),
+        )
     }
 
     private fun cache() = ImportScanCache(File(context.cacheDir, ImportScanCache.DIR_NAME))
@@ -114,7 +123,9 @@ class StageImportResumeTest {
         zip: ByteArray,
         open: () -> InputStream = { ByteArrayInputStream(zip) },
         onProgress: suspend (StageProgress) -> Unit = {},
-    ) = runBlocking { useCase.stage(user, zipId, zip.size.toLong(), open, onProgress) }
+    ) = runBlocking {
+        useCase.stage(user, zipId, ImportSource(TakeoutZipReader(open), "export.zip") { zip.size.toLong() }, onProgress)
+    }
 
     @Test
     fun `an interrupted pass continues from the saved scan and the rows already staged`() {
@@ -144,6 +155,68 @@ class StageImportResumeTest {
         assertTrue(log, log.contains("stage resume"))
         assertTrue(log, log.contains("alreadyStaged=3"))
         assertTrue(log, log.contains("stage done staged=6"))
+    }
+
+    @Test
+    fun `every staged row gets a date, the sidecar first and the entry time when nothing else has one`() {
+        val modified = 1_623_751_200_000L
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { zip ->
+            listOf("Takeout/p1.jpg", "Takeout/plain.jpg").forEach { name ->
+                zip.putNextEntry(ZipEntry(name).apply { time = modified })
+                zip.write(ByteArray(2_000).also { Random(7).nextBytes(it) })
+                zip.closeEntry()
+            }
+            zip.putNextEntry(ZipEntry("Takeout/p1.jpg.json"))
+            zip.write("""{"photoTakenTime":{"timestamp":"1609459200"}}""".toByteArray())
+            zip.closeEntry()
+        }
+
+        stage(out.toByteArray())
+
+        val dates = staged.associate { it.entryName to it.dateMs }
+        assertEquals(1_609_459_200_000L, dates["Takeout/p1.jpg"])
+        assertEquals(modified, dates["Takeout/plain.jpg"])
+    }
+
+    @Test
+    fun `a folder stages the same rows as a zip of that folder`() {
+        val modified = 1_623_751_200_000L
+        val tmp = Files.createTempDirectory("stage-folder").toFile()
+        try {
+            val root = File(tmp, "Export")
+            FolderTestTrees.write(
+                root,
+                mapOf(
+                    "Takeout/Google Photos/Trip/p1.jpg" to ByteArray(2_000).also { Random(1).nextBytes(it) },
+                    "Takeout/Google Photos/Trip/p1.jpg.json" to
+                        """{"photoTakenTime":{"timestamp":"1609459200"},"description":"Beach"}""".toByteArray(),
+                    "Family/plain.jpg" to ByteArray(2_000).also { Random(2).nextBytes(it) },
+                    "Family/IMG_3.heic" to ByteArray(2_000).also { Random(3).nextBytes(it) },
+                    "Family/IMG_3.mov" to ByteArray(2_000).also { Random(4).nextBytes(it) },
+                ),
+                modifiedMs = modified,
+            )
+            fun rows() = staged.map { listOf(it.entryName, it.title, it.dateMs, it.description, it.albumName, it.sizeBytes) }
+                .sortedBy { it[0].toString() }
+
+            val zip = FolderTestTrees.zipOf(root, modifiedMs = modified)
+            stage(zip)
+            val fromZip = rows()
+            staged.clear()
+
+            val result = runBlocking { useCase.stage(user, zipId, FolderTestTrees.source(root), {}) }
+
+            assertEquals(4, result.staged)
+            assertFalse(result.endedEarly)
+            assertEquals(fromZip, rows())
+            val dates = staged.associate { it.entryName to it.dateMs }
+            assertEquals(1_609_459_200_000L, dates["Export/Takeout/Google Photos/Trip/p1.jpg"])
+            assertEquals(modified, dates["Export/Family/plain.jpg"])
+            assertEquals(setOf("Trip", "Family"), staged.mapNotNull { it.albumName }.toSet())
+        } finally {
+            tmp.deleteRecursively()
+        }
     }
 
     @Test

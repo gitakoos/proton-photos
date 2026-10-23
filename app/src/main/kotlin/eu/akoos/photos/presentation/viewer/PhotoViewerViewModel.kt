@@ -105,7 +105,6 @@ import eu.akoos.photos.util.MotionPhotoUtil
 import eu.akoos.photos.util.PhotoGpsResolver
 import eu.akoos.photos.util.PhotoMetadata
 import eu.akoos.photos.util.UserPhotoTags
-import eu.akoos.photos.util.stripForShareOrOriginal
 import eu.akoos.photos.util.friendlyNetworkError
 import eu.akoos.photos.util.originalUriForExif
 import eu.akoos.photos.util.retryOnDbTear
@@ -204,6 +203,17 @@ internal fun syncedLocalUrisByCloudId(rows: List<SyncStateLite>): Map<String, St
         .filter { it.cloudFileId != null && it.localUri.isNotBlank() }
         .associate { it.cloudFileId!! to it.localUri }
 
+/**
+ * Whether the viewer may run a face search of its own on [photoKey]: only when the photo holds no face
+ * row at all for [account], so a search never re-detects over faces the user removed, left ungrouped or
+ * named. Same rule as [eu.akoos.photos.presentation.people.AddToPersonFaces.canFindFaces].
+ */
+internal suspend fun viewerMayDetectFaces(
+    faceDao: eu.akoos.photos.data.db.dao.FaceDao,
+    account: String,
+    photoKey: String,
+): Boolean = faceDao.facePhotoKeysIn(account, listOf(photoKey)).isEmpty()
+
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -236,6 +246,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val cloudTrashService: eu.akoos.photos.data.repository.drive.CloudTrashService,
     private val moveController: MoveToFolderController,
     private val labelRepo: PhotoLabelRepository,
+    private val outgoingUris: eu.akoos.photos.util.OutgoingPhotoUris,
 ) : ViewModel() {
 
     private companion object {
@@ -258,12 +269,13 @@ class PhotoViewerViewModel @Inject constructor(
     sealed class ViewerState {
         /**
          * Identity of the item this state was computed for (cloud linkId / local URI, or null for
-         * Loading/Error). [PhotoViewerScreen] checks it so the brief post-swipe window where
-         * settledPage has changed but state hasn't doesn't flash the previous photo.
+         * Error and the first Loading). [PhotoViewerScreen] checks it so the brief post-swipe window
+         * where settledPage has changed but state hasn't doesn't flash the previous photo.
          */
         abstract val itemKey: String?
 
-        data object Loading : ViewerState() { override val itemKey: String? = null }
+        /** Waiting on [itemKey]'s first frame; a cloud photo with no thumbnail waits here for its download. */
+        data class Loading(override val itemKey: String? = null) : ViewerState()
         data class ShowImage(
             val model: Any,
             override val itemKey: String?,
@@ -303,7 +315,7 @@ class PhotoViewerViewModel @Inject constructor(
         data class NeedsPermission(val pendingIntent: android.app.PendingIntent) : StripState()
     }
 
-    private val _state = MutableStateFlow<ViewerState>(ViewerState.Loading)
+    private val _state = MutableStateFlow<ViewerState>(ViewerState.Loading())
     val state: StateFlow<ViewerState> = _state.asStateFlow()
 
     private val _isDownloading = MutableStateFlow(false)
@@ -358,7 +370,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val _isSavingToDevice = MutableStateFlow(false)
     val isSavingToDevice: StateFlow<Boolean> = _isSavingToDevice.asStateFlow()
 
-    /** True while [shareItem] resolves a shareable URI (decrypting a cloud-only photo first).
+    /** True while [shareItem] or [setAsItem] resolves a URI (decrypting a cloud-only photo first).
      *  Drives the overflow spinner the same way [isSavingToDevice] does. */
     private val _isSharing = MutableStateFlow(false)
     val isSharing: StateFlow<Boolean> = _isSharing.asStateFlow()
@@ -367,6 +379,10 @@ class PhotoViewerViewModel @Inject constructor(
      *  chooser. replay=0 + single-buffer so a paused screen doesn't block the emit. */
     private val _shareIntent = MutableSharedFlow<android.content.Intent>(replay = 0, extraBufferCapacity = 1)
     val shareIntent: SharedFlow<android.content.Intent> = _shareIntent.asSharedFlow()
+
+    /** One-shot "Set as" intent, launched by the screen the same way as [shareIntent]. */
+    private val _setAsIntent = MutableSharedFlow<android.content.Intent>(replay = 0, extraBufferCapacity = 1)
+    val setAsIntent: SharedFlow<android.content.Intent> = _setAsIntent.asSharedFlow()
 
     /** Fires when an undo puts a deleted photo back. The viewer drops photos it deleted from its own
      *  pager, and only this tells it that one of them is worth showing again. */
@@ -681,6 +697,13 @@ class PhotoViewerViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** Whether a long press on the photo opens the top-right menu instead of selecting its text
+     *  (Settings, Appearance). Observed, so a Settings change is reflected the next time it is opened. */
+    val longPressOpensMenu: StateFlow<Boolean> = context.settingsDataStore.data
+        .map { it[SettingsKeys.VIEWER_LONG_PRESS_OPENS_MENU] == true }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     /** Per-feature face gate (Settings, AI and machine learning). AND-ed with [aiFeaturesEnabled] before
      *  the viewer offers the people-in-this-photo action, so turning faces off suppresses it while the
      *  master AI switch stays on. Observed, so a Settings change is reflected the next time the viewer
@@ -752,7 +775,7 @@ class PhotoViewerViewModel @Inject constructor(
     }
 
     /**
-     * Detect the faces on [item] now if it has none grouped yet, and return the people found, updating
+     * Detect the faces on [item] now if it holds no face row yet, and return the people found, updating
      * the bar. Called from a long-press on a spot with no already-known face, so tagging works on a
      * photo the background walk has not reached (the way the text read runs on demand). Empty when AI is
      * off. The detection itself runs off the main thread.
@@ -768,8 +791,8 @@ class PhotoViewerViewModel @Inject constructor(
         return list
     }
 
-    /** The grouped faces on [item] as people; when [detectIfEmpty] and none are grouped yet, scan the
-     *  photo on demand first (a no-op on one already scanned) so a face can still be found. */
+    /** The grouped faces on [item] as people; when [detectIfEmpty] and the photo holds no face row at all,
+     *  scan it on demand first so a face can still be found. */
     private suspend fun resolvePeople(
         item: GalleryItem,
         userId: me.proton.core.domain.entity.UserId?,
@@ -779,9 +802,14 @@ class PhotoViewerViewModel @Inject constructor(
         val photoKey = item.stableId
         var faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         if (faces.isEmpty() && detectIfEmpty) {
-            val scanned = runCatching {
-                withContext(Dispatchers.Default) { faceIndexingScheduler.indexPhotoOnDemand(item, userId, force = true) }
-            }.getOrDefault(false)
+            val scanned = try {
+                viewerMayDetectFaces(faceDao, account, photoKey) &&
+                    withContext(Dispatchers.Default) { faceIndexingScheduler.indexPhotoOnDemand(item, userId, force = true) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                false
+            }
             if (scanned) faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         }
         val otherId = personDao.otherPersonId(account)
@@ -1356,7 +1384,11 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
+    /** Follows the heart of the photo on screen; see [checkIfFavorite]. */
+    private var favoriteWatch: Job? = null
+
     fun checkIfFavorite(item: GalleryItem) {
+        watchCloudFavorite(item)
         viewModelScope.launch {
             val favIds = context.settingsDataStore.data
                 .map { it[SettingsKeys.FAVORITE_IDS] ?: emptySet() }
@@ -1377,6 +1409,29 @@ class PhotoViewerViewModel @Inject constructor(
                 is GalleryItem.CloudOnly -> item.cloud.tags
                 is GalleryItem.LocalOnly -> effectiveLocalTags(item, readUserTags(item.local.uri))
             }
+        }
+    }
+
+    /**
+     * Keeps the heart of a cloud-backed [item] in step with its listing row while it is on screen. A
+     * date or place edit replaces the photo with a corrected copy and sets the heart on the copy a
+     * moment after the copy appears, so a heart read once when the page settled would stay empty.
+     */
+    private fun watchCloudFavorite(item: GalleryItem) {
+        favoriteWatch?.cancel()
+        val linkId = when (item) {
+            is GalleryItem.Synced    -> item.cloud.linkId
+            is GalleryItem.CloudOnly -> item.cloud.linkId
+            is GalleryItem.LocalOnly -> return
+        }
+        favoriteWatch = viewModelScope.launch {
+            photoListingDao.observeTagsCsv(linkId)
+                .distinctUntilChanged()
+                .catch { }
+                .collect { csv ->
+                    val tags = csv?.let { if (it.isEmpty()) emptySet() else it.split(',').mapNotNull(String::toIntOrNull).toSet() }
+                    _isFavorite.value = isItemFavorite(item, emptySet(), tags)
+                }
         }
     }
 
@@ -2198,83 +2253,34 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 
-    /** Resolves a shareable URI and emits the send intent. Local items reuse their content URI;
-     *  a cloud-only item is decrypted to the fullres cache (single-flighted) and shared via the
-     *  FileProvider, left for the TTL sweep to reclaim. */
-    fun shareItem(item: GalleryItem) {
+    /** Resolves a shareable URI and emits the send intent. */
+    fun shareItem(item: GalleryItem) = sendOut(item) { uri ->
+        val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(listOf(item))
+        _shareIntent.tryEmit(eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, listOf(uri), mime))
+    }
+
+    /** Resolves the photo the same way a share does and emits the "Set as" intent, which the system
+     *  answers with its wallpaper and contact-photo choices. */
+    fun setAsItem(item: GalleryItem) = sendOut(item) { uri ->
+        val (mime, _) = eu.akoos.photos.util.ShareIntentBuilder.shareMimeAndName(item)
+        _setAsIntent.tryEmit(eu.akoos.photos.util.ShareIntentBuilder.buildSetAsIntent(uri, mime))
+    }
+
+    /** Resolves the uri another app reads [item] through (see [eu.akoos.photos.util.OutgoingPhotoUris])
+     *  and hands it to [emit], driving the overflow spinner while a cloud original downloads. */
+    private fun sendOut(item: GalleryItem, emit: (Uri) -> Unit) {
         viewModelScope.launch {
             _isSharing.value = true
-            // Null when strip-on-share is off, so the resolved URI passes through untouched below.
-            val stripConfig = currentShareStripConfig(context)
             runCatching {
-                val uri: Uri = when (item) {
-                    is GalleryItem.LocalOnly -> localShareUri(item.local)
-                    is GalleryItem.Synced    -> localShareUri(item.local)
-                    is GalleryItem.CloudOnly -> {
-                        // Offline pin short-circuit: a pinned blob already holds the full-res
-                        // bytes in app-private storage, so share it with no network download. The
-                        // blob dir isn't a configured FileProvider root, so copy it into the
-                        // canonical fullres path the provider already exposes (a local, instant copy).
-                        val file = withContext(Dispatchers.IO) {
-                            offlineStore.findBlob(item.cloud.linkId)
-                                ?.takeIf { it.length() > 0 }
-                                ?.let { blob ->
-                                    eu.akoos.photos.data.repository.drive.PhotoDownloadService
-                                        .fullResFile(context, item.cloud)?.also { dest ->
-                                        if (!dest.exists() || dest.length() == 0L) {
-                                            dest.parentFile?.mkdirs()
-                                            blob.copyTo(dest, overwrite = true)
-                                        }
-                                    }
-                                }
-                        } ?: run {
-                            val userId = accountManager.getPrimaryUserId().first()
-                                ?: error(context.getString(R.string.viewer_not_signed_in))
-                            cloudRepo.downloadFullResPhoto(userId, item.cloud)
-                        }
-                        androidx.core.content.FileProvider.getUriForFile(
-                            context, "${context.packageName}.share.fileprovider", file,
-                        ).also {
-                            // Report the real filename to the receiver instead of the linkId.
-                            eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, item.cloud.displayName)
-                        }
-                    }
-                }
-                val (itemMime, itemName) = eu.akoos.photos.util.ShareIntentBuilder.shareMimeAndName(item)
-                val shareUri = stripForShareOrOriginal(context, uri, itemMime, itemName, stripConfig)
-                val mime = eu.akoos.photos.util.ShareIntentBuilder.shareableMime(listOf(item))
-                eu.akoos.photos.util.ShareIntentBuilder.buildSendIntent(context, listOf(shareUri), mime)
-            }.onSuccess { intent ->
-                _shareIntent.tryEmit(intent)
-            }.onFailure { e ->
+                // Null when strip-on-share is off, so the resolved URI passes through untouched.
+                outgoingUris.uriFor(item, currentShareStripConfig(context))
+            }.onSuccess(emit).onFailure { e ->
                 _transientError.value = context.getString(
                     R.string.viewer_share_failed,
                     e.message?.let { eu.akoos.photos.util.sanitizeErrorMessage(it) } ?: context.getString(R.string.viewer_unknown_error),
                 )
             }
             _isSharing.value = false
-        }
-    }
-
-    /**
-     * The uri another app may read a device-backed photo through.
-     *
-     * A MediaStore photo already has one. A vaulted photo does not — it is an app-private `file://`
-     * that the platform refuses to put in an intent at all — so it goes out through the share
-     * provider instead, which grants the receiver that one file, serves the bytes in place, and puts
-     * no part of the vault's location in the uri it hands over.
-     */
-    private fun localShareUri(local: eu.akoos.photos.domain.entity.LocalMediaItem): Uri {
-        val parsed = Uri.parse(local.uri)
-        if (!hiddenStorage.isHiddenUri(local.uri)) return parsed
-        val file = parsed.path?.let { File(it) }?.takeIf { it.exists() }
-            ?: error(context.getString(R.string.viewer_unknown_error))
-        return androidx.core.content.FileProvider.getUriForFile(
-            context, "${context.packageName}.share.fileprovider", file,
-        ).also {
-            // The vault names its files by a private code, so report the name the photo was hidden
-            // under instead — the same substitution the cloud branch above makes.
-            eu.akoos.photos.util.ShareFileProvider.putDisplayName(it, local.displayName)
         }
     }
 
@@ -2358,7 +2364,7 @@ class PhotoViewerViewModel @Inject constructor(
             // Thumbnail placeholder while downloading full-res (videos too).
             _state.value = ViewerState.ShowImage(thumbUrl, itemKey = itemKey)
         } else {
-            _state.value = ViewerState.Loading
+            _state.value = ViewerState.Loading(itemKey)
         }
 
         viewModelScope.launch {
@@ -2373,7 +2379,7 @@ class PhotoViewerViewModel @Inject constructor(
             if (pinned != null && pinned.length() > 0) {
                 val pinnedUri = Uri.fromFile(pinned)
                 _cloudFullResSize.value = pinned.length()
-                if (_state.value.itemKey != itemKey) return@launch
+                if (!cloudLoadStillCurrent(_state.value, itemKey)) return@launch
                 _state.value = if (isVideo)
                     ViewerState.ShowVideo(pinnedUri, itemKey = itemKey, isFullRes = true)
                 else
@@ -2394,7 +2400,7 @@ class PhotoViewerViewModel @Inject constructor(
                 _fullResBlockedByMetered.value = true
                 _isDownloading.value = false
                 _downloadProgress.value = null
-                if (thumbUrl == null && _state.value.itemKey == itemKey) {
+                if (thumbUrl == null && cloudLoadStillCurrent(_state.value, itemKey)) {
                     _state.value = ViewerState.Error(context.getString(R.string.viewer_wifi_for_full_quality))
                 }
                 return@launch
@@ -2414,9 +2420,9 @@ class PhotoViewerViewModel @Inject constructor(
                     // Publish the resolved on-disk size so the details sheet can fall back
                     // to it when CloudPhoto.sizeBytes is 0 (server-side gap for videos).
                     _cloudFullResSize.value = file.length()
-                    // Drop a late blob if the user swiped away. Strict `!=` (no `?: itemKey`): a
-                    // null itemKey during a swap must NOT pass the guard and flash the old photo.
-                    if (_state.value.itemKey != itemKey) return@fold
+                    // Drop a late blob if the user swiped away. A null itemKey during a swap must NOT
+                    // pass the guard and flash the old photo.
+                    if (!cloudLoadStillCurrent(_state.value, itemKey)) return@fold
                     _state.value = if (isVideo)
                         ViewerState.ShowVideo(fileUri, itemKey = itemKey, isFullRes = true)
                     else
@@ -2429,7 +2435,7 @@ class PhotoViewerViewModel @Inject constructor(
                     else _cloudVideoMeta.value = readVideoMeta(file)
                 },
                 onFailure = { e ->
-                    if (thumbUrl == null && _state.value.itemKey == itemKey) {
+                    if (thumbUrl == null && cloudLoadStillCurrent(_state.value, itemKey)) {
                         _state.value = ViewerState.Error(eu.akoos.photos.util.sanitizeErrorMessage(e.message))
                     }
                     // else keep showing thumbnail silently
@@ -2438,3 +2444,11 @@ class PhotoViewerViewModel @Inject constructor(
         }
     }
 }
+
+/**
+ * Whether a cloud photo's load that finished for [itemKey] may still replace [current]: only while the
+ * viewer shows, or waits on, that same photo. A photo with no thumbnail waits in [ViewerState.Loading]
+ * keyed to it, so its own download still lands; another photo's state, or one with no key, drops it.
+ */
+internal fun cloudLoadStillCurrent(current: PhotoViewerViewModel.ViewerState, itemKey: String): Boolean =
+    current.itemKey == itemKey
