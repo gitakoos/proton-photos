@@ -231,6 +231,31 @@
         </activity>
 
         <!--
+            "Back up to Drive" in the share sheet, for one photo or video or many. It shows no screen:
+            the shared items join the explicit back-up queue and a toast says what happened.
+        -->
+        <activity
+            android:name=".presentation.share.ShareBackupActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:label="@string/share_backup_label"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+
+        <!--
             Lets other apps pick a photo from here (GET_CONTENT / PICK). The main screen answers it
             with the album picker. The alias ships disabled and is turned on from Settings, so until
             the user opts in the system never lists the app as a place to pick from.

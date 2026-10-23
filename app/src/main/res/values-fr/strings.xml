@@ -1459,6 +1459,11 @@
     <string name="dense_grid_warning_dismiss">Ne plus afficher</string>
 
     <string name="backup_started">Téléversement vers Drive</string>
+    <string name="share_backup_label">Sauvegarder sur Drive</string>
+    <string name="share_backup_sign_in">Connectez-vous pour sauvegarder sur Drive</string>
+    <string name="share_backup_unreadable">Aucune photo ni vidéo n\'a pu être lue dans le partage</string>
+    <string name="share_backup_some_unreadable">Téléversement vers Drive. %1$d sur %2$d n\'ont pas pu être lus et ont été ignorés</string>
+    <string name="share_backup_saved_to_phone">Enregistré sur le téléphone, téléversement vers Drive</string>
     <string name="upload_confirm_title">Téléverser vers Drive ?</string>
     <string name="upload_confirm_message">Sauvegarder %1$d sélectionnés sur votre Proton Drive ?</string>
     <string name="upload_action_short">Téléverser</string>

@@ -23,10 +23,12 @@
 package eu.akoos.photos.util
 
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.share.ShareBackupActivity
 
 /**
  * Builds the ACTION_SEND / ACTION_SEND_MULTIPLE intents that hand decrypted media to other
@@ -107,6 +109,16 @@ object ShareIntentBuilder {
             }
         }
     }
+
+    /**
+     * The share sheet for [target], without the app's own "Back up to Drive": a photo shared from
+     * inside the app is backed up from its own Back up action.
+     */
+    fun chooser(context: Context, target: Intent, title: CharSequence): Intent =
+        Intent.createChooser(target, title).putExtra(
+            Intent.EXTRA_EXCLUDE_COMPONENTS,
+            arrayOf(ComponentName(context, ShareBackupActivity::class.java)),
+        )
 
     /**
      * The "Set as" intent galleries send: ACTION_ATTACH_DATA on the photo's uri, which the system's

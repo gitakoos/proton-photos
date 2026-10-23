@@ -1472,6 +1472,11 @@
     <string name="dense_grid_warning_message">Meer foto\'s per rij kan het scrollen minder soepel maken bij zeer grote bibliotheken.</string>
     <string name="dense_grid_warning_dismiss">Niet meer tonen</string>
     <string name="backup_started">Bezig met uploaden naar Drive</string>
+    <string name="share_backup_label">Back-up naar Drive</string>
+    <string name="share_backup_sign_in">Meld je aan om een back-up naar Drive te maken</string>
+    <string name="share_backup_unreadable">Uit het gedeelde kon geen foto of video worden gelezen</string>
+    <string name="share_backup_some_unreadable">Bezig met uploaden naar Drive. %1$d van %2$d konden niet worden gelezen en zijn overgeslagen</string>
+    <string name="share_backup_saved_to_phone">Opgeslagen op de telefoon, bezig met uploaden naar Drive</string>
     <string name="upload_confirm_title">Uploaden naar Drive?</string>
     <string name="upload_confirm_message">%1$d geselecteerde uploaden naar je Proton Drive?</string>
     <string name="upload_action_short">Uploaden</string>

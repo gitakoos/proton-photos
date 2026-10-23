@@ -300,7 +300,7 @@ fun AlbumDetailScreen(
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
             appLock.runWhenOpen {
-                runCatching { shareCtx.startActivity(Intent.createChooser(intent, shareChooserTitle)) }
+                runCatching { shareCtx.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(shareCtx, intent, shareChooserTitle)) }
             }
         }
     }

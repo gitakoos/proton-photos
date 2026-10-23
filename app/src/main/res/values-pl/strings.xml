@@ -1259,6 +1259,11 @@
     <string name="device_folders_section">Foldery na tym urządzeniu</string>
     <string name="device_folder_already_backed_up">Już skopiowane do Drive</string>
     <string name="backup_started">Kopiowanie do Drive</string>
+    <string name="share_backup_label">Kopia w Drive</string>
+    <string name="share_backup_sign_in">Zaloguj się, aby skopiować do Drive</string>
+    <string name="share_backup_unreadable">Z udostępnionych elementów nie udało się odczytać żadnego zdjęcia ani filmu</string>
+    <string name="share_backup_some_unreadable">Kopiowanie do Drive. Pominięto %1$d z %2$d, bo nie dało się ich odczytać</string>
+    <string name="share_backup_saved_to_phone">Zapisano na telefonie, kopiowanie do Drive</string>
     <string name="upload_confirm_title">Wysłać do Drive?</string>
     <string name="upload_confirm_message">Skopiować %1$d zaznaczonych do Proton Drive?</string>
     <string name="upload_action_short">Wyślij</string>

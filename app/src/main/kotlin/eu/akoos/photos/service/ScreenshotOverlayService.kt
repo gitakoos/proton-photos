@@ -1934,7 +1934,7 @@ class ScreenshotOverlayService : Service() {
                     clipData = ClipData.newUri(contentResolver, "Screenshot", uri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                val chooser = Intent.createChooser(send, getString(eu.akoos.photos.R.string.screenshot_overlay_share_image)).apply {
+                val chooser = eu.akoos.photos.util.ShareIntentBuilder.chooser(this@ScreenshotOverlayService, send, getString(eu.akoos.photos.R.string.screenshot_overlay_share_image)).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
                 startActivity(chooser)

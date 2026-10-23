@@ -1259,6 +1259,11 @@
     <string name="device_folders_section">Priečinky v tomto zariadení</string>
     <string name="device_folder_already_backed_up">Už zálohované na Drive</string>
     <string name="backup_started">Zálohuje sa na Drive</string>
+    <string name="share_backup_label">Zálohovať na Drive</string>
+    <string name="share_backup_sign_in">Prihláste sa na zálohovanie na Drive</string>
+    <string name="share_backup_unreadable">Zo zdieľaného sa nepodarilo prečítať žiadnu fotku ani video</string>
+    <string name="share_backup_some_unreadable">Zálohuje sa na Drive. %1$d z %2$d sa nedalo prečítať a boli preskočené</string>
+    <string name="share_backup_saved_to_phone">Uložené do telefónu, zálohuje sa na Drive</string>
     <string name="upload_confirm_title">Nahrať na Drive?</string>
     <string name="upload_confirm_message">Zálohovať %1$d vybraných na váš Proton Drive?</string>
     <string name="upload_action_short">Nahrať</string>

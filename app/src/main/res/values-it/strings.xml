@@ -1481,6 +1481,11 @@
     <string name="dense_grid_warning_dismiss">Non mostrare più</string>
 
     <string name="backup_started">Caricamento su Drive</string>
+    <string name="share_backup_label">Salva su Drive</string>
+    <string name="share_backup_sign_in">Accedi per salvare su Drive</string>
+    <string name="share_backup_unreadable">Non è stato possibile leggere nessuna foto o video da quanto condiviso</string>
+    <string name="share_backup_some_unreadable">Caricamento su Drive. %1$d di %2$d non sono leggibili e sono stati saltati</string>
+    <string name="share_backup_saved_to_phone">Salvato sul telefono, caricamento su Drive</string>
     <string name="upload_confirm_title">Caricare su Drive?</string>
     <string name="upload_confirm_message">Eseguire il backup di %1$d selezionati sul tuo Proton Drive?</string>
     <string name="upload_action_short">Carica</string>

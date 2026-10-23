@@ -1480,6 +1480,11 @@
     <string name="dense_grid_warning_dismiss">No volver a mostrar</string>
 
     <string name="backup_started">Subiendo a Drive</string>
+    <string name="share_backup_label">Respaldar en Drive</string>
+    <string name="share_backup_sign_in">Inicia sesión para respaldar en Drive</string>
+    <string name="share_backup_unreadable">No se pudo leer ninguna foto ni vídeo de lo compartido</string>
+    <string name="share_backup_some_unreadable">Subiendo a Drive. %1$d de %2$d no se pudieron leer y se omitieron</string>
+    <string name="share_backup_saved_to_phone">Guardado en el teléfono, subiendo a Drive</string>
     <string name="upload_confirm_title">¿Subir a Drive?</string>
     <string name="upload_confirm_message">¿Hacer copia de %1$d seleccionados en tu Proton Drive?</string>
     <string name="upload_action_short">Subir</string>

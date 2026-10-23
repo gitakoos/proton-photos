@@ -1785,6 +1785,11 @@
     <string name="device_folders_section">Folders on this device</string>
     <string name="device_folder_already_backed_up">Already backed up to Drive</string>
     <string name="backup_started">Backing up to Drive</string>
+    <string name="share_backup_label">Back up to Drive</string>
+    <string name="share_backup_sign_in">Sign in to back up to Drive</string>
+    <string name="share_backup_unreadable">No photo or video could be read from what was shared</string>
+    <string name="share_backup_some_unreadable">Backing up to Drive. %1$d of %2$d could not be read and were skipped</string>
+    <string name="share_backup_saved_to_phone">Saved to the phone and backing up to Drive</string>
     <string name="upload_confirm_title">Upload to Drive?</string>
     <string name="upload_confirm_message">Back up %1$d selected to your Proton Drive?</string>
     <string name="upload_action_short">Upload</string>

@@ -986,7 +986,7 @@ fun GalleryScreen(
         viewModel.shareIntent.collect { intent ->
             appLock.runWhenOpen {
                 runCatching {
-                    context.startActivity(Intent.createChooser(intent, shareChooserTitle))
+                    context.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(context, intent, shareChooserTitle))
                 }
             }
         }

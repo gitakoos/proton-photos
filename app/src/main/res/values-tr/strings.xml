@@ -1688,6 +1688,11 @@
     <string name="device_folders_section">Bu cihazdaki klasörler</string>
     <string name="device_folder_already_backed_up">Zaten Drive\'a yedeklendi</string>
     <string name="backup_started">Drive\'a yedekleniyor</string>
+    <string name="share_backup_label">Drive\'a yedekle</string>
+    <string name="share_backup_sign_in">Drive\'a yedeklemek için oturum aç</string>
+    <string name="share_backup_unreadable">Paylaşılanlardan hiçbir fotoğraf veya video okunamadı</string>
+    <string name="share_backup_some_unreadable">Drive\'a yedekleniyor. %2$d öğeden %1$d tanesi okunamadı ve atlandı</string>
+    <string name="share_backup_saved_to_phone">Telefona kaydedildi, Drive\'a yedekleniyor</string>
     <string name="upload_confirm_title">Drive\'a yüklensin mi?</string>
     <string name="upload_confirm_message">Seçili %1$d öğe Proton Drive\'ına yedeklensin mi?</string>
     <string name="upload_action_short">Yükle</string>

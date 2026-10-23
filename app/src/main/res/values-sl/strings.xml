@@ -1260,6 +1260,11 @@
     <string name="device_folders_section">Mape v tej napravi</string>
     <string name="device_folder_already_backed_up">Že varnostno kopirano v Drive</string>
     <string name="backup_started">Varnostno kopiranje v Drive</string>
+    <string name="share_backup_label">Varnostno kopiraj v Drive</string>
+    <string name="share_backup_sign_in">Prijavite se za varnostno kopiranje v Drive</string>
+    <string name="share_backup_unreadable">Iz deljenega ni bilo mogoče prebrati nobene fotografije ali videoposnetka</string>
+    <string name="share_backup_some_unreadable">Varnostno kopiranje v Drive. Preskočeno: %1$d od %2$d, ker jih ni bilo mogoče prebrati</string>
+    <string name="share_backup_saved_to_phone">Shranjeno v telefon, varnostno kopiranje v Drive</string>
     <string name="upload_confirm_title">Naložiti v Drive?</string>
     <string name="upload_confirm_message">Varnostno kopirati %1$d izbranih v vaš Proton Drive?</string>
     <string name="upload_action_short">Naloži</string>

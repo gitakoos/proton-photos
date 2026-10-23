@@ -636,7 +636,7 @@ fun PhotoViewerScreen(
             launch {
                 viewModel.shareIntent.collect { intent ->
                     appLock.runWhenOpen {
-                        shareContext.startActivity(Intent.createChooser(intent, shareChooserTitle))
+                        shareContext.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(shareContext, intent, shareChooserTitle))
                     }
                 }
             }

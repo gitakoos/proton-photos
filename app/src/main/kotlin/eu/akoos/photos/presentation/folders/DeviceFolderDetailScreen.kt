@@ -286,7 +286,7 @@ fun DeviceFolderDetailScreen(
         viewModel.shareIntent.collect { intent ->
             appLock.runWhenOpen {
                 runCatching {
-                    shareCtx.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle))
+                    shareCtx.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(shareCtx, intent, shareChooserTitle))
                 }
             }
         }

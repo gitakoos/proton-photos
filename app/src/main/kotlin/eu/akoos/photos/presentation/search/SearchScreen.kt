@@ -348,7 +348,7 @@ fun SearchScreen(
     LaunchedEffect(Unit) {
         vm.shareIntent.collect { intent ->
             appLock.runWhenOpen {
-                runCatching { context.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle)) }
+                runCatching { context.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(context, intent, shareChooserTitle)) }
             }
         }
     }

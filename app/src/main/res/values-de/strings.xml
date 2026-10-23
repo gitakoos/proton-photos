@@ -1457,6 +1457,11 @@
     <string name="dense_grid_warning_dismiss">Nicht mehr anzeigen</string>
 
     <string name="backup_started">Wird auf Drive hochgeladen</string>
+    <string name="share_backup_label">Auf Drive sichern</string>
+    <string name="share_backup_sign_in">Melde dich an, um auf Drive zu sichern</string>
+    <string name="share_backup_unreadable">Aus dem Geteilten ließ sich kein Foto oder Video lesen</string>
+    <string name="share_backup_some_unreadable">Wird auf Drive hochgeladen. %1$d von %2$d ließen sich nicht lesen und wurden übersprungen</string>
+    <string name="share_backup_saved_to_phone">Auf dem Telefon gespeichert, wird auf Drive hochgeladen</string>
     <string name="upload_confirm_title">Auf Drive hochladen?</string>
     <string name="upload_confirm_message">%1$d ausgewählte auf deinem Proton Drive sichern?</string>
     <string name="upload_action_short">Hochladen</string>

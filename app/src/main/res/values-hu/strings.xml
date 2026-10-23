@@ -1480,6 +1480,11 @@
     <string name="dense_grid_warning_dismiss">Ne jelenjen meg többé</string>
 
     <string name="backup_started">Feltöltés a Drive-ra</string>
+    <string name="share_backup_label">Mentés a Drive-ra</string>
+    <string name="share_backup_sign_in">Jelentkezz be a Drive-ra mentéshez</string>
+    <string name="share_backup_unreadable">A megosztottakból egy fotó vagy videó sem olvasható</string>
+    <string name="share_backup_some_unreadable">Feltöltés a Drive-ra. %2$d elemből %1$d nem olvasható, ezek kimaradtak</string>
+    <string name="share_backup_saved_to_phone">Elmentve a telefonra, feltöltés a Drive-ra</string>
     <string name="upload_confirm_title">Feltöltöd a Drive-ra?</string>
     <string name="upload_confirm_message">%1$d kijelölt feltöltése a Proton Drive-ra?</string>
     <string name="upload_action_short">Feltöltés</string>
