@@ -98,6 +98,22 @@ object AccountScopedPreferences {
                         SettingsKeys.HIDDEN_FOLDER_NAMES,
                         // Individually-hidden cloud photos are the same per-user client-side state.
                         SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS,
+                        // The times of those hides and unhides, the queue of other devices' hides, and the
+                        // shared backup's switch and record, all of them about the account signing out.
+                        SettingsKeys.HIDDEN_PHOTO_HIDE_TIMES,
+                        SettingsKeys.HIDDEN_PHOTO_SHOW_TIMES,
+                        SettingsKeys.HIDDEN_ALBUM_HIDE_TIMES,
+                        SettingsKeys.HIDDEN_ALBUM_SHOW_TIMES,
+                        SettingsKeys.HIDDEN_REMOTE_HIDE_QUEUE,
+                        SettingsKeys.SHARED_BACKUP_ENABLED,
+                        SettingsKeys.SHARED_BACKUP_LAST_AT,
+                        SettingsKeys.SHARED_BACKUP_LAST_FAILED,
+                        SettingsKeys.SHARED_BACKUP_SAVED,
+                        SettingsKeys.SHARED_BACKUP_CHANGED_AT,
+                        SettingsKeys.SHARED_BACKUP_FACES_CHANGED_AT,
+                        SettingsKeys.SHARED_BACKUP_SEARCH_CHANGED_AT,
+                        SettingsKeys.SHARED_BACKUP_FACES_SAVED_AT,
+                        SettingsKeys.SHARED_BACKUP_SEARCH_SAVED_AT,
                         // Queued "shareId|linkId" cleanups name Drive nodes of the account being
                         // signed out. The next user's upload pass drains this set and would retry
                         // each delete against a share their session cannot reach.

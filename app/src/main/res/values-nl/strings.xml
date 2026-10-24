@@ -1193,6 +1193,13 @@
     <string name="people_display_settings">Weergave</string>
     <string name="people_follow_albums">Zoals het tabblad Albums</string>
     <string name="people_follow_albums_desc">Toont personen met de weergave en omslaggrootte van het tabblad Albums</string>
+    <string name="shared_backup_title">Gedeelde back-up op Proton Drive</string>
+    <string name="shared_backup_desc">Houdt gezichten, de zoekindex, labels en verborgen items gelijk op je andere apparaten</string>
+    <string name="shared_backup_syncing">Synchroniseren met Proton Drive</string>
+    <string name="shared_backup_last">Laatst gesynchroniseerd: %1$s</string>
+    <string name="shared_backup_never">Nog niet gesynchroniseerd</string>
+    <string name="shared_backup_failed">Synchronisatie mislukt, later opnieuw geprobeerd</string>
+    <string name="shared_backup_sync_now">Nu synchroniseren</string>
     <string name="albums_more_settings">Meer instellingen</string>
     <string name="album_options">Albumopties</string>
     <string name="album_group_heading">Groeperen op</string>

@@ -29,7 +29,9 @@ import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.ListingSweepSnapshotEntity
 import eu.akoos.photos.data.db.entity.LocalTagEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelDeletedEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelNameEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelStateEntity
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
@@ -45,6 +47,8 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         PhotoLocationEntity::class,
         PhotoLabelEntity::class,
         PhotoLabelNameEntity::class,
+        PhotoLabelStateEntity::class,
+        PhotoLabelDeletedEntity::class,
     ],
     version = 1,
     exportSchema = false,

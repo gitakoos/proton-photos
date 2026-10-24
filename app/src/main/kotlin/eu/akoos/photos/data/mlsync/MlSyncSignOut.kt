@@ -95,6 +95,8 @@ class MlSyncSignOut @Inject constructor(
                     work.cancelUniqueWork(eu.akoos.photos.data.autosave.AutoSaveCoordinator.uniqueName(kind)).await()
                 }
                 eu.akoos.photos.data.autosave.AutoSaveStore(context).clearAll()
+                work.cancelUniqueWork(eu.akoos.photos.data.sharedbackup.SharedBackupScheduler.SOON_WORK).await()
+                work.cancelUniqueWork(eu.akoos.photos.data.sharedbackup.SharedBackupScheduler.NEXT_WORK).await()
             }
         } catch (e: CancellationException) {
             throw e

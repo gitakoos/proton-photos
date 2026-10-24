@@ -29,6 +29,9 @@ enum class DriveDataFolder(val folderName: String, private val parseDeviceId: (S
 
     /** The labels. */
     LABELS(MlDriveNaming.LABELS_FOLDER_NAME, { LabelDriveNaming.parse(it) }),
+
+    /** The hidden photos and albums. */
+    HIDDEN(MlDriveNaming.HIDDEN_FOLDER_NAME, { HiddenDriveNaming.parse(it) }),
     ;
 
     /** The install id [fileName] carries, or null for a name this folder does not write. */
@@ -88,6 +91,9 @@ object MlDriveNaming {
 
     /** The folder inside [APP_FOLDER_NAME] that holds every install's labels. */
     const val LABELS_FOLDER_NAME = "Labels"
+
+    /** The folder inside [APP_FOLDER_NAME] that holds every install's hidden list. */
+    const val HIDDEN_FOLDER_NAME = "Hidden"
 
     /** Extension of a snapshot file. */
     const val FILE_EXTENSION = ".pfpml"

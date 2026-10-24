@@ -1836,6 +1836,13 @@
     <string name="people_display_settings">Görünüm</string>
     <string name="people_follow_albums">Albümler sekmesiyle aynı</string>
     <string name="people_follow_albums_desc">Kişileri Albümler sekmesinin görünümü ve kapak boyutuyla gösterir</string>
+    <string name="shared_backup_title">Proton Drive\'da ortak yedek</string>
+    <string name="shared_backup_desc">Yüzleri, arama dizinini, etiketleri ve gizli öğeleri diğer cihazlarında aynı tutar</string>
+    <string name="shared_backup_syncing">Proton Drive ile eşitleniyor</string>
+    <string name="shared_backup_last">Son eşitleme: %1$s</string>
+    <string name="shared_backup_never">Henüz eşitlenmedi</string>
+    <string name="shared_backup_failed">Eşitleme başarısız, daha sonra yeniden denenecek</string>
+    <string name="shared_backup_sync_now">Şimdi eşitle</string>
     <string name="albums_more_settings">Diğer ayarlar</string>
     <string name="album_options">Albüm seçenekleri</string>
     <string name="album_group_heading">Gruplama ölçütü</string>

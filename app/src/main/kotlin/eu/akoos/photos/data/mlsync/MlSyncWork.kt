@@ -42,6 +42,13 @@ enum class MlSyncOperation {
 
     /** Downloads the snapshots the user picked from the Drive listing and imports them here. */
     RESTORE,
+
+    /**
+     * The shared backup's round: takes in what the other installs saved that is newer than the copy of each taken in
+     * last (the faces and search filling gaps only, the labels and the hidden list merged by time), then writes this
+     * install's own copies that changed. Nothing is written when the read failed.
+     */
+    ROUND,
 }
 
 /** The step a running ML sync is on. */
@@ -164,6 +171,12 @@ sealed interface MlSyncRequest {
     ) : MlSyncRequest {
         override val operation: MlSyncOperation
             get() = MlSyncOperation.SAVE
+    }
+
+    /** One shared-backup round for the account. */
+    data class Round(override val userId: String) : MlSyncRequest {
+        override val operation: MlSyncOperation
+            get() = MlSyncOperation.ROUND
     }
 
     /**
@@ -313,6 +326,10 @@ object MlSyncWorkData {
 
     /** The worker's input data for [request]. */
     fun input(request: MlSyncRequest): Data = when (request) {
+        is MlSyncRequest.Round -> workDataOf(
+            KEY_OPERATION to request.operation.name,
+            KEY_USER_ID to request.userId,
+        )
         is MlSyncRequest.Save -> workDataOf(
             KEY_OPERATION to request.operation.name,
             KEY_USER_ID to request.userId,
@@ -341,6 +358,7 @@ object MlSyncWorkData {
         val userId = data.getString(KEY_USER_ID)?.takeIf { it.isNotBlank() } ?: return null
         return when (operation(data)) {
             MlSyncOperation.SAVE -> MlSyncRequest.Save(userId, data.getBoolean(KEY_CREATE_FOLDER, false))
+            MlSyncOperation.ROUND -> MlSyncRequest.Round(userId)
             MlSyncOperation.RESTORE -> MlSyncRequest.Restore(
                 userId = userId,
                 files = restoreFiles(data) ?: return null,

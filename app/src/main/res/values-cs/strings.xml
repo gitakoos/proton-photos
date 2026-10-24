@@ -1413,6 +1413,13 @@
     <string name="people_display_settings">Zobrazení</string>
     <string name="people_follow_albums">Stejně jako karta Alba</string>
     <string name="people_follow_albums_desc">Zobrazuje lidi se zobrazením a velikostí obálek karty Alba</string>
+    <string name="shared_backup_title">Sdílená záloha na Proton Drive</string>
+    <string name="shared_backup_desc">Udržuje tváře, index vyhledávání, štítky a skryté položky stejné na tvých dalších zařízeních</string>
+    <string name="shared_backup_syncing">Synchronizace s Proton Drive</string>
+    <string name="shared_backup_last">Naposledy synchronizováno: %1$s</string>
+    <string name="shared_backup_never">Zatím nesynchronizováno</string>
+    <string name="shared_backup_failed">Synchronizace se nezdařila, zkusí to znovu později</string>
+    <string name="shared_backup_sync_now">Synchronizovat nyní</string>
     <string name="albums_more_settings">Další nastavení</string>
     <string name="album_options">Možnosti alba</string>
     <string name="album_group_heading">Seskupit podle</string>

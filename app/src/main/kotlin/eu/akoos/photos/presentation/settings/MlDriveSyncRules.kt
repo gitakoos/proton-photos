@@ -85,11 +85,13 @@ internal fun mlSyncShownState(state: MlSyncState, preparingSave: Boolean): MlSyn
 
 /**
  * What opens over the section: the folder question while a save waits for the user's agreement
- * ([folderPrompt]) or a job ended without a folder, else a finished job's message, else nothing. A missing
- * folder only ever asks, never reads as a failed save.
+ * ([folderPrompt]) or a job ended without a folder, else a finished save's or restore's message, else nothing. A
+ * missing folder only ever asks, never reads as a failed save.
  */
 internal fun mlSyncSheet(folderPrompt: Boolean, state: MlSyncState): MlSyncNotice? = when {
     folderPrompt -> MlSyncNotice.AskToCreateFolder
+    // A shared-backup round runs in the background, and the shared backup's own row says how it went.
+    state is MlSyncState.Finished && state.outcome.operation == MlSyncOperation.ROUND -> null
     state is MlSyncState.Finished -> mlSyncNotice(state.outcome)
     else -> null
 }
@@ -99,6 +101,7 @@ internal fun mlSyncSheet(folderPrompt: Boolean, state: MlSyncState): MlSyncNotic
 internal fun mlSyncHeadline(operation: MlSyncOperation?): Int = when (operation) {
     MlSyncOperation.SAVE -> R.string.ml_sync_save_title
     MlSyncOperation.RESTORE -> R.string.ml_sync_restore_title
+    MlSyncOperation.ROUND -> R.string.shared_backup_syncing
     null -> R.string.ml_sync_channel_name
 }
 

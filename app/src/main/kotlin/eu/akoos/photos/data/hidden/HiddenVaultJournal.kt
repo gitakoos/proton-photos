@@ -236,6 +236,7 @@ class HiddenVaultJournal @Inject constructor(
             val settled = if (publish.isEmpty()) SettledRows() else settleVaultedSyncRows(publish)
             if (publish.isNotEmpty()) {
                 context.settingsDataStore.edit { prefs ->
+                    recordVaultHides(prefs, publish.toSet())
                     prefs[SettingsKeys.HIDDEN_PHOTO_URIS] =
                         (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) + publish
                     prefs[SettingsKeys.HIDDEN_PENDING_HIDES] =
@@ -690,7 +691,7 @@ class HiddenVaultJournal @Inject constructor(
      * landed still has an entry here, and leaving it would let the next reconciliation act on a photo
      * that is already back on the device.
      */
-    suspend fun forget(privateUris: List<String>) {
+    suspend fun forget(privateUris: List<String>, shownAt: Long? = null) {
         val keys = privateUris.toSet()
         try {
             context.settingsDataStore.edit { prefs ->
@@ -698,12 +699,33 @@ class HiddenVaultJournal @Inject constructor(
                     (prefs[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet())
                         .filterNot { it.substringBefore('|') in keys }
                         .toSet()
+                val revealedLinks = cloudLinksOf(prefs, keys)
+                HiddenSyncTimes.photosShown(prefs, revealedLinks, shownAt ?: System.currentTimeMillis())
                 pruneMaps(prefs, keys)
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.w(TAG, "forget: failed for ${privateUris.size} entr(ies): ${e.message}")
         }
+    }
+
+    /** The Drive link ids the vault recorded for the photos of [vaultUris]. */
+    private fun cloudLinksOf(prefs: MutablePreferences, vaultUris: Set<String>): List<String> =
+        (prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()).mapNotNull { entry ->
+            entry.substringAfter('|', "").takeIf { entry.substringBefore('|') in vaultUris && it.isNotBlank() }
+        }
+
+    /**
+     * Records the Drive copies of the photos just moved into the vault as hidden: as of now, or, for a photo another
+     * device hid and this one only carried out, as of that device's hide, which then leaves the waiting queue.
+     */
+    private fun recordVaultHides(prefs: MutablePreferences, vaultUris: Set<String>) {
+        val links = cloudLinksOf(prefs, vaultUris)
+        if (links.isEmpty()) return
+        val queue = HiddenSyncTimes.remoteHideQueue(prefs).toMutableMap()
+        val now = System.currentTimeMillis()
+        for (link in links) HiddenSyncTimes.photosHidden(prefs, listOf(link), queue.remove(link) ?: now)
+        HiddenSyncTimes.setRemoteHideQueue(prefs, queue)
     }
 
     /** Drops every `"uri|value"` entry keyed by one of [keys] from the four per-uri maps. */

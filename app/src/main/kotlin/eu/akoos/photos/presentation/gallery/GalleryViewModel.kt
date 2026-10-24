@@ -77,6 +77,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
 import eu.akoos.photos.data.hidden.HiddenCloudPhotos
+import eu.akoos.photos.data.hidden.HiddenSyncTimes
 import eu.akoos.photos.data.hidden.HiddenFolderProgress
 import eu.akoos.photos.data.hidden.HiddenFolderRecords
 import eu.akoos.photos.data.hidden.HiddenStorageManager
@@ -360,6 +361,7 @@ class GalleryViewModel @Inject constructor(
     private val syncInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
     init {
+        watchRemoteHides()
         // A change of the range regroups the carousel from the library already on screen.
         viewModelScope.launch {
             onThisDayWindow.collect { days ->
@@ -2043,10 +2045,54 @@ class GalleryViewModel @Inject constructor(
     private fun commitPendingHide() {
         val uris = pendingHidePrivateUris
         pendingHidePrivateUris = emptyList()
+        remoteHideBatch = emptySet()
         // The hide landed, so the folder keeps the flag this run wrote.
         pendingHideFolderName = null
         if (uris.isEmpty()) return
         viewModelScope.launch { hiddenVaultJournal.confirm(uris) }
+    }
+
+    /** The photos another device hid that the hide now running moves into the vault, by link id. */
+    private var remoteHideBatch: Set<String> = emptySet()
+
+    /**
+     * Carries out the hides another device asked for of photos this phone holds as a device file
+     * ([SettingsKeys.HIDDEN_REMOTE_HIDE_QUEUE]), through the same hide a selection runs, so each moves into the
+     * vault behind the system's delete prompt, all of them under one prompt. Waits for the timeline to have its
+     * photos and for no other hide to be on its way. A waiting photo the timeline now shows as cloud-only hides by
+     * its link id with the other device's time; one the timeline does not show waits for a later opening.
+     */
+    private fun watchRemoteHides() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { HiddenSyncTimes.remoteHideQueue(it) }
+                .distinctUntilChanged()
+                .collect { queue ->
+                    if (queue.isEmpty() || remoteHideBatch.isNotEmpty()) return@collect
+                    val items = _uiState.first { it.items.isNotEmpty() }.items
+                    if (pendingPermissionResult != null || _uiState.value.multiHideState is MultiDeleteState.Working) {
+                        return@collect
+                    }
+                    val waiting = items.filter { item ->
+                        val link = when (item) {
+                            is GalleryItem.Synced -> item.cloud.linkId
+                            is GalleryItem.CloudOnly -> item.cloud.linkId
+                            is GalleryItem.LocalOnly -> null
+                        }
+                        link != null && link in queue
+                    }
+                    val cloudOnly = waiting.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud.linkId }
+                    for (link in cloudOnly) HiddenCloudPhotos.hide(context, listOf(link), queue.getValue(link))
+                    if (cloudOnly.isNotEmpty()) context.settingsDataStore.edit { prefs ->
+                        HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - cloudOnly.toSet())
+                    }
+                    val synced = waiting.filterIsInstance<GalleryItem.Synced>()
+                    if (synced.isEmpty()) return@collect
+                    remoteHideBatch = synced.mapTo(HashSet()) { it.cloud.linkId }
+                    _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
+                    runHide(HiddenFolderRecords.hideSplit(synced), reportProgress = false)
+                }
+        }
     }
 
     /** Undo a hide that did not land: drop the private copies and everything journalled for them, and
@@ -2057,9 +2103,18 @@ class GalleryViewModel @Inject constructor(
         val uris = pendingHidePrivateUris
         val cloudIds = pendingHideCloudLinkIds
         val folderName = pendingHideFolderName
+        val declinedRemote = remoteHideBatch
         pendingHidePrivateUris = emptyList()
         pendingHideCloudLinkIds = emptyList()
         pendingHideFolderName = null
+        remoteHideBatch = emptySet()
+        // A hide another device asked for that did not land here, the system prompt declined or the copy refused,
+        // leaves the queue: asking again at every opening would be a prompt the user has already answered.
+        if (declinedRemote.isNotEmpty()) viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - declinedRemote)
+            }
+        }
         if (uris.isEmpty() && cloudIds.isEmpty() && folderName == null) return
         viewModelScope.launch {
             if (uris.isNotEmpty()) hiddenVaultJournal.discard(uris)

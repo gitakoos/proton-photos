@@ -2047,10 +2047,7 @@ class AlbumDetailViewModel @Inject constructor(
         if (albumLinkId.isBlank()) return
         viewModelScope.launch {
             runCatching {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_ALBUM_IDS] = current + albumLinkId
-                }
+                HiddenCloudPhotos.hideAlbums(context, listOf(albumLinkId))
             }.onSuccess {
                 _uiState.update { it.copy(hideAlbumDone = true) }
             }.onFailure { e ->

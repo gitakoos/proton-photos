@@ -1177,6 +1177,13 @@
     <string name="people_display_settings">Anzeige</string>
     <string name="people_follow_albums">Wie der Tab Alben</string>
     <string name="people_follow_albums_desc">Zeigt Personen mit der Ansicht und Covergröße des Tabs Alben</string>
+    <string name="shared_backup_title">Gemeinsame Sicherung auf Proton Drive</string>
+    <string name="shared_backup_desc">Hält Gesichter, Suchindex, Labels und ausgeblendete Elemente auf deinen anderen Geräten gleich</string>
+    <string name="shared_backup_syncing">Synchronisiert mit Proton Drive</string>
+    <string name="shared_backup_last">Zuletzt synchronisiert: %1$s</string>
+    <string name="shared_backup_never">Noch nicht synchronisiert</string>
+    <string name="shared_backup_failed">Synchronisierung fehlgeschlagen, neuer Versuch später</string>
+    <string name="shared_backup_sync_now">Jetzt synchronisieren</string>
     <string name="albums_more_settings">Weitere Einstellungen</string>
     <string name="album_options">Albumoptionen</string>
     <string name="album_group_heading">Gruppieren nach</string>

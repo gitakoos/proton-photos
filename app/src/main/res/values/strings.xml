@@ -1940,6 +1940,13 @@
     <string name="people_display_settings">Display</string>
     <string name="people_follow_albums">Same as the Albums tab</string>
     <string name="people_follow_albums_desc">Lays out people with the Albums tab\'s view and cover size</string>
+    <string name="shared_backup_title">Shared backup on Proton Drive</string>
+    <string name="shared_backup_desc">Keeps faces, the search index, labels and hidden items the same on your other devices</string>
+    <string name="shared_backup_syncing">Syncing with Proton Drive</string>
+    <string name="shared_backup_last">Last synced %1$s</string>
+    <string name="shared_backup_never">Not synced yet</string>
+    <string name="shared_backup_failed">Sync failed, tries again later</string>
+    <string name="shared_backup_sync_now">Sync now</string>
     <string name="albums_more_settings">More settings</string>
     <string name="album_options">Album options</string>
     <string name="album_group_heading">Group by</string>

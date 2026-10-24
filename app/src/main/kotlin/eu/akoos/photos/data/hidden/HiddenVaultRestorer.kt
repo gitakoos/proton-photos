@@ -114,12 +114,16 @@ class HiddenVaultRestorer @Inject constructor(
      * caller that goes away between the file landing and that clear would leave a folder holding
      * nothing yet still listed as hidden.
      */
-    suspend fun restorePhoto(uri: String, fallbackDisplayName: String? = null): Boolean = runs.detached {
+    suspend fun restorePhoto(
+        uri: String,
+        fallbackDisplayName: String? = null,
+        shownAt: Long? = null,
+    ): Boolean = runs.detached {
         val buckets = recordedBucketsOf(listOf(uri))
         val tally = RevealTally()
         HiddenVaultDiagnostics.revealStarted(1)
         val outcome = restoreOne(uri, tally, fallbackDisplayName)
-        if (outcome.clearsRecords) journal.forget(listOf(uri))
+        if (outcome.clearsRecords) journal.forget(listOf(uri), shownAt)
         clearEmptiedFolders(buckets)
         HiddenVaultDiagnostics.revealFinished(
             revealed = if (outcome.revealed) 1 else 0,

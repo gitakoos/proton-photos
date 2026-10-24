@@ -41,21 +41,42 @@ import eu.akoos.photos.data.preferences.settingsDataStore
  */
 object HiddenCloudPhotos {
 
-    /** Hide these cloud photos from every listing. No-op on an empty list. */
-    suspend fun hide(context: Context, linkIds: Collection<String>) {
+    /** Hide these cloud photos from every listing, as of [at]. No-op on an empty list. */
+    suspend fun hide(context: Context, linkIds: Collection<String>, at: Long = System.currentTimeMillis()) {
         if (linkIds.isEmpty()) return
         context.settingsDataStore.edit { prefs ->
             val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
             prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing + linkIds
+            HiddenSyncTimes.photosHidden(prefs, linkIds, at)
         }
     }
 
-    /** Put these cloud photos back in every listing. No-op on an empty list. */
-    suspend fun reveal(context: Context, linkIds: Collection<String>) {
+    /** Put these cloud photos back in every listing, as of [at]. No-op on an empty list. */
+    suspend fun reveal(context: Context, linkIds: Collection<String>, at: Long = System.currentTimeMillis()) {
         if (linkIds.isEmpty()) return
         context.settingsDataStore.edit { prefs ->
             val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
             prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing - linkIds.toSet()
+            HiddenSyncTimes.photosShown(prefs, linkIds, at)
+        }
+    }
+
+    /** Hide these albums and their photos from every listing, as of [at]. No-op on an empty list. */
+    suspend fun hideAlbums(context: Context, albumLinkIds: Collection<String>, at: Long = System.currentTimeMillis()) {
+        if (albumLinkIds.isEmpty()) return
+        context.settingsDataStore.edit { prefs ->
+            prefs[SettingsKeys.HIDDEN_ALBUM_IDS] = (prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()) + albumLinkIds
+            HiddenSyncTimes.albumsHidden(prefs, albumLinkIds, at)
+        }
+    }
+
+    /** Put these albums back, as of [at]. No-op on an empty list. */
+    suspend fun revealAlbums(context: Context, albumLinkIds: Collection<String>, at: Long = System.currentTimeMillis()) {
+        if (albumLinkIds.isEmpty()) return
+        context.settingsDataStore.edit { prefs ->
+            prefs[SettingsKeys.HIDDEN_ALBUM_IDS] =
+                (prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()) - albumLinkIds.toSet()
+            HiddenSyncTimes.albumsShown(prefs, albumLinkIds, at)
         }
     }
 }

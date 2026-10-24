@@ -59,6 +59,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.currentShareStripConfig
@@ -1163,10 +1164,7 @@ class PhotoViewerViewModel @Inject constructor(
                 is GalleryItem.LocalOnly -> null
             }
             if (linkId != null && linkId in hiddenCloudIds) {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = current - linkId
-                }
+                HiddenCloudPhotos.reveal(context, listOf(linkId))
                 _isHidden.value = false
             } else {
                 val uri = when (item) {
@@ -1227,10 +1225,7 @@ class PhotoViewerViewModel @Inject constructor(
                     )
                     // No device file to vault: hide the cloud photo client-side by linkId. It drops
                     // from every listing via the HIDDEN_CLOUD_PHOTO_IDS filter, nothing on Drive changes.
-                    context.settingsDataStore.edit { prefs ->
-                        val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
-                        prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing + item.cloud.linkId
-                    }
+                    HiddenCloudPhotos.hide(context, listOf(item.cloud.linkId))
                     buildHideUndoAction(emptyList(), listOf(item.cloud.linkId))
                         ?.let { undoController.offer(it) }
                     _isHidden.value = true

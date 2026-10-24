@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.albumMirrorFolders
@@ -654,10 +655,7 @@ class AlbumsViewModel @Inject constructor(
      */
     fun hideAlbum(albumLinkId: String) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_ALBUM_IDS] = current + albumLinkId
-            }
+            HiddenCloudPhotos.hideAlbums(context, listOf(albumLinkId))
         }
     }
 

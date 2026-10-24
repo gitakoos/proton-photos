@@ -69,6 +69,7 @@ import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.dao.PhotoLabelDao
+import eu.akoos.photos.data.db.dao.DriveCopyAppliedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
@@ -245,5 +246,9 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun providePhotoLabelDao(db: AppDatabase): PhotoLabelDao = db.photoLabelDao()
+
+        @Provides
+        @Singleton
+        fun provideDriveCopyAppliedDao(db: AppDatabase): DriveCopyAppliedDao = db.driveCopyAppliedDao()
     }
 }

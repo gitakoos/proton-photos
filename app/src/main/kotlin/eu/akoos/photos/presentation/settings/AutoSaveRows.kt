@@ -67,6 +67,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -79,8 +80,14 @@ import javax.inject.Inject
 class AutoSaveViewModel @Inject constructor(
     private val coordinator: AutoSaveCoordinator,
     private val store: AutoSaveStore,
+    sharedBackupStore: eu.akoos.photos.data.sharedbackup.SharedBackupStore,
     @AppScope private val appScope: CoroutineScope,
 ) : ViewModel() {
+
+    /** Whether the shared backup is on, which saves every Drive copy itself, so the automatic-save rows step aside. */
+    val sharedBackupOn: StateFlow<Boolean> = sharedBackupStore.status
+        .map { it.enabled }
+        .stateIn(appScope, SharingStarted.WhileSubscribed(5_000L), false)
 
     private val states = HashMap<AutoSaveKind, StateFlow<AutoSaveState>>()
 
@@ -132,6 +139,8 @@ internal fun AutoSaveRows(
     viewModel: AutoSaveViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
+    val sharedBackupOn by viewModel.sharedBackupOn.collectAsStateWithLifecycle()
+    if (sharedBackupOn) return
     val state by remember(kind) { viewModel.state(kind) }.collectAsStateWithLifecycle()
     var confirm by rememberSaveable(kind.name) { mutableStateOf(false) }
     var choosing by rememberSaveable(kind.name + "_choose") { mutableStateOf(false) }

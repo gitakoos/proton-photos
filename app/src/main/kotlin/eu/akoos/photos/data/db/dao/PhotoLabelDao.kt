@@ -29,7 +29,9 @@ import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import eu.akoos.photos.data.db.entity.PhotoLabelEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelDeletedEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelNameEntity
+import eu.akoos.photos.data.db.entity.PhotoLabelStateEntity
 import eu.akoos.photos.util.LabelNormalizer
 import eu.akoos.photos.util.SQL_CHUNK_SIZE
 import eu.akoos.photos.util.flatMapSqlChunks
@@ -160,14 +162,115 @@ interface PhotoLabelDao {
     @Query("DELETE FROM photo_label WHERE photoKey IN (:photoKeys)")
     suspend fun deleteForPhotoKeysChunk(photoKeys: List<String>): Int
 
+    /** One slice of the change times [deleteForPhotoKeys] drops. */
+    @Query("DELETE FROM photo_label_state WHERE photoKey IN (:photoKeys)")
+    suspend fun deleteStatesForPhotoKeysChunk(photoKeys: List<String>): Int
+
     /**
      * Drops every label of the photos in [photoKeys] under every owner, guest included, so a photo
-     * leaving view (hidden into the vault) keeps nothing searchable whichever session wrote it.
+     * leaving view (hidden into the vault) keeps nothing searchable whichever session wrote it. Their
+     * change times go too: the photo leaves the labels, which is no edit for another device to repeat.
      */
     suspend fun deleteForPhotoKeys(photoKeys: Collection<String>): Int {
         var deleted = 0
-        photoKeys.distinct().forEachSqlChunk { deleted += deleteForPhotoKeysChunk(it) }
+        photoKeys.distinct().forEachSqlChunk {
+            deleted += deleteForPhotoKeysChunk(it)
+            deleteStatesForPhotoKeysChunk(it)
+        }
         return deleted
+    }
+
+    // ---- Change times and deletions, which the shared backup merges by ----
+
+    @Upsert
+    suspend fun upsertStates(rows: List<PhotoLabelStateEntity>)
+
+    /** When each photo of the account last had its labels changed, a photo whose labels were all taken off included. */
+    @Query("SELECT * FROM photo_label_state WHERE userId = :userId")
+    suspend fun statesForUser(userId: String): List<PhotoLabelStateEntity>
+
+    @Query("SELECT * FROM photo_label_state WHERE userId = :userId AND photoKey = :photoKey")
+    suspend fun stateOf(userId: String, photoKey: String): PhotoLabelStateEntity?
+
+    @Query("DELETE FROM photo_label_state WHERE userId = :userId AND photoKey = :photoKey")
+    suspend fun deleteState(userId: String, photoKey: String): Int
+
+    @Upsert
+    suspend fun upsertDeleted(rows: List<PhotoLabelDeletedEntity>)
+
+    /** The labels the account deleted, with when. */
+    @Query("SELECT * FROM photo_label_deleted WHERE userId = :userId")
+    suspend fun deletedForUser(userId: String): List<PhotoLabelDeletedEntity>
+
+    @Query("DELETE FROM photo_label_deleted WHERE userId = :userId AND labelKey = :labelKey")
+    suspend fun deleteDeleted(userId: String, labelKey: String): Int
+
+    /** Clears the deletion of each of [labelKeys] made no later than [at]: the label was put back on purpose. */
+    @Query("DELETE FROM photo_label_deleted WHERE userId = :userId AND labelKey IN (:labelKeys) AND deletedAt <= :at")
+    suspend fun undelete(userId: String, labelKeys: List<String>, at: Long): Int
+
+    /** Records that each photo of [photoKeys] had its labels changed at [at]. */
+    suspend fun stamp(userId: String, photoKeys: Collection<String>, at: Long) {
+        if (photoKeys.isEmpty()) return
+        photoKeys.distinct().chunked(SQL_CHUNK_SIZE).forEach { chunk ->
+            upsertStates(chunk.map { PhotoLabelStateEntity(userId, it, at) })
+        }
+    }
+
+    /**
+     * Sets one photo's labels to [rows] (already normalised, capped and spelled by the caller) as of [at]. A list
+     * equal to the one the photo has, spellings included, changes nothing and records no time. Otherwise the
+     * change time is recorded and the deletion of each label it now carries, if made before, is cleared. True
+     * when the list changed.
+     */
+    @Transaction
+    suspend fun setLabelsOfPhoto(userId: String, photoKey: String, rows: List<PhotoLabelEntity>, at: Long): Boolean {
+        val before = labelsOfPhoto(userId, photoKey).map { it.label }
+        if (before == rows.map { it.label }) return false
+        replaceLabelsOfPhoto(userId, photoKey, rows)
+        stamp(userId, listOf(photoKey), at)
+        if (rows.isNotEmpty()) undelete(userId, rows.map { it.labelKey }, at)
+        return true
+    }
+
+    /** Takes one label off one photo as of [at]. True when the photo carried it. */
+    @Transaction
+    suspend fun removeLabelOfPhoto(userId: String, photoKey: String, labelKey: String, at: Long): Boolean {
+        if (deleteLabelOfPhoto(userId, photoKey, labelKey) == 0) return false
+        stamp(userId, listOf(photoKey), at)
+        return true
+    }
+
+    /**
+     * Writes a merge's changes in one transaction: each photo of [photos] gets the given rows (in order) and change
+     * time, the names of [nameKeysToDrop] go, [namesToAdd] join unless the account has them, and [deleted] is
+     * recorded. A photo whose change time is no longer the one the merge read ([expectedChangedAt], null for none)
+     * was edited meanwhile and keeps that edit.
+     */
+    @Transaction
+    suspend fun writeMerged(
+        userId: String,
+        photos: Map<String, Pair<List<PhotoLabelEntity>, Long>>,
+        expectedChangedAt: Map<String, Long?>,
+        namesToAdd: List<PhotoLabelNameEntity>,
+        nameKeysToDrop: List<String>,
+        deleted: List<PhotoLabelDeletedEntity>,
+    ) {
+        for ((key, change) in photos) {
+            if (stateOf(userId, key)?.changedAt != expectedChangedAt[key]) continue
+            replaceLabelsOfPhoto(userId, key, change.first)
+            upsertStates(listOf(PhotoLabelStateEntity(userId, key, change.second)))
+        }
+        for (key in nameKeysToDrop) deleteName(userId, key)
+        for (name in namesToAdd) insertName(name)
+        if (deleted.isNotEmpty()) upsertDeleted(deleted)
+    }
+
+    /** Creates the label with no photo as of [row]'s time, clearing an earlier deletion of it. */
+    @Transaction
+    suspend fun createName(row: PhotoLabelNameEntity): Long {
+        undelete(row.userId, listOf(row.labelKey), row.createdAt)
+        return insertName(row)
     }
 
     /** Replaces one photo's labels with [rows] (already normalised and capped by the caller). */
@@ -195,18 +298,24 @@ interface PhotoLabelDao {
         for (chunk in photoKeys.distinct().chunked(SQL_CHUNK_SIZE)) {
             val existing = labelsForKeysChunk(userId, chunk).groupBy { it.photoKey }
             val rows = mutableListOf<PhotoLabelEntity>()
+            val changedKeys = mutableListOf<String>()
             for (key in chunk) {
                 val current = existing[key].orEmpty()
                 val incoming = labels.map { PhotoLabelEntity(userId, key, it, LabelNormalizer.fold(it), now) }
                 val fit = rowsThatFit(current, incoming)
                 val currentKeys = current.mapTo(HashSet()) { it.labelKey }
                 val wanted = incoming.count { it.labelKey !in currentKeys }
-                if (fit.isNotEmpty()) changed++
+                if (fit.isNotEmpty()) {
+                    changed++
+                    changedKeys += key
+                }
                 if (fit.size < wanted) capped++
                 rows += fit
             }
             if (rows.isNotEmpty()) insertIgnore(rows)
+            stamp(userId, changedKeys, now)
         }
+        if (changed > 0) undelete(userId, labels.map { LabelNormalizer.fold(it) }, now)
         return LabelBulkResult(changed, capped)
     }
 
@@ -235,6 +344,21 @@ interface PhotoLabelDao {
     }
 
     /**
+     * [removeLabelEverywhere] as of [at], spelled [label]: each photo that lost it records the change, and the
+     * label is recorded as deleted when the account had it at all, so an older copy from another device does not
+     * bring it back. Returns how many photos lost it.
+     */
+    @Transaction
+    suspend fun deleteLabelAt(userId: String, labelKey: String, label: String, at: Long): Int {
+        val keys = photoKeysOfLabel(userId, labelKey)
+        val hadName = nameSpellingOf(userId, labelKey) != null
+        val removed = removeLabelEverywhere(userId, labelKey)
+        stamp(userId, keys, at)
+        if (hadName || keys.isNotEmpty()) upsertDeleted(listOf(PhotoLabelDeletedEntity(userId, labelKey, label, at)))
+        return removed
+    }
+
+    /**
      * Renames the label [fromKey] to [toLabel] on every photo of the account, merging it into
      * [toKey] when that label already exists. A photo carrying both keeps its [toKey] row and loses
      * the [fromKey] one, so a merge never raises a photo's count. Every [toKey] row takes the
@@ -253,6 +377,37 @@ interface PhotoLabelDao {
         moveName(userId, fromKey, toKey, toLabel)
         deleteName(userId, fromKey)
         setNameSpelling(userId, toKey, toLabel)
+        return moved
+    }
+
+    @Query("SELECT photoKey FROM photo_label WHERE userId = :userId AND labelKey = :labelKey AND label != :label")
+    suspend fun photoKeysSpelledOtherwise(userId: String, labelKey: String, label: String): List<String>
+
+    /**
+     * [renameLabel] as of [at]. Each photo whose list changed records it; a new spelling of the same label stamps
+     * the photos that showed the old one. A rename to another label records the old one, spelled [fromLabel], as
+     * deleted a millisecond before [at], so an older copy from another device does not bring it back while that
+     * device still takes the renamed photos (see [eu.akoos.photos.data.label.LabelCopyMerge.renameLabel]), and
+     * clears an earlier deletion of the new one.
+     */
+    @Transaction
+    suspend fun renameLabelAt(
+        userId: String,
+        fromKey: String,
+        fromLabel: String,
+        toKey: String,
+        toLabel: String,
+        at: Long,
+    ): Int {
+        if (fromKey == toKey) {
+            stamp(userId, photoKeysSpelledOtherwise(userId, toKey, toLabel), at)
+            return renameLabel(userId, fromKey, toKey, toLabel)
+        }
+        val keys = photoKeysOfLabel(userId, fromKey)
+        val moved = renameLabel(userId, fromKey, toKey, toLabel)
+        stamp(userId, keys, at)
+        upsertDeleted(listOf(PhotoLabelDeletedEntity(userId, fromKey, fromLabel, at - 1)))
+        undelete(userId, listOf(toKey), at)
         return moved
     }
 
@@ -301,8 +456,17 @@ interface PhotoLabelDao {
             if (fit.isNotEmpty()) insertIgnore(fit)
             deleteAllOfPhoto(userId, oldKey)
             moved += fit.size
+            moveState(userId, oldKey, newKey)
         }
         return moved
+    }
+
+    /** Moves the change time of [oldKey] onto [newKey], keeping the later of the two when both have one. */
+    suspend fun moveState(userId: String, oldKey: String, newKey: String) {
+        val old = stateOf(userId, oldKey) ?: return
+        val new = stateOf(userId, newKey)
+        upsertStates(listOf(PhotoLabelStateEntity(userId, newKey, maxOf(old.changedAt, new?.changedAt ?: 0L))))
+        deleteState(userId, oldKey)
     }
 
     @Query("SELECT DISTINCT photoKey FROM photo_label WHERE userId = :userId")
@@ -328,6 +492,8 @@ interface PhotoLabelDao {
     suspend fun adoptUserRows(fromUser: String, toUser: String): Int {
         if (fromUser == toUser) return 0
         copyNames(fromUser, toUser)
+        copyStates(fromUser, toUser)
+        copyDeleted(fromUser, toUser)
         var adopted = moveRowsWherePhotoFree(fromUser, toUser)
         for (key in photoKeysForUser(fromUser)) {
             val incoming = labelsOfPhoto(fromUser, key).map { it.copy(userId = toUser) }
@@ -342,10 +508,32 @@ interface PhotoLabelDao {
     @Query("DELETE FROM photo_label WHERE userId = :userId")
     suspend fun deleteLabelRowsForUser(userId: String): Int
 
+    /** Gives [toUser] the change time of every photo [fromUser] has one for and it has none. */
+    @Query(
+        "INSERT OR IGNORE INTO photo_label_state (userId, photoKey, changedAt) " +
+            "SELECT :toUser, photoKey, changedAt FROM photo_label_state WHERE userId = :fromUser",
+    )
+    suspend fun copyStates(fromUser: String, toUser: String)
+
+    /** Gives [toUser] every deletion [fromUser] recorded that it has not. */
+    @Query(
+        "INSERT OR IGNORE INTO photo_label_deleted (userId, labelKey, label, deletedAt) " +
+            "SELECT :toUser, labelKey, label, deletedAt FROM photo_label_deleted WHERE userId = :fromUser",
+    )
+    suspend fun copyDeleted(fromUser: String, toUser: String)
+
+    @Query("DELETE FROM photo_label_state WHERE userId = :userId")
+    suspend fun deleteStatesForUser(userId: String): Int
+
+    @Query("DELETE FROM photo_label_deleted WHERE userId = :userId")
+    suspend fun deleteDeletedForUser(userId: String): Int
+
     /** Removes every label of the account, the ones without a photo included, for the sign-out wipe. */
     @Transaction
     suspend fun deleteAllForUser(userId: String): Int {
         deleteNamesForUser(userId)
+        deleteStatesForUser(userId)
+        deleteDeletedForUser(userId)
         return deleteLabelRowsForUser(userId)
     }
 }

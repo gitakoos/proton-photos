@@ -769,6 +769,10 @@ fun SettingsScreen(
                     onClick = onLabelsClick,
                 )
             }
+            // The shared backup keeps the faces, search, labels and hidden items in step with the account's other
+            // devices through Drive: an account and a device the Drive client runs on.
+            val sharedBackupCapable = remember { eu.akoos.photos.data.sdk.SdkGate().isCapable }
+            if (state.isSignedIn && sharedBackupCapable) SharedBackupCard()
             Spacer(Modifier.height(12.dp))
             SettingsCard {
                 NavRow(

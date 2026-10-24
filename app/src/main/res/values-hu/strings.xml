@@ -1200,6 +1200,13 @@
     <string name="people_display_settings">Megjelenítés</string>
     <string name="people_follow_albums">Ugyanaz, mint az Albumok lap</string>
     <string name="people_follow_albums_desc">Az embereket az Albumok lap nézetével és borítóméretével mutatja</string>
+    <string name="shared_backup_title">Közös mentés a Proton Drive-on</string>
+    <string name="shared_backup_desc">Az arcok, a keresési index, a címkék és a rejtett elemek a többi eszközödön is ugyanazok</string>
+    <string name="shared_backup_syncing">Szinkronizálás a Proton Drive-val</string>
+    <string name="shared_backup_last">Utoljára szinkronizálva: %1$s</string>
+    <string name="shared_backup_never">Még nem volt szinkronizálás</string>
+    <string name="shared_backup_failed">A szinkronizálás nem sikerült, később újrapróbálja</string>
+    <string name="shared_backup_sync_now">Szinkronizálás most</string>
     <string name="albums_more_settings">További beállítások</string>
     <string name="album_options">Albumműveletek</string>
     <string name="album_group_heading">Csoportosítás</string>

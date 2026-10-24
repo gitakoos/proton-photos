@@ -30,9 +30,11 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.hilt.work.HiltWorker
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -80,6 +82,13 @@ import eu.akoos.photos.data.mlsync.mlSyncRunAllowed
 import eu.akoos.photos.data.mlsync.partStatus
 import eu.akoos.photos.data.mlsync.planRestore
 import eu.akoos.photos.data.mlsync.uploadDecision
+import eu.akoos.photos.data.mlsync.DriveDataFolder
+import eu.akoos.photos.data.mlsync.faceIndexingPausedByUser
+import eu.akoos.photos.data.sharedbackup.DriveJobLock
+import eu.akoos.photos.data.sharedbackup.SharedBackupKind
+import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
+import eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
+import eu.akoos.photos.data.sharedbackup.SharedBackupStore
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.sdk.SdkGate
@@ -95,6 +104,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.accountmanager.domain.AccountManager
@@ -155,6 +165,9 @@ class MlSyncWorker @AssistedInject constructor(
     private val mlWalkGate: MlWalkGate,
     private val signOut: MlSyncSignOut,
     private val autoSave: AutoSaveCoordinator,
+    private val sharedBackupRunner: SharedBackupRunner,
+    private val sharedBackupStore: SharedBackupStore,
+    private val sharedBackupScheduler: SharedBackupScheduler,
 ) : CoroutineWorker(context, params) {
 
     /** Read from the input on its own, so the notification knows it even for a request that is unreadable. */
@@ -164,15 +177,21 @@ class MlSyncWorker @AssistedInject constructor(
     private var runStartedMs = 0L
     private var lastOutcome: MlSyncOutcome? = null
 
-    /** Tracked whole, the hand-back included, so a sign-out can stop the run and wait for it to end. */
+    /**
+     * Tracked whole, the hand-back included, so a sign-out can stop the run and wait for it to end. Held under the
+     * Drive job lock, so it never runs beside a label save or restore.
+     */
     override suspend fun doWork(): Result = signOut.track {
-        runStartedMs = System.currentTimeMillis()
-        try {
-            runRequest()
-        } finally {
-            withContext(NonCancellable) {
-                handBackLeftoverFacePause()
-                recordAutoSave()
+        DriveJobLock.mutex.withLock {
+            runStartedMs = System.currentTimeMillis()
+            try {
+                runRequest()
+            } finally {
+                withContext(NonCancellable) {
+                    handBackLeftoverFacePause()
+                    recordAutoSave()
+                    if (operation == MlSyncOperation.ROUND) runCatching { sharedBackupScheduler.scheduleNext() }
+                }
             }
         }
     }
@@ -219,6 +238,7 @@ class MlSyncWorker @AssistedInject constructor(
                     when (request) {
                         is MlSyncRequest.Save -> save(userId, request, scratch)
                         is MlSyncRequest.Restore -> restore(userId, request, scratch)
+                        is MlSyncRequest.Round -> round(userId, scratch)
                     }
                 }
             }
@@ -431,7 +451,10 @@ class MlSyncWorker @AssistedInject constructor(
         }
     }
 
-    /** Downloads and imports one file. Returns a result that ends the whole run, or null. */
+    /**
+     * Downloads and imports one file, telling [onStatus] how that file ended. Returns a result that ends the whole
+     * run, or null.
+     */
     private suspend fun restoreStep(
         userId: UserId,
         step: MlRestoreStep,
@@ -440,6 +463,7 @@ class MlSyncWorker @AssistedInject constructor(
         tally: MlSyncTally,
         walks: WalkStandDown,
         scratch: TransferScratch,
+        onStatus: (MlSyncPartStatus) -> Unit = {},
     ): MlSyncResult? {
         val kind = step.file.kind
         report(MlSyncProgress(MlSyncPhase.DOWNLOADING, kind, index, total))
@@ -447,6 +471,7 @@ class MlSyncWorker @AssistedInject constructor(
             scratch.newFile("restore-${kind.prefix}-")
         } catch (e: IOException) {
             tally.record(kind, MlSyncPartStatus.FAILED, className(e))
+            onStatus(MlSyncPartStatus.FAILED)
             return null
         }
         try {
@@ -454,14 +479,17 @@ class MlSyncWorker @AssistedInject constructor(
                 is MlDriveResult.Ok -> Unit
                 MlDriveResult.NotCapable -> {
                     tally.record(kind, MlSyncPartStatus.FAILED)
+                    onStatus(MlSyncPartStatus.FAILED)
                     return MlSyncResult.NOT_CAPABLE
                 }
                 MlDriveResult.Conflict, MlDriveResult.FolderMissing -> {
                     tally.record(kind, MlSyncPartStatus.FAILED, download.javaClass.simpleName)
+                    onStatus(MlSyncPartStatus.FAILED)
                     return null
                 }
                 is MlDriveResult.Failed -> {
                     tally.record(kind, MlSyncPartStatus.FAILED, download.cause)
+                    onStatus(MlSyncPartStatus.FAILED)
                     return null
                 }
             }
@@ -469,7 +497,7 @@ class MlSyncWorker @AssistedInject constructor(
             val status = try {
                 when (kind) {
                     MlDriveFileKind.FACES -> importFaces(userId, step, file, tally, walks)
-                    MlDriveFileKind.SEARCH -> importSearch(userId, step, file, tally, walks)
+                    MlDriveFileKind.SEARCH -> importSearch(userId, step, file, tally, walks, ownDeviceId = null)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -479,6 +507,7 @@ class MlSyncWorker @AssistedInject constructor(
                 (if (isStorageFull(e)) MlSyncPartStatus.NO_SPACE else MlSyncPartStatus.FAILED)
                     .also { tally.record(kind, it, className(e)) }
             }
+            onStatus(status)
             // Full storage would fail every later file and a retry alike, so the run ends here.
             return if (status == MlSyncPartStatus.NO_SPACE) MlSyncResult.NO_SPACE else null
         } finally {
@@ -536,15 +565,18 @@ class MlSyncWorker @AssistedInject constructor(
         file: File,
         tally: MlSyncTally,
         walks: WalkStandDown,
+        ownDeviceId: String?,
     ): MlSyncPartStatus {
         walks.pauseSemantic()
         val mode = if (step.replace) SearchImportMode.Replace else SearchImportMode.Merge
         // The importer opens the file afresh for its second try with refreshed address keys. Opened and
         // verified, the download is spent: deleted before the first row is written, to free its space.
+        val own = ownDeviceId ?: runCatching { driveStore.deviceId() }.getOrNull()
         val result = searchImporter.importFrom(
             userId,
             mode,
             expectedDeviceId = step.file.deviceId,
+            fromOtherDevice = own == null || own != step.file.deviceId,
             releaseSnapshot = { file.delete() },
         ) {
             FileInputStream(file)
@@ -556,6 +588,89 @@ class MlSyncWorker @AssistedInject constructor(
             tally.count(searchEmbeddings = result.imported, searchKept = result.kept)
         }
         return status
+    }
+
+    // ---- Shared backup round -------------------------------------------------------------------------
+
+    /**
+     * One round of the shared backup. Reads first: the three Drive folders are listed (a listing that fails ends the
+     * round with nothing written), the other installs' face and search files newer than the copy taken in last are
+     * imported filling gaps only, the way a Merge restore does (a face file's scan markers mark its photos as
+     * scanned here, so each photo is scanned once), and their label copies and hidden lists are merged. Then this
+     * install's own copy of each kind is written when its read went through and something in it changed. Ends with
+     * the round's outcome recorded for the settings row.
+     */
+    private suspend fun round(userId: UserId, scratch: TransferScratch): MlSyncOutcome {
+        val tally = MlSyncTally(MlSyncOperation.ROUND, filesTotal = 0)
+        if (!sharedBackupStore.isEnabled()) return tally.outcome(MlSyncResult.SUCCESS)
+        report(MlSyncProgress(MlSyncPhase.PREPARING, kind = null, done = 0, total = 0))
+        val ownDeviceId = try {
+            driveStore.deviceId()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return endRound(tally.outcome(MlSyncResult.FAILED, className(e)), failed = true)
+        }
+        val listing = sharedBackupRunner.list(userId)
+            ?: return endRound(tally.outcome(MlSyncResult.FAILED, READ_FAILURE), failed = true)
+
+        val unread = HashSet<MlDriveFileKind>()
+        val plan = planRestore(sharedBackupRunner.mlFilesToTake(userId, listing, ownDeviceId), FaceSnapshotMode.Merge)
+        if (plan.isNotEmpty()) {
+            promoteToForeground()
+            val pause = MlSyncFacePause.read(applicationContext)
+            val walks = WalkStandDown(faceIndexingPausedByUser(pause?.switchOn, pause?.held))
+            try {
+                if (plan.any { it.file.kind == MlDriveFileKind.FACES }) walks.standDownFaces()
+                for ((index, step) in plan.withIndex()) {
+                    var status: MlSyncPartStatus? = null
+                    val ends = restoreStep(userId, step, index, plan.size, tally, walks, scratch) { status = it }
+                    val kind = step.file.kind
+                    if (status?.finished == true) {
+                        val recorded = if (kind == MlDriveFileKind.FACES) SharedBackupKind.FACES else SharedBackupKind.SEARCH
+                        sharedBackupRunner.markApplied(userId, recorded, step.file.deviceId, step.file.serverModifiedAtMs)
+                    } else {
+                        unread += kind
+                    }
+                    if (ends != null) return endRound(tally.outcome(ends), failed = true)
+                }
+            } finally {
+                withContext(NonCancellable) { walks.handBack(userId) }
+            }
+        }
+        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, ownDeviceId)
+        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, ownDeviceId)
+        var failed = unread.isNotEmpty() || !labelsRead || !hiddenRead
+
+        if (sharedBackupStore.isEnabled()) {
+            for ((index, kind) in ML_SYNC_KIND_ORDER.withIndex()) {
+                if (kind in unread || !sharedBackupStore.mlChanged(kind)) continue
+                if (!sharedBackupRunner.ensureFolder(userId, DriveDataFolder.ML)) {
+                    failed = true
+                    continue
+                }
+                promoteToForeground()
+                val saveStarted = System.currentTimeMillis()
+                val kindTally = MlSyncTally(MlSyncOperation.SAVE, filesTotal = 1)
+                saveKind(userId, kind, ownDeviceId, index, ML_SYNC_KIND_ORDER.size, kindTally, scratch)
+                val saved = kindTally.outcome().let { if (kind == MlDriveFileKind.FACES) it.faces else it.search }
+                if (saved == MlSyncPartStatus.DONE || saved == MlSyncPartStatus.EMPTY) {
+                    sharedBackupStore.mlSaved(kind, saveStarted)
+                } else {
+                    failed = true
+                }
+            }
+            val now = System.currentTimeMillis()
+            if (labelsRead && sharedBackupRunner.saveLabels(userId, ownDeviceId, now) == null) failed = true
+            if (hiddenRead && sharedBackupRunner.saveHidden(userId, ownDeviceId, now) == null) failed = true
+        }
+        return endRound(tally.outcome(if (failed) MlSyncResult.PARTIAL else MlSyncResult.SUCCESS), failed)
+    }
+
+    /** Records how a round ended for the settings row and hands its outcome on. */
+    private suspend fun endRound(outcome: MlSyncOutcome, failed: Boolean): MlSyncOutcome {
+        runCatching { sharedBackupStore.recordRound(System.currentTimeMillis(), failed) }
+        return outcome
     }
 
     /**
@@ -733,7 +848,11 @@ class MlSyncWorker @AssistedInject constructor(
         val context = applicationContext
         ensureChannel(context)
         val restoring = operation == MlSyncOperation.RESTORE
-        val title = if (restoring) R.string.ml_sync_restore_title else R.string.ml_sync_save_title
+        val title = when (operation) {
+            MlSyncOperation.RESTORE -> R.string.ml_sync_restore_title
+            MlSyncOperation.ROUND -> R.string.shared_backup_syncing
+            else -> R.string.ml_sync_save_title
+        }
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(if (restoring) android.R.drawable.stat_sys_download else android.R.drawable.stat_sys_upload)
             .setContentTitle(context.getString(title))
@@ -780,6 +899,9 @@ class MlSyncWorker @AssistedInject constructor(
 
         private const val SCRATCH_DIR = "mlsync/transfer"
 
+        /** The failure a round names when it could not read the copies on Drive. */
+        private const val READ_FAILURE = "ReadFailed"
+
         /** How long a restore waits for a stood-down walk to put its model session away before importing
          *  anyway; the import's single transaction still holds the walk's writes back until it commits. */
         private const val WALK_SETTLE_TIMEOUT_MS = 30_000L
@@ -804,6 +926,19 @@ class MlSyncWorker @AssistedInject constructor(
          * already queued or running stays and this request is dropped. The operation also rides as a tag, so a
          * reader knows it while the job is still queued.
          */
+        fun enqueueRound(context: Context, userId: UserId): UUID {
+            ensureChannel(context)
+            val request = MlSyncRequest.Round(userId.id)
+            val work = OneTimeWorkRequestBuilder<MlSyncWorker>()
+                .setInputData(MlSyncWorkData.input(request))
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .addTag(TAG)
+                .addTag(MlSyncWorkData.operationTag(request.operation))
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.KEEP, work)
+            return work.id
+        }
+
         fun enqueue(context: Context, request: MlSyncRequest): UUID {
             ensureChannel(context)
             val work = OneTimeWorkRequestBuilder<MlSyncWorker>()

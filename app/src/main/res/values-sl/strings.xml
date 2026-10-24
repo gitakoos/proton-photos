@@ -1414,6 +1414,13 @@
     <string name="people_display_settings">Prikaz</string>
     <string name="people_follow_albums">Enako kot zavihek Albumi</string>
     <string name="people_follow_albums_desc">Prikaže osebe s pogledom in velikostjo naslovnic zavihka Albumi</string>
+    <string name="shared_backup_title">Skupna varnostna kopija na Proton Drive</string>
+    <string name="shared_backup_desc">Ohranja enake obraze, iskalni indeks, oznake in skrite elemente na tvojih drugih napravah</string>
+    <string name="shared_backup_syncing">Sinhronizacija s Proton Drive</string>
+    <string name="shared_backup_last">Zadnja sinhronizacija: %1$s</string>
+    <string name="shared_backup_never">Še ni sinhronizirano</string>
+    <string name="shared_backup_failed">Sinhronizacija ni uspela, poskusi znova pozneje</string>
+    <string name="shared_backup_sync_now">Sinhroniziraj zdaj</string>
     <string name="albums_more_settings">Več nastavitev</string>
     <string name="album_options">Možnosti albuma</string>
     <string name="album_group_heading">Združi po</string>

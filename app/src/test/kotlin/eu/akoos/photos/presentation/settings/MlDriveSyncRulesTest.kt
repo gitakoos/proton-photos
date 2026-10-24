@@ -386,6 +386,12 @@ class MlDriveSyncRulesTest {
     }
 
     @Test
+    fun `a finished shared-backup round opens no sheet over the section`() {
+        val round = MlSyncState.Finished("run", outcome(MlSyncOperation.ROUND, MlSyncResult.SUCCESS))
+        assertEquals(null, mlSyncSheet(folderPrompt = false, state = round))
+    }
+
+    @Test
     fun `a missing folder shows only the folder question, never a failure`() {
         assertEquals(MlSyncNotice.AskToCreateFolder, mlSyncSheet(folderPrompt = true, state = MlSyncState.Idle))
         // A job that still found no folder asks the same question.

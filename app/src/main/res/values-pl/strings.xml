@@ -1413,6 +1413,13 @@
     <string name="people_display_settings">Wyświetlanie</string>
     <string name="people_follow_albums">Tak jak karta Albumy</string>
     <string name="people_follow_albums_desc">Pokazuje osoby w widoku i rozmiarze okładek karty Albumy</string>
+    <string name="shared_backup_title">Wspólna kopia na Proton Drive</string>
+    <string name="shared_backup_desc">Utrzymuje te same twarze, indeks wyszukiwania, etykiety i ukryte elementy na Twoich innych urządzeniach</string>
+    <string name="shared_backup_syncing">Synchronizacja z Proton Drive</string>
+    <string name="shared_backup_last">Ostatnia synchronizacja: %1$s</string>
+    <string name="shared_backup_never">Jeszcze nie zsynchronizowano</string>
+    <string name="shared_backup_failed">Synchronizacja nie powiodła się, ponowna próba później</string>
+    <string name="shared_backup_sync_now">Synchronizuj teraz</string>
     <string name="albums_more_settings">Więcej ustawień</string>
     <string name="album_options">Opcje albumu</string>
     <string name="album_group_heading">Grupuj według</string>

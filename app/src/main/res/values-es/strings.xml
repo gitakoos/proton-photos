@@ -1192,6 +1192,13 @@
     <string name="people_display_settings">Visualización</string>
     <string name="people_follow_albums">Igual que la pestaña Álbumes</string>
     <string name="people_follow_albums_desc">Muestra a las personas con la vista y el tamaño de portada de la pestaña Álbumes</string>
+    <string name="shared_backup_title">Copia compartida en Proton Drive</string>
+    <string name="shared_backup_desc">Mantiene iguales las caras, el índice de búsqueda, las etiquetas y los elementos ocultos en tus otros dispositivos</string>
+    <string name="shared_backup_syncing">Sincronizando con Proton Drive</string>
+    <string name="shared_backup_last">Última sincronización: %1$s</string>
+    <string name="shared_backup_never">Aún sin sincronizar</string>
+    <string name="shared_backup_failed">La sincronización falló, se reintentará más tarde</string>
+    <string name="shared_backup_sync_now">Sincronizar ahora</string>
     <string name="albums_more_settings">Más ajustes</string>
     <string name="album_options">Opciones del álbum</string>
     <string name="album_group_heading">Agrupar por</string>
