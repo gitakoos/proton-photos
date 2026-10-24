@@ -1793,6 +1793,8 @@
     <string name="sdk_route_download_desc">Fotók megnyitása és mentése a Drive-ról teljes felbontásban</string>
     <string name="sdk_route_upload">Mentés és feltöltés</string>
     <string name="sdk_route_upload_desc">Fotók küldése a Drive-ra, mentéskor és minden más feltöltéskor</string>
+    <string name="sdk_route_albums">Albumok</string>
+    <string name="sdk_route_albums_desc">Albumok létrehozása, átnevezése és törlése a Drive-on, fotók hozzáadása és eltávolítása</string>
     <string name="sdk_route_activity">%1$s. Ebben a munkamenetben: %2$d a könyvtáron át, %3$d a megszokott módon.</string>
     <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>
     <string name="settings_ai_grouping_progress">%1$d / %2$d arc</string>

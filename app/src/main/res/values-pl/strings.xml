@@ -1878,6 +1878,8 @@
     <string name="sdk_route_download_desc">Otwieranie i zapisywanie zdjęć z Drive w pełnej rozdzielczości</string>
     <string name="sdk_route_upload">Kopia zapasowa i przesyłanie</string>
     <string name="sdk_route_upload_desc">Wysyłanie zdjęć do Drive, przy kopii zapasowej i każdym innym przesyłaniu</string>
+    <string name="sdk_route_albums">Albumy</string>
+    <string name="sdk_route_albums_desc">Tworzenie, zmiana nazwy i usuwanie albumów w Drive oraz dodawanie i usuwanie z nich zdjęć</string>
     <string name="sdk_route_activity">%1$s. W tej sesji: %2$d przez bibliotekę, %3$d w zwykły sposób.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d zdjęć</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d twarzy</string>

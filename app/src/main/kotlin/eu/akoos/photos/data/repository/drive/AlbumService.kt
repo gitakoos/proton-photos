@@ -65,6 +65,9 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.repository.VideoDurationBackfillScheduler
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.AlbumChild
+import eu.akoos.photos.data.sdk.SdkAlbumOps
+import eu.akoos.photos.data.sdk.SdkRoute
+import eu.akoos.photos.data.sdk.SdkRouting
 import eu.akoos.photos.domain.entity.AlbumDeleteWouldLosePhotos
 import eu.akoos.photos.domain.entity.AlbumNotFoundException
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -204,6 +207,8 @@ class AlbumService @Inject constructor(
     private val albumCryptoChain: AlbumCryptoChain,
     private val sharedAlbumKeyStore: SharedAlbumKeyStore,
     private val albumCacheCleanup: AlbumCacheCleanup,
+    private val sdkRouting: SdkRouting,
+    private val sdkAlbumOps: SdkAlbumOps,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -859,6 +864,21 @@ class AlbumService @Inject constructor(
     }
 
     suspend fun createDriveAlbum(userId: UserId, name: String): Album = withContext(Dispatchers.IO) {
+        val newLinkId = sdkRouting.run(SdkRoute.ALBUMS, viaSdk = { sdkAlbumOps.createAlbum(userId, name) }) {
+            createDriveAlbumOwnPath(userId, name)
+        }
+        Log.d(TAG, "createDriveAlbum: created album linkId=$newLinkId name=$name")
+        Album(
+            linkId             = newLinkId,
+            name               = name,   // plaintext for immediate display
+            photoCount         = 0,
+            coverLinkId        = null,
+            lastActivityTimeMs = null,
+        )
+    }
+
+    /** The app's own album create; returns the new album's link id. */
+    private suspend fun createDriveAlbumOwnPath(userId: UserId, name: String): String {
         val volumeId = shareService.getVolumeId(userId)
 
         // A brand-new Photos share has no materialised root link until the first
@@ -991,15 +1011,7 @@ class AlbumService @Inject constructor(
             }.valueOrThrow
         }
         // Response: {"Album": {"Link": {"LinkID": "..."}}, "Code": 1000}
-        val newLinkId = response.album.link.linkId
-        Log.d(TAG, "createDriveAlbum: created album linkId=$newLinkId name=$name")
-        Album(
-            linkId             = newLinkId,
-            name               = name,   // plaintext for immediate display
-            photoCount         = 0,
-            coverLinkId        = null,
-            lastActivityTimeMs = null,
-        )
+        return response.album.link.linkId
     }
 
     suspend fun loadAlbumChildren(userId: UserId, albumLinkId: String): List<AlbumChild> = withContext(Dispatchers.IO) {
@@ -1460,6 +1472,44 @@ class AlbumService @Inject constructor(
         if (photoLinkIds.isEmpty()) {
             return@withContext DrivePhotoRepository.AddPhotosToAlbumResult(emptyList(), emptyList())
         }
+        // Photos the SDK already added before it failed; the app's own request takes the rest.
+        val doneBySdk = LinkedHashSet<String>()
+        val result = sdkRouting.run(
+            SdkRoute.ALBUMS,
+            viaSdk = {
+                val volumeId = shareService.getVolumeId(userId)
+                val refused = sdkAlbumOps.addPhotos(userId, volumeId, albumLinkId, photoLinkIds) { doneBySdk += it }
+                DrivePhotoRepository.AddPhotosToAlbumResult(
+                    photoLinkIds.filter { it !in refused },
+                    photoLinkIds.filter { it in refused },
+                )
+            },
+        ) {
+            val rest = photoLinkIds.filterNot { it in doneBySdk }
+            if (rest.isEmpty()) {
+                DrivePhotoRepository.AddPhotosToAlbumResult(doneBySdk.toList(), emptyList())
+            } else {
+                val own = addPhotosToAlbumOwnPath(userId, albumLinkId, rest)
+                DrivePhotoRepository.AddPhotosToAlbumResult(doneBySdk.toList() + own.succeededLinkIds, own.failedLinkIds)
+            }
+        }
+        if (doneBySdk.isNotEmpty()) {
+            runCatching {
+                albumPhotoMembershipDao.upsertAll(
+                    doneBySdk.map { eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity(albumLinkId, it) }
+                )
+            }.onFailure { Log.w(TAG, "addPhotosToAlbum: membership upsert failed: ${it.message}") }
+            invalidateMembershipCache()
+        }
+        result
+    }
+
+    /** The app's own add, for photos on this user's volume; keeps the membership table in step itself. */
+    private suspend fun addPhotosToAlbumOwnPath(
+        userId: UserId,
+        albumLinkId: String,
+        photoLinkIds: List<String>,
+    ): DrivePhotoRepository.AddPhotosToAlbumResult {
         val volumeId = shareService.getVolumeId(userId)
         val manager = apiProvider.get<DriveApiService>(userId)
 
@@ -1695,7 +1745,7 @@ class AlbumService @Inject constructor(
             }.onFailure { Log.w(TAG, "addPhotosToAlbum: membership upsert failed: ${it.message}") }
         }
         invalidateMembershipCache()
-        DrivePhotoRepository.AddPhotosToAlbumResult(succeeded, failed)
+        return DrivePhotoRepository.AddPhotosToAlbumResult(succeeded, failed)
     }
 
     /**
@@ -1738,17 +1788,25 @@ class AlbumService @Inject constructor(
             val manager = apiProvider.get<DriveApiService>(userId)
             // DELETE /drive/photos/volumes/{volumeId}/albums/{albumLinkId}?DeleteAlbumPhotos=0
             // Photos inside the album are NOT deleted; only the album container is removed.
-            try {
-                semaphore.withPermit {
-                    manager.invoke {
-                        deleteAlbum(volumeId, albumLinkId, deleteAlbumPhotos = if (deletePhotosToo) 1 else 0)
-                    }.valueOrThrow
+            // False when the album holds photos that exist nowhere else and deletePhotosToo is off.
+            val deleted = sdkRouting.run(
+                SdkRoute.ALBUMS,
+                viaSdk = { sdkAlbumOps.deleteAlbum(userId, volumeId, albumLinkId, deletePhotosToo) },
+            ) {
+                try {
+                    semaphore.withPermit {
+                        manager.invoke {
+                            deleteAlbum(volumeId, albumLinkId, deleteAlbumPhotos = if (deletePhotosToo) 1 else 0)
+                        }.valueOrThrow
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    if (isAlbumDeleteDataLoss(e)) throw AlbumDeleteWouldLosePhotos(albumLinkId)
+                    throw e
                 }
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                if (isAlbumDeleteDataLoss(e)) throw AlbumDeleteWouldLosePhotos(albumLinkId)
-                throw e
+                true
             }
+            if (!deleted) throw AlbumDeleteWouldLosePhotos(albumLinkId)
             // Drop the local rows too, otherwise loadAlbumsCached repaints the dead
             // album on the next cold start. Shares leaveSharedAlbum's cleanup, which leaves an
             // owned album's photos alone and only clears them for one shared with this user.
@@ -1797,6 +1855,38 @@ class AlbumService @Inject constructor(
         albumVolumeId: String? = null,
     ): List<String> = withContext(Dispatchers.IO) {
         if (photoLinkIds.isEmpty()) return@withContext emptyList()
+        // Photos the SDK already took out before it failed; the app's own request takes the rest.
+        val doneBySdk = LinkedHashSet<String>()
+        val removed = sdkRouting.run(
+            SdkRoute.ALBUMS,
+            viaSdk = {
+                val volumeId = albumVolumeId ?: shareService.getVolumeId(userId)
+                val refused = sdkAlbumOps.removePhotos(userId, volumeId, albumLinkId, photoLinkIds) { doneBySdk += it }
+                if (refused.isNotEmpty()) {
+                    eu.akoos.photos.util.SyncDiagnostics.log("album-remove: server refused ${refused.size} photo(s)")
+                }
+                doneBySdk.toList()
+            },
+        ) {
+            val rest = photoLinkIds.filterNot { it in doneBySdk }
+            doneBySdk.toList() + if (rest.isEmpty()) emptyList() else removePhotosFromAlbumOwnPath(userId, albumLinkId, rest, albumVolumeId)
+        }
+        if (doneBySdk.isNotEmpty()) {
+            runCatching {
+                doneBySdk.toList().forEachSqlChunk { albumPhotoMembershipDao.deleteForAlbumPhotos(albumLinkId, it) }
+            }.onFailure { Log.w(TAG, "removePhotosFromAlbum: membership delete failed: ${it.message}") }
+            invalidateMembershipCache()
+        }
+        removed
+    }
+
+    /** The app's own remove; keeps the membership table in step itself. */
+    private suspend fun removePhotosFromAlbumOwnPath(
+        userId: UserId,
+        albumLinkId: String,
+        photoLinkIds: List<String>,
+        albumVolumeId: String?,
+    ): List<String> {
         val volumeId = albumVolumeId ?: shareService.getVolumeId(userId)
         val manager = apiProvider.get<DriveApiService>(userId)
         val removed = mutableListOf<String>()
@@ -1850,7 +1940,7 @@ class AlbumService @Inject constructor(
             }.onFailure { Log.w(TAG, "removePhotosFromAlbum: membership delete failed: ${it.message}") }
             invalidateMembershipCache()
         }
-        removed
+        return removed
     }
 
     /**
@@ -1866,7 +1956,17 @@ class AlbumService @Inject constructor(
     suspend fun renameAlbum(userId: UserId, albumLinkId: String, newName: String): Unit = withContext(Dispatchers.IO) {
         val trimmed = newName.trim()
         require(trimmed.isNotEmpty()) { "renameAlbum: name must be non-empty" }
+        sdkRouting.run(
+            SdkRoute.ALBUMS,
+            viaSdk = { sdkAlbumOps.updateAlbum(userId, shareService.getVolumeId(userId), albumLinkId, name = trimmed) },
+        ) {
+            renameAlbumOwnPath(userId, albumLinkId, trimmed)
+        }
+        Log.d(TAG, "renameAlbum: renamed $albumLinkId to '$trimmed'")
+        invalidateMembershipCache()
+    }
 
+    private suspend fun renameAlbumOwnPath(userId: UserId, albumLinkId: String, trimmed: String) {
         val volumeId = shareService.getVolumeId(userId)
         val manager = apiProvider.get<DriveApiService>(userId)
 
@@ -1935,8 +2035,6 @@ class AlbumService @Inject constructor(
                 )
             }.valueOrThrow
         }
-        Log.d(TAG, "renameAlbum: renamed $albumLinkId to '$trimmed'")
-        invalidateMembershipCache()
     }
 
     /**
@@ -1949,11 +2047,16 @@ class AlbumService @Inject constructor(
     suspend fun setAlbumCover(userId: UserId, albumLinkId: String, coverPhotoLinkId: String): Unit =
         withContext(Dispatchers.IO) {
             val volumeId = shareService.getVolumeId(userId)
-            val manager = apiProvider.get<DriveApiService>(userId)
-            semaphore.withPermit {
-                manager.invoke {
-                    updateAlbum(volumeId, albumLinkId, UpdateAlbumRequest(coverLinkId = coverPhotoLinkId))
-                }.valueOrThrow
+            sdkRouting.run(
+                SdkRoute.ALBUMS,
+                viaSdk = { sdkAlbumOps.updateAlbum(userId, volumeId, albumLinkId, coverLinkId = coverPhotoLinkId) },
+            ) {
+                val manager = apiProvider.get<DriveApiService>(userId)
+                semaphore.withPermit {
+                    manager.invoke {
+                        updateAlbum(volumeId, albumLinkId, UpdateAlbumRequest(coverLinkId = coverPhotoLinkId))
+                    }.valueOrThrow
+                }
             }
             Log.d(TAG, "setAlbumCover: set $coverPhotoLinkId as cover for $albumLinkId")
         }

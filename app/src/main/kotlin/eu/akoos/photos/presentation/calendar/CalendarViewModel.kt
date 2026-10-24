@@ -292,7 +292,7 @@ class CalendarViewModel @Inject constructor(
         val itemsByDate = groupItemsByDay(
             items,
             captureTimeMs = { it.captureTimeMs },
-            isoDate = { ISO_DATE.get().format(Date(it)) },
+            isoDate = { ISO_DATE.get()!!.format(Date(it)) },
         )
 
         var minMillis = Long.MAX_VALUE

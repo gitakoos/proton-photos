@@ -1794,6 +1794,8 @@
     <string name="sdk_route_download_desc">Fotos aus Drive in voller Auflösung öffnen und speichern</string>
     <string name="sdk_route_upload">Sicherung und Hochladen</string>
     <string name="sdk_route_upload_desc">Fotos an Drive senden, bei der Sicherung und jedem anderen Hochladen</string>
+    <string name="sdk_route_albums">Alben</string>
+    <string name="sdk_route_albums_desc">Alben in Drive erstellen, umbenennen und löschen sowie Fotos hinzufügen oder entfernen</string>
     <string name="sdk_route_activity">%1$s. In dieser Sitzung: %2$d über die Bibliothek, %3$d auf dem üblichen Weg.</string>
     <string name="settings_ai_indexing_progress">%1$d von %2$d Fotos</string>
     <string name="settings_ai_grouping_progress">%1$d von %2$d Gesichtern</string>

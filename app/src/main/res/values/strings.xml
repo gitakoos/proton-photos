@@ -854,6 +854,8 @@
     <string name="sdk_route_download_desc">Opening and saving photos from Drive in full resolution</string>
     <string name="sdk_route_upload">Backup and upload</string>
     <string name="sdk_route_upload_desc">Sending photos to Drive, for backup and every other upload</string>
+    <string name="sdk_route_albums">Albums</string>
+    <string name="sdk_route_albums_desc">Creating, renaming and deleting albums in Drive, and adding or removing their photos</string>
     <string name="sdk_route_activity">%1$s. This session: %2$d through the library, %3$d done the usual way.</string>
     <string name="settings_ai_indexing_progress">%1$d of %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d of %2$d faces</string>

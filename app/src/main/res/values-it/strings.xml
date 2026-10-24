@@ -1829,6 +1829,8 @@
     <string name="sdk_route_download_desc">Aprire e salvare le foto di Drive a piena risoluzione</string>
     <string name="sdk_route_upload">Backup e caricamento</string>
     <string name="sdk_route_upload_desc">Inviare foto a Drive, per il backup e ogni altro caricamento</string>
+    <string name="sdk_route_albums">Album</string>
+    <string name="sdk_route_albums_desc">Creare, rinominare ed eliminare album in Drive, e aggiungere o togliere foto</string>
     <string name="sdk_route_activity">%1$s. In questa sessione: %2$d tramite la libreria, %3$d nel modo consueto.</string>
     <string name="settings_ai_indexing_progress">%1$d di %2$d foto</string>
     <string name="settings_ai_grouping_progress">%1$d di %2$d volti</string>

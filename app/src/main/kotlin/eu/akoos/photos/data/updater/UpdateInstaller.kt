@@ -113,7 +113,9 @@ class UpdateInstaller @Inject constructor(
                     setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    // Update ownership keeps later silent updates routed through this installer.
+                    // Update ownership keeps later silent updates routed through this installer. Without the
+                    // ENFORCE_UPDATE_OWNERSHIP grant the platform ignores the request rather than failing.
+                    @android.annotation.SuppressLint("MissingPermission")
                     setRequestUpdateOwnership(true)
                 }
             }

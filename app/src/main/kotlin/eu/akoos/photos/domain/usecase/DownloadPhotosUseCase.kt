@@ -483,6 +483,8 @@ class DownloadPhotosUseCase @Inject constructor(
         val effectiveCaptureSeconds = if (captureTimeSeconds > 0L) {
             captureTimeSeconds
         } else if (!isVideo) {
+            // The library's own date parser (offset and sub-second aware); the exifinterface version is pinned.
+            @android.annotation.SuppressLint("RestrictedApi")
             runCatching {
                 androidx.exifinterface.media.ExifInterface(file.absolutePath)
                     .let { it.getDateTimeOriginal() ?: it.getDateTime() }
