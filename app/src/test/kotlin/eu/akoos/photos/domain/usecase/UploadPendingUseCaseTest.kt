@@ -27,6 +27,8 @@ import android.content.ContentResolver
 import android.net.Uri
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.emptyPreferences
+import eu.akoos.photos.domain.entity.Album
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -310,6 +312,59 @@ class UploadPendingUseCaseTest {
         coEvery { networkObserver.currentlyOnWifi() } returns true
         useCase(userId)
         coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `photos from one opted-in folder create its album once and remember it`() = runTest {
+        // Three uploads from the same new folder run in parallel; the album is created by the first and
+        // reused by the others, and the folder-to-album link is stored for the next batch.
+        every { mockPrefsRef[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] } returns setOf("Camera")
+        val states = listOf(
+            syncState("uri://1", SyncStatus.LOCAL_ONLY),
+            syncState("uri://2", SyncStatus.LOCAL_ONLY),
+            syncState("uri://3", SyncStatus.LOCAL_ONLY),
+        )
+        every { syncStateRepo.observeAll(userId) } returns flowOf(states)
+        coEvery { localRepo.queryByUri(any()) } answers { localItem(firstArg()) }
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } answers {
+            "cloud-" + secondArg<LocalMediaItem>().uri
+        }
+        coEvery { cloudRepo.loadAlbums(userId) } returns emptyList()
+        coEvery { cloudRepo.createDriveAlbum(userId, "Camera") } returns
+            Album(linkId = "album-camera", name = "Camera", photoCount = 0, coverLinkId = null, lastActivityTimeMs = null)
+        val transforms = mutableListOf<suspend (Preferences) -> Preferences>()
+        val dataStore = context.settingsDataStore
+        coEvery { dataStore.updateData(capture(transforms)) } returns emptyPreferences()
+
+        useCase(userId)
+
+        coVerify(exactly = 1) { cloudRepo.createDriveAlbum(userId, "Camera") }
+        for (n in 1..3) {
+            coVerify(exactly = 1) { cloudRepo.addPhotosToAlbum(userId, "album-camera", listOf("cloud-uri://$n")) }
+        }
+        val stored = transforms.map { it(emptyPreferences())[SettingsKeys.ALBUM_BUCKET_MAP] }
+        assertTrue(stored.contains(setOf("Camera=album-camera")))
+    }
+
+    @Test
+    fun `an opted-in folder whose album already exists joins it without creating another`() = runTest {
+        every { mockPrefsRef[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] } returns setOf("Camera")
+        every { syncStateRepo.observeAll(userId) } returns
+            flowOf(listOf(syncState("uri://1", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri(any()) } answers { localItem(firstArg()) }
+        coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-1"
+        coEvery { cloudRepo.loadAlbums(userId) } returns
+            listOf(Album(linkId = "existing", name = "camera", photoCount = 4, coverLinkId = null, lastActivityTimeMs = null))
+        val transforms = mutableListOf<suspend (Preferences) -> Preferences>()
+        val dataStore = context.settingsDataStore
+        coEvery { dataStore.updateData(capture(transforms)) } returns emptyPreferences()
+
+        useCase(userId)
+
+        coVerify(exactly = 0) { cloudRepo.createDriveAlbum(any(), any()) }
+        coVerify(exactly = 1) { cloudRepo.addPhotosToAlbum(userId, "existing", listOf("cloud-1")) }
+        val stored = transforms.map { it(emptyPreferences())[SettingsKeys.ALBUM_BUCKET_MAP] }
+        assertTrue(stored.contains(setOf("Camera=existing")))
     }
 
     @Test

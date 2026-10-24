@@ -3359,7 +3359,7 @@ class PhotoEditorViewModel @Inject constructor(
 
     /**
      * Builds the photo xAttr (Location + Camera + display dimensions) for an edited cloud copy from the
-     * ORIGINAL photo's [originalExif], mirroring [UploadPendingUseCase.buildXAttrMetadata]'s image branch
+     * ORIGINAL photo's [originalExif], mirroring [eu.akoos.photos.data.upload.UploadXAttrBuilder.buildXAttrMetadata]'s image branch
      * so Proton's map + camera UI keep working. The edited bitmap is always upright (rotation baked into
      * pixels), so orientation is NORMAL and the bitmap's own [displayWidth]/[displayHeight] are reported
      * as-is (a crop already changed them, no width/height swap). GPS and camera are gated by the same
@@ -3377,7 +3377,7 @@ class PhotoEditorViewModel @Inject constructor(
         val stripCamera = stripOnUpload && stripConfig.stripCameraInfo
         val latLong = originalExif?.latLong
         val model = originalExif?.getAttribute(ExifInterface.TAG_MODEL)
-        // SubjectArea → [Top,Left,Bottom,Right], matching UploadPendingUseCase.readSubjectCoordinates
+        // SubjectArea → [Top,Left,Bottom,Right], matching UploadXAttrBuilder.readSubjectCoordinates
         // (Rectangle.fromCenter). Gated with the camera info, so a strip that drops the camera block
         // drops this too. runCatching keeps a malformed tag from ever failing the save.
         val subjectCoords: IntArray? = if (!stripCamera) runCatching {
