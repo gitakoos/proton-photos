@@ -124,6 +124,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val driveRepo: DrivePhotoRepository,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val upload: eu.akoos.photos.domain.usecase.UploadPendingUseCase,
+    private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
     private val undoController: UndoController,
     private val favoriteWriter: eu.akoos.photos.presentation.common.FavoriteWriter,
     private val moveController: MoveToFolderController,
@@ -361,9 +362,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val name = bucketName.value
         if (name.isEmpty()) return
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
+            val updated = context.settingsDataStore.edit { prefs ->
                 prefs.putAlbumMirrorFolders(prefs.albumMirrorFolders().flipped(name))
             }
+            if (name in updated.albumMirrorFolders()) folderAlbumBackfill.onAlbumTurnedOn(name)
         }
     }
 
@@ -847,7 +849,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
     fun backUpAll(asMirror: Boolean, onResult: (UploadOutcome) -> Unit) {
         val userId = primaryUserId ?: return
         viewModelScope.launch {
-            if (asMirror) setFolderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, enable = true)
+            if (asMirror) {
+                setFolderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, enable = true)
+                folderAlbumBackfill.onAlbumTurnedOn(bucketName.value)
+            }
             val syncedUris = _items.value
                 .filterIsInstance<GalleryItem.Synced>()
                 .map { it.local.uri }

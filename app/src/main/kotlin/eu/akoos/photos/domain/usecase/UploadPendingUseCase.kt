@@ -188,6 +188,19 @@ class UploadPendingUseCase @Inject constructor(
     }
 
     /**
+     * Joins the photos [bucketName] already backed up to the folder's Drive album, for when its album
+     * mirror is turned on (see [BucketAlbumMirror.backfill]). Runs under the batch lock, so this and an
+     * upload pass can never both create the folder's album. Returns how many photos were queued.
+     */
+    suspend fun backfillFolderAlbum(userId: UserId, bucketName: String): Int = mutex.withLock {
+        val uris = localRepo.freshMedia().filter { it.bucketName == bucketName }.map { it.uri }
+        val onDrive = syncStateRepo.cloudPairedLinkIds(userId, uris)
+        val queued = bucketAlbumMirror.backfill(userId, bucketName, onDrive, uploadAlbumTargetDao)
+        if (queued > 0) albumListEvents.notifyChanged()
+        queued
+    }
+
+    /**
      * Hot stream of per-file upload events. Buffered so a slow collector never throttles the
      * upload loop. Replay = 1 so a UI that connects mid-batch sees the latest event immediately.
      */

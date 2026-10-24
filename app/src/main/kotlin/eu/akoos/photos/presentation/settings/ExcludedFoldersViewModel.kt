@@ -64,6 +64,7 @@ import javax.inject.Inject
 class ExcludedFoldersViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localMediaRepo: LocalMediaRepository,
+    private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
 ) : ViewModel() {
 
     data class ExcludedFolder(
@@ -156,6 +157,7 @@ class ExcludedFoldersViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it.putAlbumMirrorFolders(next) }
         }
+        if (folderName in next) folderAlbumBackfill.onAlbumTurnedOn(folderName)
     }
 
     fun excludeAll() {

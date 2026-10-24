@@ -161,6 +161,7 @@ class AlbumsViewModel @Inject constructor(
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val resolveCoverGifUseCase: ResolveCoverGifUseCase,
+    private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumsUiState())
@@ -419,9 +420,10 @@ class AlbumsViewModel @Inject constructor(
     fun toggleFolderMirrorAsAlbum(folderName: String) {
         if (folderName.isEmpty()) return
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
+            val updated = context.settingsDataStore.edit { prefs ->
                 prefs.putAlbumMirrorFolders(prefs.albumMirrorFolders().flipped(folderName))
             }
+            if (folderName in updated.albumMirrorFolders()) folderAlbumBackfill.onAlbumTurnedOn(folderName)
         }
     }
 

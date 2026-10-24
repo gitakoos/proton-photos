@@ -32,6 +32,8 @@ import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
+import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
 
 /**
  * Mirrors uploads into a Drive album named after their device folder, for the folders the user opted
@@ -145,5 +147,38 @@ internal class BucketAlbumMirror(
                 // Non-fatal: photo is uploaded, album sync is best-effort
             }
         }
+    }
+
+    /**
+     * Joins the photos of [bucketName] already on Drive ([cloudIdsByUri], device uri to Drive link) to
+     * the folder's album, creating the album when there is none yet: turning a folder's album on covers
+     * what the folder backed up before, not only the photos that upload after it. Every pair is first
+     * recorded as a queued album join, so a photo the add does not land (a failure, a process death) is
+     * joined by the next upload pass's drain, and a photo that lands drops its pair. An album list that
+     * cannot be read stops the backfill instead of creating a second album of the same name. Returns how
+     * many photos were queued.
+     */
+    suspend fun backfill(
+        userId: UserId,
+        bucketName: String,
+        cloudIdsByUri: Map<String, String>,
+        targets: UploadAlbumTargetDao,
+    ): Int {
+        if (cloudIdsByUri.isEmpty()) return 0
+        val albumsByName = cloudRepo.loadAlbums(userId).associate { it.name.lowercase() to it.linkId }
+        val albumLinkId = albumsByName[bucketName.lowercase()]
+            ?: cloudRepo.createDriveAlbum(userId, bucketName).linkId
+        context.settingsDataStore.edit { p ->
+            val others = (p[SettingsKeys.ALBUM_BUCKET_MAP] ?: emptySet()).filterNot { it.substringBefore('=') == bucketName }
+            p[SettingsKeys.ALBUM_BUCKET_MAP] = (others + "$bucketName=$albumLinkId").toSet()
+        }
+        targets.insertIgnoreAll(cloudIdsByUri.keys.map { UploadAlbumTargetEntity(localUri = it, albumLinkId = albumLinkId) })
+        val landed = runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, cloudIdsByUri.values.distinct()) }
+            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+            .getOrNull()?.succeededLinkIds.orEmpty().toSet()
+        for ((uri, cloudId) in cloudIdsByUri) {
+            if (cloudId in landed) targets.deleteTarget(uri, albumLinkId)
+        }
+        return cloudIdsByUri.size
     }
 }
