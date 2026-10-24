@@ -26,6 +26,8 @@ import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.DriveCopyAppliedDao
+import eu.akoos.photos.data.db.dao.FaceScanDao
+import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
 import eu.akoos.photos.data.db.entity.DriveCopyAppliedEntity
 import eu.akoos.photos.data.hidden.HiddenCopyMerge
 import eu.akoos.photos.data.hidden.HiddenSnapshot
@@ -103,6 +105,8 @@ class SharedBackupRunner @Inject constructor(
     private val hidden: HiddenSyncStore,
     private val appliedDao: DriveCopyAppliedDao,
     private val store: SharedBackupStore,
+    private val faceScanDao: FaceScanDao,
+    private val imageEmbeddingDao: ImageEmbeddingDao,
 ) {
 
     /** The three folders' files, or null when any listing failed: a round that cannot read writes nothing. */
@@ -134,11 +138,13 @@ class SharedBackupRunner @Inject constructor(
 
     /**
      * The other installs' face and search files newer than the copy of each taken in last, as restore files: each
-     * install's newest file of each kind, never this install's own.
+     * install's newest file of each kind, never this install's own. A kind this device holds nothing of (its face
+     * data deleted, wiped by a model change, or its search index reset) takes every other install's newest file
+     * again, whatever was taken in before: filling gaps twice changes nothing.
      */
     suspend fun mlFilesToTake(userId: UserId, listing: SharedBackupListing, ownDeviceId: String): List<MlRestoreFile> {
-        val faces = applied(userId, SharedBackupKind.FACES)
-        val search = applied(userId, SharedBackupKind.SEARCH)
+        val faces = if (faceScanDao.hasAnyForUser(userId.id)) applied(userId, SharedBackupKind.FACES) else emptyMap()
+        val search = if (imageEmbeddingDao.countForUser(userId.id) > 0) applied(userId, SharedBackupKind.SEARCH) else emptyMap()
         return MlDriveNaming.selectForImport(listing.ml, ownDeviceId).mapNotNull { pick ->
             val taken = if (pick.kind == eu.akoos.photos.data.mlsync.MlDriveFileKind.FACES) faces else search
             val madeAt = SharedBackupCopy(pick.deviceId, pick.file).madeAtMs

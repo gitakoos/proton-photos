@@ -22,7 +22,12 @@
 
 package eu.akoos.photos.data.sharedbackup
 
+import eu.akoos.photos.data.db.dao.DriveCopyAppliedDao
+import eu.akoos.photos.data.db.dao.FaceScanDao
+import eu.akoos.photos.data.db.dao.ImageEmbeddingDao
+import eu.akoos.photos.data.db.entity.DriveCopyAppliedEntity
 import eu.akoos.photos.data.mlsync.HiddenDriveNaming
+import eu.akoos.photos.data.mlsync.MlDriveFileKind
 import eu.akoos.photos.data.mlsync.LabelDriveNaming
 import eu.akoos.photos.data.mlsync.MlDriveFile
 import eu.akoos.photos.data.mlsync.MlSyncOperation
@@ -32,6 +37,10 @@ import eu.akoos.photos.data.mlsync.SearchImportMode
 import eu.akoos.photos.data.mlsync.shouldImportSearchEmbedding
 import eu.akoos.photos.presentation.settings.SharedBackupLine
 import eu.akoos.photos.presentation.settings.sharedBackupLine
+import io.mockk.coEvery
+import io.mockk.mockk
+import kotlinx.coroutines.test.runTest
+import me.proton.core.domain.entity.UserId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -75,6 +84,51 @@ class SharedBackupRulesTest {
     fun `a copy Drive gives no claimed time for is judged by when the server stored it`() {
         val copies = newerCopies(listOf(file(HiddenDriveNaming.fileName(pc), claimed = null, server = 70)), HiddenDriveNaming::parse, own, mapOf(pc to 60L))
         assertEquals(70L, copies.single().madeAtMs)
+    }
+
+    private fun runner(facesHere: Boolean, embeddingsHere: Int, appliedFaces: Long): SharedBackupRunner {
+        val appliedDao = mockk<DriveCopyAppliedDao>()
+        coEvery { appliedDao.forKind("u", SharedBackupKind.FACES.key) } returns
+            listOf(DriveCopyAppliedEntity("u", SharedBackupKind.FACES.key, pc, appliedFaces))
+        coEvery { appliedDao.forKind("u", SharedBackupKind.SEARCH.key) } returns
+            listOf(DriveCopyAppliedEntity("u", SharedBackupKind.SEARCH.key, pc, appliedFaces))
+        val faceScanDao = mockk<FaceScanDao>()
+        coEvery { faceScanDao.hasAnyForUser("u") } returns facesHere
+        val embeddings = mockk<ImageEmbeddingDao>()
+        coEvery { embeddings.countForUser("u") } returns embeddingsHere
+        return SharedBackupRunner(
+            context = mockk(relaxed = true),
+            driveStore = mockk(relaxed = true),
+            envelopeCrypto = mockk(relaxed = true),
+            labels = mockk(relaxed = true),
+            hidden = mockk(relaxed = true),
+            appliedDao = appliedDao,
+            store = mockk(relaxed = true),
+            faceScanDao = faceScanDao,
+            imageEmbeddingDao = embeddings,
+        )
+    }
+
+    private val mlListing = SharedBackupListing(
+        ml = listOf(
+            file("faces-$pc.pfpml", claimed = 100),
+            file("search-$pc.pfpml", claimed = 100),
+        ),
+        labels = emptyList(),
+        hidden = emptyList(),
+    )
+
+    @Test
+    fun `face and search copies taken in once are not read again while this device holds data of that kind`() =
+        runTest {
+            val files = runner(facesHere = true, embeddingsHere = 5, appliedFaces = 100).mlFilesToTake(UserId("u"), mlListing, own)
+            assertTrue(files.isEmpty())
+        }
+
+    @Test
+    fun `a kind this device holds nothing of takes the other installs' copies again`() = runTest {
+        val files = runner(facesHere = false, embeddingsHere = 0, appliedFaces = 100).mlFilesToTake(UserId("u"), mlListing, own)
+        assertEquals(setOf(MlDriveFileKind.FACES, MlDriveFileKind.SEARCH), files.map { it.kind }.toSet())
     }
 
     @Test
