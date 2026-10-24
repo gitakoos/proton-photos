@@ -1410,6 +1410,9 @@
     <string name="albums_view_heading">Zobrazení</string>
     <string name="albums_view_grid">Mřížka</string>
     <string name="albums_view_list">Seznam</string>
+    <string name="people_display_settings">Zobrazení</string>
+    <string name="people_follow_albums">Stejně jako karta Alba</string>
+    <string name="people_follow_albums_desc">Zobrazuje lidi se zobrazením a velikostí obálek karty Alba</string>
     <string name="albums_more_settings">Další nastavení</string>
     <string name="album_options">Možnosti alba</string>
     <string name="album_group_heading">Seskupit podle</string>

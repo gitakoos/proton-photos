@@ -1410,6 +1410,9 @@
     <string name="albums_view_heading">Zobrazenie</string>
     <string name="albums_view_grid">Mriežka</string>
     <string name="albums_view_list">Zoznam</string>
+    <string name="people_display_settings">Zobrazenie</string>
+    <string name="people_follow_albums">Rovnako ako karta Albumy</string>
+    <string name="people_follow_albums_desc">Zobrazuje ľudí so zobrazením a veľkosťou obálok karty Albumy</string>
     <string name="albums_more_settings">Ďalšie nastavenia</string>
     <string name="album_options">Možnosti albumu</string>
     <string name="album_group_heading">Zoskupiť podľa</string>

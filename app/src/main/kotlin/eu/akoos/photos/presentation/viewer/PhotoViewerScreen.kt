@@ -2121,12 +2121,15 @@ fun PhotoViewerScreen(
                     effectiveSynced -> Icon(
                         Icons.Default.Cloud,
                         contentDescription = stringResource(R.string.cd_status_backed_up_device),
-                        // Green, as in the grid, so a photo on Drive and on the device reads differently from one on
-                        // Drive only (white); the green of the grid is too pale on the light theme's pill.
-                        tint = if (eu.akoos.photos.presentation.theme.AppColors.current.isLight) {
-                            androidx.compose.ui.graphics.Color(0xFF1E9E48)
-                        } else {
-                            cloudBadgeTint(CloudBadgeSurface.DarkChip)
+                        // Green (or the accent, when the cloud is set to take it), as in the grid, so a photo on Drive
+                        // and on the device reads differently from one on Drive only (white); the grid's green is too
+                        // pale on the light theme's pill, so the pill takes a deeper one.
+                        tint = when {
+                            !eu.akoos.photos.presentation.theme.AppColors.current.isLight ->
+                                cloudBadgeTint(CloudBadgeSurface.DarkChip)
+                            eu.akoos.photos.presentation.theme.LocalTintCloudWithAccent.current ->
+                                cloudBadgeTint(CloudBadgeSurface.Pill)
+                            else -> androidx.compose.ui.graphics.Color(0xFF1E9E48)
                         },
                         modifier = Modifier.size(16.dp),
                     )

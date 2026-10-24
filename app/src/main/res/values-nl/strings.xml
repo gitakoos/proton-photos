@@ -1190,6 +1190,9 @@
     <string name="albums_view_heading">Weergave</string>
     <string name="albums_view_grid">Raster</string>
     <string name="albums_view_list">Lijst</string>
+    <string name="people_display_settings">Weergave</string>
+    <string name="people_follow_albums">Zoals het tabblad Albums</string>
+    <string name="people_follow_albums_desc">Toont personen met de weergave en omslaggrootte van het tabblad Albums</string>
     <string name="albums_more_settings">Meer instellingen</string>
     <string name="album_options">Albumopties</string>
     <string name="album_group_heading">Groeperen op</string>

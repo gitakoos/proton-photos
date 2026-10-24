@@ -29,12 +29,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -42,6 +44,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.HowToReg
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -67,18 +70,25 @@ import eu.akoos.photos.domain.usecase.isNameableCluster
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.common.ShimmerBox
+import eu.akoos.photos.presentation.common.ShimmerTextLine
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.albums.AlbumRowCoverSize
+import eu.akoos.photos.presentation.albums.AlbumRowGap
+import eu.akoos.photos.presentation.albums.AlbumRowPadding
+import eu.akoos.photos.presentation.gallery.AlbumsViewMode
 import eu.akoos.photos.presentation.gallery.PersonCard
+import eu.akoos.photos.presentation.gallery.PersonRow
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
  * Full-screen list of every clustered person who appears in enough photos, most-photographed first,
- * as a 2-column grid of the same album-style [PersonCard] the Collection preview uses. Reached from
- * the People header in the Collection; a tap opens that person's detail. The floating pill header
- * carries a back button and a three-dot overflow menu that jumps to the AI settings, so the
- * on-device people features stay reachable from where the people are shown. The one-off detections
- * the preview hides are filtered here too, so the two surfaces list the same people.
+ * as a grid of the same album-style [PersonCard] the Collection preview uses, or as a list of
+ * [PersonRow]s, laid out by [rememberPeopleDisplay]. Reached from the People header in the Collection;
+ * a tap opens that person's detail. The floating pill header carries a back button and a three-dot
+ * overflow menu with the page's display settings and the AI settings, so the on-device people features
+ * stay reachable from where the people are shown. The one-off detections the preview hides are
+ * filtered here too, so the two surfaces list the same people.
  */
 @Composable
 fun PeopleScreen(
@@ -87,9 +97,20 @@ fun PeopleScreen(
     onOpenAiSettings: () -> Unit,
     onReviewSuggestions: () -> Unit,
     onOpenExcluded: () -> Unit,
+    onOpenDisplaySettings: () -> Unit,
     viewModel: PeopleViewModel = hiltViewModel(),
 ) {
     val colors = AppColors.current
+    val display = rememberPeopleDisplay()
+    val listView = display.viewMode == AlbumsViewMode.List
+    // A list row spans the width and pads itself, as an Albums list row does; grid cards sit on margins.
+    val contentPadding = if (listView) {
+        PaddingValues(top = floatingHeaderContentTopPadding(), bottom = 24.dp)
+    } else {
+        PaddingValues(start = 14.dp, end = 14.dp, top = floatingHeaderContentTopPadding(), bottom = 24.dp)
+    }
+    val columns = GridCells.Fixed(if (listView) 1 else display.columns)
+    val rowSpacing = if (listView) 0.dp else 10.dp
     val people by viewModel.people.collectAsStateWithLifecycle()
     // A null value is the pre-first-emission load; once resolved it is a (possibly empty) list.
     val loading = people == null
@@ -121,29 +142,24 @@ fun PeopleScreen(
         Crossfade(targetState = phase, label = "peopleContent", modifier = Modifier.fillMaxSize()) { p ->
             when (p) {
                 0 ->
-                    // Skeleton grid matching the 2-column PersonCard layout so there is no jump when
-                    // the real cards arrive.
+                    // Skeleton in the same layout as the real cards or rows, so there is no jump when
+                    // they arrive.
                     LazyVerticalGrid(
-                        // Width-adaptive so a tablet fits more, smaller person tiles instead of two
-                        // huge ones (a low-res cover blown up into a half-screen tile reads as a
-                        // blurry mush). ~140dp keeps every phone (down to ~320dp wide, incl. a larger
-                        // display-size setting) at two columns and only adds columns past that.
-                        columns = GridCells.Adaptive(140.dp),
-                        contentPadding = PaddingValues(
-                            start = 14.dp,
-                            end = 14.dp,
-                            top = floatingHeaderContentTopPadding(),
-                            bottom = 24.dp,
-                        ),
+                        columns = columns,
+                        contentPadding = contentPadding,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(rowSpacing),
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         items(8) {
-                            ShimmerBox(
-                                modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
-                                cornerRadius = 16.dp,
-                            )
+                            if (listView) {
+                                PersonRowShimmer()
+                            } else {
+                                ShimmerBox(
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
+                                    cornerRadius = 16.dp,
+                                )
+                            }
                         }
                     }
                 1 ->
@@ -173,19 +189,18 @@ fun PeopleScreen(
                     }
                 else ->
                     LazyVerticalGrid(
-                        columns = GridCells.Adaptive(140.dp),
-                        contentPadding = PaddingValues(
-                            start = 14.dp,
-                            end = 14.dp,
-                            top = floatingHeaderContentTopPadding(),
-                            bottom = 24.dp,
-                        ),
+                        columns = columns,
+                        contentPadding = contentPadding,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(rowSpacing),
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         items(items = shown, key = { it.personId }) { person ->
-                            PersonCard(person = person, onClick = { onPersonClick(person.personId) })
+                            if (listView) {
+                                PersonRow(person = person, onClick = { onPersonClick(person.personId) })
+                            } else {
+                                PersonCard(person = person, onClick = { onPersonClick(person.personId) })
+                            }
                         }
                     }
             }
@@ -275,6 +290,25 @@ fun PeopleScreen(
                         DropdownMenuItem(
                             text = {
                                 Text(
+                                    stringResource(R.string.people_display_settings),
+                                    color = colors.fgPrimary,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.GridView,
+                                    contentDescription = null,
+                                    tint = colors.fgDim,
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onOpenDisplaySettings()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
                                     stringResource(R.string.settings_ai_section),
                                     color = colors.fgPrimary,
                                 )
@@ -304,6 +338,25 @@ fun PeopleScreen(
                 onDismiss = { showSearch = false },
                 searchPlaceholder = stringResource(R.string.people_search_hint),
             )
+        }
+    }
+}
+
+/** Loading placeholder for [PersonRow], on the same insets so the rows land where it stood. */
+@Composable
+private fun PersonRowShimmer() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(AlbumRowPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AlbumRowGap),
+    ) {
+        ShimmerBox(modifier = Modifier.size(AlbumRowCoverSize), cornerRadius = AlbumRowCoverSize / 2)
+        Column(modifier = Modifier.weight(1f)) {
+            ShimmerTextLine(widthFraction = 0.5f, height = 14.dp)
+            Spacer(Modifier.height(4.dp))
+            ShimmerTextLine(widthFraction = 0.25f, height = 12.dp)
         }
     }
 }

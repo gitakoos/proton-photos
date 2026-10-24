@@ -68,7 +68,7 @@ import eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.FaceCropTransformation
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberFaceCoverModel
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.viewer.DetailsPeopleRow
@@ -105,7 +105,7 @@ data class ChosenFace(val faceId: String, val photoKey: String, val faceSource: 
  */
 @Composable
 fun rememberGroupSubject(person: PersonUi): NameOrMergeSubject.Group {
-    val cover = LocalThumbnailUrls.current.value[person.coverPhotoKey] ?: person.coverPhotoKey
+    val cover = rememberFaceCoverModel(person.coverPhotoKey)
     return remember(person, cover) {
         NameOrMergeSubject.Group(
             personId = person.personId,

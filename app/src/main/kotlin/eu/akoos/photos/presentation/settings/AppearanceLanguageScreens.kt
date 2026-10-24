@@ -93,6 +93,7 @@ fun AppearanceSettingsScreen(
     onTimeFormatClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
     onAlbumsSettingsClick: () -> Unit = {},
+    onPeopleSettingsClick: () -> Unit = {},
     onLandingTabClick: () -> Unit = {},
     onViewerClick: () -> Unit = {},
 ) {
@@ -131,6 +132,11 @@ fun AppearanceSettingsScreen(
             NavRow(
                 label = stringResource(R.string.gallery_tab_albums),
                 onClick = onAlbumsSettingsClick,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.gallery_category_people),
+                onClick = onPeopleSettingsClick,
             )
             RowDivider()
             NavRow(

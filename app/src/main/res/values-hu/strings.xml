@@ -1197,6 +1197,9 @@
     <string name="albums_view_heading">Nézet</string>
     <string name="albums_view_grid">Rács</string>
     <string name="albums_view_list">Lista</string>
+    <string name="people_display_settings">Megjelenítés</string>
+    <string name="people_follow_albums">Ugyanaz, mint az Albumok lap</string>
+    <string name="people_follow_albums_desc">Az embereket az Albumok lap nézetével és borítóméretével mutatja</string>
     <string name="albums_more_settings">További beállítások</string>
     <string name="album_options">Albumműveletek</string>
     <string name="album_group_heading">Csoportosítás</string>

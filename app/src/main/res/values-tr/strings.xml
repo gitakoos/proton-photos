@@ -1833,6 +1833,9 @@
     <string name="albums_view_heading">Görünüm</string>
     <string name="albums_view_grid">Izgara</string>
     <string name="albums_view_list">Liste</string>
+    <string name="people_display_settings">Görünüm</string>
+    <string name="people_follow_albums">Albümler sekmesiyle aynı</string>
+    <string name="people_follow_albums_desc">Kişileri Albümler sekmesinin görünümü ve kapak boyutuyla gösterir</string>
     <string name="albums_more_settings">Diğer ayarlar</string>
     <string name="album_options">Albüm seçenekleri</string>
     <string name="album_group_heading">Gruplama ölçütü</string>

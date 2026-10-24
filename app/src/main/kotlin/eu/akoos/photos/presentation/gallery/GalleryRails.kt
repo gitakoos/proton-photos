@@ -154,6 +154,9 @@ import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Accent2
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ArcTrack
+import eu.akoos.photos.presentation.albums.AlbumRowCoverSize
+import eu.akoos.photos.presentation.albums.AlbumRowGap
+import eu.akoos.photos.presentation.albums.AlbumRowPadding
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
@@ -947,8 +950,7 @@ private fun PeopleBar(
 }
 
 /** One round face tile: the cover photo's thumbnail cropped to the face box inside a circle, with the
- *  person's name below when one is set. Reuses the timeline's linkId → decrypted-thumbnail resolution
- *  ([LocalThumbnailUrls]); a local cover falls back to its own content uri. */
+ *  person's name below when one is set. The cover resolves through [rememberFaceCoverModel]. */
 @Composable
 internal fun PersonTile(
     person: PersonUi,
@@ -956,7 +958,7 @@ internal fun PersonTile(
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
-    val model = LocalThumbnailUrls.current.value[person.coverPhotoKey] ?: person.coverPhotoKey
+    val model = rememberFaceCoverModel(person.coverPhotoKey)
     val request = remember(model, person.faceBox) {
         ImageRequest.Builder(context)
             .data(model)
@@ -1011,7 +1013,7 @@ internal fun PersonTile(
  * Album-style People card: the person's face-cropped cover filling a rounded rectangle, captioned with
  * the name and a photo count, mirroring the memories [SeasonCard] (same aspect, corners, background and
  * caption treatment) but for a person. Fills its grid cell width. Reuses [PersonTile]'s cover resolution
- * ([LocalThumbnailUrls] keyed by coverPhotoKey) and the same [FaceCropTransformation], clipped to the
+ * ([rememberFaceCoverModel]) and the same [FaceCropTransformation], clipped to the
  * card corners instead of a circle; an unresolved cover falls back to the card's [Bg2] background.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -1023,7 +1025,7 @@ internal fun PersonCard(
     selected: Boolean = false,
 ) {
     val context = LocalContext.current
-    val model = LocalThumbnailUrls.current.value[person.coverPhotoKey] ?: person.coverPhotoKey
+    val model = rememberFaceCoverModel(person.coverPhotoKey)
     val request = remember(model, person.faceBox) {
         ImageRequest.Builder(context)
             .data(model)
@@ -1103,6 +1105,69 @@ internal fun PersonCard(
                     modifier = Modifier.size(14.dp),
                 )
             }
+        }
+    }
+}
+
+/**
+ * The list-view counterpart of [PersonCard]: the face in a circle at an album row's cover size, with the
+ * name and photo count beside it, on an album row's insets, so the People list reads like the Albums list.
+ */
+@Composable
+internal fun PersonRow(
+    person: PersonUi,
+    onClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    val model = rememberFaceCoverModel(person.coverPhotoKey)
+    val request = remember(model, person.faceBox) {
+        ImageRequest.Builder(context)
+            .data(model)
+            .size(FACE_TILE_PX)
+            .crossfade(false)
+            .apply { person.faceBox?.let { transformations(FaceCropTransformation(it)) } }
+            .build()
+    }
+    val name = when {
+        person.isOther -> stringResource(R.string.person_unsorted)
+        else -> person.displayName ?: stringResource(R.string.person_detail_unnamed)
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(AlbumRowPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AlbumRowGap),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(AlbumRowCoverSize)
+                .clip(CircleShape)
+                .background(Bg2),
+        ) {
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                color = FgPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = pluralStringResource(R.plurals.count_photos_plural, person.faceCount, person.faceCount),
+                color = FgMute,
+                fontSize = 12.sp,
+                maxLines = 1,
+            )
         }
     }
 }

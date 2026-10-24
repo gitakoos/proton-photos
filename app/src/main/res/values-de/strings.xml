@@ -1174,6 +1174,9 @@
     <string name="albums_view_heading">Ansicht</string>
     <string name="albums_view_grid">Raster</string>
     <string name="albums_view_list">Liste</string>
+    <string name="people_display_settings">Anzeige</string>
+    <string name="people_follow_albums">Wie der Tab Alben</string>
+    <string name="people_follow_albums_desc">Zeigt Personen mit der Ansicht und Covergröße des Tabs Alben</string>
     <string name="albums_more_settings">Weitere Einstellungen</string>
     <string name="album_options">Albumoptionen</string>
     <string name="album_group_heading">Gruppieren nach</string>

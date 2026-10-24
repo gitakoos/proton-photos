@@ -1189,6 +1189,9 @@
     <string name="albums_view_heading">Visualizzazione</string>
     <string name="albums_view_grid">Griglia</string>
     <string name="albums_view_list">Elenco</string>
+    <string name="people_display_settings">Visualizzazione</string>
+    <string name="people_follow_albums">Come la scheda Album</string>
+    <string name="people_follow_albums_desc">Mostra le persone con la vista e la dimensione copertina della scheda Album</string>
     <string name="albums_more_settings">Altre impostazioni</string>
     <string name="album_options">Opzioni album</string>
     <string name="album_group_heading">Raggruppa per</string>

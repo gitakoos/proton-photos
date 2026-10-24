@@ -1411,6 +1411,9 @@
     <string name="albums_view_heading">Pogled</string>
     <string name="albums_view_grid">Mreža</string>
     <string name="albums_view_list">Seznam</string>
+    <string name="people_display_settings">Prikaz</string>
+    <string name="people_follow_albums">Enako kot zavihek Albumi</string>
+    <string name="people_follow_albums_desc">Prikaže osebe s pogledom in velikostjo naslovnic zavihka Albumi</string>
     <string name="albums_more_settings">Več nastavitev</string>
     <string name="album_options">Možnosti albuma</string>
     <string name="album_group_heading">Združi po</string>

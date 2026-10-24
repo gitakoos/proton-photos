@@ -167,18 +167,18 @@ fun UnifiedAlbumCard(
 }
 
 /** Corner of every album cover, on a card and on a list row alike. */
-private val AlbumCoverCorner = 14.dp
+internal val AlbumCoverCorner = 14.dp
 private val AlbumCoverShape = RoundedCornerShape(AlbumCoverCorner)
 
 /** Edge of the square cover on a list row. */
-private val AlbumRowCoverSize = 56.dp
+internal val AlbumRowCoverSize = 56.dp
 
 /** A list row's insets: the Albums tab's 20dp margin ahead of the cover, and less behind, where the
  *  options button's own touch padding makes up the rest. */
-private val AlbumRowPadding = PaddingValues(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
+internal val AlbumRowPadding = PaddingValues(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)
 
 /** Gap between a list row's cover and its text. */
-private val AlbumRowGap = 14.dp
+internal val AlbumRowGap = 14.dp
 
 /**
  * A cover image filling its box. A GIF cover animates only when the user opted into cover autoplay;

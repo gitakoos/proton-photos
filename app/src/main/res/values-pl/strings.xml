@@ -1410,6 +1410,9 @@
     <string name="albums_view_heading">Widok</string>
     <string name="albums_view_grid">Siatka</string>
     <string name="albums_view_list">Lista</string>
+    <string name="people_display_settings">Wyświetlanie</string>
+    <string name="people_follow_albums">Tak jak karta Albumy</string>
+    <string name="people_follow_albums_desc">Pokazuje osoby w widoku i rozmiarze okładek karty Albumy</string>
     <string name="albums_more_settings">Więcej ustawień</string>
     <string name="album_options">Opcje albumu</string>
     <string name="album_group_heading">Grupuj według</string>

@@ -1189,6 +1189,9 @@
     <string name="albums_view_heading">Vista</string>
     <string name="albums_view_grid">Cuadrícula</string>
     <string name="albums_view_list">Lista</string>
+    <string name="people_display_settings">Visualización</string>
+    <string name="people_follow_albums">Igual que la pestaña Álbumes</string>
+    <string name="people_follow_albums_desc">Muestra a las personas con la vista y el tamaño de portada de la pestaña Álbumes</string>
     <string name="albums_more_settings">Más ajustes</string>
     <string name="album_options">Opciones del álbum</string>
     <string name="album_group_heading">Agrupar por</string>

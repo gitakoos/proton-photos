@@ -77,10 +77,12 @@ import androidx.datastore.preferences.core.edit
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.setContinueWithoutAccount
+import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.presentation.common.LocalViewerReturnKey
 import eu.akoos.photos.presentation.common.resolve
 import eu.akoos.photos.presentation.common.MapStyleChooserDialog
+import eu.akoos.photos.presentation.gallery.LocalCoverThumbnailRequester
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import androidx.compose.runtime.CompositionLocalProvider
 import eu.akoos.photos.domain.entity.Album
@@ -148,6 +150,7 @@ import eu.akoos.photos.presentation.settings.TimelineCategoriesScreen
 import eu.akoos.photos.presentation.settings.TimelineAlbumsScreen
 import eu.akoos.photos.presentation.settings.TimelineDeviceFoldersScreen
 import eu.akoos.photos.presentation.settings.AlbumsSettingsScreen
+import eu.akoos.photos.presentation.settings.PeopleSettingsScreen
 import eu.akoos.photos.presentation.settings.BackupProcessingScreen
 import eu.akoos.photos.presentation.settings.SyncSettingsScreen
 import eu.akoos.photos.presentation.map.MAP_FOCUS_LAT_ARG
@@ -245,6 +248,7 @@ sealed class Screen(val route: String) {
 
     /** The Albums tab's settings page, from the tab's filter sheet and from Appearance. */
     data object AlbumsSettings : Screen("albums_settings")
+    data object PeopleSettings : Screen("people_settings")
     data object LabelsSettings : Screen("labels_settings")
     data object LabelPhotoPicker : Screen("label_photo_picker")
     data object Search : Screen("search")
@@ -345,13 +349,23 @@ class NavViewModel @Inject constructor(
  * Exposes the app-scoped [ThumbnailUrlStore] map to the composition. Obtained once at the nav root
  * so every screen below inherits the live linkId -> thumbnail URL map through [LocalThumbnailUrls];
  * a decrypt that lands mid-scroll then repaints just the affected cell on any of them without each
- * screen wiring the store itself.
+ * screen wiring the store itself. [requestCover] backs [LocalCoverThumbnailRequester] the same way.
  */
 @HiltViewModel
 class ThumbnailUrlsViewModel @Inject constructor(
     store: ThumbnailUrlStore,
+    private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
+    private val accountManager: AccountManager,
 ) : ViewModel() {
     val urls: StateFlow<Map<String, String>> = store.urls
+
+    /** Decrypt and keep a face cover's thumbnail. A guest has no cloud photos, so nothing to ask for. */
+    fun requestCover(linkId: String) {
+        viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
+            thumbnailDecryptScheduler.requestPinnedCover(userId, linkId)
+        }
+    }
 }
 
 /** Encodes a single trash viewer action as the "action|kind|key" string the Trash screen parses and
@@ -401,6 +415,7 @@ fun NavGraph(
     // the store in, and a decrypt mid-scroll rebinds only the changed tiles, not the nav root.
     val thumbnailUrlsViewModel: ThumbnailUrlsViewModel = hiltViewModel()
     val thumbnailUrlsState = thumbnailUrlsViewModel.urls.collectAsStateWithLifecycle()
+    val coverThumbnailRequester = remember(thumbnailUrlsViewModel) { thumbnailUrlsViewModel::requestCover }
     // One-time 2.5.0 thank-you popup. The view-model shares a @Singleton controller with the About
     // screen's hidden preview trigger, so either place can raise the dialog rendered here at the root.
     val thankYouVm: ThankYouViewModel = hiltViewModel()
@@ -678,6 +693,7 @@ fun NavGraph(
     Box(modifier = Modifier.fillMaxSize()) {
     CompositionLocalProvider(
         LocalThumbnailUrls provides thumbnailUrlsState,
+        LocalCoverThumbnailRequester provides coverThumbnailRequester,
         LocalViewerReturnKey provides viewerReturnKey,
     ) {
     // Routes that open with their own full-width slide from the side (Search, the third tab of the dock), so
@@ -924,6 +940,7 @@ fun NavGraph(
         composable(Screen.People.route) {
             PeopleScreen(
                 onBack = { navController.popBackStack() },
+                onOpenDisplaySettings = { navController.navigate(Screen.PeopleSettings.route) },
                 onPersonClick = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
                 onOpenAiSettings = { navController.navigate(Screen.AiSettings.route) },
                 onReviewSuggestions = { navController.navigate(Screen.ReviewSuggestions.route) },
@@ -1656,6 +1673,7 @@ fun NavGraph(
                 onTimeFormatClick = { navController.navigate(Screen.ClockFormatSettings.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
                 onAlbumsSettingsClick = { navController.navigate(Screen.AlbumsSettings.route) },
+                onPeopleSettingsClick = { navController.navigate(Screen.PeopleSettings.route) },
                 onLandingTabClick = { navController.navigate(Screen.LandingTab.route) },
                 onViewerClick = { navController.navigate(Screen.ViewerSettings.route) },
             )
@@ -1983,6 +2001,10 @@ fun NavGraph(
 
         composable(Screen.TimelineDeviceFolders.route) {
             TimelineDeviceFoldersScreen(onBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.PeopleSettings.route) {
+            PeopleSettingsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Screen.AlbumsSettings.route) {

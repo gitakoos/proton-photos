@@ -65,7 +65,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.FaceCropTransformation
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberFaceCoverModel
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.pillShape
 
@@ -74,7 +74,7 @@ import eu.akoos.photos.presentation.theme.pillShape
  * person", one section per name) and faces dismissed as "not a person" (one "Ignored" section). Each
  * face shows as a cropped thumbnail with an Undo control that reverses the underlying exclusion so the
  * face is re-evaluated on the next clustering pass. Reuses the People rail's cover resolution
- * ([LocalThumbnailUrls]) and [FaceCropTransformation], so no new decrypt path is introduced.
+ * ([rememberFaceCoverModel]) and [FaceCropTransformation], so no new decrypt path is introduced.
  */
 @Composable
 fun FaceExclusionsScreen(
@@ -160,7 +160,7 @@ private fun SectionHeader(text: String) {
 private fun ExcludedFaceTile(face: ExcludedFaceUi, onUndo: () -> Unit) {
     val context = LocalContext.current
     val colors = AppColors.current
-    val model = LocalThumbnailUrls.current.value[face.photoKey] ?: face.photoKey
+    val model = rememberFaceCoverModel(face.photoKey)
     val request = remember(model, face.box) {
         ImageRequest.Builder(context)
             .data(model)

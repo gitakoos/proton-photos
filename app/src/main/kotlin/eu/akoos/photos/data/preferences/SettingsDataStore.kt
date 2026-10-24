@@ -96,6 +96,18 @@ object SettingsKeys {
      *  account, like [ALBUMS_SHOW_COLLECTION]: it holds in a guest session and survives a sign-out. */
     val ALBUMS_VIEW_MODE = intPreferencesKey("albums_view_mode")
 
+    /** When true, the People page lays its people out as the Albums tab lays out its albums, by
+     *  [ALBUMS_VIEW_MODE] and [ALBUM_GRID_COLUMNS]; when false, by [PEOPLE_VIEW_MODE] and
+     *  [PEOPLE_GRID_COLUMNS]. Absent = true. A view preference of the phone, like the Albums ones. */
+    val PEOPLE_FOLLOW_ALBUMS = booleanPreferencesKey("people_follow_albums")
+
+    /** The People page's own layout while [PEOPLE_FOLLOW_ALBUMS] is off, an AlbumsViewMode ordinal.
+     *  Absent = Grid. */
+    val PEOPLE_VIEW_MODE = intPreferencesKey("people_view_mode")
+
+    /** The People page's own cards per row (2, 3 or 4) while [PEOPLE_FOLLOW_ALBUMS] is off. Absent = 2. */
+    val PEOPLE_GRID_COLUMNS = intPreferencesKey("people_grid_columns")
+
     /** Direction the photos inside an album are listed in, an AlbumPhotoSortMode ordinal
      *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order albums have always
      *  opened on. One global choice every album shares: a per-album key would grow with the
