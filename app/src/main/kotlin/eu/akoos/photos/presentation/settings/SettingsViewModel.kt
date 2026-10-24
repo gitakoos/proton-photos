@@ -664,9 +664,10 @@ class SettingsViewModel @Inject constructor(
                             // clear only the live counters (bytes/sec, in-flight tally).
                             batchStartMs = 0L
                             uploadedBytesByUri.clear()
+                            val (done, total) = closedUploadCounts(current.uploadTotalCount, evt.doneIdx, evt.totalCount)
                             current.copy(
-                                uploadDoneCount = evt.doneIdx,
-                                uploadTotalCount = evt.totalCount,
+                                uploadDoneCount = done,
+                                uploadTotalCount = total,
                                 uploadBytesPerSecond = null,
                                 uploadDeferReason = null,
                             )
@@ -2199,6 +2200,18 @@ private const val CLOUD_TRASH_TTL_MS = 5L * 60L * 1000L
 
 /** A cached trash count moved by [delta]; an unknown count stays unknown until its fetch. */
 internal fun shiftedTrashCount(count: Int?, delta: Int): Int? = count?.let { (it + delta).coerceAtLeast(0) }
+
+/**
+ * The done / total the Sync card shows once an upload pass closes. A batch closes on its own total
+ * (every file accounted for), but a later pass that found nothing to upload closes on 0 / 0, which
+ * would turn a finished "80 / 80" into "0 % 0 / 0" under the list of files it just uploaded. That
+ * empty close keeps the last batch's total, shown complete.
+ */
+internal fun closedUploadCounts(currentTotal: Int, closingDone: Int, closingTotal: Int): Pair<Int, Int> = when {
+    closingTotal > 0 -> closingDone to closingTotal
+    currentTotal > 0 -> currentTotal to currentTotal
+    else -> 0 to 0
+}
 
 /** Shortest pause between two reads of the backup totals, each a pass over the user's whole listing. */
 private const val BACKUP_TOTALS_MIN_INTERVAL_MS = 1_000L
