@@ -808,6 +808,10 @@
     <string name="sdk_route_upload_desc">Fotoğrafları Drive\'a gönderme, yedeklemede ve diğer her yüklemede</string>
     <string name="sdk_route_albums">Albümler</string>
     <string name="sdk_route_albums_desc">Drive\'da albüm oluşturma, yeniden adlandırma ve silme, fotoğraf ekleme veya çıkarma</string>
+    <string name="sdk_route_events">Değişiklik takibi</string>
+    <string name="sdk_route_events_desc">Zaman çizelgesini diğer cihazlarda ve webde yapılan değişikliklerle güncel tutma</string>
+    <string name="sdk_route_shared">Sizinle paylaşılan albümler</string>
+    <string name="sdk_route_shared_desc">Başkalarının sizinle paylaştığı albümleri listeleme ve bırakma, bunlara fotoğraf ekleme ve fotoğraflarını tam çözünürlükte açma</string>
     <string name="sdk_route_activity">%1$s. Bu oturumda: kitaplık üzerinden %2$d, her zamanki yoldan %3$d.</string>
     <string name="settings_ai_indexing_progress">%2$d fotoğraftan %1$d</string>
     <string name="settings_ai_grouping_progress">%2$d yüzden %1$d</string>

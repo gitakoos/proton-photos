@@ -132,6 +132,9 @@ class AlbumSharingService @Inject constructor(
     private val sessionProvider: SessionProvider,
     private val cryptoContext: me.proton.core.crypto.common.context.CryptoContext,
     private val userAddressRepository: me.proton.core.user.domain.repository.UserAddressRepository,
+    private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
+    private val sdkSharedOps: eu.akoos.photos.data.sdk.SdkSharedOps,
+    private val sdkAlbumOps: eu.akoos.photos.data.sdk.SdkAlbumOps,
     @ApplicationContext private val context: Context,
 ) {
     /**
@@ -916,6 +919,22 @@ class AlbumSharingService @Inject constructor(
      * album so it disappears from their library. Owner's copy and other members stay intact.
      */
     suspend fun leaveSharedAlbum(userId: UserId, shareId: String, albumLinkId: String): Unit = withContext(Dispatchers.IO) {
+        // The SDK names the album by its volume, which the cached shared row carries; without one the
+        // app's own path, which works from the share, does the leave.
+        val albumVolumeId = runCatching { cloudAlbumDao.getByLinkId(albumLinkId)?.volumeId }.getOrNull()
+        val leftViaSdk = sdkRouting.run(
+            eu.akoos.photos.data.sdk.SdkRoute.SHARED,
+            viaSdk = {
+                sdkSharedOps.leave(userId, albumVolumeId ?: error("no volume"), albumLinkId)
+                true
+            },
+            on = albumVolumeId != null,
+        ) { false }
+        if (leftViaSdk) {
+            Log.d(TAG, "leaveSharedAlbum: left album=$albumLinkId through the SDK")
+            albumCacheCleanup.dropCachedAlbum(userId, albumLinkId)
+            return@withContext
+        }
         val manager = apiProvider.get<DriveApiService>(userId)
 
         // 1. Resolve our own memberId from the share bootstrap's Memberships array (scoped to
@@ -992,6 +1011,55 @@ class AlbumSharingService @Inject constructor(
      * feed is used as a backup, merged + de-duplicated by linkId.
      */
     suspend fun loadSharedWithMeAlbums(userId: UserId): List<Album> = withContext(Dispatchers.IO) {
+        val result = sdkRouting.run(
+            eu.akoos.photos.data.sdk.SdkRoute.SHARED,
+            viaSdk = { listSharedWithMeViaSdk(userId) },
+        ) { listSharedWithMeOwnPath(userId) }
+
+        // Persist alongside the owned albums so the add-to-album picker can offer the ones this
+        // user may contribute to without a network round trip. Both statements are scoped to
+        // shared rows, so an owned album is never touched here, just as the owned refresh no
+        // longer evicts these. Best-effort for the same reason the owned path is: the cache is a
+        // performance optimisation and the caller already holds the real answer.
+        runCatching {
+            val now = System.currentTimeMillis()
+            cloudAlbumDao.upsertAll(result.map { eu.akoos.photos.data.db.entity.CloudAlbumEntity.fromDomain(it, now) })
+            // An empty list is not evidence that the user has none: a refresh whose feeds all
+            // failed reports the same empty result, and SQLite reads `NOT IN ()` as true for every
+            // row, so the prune would clear the whole cache on a bad network. Pruning only against
+            // a non-empty answer costs a stale row until the next refresh that actually read
+            // something, which is the cheaper of the two mistakes.
+            if (result.isNotEmpty()) cloudAlbumDao.deleteSharedWhereNotIn(result.map { it.linkId })
+        }.onFailure { e ->
+            Log.w(TAG, "loadSharedWithMeAlbums: cache persist failed (${e.message}), in-memory result still returned")
+        }
+
+        result
+    }
+
+    /** The shared-with-me list through the SDK, named and pictured the way the app's own listing does it. */
+    private suspend fun listSharedWithMeViaSdk(userId: UserId): List<Album> {
+        val cachedSharedNames: Map<String, String> = runCatching {
+            cloudAlbumDao.getSharedWithMe().associate { it.linkId to it.name }
+        }.getOrDefault(emptyMap())
+        return sdkSharedOps.listSharedAlbums(userId).map { shared ->
+            Album(
+                linkId = shared.linkId,
+                name = resolveSharedAlbumName(shared.name, cachedSharedNames[shared.linkId], shared.linkId),
+                photoCount = shared.photoCount,
+                coverLinkId = shared.coverLinkId,
+                lastActivityTimeMs = shared.lastActivityTimeMs,
+                coverThumbnailUrl = resolveOfflineCoverUrl(shared.coverLinkId, shared.linkId),
+                sharingShareId = shared.shareId,
+                sharedByEmail = shared.sharedByEmail,
+                volumeId = shared.volumeId,
+                permissions = shared.permissions,
+            )
+        }.also { Log.d(TAG, "loadSharedWithMeAlbums: ${it.size} album(s) through the SDK") }
+    }
+
+    /** The app's own shared-with-me listing: the Photos album feed, then the v2 shared-with-me feed as a backup. */
+    private suspend fun listSharedWithMeOwnPath(userId: UserId): List<Album> {
         val manager = apiProvider.get<DriveApiService>(userId)
         val result = mutableListOf<Album>()
         val seenLinkIds = mutableSetOf<String>()
@@ -1247,26 +1315,7 @@ class AlbumSharingService @Inject constructor(
         }
 
         Log.d(TAG, "loadSharedWithMeAlbums: DONE — photosStubs=${albumStubs.size} afterPhotosDecrypt=$resultsAfterPhotosEndpoint v2AlbumRaw=${sharedLinks.size} finalTotal=${result.size}")
-
-        // Persist alongside the owned albums so the add-to-album picker can offer the ones this
-        // user may contribute to without a network round trip. Both statements are scoped to
-        // shared rows, so an owned album is never touched here, just as the owned refresh no
-        // longer evicts these. Best-effort for the same reason the owned path is: the cache is a
-        // performance optimisation and the caller already holds the real answer.
-        runCatching {
-            val now = System.currentTimeMillis()
-            cloudAlbumDao.upsertAll(result.map { eu.akoos.photos.data.db.entity.CloudAlbumEntity.fromDomain(it, now) })
-            // An empty list is not evidence that the user has none: a refresh whose feeds all
-            // failed reports the same empty result, and SQLite reads `NOT IN ()` as true for every
-            // row, so the prune would clear the whole cache on a bad network. Pruning only against
-            // a non-empty answer costs a stale row until the next refresh that actually read
-            // something, which is the cheaper of the two mistakes.
-            if (result.isNotEmpty()) cloudAlbumDao.deleteSharedWhereNotIn(result.map { it.linkId })
-        }.onFailure { e ->
-            Log.w(TAG, "loadSharedWithMeAlbums: cache persist failed (${e.message}), in-memory result still returned")
-        }
-
-        result
+        return result
     }
 
     /**
@@ -2067,13 +2116,48 @@ class AlbumSharingService @Inject constructor(
         require(album.canAddPhotos) {
             "addPhotosToSharedAlbum: no edit rights on album ${album.linkId}"
         }
+        val ownVolumeId = shareService.getVolumeId(userId)
+        // Photos the SDK already copied before it failed; the app's own copy takes the rest.
+        val doneBySdk = LinkedHashSet<String>()
+        sdkRouting.run(
+            eu.akoos.photos.data.sdk.SdkRoute.SHARED,
+            viaSdk = {
+                val refused = sdkAlbumOps.addPhotosToForeignAlbum(
+                    userId, targetVolumeId, album.linkId, ownVolumeId, photoLinkIds,
+                ) { doneBySdk += it }
+                eu.akoos.photos.domain.repository.DrivePhotoRepository.AddPhotosToAlbumResult(
+                    photoLinkIds.filter { it !in refused },
+                    photoLinkIds.filter { it in refused },
+                )
+            },
+        ) {
+            val rest = photoLinkIds.filterNot { it in doneBySdk }
+            if (rest.isEmpty()) {
+                eu.akoos.photos.domain.repository.DrivePhotoRepository.AddPhotosToAlbumResult(doneBySdk.toList(), emptyList())
+            } else {
+                val own = addPhotosToSharedAlbumOwnPath(userId, album, rest, sharingShareId, targetVolumeId, ownVolumeId)
+                eu.akoos.photos.domain.repository.DrivePhotoRepository.AddPhotosToAlbumResult(
+                    doneBySdk.toList() + own.succeededLinkIds,
+                    own.failedLinkIds,
+                )
+            }
+        }
+    }
 
+    /** The app's own copy of this user's photos into an album another user shared. */
+    private suspend fun addPhotosToSharedAlbumOwnPath(
+        userId: UserId,
+        album: Album,
+        photoLinkIds: List<String>,
+        sharingShareId: String,
+        targetVolumeId: String,
+        ownVolumeId: String,
+    ): eu.akoos.photos.domain.repository.DrivePhotoRepository.AddPhotosToAlbumResult {
         val manager = apiProvider.get<DriveApiService>(userId)
         val signingKey = cryptoHelper.getAddressSigningKey(userId)
 
         // The source side: these photos belong to this user, so their passphrases and names are
         // wrapped to this user's own Photos-root key and they live on this user's own volume.
-        val ownVolumeId = shareService.getVolumeId(userId)
         val rootLinkKeyBytes = shareService.getRootLinkKeyBytes(userId)
             ?: error("addPhotosToSharedAlbum: cannot load root link key")
 
@@ -2184,7 +2268,7 @@ class AlbumSharingService @Inject constructor(
         }
 
         Log.d(TAG, "addPhotosToSharedAlbum: album=${album.linkId} ok=${succeeded.size} failed=${failed.size}")
-        eu.akoos.photos.domain.repository.DrivePhotoRepository.AddPhotosToAlbumResult(succeeded, failed)
+        return eu.akoos.photos.domain.repository.DrivePhotoRepository.AddPhotosToAlbumResult(succeeded, failed)
     }
 
     private companion object {

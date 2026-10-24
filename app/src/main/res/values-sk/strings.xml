@@ -1890,6 +1890,10 @@
     <string name="sdk_route_upload_desc">Odosielanie fotiek na Drive, pri zálohe aj každom inom nahrávaní</string>
     <string name="sdk_route_albums">Albumy</string>
     <string name="sdk_route_albums_desc">Vytváranie, premenovanie a mazanie albumov na Drive a pridávanie či odoberanie ich fotiek</string>
+    <string name="sdk_route_events">Sledovanie zmien</string>
+    <string name="sdk_route_events_desc">Udržiavanie časovej osi aktuálnej so zmenami z iných zariadení a z webu</string>
+    <string name="sdk_route_shared">Albumy zdieľané s vami</string>
+    <string name="sdk_route_shared_desc">Zobrazenie a opustenie albumov, ktoré s vami zdieľali iní, pridávanie fotiek do nich a otváranie ich fotiek v plnom rozlíšení</string>
     <string name="sdk_route_activity">%1$s. V tejto relácii: %2$d cez knižnicu, %3$d obvyklým spôsobom.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotiek</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d tvárí</string>

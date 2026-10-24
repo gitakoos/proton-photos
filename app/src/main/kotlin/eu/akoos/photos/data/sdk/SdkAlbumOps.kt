@@ -36,7 +36,7 @@ import javax.inject.Singleton
  * removing photos. Adds and removes answer as the app's own requests do, with the links the server refused,
  * and hand each finished link to `onDone` as its answer arrives, so a call that fails partway lets the
  * caller's own request take only the links still left. A photo the album already holds counts as added.
- * Run only through [SdkRouting] ([SdkRoute.ALBUMS]).
+ * Run only through [SdkRouting]: [SdkRoute.ALBUMS], and [SdkRoute.SHARED] for an album another user shared.
  */
 @Singleton
 class SdkAlbumOps @Inject constructor(
@@ -60,6 +60,27 @@ class SdkAlbumOps @Inject constructor(
         clientProvider.withPhotosClient(userId) { client ->
             refusedPhotos(
                 client.addPhotosToAlbum(nodeUid(volumeId, albumLinkId), photoLinkIds.map { nodeUid(volumeId, it) }),
+                onDone,
+                countsAsDone = ::alreadyInAlbum,
+            )
+        } ?: throw SdkAlbumException("the SDK cannot run on this device")
+
+    /**
+     * Adds this user's photos (on [ownVolumeId]) to an album another user shared, on [albumVolumeId]: the
+     * SDK copies each photo onto the album owner's volume, its Live Photo or burst companions with it.
+     * Answers like [addPhotos], keyed by this user's own link ids.
+     */
+    suspend fun addPhotosToForeignAlbum(
+        userId: UserId,
+        albumVolumeId: String,
+        albumLinkId: String,
+        ownVolumeId: String,
+        photoLinkIds: List<String>,
+        onDone: (linkId: String) -> Unit = {},
+    ): Set<String> =
+        clientProvider.withPhotosClient(userId) { client ->
+            refusedPhotos(
+                client.addPhotosToAlbum(nodeUid(albumVolumeId, albumLinkId), photoLinkIds.map { nodeUid(ownVolumeId, it) }),
                 onDone,
                 countsAsDone = ::alreadyInAlbum,
             )

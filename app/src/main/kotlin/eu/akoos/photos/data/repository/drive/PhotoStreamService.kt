@@ -479,6 +479,8 @@ class PhotoStreamService @Inject constructor(
     private val thumbnailHelpers: ThumbnailHelpers,
     private val recentUploadsTracker: RecentUploadsTracker,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
+    private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
+    private val sdkEventOps: eu.akoos.photos.data.sdk.SdkEventOps,
     @ApplicationContext private val context: Context,
     @eu.akoos.photos.di.AppScope appScope: CoroutineScope,
     db: AppDatabase,
@@ -1730,12 +1732,17 @@ class PhotoStreamService @Inject constructor(
                     return
                 }
                 try {
-                    val manager = apiProvider.get<DriveApiService>(userId)
-                    val latestAnchor = semaphore.withPermit {
-                        manager.invoke { getLatestEventAnchor(volumeId) }.valueOrThrow
+                    val latestAnchor = sdkRouting.run(
+                        eu.akoos.photos.data.sdk.SdkRoute.EVENTS,
+                        viaSdk = { sdkEventOps.latestCursor(userId, volumeId) },
+                    ) {
+                        val manager = apiProvider.get<DriveApiService>(userId)
+                        semaphore.withPermit {
+                            manager.invoke { getLatestEventAnchor(volumeId) }.valueOrThrow
+                        }.eventId
                     }
-                    context.settingsDataStore.edit { it[anchorKey] = latestAnchor.eventId }
-                    Log.d(TAG, "incremental: initial anchor saved ${latestAnchor.eventId}")
+                    context.settingsDataStore.edit { it[anchorKey] = latestAnchor }
+                    Log.d(TAG, "incremental: initial anchor saved $latestAnchor")
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) throw e
                     if (shouldResetEventAnchor(e)) {
@@ -1761,26 +1768,42 @@ class PhotoStreamService @Inject constructor(
             val thumbnailCacheDir = File(context.cacheDir, "thumbnails").also { it.mkdirs() }
             val manager = apiProvider.get<DriveApiService>(userId)
 
-            var currentAnchor: String = storedAnchor
-            var hasMore = true
-            var upsertLinkIds = mutableListOf<String>()
-            val deleteLinkIds = mutableListOf<String>()
-
-            while (hasMore) {
-                val eventsResp = semaphore.withPermit {
-                    manager.invoke { getEvents(volumeId, currentAnchor) }.valueOrThrow
-                }
-                for (event in eventsResp.events) {
-                    val linkId = event.link?.linkId ?: event.linkId ?: continue
-                    if (isStreamRemovalEvent(event.eventType, event.link?.state)) {
-                        deleteLinkIds += linkId
-                    } else {
-                        upsertLinkIds += linkId
+            val batch = sdkRouting.run(
+                eu.akoos.photos.data.sdk.SdkRoute.EVENTS,
+                viaSdk = { sdkEventOps.changesSince(userId, volumeId, storedAnchor) },
+            ) {
+                var anchor: String = storedAnchor
+                var hasMore = true
+                val upserts = mutableListOf<String>()
+                val deletes = mutableListOf<String>()
+                while (hasMore) {
+                    val eventsResp = semaphore.withPermit {
+                        manager.invoke { getEvents(volumeId, anchor) }.valueOrThrow
                     }
+                    for (event in eventsResp.events) {
+                        val linkId = event.link?.linkId ?: event.linkId ?: continue
+                        if (isStreamRemovalEvent(event.eventType, event.link?.state)) {
+                            deletes += linkId
+                        } else {
+                            upserts += linkId
+                        }
+                    }
+                    anchor = eventsResp.eventId
+                    hasMore = eventsResp.more != 0
                 }
-                currentAnchor = eventsResp.eventId
-                hasMore = eventsResp.more != 0
+                eu.akoos.photos.data.sdk.EventBatch(upserts, deletes, anchor)
             }
+            if (batch.continuityLost) {
+                // The server could not hand over the changes since the stored anchor: the same reset an
+                // anchor the feed refuses gets, so the next pass arms a fresh one after a full listing.
+                clearEventAnchor(anchorKey)
+                eu.akoos.photos.util.SyncDiagnostics.log("incremental: change feed lost continuity, full refresh")
+                refreshCloudPhotos(userId)
+                return
+            }
+            val currentAnchor: String = batch.cursor
+            var upsertLinkIds = batch.upserts.toMutableList()
+            val deleteLinkIds = batch.deletes.toMutableList()
             eventLinks = upsertLinkIds.size + deleteLinkIds.size
 
             if (deleteLinkIds.isNotEmpty()) {

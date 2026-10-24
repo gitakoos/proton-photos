@@ -1887,6 +1887,10 @@
     <string name="sdk_route_upload_desc">Pošiljanje fotografij v Drive, pri varnostnem kopiranju in vsakem drugem nalaganju</string>
     <string name="sdk_route_albums">Albumi</string>
     <string name="sdk_route_albums_desc">Ustvarjanje, preimenovanje in brisanje albumov v Drive ter dodajanje ali odstranjevanje njihovih fotografij</string>
+    <string name="sdk_route_events">Spremljanje sprememb</string>
+    <string name="sdk_route_events_desc">Sprotno posodabljanje časovnice s spremembami na drugih napravah in na spletu</string>
+    <string name="sdk_route_shared">Albumi, deljeni z vami</string>
+    <string name="sdk_route_shared_desc">Prikaz in zapuščanje albumov, ki so jih drugi delili z vami, dodajanje fotografij vanje in odpiranje njihovih fotografij v polni ločljivosti</string>
     <string name="sdk_route_activity">%1$s. V tej seji: %2$d prek knjižnice, %3$d na običajen način.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
     <string name="settings_ai_grouping_progress">%1$d od %2$d obrazov</string>

@@ -1832,6 +1832,10 @@
     <string name="sdk_route_upload_desc">Enviar fotos a Drive, en la copia de seguridad y en cualquier otra subida</string>
     <string name="sdk_route_albums">Álbumes</string>
     <string name="sdk_route_albums_desc">Crear, renombrar y eliminar álbumes en Drive, y añadir o quitar sus fotos</string>
+    <string name="sdk_route_events">Seguimiento de cambios</string>
+    <string name="sdk_route_events_desc">Mantener la cronología al día con los cambios hechos en otros dispositivos y en la web</string>
+    <string name="sdk_route_shared">Álbumes compartidos contigo</string>
+    <string name="sdk_route_shared_desc">Listar y abandonar álbumes que otros compartieron contigo, añadirles fotos y abrir sus fotos a resolución completa</string>
     <string name="sdk_route_activity">%1$s. En esta sesión: %2$d con la biblioteca, %3$d de la forma habitual.</string>
     <string name="settings_ai_indexing_progress">%1$d de %2$d fotos</string>
     <string name="settings_ai_grouping_progress">%1$d de %2$d rostros</string>

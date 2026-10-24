@@ -38,7 +38,6 @@ import eu.akoos.photos.data.api.dto.FavoriteRequest
 import eu.akoos.photos.data.api.dto.LinkCoreDto
 import eu.akoos.photos.data.api.dto.RenameLinkRequest
 import eu.akoos.photos.data.api.dto.TagRequest
-import eu.akoos.photos.data.api.dto.ThumbnailBatchRequest
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.sdk.SdkRoute
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -435,19 +434,17 @@ class CloudTrashService @Inject constructor(
                     ?: link.activeRevision?.thumbnails?.firstOrNull()?.thumbnailId
             }
 
-            // Batch-fetch thumbnail download URLs (same mechanism as gallery).
+            // Thumbnail download URLs through the gallery's own lookup, which asks in batches of the size the
+            // endpoint accepts: one request naming more than 30 thumbnails is refused outright, which left a
+            // larger trash with no thumbnails at all.
             val thumbMap = mutableMapOf<String, Pair<String, String?>>() // thumbnailId → (bareUrl, token)
             if (thumbnailIds.isNotEmpty()) {
-                runCatching {
-                    val resp = shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            getThumbnailUrls(volumeId, ThumbnailBatchRequest(thumbnailIds))
-                        }.valueOrThrow
+                runCatching { linkDetailHelpers.batchFetchThumbnailUrls(userId, volumeId, thumbnailIds) }
+                    .onSuccess { urls -> urls.forEach { (id, info) -> thumbMap[id] = info.bareUrl to info.token } }
+                    .onFailure { e ->
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.w(TAG, "getCloudTrash: thumbnail batch failed — ${e.message}")
                     }
-                    resp.thumbnails.forEach { t ->
-                        if (t.bareUrl != null) thumbMap[t.thumbnailId] = t.bareUrl to t.token
-                    }
-                }.onFailure { e -> Log.w(TAG, "getCloudTrash: thumbnail batch failed — ${e.message}") }
             }
 
             // Photos are flat under the photos root, so its link key decrypts their names; fetch it

@@ -972,6 +972,12 @@ object SettingsKeys {
     /** Create, change and delete albums and add or remove their photos through the Drive SDK; see [SDK_ROUTE_TAGS]. */
     val SDK_ROUTE_ALBUMS = booleanPreferencesKey("sdk_route_albums")
 
+    /** Follow the photo volume's change feed through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_EVENTS = booleanPreferencesKey("sdk_route_events")
+
+    /** List, leave and add to albums shared with this user, and download their photos, through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_SHARED = booleanPreferencesKey("sdk_route_shared")
+
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated
      * (0 = off / not simulating). Only read by the BuildConfig.DEBUG-gated simulator UI +

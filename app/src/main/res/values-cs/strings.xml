@@ -1888,6 +1888,10 @@
     <string name="sdk_route_upload_desc">Odesílání fotek na Drive, při záloze i každém jiném nahrávání</string>
     <string name="sdk_route_albums">Alba</string>
     <string name="sdk_route_albums_desc">Vytváření, přejmenování a mazání alb na Drive a přidávání či odebírání jejich fotek</string>
+    <string name="sdk_route_events">Sledování změn</string>
+    <string name="sdk_route_events_desc">Udržování časové osy aktuální se změnami z jiných zařízení a z webu</string>
+    <string name="sdk_route_shared">Alba sdílená s vámi</string>
+    <string name="sdk_route_shared_desc">Zobrazení a opuštění alb, která s vámi sdíleli jiní, přidávání fotek do nich a otevírání jejich fotek v plném rozlišení</string>
     <string name="sdk_route_activity">%1$s. V této relaci: %2$d přes knihovnu, %3$d obvyklým způsobem.</string>
     <string name="settings_ai_indexing_progress">%1$d z %2$d fotek</string>
     <string name="settings_ai_grouping_progress">%1$d z %2$d obličejů</string>
