@@ -29,6 +29,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.util.Log
 import androidx.room.withTransaction
+import eu.akoos.photos.data.face.PersonNameLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -151,6 +152,9 @@ class ReviewSuggestionsViewModel @Inject constructor(
                         faceDao.labelFacesByIds(faceIds, name)
                     }
                     personDao.updateName(target, name)
+                    if (existing == null) {
+                        PersonNameLog.named(appDatabase.personNameDao(), account, name, System.currentTimeMillis())
+                    }
                     val count = (faceDao.distinctPhotoKeysForPerson(account, target) + manual).toHashSet().size
                     val cover = faceDao.topFaceForPerson(account, target)
                     personDao.updateCoverAndCount(target, cover, count)

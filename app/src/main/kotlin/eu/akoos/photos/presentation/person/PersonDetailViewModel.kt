@@ -24,6 +24,8 @@ package eu.akoos.photos.presentation.person
 
 import android.content.Context
 import android.util.Log
+import eu.akoos.photos.data.db.dao.PersonNameDao
+import eu.akoos.photos.data.face.PersonNameLog
 import eu.akoos.photos.util.retryOnDbTear
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -119,6 +121,7 @@ class PersonDetailViewModel @Inject constructor(
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
+    private val personNameDao: PersonNameDao,
     private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val observePeopleUseCase: ObservePeopleUseCase,
@@ -510,6 +513,9 @@ class PersonDetailViewModel @Inject constructor(
                 faceDao.renameManualName(account, old, trimmed)
                 notPersonDao.rename(account, old, trimmed)
                 personCoverDao.rename(account, old, trimmed)
+                PersonNameLog.renamed(personNameDao, account, old, trimmed, System.currentTimeMillis())
+            } else if (old.isNullOrBlank() && trimmed != null) {
+                PersonNameLog.named(personNameDao, account, trimmed, System.currentTimeMillis())
             }
             // Anchor the person's current faces to the name as confirmations (like a fold does), so a
             // later rebuild that splits the person keeps every face together instead of orphaning the

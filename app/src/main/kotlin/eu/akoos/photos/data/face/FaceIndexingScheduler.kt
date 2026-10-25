@@ -35,6 +35,7 @@ import android.util.Log
 import androidx.datastore.preferences.core.edit
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.db.dao.clearForUser
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1752,6 +1753,7 @@ class FaceIndexingScheduler @Inject constructor(
             personManualPhotoDao.clearForUser(account)
             notPersonDao.clearForUser(account)
             appDatabase.personCoverDao().clearForUser(account)
+            appDatabase.personNameDao().clearForUser(account)
             appDatabase.clusterSummaryDao().clearForUser(account)
         }
         if (thenIndex) requestIndex(userId)

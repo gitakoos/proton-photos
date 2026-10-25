@@ -166,6 +166,13 @@ internal fun mergeFaceCuration(local: LocalFaceCuration, snapshot: SnapshotFaceC
 
 /** Whether a snapshot's "not [markName]" mark lands on the local face it overlaps, whose confirmed name
  *  once the merge is done is [localConfirmedName]: never against a face confirmed as that very name. */
+/**
+ * Whether a rename or merge another install made at [changedAt] is carried out here, where the person it names
+ * got that name at [heldNamedAt] (0 when unknown): only when it came later, so the later rename or merge wins on
+ * every install, and a name given here after it (often a new person under a freed name) stays.
+ */
+internal fun nameChangeApplies(heldNamedAt: Long, changedAt: Long): Boolean = changedAt > heldNamedAt
+
 internal fun notPersonMarkApplies(localConfirmedName: String?, markName: String): Boolean =
     localConfirmedName != markName
 

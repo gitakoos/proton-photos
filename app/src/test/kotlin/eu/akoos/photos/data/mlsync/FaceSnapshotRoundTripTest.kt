@@ -38,9 +38,11 @@ import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
+import eu.akoos.photos.data.db.entity.PersonNameStateEntity
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachData
 import eu.akoos.photos.data.face.FaceReattachSnapshot
+import eu.akoos.photos.data.face.PersonNameLog
 import eu.akoos.photos.data.face.ReattachBox
 import eu.akoos.photos.data.face.ReattachManual
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -377,6 +379,104 @@ class FaceSnapshotRoundTripTest {
         )
         assertEquals(setOf("Alice" to "linkX"), covers())
         assertEquals(setOf("Alice" to "linkE"), manualPhotos())
+    }
+
+    /** The target holding "Ally" with its first face confirmed under that name, named at [allyNamedAt]. */
+    private suspend fun seedAllyOnTarget(allyNamedAt: Long) {
+        target.personDao().upsert(PersonEntity(id = 10, userId = ACCOUNT, displayName = "Ally", faceCount = 1))
+        target.faceDao().upsert(
+            listOf(face("linkA#0", "linkA", 0.10f, 0.10f, 0.30f, 0.40f, seed = 21, personId = 10, manualName = "Ally")),
+        )
+        target.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkA")))
+        target.personCoverDao().set(PersonCoverEntity(ACCOUNT, "Ally", "linkA"))
+        target.personNameDao().setState(PersonNameStateEntity(ACCOUNT, "Ally", allyNamedAt))
+    }
+
+    private suspend fun namedPeople(db: AppDatabase = target): Map<String, Long> =
+        db.personDao().namedPeopleForUser(ACCOUNT).associate { it.displayName!! to it.id }
+
+    @Test
+    fun `a rename made on the other device after this one named the person reaches it, curation following`() = runTest {
+        seedSource()
+        PersonNameLog.renamed(source.personNameDao(), ACCOUNT, "Ally", "Alice", 200L)
+        seedAllyOnTarget(allyNamedAt = 100L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        val people = namedPeople()
+        assertEquals(setOf("Alice", "Carol"), people.keys)
+        // The person kept here is renamed, not replaced, and the faces the source adds join it.
+        assertEquals(10L, people.getValue("Alice"))
+        val merged = faces()
+        assertEquals("Alice", merged.getValue("linkA#0").manualName)
+        assertEquals(10L, merged.getValue("linkB#0").personId)
+        // The cover chosen here follows the rename and outranks the one the copy brings.
+        assertEquals(setOf("Alice" to "linkA"), covers())
+        // Kept here as well, so this device's next copy hands the rename on.
+        assertEquals(200L, target.personNameDao().namedAt(ACCOUNT, "Alice"))
+        assertNull(target.personNameDao().namedAt(ACCOUNT, "Ally"))
+        assertEquals(
+            listOf(Triple("Ally", "Alice", 200L)),
+            target.personNameDao().recentChanges(ACCOUNT, 10).map { Triple(it.fromName, it.toName, it.changedAt) },
+        )
+    }
+
+    @Test
+    fun `a name given here after the other device's rename stays`() = runTest {
+        seedSource()
+        PersonNameLog.renamed(source.personNameDao(), ACCOUNT, "Ally", "Alice", 200L)
+        seedAllyOnTarget(allyNamedAt = 300L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertEquals(10L, namedPeople().getValue("Ally"))
+        assertEquals("Ally", faces().getValue("linkA#0").manualName)
+        assertEquals(300L, target.personNameDao().namedAt(ACCOUNT, "Ally"))
+    }
+
+    @Test
+    fun `a merge made on the other device folds the person into the one already holding the name`() = runTest {
+        seedSource()
+        PersonNameLog.renamed(source.personNameDao(), ACCOUNT, "Ally", "Alice", 200L)
+        seedAllyOnTarget(allyNamedAt = 100L)
+        target.personDao().upsert(PersonEntity(id = 12, userId = ACCOUNT, displayName = "Alice", faceCount = 1))
+        target.faceDao().upsert(
+            listOf(face("linkC#1", "linkC", 0.20f, 0.20f, 0.40f, 0.50f, seed = 23, personId = 12, manualName = "Alice")),
+        )
+        target.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkC")))
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        val people = namedPeople()
+        assertFalse("Ally" in people)
+        assertEquals(12L, people.getValue("Alice"))
+        val merged = faces()
+        assertEquals(12L, merged.getValue("linkA#0").personId)
+        assertEquals("Alice", merged.getValue("linkA#0").manualName)
+    }
+
+    @Test
+    fun `a rename or merge made here is written into this device's copy for the others`() = runTest {
+        seedSource()
+        PersonNameLog.named(source.personNameDao(), ACCOUNT, "Carol", 50L)
+        PersonNameLog.renamed(source.personNameDao(), ACCOUNT, "Ally", "Alice", 200L)
+        val out = ByteArrayOutputStream()
+        FaceSnapshotExporter(context, source, sealing()).writePlaintext(user, out, FaceSnapshotOrigin(
+            device = FaceSnapshotDevice(DEVICE_ID, "Test phone"),
+            createdAtMillis = 1L,
+            faceModelVersion = FACE_MODEL_VERSION,
+            faceModelSha256 = FaceModelAssets.EMBED_MODEL.sha256,
+            clusterParamsVersion = FACE_CLUSTER_PARAMS_VERSION,
+        ))
+        val records = MlSnapshotReader(ByteArrayInputStream(out.toByteArray())).asSequence().toList()
+
+        val people = records.filterIsInstance<MlSnapshotRecord.Person>().associate { it.name to it.namedAtMillis }
+        assertEquals(200L, people["Alice"])
+        assertEquals(50L, people["Carol"])
+        assertEquals(
+            listOf(MlSnapshotRecord.NameChange("Ally", "Alice", 200L)),
+            records.filterIsInstance<MlSnapshotRecord.NameChange>(),
+        )
     }
 
     @Test

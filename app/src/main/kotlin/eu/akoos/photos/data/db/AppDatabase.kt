@@ -129,6 +129,7 @@ import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.dao.PersonNameDao
 import eu.akoos.photos.data.db.dao.PhotoLabelDao
 import eu.akoos.photos.data.db.dao.DriveCopyAppliedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
@@ -154,6 +155,8 @@ import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
+import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
+import eu.akoos.photos.data.db.entity.PersonNameStateEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelNameEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelStateEntity
@@ -206,6 +209,8 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         PhotoLabelStateEntity::class,
         PhotoLabelDeletedEntity::class,
         DriveCopyAppliedEntity::class,
+        PersonNameStateEntity::class,
+        PersonNameChangeEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -245,7 +250,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 49,
+    version = 50,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -290,6 +295,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun imageEmbeddingDao(): ImageEmbeddingDao
     abstract fun photoLabelDao(): PhotoLabelDao
     abstract fun driveCopyAppliedDao(): DriveCopyAppliedDao
+    abstract fun personNameDao(): PersonNameDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

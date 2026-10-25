@@ -23,6 +23,7 @@
 package eu.akoos.photos.domain.usecase
 
 import androidx.room.withTransaction
+import eu.akoos.photos.data.face.PersonNameLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.data.db.AppDatabase
@@ -73,6 +74,9 @@ class AssignPersonNameUseCase @Inject constructor(
             faceDao.renameManualName(account, oldName, name)
             notPersonDao.rename(account, oldName, name)
             personCoverDao.rename(account, oldName, name)
+            PersonNameLog.renamed(appDatabase.personNameDao(), account, oldName, name, System.currentTimeMillis())
+        } else if (oldName.isNullOrBlank() && target == fromPersonId) {
+            PersonNameLog.named(appDatabase.personNameDao(), account, name, System.currentTimeMillis())
         }
         personDao.updateName(target, name)
         val manual = personManualPhotoDao.photoKeysForNameList(account, name)

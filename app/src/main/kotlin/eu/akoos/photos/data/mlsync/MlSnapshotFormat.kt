@@ -41,7 +41,7 @@ import java.io.IOException
  * Header
  *
  *     magic                 8 bytes  ASCII "PPMLSNAP"
- *     version               u32      4
+ *     version               u32      5 for FACES, 4 for SEARCH (a reader takes 4 and 5 for either kind)
  *     kind                  u8       1 = FACES, 2 = SEARCH
  *     deviceId              str      the writing device's id
  *     deviceLabel           str      the writing device's human-readable name
@@ -51,7 +51,8 @@ import java.io.IOException
  *     faceModelSha256       str      hex SHA-256 of the recognition model file
  *     clusterParamsVersion  u32      clustering parameters generation
  *     embeddingDim          u32      components per face embedding
- *     7 x u32 counts: keys, people, faces, manualPhotos, notPersons, covers, scanMarkers
+ *     8 x u32 counts: keys, people, nameChanges, faces, manualPhotos, notPersons, covers, scanMarkers
+ *     (version 4: 7 counts, no nameChanges)
  *   SEARCH continues with
  *     searchModelId         str      the embedding space; vectors compare only under an equal id
  *     embeddingDim          u32      components per search embedding
@@ -60,12 +61,12 @@ import java.io.IOException
  * Records
  *
  * Every record is a u8 tag and a body. Records come in sections, one per count above and in the same
- * order (FACES: KEY, PERSON, FACE, MANUAL_PHOTO, NOT_PERSON, COVER, SCAN_MARKER; SEARCH: KEY,
+ * order (FACES: KEY, PERSON, NAME_CHANGE, FACE, MANUAL_PHOTO, NOT_PERSON, COVER, SCAN_MARKER; SEARCH: KEY,
  * SEARCH_EMBEDDING), each holding exactly its count of records. The END tag follows the last section and
  * is the final byte of the stream.
  *
  *     0x01 KEY               str photoKey
- *     0x02 PERSON            str name
+ *     0x02 PERSON            str name, i64 namedAt (version 4: str name only)
  *     0x03 FACE              u32 key, u32 faceIndex, f32 left, f32 top, f32 right, f32 bottom,
  *                            f32 score, f32 blur, u8 flags, u32 person, u32 confirmedPerson,
  *                            u8 points, points x (f32 x, f32 y), embeddingDim x f32
@@ -74,6 +75,7 @@ import java.io.IOException
  *     0x06 COVER             u32 person, u32 key
  *     0x07 SCAN_MARKER       u32 key, u8 flags
  *     0x08 SEARCH_EMBEDDING  u32 key, u8 flags, then embeddingDim x f16 unless the tombstone flag is set
+ *     0x09 NAME_CHANGE       str from, str to, i64 changedAt
  *     0xFF END
  *
  * Meaning
@@ -81,6 +83,13 @@ import java.io.IOException
  * - KEY: a photo's Proton Drive link id, the identity every device of the account shares. Keys are
  *   numbered from 0 in stream order, and every later record names a photo by that number.
  * - PERSON: a person name, numbered from 0 the same way. Every name a later record uses is listed once.
+ *   namedAt is when the person got this name, in epoch milliseconds, 0 when unknown (a name given before
+ *   the time was kept, or a version 4 file).
+ * - NAME_CHANGE: a rename or merge made by hand at changedAt (epoch milliseconds): from then on the person
+ *   called from is called to, or is folded into the person already called that. The names are spelled out
+ *   rather than numbered, as from is usually no longer a person. An importer applies a change that came
+ *   after the name it holds, so the later rename or merge wins on every install; one it holds a later name
+ *   for is passed over.
  * - FACE: one detected face. faceIndex is its position among its photo's detections, so its id on the
  *   writing device is photoKey + "#" + faceIndex. The box is normalised to the photo (0..1), score is
  *   the detection score and blur the Laplacian variance of the aligned crop. Flags: bit 0 set when the
@@ -97,15 +106,22 @@ import java.io.IOException
  * - SEARCH_EMBEDDING: a photo's image embedding at half precision. Flags: bit 0 marks a tombstone, a
  *   photo the indexer could not decode and keeps as the zero vector; a tombstone carries no components.
  *
- * Flag bits not listed are zero. A reader refuses a wrong magic, any version but [VERSION] (so an older
- * build turns a newer file away before reading on), an unknown kind, a record out of order or past its
+ * Flag bits not listed are zero. A reader refuses a wrong magic, a version outside
+ * [OLDEST_READ_VERSION]..[FACES_VERSION] (so an older build turns a newer file away before reading on), an
+ * unknown kind, a record out of order or past its
  * section's count, a reference to a key or person that is not listed, a set unlisted flag bit, malformed
  * UTF-8, a stream that ends before the END tag, and any byte after it.
  */
 object MlSnapshotFormat {
 
-    /** The format version this build writes, and the only one it reads. */
-    const val VERSION = 4
+    /** The version this build writes for a face snapshot, and the newest it reads. */
+    const val FACES_VERSION = 5
+
+    /** The version this build writes for a search snapshot, whose layout version 5 left as it was. */
+    const val SEARCH_VERSION = 4
+
+    /** The oldest version this build reads. */
+    const val OLDEST_READ_VERSION = 4
 
     /** The widest embedding a header may declare. Far above any model in use, it keeps a damaged header
      *  from asking for a huge allocation per record. */
@@ -127,6 +143,7 @@ object MlSnapshotFormat {
     internal const val TAG_COVER = 0x06
     internal const val TAG_SCAN_MARKER = 0x07
     internal const val TAG_SEARCH_EMBEDDING = 0x08
+    internal const val TAG_NAME_CHANGE = 0x09
     internal const val TAG_END = 0xFF
 
     internal const val FACE_REJECTED = 0x01
@@ -191,6 +208,7 @@ object MlSnapshotFormat {
         is MlSnapshotHeader.Faces -> listOf(
             Section(TAG_KEY, header.keyCount),
             Section(TAG_PERSON, header.personCount),
+            Section(TAG_NAME_CHANGE, header.nameChangeCount),
             Section(TAG_FACE, header.faceCount),
             Section(TAG_MANUAL_PHOTO, header.manualPhotoCount),
             Section(TAG_NOT_PERSON, header.notPersonCount),
@@ -212,6 +230,7 @@ object MlSnapshotFormat {
         TAG_COVER -> "COVER"
         TAG_SCAN_MARKER -> "SCAN_MARKER"
         TAG_SEARCH_EMBEDDING -> "SEARCH_EMBEDDING"
+        TAG_NAME_CHANGE -> "NAME_CHANGE"
         TAG_END -> "END"
         else -> "tag $tag"
     }
@@ -251,6 +270,7 @@ sealed interface MlSnapshotHeader {
         val notPersonCount: Int,
         val coverCount: Int,
         val scanMarkerCount: Int,
+        val nameChangeCount: Int = 0,
     ) : MlSnapshotHeader {
         override val kind: MlSnapshotKind get() = MlSnapshotKind.FACES
     }
@@ -278,8 +298,11 @@ sealed interface MlSnapshotRecord {
     /** One entry of the key table. */
     data class PhotoKey(val photoKey: String) : MlSnapshotRecord
 
-    /** One entry of the name table. */
-    data class Person(val name: String) : MlSnapshotRecord
+    /** One entry of the name table, with when the person got the name ([namedAtMillis], 0 when unknown). */
+    data class Person(val name: String, val namedAtMillis: Long = 0L) : MlSnapshotRecord
+
+    /** A rename or merge made by hand at [changedAtMillis]: the person called [fromName] is called [toName]. */
+    data class NameChange(val fromName: String, val toName: String, val changedAtMillis: Long) : MlSnapshotRecord
 
     /**
      * One detected face. [landmarks] interleaves the points' x and y. [embedding] is the face index's own

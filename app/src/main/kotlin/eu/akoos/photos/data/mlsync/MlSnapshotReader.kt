@@ -31,6 +31,7 @@ import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_COVER
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_FACE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_KEY
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_MANUAL_PHOTO
+import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NAME_CHANGE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NOT_PERSON
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_PERSON
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_SCAN_MARKER
@@ -53,7 +54,8 @@ private const val PRESIZE_LIMIT = 1 shl 16
  * Only the key and name tables are kept, never the records, so a library of any size streams through.
  *
  * Malformed input throws [MlSnapshotFormatException]: [MlSnapshotTruncatedException] when the stream
- * ends early, [UnsupportedMlSnapshotVersionException] for another version. The END tag, and the end of
+ * ends early, [UnsupportedMlSnapshotVersionException] for a version it does not read. A version 4 face
+ * snapshot reads as one with no name changes and no naming times. The END tag, and the end of
  * [input] right behind it, are checked by the [hasNext] call that returns false, so a caller treats the
  * snapshot as complete only once iteration has run out normally. [input] is never closed here.
  */
@@ -62,6 +64,9 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
     private val source = SnapshotInput(
         if (input is BufferedInputStream) input else BufferedInputStream(input, READ_BUFFER_BYTES),
     )
+
+    /** The version the stream declares, which decides the face layout. */
+    private var version = 0
 
     /** The snapshot's header, read and checked when the reader was built. */
     val header: MlSnapshotHeader = readHeader()
@@ -100,7 +105,16 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
         }
         val record = when (tag) {
             TAG_KEY -> MlSnapshotRecord.PhotoKey(source.str()).also { keys.add(it.photoKey) }
-            TAG_PERSON -> MlSnapshotRecord.Person(source.str()).also { people.add(it.name) }
+            TAG_PERSON -> {
+                val name = source.str()
+                val namedAt = if (version >= 5) nonNegative(source.i64(), "naming time") else 0L
+                MlSnapshotRecord.Person(name, namedAt).also { people.add(it.name) }
+            }
+            TAG_NAME_CHANGE -> MlSnapshotRecord.NameChange(
+                fromName = source.str(),
+                toName = source.str(),
+                changedAtMillis = nonNegative(source.i64(), "name change time"),
+            )
             TAG_FACE -> readFace()
             TAG_MANUAL_PHOTO -> MlSnapshotRecord.ManualPhoto(personAt(source.i32()), keyAt(source.i32()))
             TAG_NOT_PERSON -> MlSnapshotRecord.NotPerson(
@@ -125,8 +139,8 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
         val magic = ByteArray(MlSnapshotFormat.MAGIC.size)
         source.fully(magic)
         if (!magic.contentEquals(MlSnapshotFormat.MAGIC)) throw MlSnapshotFormatException("not an ML snapshot")
-        val version = source.i32()
-        if (version != MlSnapshotFormat.VERSION) {
+        version = source.i32()
+        if (version !in MlSnapshotFormat.OLDEST_READ_VERSION..MlSnapshotFormat.FACES_VERSION) {
             throw UnsupportedMlSnapshotVersionException(version.toLong() and 0xFFFFFFFFL)
         }
         val kindCode = source.u8()
@@ -136,22 +150,32 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
         val deviceLabel = source.str()
         val createdAtMillis = source.i64()
         return when (kind) {
-            MlSnapshotKind.FACES -> MlSnapshotHeader.Faces(
-                deviceId = deviceId,
-                deviceLabel = deviceLabel,
-                createdAtMillis = createdAtMillis,
-                faceModelVersion = nonNegative(source.i32(), "face model version"),
-                faceModelSha256 = source.str(),
-                clusterParamsVersion = nonNegative(source.i32(), "clustering parameters version"),
-                embeddingDim = embeddingDim(source.i32()),
-                keyCount = nonNegative(source.i32(), "key count"),
-                personCount = nonNegative(source.i32(), "person count"),
-                faceCount = nonNegative(source.i32(), "face count"),
-                manualPhotoCount = nonNegative(source.i32(), "manual photo count"),
-                notPersonCount = nonNegative(source.i32(), "not-person count"),
-                coverCount = nonNegative(source.i32(), "cover count"),
-                scanMarkerCount = nonNegative(source.i32(), "scan marker count"),
-            )
+            MlSnapshotKind.FACES -> {
+                val faceModelVersion = nonNegative(source.i32(), "face model version")
+                val faceModelSha256 = source.str()
+                val clusterParamsVersion = nonNegative(source.i32(), "clustering parameters version")
+                val embeddingDim = embeddingDim(source.i32())
+                val keyCount = nonNegative(source.i32(), "key count")
+                val personCount = nonNegative(source.i32(), "person count")
+                val nameChangeCount = if (version >= 5) nonNegative(source.i32(), "name change count") else 0
+                MlSnapshotHeader.Faces(
+                    deviceId = deviceId,
+                    deviceLabel = deviceLabel,
+                    createdAtMillis = createdAtMillis,
+                    faceModelVersion = faceModelVersion,
+                    faceModelSha256 = faceModelSha256,
+                    clusterParamsVersion = clusterParamsVersion,
+                    embeddingDim = embeddingDim,
+                    keyCount = keyCount,
+                    personCount = personCount,
+                    faceCount = nonNegative(source.i32(), "face count"),
+                    manualPhotoCount = nonNegative(source.i32(), "manual photo count"),
+                    notPersonCount = nonNegative(source.i32(), "not-person count"),
+                    coverCount = nonNegative(source.i32(), "cover count"),
+                    scanMarkerCount = nonNegative(source.i32(), "scan marker count"),
+                    nameChangeCount = nameChangeCount,
+                )
+            }
             MlSnapshotKind.SEARCH -> MlSnapshotHeader.Search(
                 deviceId = deviceId,
                 deviceLabel = deviceLabel,
@@ -228,6 +252,11 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
     }
 
     private fun nonNegative(value: Int, what: String): Int {
+        if (value < 0) throw MlSnapshotFormatException("the $what is out of range")
+        return value
+    }
+
+    private fun nonNegative(value: Long, what: String): Long {
         if (value < 0) throw MlSnapshotFormatException("the $what is out of range")
         return value
     }

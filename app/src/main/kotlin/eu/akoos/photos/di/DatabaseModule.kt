@@ -68,6 +68,7 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.dao.PersonNameDao
 import eu.akoos.photos.data.db.dao.PhotoLabelDao
 import eu.akoos.photos.data.db.dao.DriveCopyAppliedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
@@ -234,6 +235,10 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun providePersonCoverDao(db: AppDatabase): PersonCoverDao = db.personCoverDao()
+
+        @Provides
+        @Singleton
+        fun providePersonNameDao(db: AppDatabase): PersonNameDao = db.personNameDao()
 
         @Provides
         @Singleton

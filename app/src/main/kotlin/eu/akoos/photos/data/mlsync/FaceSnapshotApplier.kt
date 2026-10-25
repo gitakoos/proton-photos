@@ -29,6 +29,8 @@ import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
+import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
+import eu.akoos.photos.data.db.entity.PersonNameStateEntity
 import eu.akoos.photos.data.face.FaceReattachData
 import eu.akoos.photos.data.face.ReattachBox
 import eu.akoos.photos.domain.usecase.ReattachFace
@@ -109,6 +111,12 @@ internal class FaceSnapshotApplied(
  * marks and removals are staged by where each face sat, for the reattach path to put back once the
  * library is detected; on Merge the photos already scanned here take theirs at once, by the same pairing
  * and the same local-wins rule. Manual photos and covers are plain name-keyed rows in either fit.
+ *
+ * The snapshot's renames and merges ([MlSnapshotRecord.NameChange]) come before its faces. On Merge each one
+ * made after the name this device holds is carried out here, a rename or a fold into the person already
+ * called the new name, so the faces that follow meet the people under their new names; one this device holds
+ * a later name for is passed over. Every change and naming time is kept here too, so the next copy this
+ * device writes hands them on.
  */
 internal class FaceSnapshotApplier(
     db: AppDatabase,
@@ -124,6 +132,8 @@ internal class FaceSnapshotApplier(
     private val notPersonDao = db.notPersonDao()
     private val coverDao = db.personCoverDao()
     private val clusterSummaryDao = db.clusterSummaryDao()
+    private val nameDao = db.personNameDao()
+    private val namedAt = HashMap<String, Long>()
 
     private val merge = mode == FaceSnapshotMode.Merge
     private val full = fit == FaceSnapshotFit.Full
@@ -166,7 +176,8 @@ internal class FaceSnapshotApplier(
             enter(sectionOf(record))
             when (record) {
                 is MlSnapshotRecord.PhotoKey -> onKey(record.photoKey)
-                is MlSnapshotRecord.Person -> Unit
+                is MlSnapshotRecord.Person -> onPerson(record)
+                is MlSnapshotRecord.NameChange -> onNameChange(record)
                 is MlSnapshotRecord.Face -> onFace(record)
                 is MlSnapshotRecord.ManualPhoto -> onManualPhoto(record)
                 is MlSnapshotRecord.NotPerson -> onNotPerson(record)
@@ -188,6 +199,7 @@ internal class FaceSnapshotApplier(
 
     private suspend fun prepare() {
         if (full && !merge) clearCloudFaceData()
+        nameDao.statesForUser(account).associateTo(namedAt) { it.name to it.namedAt }
         if (!merge) return
         for (person in personDao.namedPeopleForUser(account)) {
             val name = person.displayName?.takeIf { it.isNotBlank() } ?: continue
@@ -241,6 +253,67 @@ internal class FaceSnapshotApplier(
             }
             section = Section.entries[section.ordinal + 1]
         }
+    }
+
+    /** Keeps the later of the two times a name was given, here or on the writing device. */
+    private suspend fun onPerson(person: MlSnapshotRecord.Person) {
+        val name = snapshotName(person.name) ?: return
+        if (person.namedAtMillis <= (namedAt[name] ?: 0L)) return
+        namedAt[name] = person.namedAtMillis
+        nameDao.setState(PersonNameStateEntity(account, name, person.namedAtMillis))
+    }
+
+    /**
+     * Carries out a rename or merge made on the writing device ([nameChangeApplies]): the person named
+     * [MlSnapshotRecord.NameChange.fromName] here is renamed, or folded into the person already holding the new
+     * name. Kept here either way, so this device's next copy hands it on to the installs that did not see it.
+     */
+    private suspend fun onNameChange(change: MlSnapshotRecord.NameChange) {
+        val from = snapshotName(change.fromName) ?: return
+        val to = snapshotName(change.toName) ?: return
+        if (from == to) return
+        val at = change.changedAtMillis
+        val fromId = personIdByName[from]
+        if (merge && fromId != null && nameChangeApplies(namedAt[from] ?: 0L, at)) renameHere(fromId, from, to)
+        nameDao.addChange(PersonNameChangeEntity(account, from, to, at))
+        if ((namedAt[from] ?: 0L) <= at && from !in personIdByName) {
+            namedAt.remove(from)
+            nameDao.deleteState(account, from)
+        }
+        if (at > (namedAt[to] ?: 0L)) {
+            namedAt[to] = at
+            nameDao.setState(PersonNameStateEntity(account, to, at))
+        }
+    }
+
+    /** Renames the person [fromId], called [from], to [to], or folds them into the person already called [to],
+     *  with the same bookkeeping as a rename or merge made here. */
+    private suspend fun renameHere(fromId: Long, from: String, to: String) {
+        val faceIds = faceDao.faceIdsForPerson(account, fromId)
+        val toId = personIdByName[to]
+        if (toId != null && toId != fromId) {
+            if (faceIds.isNotEmpty()) faceDao.reassignFacesToPerson(faceIds, toId)
+            personDao.updateCoverAndCount(fromId, null, 0)
+            personDao.deleteEmpty(account)
+            clusterSummaryDao.deleteByPerson(toId)
+            clusterSummaryDao.deleteOrphansForUser(account)
+            touchedPeople += toId
+            touchedPeople -= fromId
+        } else {
+            personDao.updateName(fromId, to)
+            personIdByName[to] = fromId
+            nameByPersonId[fromId] = to
+            touchedPeople += fromId
+        }
+        personIdByName.remove(from)
+        if (nameByPersonId[fromId] == from) nameByPersonId.remove(fromId)
+        if (faceIds.isNotEmpty()) faceDao.labelFacesByIds(faceIds, to)
+        manualPhotoDao.rename(account, from, to)
+        faceDao.renameManualName(account, from, to)
+        notPersonDao.rename(account, from, to)
+        coverDao.rename(account, from, to)
+        if (localCoverNames.remove(from)) localCoverNames += to
+        for (names in localBlockedNames.values) if (names.remove(from)) names += to
     }
 
     private suspend fun onKey(photoKey: String) {
@@ -475,6 +548,7 @@ internal class FaceSnapshotApplier(
     private fun sectionOf(record: MlSnapshotRecord): Section = when (record) {
         is MlSnapshotRecord.PhotoKey -> Section.KEYS
         is MlSnapshotRecord.Person -> Section.PEOPLE
+        is MlSnapshotRecord.NameChange -> Section.NAME_CHANGES
         is MlSnapshotRecord.Face -> Section.FACES
         is MlSnapshotRecord.ManualPhoto -> Section.MANUAL_PHOTOS
         is MlSnapshotRecord.NotPerson -> Section.NOT_PERSONS
@@ -485,7 +559,7 @@ internal class FaceSnapshotApplier(
     }
 
     /** The FACES sections in stream order, then the end. */
-    private enum class Section { KEYS, PEOPLE, FACES, MANUAL_PHOTOS, NOT_PERSONS, COVERS, SCAN_MARKERS, END }
+    private enum class Section { KEYS, PEOPLE, NAME_CHANGES, FACES, MANUAL_PHOTOS, NOT_PERSONS, COVERS, SCAN_MARKERS, END }
 
     /** A snapshot face on a photo this device has scanned, waiting to be paired with a local face. */
     private class WaitingFace(val box: ReattachFace, val curation: SnapshotFaceCuration)

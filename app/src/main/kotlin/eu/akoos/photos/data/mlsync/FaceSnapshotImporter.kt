@@ -28,6 +28,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.db.dao.clearForUser
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachData
@@ -171,6 +172,7 @@ class FaceSnapshotImporter internal constructor(
             appDatabase.personManualPhotoDao().clearForUser(account)
             appDatabase.notPersonDao().clearForUser(account)
             appDatabase.personCoverDao().clearForUser(account)
+            appDatabase.personNameDao().clearForUser(account)
             appDatabase.clusterSummaryDao().clearForUser(account)
         }
         FaceReattachSnapshot.clear(reattachFile)

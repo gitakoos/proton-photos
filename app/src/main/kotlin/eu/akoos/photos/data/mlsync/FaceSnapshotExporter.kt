@@ -30,8 +30,10 @@ import eu.akoos.photos.data.db.dao.FaceHead
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
+import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceModelAssets
+import eu.akoos.photos.data.face.PersonNameLog
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
@@ -173,7 +175,10 @@ class FaceSnapshotExporter internal constructor(
         val plan = plan(account)
         val writer = MlSnapshotWriter(output, plan.header(origin))
         for (key in plan.keys) writer.write(MlSnapshotRecord.PhotoKey(key))
-        for (name in plan.names) writer.write(MlSnapshotRecord.Person(name))
+        for (name in plan.names) writer.write(MlSnapshotRecord.Person(name, plan.namedAt[name] ?: 0L))
+        for (change in plan.nameChanges) {
+            writer.write(MlSnapshotRecord.NameChange(change.fromName, change.toName, change.changedAt))
+        }
         var facesWritten = 0
         val groupedNames = HashSet<String>()
         forEachFace(account) { face ->
@@ -251,10 +256,16 @@ class FaceSnapshotExporter internal constructor(
         for (row in covers) { addKey(row.photoKey); names += row.personName }
         val markers = ArrayList<String>()
         forEachMarker(account) { photoKey, _ -> markers += addKey(photoKey) }
+        val nameDao = appDatabase.personNameDao()
+        val namedAt = nameDao.statesForUser(account).associate { it.name to it.namedAt }
+        val nameChanges = nameDao.recentChanges(account, PersonNameLog.MAX_CHANGES)
+            .filter { snapshotName(it.fromName) != null && snapshotName(it.toName) != null }
         return ExportPlan(
             nameByPersonId = nameByPersonId,
             keys = keys.keys,
             nameSet = names,
+            namedAt = namedAt,
+            nameChanges = nameChanges,
             faces = faces,
             manualPhotos = manualPhotos,
             notPersons = notPersons,
@@ -338,6 +349,8 @@ class FaceSnapshotExporter internal constructor(
         val nameByPersonId: Map<Long, String>,
         val keys: Collection<String>,
         private val nameSet: Set<String>,
+        val namedAt: Map<String, Long>,
+        val nameChanges: List<PersonNameChangeEntity>,
         val faces: PlannedFaces,
         val manualPhotos: List<PersonManualPhotoEntity>,
         val notPersons: List<ExportedMark>,
@@ -361,6 +374,7 @@ class FaceSnapshotExporter internal constructor(
             notPersonCount = notPersons.size,
             coverCount = covers.size,
             scanMarkerCount = markers.size,
+            nameChangeCount = nameChanges.size,
         )
 
         /** [face] as its snapshot record, or null for a face the plan left out. */

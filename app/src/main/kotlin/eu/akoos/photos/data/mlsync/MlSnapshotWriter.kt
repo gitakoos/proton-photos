@@ -31,6 +31,7 @@ import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_COVER
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_FACE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_KEY
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_MANUAL_PHOTO
+import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NAME_CHANGE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NOT_PERSON
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_PERSON
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_SCAN_MARKER
@@ -90,7 +91,12 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
             require(header.clusterParamsVersion >= 0) { "clusterParamsVersion is negative" }
         }
         out.bytes(MlSnapshotFormat.MAGIC)
-        out.i32(MlSnapshotFormat.VERSION)
+        out.i32(
+            when (header) {
+                is MlSnapshotHeader.Faces -> MlSnapshotFormat.FACES_VERSION
+                is MlSnapshotHeader.Search -> MlSnapshotFormat.SEARCH_VERSION
+            },
+        )
         out.u8(header.kind.code)
         out.str(deviceId)
         out.str(deviceLabel)
@@ -114,6 +120,15 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
         when (record) {
             is MlSnapshotRecord.PhotoKey -> writeKey(record)
             is MlSnapshotRecord.Person -> writePerson(record)
+            is MlSnapshotRecord.NameChange -> {
+                val from = utf8(record.fromName)
+                val to = utf8(record.toName)
+                require(record.changedAtMillis >= 0) { "a name change time is negative" }
+                out.u8(TAG_NAME_CHANGE)
+                out.str(from)
+                out.str(to)
+                out.i64(record.changedAtMillis)
+            }
             is MlSnapshotRecord.Face -> writeFace(record)
             is MlSnapshotRecord.ManualPhoto -> {
                 val person = personOf(record.personName)
@@ -190,9 +205,11 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
     private fun writePerson(record: MlSnapshotRecord.Person) {
         val bytes = utf8(record.name)
         require(record.name !in personIndex) { "a person name is listed twice" }
+        require(record.namedAtMillis >= 0) { "a person's naming time is negative" }
         personIndex[record.name] = personIndex.size
         out.u8(TAG_PERSON)
         out.str(bytes)
+        out.i64(record.namedAtMillis)
     }
 
     private fun writeFace(face: MlSnapshotRecord.Face) {
@@ -263,6 +280,7 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
     private fun tagOf(record: MlSnapshotRecord): Int = when (record) {
         is MlSnapshotRecord.PhotoKey -> TAG_KEY
         is MlSnapshotRecord.Person -> TAG_PERSON
+        is MlSnapshotRecord.NameChange -> TAG_NAME_CHANGE
         is MlSnapshotRecord.Face -> TAG_FACE
         is MlSnapshotRecord.ManualPhoto -> TAG_MANUAL_PHOTO
         is MlSnapshotRecord.NotPerson -> TAG_NOT_PERSON
