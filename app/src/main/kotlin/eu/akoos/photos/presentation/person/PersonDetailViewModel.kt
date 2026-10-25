@@ -24,7 +24,9 @@ package eu.akoos.photos.presentation.person
 
 import android.content.Context
 import android.util.Log
+import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
 import eu.akoos.photos.data.db.dao.PersonNameDao
+import eu.akoos.photos.data.face.FaceCurationLog
 import eu.akoos.photos.data.face.PersonNameLog
 import eu.akoos.photos.util.retryOnDbTear
 import androidx.lifecycle.ViewModel
@@ -122,6 +124,7 @@ class PersonDetailViewModel @Inject constructor(
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
     private val personNameDao: PersonNameDao,
+    private val faceCurationTimeDao: FaceCurationTimeDao,
     private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val observePeopleUseCase: ObservePeopleUseCase,
@@ -477,6 +480,7 @@ class PersonDetailViewModel @Inject constructor(
             val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
             val faceIds = faceDao.faceIdsForPerson(account, candidateId)
             if (faceIds.isNotEmpty()) notPersonDao.add(faceIds.map { NotPersonEntity(account, name, it) })
+            FaceCurationLog.notPerson(faceCurationTimeDao, account, name, faceIds, removed = false, System.currentTimeMillis())
             handledCandidateFaceIds += faceIds
             loadMergeSuggestion(personId)
         }
@@ -513,9 +517,12 @@ class PersonDetailViewModel @Inject constructor(
                 faceDao.renameManualName(account, old, trimmed)
                 notPersonDao.rename(account, old, trimmed)
                 personCoverDao.rename(account, old, trimmed)
+                faceCurationTimeDao.rename(account, old, trimmed)
                 PersonNameLog.renamed(personNameDao, account, old, trimmed, System.currentTimeMillis())
             } else if (old.isNullOrBlank() && trimmed != null) {
                 PersonNameLog.named(personNameDao, account, trimmed, System.currentTimeMillis())
+            } else if (!old.isNullOrBlank() && trimmed == null) {
+                PersonNameLog.unnamed(personNameDao, account, old, System.currentTimeMillis())
             }
             // Anchor the person's current faces to the name as confirmations (like a fold does), so a
             // later rebuild that splits the person keeps every face together instead of orphaning the
@@ -551,11 +558,17 @@ class PersonDetailViewModel @Inject constructor(
             // never rejoin), then unassign them WITHOUT rejecting, so they recluster and can be
             // suggested for the right person on the next rebuild rather than vanishing from People.
             val faceIds = faceDao.faceIdsForPersonInPhotos(account, personId, photoKeys)
+            val now = System.currentTimeMillis()
             if (!name.isNullOrBlank() && faceIds.isNotEmpty()) {
                 notPersonDao.add(faceIds.map { NotPersonEntity(account, name, it) })
+                FaceCurationLog.notPerson(faceCurationTimeDao, account, name, faceIds, removed = false, now)
             }
             faceDao.unassignFaces(faceIds)
-            if (!name.isNullOrBlank()) personManualPhotoDao.remove(account, name, photoKeys)
+            if (!name.isNullOrBlank()) {
+                val attached = personManualPhotoDao.photoKeysForNameList(account, name).toHashSet()
+                personManualPhotoDao.remove(account, name, photoKeys)
+                FaceCurationLog.manualPhotos(faceCurationTimeDao, account, name, photoKeys.filter { it in attached }, removed = true, now)
+            }
             val manual = if (name.isNullOrBlank()) emptyList()
                 else personManualPhotoDao.photoKeysForNameList(account, name)
             val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
@@ -641,9 +654,16 @@ class PersonDetailViewModel @Inject constructor(
             faceDao.rejectAllForPerson(account, personId)
             hideSimilarFaces(account, reference)
             if (!name.isNullOrBlank()) {
+                val now = System.currentTimeMillis()
+                val attached = personManualPhotoDao.photoKeysForNameList(account, name)
+                val marks = notPersonDao.allForUser(account).filter { it.personName == name }.map { it.faceId }
+                val hadCover = personCoverDao.photoKeyForName(account, name) != null
                 personManualPhotoDao.clearForName(account, name)
                 notPersonDao.clearForName(account, name)
                 personCoverDao.clearForName(account, name)
+                FaceCurationLog.manualPhotos(faceCurationTimeDao, account, name, attached, removed = true, now)
+                FaceCurationLog.notPerson(faceCurationTimeDao, account, name, marks, removed = true, now)
+                if (hadCover) FaceCurationLog.cover(faceCurationTimeDao, account, name, removed = true, now)
             }
             personDao.updateCoverAndCount(personId, null, 0)
             personDao.deleteEmpty(account)
@@ -665,6 +685,7 @@ class PersonDetailViewModel @Inject constructor(
             val name = personDao.personById(personId)?.displayName
             if (name.isNullOrBlank()) return@launch
             personManualPhotoDao.add(photoKeys.map { PersonManualPhotoEntity(account, name, it) })
+            FaceCurationLog.manualPhotos(faceCurationTimeDao, account, name, photoKeys, removed = false, System.currentTimeMillis())
             // Refresh the cached count so the People tile matches the grid (which observes the manual
             // keys live); otherwise the tile stays stale until the next clustering rebuild.
             val manual = personManualPhotoDao.photoKeysForNameList(account, name)
@@ -693,6 +714,7 @@ class PersonDetailViewModel @Inject constructor(
             val name = personDao.personById(personId)?.displayName
             if (!name.isNullOrBlank()) {
                 personCoverDao.set(PersonCoverEntity(account, name, photoKey))
+                FaceCurationLog.cover(faceCurationTimeDao, account, name, removed = false, System.currentTimeMillis())
             }
         }
     }

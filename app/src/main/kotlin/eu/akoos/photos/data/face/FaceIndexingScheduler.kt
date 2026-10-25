@@ -1754,6 +1754,7 @@ class FaceIndexingScheduler @Inject constructor(
             notPersonDao.clearForUser(account)
             appDatabase.personCoverDao().clearForUser(account)
             appDatabase.personNameDao().clearForUser(account)
+            appDatabase.faceCurationTimeDao().clearForUser(account)
             appDatabase.clusterSummaryDao().clearForUser(account)
         }
         if (thenIndex) requestIndex(userId)

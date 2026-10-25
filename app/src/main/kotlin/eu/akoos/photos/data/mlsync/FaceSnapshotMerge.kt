@@ -173,6 +173,12 @@ internal fun mergeFaceCuration(local: LocalFaceCuration, snapshot: SnapshotFaceC
  */
 internal fun nameChangeApplies(heldNamedAt: Long, changedAt: Long): Boolean = changedAt > heldNamedAt
 
+/**
+ * Whether a setting or removal of one piece of curation stamped [changedAt] (an attached photo, a "not this person"
+ * mark, a cover) outranks what this device holds for it, set or removed at [heldAt] (0 when unknown): the later wins.
+ */
+internal fun curationChangeApplies(heldAt: Long, changedAt: Long): Boolean = changedAt > heldAt
+
 internal fun notPersonMarkApplies(localConfirmedName: String?, markName: String): Boolean =
     localConfirmedName != markName
 

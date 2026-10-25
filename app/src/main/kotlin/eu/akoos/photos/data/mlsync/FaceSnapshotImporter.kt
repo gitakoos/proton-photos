@@ -173,6 +173,7 @@ class FaceSnapshotImporter internal constructor(
             appDatabase.notPersonDao().clearForUser(account)
             appDatabase.personCoverDao().clearForUser(account)
             appDatabase.personNameDao().clearForUser(account)
+            appDatabase.faceCurationTimeDao().clearForUser(account)
             appDatabase.clusterSummaryDao().clearForUser(account)
         }
         FaceReattachSnapshot.clear(reattachFile)

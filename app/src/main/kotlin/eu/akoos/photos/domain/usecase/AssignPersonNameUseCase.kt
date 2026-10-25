@@ -74,6 +74,7 @@ class AssignPersonNameUseCase @Inject constructor(
             faceDao.renameManualName(account, oldName, name)
             notPersonDao.rename(account, oldName, name)
             personCoverDao.rename(account, oldName, name)
+            appDatabase.faceCurationTimeDao().rename(account, oldName, name)
             PersonNameLog.renamed(appDatabase.personNameDao(), account, oldName, name, System.currentTimeMillis())
         } else if (oldName.isNullOrBlank() && target == fromPersonId) {
             PersonNameLog.named(appDatabase.personNameDao(), account, name, System.currentTimeMillis())

@@ -41,6 +41,13 @@ object PersonNameLog {
         dao.setState(PersonNameStateEntity(account, name, at))
     }
 
+    /** The name [from] taken off its person at [at]; the person stays, unnamed. */
+    suspend fun unnamed(dao: PersonNameDao, account: String, from: String, at: Long) {
+        dao.addChange(PersonNameChangeEntity(account, from, "", at))
+        dao.deleteState(account, from)
+        dao.pruneChanges(account, MAX_CHANGES)
+    }
+
     /** The person named [from] called [to] from [at] on, renamed or folded into the person already called that. */
     suspend fun renamed(dao: PersonNameDao, account: String, from: String, to: String, at: Long) {
         if (from == to) return

@@ -27,6 +27,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
+import eu.akoos.photos.data.face.FaceCurationLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -79,6 +81,7 @@ class FaceExclusionsViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val faceDao: FaceDao,
     private val notPersonDao: NotPersonDao,
+    private val faceCurationTimeDao: FaceCurationTimeDao,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
@@ -119,7 +122,9 @@ class FaceExclusionsViewModel @Inject constructor(
     fun undoNotThisPerson(name: String, faceId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
-            notPersonDao.deleteMark(userId?.id ?: PhotoLocationEntity.LOCAL_USER, name, faceId)
+            val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+            notPersonDao.deleteMark(account, name, faceId)
+            FaceCurationLog.notPerson(faceCurationTimeDao, account, name, listOf(faceId), removed = true, System.currentTimeMillis())
             faceIndexingScheduler.requestIndex(userId)
             load()
         }

@@ -34,6 +34,7 @@ import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_MANUAL_PHOTO
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NAME_CHANGE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NOT_PERSON
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_PERSON
+import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_REMOVAL
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_SCAN_MARKER
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_SEARCH_EMBEDDING
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.tagName
@@ -129,29 +130,50 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
                 out.str(to)
                 out.i64(record.changedAtMillis)
             }
+            is MlSnapshotRecord.Removal -> {
+                require(record.kind in MlSnapshotFormat.REMOVAL_MANUAL_PHOTO..MlSnapshotFormat.REMOVAL_COVER) {
+                    "unknown removal kind ${record.kind}"
+                }
+                val person = utf8(record.personName)
+                val photoKey = utf8(record.photoKey)
+                require(record.faceIndex >= 0) { "faceIndex is negative" }
+                require(record.removedAtMillis >= 0) { "a removal time is negative" }
+                out.u8(TAG_REMOVAL)
+                out.u8(record.kind)
+                out.str(person)
+                out.str(photoKey)
+                out.i32(record.faceIndex)
+                out.i64(record.removedAtMillis)
+            }
             is MlSnapshotRecord.Face -> writeFace(record)
             is MlSnapshotRecord.ManualPhoto -> {
                 val person = personOf(record.personName)
                 val key = keyOf(record.photoKey)
+                require(record.addedAtMillis >= 0) { "a curation time is negative" }
                 out.u8(TAG_MANUAL_PHOTO)
                 out.i32(person)
                 out.i32(key)
+                out.i64(record.addedAtMillis)
             }
             is MlSnapshotRecord.NotPerson -> {
                 val person = personOf(record.personName)
                 val key = keyOf(record.photoKey)
                 require(record.faceIndex >= 0) { "faceIndex is negative" }
+                require(record.addedAtMillis >= 0) { "a curation time is negative" }
                 out.u8(TAG_NOT_PERSON)
                 out.i32(person)
                 out.i32(key)
                 out.i32(record.faceIndex)
+                out.i64(record.addedAtMillis)
             }
             is MlSnapshotRecord.Cover -> {
                 val person = personOf(record.personName)
                 val key = keyOf(record.photoKey)
+                require(record.setAtMillis >= 0) { "a curation time is negative" }
                 out.u8(TAG_COVER)
                 out.i32(person)
                 out.i32(key)
+                out.i64(record.setAtMillis)
             }
             is MlSnapshotRecord.ScanMarker -> {
                 val key = keyOf(record.photoKey)
@@ -281,6 +303,7 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
         is MlSnapshotRecord.PhotoKey -> TAG_KEY
         is MlSnapshotRecord.Person -> TAG_PERSON
         is MlSnapshotRecord.NameChange -> TAG_NAME_CHANGE
+        is MlSnapshotRecord.Removal -> TAG_REMOVAL
         is MlSnapshotRecord.Face -> TAG_FACE
         is MlSnapshotRecord.ManualPhoto -> TAG_MANUAL_PHOTO
         is MlSnapshotRecord.NotPerson -> TAG_NOT_PERSON

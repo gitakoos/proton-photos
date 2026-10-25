@@ -51,8 +51,8 @@ import java.io.IOException
  *     faceModelSha256       str      hex SHA-256 of the recognition model file
  *     clusterParamsVersion  u32      clustering parameters generation
  *     embeddingDim          u32      components per face embedding
- *     8 x u32 counts: keys, people, nameChanges, faces, manualPhotos, notPersons, covers, scanMarkers
- *     (version 4: 7 counts, no nameChanges)
+ *     9 x u32 counts: keys, people, nameChanges, removals, faces, manualPhotos, notPersons, covers,
+ *     scanMarkers (version 4: 7 counts, no nameChanges or removals)
  *   SEARCH continues with
  *     searchModelId         str      the embedding space; vectors compare only under an equal id
  *     embeddingDim          u32      components per search embedding
@@ -61,7 +61,7 @@ import java.io.IOException
  * Records
  *
  * Every record is a u8 tag and a body. Records come in sections, one per count above and in the same
- * order (FACES: KEY, PERSON, NAME_CHANGE, FACE, MANUAL_PHOTO, NOT_PERSON, COVER, SCAN_MARKER; SEARCH: KEY,
+ * order (FACES: KEY, PERSON, NAME_CHANGE, REMOVAL, FACE, MANUAL_PHOTO, NOT_PERSON, COVER, SCAN_MARKER; SEARCH: KEY,
  * SEARCH_EMBEDDING), each holding exactly its count of records. The END tag follows the last section and
  * is the final byte of the stream.
  *
@@ -70,12 +70,13 @@ import java.io.IOException
  *     0x03 FACE              u32 key, u32 faceIndex, f32 left, f32 top, f32 right, f32 bottom,
  *                            f32 score, f32 blur, u8 flags, u32 person, u32 confirmedPerson,
  *                            u8 points, points x (f32 x, f32 y), embeddingDim x f32
- *     0x04 MANUAL_PHOTO      u32 person, u32 key
- *     0x05 NOT_PERSON        u32 person, u32 key, u32 faceIndex
- *     0x06 COVER             u32 person, u32 key
+ *     0x04 MANUAL_PHOTO      u32 person, u32 key, i64 addedAt (version 4: no time)
+ *     0x05 NOT_PERSON        u32 person, u32 key, u32 faceIndex, i64 addedAt (version 4: no time)
+ *     0x06 COVER             u32 person, u32 key, i64 setAt (version 4: no time)
  *     0x07 SCAN_MARKER       u32 key, u8 flags
  *     0x08 SEARCH_EMBEDDING  u32 key, u8 flags, then embeddingDim x f16 unless the tombstone flag is set
  *     0x09 NAME_CHANGE       str from, str to, i64 changedAt
+ *     0x0A REMOVAL           u8 kind, str person, str photoKey, u32 faceIndex, i64 removedAt
  *     0xFF END
  *
  * Meaning
@@ -86,10 +87,17 @@ import java.io.IOException
  *   namedAt is when the person got this name, in epoch milliseconds, 0 when unknown (a name given before
  *   the time was kept, or a version 4 file).
  * - NAME_CHANGE: a rename or merge made by hand at changedAt (epoch milliseconds): from then on the person
- *   called from is called to, or is folded into the person already called that. The names are spelled out
- *   rather than numbered, as from is usually no longer a person. An importer applies a change that came
- *   after the name it holds, so the later rename or merge wins on every install; one it holds a later name
- *   for is passed over.
+ *   called from is called to, or is folded into the person already called that; an empty to is the name
+ *   taken off. The names are spelled out rather than numbered, as from is usually no longer a person. An
+ *   importer applies a change that came after the name it holds, so the later rename, merge or removal of
+ *   a name wins on every install; one it holds a later name for is passed over.
+ * - REMOVAL: a piece of a person's curation taken away by hand at removedAt: kind 1 a photo attached to the
+ *   person (photoKey), kind 2 a "not this person" mark (the face photoKey + "#" + faceIndex), kind 3 the
+ *   cover (photoKey empty). faceIndex is 0 unless kind is 2. Spelled out, as the photo need not be in the
+ *   key table. An importer takes it away when it holds the piece from before removedAt, and passes over a
+ *   MANUAL_PHOTO, NOT_PERSON or COVER of its own copies that came before a removal it holds.
+ * - The times on MANUAL_PHOTO, NOT_PERSON and COVER are when that piece was set by hand, epoch milliseconds,
+ *   0 when unknown; on each the later of a setting and a removal wins, and of two covers the later.
  * - FACE: one detected face. faceIndex is its position among its photo's detections, so its id on the
  *   writing device is photoKey + "#" + faceIndex. The box is normalised to the photo (0..1), score is
  *   the detection score and blur the Laplacian variance of the aligned crop. Flags: bit 0 set when the
@@ -144,6 +152,12 @@ object MlSnapshotFormat {
     internal const val TAG_SCAN_MARKER = 0x07
     internal const val TAG_SEARCH_EMBEDDING = 0x08
     internal const val TAG_NAME_CHANGE = 0x09
+    internal const val TAG_REMOVAL = 0x0A
+
+    /** The kinds of a REMOVAL, the same numbers the curation times keep. */
+    const val REMOVAL_MANUAL_PHOTO = 1
+    const val REMOVAL_NOT_PERSON = 2
+    const val REMOVAL_COVER = 3
     internal const val TAG_END = 0xFF
 
     internal const val FACE_REJECTED = 0x01
@@ -209,6 +223,7 @@ object MlSnapshotFormat {
             Section(TAG_KEY, header.keyCount),
             Section(TAG_PERSON, header.personCount),
             Section(TAG_NAME_CHANGE, header.nameChangeCount),
+            Section(TAG_REMOVAL, header.removalCount),
             Section(TAG_FACE, header.faceCount),
             Section(TAG_MANUAL_PHOTO, header.manualPhotoCount),
             Section(TAG_NOT_PERSON, header.notPersonCount),
@@ -231,6 +246,7 @@ object MlSnapshotFormat {
         TAG_SCAN_MARKER -> "SCAN_MARKER"
         TAG_SEARCH_EMBEDDING -> "SEARCH_EMBEDDING"
         TAG_NAME_CHANGE -> "NAME_CHANGE"
+        TAG_REMOVAL -> "REMOVAL"
         TAG_END -> "END"
         else -> "tag $tag"
     }
@@ -271,6 +287,7 @@ sealed interface MlSnapshotHeader {
         val coverCount: Int,
         val scanMarkerCount: Int,
         val nameChangeCount: Int = 0,
+        val removalCount: Int = 0,
     ) : MlSnapshotHeader {
         override val kind: MlSnapshotKind get() = MlSnapshotKind.FACES
     }
@@ -301,8 +318,24 @@ sealed interface MlSnapshotRecord {
     /** One entry of the name table, with when the person got the name ([namedAtMillis], 0 when unknown). */
     data class Person(val name: String, val namedAtMillis: Long = 0L) : MlSnapshotRecord
 
-    /** A rename or merge made by hand at [changedAtMillis]: the person called [fromName] is called [toName]. */
+    /** A rename or merge made by hand at [changedAtMillis]: the person called [fromName] is called [toName], or
+     *  has no name any more when [toName] is empty. */
     data class NameChange(val fromName: String, val toName: String, val changedAtMillis: Long) : MlSnapshotRecord
+
+    /**
+     * A piece of [personName]'s curation taken away by hand at [removedAtMillis]: an attached photo
+     * ([MlSnapshotFormat.REMOVAL_MANUAL_PHOTO], [photoKey]), a "not this person" mark
+     * ([MlSnapshotFormat.REMOVAL_NOT_PERSON], [photoKey] and [faceIndex]) or the cover ([MlSnapshotFormat.REMOVAL_COVER]).
+     */
+    data class Removal(
+        val kind: Int,
+        val personName: String,
+        val photoKey: String,
+        val faceIndex: Int,
+        val removedAtMillis: Long,
+    ) : MlSnapshotRecord {
+        val faceId: String get() = "$photoKey#$faceIndex"
+    }
 
     /**
      * One detected face. [landmarks] interleaves the points' x and y. [embedding] is the face index's own
@@ -369,16 +402,21 @@ sealed interface MlSnapshotRecord {
                 "embedding=${embedding.size} bytes)"
     }
 
-    /** A photo attached to [personName] by hand. */
-    data class ManualPhoto(val personName: String, val photoKey: String) : MlSnapshotRecord
+    /** A photo attached to [personName] by hand, at [addedAtMillis] (0 when unknown). */
+    data class ManualPhoto(val personName: String, val photoKey: String, val addedAtMillis: Long = 0L) : MlSnapshotRecord
 
-    /** The face [faceIndex] of [photoKey] is marked as not being [personName]. */
-    data class NotPerson(val personName: String, val photoKey: String, val faceIndex: Int) : MlSnapshotRecord {
+    /** The face [faceIndex] of [photoKey] is marked as not being [personName], since [addedAtMillis] (0 when unknown). */
+    data class NotPerson(
+        val personName: String,
+        val photoKey: String,
+        val faceIndex: Int,
+        val addedAtMillis: Long = 0L,
+    ) : MlSnapshotRecord {
         val faceId: String get() = "$photoKey#$faceIndex"
     }
 
-    /** The photo picked as [personName]'s cover. */
-    data class Cover(val personName: String, val photoKey: String) : MlSnapshotRecord
+    /** The photo picked as [personName]'s cover, at [setAtMillis] (0 when unknown). */
+    data class Cover(val personName: String, val photoKey: String, val setAtMillis: Long = 0L) : MlSnapshotRecord
 
     /** A photo the face indexer finished, with or without faces. */
     data class ScanMarker(val photoKey: String, val hiResScanned: Boolean) : MlSnapshotRecord

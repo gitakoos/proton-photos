@@ -33,6 +33,7 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FaceCurationLog
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -106,7 +107,9 @@ class AssignFacesToPersonUseCase @Inject constructor(
         faceDao.reassignFacesToPerson(ids, person.id)
         if (name != null) {
             faceDao.labelFacesByIds(ids, name)
-            for (id in ids) notPersonDao.deleteMark(account, name, id)
+            val marked = notPersonDao.allForUser(account).filter { it.personName == name && it.faceId in ids }.map { it.faceId }
+            for (id in marked) notPersonDao.deleteMark(account, name, id)
+            FaceCurationLog.notPerson(appDatabase.faceCurationTimeDao(), account, name, marked, removed = true, System.currentTimeMillis())
         } else {
             faceDao.clearManualNameByIds(ids)
         }

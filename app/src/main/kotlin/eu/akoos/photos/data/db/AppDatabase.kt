@@ -28,6 +28,8 @@ package eu.akoos.photos.data.db
 
 import androidx.room.Database
 import androidx.room.TypeConverters
+import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
+import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
 import me.proton.core.account.data.db.AccountConverters
 import me.proton.core.account.data.db.AccountDatabase
 import me.proton.core.account.data.db.AccountDao
@@ -211,6 +213,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         DriveCopyAppliedEntity::class,
         PersonNameStateEntity::class,
         PersonNameChangeEntity::class,
+        FaceCurationTimeEntity::class,
         // Account
         AccountEntity::class,
         AccountMetadataEntity::class,
@@ -250,7 +253,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 50,
+    version = 51,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -296,6 +299,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun photoLabelDao(): PhotoLabelDao
     abstract fun driveCopyAppliedDao(): DriveCopyAppliedDao
     abstract fun personNameDao(): PersonNameDao
+    abstract fun faceCurationTimeDao(): FaceCurationTimeDao
 
     abstract override fun accountDao(): AccountDao
     abstract override fun sessionDao(): SessionDao

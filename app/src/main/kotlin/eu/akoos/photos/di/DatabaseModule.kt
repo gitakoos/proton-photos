@@ -31,6 +31,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.Multibinds
+import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
 import me.proton.core.eventmanager.domain.EventListener
 import me.proton.core.account.data.db.AccountDatabase
 import me.proton.core.auth.data.db.AuthDatabase
@@ -239,6 +240,10 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun providePersonNameDao(db: AppDatabase): PersonNameDao = db.personNameDao()
+
+        @Provides
+        @Singleton
+        fun provideFaceCurationTimeDao(db: AppDatabase): FaceCurationTimeDao = db.faceCurationTimeDao()
 
         @Provides
         @Singleton

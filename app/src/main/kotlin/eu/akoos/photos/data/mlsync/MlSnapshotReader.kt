@@ -34,6 +34,7 @@ import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_MANUAL_PHOTO
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NAME_CHANGE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NOT_PERSON
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_PERSON
+import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_REMOVAL
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_SCAN_MARKER
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_SEARCH_EMBEDDING
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.tagName
@@ -116,13 +117,27 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
                 changedAtMillis = nonNegative(source.i64(), "name change time"),
             )
             TAG_FACE -> readFace()
-            TAG_MANUAL_PHOTO -> MlSnapshotRecord.ManualPhoto(personAt(source.i32()), keyAt(source.i32()))
+            TAG_REMOVAL -> {
+                val kind = source.u8()
+                if (kind !in MlSnapshotFormat.REMOVAL_MANUAL_PHOTO..MlSnapshotFormat.REMOVAL_COVER) {
+                    throw MlSnapshotFormatException("unknown removal kind $kind")
+                }
+                MlSnapshotRecord.Removal(
+                    kind = kind,
+                    personName = source.str(),
+                    photoKey = source.str(),
+                    faceIndex = nonNegative(source.i32(), "face index"),
+                    removedAtMillis = nonNegative(source.i64(), "removal time"),
+                )
+            }
+            TAG_MANUAL_PHOTO -> MlSnapshotRecord.ManualPhoto(personAt(source.i32()), keyAt(source.i32()), curationTime())
             TAG_NOT_PERSON -> MlSnapshotRecord.NotPerson(
                 personName = personAt(source.i32()),
                 photoKey = keyAt(source.i32()),
                 faceIndex = nonNegative(source.i32(), "face index"),
+                addedAtMillis = curationTime(),
             )
-            TAG_COVER -> MlSnapshotRecord.Cover(personAt(source.i32()), keyAt(source.i32()))
+            TAG_COVER -> MlSnapshotRecord.Cover(personAt(source.i32()), keyAt(source.i32()), curationTime())
             TAG_SCAN_MARKER -> {
                 val photoKey = keyAt(source.i32())
                 val flags = checkedFlags(source.u8(), SCAN_HI_RES)
@@ -158,6 +173,7 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
                 val keyCount = nonNegative(source.i32(), "key count")
                 val personCount = nonNegative(source.i32(), "person count")
                 val nameChangeCount = if (version >= 5) nonNegative(source.i32(), "name change count") else 0
+                val removalCount = if (version >= 5) nonNegative(source.i32(), "removal count") else 0
                 MlSnapshotHeader.Faces(
                     deviceId = deviceId,
                     deviceLabel = deviceLabel,
@@ -174,6 +190,7 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
                     coverCount = nonNegative(source.i32(), "cover count"),
                     scanMarkerCount = nonNegative(source.i32(), "scan marker count"),
                     nameChangeCount = nameChangeCount,
+                    removalCount = removalCount,
                 )
             }
             MlSnapshotKind.SEARCH -> MlSnapshotHeader.Search(
@@ -237,6 +254,9 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
         }
         return MlSnapshotRecord.SearchEmbedding(photoKey, embedding)
     }
+
+    /** A curation record's time: version 5 carries one, version 4 none. */
+    private fun curationTime(): Long = if (version >= 5) nonNegative(source.i64(), "curation time") else 0L
 
     private fun keyAt(index: Int): String =
         keys.getOrNull(index) ?: throw MlSnapshotFormatException("a photo key reference is out of range")

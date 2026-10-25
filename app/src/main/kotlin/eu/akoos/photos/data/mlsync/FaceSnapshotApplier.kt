@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.mlsync
 
 import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.FaceScanEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
@@ -117,6 +118,10 @@ internal class FaceSnapshotApplied(
  * called the new name, so the faces that follow meet the people under their new names; one this device holds
  * a later name for is passed over. Every change and naming time is kept here too, so the next copy this
  * device writes hands them on.
+ *
+ * Attached photos, "not this person" marks and covers carry the time each was set by hand, and the pieces taken
+ * away by hand come as [MlSnapshotRecord.Removal]s before the faces. Of a setting and a removal of the same piece,
+ * here or there, the later wins, and of two covers the later; the times are kept here as well.
  */
 internal class FaceSnapshotApplier(
     db: AppDatabase,
@@ -134,6 +139,9 @@ internal class FaceSnapshotApplier(
     private val clusterSummaryDao = db.clusterSummaryDao()
     private val nameDao = db.personNameDao()
     private val namedAt = HashMap<String, Long>()
+    private val curationDao = db.faceCurationTimeDao()
+    private val curation = HashMap<CurationKey, FaceCurationTimeEntity>()
+    private val curationNotes = ArrayList<FaceCurationTimeEntity>()
 
     private val merge = mode == FaceSnapshotMode.Merge
     private val full = fit == FaceSnapshotFit.Full
@@ -178,6 +186,7 @@ internal class FaceSnapshotApplier(
                 is MlSnapshotRecord.PhotoKey -> onKey(record.photoKey)
                 is MlSnapshotRecord.Person -> onPerson(record)
                 is MlSnapshotRecord.NameChange -> onNameChange(record)
+                is MlSnapshotRecord.Removal -> onRemoval(record)
                 is MlSnapshotRecord.Face -> onFace(record)
                 is MlSnapshotRecord.ManualPhoto -> onManualPhoto(record)
                 is MlSnapshotRecord.NotPerson -> onNotPerson(record)
@@ -188,6 +197,7 @@ internal class FaceSnapshotApplier(
         }
         enter(Section.END)
         if (full) finishRows()
+        if (curationNotes.isNotEmpty()) curationDao.set(curationNotes)
         return FaceSnapshotApplied(
             facesWritten = facesWritten,
             facesUpdated = facesUpdated,
@@ -200,6 +210,7 @@ internal class FaceSnapshotApplier(
     private suspend fun prepare() {
         if (full && !merge) clearCloudFaceData()
         nameDao.statesForUser(account).associateTo(namedAt) { it.name to it.namedAt }
+        for (row in curationDao.allForUser(account)) curation[CurationKey(row.kind, row.personName, row.ref)] = row
         if (!merge) return
         for (person in personDao.namedPeopleForUser(account)) {
             val name = person.displayName?.takeIf { it.isNotBlank() } ?: continue
@@ -270,6 +281,10 @@ internal class FaceSnapshotApplier(
      */
     private suspend fun onNameChange(change: MlSnapshotRecord.NameChange) {
         val from = snapshotName(change.fromName) ?: return
+        if (change.toName.isEmpty()) {
+            onNameRemoved(from, change.changedAtMillis)
+            return
+        }
         val to = snapshotName(change.toName) ?: return
         if (from == to) return
         val at = change.changedAtMillis
@@ -284,6 +299,67 @@ internal class FaceSnapshotApplier(
             namedAt[to] = at
             nameDao.setState(PersonNameStateEntity(account, to, at))
         }
+    }
+
+    /** Takes the name [from] off the person holding it here, as a name taken off here does, when that came later
+     *  than the name was given here; the person stays, unnamed. */
+    private suspend fun onNameRemoved(from: String, at: Long) {
+        val fromId = personIdByName[from]
+        if (merge && fromId != null && nameChangeApplies(namedAt[from] ?: 0L, at)) {
+            val faceIds = faceDao.faceIdsForPerson(account, fromId)
+            personDao.updateName(fromId, null)
+            if (faceIds.isNotEmpty()) faceDao.clearManualNameByIds(faceIds)
+            personIdByName.remove(from)
+            nameByPersonId.remove(fromId)
+            touchedPeople += fromId
+        }
+        nameDao.addChange(PersonNameChangeEntity(account, from, "", at))
+        if ((namedAt[from] ?: 0L) <= at && from !in personIdByName) {
+            namedAt.remove(from)
+            nameDao.deleteState(account, from)
+        }
+    }
+
+    /**
+     * Takes away a piece of curation removed on the writing device, when this device set it before that, and keeps
+     * the removal so a setting of the same piece from before it is passed over here and handed on as removed.
+     */
+    private suspend fun onRemoval(removal: MlSnapshotRecord.Removal) {
+        val name = snapshotName(removal.personName) ?: return
+        val at = removal.removedAtMillis
+        val ref = when (removal.kind) {
+            MlSnapshotFormat.REMOVAL_MANUAL_PHOTO -> removal.photoKey.takeIf(::isPortableFaceKey) ?: return
+            MlSnapshotFormat.REMOVAL_NOT_PERSON -> removal.faceId.takeIf { isPortableFaceKey(removal.photoKey) } ?: return
+            else -> ""
+        }
+        val key = CurationKey(removal.kind, name, ref)
+        val held = curation[key]
+        if (!curationChangeApplies(held?.changedAt ?: 0L, at)) return
+        if (held?.removed != true) {
+            when (removal.kind) {
+                MlSnapshotFormat.REMOVAL_MANUAL_PHOTO -> manualPhotoDao.remove(account, name, listOf(ref))
+                MlSnapshotFormat.REMOVAL_NOT_PERSON -> {
+                    notPersonDao.deleteMark(account, name, ref)
+                    localBlockedNames[ref]?.remove(name)
+                }
+                MlSnapshotFormat.REMOVAL_COVER -> if (localCoverNames.remove(name)) coverDao.clearForName(account, name)
+            }
+        }
+        note(key, removed = true, at)
+    }
+
+    /** Whether a setting of the piece [key] stamped [at] is taken: not when this device removed it later. */
+    private fun settingTaken(key: CurationKey, at: Long): Boolean {
+        val held = curation[key] ?: return true
+        return !held.removed || curationChangeApplies(held.changedAt, at)
+    }
+
+    private fun note(key: CurationKey, removed: Boolean, at: Long) {
+        val held = curation[key]
+        if (held != null && held.changedAt >= at) return
+        val row = FaceCurationTimeEntity(account, key.kind, key.name, key.ref, removed, at)
+        curation[key] = row
+        curationNotes += row
     }
 
     /** Renames the person [fromId], called [from], to [to], or folds them into the person already called [to],
@@ -312,6 +388,11 @@ internal class FaceSnapshotApplier(
         faceDao.renameManualName(account, from, to)
         notPersonDao.rename(account, from, to)
         coverDao.rename(account, from, to)
+        curationDao.rename(account, from, to)
+        for (key in curation.keys.filter { it.name == from }) {
+            val row = curation.remove(key) ?: continue
+            curation[key.copy(name = to)] = row.copy(personName = to)
+        }
         if (localCoverNames.remove(from)) localCoverNames += to
         for (names in localBlockedNames.values) if (names.remove(from)) names += to
     }
@@ -446,25 +527,37 @@ internal class FaceSnapshotApplier(
 
     private suspend fun onManualPhoto(record: MlSnapshotRecord.ManualPhoto) {
         if (!isPortableFaceKey(record.photoKey)) return
+        val key = CurationKey(MlSnapshotFormat.REMOVAL_MANUAL_PHOTO, record.personName, record.photoKey)
+        if (!settingTaken(key, record.addedAtMillis)) return
         manualRows += PersonManualPhotoEntity(account, record.personName, record.photoKey)
+        if (record.addedAtMillis > 0L) note(key, removed = false, record.addedAtMillis)
         if (manualRows.size >= WRITE_BATCH) flushManualRows()
     }
 
     private suspend fun onNotPerson(record: MlSnapshotRecord.NotPerson) {
         if (!isPortableFaceKey(record.photoKey)) return
+        if (!settingTaken(CurationKey(MlSnapshotFormat.REMOVAL_NOT_PERSON, record.personName, record.faceId), record.addedAtMillis)) return
         if (!importsFaceRows(mode, record.photoKey in scannedHere)) {
             // A photo scanned here: the mark follows its face onto the local face it was paired with.
             val match = notPersonMatches[record.faceId] ?: return
             if (notPersonMarkApplies(match.confirmedName, record.personName)) {
                 addNotPersonRow(NotPersonEntity(account, record.personName, match.localFaceId))
+                noteMark(record, match.localFaceId)
             }
             return
         }
         if (full) {
             addNotPersonRow(NotPersonEntity(account, record.personName, record.faceId))
+            noteMark(record, record.faceId)
         } else {
             val box = stagedBoxes[record.faceId] ?: return
             stagedNots += ReattachLabel(box.faceId, box.photoKey, box.left, box.top, box.right, box.bottom, record.personName)
+        }
+    }
+
+    private fun noteMark(record: MlSnapshotRecord.NotPerson, faceId: String) {
+        if (record.addedAtMillis > 0L) {
+            note(CurationKey(MlSnapshotFormat.REMOVAL_NOT_PERSON, record.personName, faceId), removed = false, record.addedAtMillis)
         }
     }
 
@@ -475,9 +568,14 @@ internal class FaceSnapshotApplier(
 
     private suspend fun onCover(record: MlSnapshotRecord.Cover) {
         if (!isPortableFaceKey(record.photoKey)) return
-        if (!coverApplies(mode, record.personName in localCoverNames)) return
+        val key = CurationKey(MlSnapshotFormat.REMOVAL_COVER, record.personName, "")
+        if (!settingTaken(key, record.setAtMillis)) return
+        val heldAt = curation[key]?.takeUnless { it.removed }?.changedAt ?: 0L
+        val laterThanHeld = curationChangeApplies(heldAt, record.setAtMillis)
+        if (!coverApplies(mode, record.personName in localCoverNames) && !laterThanHeld) return
         coverDao.set(PersonCoverEntity(account, record.personName, record.photoKey))
         localCoverNames += record.personName
+        if (record.setAtMillis > 0L) note(key, removed = false, record.setAtMillis)
     }
 
     private suspend fun onScanMarker(record: MlSnapshotRecord.ScanMarker) {
@@ -549,6 +647,7 @@ internal class FaceSnapshotApplier(
         is MlSnapshotRecord.PhotoKey -> Section.KEYS
         is MlSnapshotRecord.Person -> Section.PEOPLE
         is MlSnapshotRecord.NameChange -> Section.NAME_CHANGES
+        is MlSnapshotRecord.Removal -> Section.REMOVALS
         is MlSnapshotRecord.Face -> Section.FACES
         is MlSnapshotRecord.ManualPhoto -> Section.MANUAL_PHOTOS
         is MlSnapshotRecord.NotPerson -> Section.NOT_PERSONS
@@ -559,7 +658,9 @@ internal class FaceSnapshotApplier(
     }
 
     /** The FACES sections in stream order, then the end. */
-    private enum class Section { KEYS, PEOPLE, NAME_CHANGES, FACES, MANUAL_PHOTOS, NOT_PERSONS, COVERS, SCAN_MARKERS, END }
+    private enum class Section { KEYS, PEOPLE, NAME_CHANGES, REMOVALS, FACES, MANUAL_PHOTOS, NOT_PERSONS, COVERS, SCAN_MARKERS, END }
+
+    private data class CurationKey(val kind: Int, val name: String, val ref: String)
 
     /** A snapshot face on a photo this device has scanned, waiting to be paired with a local face. */
     private class WaitingFace(val box: ReattachFace, val curation: SnapshotFaceCuration)

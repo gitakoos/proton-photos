@@ -41,6 +41,7 @@ import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PersonNameStateEntity
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachData
+import eu.akoos.photos.data.face.FaceCurationLog
 import eu.akoos.photos.data.face.FaceReattachSnapshot
 import eu.akoos.photos.data.face.PersonNameLog
 import eu.akoos.photos.data.face.ReattachBox
@@ -477,6 +478,66 @@ class FaceSnapshotRoundTripTest {
             listOf(MlSnapshotRecord.NameChange("Ally", "Alice", 200L)),
             records.filterIsInstance<MlSnapshotRecord.NameChange>(),
         )
+    }
+
+    @Test
+    fun `a name taken off on the other device after it was given here is taken off here too`() = runTest {
+        seedSource()
+        PersonNameLog.unnamed(source.personNameDao(), ACCOUNT, "Ally", 200L)
+        seedAllyOnTarget(allyNamedAt = 100L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertFalse("Ally" in namedPeople())
+        // The face loses the name taken off; the copy, which names it Alice, then fills the gap.
+        assertEquals("Alice", faces().getValue("linkA#0").manualName)
+        assertNull(target.personNameDao().namedAt(ACCOUNT, "Ally"))
+    }
+
+    @Test
+    fun `the later cover wins, here or there`() = runTest {
+        seedSource()
+        FaceCurationLog.cover(source.faceCurationTimeDao(), ACCOUNT, "Alice", removed = false, 200L)
+        target.personCoverDao().set(PersonCoverEntity(ACCOUNT, "Alice", "linkX"))
+        FaceCurationLog.cover(target.faceCurationTimeDao(), ACCOUNT, "Alice", removed = false, 100L)
+
+        import(export(), FaceSnapshotMode.Merge)
+        assertEquals(setOf("Alice" to "linkB"), covers())
+
+        // A cover picked here after the one the copy brings stays.
+        target.personCoverDao().set(PersonCoverEntity(ACCOUNT, "Alice", "linkX"))
+        FaceCurationLog.cover(target.faceCurationTimeDao(), ACCOUNT, "Alice", removed = false, 300L)
+        import(export(), FaceSnapshotMode.Merge)
+        assertEquals(setOf("Alice" to "linkX"), covers())
+    }
+
+    @Test
+    fun `a photo taken off a person or a mark taken back on the other device goes here too`() = runTest {
+        seedSource()
+        target.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(ACCOUNT, "Alice", "linkE")))
+        FaceCurationLog.manualPhotos(target.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkE"), removed = false, 100L)
+        target.notPersonDao().add(listOf(NotPersonEntity(ACCOUNT, "Bob", "linkA#0")))
+        FaceCurationLog.notPerson(target.faceCurationTimeDao(), ACCOUNT, "Bob", listOf("linkA#0"), removed = false, 100L)
+        source.personManualPhotoDao().remove(ACCOUNT, "Alice", listOf("linkE"))
+        FaceCurationLog.manualPhotos(source.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkE"), removed = true, 200L)
+        source.notPersonDao().deleteMark(ACCOUNT, "Bob", "linkA#0")
+        FaceCurationLog.notPerson(source.faceCurationTimeDao(), ACCOUNT, "Bob", listOf("linkA#0"), removed = true, 200L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertFalse("Alice" to "linkE" in manualPhotos())
+        assertFalse("Bob" to "linkA#0" in notPersons())
+    }
+
+    @Test
+    fun `what the other device set before a removal made here is not brought back`() = runTest {
+        seedSource()
+        FaceCurationLog.manualPhotos(source.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkE"), removed = false, 200L)
+        FaceCurationLog.manualPhotos(target.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkE"), removed = true, 300L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertFalse("Alice" to "linkE" in manualPhotos())
     }
 
     @Test
