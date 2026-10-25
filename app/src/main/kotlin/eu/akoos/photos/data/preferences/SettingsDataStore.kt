@@ -850,6 +850,10 @@ object SettingsKeys {
     val SHARED_BACKUP_FACES_SAVED_AT = longPreferencesKey("shared_backup_faces_saved_at")
     val SHARED_BACKUP_SEARCH_SAVED_AT = longPreferencesKey("shared_backup_search_saved_at")
 
+    /** When the user last changed the faces here (a name, a merge, a cover), epoch millis, so a round writes the
+     *  faces copy at once instead of waiting out the hour a scan's changes wait. */
+    val SHARED_BACKUP_FACES_USER_CHANGED_AT = longPreferencesKey("shared_backup_faces_user_changed_at")
+
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")
 

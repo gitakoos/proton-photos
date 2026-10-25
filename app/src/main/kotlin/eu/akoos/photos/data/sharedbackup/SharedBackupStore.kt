@@ -57,6 +57,17 @@ object DriveJobLock {
  * copy on Drive held when this device last wrote it, and when the machine-learning data last changed here.
  */
 @Singleton
+/** The shortest gap between two saves of a machine-learning copy that only a scan changed. */
+internal const val ML_SAVE_GAP_MS = 60L * 60_000L
+
+/**
+ * Whether a machine-learning copy is written: it changed ([changedAt]) since a round last began saving it ([savedAt]),
+ * and it was never saved, the user changed it since ([userChangedAt]), or [ML_SAVE_GAP_MS] passed since that save. A
+ * scan running for hours then sends its copy once an hour instead of every round, the whole index each time.
+ */
+internal fun mlSaveDue(changedAt: Long, userChangedAt: Long, savedAt: Long, nowMs: Long): Boolean =
+    changedAt > savedAt && (savedAt == 0L || userChangedAt > savedAt || nowMs - savedAt >= ML_SAVE_GAP_MS)
+
 class SharedBackupStore @Inject constructor(@ApplicationContext private val context: Context) {
 
     val status: Flow<SharedBackupStatus>
@@ -65,8 +76,8 @@ class SharedBackupStore @Inject constructor(@ApplicationContext private val cont
     suspend fun isEnabled(): Boolean = context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_ENABLED] == true
 
     /**
-     * Turns the shared backup on or off. Turning it on counts this device's machine-learning data as changed, so the
-     * first round writes its copies.
+     * Turns the shared backup on or off. Turning it on counts this device's machine-learning data as changed and not
+     * yet saved, so the first round writes its copies.
      */
     suspend fun setEnabled(enabled: Boolean, nowMs: Long) {
         context.settingsDataStore.edit { prefs ->
@@ -74,25 +85,31 @@ class SharedBackupStore @Inject constructor(@ApplicationContext private val cont
             if (enabled) {
                 prefs[SettingsKeys.SHARED_BACKUP_FACES_CHANGED_AT] = nowMs
                 prefs[SettingsKeys.SHARED_BACKUP_SEARCH_CHANGED_AT] = nowMs
+                prefs.remove(SettingsKeys.SHARED_BACKUP_FACES_SAVED_AT)
+                prefs.remove(SettingsKeys.SHARED_BACKUP_SEARCH_SAVED_AT)
                 prefs[SettingsKeys.SHARED_BACKUP_LAST_FAILED] = false
             }
         }
     }
 
-    /** Notes a change of [kinds] here at [nowMs]. */
-    suspend fun markChanged(kinds: Collection<SharedBackupKind>, nowMs: Long) {
+    /** Notes a change of [kinds] here at [nowMs]; [byUser] when the user made it rather than a scan. */
+    suspend fun markChanged(kinds: Collection<SharedBackupKind>, nowMs: Long, byUser: Boolean) {
         context.settingsDataStore.edit { prefs ->
             prefs[SettingsKeys.SHARED_BACKUP_CHANGED_AT] = nowMs
-            if (SharedBackupKind.FACES in kinds) prefs[SettingsKeys.SHARED_BACKUP_FACES_CHANGED_AT] = nowMs
+            if (SharedBackupKind.FACES in kinds) {
+                prefs[SettingsKeys.SHARED_BACKUP_FACES_CHANGED_AT] = nowMs
+                if (byUser) prefs[SettingsKeys.SHARED_BACKUP_FACES_USER_CHANGED_AT] = nowMs
+            }
             if (SharedBackupKind.SEARCH in kinds) prefs[SettingsKeys.SHARED_BACKUP_SEARCH_CHANGED_AT] = nowMs
         }
     }
 
-    /** Whether the machine-learning data of [kind] changed since a round last began saving it. */
-    suspend fun mlChanged(kind: MlDriveFileKind): Boolean {
+    /** Whether a round should write the machine-learning copy of [kind] at [nowMs] ([mlSaveDue]). */
+    suspend fun mlDue(kind: MlDriveFileKind, nowMs: Long): Boolean {
         val prefs = context.settingsDataStore.data.first()
         val (changed, saved) = mlKeys(kind)
-        return (prefs[changed] ?: 0L) > (prefs[saved] ?: 0L)
+        val byUser = if (kind == MlDriveFileKind.FACES) prefs[SettingsKeys.SHARED_BACKUP_FACES_USER_CHANGED_AT] ?: 0L else 0L
+        return mlSaveDue(prefs[changed] ?: 0L, byUser, prefs[saved] ?: 0L, nowMs)
     }
 
     /** Records that a round that began at [startedMs] wrote the copy of [kind], or found nothing to write. */

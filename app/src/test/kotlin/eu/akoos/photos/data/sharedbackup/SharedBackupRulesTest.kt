@@ -132,6 +132,26 @@ class SharedBackupRulesTest {
     }
 
     @Test
+    fun `a scan's changes go out once an hour, a change the user made at the next round`() {
+        val hour = ML_SAVE_GAP_MS
+        assertTrue(mlSaveDue(changedAt = 10, userChangedAt = 0, savedAt = 0, nowMs = 10))
+        assertFalse(mlSaveDue(changedAt = 10, userChangedAt = 0, savedAt = 10, nowMs = 20))
+        assertFalse(mlSaveDue(changedAt = 1_000, userChangedAt = 0, savedAt = 500, nowMs = 500 + hour - 1))
+        assertTrue(mlSaveDue(changedAt = 1_000, userChangedAt = 0, savedAt = 500, nowMs = 500 + hour))
+        assertTrue(mlSaveDue(changedAt = 1_000, userChangedAt = 900, savedAt = 500, nowMs = 1_000))
+        assertFalse(mlSaveDue(changedAt = 1_000, userChangedAt = 400, savedAt = 500, nowMs = 1_000))
+    }
+
+    @Test
+    fun `a round after the user's changes waits three minutes, and never past ten after the first`() {
+        val minute = 60_000L
+        assertEquals(3 * minute, soonRoundDelay(nowMs = 0, firstWaitingMs = 0))
+        assertEquals(3 * minute, soonRoundDelay(nowMs = 5 * minute, firstWaitingMs = 0))
+        assertEquals(2 * minute, soonRoundDelay(nowMs = 8 * minute, firstWaitingMs = 0))
+        assertEquals(0L, soonRoundDelay(nowMs = 12 * minute, firstWaitingMs = 0))
+    }
+
+    @Test
     fun `the hidden list has one file per install`() {
         assertEquals("hidden-$pc.pfphd", HiddenDriveNaming.fileName(pc))
         assertEquals(pc, HiddenDriveNaming.parse("hidden-$pc.pfphd"))

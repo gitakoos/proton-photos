@@ -86,7 +86,7 @@ class SharedBackupViewModel @Inject constructor(
     }
 
     fun syncNow() {
-        viewModelScope.launch { scheduler.syncNow() }
+        viewModelScope.launch { scheduler.syncNow(userAsked = true) }
     }
 }
 

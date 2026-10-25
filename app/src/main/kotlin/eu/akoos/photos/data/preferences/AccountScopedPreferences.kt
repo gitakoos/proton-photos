@@ -114,6 +114,7 @@ object AccountScopedPreferences {
                         SettingsKeys.SHARED_BACKUP_SEARCH_CHANGED_AT,
                         SettingsKeys.SHARED_BACKUP_FACES_SAVED_AT,
                         SettingsKeys.SHARED_BACKUP_SEARCH_SAVED_AT,
+                        SettingsKeys.SHARED_BACKUP_FACES_USER_CHANGED_AT,
                         // Queued "shareId|linkId" cleanups name Drive nodes of the account being
                         // signed out. The next user's upload pass drains this set and would retry
                         // each delete against a share their session cannot reach.

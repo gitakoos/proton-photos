@@ -648,7 +648,7 @@ class MlSyncWorker @AssistedInject constructor(
 
         if (sharedBackupStore.isEnabled()) {
             for ((index, kind) in ML_SYNC_KIND_ORDER.withIndex()) {
-                if (kind in unread || !sharedBackupStore.mlChanged(kind)) continue
+                if (kind in unread || !sharedBackupStore.mlDue(kind, System.currentTimeMillis())) continue
                 if (!sharedBackupRunner.ensureFolder(userId, DriveDataFolder.ML)) {
                     failedParts += "ml folder"
                     continue
@@ -933,20 +933,24 @@ class MlSyncWorker @AssistedInject constructor(
         }
 
         /**
-         * Enqueues [request] as the one ML sync job and returns its id. Under [ExistingWorkPolicy.KEEP] a job
-         * already queued or running stays and this request is dropped. The operation also rides as a tag, so a
-         * reader knows it while the job is still queued.
+         * Enqueues a shared-backup round as the one ML sync job and returns its id: on any connection when
+         * [anyNetwork], otherwise on an unmetered one. Under [ExistingWorkPolicy.KEEP] a job already queued or
+         * running stays and this request is dropped, unless [replaceWaiting], for a round the user asked for that
+         * takes the place of an automatic one still waiting for its network. The operation also rides as a tag,
+         * so a reader knows it while the job is still queued.
          */
-        fun enqueueRound(context: Context, userId: UserId): UUID {
+        fun enqueueRound(context: Context, userId: UserId, anyNetwork: Boolean, replaceWaiting: Boolean): UUID {
             ensureChannel(context)
             val request = MlSyncRequest.Round(userId.id)
+            val network = if (anyNetwork) NetworkType.CONNECTED else NetworkType.UNMETERED
             val work = OneTimeWorkRequestBuilder<MlSyncWorker>()
                 .setInputData(MlSyncWorkData.input(request))
-                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(network).build())
                 .addTag(TAG)
                 .addTag(MlSyncWorkData.operationTag(request.operation))
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(UNIQUE_WORK_NAME, ExistingWorkPolicy.KEEP, work)
+            val policy = if (replaceWaiting) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
+            WorkManager.getInstance(context).enqueueUniqueWork(UNIQUE_WORK_NAME, policy, work)
             return work.id
         }
 
