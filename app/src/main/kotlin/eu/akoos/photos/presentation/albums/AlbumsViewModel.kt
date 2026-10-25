@@ -680,9 +680,9 @@ class AlbumsViewModel @Inject constructor(
 
     // ── Rename a device folder ────────────────────────────────────────────────
     // Android has no folder-rename under scoped storage, so a folder rename physically relocates every
-    // photo in the bucket into DCIM/<newName>/ via [MoveToFolderUseCase]. Offered only in a logged-out
-    // session, the local counterpart of [renameCloudAlbum]; a foreign file needs one-shot write consent,
-    // handled exactly like the timeline's move.
+    // photo in the bucket into DCIM/<newName>/ via [MoveToFolderUseCase], which also brings the Drive album
+    // of a mirrored folder along; a foreign file needs one-shot write consent, handled exactly like the
+    // timeline's move.
 
     /** Rename the device folder [bucketName] by moving its photos into [newName] under DCIM/. A blank
      *  or unchanged name is a no-op, as is a folder with no readable device file. */

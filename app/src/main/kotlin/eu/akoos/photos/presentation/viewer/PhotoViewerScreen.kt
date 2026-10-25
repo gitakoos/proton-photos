@@ -2420,11 +2420,11 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Move to folder, the logged-out counterpart of Add to album: with no account
-                            // there is no Drive album to add to, so a device photo is relocated into another
-                            // DCIM folder instead. Q+ only (the relocation uses MediaStore), and only for an
-                            // item with a device file (LocalOnly / Synced); a cloud-only photo has none.
-                            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                            // Move to folder: a device photo is relocated into another DCIM folder, and the
+                            // Drive albums of mirrored folders follow a backed-up one. Q+ only (the relocation
+                            // uses MediaStore), and only for an item with a device file (LocalOnly / Synced);
+                            // a cloud-only photo has none.
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
                                 (settledItem is GalleryItem.LocalOnly || settledItem is GalleryItem.Synced)
                             ) {
                                 androidx.compose.material3.DropdownMenuItem(
@@ -3187,7 +3187,7 @@ fun PhotoViewerScreen(
             is GalleryItem.Synced    -> settledItem.local.uri
             else -> null
         }
-        if (!isSignedIn && currentUri != null) {
+        if (currentUri != null) {
             val moveTargetFolders by viewModel.moveTargetFolders.collectAsStateWithLifecycle()
             val pendingMoveIntent by viewModel.pendingMoveIntent.collectAsStateWithLifecycle()
             MoveToFolderHost(

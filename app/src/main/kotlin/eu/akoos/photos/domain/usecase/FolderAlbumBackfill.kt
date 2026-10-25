@@ -23,6 +23,7 @@
 package eu.akoos.photos.domain.usecase
 
 import eu.akoos.photos.di.AppScope
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
@@ -40,13 +41,21 @@ import javax.inject.Singleton
 class FolderAlbumBackfill @Inject constructor(
     private val accountManager: AccountManager,
     private val upload: UploadPendingUseCase,
+    private val localRepo: LocalMediaRepository,
+    private val drivePairs: DrivePairLookup,
     @AppScope private val appScope: CoroutineScope,
 ) {
     fun onAlbumTurnedOn(bucketName: String) {
         if (bucketName.isEmpty()) return
         appScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            runCatching { upload.backfillFolderAlbum(userId, bucketName) }
+            runCatching {
+                val onDrive = drivePairs.pairs(
+                    userId,
+                    localRepo.queryByBucket(bucketName).associate { it.uri to it.displayName },
+                )
+                upload.backfillFolderAlbum(userId, bucketName, onDrive)
+            }
                 .onSuccess { eu.akoos.photos.util.SyncDiagnostics.log("folder album backfill: $it photo(s) queued") }
                 .onFailure { e ->
                     if (e is CancellationException) throw e

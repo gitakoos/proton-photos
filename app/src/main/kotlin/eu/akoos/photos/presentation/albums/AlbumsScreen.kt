@@ -1164,7 +1164,7 @@ fun AlbumsScreen(
             onToggleHiddenCard = { onHideDeviceFolder(folder.name) },
             onSortSelected = { mode -> viewModel.setDeviceFolderSortMode(folder.name, mode) },
             onGroupingSelected = { grouping -> viewModel.setDeviceFolderGrouping(folder.name, grouping) },
-            // Held to a logged-out session inside the sheet, where there is no Drive album to rename.
+            // Offered on Android 10+ inside the sheet; the move behind it brings a mirrored folder's album along.
             onRename = { deviceFolderRenameFor = folder },
             isExcludedFromGrid = excludedFromGrid,
             onToggleExcludedFromGrid = { viewModel.setFolderExcludedFromGrid(folder.name, exclude = !excludedFromGrid) },
@@ -1198,7 +1198,7 @@ fun AlbumsScreen(
     }
 
     // ── Device-folder rename sheet ───────────────────────────────────────────
-    // Logged-out counterpart of the cloud-album rename above: the same field prefilled with the
+    // The device-folder counterpart of the cloud-album rename above: the same field prefilled with the
     // folder's name, but the rename relocates its photos into a new DCIM directory. The confirmation
     // snackbar rides folderRenameConfirmation once the move lands.
     deviceFolderRenameFor?.let { folder ->

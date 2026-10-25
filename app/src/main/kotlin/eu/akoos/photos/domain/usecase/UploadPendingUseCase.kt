@@ -30,6 +30,7 @@ import android.provider.MediaStore
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.datastore.preferences.core.edit
+import eu.akoos.photos.data.preferences.putAlbumMirrorFolders
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
@@ -188,16 +189,55 @@ class UploadPendingUseCase @Inject constructor(
     }
 
     /**
-     * Joins the photos [bucketName] already backed up to the folder's Drive album, for when its album
-     * mirror is turned on (see [BucketAlbumMirror.backfill]). Runs under the batch lock, so this and an
-     * upload pass can never both create the folder's album. Returns how many photos were queued.
+     * Joins the photos [bucketName] already backed up ([onDrive], device uri to Drive link, see
+     * [DrivePairLookup]) to the folder's Drive album, for when its album mirror is turned on (see
+     * [BucketAlbumMirror.backfill]). Runs under the batch lock, so this and an upload pass can never both
+     * create the folder's album. Returns how many photos were queued.
      */
-    suspend fun backfillFolderAlbum(userId: UserId, bucketName: String): Int = mutex.withLock {
-        val uris = localRepo.freshMedia().filter { it.bucketName == bucketName }.map { it.uri }
-        val onDrive = syncStateRepo.cloudPairedLinkIds(userId, uris)
+    suspend fun backfillFolderAlbum(userId: UserId, bucketName: String, onDrive: Map<String, String>): Int = mutex.withLock {
         val queued = bucketAlbumMirror.backfill(userId, bucketName, onDrive, uploadAlbumTargetDao)
         if (queued > 0) albumListEvents.notifyChanged()
         queued
+    }
+
+    /**
+     * Brings the Drive albums of mirrored folders in step after photos moved between device folders on the
+     * phone ([sourceBucketByUri], device uri to the folder it left, into [targetBucket]; [onDrive] maps the moved
+     * photos already on Drive to their links); the rule is [folderMoveAlbumPlan]. Those photos leave each mirrored
+     * source folder's album (and any
+     * join still queued for it), the target folder starts mirroring when it did not, and the photos join its
+     * album through [BucketAlbumMirror.backfill], which creates the album when missing and queues what does not
+     * land. Runs under the batch lock, like an upload pass. Returns the plan carried out, or null for none.
+     */
+    internal suspend fun followFolderMove(
+        userId: UserId,
+        sourceBucketByUri: Map<String, String?>,
+        onDrive: Map<String, String>,
+        targetBucket: String,
+    ): FolderMoveAlbumPlan? = mutex.withLock {
+        val rule = context.settingsDataStore.data.first().albumMirrorFolders()
+        val plan = folderMoveAlbumPlan(rule, sourceBucketByUri, onDrive, targetBucket) ?: return@withLock null
+        if (plan.removals.isNotEmpty()) {
+            val albumsByName = cloudRepo.loadAlbums(userId).associate { it.name.lowercase() to it.linkId }
+            for ((bucket, pairs) in plan.removals) {
+                val albumLinkId = albumsByName[bucket.lowercase()] ?: continue
+                pairs.keys.forEach { uploadAlbumTargetDao.deleteTarget(it, albumLinkId) }
+                cloudRepo.removePhotosFromAlbum(userId, albumLinkId, pairs.values.distinct())
+            }
+        }
+        if (plan.optInTarget) {
+            context.settingsDataStore.edit { prefs ->
+                val current = prefs.albumMirrorFolders()
+                if (targetBucket !in current) prefs.putAlbumMirrorFolders(current.flipped(targetBucket))
+            }
+        }
+        bucketAlbumMirror.backfill(userId, targetBucket, plan.joins, uploadAlbumTargetDao)
+        albumListEvents.notifyChanged()
+        eu.akoos.photos.util.SyncDiagnostics.log(
+            "folder move albums: ${plan.joins.size} photo(s) to the target album, " +
+                "${plan.removals.values.sumOf { it.size }} out of ${plan.removals.size} source album(s)",
+        )
+        plan
     }
 
     /**

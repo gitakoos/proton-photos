@@ -805,10 +805,10 @@ fun DeviceFolderDetailScreen(
                     )
                 )
             }
-            // Move selected into another device folder, the logged-out counterpart of "Add to album",
-            // relocating the files under DCIM/ with no cloud involved. Held to the scoped-storage move's
-            // Android 10+ floor and offered only on photos that still have a device file.
-            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && selectedDeviceItems.isNotEmpty()) {
+            // Move selected into another device folder, relocating the files under DCIM/; the Drive albums of
+            // mirrored folders follow a backed-up photo. Held to the scoped-storage move's Android 10+ floor
+            // and offered only on photos that still have a device file.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && selectedDeviceItems.isNotEmpty()) {
                 add(
                     SelectionAction(
                         icon = Icons.AutoMirrored.Filled.DriveFileMove,
@@ -1051,7 +1051,7 @@ fun DeviceFolderDetailScreen(
         }
 
         // Move-to-folder host: the picker, the new-folder name dialog, the write-consent launcher a
-        // foreign-file move needs and the completion snackbar, all logged-out and device-only. The
+        // foreign-file move needs and the completion snackbar, device files only. The
         // selection is snapshotted in the ViewModel, so the host carries only the picked name.
         MoveToFolderHost(
             targetFolders = moveTargetFolders,

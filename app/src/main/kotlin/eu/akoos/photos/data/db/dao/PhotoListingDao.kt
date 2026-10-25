@@ -28,6 +28,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import eu.akoos.photos.data.db.entity.LinkIdName
 import kotlinx.coroutines.flow.Flow
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoListingLite
@@ -296,6 +297,14 @@ interface PhotoListingDao {
             "AND isChildOfAlbum = 0 AND displayName IN (:names) LIMIT 1",
     )
     suspend fun linkIdByNameAndCapture(userId: String, names: List<String>, captureSec: Long): String?
+
+    /** The own-stream photos of this user named, case aside, one of [lowerNames] (already lower-cased).
+     *  Callers chunk the input at 500, under SQLite's bind-variable limit. */
+    @Query(
+        "SELECT linkId, displayName FROM photo_listing WHERE userId = :userId AND isChildOfAlbum = 0 " +
+            "AND lower(displayName) IN (:lowerNames)",
+    )
+    suspend fun ownStreamByLowerNames(userId: String, lowerNames: List<String>): List<LinkIdName>
 
     /** Whether this user's library holds a row for [linkId]. */
     @Query("SELECT EXISTS(SELECT 1 FROM photo_listing WHERE userId = :userId AND linkId = :linkId)")

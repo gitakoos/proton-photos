@@ -341,9 +341,10 @@ fun rememberGallerySelectionActions(
             )
         }
         // Move the selected on-device photos into a real DCIM/<name>/ folder other gallery apps can
-        // see. Offered only in local-only (signed-out) mode, where every photo is a device file and
-        // no cloud pairing is in play; it is an in-place scoped-storage relocation, so Android 10+ only.
-        if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && anyOnDevice(selectedItems)) {
+        // see. The move keeps each file's content URI, so a backed-up photo stays paired, and the Drive
+        // albums of mirrored folders follow it (FolderMoveAlbumFollow); it is an in-place scoped-storage
+        // relocation, so Android 10+ only.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && anyOnDevice(selectedItems)) {
             add(
                 SelectionAction(
                     icon = Icons.AutoMirrored.Filled.DriveFileMove,

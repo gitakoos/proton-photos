@@ -574,9 +574,8 @@ fun LocationPhotosContent(
                     )
                 )
             }
-            // Move the device selection into another folder, the logged-out counterpart to
-            // Add-to-album, offered only without an account and on the Android 10+ MediaStore floor.
-            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Move the device selection into another folder, on the Android 10+ MediaStore floor.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(
                     SelectionAction(
                         icon = Icons.AutoMirrored.Filled.DriveFileMove,
@@ -891,7 +890,7 @@ fun LocationPhotosContent(
     }
 
     // Move-to-folder host: the picker, the new-folder name dialog, its own write-consent launcher and
-    // the completion snackbar, all logged-out and device-only. The selection is snapshotted in the
+    // the completion snackbar, device files only. The selection is snapshotted in the
     // ViewModel, so the host carries only the picked name.
     MoveToFolderHost(
         targetFolders = moveTargetFolders,

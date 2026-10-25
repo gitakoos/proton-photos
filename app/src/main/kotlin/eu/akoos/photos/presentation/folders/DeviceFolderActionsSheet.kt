@@ -245,10 +245,10 @@ internal fun DeviceFolderActionsSheet(
                 )
                 Spacer(Modifier.height(8.dp))
             }
-            // Renaming a folder relocates its photos into a new directory, the local stand-in for
-            // renaming a Drive album. It is offered only in a logged-out session, and only where the
-            // scoped-storage move it performs is supported.
-            if (!isSignedIn && onRename != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Renaming a folder relocates its photos into a new directory; the Drive album of a mirrored
+            // folder follows its backed-up photos. Offered only where the scoped-storage move it performs
+            // is supported.
+            if (onRename != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ActionSheetRow(
                     icon = Icons.Default.Edit,
                     title = stringResource(R.string.folder_rename),
