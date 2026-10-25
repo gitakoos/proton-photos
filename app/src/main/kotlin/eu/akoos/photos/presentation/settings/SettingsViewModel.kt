@@ -245,12 +245,15 @@ class SettingsViewModel @Inject constructor(
                         it[SettingsKeys.FACE_ENABLED] == true,
                         it[SettingsKeys.OCR_ENABLED] ?: ocrModelManager.filesPresentQuick(),
                         it[SettingsKeys.SEMANTIC_ENABLED] == true,
-                    )
+                    ) to (it[SettingsKeys.SHARED_BACKUP_ENABLED] == true)
                 }
                 .distinctUntilChanged()
                 .flowOn(Dispatchers.IO)
-                .collect { (face, ocr, semantic) ->
-                    _uiState.update { it.copy(faceEnabled = face, ocrEnabled = ocr, semanticEnabled = semantic) }
+                .collect { (switches, backupOn) ->
+                    val (face, ocr, semantic) = switches
+                    _uiState.update {
+                        it.copy(faceEnabled = face, ocrEnabled = ocr, semanticEnabled = semantic, sharedBackupOn = backupOn)
+                    }
                 }
         }
         // Reflect the shared model-download progress into the per-feature rows, derived fresh from the

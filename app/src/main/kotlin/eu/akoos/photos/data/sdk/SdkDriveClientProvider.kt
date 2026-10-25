@@ -241,6 +241,22 @@ class SdkDriveClientProvider @Inject constructor(
     }
 
     /**
+     * Drops [userId]'s clients without closing the account, so the next call makes fresh ones. For a client that
+     * keeps failing with no answer from the network at all: one made in the moment right after a sign-in, before the
+     * session was whole, stays that way until it is replaced. Calls still running keep their client, which the last
+     * of them closes.
+     */
+    suspend fun recycle(userId: UserId) {
+        val retired = mutex.withLock {
+            ClientKind.entries.mapNotNull { kind ->
+                val held = clients.remove(userId to kind) ?: return@mapNotNull null
+                held to held.lease.retire()
+            }
+        }
+        for ((held, closeNow) in retired) if (closeNow) shutDown(held)
+    }
+
+    /**
      * Closes and drops [userId]'s clients and their scopes, so a later sign-in never reuses them, after
      * closing the account to new calls ([close]). A call still running keeps its client: this waits for
      * such calls, at most [IN_FLIGHT_WAIT_MS] in all, and a client still in use by then is closed by the

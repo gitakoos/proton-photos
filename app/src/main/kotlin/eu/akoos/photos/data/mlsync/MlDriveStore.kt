@@ -35,6 +35,8 @@ import eu.akoos.photos.util.SyncDiagnostics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.sync.Mutex
@@ -219,40 +221,79 @@ class MlDriveStore @Inject constructor(
             val modified = Instant.ofEpochMilli(
                 localFile.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis(),
             )
-            val existing = findChild(client, folderUid, name, AvailableNameTarget.FILE)
-            val uploader = when (existing) {
-                null -> client.uploader(
-                    FileUploaderRequest(
-                        parentFolderUid = folderUid,
-                        name = name,
-                        mediaType = mediaType,
-                        fileSize = size,
-                        lastModificationTime = modified,
-                        // The name carries this install's id, so a draft holding it is this install's
-                        // own leftover from an interrupted upload.
-                        overrideExistingDraftByOtherClient = true,
-                        noWaiting = false,
-                    ),
-                )
-                is FileNode -> client.uploader(
-                    FileRevisionUploaderRequest(
-                        currentActiveRevisionUid = existing.activeRevision.uid,
-                        lastModificationTime = modified,
-                        size = size,
-                        noWaiting = false,
-                    ),
-                )
-                else -> return@sdkCall MlDriveResult.Failed(MlDriveResult.Failed.NAME_TAKEN)
+            uploadWithRetries(client, folderUid, name, mediaType, localFile, size, modified)
+        }
+    }
+
+    /**
+     * An upload right after another one often fails at once with a network error and goes through when made again a
+     * moment later, so the file is looked up afresh and sent again, after a short wait each time. A conflict is not
+     * tried again here; the caller decides on that.
+     */
+    private suspend fun uploadWithRetries(
+        client: ProtonDriveClient,
+        folderUid: NodeUid,
+        name: String,
+        mediaType: String,
+        localFile: File,
+        size: Long,
+        modified: Instant,
+    ): MlDriveResult<MlDriveUpload> {
+        var attempt = 0
+        while (true) {
+            try {
+                return uploadOnce(client, folderUid, name, mediaType, localFile, size, modified)
+            } catch (t: Throwable) {
+                currentCoroutineContext().ensureActive()
+                if (isConflict(t) || attempt >= UPLOAD_RETRY_WAITS_MS.size) throw t
+                SyncDiagnostics.log("drive data: upload failed, trying again: ${describe(t)}")
+                delay(UPLOAD_RETRY_WAITS_MS[attempt++])
             }
-            val result = uploader.use { sendFile(it, localFile) }
-            MlDriveResult.Ok(
-                MlDriveUpload(
-                    nodeUid = result.nodeUid.value,
-                    revisionUid = result.revisionUid.value,
-                    createdFile = existing == null,
+        }
+    }
+
+    private suspend fun uploadOnce(
+        client: ProtonDriveClient,
+        folderUid: NodeUid,
+        name: String,
+        mediaType: String,
+        localFile: File,
+        size: Long,
+        modified: Instant,
+    ): MlDriveResult<MlDriveUpload> {
+        val existing = findChild(client, folderUid, name, AvailableNameTarget.FILE)
+        val uploader = when (existing) {
+            null -> client.uploader(
+                FileUploaderRequest(
+                    parentFolderUid = folderUid,
+                    name = name,
+                    mediaType = mediaType,
+                    fileSize = size,
+                    lastModificationTime = modified,
+                    // The name carries this install's id, so a draft holding it is this install's
+                    // own leftover from an interrupted upload.
+                    overrideExistingDraftByOtherClient = true,
+                    noWaiting = false,
                 ),
             )
+            is FileNode -> client.uploader(
+                FileRevisionUploaderRequest(
+                    currentActiveRevisionUid = existing.activeRevision.uid,
+                    lastModificationTime = modified,
+                    size = size,
+                    noWaiting = false,
+                ),
+            )
+            else -> return MlDriveResult.Failed(MlDriveResult.Failed.NAME_TAKEN)
         }
+        val result = uploader.use { sendFile(it, localFile) }
+        return MlDriveResult.Ok(
+            MlDriveUpload(
+                nodeUid = result.nodeUid.value,
+                revisionUid = result.revisionUid.value,
+                createdFile = existing == null,
+            ),
+        )
     }
 
     /**
@@ -299,6 +340,7 @@ class MlDriveStore @Inject constructor(
             ensureActive()
             // Class names and the API's numeric codes only, so the line is safe in a shared diagnostics log.
             SyncDiagnostics.log("drive data: $operation failed: ${describe(t)}")
+            if (isNetworkFailure(t)) clientProvider.recycle(userId)
             if (isConflict(t)) MlDriveResult.Conflict else MlDriveResult.Failed(failureName(t))
         }
     }
@@ -493,6 +535,10 @@ class MlDriveStore @Inject constructor(
                 )
     }
 
+    /** A failure with no answer from the server at all, which a client made in a bad moment keeps giving. */
+    private fun isNetworkFailure(t: Throwable): Boolean =
+        sdkErrors(t).firstOrNull()?.domain == ProtonSdkError.ErrorDomain.Network
+
     /** The most specific class name behind [t]: the SDK's own error type when it carries one. */
     private fun failureName(t: Throwable): String {
         sdkErrors(t).firstOrNull()?.type?.substringAfterLast('.')?.takeIf { it.isNotEmpty() }
@@ -524,6 +570,9 @@ class MlDriveStore @Inject constructor(
 
     private companion object {
         const val TAG = "MlDriveStore"
+
+        /** The waits before an upload that failed with a network error is made again, one per further try. */
+        val UPLOAD_RETRY_WAITS_MS = longArrayOf(2_000L, 5_000L)
         const val PARTIAL_SUFFIX = ".part"
         const val CLEANUP_TIMEOUT_MS = 5_000L
         const val MAX_CAUSE_DEPTH = 8

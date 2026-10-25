@@ -33,6 +33,7 @@ import eu.akoos.photos.data.mlsync.MlDriveFile
 import eu.akoos.photos.data.mlsync.MlSyncOperation
 import eu.akoos.photos.data.mlsync.MlSyncRequest
 import eu.akoos.photos.data.mlsync.MlSyncWorkData
+import eu.akoos.photos.data.mlsync.RoundMode
 import eu.akoos.photos.data.mlsync.SearchImportMode
 import eu.akoos.photos.data.mlsync.shouldImportSearchEmbedding
 import eu.akoos.photos.presentation.settings.SharedBackupLine
@@ -157,6 +158,21 @@ class SharedBackupRulesTest {
         assertEquals(pc, HiddenDriveNaming.parse("hidden-$pc.pfphd"))
         assertNull(HiddenDriveNaming.parse("labels-$pc.pfplb"))
         assertNull(HiddenDriveNaming.parse("hidden-nope.pfphd"))
+    }
+
+    @Test
+    fun `load from Drive takes every other device's copies in again, even ones taken in before`() = runTest {
+        val files = runner(facesHere = true, embeddingsHere = 5, appliedFaces = 100)
+            .mlFilesToTake(UserId("u"), mlListing, own, retake = true)
+        assertEquals(setOf(MlDriveFileKind.FACES, MlDriveFileKind.SEARCH), files.map { it.kind }.toSet())
+    }
+
+    @Test
+    fun `a manual round keeps its mode through the worker's data`() {
+        for (mode in RoundMode.entries) {
+            val request = MlSyncWorkData.request(MlSyncWorkData.input(MlSyncRequest.Round("user-1", mode)))
+            assertEquals(MlSyncRequest.Round("user-1", mode), request)
+        }
     }
 
     @Test

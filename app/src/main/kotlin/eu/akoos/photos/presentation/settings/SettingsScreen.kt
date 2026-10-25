@@ -1142,7 +1142,6 @@ fun AiSettingsScreen(
         // Save and Restore of the face and search data through the account's Drive, so another device of
         // the account restores them instead of scanning again. The section hides itself for a guest, while
         // the features are off, and on a device the Drive client does not run on.
-        MlDriveSyncSection(mlEnabled = state.aiFeaturesEnabled)
         Spacer(Modifier.height(20.dp))
     }
 }

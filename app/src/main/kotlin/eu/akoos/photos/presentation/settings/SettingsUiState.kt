@@ -178,6 +178,8 @@ data class SettingsUiState(
      *  confirmation waits on it, so the number it names is the settled one rather than a zero that
      *  changes a moment after the user has read it. */
     val vaultedCountSettled: Boolean = false,
+    /** Whether the automatic Drive backup is on, so a sign-out says the faces come back rather than that they are gone. */
+    val sharedBackupOn: Boolean = false,
     /** Numbers-only picture of the vault for the shared diagnostics: index, blobs on disk, the two
      *  directions those can disagree in, pairings, pending hides, folders and size. Refreshed when the
      *  diagnostics chooser opens, since the vault classes are injected singletons the screen itself

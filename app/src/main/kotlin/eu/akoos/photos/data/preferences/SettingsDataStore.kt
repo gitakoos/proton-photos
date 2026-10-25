@@ -854,6 +854,13 @@ object SettingsKeys {
      *  faces copy at once instead of waiting out the hour a scan's changes wait. */
     val SHARED_BACKUP_FACES_USER_CHANGED_AT = longPreferencesKey("shared_backup_faces_user_changed_at")
 
+    /** The accounts that had the automatic Drive backup on, as SHA-256 hex of their user id. Not tied to an account,
+     *  so it outlives a sign-out: the same account signing back in finds its backup on again, another does not. */
+    val SHARED_BACKUP_ACCOUNTS = stringSetPreferencesKey("shared_backup_accounts")
+
+    /** Set once the older per-kind automatic saves were folded into the automatic Drive backup. */
+    val SHARED_BACKUP_AUTOSAVE_FOLDED = booleanPreferencesKey("shared_backup_autosave_folded")
+
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")
 

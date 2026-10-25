@@ -141,11 +141,17 @@ class SharedBackupRunner @Inject constructor(
      * The other installs' face and search files newer than the copy of each taken in last, as restore files: each
      * install's newest file of each kind, never this install's own. A kind this device holds nothing of (its face
      * data deleted, wiped by a model change, or its search index reset) takes every other install's newest file
-     * again, whatever was taken in before: filling gaps twice changes nothing.
+     * again, whatever was taken in before: filling gaps twice changes nothing. So does every kind when [retake], the
+     * user's "Load from Drive".
      */
-    suspend fun mlFilesToTake(userId: UserId, listing: SharedBackupListing, ownDeviceId: String): List<MlRestoreFile> {
-        val faces = if (faceScanDao.hasAnyForUser(userId.id)) applied(userId, SharedBackupKind.FACES) else emptyMap()
-        val search = if (imageEmbeddingDao.countForUser(userId.id) > 0) applied(userId, SharedBackupKind.SEARCH) else emptyMap()
+    suspend fun mlFilesToTake(
+        userId: UserId,
+        listing: SharedBackupListing,
+        ownDeviceId: String,
+        retake: Boolean = false,
+    ): List<MlRestoreFile> {
+        val faces = if (!retake && faceScanDao.hasAnyForUser(userId.id)) applied(userId, SharedBackupKind.FACES) else emptyMap()
+        val search = if (!retake && imageEmbeddingDao.countForUser(userId.id) > 0) applied(userId, SharedBackupKind.SEARCH) else emptyMap()
         return MlDriveNaming.selectForImport(listing.ml, ownDeviceId).mapNotNull { pick ->
             val taken = if (pick.kind == eu.akoos.photos.data.mlsync.MlDriveFileKind.FACES) faces else search
             val madeAt = SharedBackupCopy(pick.deviceId, pick.file).madeAtMs
@@ -156,15 +162,17 @@ class SharedBackupRunner @Inject constructor(
 
     /**
      * Takes the other installs' label copies newer than the ones taken in last into this device's labels. False when
-     * a copy could not be read, so the round does not write this device's labels over an unread copy.
+     * a copy could not be read, so the round does not write this device's labels over an unread copy. [retake] takes
+     * every other install's newest copy in again, even one taken in before.
      */
-    suspend fun takeInLabels(userId: UserId, listing: SharedBackupListing, ownDeviceId: String): Boolean {
-        val applied = applied(userId, SharedBackupKind.LABELS)
+    suspend fun takeInLabels(userId: UserId, listing: SharedBackupListing, ownDeviceId: String, retake: Boolean = false): Boolean {
+        val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.LABELS)
         val copies = newerCopies(listing.labels, LabelDriveNaming::parse, ownDeviceId, applied)
         if (copies.isEmpty()) return true
         val read = copies.map { copy -> copy to (readLabels(userId, copy) ?: return false) }
         val before = labels.loadSyncState(userId)
         val after = before.deepCopy()
+        if (retake) after.applied.clear()
         after.applied.putAll(applied)
         for ((_, snapshot) in read) LabelCopyMerge.takeIn(after, snapshot, ownDeviceId)
         val changed = labels.saveSyncState(userId, before, after)
@@ -177,10 +185,10 @@ class SharedBackupRunner @Inject constructor(
 
     /**
      * Takes the other installs' hidden lists newer than the ones taken in last into this device's hidden photos and
-     * albums. False when a copy could not be read.
+     * albums. False when a copy could not be read. [retake] takes every other install's newest list in again.
      */
-    suspend fun takeInHidden(userId: UserId, listing: SharedBackupListing, ownDeviceId: String): Boolean {
-        val applied = applied(userId, SharedBackupKind.HIDDEN)
+    suspend fun takeInHidden(userId: UserId, listing: SharedBackupListing, ownDeviceId: String, retake: Boolean = false): Boolean {
+        val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.HIDDEN)
         val copies = newerCopies(listing.hidden, HiddenDriveNaming::parse, ownDeviceId, applied)
         if (copies.isEmpty()) return true
         val read = copies.map { copy -> copy to (readHidden(userId, copy) ?: return false) }

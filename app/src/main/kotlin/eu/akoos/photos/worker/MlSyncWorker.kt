@@ -71,6 +71,7 @@ import eu.akoos.photos.data.mlsync.MlSyncTally
 import eu.akoos.photos.data.mlsync.MlSyncWorkData
 import eu.akoos.photos.data.mlsync.MlUploadDecision
 import eu.akoos.photos.data.mlsync.RETRY_LIMIT_FAILURE
+import eu.akoos.photos.data.mlsync.RoundMode
 import eu.akoos.photos.data.mlsync.SearchImportMode
 import eu.akoos.photos.data.mlsync.SearchSnapshotExportResult
 import eu.akoos.photos.data.mlsync.SearchSnapshotExporter
@@ -239,7 +240,7 @@ class MlSyncWorker @AssistedInject constructor(
                     when (request) {
                         is MlSyncRequest.Save -> save(userId, request, scratch)
                         is MlSyncRequest.Restore -> restore(userId, request, scratch)
-                        is MlSyncRequest.Round -> round(userId, scratch)
+                        is MlSyncRequest.Round -> round(userId, scratch, request.mode)
                     }
                 }
             }
@@ -601,9 +602,10 @@ class MlSyncWorker @AssistedInject constructor(
      * install's own copy of each kind is written when its read went through and something in it changed. Ends with
      * the round's outcome recorded for the settings row.
      */
-    private suspend fun round(userId: UserId, scratch: TransferScratch): MlSyncOutcome {
+    private suspend fun round(userId: UserId, scratch: TransferScratch, mode: RoundMode): MlSyncOutcome {
         val tally = MlSyncTally(MlSyncOperation.ROUND, filesTotal = 0)
-        if (!sharedBackupStore.isEnabled()) return tally.outcome(MlSyncResult.SUCCESS)
+        if (mode == RoundMode.AUTO && !sharedBackupStore.isEnabled()) return tally.outcome(MlSyncResult.SUCCESS)
+        val retake = mode == RoundMode.LOAD_NOW
         report(MlSyncProgress(MlSyncPhase.PREPARING, kind = null, done = 0, total = 0))
         val ownDeviceId = try {
             driveStore.deviceId()
@@ -616,7 +618,7 @@ class MlSyncWorker @AssistedInject constructor(
             ?: return endRound(tally.outcome(MlSyncResult.FAILED, READ_FAILURE), failed = true)
 
         val unread = HashSet<MlDriveFileKind>()
-        val plan = planRestore(sharedBackupRunner.mlFilesToTake(userId, listing, ownDeviceId), FaceSnapshotMode.Merge)
+        val plan = planRestore(sharedBackupRunner.mlFilesToTake(userId, listing, ownDeviceId, retake), FaceSnapshotMode.Merge)
         if (plan.isNotEmpty()) {
             promoteToForeground()
             val pause = MlSyncFacePause.read(applicationContext)
@@ -639,16 +641,18 @@ class MlSyncWorker @AssistedInject constructor(
                 withContext(NonCancellable) { walks.handBack(userId) }
             }
         }
-        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, ownDeviceId)
-        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, ownDeviceId)
+        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, ownDeviceId, retake)
+        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, ownDeviceId, retake)
         val failedParts = ArrayList<String>()
         unread.mapTo(failedParts) { "read ${it.name.lowercase()}" }
         if (!labelsRead) failedParts += "read labels"
         if (!hiddenRead) failedParts += "read hidden"
 
-        if (sharedBackupStore.isEnabled()) {
+        val writes = mode == RoundMode.SAVE_NOW || (mode == RoundMode.AUTO && sharedBackupStore.isEnabled())
+        if (writes) {
             for ((index, kind) in ML_SYNC_KIND_ORDER.withIndex()) {
-                if (kind in unread || !sharedBackupStore.mlDue(kind, System.currentTimeMillis())) continue
+                if (kind in unread) continue
+                if (mode != RoundMode.SAVE_NOW && !sharedBackupStore.mlDue(kind, System.currentTimeMillis())) continue
                 if (!sharedBackupRunner.ensureFolder(userId, DriveDataFolder.ML)) {
                     failedParts += "ml folder"
                     continue
@@ -940,9 +944,15 @@ class MlSyncWorker @AssistedInject constructor(
          * takes the place of an automatic one still waiting for its network. The operation also rides as a tag,
          * so a reader knows it while the job is still queued.
          */
-        fun enqueueRound(context: Context, userId: UserId, anyNetwork: Boolean, replaceWaiting: Boolean): UUID {
+        fun enqueueRound(
+            context: Context,
+            userId: UserId,
+            anyNetwork: Boolean,
+            replaceWaiting: Boolean,
+            mode: RoundMode = RoundMode.AUTO,
+        ): UUID {
             ensureChannel(context)
-            val request = MlSyncRequest.Round(userId.id)
+            val request = MlSyncRequest.Round(userId.id, mode)
             val network = if (anyNetwork) NetworkType.CONNECTED else NetworkType.UNMETERED
             val work = OneTimeWorkRequestBuilder<MlSyncWorker>()
                 .setInputData(MlSyncWorkData.input(request))

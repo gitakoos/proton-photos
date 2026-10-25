@@ -92,6 +92,19 @@ class SharedBackupStore @Inject constructor(@ApplicationContext private val cont
         }
     }
 
+    /** Whether the account [userId] had the automatic backup on, before a sign-out wiped its switch. */
+    suspend fun rememberedOn(userId: String): Boolean =
+        accountHash(userId) in (context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_ACCOUNTS] ?: emptySet())
+
+    /** Remembers whether the account [userId] has the automatic backup on, across a sign-out. */
+    suspend fun remember(userId: String, on: Boolean) {
+        val hash = accountHash(userId)
+        context.settingsDataStore.edit { prefs ->
+            val accounts = prefs[SettingsKeys.SHARED_BACKUP_ACCOUNTS] ?: emptySet()
+            prefs[SettingsKeys.SHARED_BACKUP_ACCOUNTS] = if (on) accounts + hash else accounts - hash
+        }
+    }
+
     /** Notes a change of [kinds] here at [nowMs]; [byUser] when the user made it rather than a scan. */
     suspend fun markChanged(kinds: Collection<SharedBackupKind>, nowMs: Long, byUser: Boolean) {
         context.settingsDataStore.edit { prefs ->
@@ -153,6 +166,9 @@ class SharedBackupStore @Inject constructor(@ApplicationContext private val cont
         (prefs[SettingsKeys.SHARED_BACKUP_SAVED] ?: emptySet()).associate {
             it.substringBefore('|') to it.substringAfter('|', "")
         }
+
+    private fun accountHash(userId: String): String =
+        MessageDigest.getInstance("SHA-256").digest(userId.encodeToByteArray()).joinToString("") { "%02x".format(it) }
 
     private fun fingerprint(content: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(content).joinToString("") { "%02x".format(it) }

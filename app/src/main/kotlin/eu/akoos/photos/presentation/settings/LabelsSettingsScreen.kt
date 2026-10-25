@@ -247,7 +247,6 @@ fun LabelsSettingsScreen(
                     onClose = { picked = emptyList() },
                 )
             } else {
-                LabelBackupSection(viewModel)
             }
         }
 

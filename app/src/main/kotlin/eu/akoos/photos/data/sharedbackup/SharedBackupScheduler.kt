@@ -24,6 +24,7 @@ package eu.akoos.photos.data.sharedbackup
 
 import android.content.Context
 import android.util.Log
+import androidx.datastore.preferences.core.edit
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -33,12 +34,15 @@ import androidx.work.WorkManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.autosave.AutoSaveCoordinator
 import eu.akoos.photos.data.autosave.AutoSaveKind
+import eu.akoos.photos.data.autosave.AutoSaveStore
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.mlsync.MlSyncOperation
 import eu.akoos.photos.data.mlsync.MlSyncWorkData
+import eu.akoos.photos.data.mlsync.RoundMode
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.di.AppScope
+import eu.akoos.photos.util.SyncDiagnostics
 import eu.akoos.photos.worker.MlSyncWorker
 import eu.akoos.photos.worker.SharedBackupTriggerWorker
 import kotlinx.coroutines.CancellationException
@@ -48,6 +52,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -80,6 +85,7 @@ class SharedBackupScheduler @Inject constructor(
     private val accountManager: AccountManager,
     private val database: AppDatabase,
     private val autoSave: AutoSaveCoordinator,
+    private val autoSaveStore: AutoSaveStore,
     @AppScope private val appScope: CoroutineScope,
 ) {
     private val workManager: WorkManager
@@ -122,6 +128,37 @@ class SharedBackupScheduler @Inject constructor(
             }
         }
         appScope.launch { runCatching { syncNow() } }
+        // The same account signing back in finds its automatic backup on again; the sign-out wiped the switch, as it
+        // wipes every account-tied setting, so another account on this device never inherits it.
+        appScope.launch {
+            try {
+                // Distinct before the nulls go, so the same account signing back in after a sign-out counts again.
+                accountManager.getPrimaryUserId().distinctUntilChanged().filterNotNull().collect { userId ->
+                    foldOlderAutoSaves()
+                    val remembered = store.rememberedOn(userId.id)
+                    val on = store.isEnabled()
+                    SyncDiagnostics.log("shared backup: account signed in, on=$on remembered=$remembered")
+                    if (!on && remembered) setEnabled(true)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "account watch stopped: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /**
+     * Folds the older per-kind automatic saves (face and search data, labels) into the automatic backup, once: one
+     * on turns the automatic backup on, and both go off, so two automatic saves never run side by side.
+     */
+    private suspend fun foldOlderAutoSaves() {
+        if (context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_AUTOSAVE_FOLDED] == true) return
+        val anyOn = AutoSaveKind.entries.any { autoSaveStore.read(it).enabled }
+        val now = System.currentTimeMillis()
+        for (kind in AutoSaveKind.entries) autoSaveStore.setEnabled(kind, false, now)
+        context.settingsDataStore.edit { it[SettingsKeys.SHARED_BACKUP_AUTOSAVE_FOLDED] = true }
+        if (anyOn && !store.isEnabled()) setEnabled(true)
     }
 
     /**
@@ -130,6 +167,7 @@ class SharedBackupScheduler @Inject constructor(
      */
     suspend fun setEnabled(enabled: Boolean) {
         store.setEnabled(enabled, System.currentTimeMillis())
+        accountManager.getPrimaryUserId().first()?.let { store.remember(it.id, enabled) }
         if (enabled) {
             syncNow(userAsked = true)
         } else {
@@ -152,16 +190,30 @@ class SharedBackupScheduler @Inject constructor(
         MlSyncWorker.enqueueRound(context, userId, anyNetwork, replaceWaiting)
     }
 
+    /** The user's "Back up now": reads what the other devices saved, then writes every copy of this device's. */
+    suspend fun saveNow() = manualRound(RoundMode.SAVE_NOW)
+
+    /** The user's "Load from Drive": takes in every other device's newest copies again, and writes nothing. */
+    suspend fun loadNow() = manualRound(RoundMode.LOAD_NOW)
+
+    /** A round the user asked for from the card, on any connection, whether the automatic backup is on or not. */
+    private suspend fun manualRound(mode: RoundMode) {
+        val userId = accountManager.getPrimaryUserId().first() ?: return
+        val replaceWaiting = withContext(Dispatchers.IO) { automaticRoundWaiting() }
+        MlSyncWorker.enqueueRound(context, userId, anyNetwork = true, replaceWaiting = replaceWaiting, mode = mode)
+    }
+
     private fun automaticRoundWaiting(): Boolean = runCatching {
         workManager.getWorkInfosForUniqueWork(MlSyncWorker.UNIQUE_WORK_NAME).get().any {
             it.state == WorkInfo.State.ENQUEUED && MlSyncWorkData.operationTag(MlSyncOperation.ROUND) in it.tags
         }
     }.getOrDefault(false)
 
-    /** Plans the next round [ROUND_EVERY_MS] from now. The round worker calls this as it ends. */
+    /** Plans the next round [ROUND_EVERY_MS] from now, or [SAVE_AFTER_MS] after one that failed. The round worker
+     *  calls this as it ends. */
     suspend fun scheduleNext() {
         if (!store.isEnabled()) return
-        enqueueCheck(NEXT_WORK, ROUND_EVERY_MS)
+        enqueueCheck(NEXT_WORK, if (store.status.first().lastFailed) SAVE_AFTER_MS else ROUND_EVERY_MS)
     }
 
     /** Drops every planned check, for a switch turned off or a sign-out. */
