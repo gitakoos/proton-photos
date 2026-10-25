@@ -51,6 +51,7 @@ import eu.akoos.photos.data.mlsync.MlDriveResult
 import eu.akoos.photos.data.mlsync.MlDriveStore
 import eu.akoos.photos.data.mlsync.MlRestoreFile
 import eu.akoos.photos.data.mlsync.MlSyncScratch
+import eu.akoos.photos.util.SyncDiagnostics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -122,7 +123,7 @@ class SharedBackupRunner @Inject constructor(
             is MlDriveResult.Ok -> result.value
             MlDriveResult.FolderMissing -> emptyList()
             MlDriveResult.NotCapable, MlDriveResult.Conflict, is MlDriveResult.Failed -> {
-                Log.w(TAG, "listing ${area.name} failed")
+                SyncDiagnostics.log("shared backup: listing ${area.name} failed: ${causeOf(result)}")
                 null
             }
         }
@@ -269,20 +270,28 @@ class SharedBackupRunner @Inject constructor(
         if (copy.file.sizeBytes > MAX_COPY_BYTES) return null
         val scratch = scratchFile("read-") ?: return null
         try {
-            if (driveStore.download(userId, copy.file.activeRevisionUid, scratch) !is MlDriveResult.Ok) return null
+            val downloaded = driveStore.download(userId, copy.file.activeRevisionUid, scratch)
+            if (downloaded !is MlDriveResult.Ok) {
+                SyncDiagnostics.log("shared backup: a copy could not be downloaded: ${causeOf(downloaded)}")
+                return null
+            }
             for (refresh in listOf(false, true)) {
                 val opened = withContext(Dispatchers.IO) { FileInputStream(scratch).use { open(it, refresh) } }
                 when (opened) {
                     is Opened.Value -> return opened.value
                     Opened.WrongKey -> continue
-                    Opened.Unreadable -> return null
+                    Opened.Unreadable -> {
+                        SyncDiagnostics.log("shared backup: a copy could not be read")
+                        return null
+                    }
                 }
             }
+            SyncDiagnostics.log("shared backup: a copy is sealed to a key this account does not hold")
             return null
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "a copy could not be read: ${e.javaClass.simpleName}")
+            SyncDiagnostics.log("shared backup: a copy could not be read: ${e.javaClass.simpleName}")
             return null
         } finally {
             scratch.delete()
@@ -306,7 +315,7 @@ class SharedBackupRunner @Inject constructor(
             file.delete()
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "a copy could not be sealed: ${e.javaClass.simpleName}")
+            SyncDiagnostics.log("shared backup: a copy could not be sealed: ${e.javaClass.simpleName}")
             file.delete()
             null
         }
@@ -321,7 +330,7 @@ class SharedBackupRunner @Inject constructor(
                     is MlDriveResult.Ok -> return true
                     MlDriveResult.Conflict -> Unit
                     else -> {
-                        Log.w(TAG, "upload to ${area.name} failed: ${(result as? MlDriveResult.Failed)?.cause ?: result}")
+                        SyncDiagnostics.log("shared backup: upload to ${area.name} failed: ${causeOf(result)}")
                         return null
                     }
                 }
@@ -338,9 +347,12 @@ class SharedBackupRunner @Inject constructor(
         if (!dir.isDirectory) throw IOException("no scratch directory")
         File.createTempFile(prefix, ".tmp", dir)
     } catch (e: IOException) {
-        Log.w(TAG, "no scratch file: ${e.javaClass.simpleName}")
+        SyncDiagnostics.log("shared backup: no scratch file: ${e.javaClass.simpleName}")
         null
     }
+
+    /** What a Drive call that did not go through came to, for the diagnostics: a class name or a result name, never a message. */
+    private fun causeOf(result: MlDriveResult<*>): String = (result as? MlDriveResult.Failed)?.cause ?: result.javaClass.simpleName
 
     private companion object {
         const val TAG = "SharedBackup"

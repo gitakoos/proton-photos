@@ -96,6 +96,7 @@ import eu.akoos.photos.data.semantic.SemanticIndexingScheduler
 import eu.akoos.photos.data.semantic.SemanticIndexingState
 import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.MlWalkGate
+import eu.akoos.photos.util.SyncDiagnostics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -640,13 +641,16 @@ class MlSyncWorker @AssistedInject constructor(
         }
         val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, ownDeviceId)
         val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, ownDeviceId)
-        var failed = unread.isNotEmpty() || !labelsRead || !hiddenRead
+        val failedParts = ArrayList<String>()
+        unread.mapTo(failedParts) { "read ${it.name.lowercase()}" }
+        if (!labelsRead) failedParts += "read labels"
+        if (!hiddenRead) failedParts += "read hidden"
 
         if (sharedBackupStore.isEnabled()) {
             for ((index, kind) in ML_SYNC_KIND_ORDER.withIndex()) {
                 if (kind in unread || !sharedBackupStore.mlChanged(kind)) continue
                 if (!sharedBackupRunner.ensureFolder(userId, DriveDataFolder.ML)) {
-                    failed = true
+                    failedParts += "ml folder"
                     continue
                 }
                 promoteToForeground()
@@ -657,19 +661,26 @@ class MlSyncWorker @AssistedInject constructor(
                 if (saved == MlSyncPartStatus.DONE || saved == MlSyncPartStatus.EMPTY) {
                     sharedBackupStore.mlSaved(kind, saveStarted)
                 } else {
-                    failed = true
+                    failedParts += "save ${kind.name.lowercase()}"
                 }
             }
             val now = System.currentTimeMillis()
-            if (labelsRead && sharedBackupRunner.saveLabels(userId, ownDeviceId, now) == null) failed = true
-            if (hiddenRead && sharedBackupRunner.saveHidden(userId, ownDeviceId, now) == null) failed = true
+            if (labelsRead && sharedBackupRunner.saveLabels(userId, ownDeviceId, now) == null) failedParts += "save labels"
+            if (hiddenRead && sharedBackupRunner.saveHidden(userId, ownDeviceId, now) == null) failedParts += "save hidden"
         }
-        return endRound(tally.outcome(if (failed) MlSyncResult.PARTIAL else MlSyncResult.SUCCESS), failed)
+        val failed = failedParts.isNotEmpty()
+        return endRound(
+            tally.outcome(if (failed) MlSyncResult.PARTIAL else MlSyncResult.SUCCESS),
+            failed,
+            failedParts.joinToString(", "),
+        )
     }
 
-    /** Records how a round ended for the settings row and hands its outcome on. */
-    private suspend fun endRound(outcome: MlSyncOutcome, failed: Boolean): MlSyncOutcome {
+    /** Records how a round ended for the settings row and the diagnostics, and hands its outcome on. */
+    private suspend fun endRound(outcome: MlSyncOutcome, failed: Boolean, failedParts: String = ""): MlSyncOutcome {
         runCatching { sharedBackupStore.recordRound(System.currentTimeMillis(), failed) }
+        val what = failedParts.ifEmpty { outcome.failure.orEmpty() }
+        SyncDiagnostics.log("shared backup round: ${outcome.result.name.lowercase()}" + if (failed) " ($what)" else "")
         return outcome
     }
 
