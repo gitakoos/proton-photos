@@ -150,6 +150,31 @@ class HiddenCopyMergeTest {
     }
 
     @Test
+    fun `a photo taken out of the vault here stays shown when another device's older hide comes back`() {
+        val vault = "file:///vault/1"
+        val prefs = mutablePreferencesOf(
+            SettingsKeys.HIDDEN_PHOTO_URIS to setOf(vault),
+            SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP to setOf("$vault|link"),
+            SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP to setOf("$vault|IMG_1.jpg"),
+            SettingsKeys.HIDDEN_PHOTO_HIDE_TIMES to setOf("link|100"),
+        )
+        dropRevealedRecords(prefs, vault, shownAt = 200)
+        assertTrue(prefs[SettingsKeys.HIDDEN_PHOTO_URIS].isNullOrEmpty())
+        assertTrue(prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP].isNullOrEmpty())
+        val here = HiddenSyncStore.stateOf(prefs)
+        assertEquals(mapOf("link" to 200L), here.photos.shown.toMap())
+        val changes = HiddenCopyMerge.takeIn(
+            here,
+            HiddenSnapshot(
+                deviceId = pc, deviceLabel = "PC", createdAtMillis = 150,
+                photos = listOf(HiddenSnapshotEntry("link", true, 100)), albums = emptyList(),
+            ),
+            phone,
+        )
+        assertTrue(changes.isEmpty)
+    }
+
+    @Test
     fun `a hide and an unhide of the same photo keep only the later time`() {
         val prefs = mutablePreferencesOf()
         HiddenSyncTimes.photosHidden(prefs, listOf("p"), 10)
