@@ -5,7 +5,8 @@
     <!-- Onboarding wizard (first-launch, post-sign-in) -->
     <string name="onboarding_back">Zpět</string>
     <string name="onboarding_continue">Pokračovat</string>
-    <string name="onboarding_skip">Zatím přeskočit</string>
+    <string name="onboarding_not_now">Teď ne</string>
+    <string name="onboarding_get_started">Začít</string>
     <string name="onboarding_allow">Povolit</string>
     <string name="onboarding_open_settings">Otevřít nastavení</string>
     <string name="onboarding_permission_granted">Uděleno</string>
@@ -18,9 +19,9 @@
     <string name="onboarding_backup_title">Vyberte, co zálohovat</string>
     <string name="onboarding_backup_subtitle">Kdykoli to můžete změnit v Nastavení.</string>
     <string name="onboarding_backup_everything">Zálohovat vše</string>
-    <string name="onboarding_backup_everything_desc">Všechny fotky a videa v zařízení, kromě složek, které později vyloučíte.</string>
+    <string name="onboarding_backup_everything_desc">Všechny fotky a videa v tomto zařízení. Na další obrazovce můžete vynechat složky.</string>
     <string name="onboarding_backup_folders">Vybrat konkrétní složky</string>
-    <string name="onboarding_backup_folders_desc">Vyberte v Nastavení, které složky zálohovat. Dokud nevyberete, nic se nenahraje.</string>
+    <string name="onboarding_backup_folders_desc">Jen složky, které vyberete na další obrazovce.</string>
     <string name="onboarding_backup_nothing">Zatím nic</string>
     <string name="onboarding_backup_nothing_desc">Procházejte to, co už je na Proton Drive, bez zálohování nových fotek.</string>
 
@@ -40,7 +41,7 @@
     <string name="onboarding_photos_subtitle">Přístup ke čtení vašich fotek a videí je potřeba k jejich zašifrování a zálohování na Drive.</string>
 
     <string name="onboarding_manage_media_title">Správa médií</string>
-    <string name="onboarding_manage_media_subtitle">Důrazně doporučeno. Umožní aplikaci upravovat, mazat a přejmenovávat fotky a videa v zařízení bez systémového potvrzovacího dialogu pokaždé znovu. Využívá se pro úpravy v aplikaci, ukládání zpět do zařízení, koš a Smazat po záloze. Klepnutím otevřete systémové nastavení.</string>
+    <string name="onboarding_manage_media_subtitle">Důrazně doporučeno. Aplikace může upravovat, mazat a přejmenovávat fotky v tomto zařízení, aniž by se pokaždé ptala na potvrzení.</string>
     <string name="onboarding_folders_include_title">Složky k zálohování</string>
     <string name="onboarding_folders_include_subtitle">Vyberte, které složky se mají nahrávat na Drive. Položky v ostatních složkách zůstanou jen v tomto zařízení.</string>
     <string name="onboarding_folders_exclude_title">Složky k přeskočení</string>
@@ -53,7 +54,6 @@
 
     <string name="onboarding_about_title">Nezávislý klient třetí strany</string>
     <string name="onboarding_about_subtitle">Vytvořil jeden vývojář. Není spojen se společností Proton AG. Zdrojový kód je dostupný, licencovaný pod GPL, bez vlastní telemetrie.</string>
-    <string name="onboarding_about_author_subtitle">Osobní web vývojáře.</string>
     <string name="onboarding_about_github_subtitle">Kompletní zdrojový kód na GitHubu.</string>
 
     <string name="onboarding_appearance_title">Přizpůsobte si to</string>
@@ -66,7 +66,17 @@
     <string name="onboarding_lock_timeout_label">Znovu zamknout po</string>
 
     <string name="onboarding_done_title">Vše je připraveno</string>
-    <string name="onboarding_done_subtitle">Vaše nastavení je uloženo. Cokoli zde lze později upravit na stránce Nastavení.</string>
+    <string name="onboarding_done_subtitle">Tohle se nastaví. Cokoli můžete později změnit v Nastavení.</string>
+    <string name="onboarding_done_backup_everything">Záloha: všechny fotky a videa</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Záloha: %d složka</item>
+        <item quantity="few">Záloha: %d složky</item>
+        <item quantity="many">Záloha: %d složky</item>
+        <item quantity="other">Záloha: %d složek</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Záloha: zatím vypnutá</string>
+    <string name="onboarding_done_ml">Stažení po nastavení: %s</string>
+    <string name="onboarding_done_lock">Zámek aplikace: zapnutý</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Soukromé, koncově šifrované zálohování fotek.</string>
@@ -1565,7 +1575,6 @@
     <!-- FAQ -->
     <string name="faq_title">Časté dotazy</string>
     <string name="faq_settings_entry">Časté dotazy</string>
-    <string name="faq_onboarding_intro">Pár rychlých odpovědí pro začátek. Později je najdete v Nastavení.</string>
     <string name="faq_q_cloud_icons">Co znamenají ikony cloudu?</string>
     <string name="faq_a_cloud_icons">Zelený cloud znamená, že je fotka zálohovaná na Proton Drive a zároveň je stále v tomto zařízení. Bílý cloud znamená, že je pouze na Proton Drive, nikoli v tomto zařízení. Žádná ikona znamená, že je jen v tomto zařízení a ještě není zálohovaná.</string>
     <string name="faq_q_backup">Jak funguje zálohování?</string>
@@ -1668,7 +1677,7 @@
 
     <!-- Onboarding: all-files access -->
     <string name="onboarding_all_files_title">Přístup ke všem souborům</string>
-    <string name="onboarding_all_files_subtitle">Doporučeno. Umožní aplikaci vrátit obnovené skryté fotky do jejich původní složky (například do složky médií chatovací aplikace, ne jen do Pictures) a zapisovat změny do místních souborů přímo na místě. Klepnutím otevřete systémové nastavení.</string>
+    <string name="onboarding_all_files_subtitle">Doporučeno. Obnovené skryté fotky se vrátí do své původní složky a aplikace může aktualizovat místní soubory přímo na místě.</string>
 
     <!-- Permissions screen -->
     <string name="permissions_title">Oprávnění</string>
@@ -2644,7 +2653,7 @@
     <string name="viewer_save_to_drive_failed">Nepodařilo se uložit na Drive</string>
     <string name="viewer_remove_shared_confirm_body">Fotka bude odebrána ze sdíleného alba. Zůstane u vlastníka alba a tady už nebude vidět.</string>
     <string name="onboarding_ml_title">Chytré funkce ve vašem zařízení</string>
-    <string name="onboarding_ml_subtitle">Vyhledávejte osoby a věci na svých fotkách a kopírujte z nich text. Vše běží v tomto telefonu a nic z něj neodchází. Vyberte si teď, co chcete, nebo to později změňte v Nastavení.</string>
+    <string name="onboarding_ml_subtitle">Najděte lidi a věci na svých fotkách a kopírujte z nich text. Vše běží na tomto telefonu a nic ho neopouští.</string>
     <string name="onboarding_ml_size">Stažení %1$s</string>
     <string name="onboarding_ml_note">Modely se stahují jednou, po nastavení, na pozadí. Doporučuje se Wi-Fi, protože bez Wi-Fi stahování spotřebuje mobilní data.</string>
 </resources>

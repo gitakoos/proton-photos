@@ -25,8 +25,7 @@ package eu.akoos.photos.presentation.onboarding.steps
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -38,7 +37,9 @@ import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.ocr.OcrModelAssets
 import eu.akoos.photos.data.semantic.SemanticModelAssets
 import eu.akoos.photos.presentation.onboarding.components.StepHeader
-import eu.akoos.photos.presentation.onboarding.components.ToggleCard
+import eu.akoos.photos.presentation.settings.components.RowDivider
+import eu.akoos.photos.presentation.settings.components.SettingsCard
+import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.util.formatBytes
 
@@ -58,41 +59,42 @@ internal fun MlIntroStep(
     val colors = AppColors.current
     Column {
         StepHeader(
-            icon = Icons.Default.AutoAwesome,
             title = stringResource(R.string.onboarding_ml_title),
             subtitle = stringResource(R.string.onboarding_ml_subtitle),
         )
-        Spacer(Modifier.height(20.dp))
-        ToggleCard(
-            label = stringResource(R.string.settings_ai_face_toggle),
-            description = featureDescription(R.string.settings_ai_face_desc, FaceModelAssets.TOTAL_DOWNLOAD_BYTES),
-            checked = face,
-            onChange = onFaceChange,
-        )
-        Spacer(Modifier.height(10.dp))
-        ToggleCard(
-            label = stringResource(R.string.settings_ai_semantic),
-            description = featureDescription(R.string.settings_ai_semantic_desc, SemanticModelAssets.TOTAL_DOWNLOAD_BYTES),
-            checked = semantic,
-            onChange = onSemanticChange,
-        )
-        Spacer(Modifier.height(10.dp))
-        ToggleCard(
-            label = stringResource(R.string.settings_ai_ocr),
-            description = featureDescription(R.string.settings_ai_ocr_desc, OcrModelAssets.TOTAL_DOWNLOAD_BYTES),
-            checked = ocr,
-            onChange = onOcrChange,
-        )
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(24.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.settings_ai_face_toggle),
+                description = described(R.string.settings_ai_face_desc, FaceModelAssets.TOTAL_DOWNLOAD_BYTES),
+                checked = face,
+                onCheckedChange = onFaceChange,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_ai_semantic),
+                description = described(R.string.settings_ai_semantic_desc, SemanticModelAssets.TOTAL_DOWNLOAD_BYTES),
+                checked = semantic,
+                onCheckedChange = onSemanticChange,
+            )
+            RowDivider()
+            ToggleRow(
+                label = stringResource(R.string.settings_ai_ocr),
+                description = described(R.string.settings_ai_ocr_desc, OcrModelAssets.TOTAL_DOWNLOAD_BYTES),
+                checked = ocr,
+                onCheckedChange = onOcrChange,
+            )
+        }
         Text(
             text = stringResource(R.string.onboarding_ml_note),
             color = colors.fgMute,
             fontSize = 12.sp,
             lineHeight = 18.sp,
+            modifier = Modifier.padding(start = 4.dp, end = 4.dp, top = 12.dp),
         )
     }
 }
 
 @Composable
-private fun featureDescription(descriptionRes: Int, modelBytes: Long): String =
+private fun described(descriptionRes: Int, modelBytes: Long): String =
     stringResource(descriptionRes) + "\n" + stringResource(R.string.onboarding_ml_size, formatBytes(modelBytes))

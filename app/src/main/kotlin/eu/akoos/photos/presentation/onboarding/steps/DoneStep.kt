@@ -22,66 +22,87 @@
 
 package eu.akoos.photos.presentation.onboarding.steps
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.onboarding.BackupMode
+import eu.akoos.photos.presentation.onboarding.components.StepHeader
+import eu.akoos.photos.presentation.settings.components.RowDivider
+import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.theme.AppColors
 
+/** The last step: what the wizard is about to apply, as a settings card, so Finish holds no surprise. */
 @Composable
-internal fun DoneStep() {
+internal fun DoneStep(
+    backupMode: BackupMode,
+    folderCount: Int,
+    mlFace: Boolean,
+    mlSemantic: Boolean,
+    mlOcr: Boolean,
+    appLockEnabled: Boolean,
+) {
     val colors = AppColors.current
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier.size(96.dp).background(
-                Brush.linearGradient(
-                    listOf(colors.accent, colors.accent2),
-                    Offset.Zero,
-                    Offset(220f, 220f),
-                ),
-                CircleShape,
-            ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(48.dp))
+    val backupLine = when {
+        backupMode == BackupMode.Everything -> stringResource(R.string.onboarding_done_backup_everything)
+        backupMode == BackupMode.ChooseLater && folderCount > 0 ->
+            pluralStringResource(R.plurals.onboarding_done_backup_folders, folderCount, folderCount)
+        else -> stringResource(R.string.onboarding_done_backup_nothing)
+    }
+    val mlNames = buildList {
+        if (mlFace) add(stringResource(R.string.settings_ai_face_toggle))
+        if (mlSemantic) add(stringResource(R.string.settings_ai_semantic))
+        if (mlOcr) add(stringResource(R.string.settings_ai_ocr))
+    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        StepHeader(
+            title = stringResource(R.string.onboarding_done_title),
+            subtitle = stringResource(R.string.onboarding_done_subtitle),
+        )
+        Spacer(Modifier.height(24.dp))
+        SettingsCard {
+            SummaryRow(Icons.Default.CloudUpload, backupLine)
+            if (mlNames.isNotEmpty()) {
+                RowDivider()
+                SummaryRow(Icons.Default.Download, stringResource(R.string.onboarding_done_ml, mlNames.joinToString(", ")))
+            }
+            if (appLockEnabled) {
+                RowDivider()
+                SummaryRow(Icons.Default.Lock, stringResource(R.string.onboarding_done_lock))
+            }
         }
-        Spacer(Modifier.height(18.dp))
-        Text(
-            stringResource(R.string.onboarding_done_title),
-            color = colors.fgPrimary,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            stringResource(R.string.onboarding_done_subtitle),
-            color = colors.fgMute,
-            fontSize = 14.sp,
-            lineHeight = 21.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
+    }
+}
+
+@Composable
+private fun SummaryRow(icon: ImageVector, text: String) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = colors.fgDim, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(14.dp))
+        Text(text, color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
 }

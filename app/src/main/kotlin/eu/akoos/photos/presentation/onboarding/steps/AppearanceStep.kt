@@ -39,7 +39,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -71,7 +70,6 @@ internal fun AppearanceStep(
     val colors = AppColors.current
     Column {
         StepHeader(
-            icon = Icons.Default.Palette,
             title = stringResource(R.string.onboarding_appearance_title),
             subtitle = stringResource(R.string.onboarding_appearance_subtitle),
         )
@@ -119,8 +117,8 @@ internal fun AppearanceStep(
         FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(colors.cardBg, RoundedCornerShape(24.dp))
-                .border(0.5.dp, colors.cardBorder, RoundedCornerShape(24.dp))
+                .background(colors.cardBg, RoundedCornerShape(12.dp))
+                .border(0.5.dp, colors.cardBorder, RoundedCornerShape(12.dp))
                 .padding(horizontal = 18.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterHorizontally),
             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -169,16 +167,7 @@ internal fun AppearanceStep(
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.weight(1f),
                     )
-                    if (selected) {
-                        Box(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .background(colors.accent, CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
-                        }
-                    }
+                    if (selected) Icon(Icons.Default.Check, null, tint = colors.accent, modifier = Modifier.size(20.dp))
                 }
                 if (idx < options.lastIndex) {
                     Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(0.5.dp).background(colors.cardBorder))

@@ -28,28 +28,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import eu.akoos.photos.R
-import eu.akoos.photos.presentation.onboarding.components.AllowButton
+import eu.akoos.photos.presentation.onboarding.components.PermissionRow
 import eu.akoos.photos.presentation.onboarding.components.StepHeader
+import eu.akoos.photos.presentation.settings.components.SettingsCard
 
 @Composable
-internal fun ManageMediaStep(granted: Boolean, onAllow: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+internal fun ManageMediaStep(granted: Boolean) {
+    Column {
         StepHeader(
-            icon = Icons.Default.DeleteOutline,
             title = stringResource(R.string.onboarding_manage_media_title),
             subtitle = stringResource(R.string.onboarding_manage_media_subtitle),
         )
-        Spacer(Modifier.height(20.dp))
-        AllowButton(
-            label = if (granted) stringResource(R.string.onboarding_permission_granted)
-            else stringResource(R.string.onboarding_open_settings),
-            granted = granted,
-            onClick = onAllow,
-        )
+        Spacer(Modifier.height(24.dp))
+        SettingsCard {
+            PermissionRow(Icons.Default.DeleteOutline, stringResource(R.string.permissions_managemedia_title), granted)
+        }
     }
 }

@@ -5,7 +5,8 @@
     <!-- Onboarding wizard (first-launch, post-sign-in) -->
     <string name="onboarding_back">Wstecz</string>
     <string name="onboarding_continue">Dalej</string>
-    <string name="onboarding_skip">Pomiń na razie</string>
+    <string name="onboarding_not_now">Nie teraz</string>
+    <string name="onboarding_get_started">Rozpocznij</string>
     <string name="onboarding_allow">Zezwól</string>
     <string name="onboarding_open_settings">Otwórz ustawienia</string>
     <string name="onboarding_permission_granted">Przyznano</string>
@@ -18,9 +19,9 @@
     <string name="onboarding_backup_title">Wybierz, co kopiować</string>
     <string name="onboarding_backup_subtitle">Możesz to zmienić w każdej chwili w Ustawieniach.</string>
     <string name="onboarding_backup_everything">Kopiuj wszystko</string>
-    <string name="onboarding_backup_everything_desc">Wszystkie zdjęcia i filmy na urządzeniu, pomniejszone o foldery, które później wykluczysz.</string>
+    <string name="onboarding_backup_everything_desc">Wszystkie zdjęcia i filmy na tym urządzeniu. Na następnym ekranie możesz wykluczyć foldery.</string>
     <string name="onboarding_backup_folders">Wybierz określone foldery</string>
-    <string name="onboarding_backup_folders_desc">Wybierz foldery do kopiowania w Ustawieniach. Nic nie zostanie wysłane, dopóki nie wybierzesz.</string>
+    <string name="onboarding_backup_folders_desc">Tylko foldery wybrane na następnym ekranie.</string>
     <string name="onboarding_backup_nothing">Na razie nic</string>
     <string name="onboarding_backup_nothing_desc">Przeglądaj zdjęcia, które już są w Proton Drive, bez kopiowania nowych.</string>
 
@@ -40,7 +41,7 @@
     <string name="onboarding_photos_subtitle">Potrzebny jest dostęp do odczytu Twoich zdjęć i filmów, aby je zaszyfrować i skopiować do Drive.</string>
 
     <string name="onboarding_manage_media_title">Zarządzaj multimediami</string>
-    <string name="onboarding_manage_media_subtitle">Zdecydowanie zalecane. Pozwala aplikacji edytować, usuwać i zmieniać nazwy zdjęć oraz filmów na urządzeniu bez systemowego okna potwierdzenia za każdym razem. Używane do edycji w aplikacji, zapisu na urządzenie, kosza i usuwania po kopii. Dotknij, aby otworzyć ustawienia systemu.</string>
+    <string name="onboarding_manage_media_subtitle">Zdecydowanie zalecane. Aplikacja może edytować, usuwać i zmieniać nazwy zdjęć na tym urządzeniu bez pytania o potwierdzenie za każdym razem.</string>
     <string name="onboarding_folders_include_title">Foldery do kopiowania</string>
     <string name="onboarding_folders_include_subtitle">Wybierz, które foldery mają być wysyłane do Drive. Elementy w innych folderach pozostaną tylko na tym urządzeniu.</string>
     <string name="onboarding_folders_exclude_title">Foldery do pominięcia</string>
@@ -53,7 +54,6 @@
 
     <string name="onboarding_about_title">Niezależny klient innej firmy</string>
     <string name="onboarding_about_subtitle">Stworzony przez jednego programistę. Niepowiązany z Proton AG. Kod źródłowy dostępny, na licencji GPL, bez własnej telemetrii.</string>
-    <string name="onboarding_about_author_subtitle">Osobista strona programisty.</string>
     <string name="onboarding_about_github_subtitle">Pełny kod źródłowy na GitHubie.</string>
 
     <string name="onboarding_appearance_title">Dostosuj do siebie</string>
@@ -66,7 +66,17 @@
     <string name="onboarding_lock_timeout_label">Zablokuj ponownie po</string>
 
     <string name="onboarding_done_title">Wszystko gotowe</string>
-    <string name="onboarding_done_subtitle">Twoje ustawienia zostały zapisane. Wszystko tutaj można później zmienić na stronie Ustawień.</string>
+    <string name="onboarding_done_subtitle">Oto co zostanie ustawione. Wszystko możesz później zmienić w Ustawieniach.</string>
+    <string name="onboarding_done_backup_everything">Kopia: wszystkie zdjęcia i filmy</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Kopia: %d folder</item>
+        <item quantity="few">Kopia: %d foldery</item>
+        <item quantity="many">Kopia: %d folderów</item>
+        <item quantity="other">Kopia: %d folderu</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Kopia: na razie wyłączona</string>
+    <string name="onboarding_done_ml">Pobieranie po konfiguracji: %s</string>
+    <string name="onboarding_done_lock">Blokada aplikacji: włączona</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Prywatna, szyfrowana od końca do końca kopia zdjęć.</string>
@@ -1565,7 +1575,6 @@
     <!-- FAQ -->
     <string name="faq_title">Najczęstsze pytania</string>
     <string name="faq_settings_entry">Najczęstsze pytania</string>
-    <string name="faq_onboarding_intro">Kilka szybkich odpowiedzi na początek. Znajdziesz je później w Ustawieniach.</string>
     <string name="faq_q_cloud_icons">Co oznaczają ikony chmury?</string>
     <string name="faq_a_cloud_icons">Zielona chmura oznacza, że zdjęcie jest skopiowane do Proton Drive i nadal znajduje się na tym urządzeniu. Biała chmura oznacza, że jest tylko w Proton Drive, a nie na tym urządzeniu. Brak ikony oznacza, że jest tylko na tym urządzeniu i nie zostało jeszcze skopiowane.</string>
     <string name="faq_q_backup">Jak działa kopia?</string>
@@ -1663,7 +1672,7 @@
     <string name="duplicates_filter_match_label">Dopasowanie</string>
     <string name="duplicates_badge_cloud">Chmura</string>
     <string name="duplicates_badge_device">Urządzenie</string>
-    <string name="onboarding_all_files_subtitle">Zalecane. Pozwala aplikacji przywrócić odzyskane ukryte zdjęcia do ich pierwotnego folderu (na przykład do folderu multimediów aplikacji do czatu, nie tylko do Pictures) oraz zapisywać zmiany w plikach lokalnych w miejscu. Dotknij, aby otworzyć ustawienia systemu.</string>
+    <string name="onboarding_all_files_subtitle">Zalecane. Przywrócone ukryte zdjęcia wracają do swojego pierwotnego folderu, a aplikacja może aktualizować pliki lokalne na miejscu.</string>
     <string name="onboarding_all_files_title">Dostęp do wszystkich plików</string>
     <string name="permissions_action_allow">Zezwól</string>
     <string name="permissions_allfiles_title">Dostęp do wszystkich plików</string>
@@ -2638,7 +2647,7 @@
     <string name="viewer_save_to_drive_failed">Nie udało się zapisać na Drive</string>
     <string name="viewer_remove_shared_confirm_body">Zdjęcie zostanie usunięte z udostępnionego albumu. Zostaje u właściciela albumu i nie będzie tu już widoczne.</string>
     <string name="onboarding_ml_title">Inteligentne funkcje na Twoim urządzeniu</string>
-    <string name="onboarding_ml_subtitle">Znajduj osoby i rzeczy na swoich zdjęciach i kopiuj z nich tekst. Wszystko działa na tym telefonie i nic go nie opuszcza. Wybierz teraz, czego chcesz, albo zmień to później w Ustawieniach.</string>
+    <string name="onboarding_ml_subtitle">Znajduj osoby i rzeczy na zdjęciach i kopiuj z nich tekst. Wszystko działa na tym telefonie i nic go nie opuszcza.</string>
     <string name="onboarding_ml_size">Pobieranie %1$s</string>
     <string name="onboarding_ml_note">Modele pobierają się jednorazowo, po konfiguracji, w tle. Zalecane jest Wi-Fi, ponieważ bez Wi-Fi pobieranie zużywa dane mobilne.</string>
 </resources>

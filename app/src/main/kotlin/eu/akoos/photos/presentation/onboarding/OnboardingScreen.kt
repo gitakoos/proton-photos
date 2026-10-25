@@ -28,6 +28,7 @@ import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
@@ -42,19 +43,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -64,7 +62,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -91,16 +88,13 @@ import eu.akoos.photos.presentation.lock.WIZARD_LOCK_TIMEOUT_SECONDS
 import eu.akoos.photos.presentation.lock.appLockWizardStart
 import eu.akoos.photos.presentation.lock.appLockWizardWrite
 import eu.akoos.photos.presentation.lock.showAppLockPrompt
-import eu.akoos.photos.presentation.onboarding.components.ProgressDots
-import eu.akoos.photos.presentation.onboarding.steps.AboutStep
+import eu.akoos.photos.presentation.onboarding.components.WizardTopBar
 import eu.akoos.photos.presentation.onboarding.steps.AlbumMirrorStep
 import eu.akoos.photos.presentation.onboarding.steps.AppLockStep
 import eu.akoos.photos.presentation.common.PrimaryButton
-import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.onboarding.steps.AppearanceStep
 import eu.akoos.photos.presentation.onboarding.steps.BackupModeStep
 import eu.akoos.photos.presentation.onboarding.steps.DoneStep
-import eu.akoos.photos.presentation.onboarding.steps.FaqStep
 import eu.akoos.photos.presentation.onboarding.steps.FolderPickerStep
 import eu.akoos.photos.presentation.onboarding.steps.AllFilesAccessStep
 import eu.akoos.photos.presentation.onboarding.steps.ManageMediaStep
@@ -418,7 +412,13 @@ fun OnboardingScreen(
         appLockPrefilled = true
     }
 
-    var notificationGranted by rememberSaveable { mutableStateOf(false) }
+    var notificationGranted by rememberSaveable {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
     var mediaGranted by rememberSaveable {
         mutableStateOf(hasMediaPermission(context))
     }
@@ -440,15 +440,13 @@ fun OnboardingScreen(
     val showManageMedia = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val showNotifications = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
-    // Step list — order is About → Welcome → FAQ → Appearance → Photos perm →
+    // Step list, in order: Welcome → Appearance → Photos perm →
     // Backup mode → conditional Folder picker → Privacy → Machine learning → App lock → Notifications →
     // Manage media → Done. Photos perm comes before the folder picker so when
     // we hit that step MediaStore can actually enumerate buckets; otherwise the
     // list would render empty.
     val steps = buildList {
-        add(OnboardingStep.About)
         add(OnboardingStep.Welcome)
-        add(OnboardingStep.Faq)
         add(OnboardingStep.Appearance)
         add(OnboardingStep.PhotosAccess)
         // All-files access right after the media grant — the app asks for it by default (not only
@@ -506,6 +504,34 @@ fun OnboardingScreen(
     ) {
         allFilesGranted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
             android.os.Environment.isExternalStorageManager()
+        // The mirror step asks from its own row and stays put; the all-files step moves on like the other asks.
+        if (currentStep == OnboardingStep.AllFilesAccess) {
+            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+        }
+    }
+
+    fun openAllFilesSettings() {
+        allFilesLauncher.launch(
+            Intent(
+                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                android.net.Uri.fromParts("package", context.packageName, null),
+            )
+        )
+    }
+
+    // What a permission step's main button asks for. Null on a step that is not a permission ask.
+    fun permissionAsk(step: OnboardingStep): (() -> Unit)? = when (step) {
+        OnboardingStep.PhotosAccess -> { { mediaLauncher.launch(mediaPermissions) } }
+        OnboardingStep.AllFilesAccess -> { { openAllFilesSettings() } }
+        OnboardingStep.Notifications -> { { notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) } }
+        OnboardingStep.ManageMedia -> { {
+            manageMediaLauncher.launch(
+                Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA).apply {
+                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                }
+            )
+        } }
+        else -> null
     }
 
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
@@ -517,7 +543,22 @@ fun OnboardingScreen(
                 .padding(horizontal = 24.dp)
                 .padding(top = 16.dp, bottom = 24.dp),
         ) {
-            ProgressDots(currentIndex = currentPage, total = totalSteps)
+            // Built like the app's floating header: back on the left, the step count in a pill, so the bottom row
+            // only ever holds the step's own actions.
+            val canGoBack = currentPage > 0 && currentStep != OnboardingStep.Done
+            // The system back steps back through the wizard too, instead of leaving the app halfway.
+            BackHandler(enabled = currentPage > 0) {
+                scope.launch { pagerState.animateScrollToPage(currentPage - 1) }
+            }
+            WizardTopBar(
+                step = currentPage + 1,
+                total = totalSteps,
+                onBack = if (canGoBack) {
+                    { scope.launch { pagerState.animateScrollToPage(currentPage - 1) } }
+                } else {
+                    null
+                },
+            )
             Spacer(Modifier.height(20.dp))
 
             HorizontalPager(
@@ -538,9 +579,7 @@ fun OnboardingScreen(
                         .padding(horizontal = 4.dp),
                 ) {
                     when (step) {
-                        OnboardingStep.About -> AboutStep()
                         OnboardingStep.Welcome -> WelcomeStep()
-                        OnboardingStep.Faq -> FaqStep()
                         OnboardingStep.Appearance -> AppearanceStep(
                             themeMode = themeMode,
                             palette = palette,
@@ -549,10 +588,7 @@ fun OnboardingScreen(
                             onPalette = { viewModel.setPaletteLive(it) },
                             onLanguage = { viewModel.setLanguageLive(it) },
                         )
-                        OnboardingStep.PhotosAccess -> PhotosAccessStep(
-                            granted = mediaGranted,
-                            onAllow = { mediaLauncher.launch(mediaPermissions) },
-                        )
+                        OnboardingStep.PhotosAccess -> PhotosAccessStep(granted = mediaGranted)
                         OnboardingStep.BackupMode -> BackupModeStep(
                             selected = backupMode,
                             onSelect = { backupMode = it },
@@ -623,14 +659,7 @@ fun OnboardingScreen(
                             enabled = mirrorToLocal,
                             granted = allFilesGranted,
                             onEnabledChange = { mirrorToLocal = it },
-                            onGrant = {
-                                allFilesLauncher.launch(
-                                    Intent(
-                                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                        android.net.Uri.fromParts("package", context.packageName, null),
-                                    )
-                                )
-                            },
+                            onGrant = ::openAllFilesSettings,
                         )
                         OnboardingStep.MachineLearning -> MlIntroStep(
                             face = mlFace,
@@ -652,72 +681,64 @@ fun OnboardingScreen(
                                 appLockPrefilled = true
                             },
                         )
-                        OnboardingStep.Notifications -> NotificationsStep(
-                            granted = notificationGranted,
-                            onAllow = { notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                        OnboardingStep.Notifications -> NotificationsStep(granted = notificationGranted)
+                        OnboardingStep.AllFilesAccess -> AllFilesAccessStep(granted = allFilesGranted)
+                        OnboardingStep.ManageMedia -> ManageMediaStep(granted = manageMediaGranted)
+                        OnboardingStep.Done -> DoneStep(
+                            backupMode = backupMode,
+                            folderCount = selectedFolders.size,
+                            mlFace = mlFace,
+                            mlSemantic = mlSemantic,
+                            mlOcr = mlOcr,
+                            appLockEnabled = appLockEnabled,
                         )
-                        OnboardingStep.AllFilesAccess -> AllFilesAccessStep(
-                            granted = allFilesGranted,
-                            onAllow = {
-                                allFilesLauncher.launch(
-                                    Intent(
-                                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                        android.net.Uri.fromParts("package", context.packageName, null),
-                                    )
-                                )
-                            },
-                        )
-                        OnboardingStep.ManageMedia -> ManageMediaStep(
-                            granted = manageMediaGranted,
-                            onAllow = {
-                                manageMediaLauncher.launch(
-                                    Intent(Settings.ACTION_REQUEST_MANAGE_MEDIA).apply {
-                                        data = android.net.Uri.fromParts("package", context.packageName, null)
-                                    }
-                                )
-                            },
-                        )
-                        OnboardingStep.Done -> DoneStep()
                     }
                 }
             }
 
-            // ── Bottom nav ──────────────────────────────────────────────────
+            // ── Bottom actions ──────────────────────────────────────────────
+            // One main button per step. A permission ask that is still open shows "Allow" with a quiet "Not now"
+            // beside it; once granted, or on any other step, the main button simply moves on.
             Spacer(Modifier.height(16.dp))
             val isLastStep = currentStep == OnboardingStep.Done
-            val isPermissionStep = currentStep == OnboardingStep.Notifications ||
-                currentStep == OnboardingStep.PhotosAccess ||
-                currentStep == OnboardingStep.AllFilesAccess ||
-                currentStep == OnboardingStep.ManageMedia
+            val currentStepGranted = when (currentStep) {
+                OnboardingStep.Notifications -> notificationGranted
+                OnboardingStep.PhotosAccess -> mediaGranted
+                OnboardingStep.AllFilesAccess -> allFilesGranted
+                OnboardingStep.ManageMedia -> manageMediaGranted
+                else -> false
+            }
+            val ask = permissionAsk(currentStep)?.takeIf { !currentStepGranted }
+            val goNext: () -> Unit = { scope.launch { pagerState.animateScrollToPage(currentPage + 1) } }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (currentPage > 0 && !isLastStep) {
-                    SecondaryButton(
-                        label = stringResource(R.string.onboarding_back),
-                        onClick = { scope.launch { pagerState.animateScrollToPage(currentPage - 1) } },
-                        modifier = Modifier.weight(1f),
+                if (ask != null) {
+                    TextButton(onClick = goNext, modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.onboarding_not_now),
+                            color = colors.fgMute,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    PrimaryButton(
+                        label = stringResource(
+                            if (currentStep == OnboardingStep.AllFilesAccess || currentStep == OnboardingStep.ManageMedia) {
+                                R.string.onboarding_open_settings
+                            } else {
+                                R.string.onboarding_allow
+                            },
+                        ),
+                        onClick = ask,
+                        modifier = Modifier.weight(1.5f),
                     )
-                } else {
-                    Spacer(Modifier.weight(1f))
-                }
-                // A permission step's CTA reads "Continue" once its permission is granted,
-                // "Skip" while it's still outstanding.
-                val currentStepGranted = when (currentStep) {
-                    OnboardingStep.Notifications -> notificationGranted
-                    OnboardingStep.PhotosAccess  -> mediaGranted
-                    OnboardingStep.AllFilesAccess -> allFilesGranted
-                    OnboardingStep.ManageMedia   -> manageMediaGranted
-                    else -> false
-                }
-                val ctaLabel: String
-                val ctaAction: () -> Unit
-                when {
-                    isLastStep -> {
-                        ctaLabel = stringResource(R.string.onboarding_finish)
-                        ctaAction = {
+                } else if (isLastStep) {
+                    PrimaryButton(
+                        label = stringResource(R.string.onboarding_finish),
+                        onClick = {
                             viewModel.finishOnboarding(
                                 backupMode = backupMode,
                                 excludedFolders = excludedFolders,
@@ -753,36 +774,26 @@ fun OnboardingScreen(
                                 },
                                 onAppliedLocale = onComplete,
                             )
-                        }
-                    }
-                    isPermissionStep -> {
-                        ctaLabel = stringResource(
-                            if (currentStepGranted) R.string.onboarding_continue
-                            else R.string.onboarding_skip,
-                        )
-                        ctaAction = {
-                            scope.launch { pagerState.animateScrollToPage(currentPage + 1) }
-                        }
-                    }
-                    else -> {
-                        ctaLabel = stringResource(R.string.onboarding_continue)
-                        ctaAction = {
-                            scope.launch { pagerState.animateScrollToPage(currentPage + 1) }
-                        }
-                    }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    PrimaryButton(
+                        label = stringResource(
+                            if (currentStep == OnboardingStep.Welcome) R.string.onboarding_get_started
+                            else R.string.onboarding_continue,
+                        ),
+                        onClick = goNext,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
-                PrimaryButton(
-                    label = ctaLabel,
-                    onClick = ctaAction,
-                    modifier = Modifier.weight(1.5f),
-                )
             }
         }
     }
 }
 
 private enum class OnboardingStep {
-    About, Welcome, Faq, Appearance, PhotosAccess, AllFilesAccess, BackupMode, FolderPicker,
+    Welcome, Appearance, PhotosAccess, AllFilesAccess, BackupMode, FolderPicker,
     AlbumMirrorOptIn, Privacy, MirrorOptIn, MachineLearning, AppLock, Notifications, ManageMedia, Done,
 }
 

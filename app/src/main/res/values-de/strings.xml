@@ -6,7 +6,8 @@
     <!-- Onboarding Assistent -->
     <string name="onboarding_back">Zurück</string>
     <string name="onboarding_continue">Weiter</string>
-    <string name="onboarding_skip">Vorerst überspringen</string>
+    <string name="onboarding_not_now">Nicht jetzt</string>
+    <string name="onboarding_get_started">Los geht\'s</string>
     <string name="onboarding_allow">Erlauben</string>
     <string name="onboarding_open_settings">Einstellungen öffnen</string>
     <string name="onboarding_permission_granted">Erteilt</string>
@@ -19,9 +20,9 @@
     <string name="onboarding_backup_title">Wähle, was gesichert wird</string>
     <string name="onboarding_backup_subtitle">Jederzeit in den Einstellungen änderbar.</string>
     <string name="onboarding_backup_everything">Alles sichern</string>
-    <string name="onboarding_backup_everything_desc">Alle Fotos und Videos auf dem Gerät, abzüglich der Ordner, die du später ausschließt.</string>
+    <string name="onboarding_backup_everything_desc">Alle Fotos und Videos auf diesem Gerät. Auf der nächsten Seite kannst du Ordner ausnehmen.</string>
     <string name="onboarding_backup_folders">Bestimmte Ordner wählen</string>
-    <string name="onboarding_backup_folders_desc">Wähle Ordner in den Einstellungen. Bis dahin wird nichts hochgeladen.</string>
+    <string name="onboarding_backup_folders_desc">Nur die Ordner, die du auf der nächsten Seite auswählst.</string>
     <string name="onboarding_backup_nothing">Vorerst nichts</string>
     <string name="onboarding_backup_nothing_desc">Bestehende Fotos auf Proton Drive ansehen, ohne neue zu sichern.</string>
 
@@ -41,7 +42,7 @@
     <string name="onboarding_photos_subtitle">Lesezugriff auf deine Fotos und Videos ist nötig, um sie zu verschlüsseln und auf Drive zu sichern.</string>
 
     <string name="onboarding_manage_media_title">Medien verwalten</string>
-    <string name="onboarding_manage_media_subtitle">Stark empfohlen. Erlaubt der App das Bearbeiten, Löschen und Umbenennen von Fotos und Videos auf deinem Gerät ohne ständige Systemdialoge. Wird für In App Bearbeitung, Speichern auf Gerät, Papierkorb und Nach Sicherung löschen verwendet. Tippen, um die Systemeinstellungen zu öffnen.</string>
+    <string name="onboarding_manage_media_subtitle">Dringend empfohlen. Die App kann Fotos auf diesem Gerät bearbeiten, löschen und umbenennen, ohne jedes Mal nachzufragen.</string>
     <string name="onboarding_folders_include_title">Ordner zum Sichern</string>
     <string name="onboarding_folders_include_subtitle">Wähle, welche Ordner zu Drive hochgeladen werden sollen. Andere bleiben nur auf diesem Gerät.</string>
     <string name="onboarding_folders_exclude_title">Ordner ausschließen</string>
@@ -54,7 +55,6 @@
 
     <string name="onboarding_about_title">Unabhängiger Drittanbieter Client</string>
     <string name="onboarding_about_subtitle">Von einer einzelnen Person entwickelt. Nicht mit Proton AG verbunden. Quellcode öffentlich, GPL-lizenziert, keine eigene Telemetrie.</string>
-    <string name="onboarding_about_author_subtitle">Persönliche Seite des Entwicklers.</string>
     <string name="onboarding_about_github_subtitle">Vollständiger Quellcode auf GitHub.</string>
 
     <string name="onboarding_appearance_title">Ganz nach deinem Geschmack</string>
@@ -67,7 +67,15 @@
     <string name="onboarding_lock_timeout_label">Sperren nach</string>
 
     <string name="onboarding_done_title">Fertig</string>
-    <string name="onboarding_done_subtitle">Deine Einstellungen sind gespeichert. Alles davon kannst du später in den Einstellungen anpassen.</string>
+    <string name="onboarding_done_subtitle">Das wird eingerichtet. Du kannst alles später in den Einstellungen ändern.</string>
+    <string name="onboarding_done_backup_everything">Sicherung: alle Fotos und Videos</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Sicherung: %d Ordner</item>
+        <item quantity="other">Sicherung: %d Ordner</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Sicherung: vorerst aus</string>
+    <string name="onboarding_done_ml">Download nach der Einrichtung: %s</string>
+    <string name="onboarding_done_lock">App-Sperre: an</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Private, Ende-zu-Ende-verschlüsselte Fotosicherung.</string>
@@ -1487,7 +1495,6 @@
     <!-- FAQ -->
     <string name="faq_title">Häufige Fragen</string>
     <string name="faq_settings_entry">Häufige Fragen</string>
-    <string name="faq_onboarding_intro">Ein paar kurze Antworten für den Einstieg. Du findest sie später in den Einstellungen.</string>
     <string name="faq_q_cloud_icons">Was bedeuten die Cloud-Symbole?</string>
     <string name="faq_a_cloud_icons">Eine grüne Cloud bedeutet, dass das Foto in Proton Drive gesichert ist und sich noch auf diesem Gerät befindet. Eine weiße Cloud bedeutet, dass es nur in Proton Drive liegt, nicht auf diesem Gerät. Kein Symbol bedeutet, dass es nur auf diesem Gerät ist und noch nicht gesichert wurde.</string>
     <string name="faq_q_backup">Wie funktioniert die Sicherung?</string>
@@ -1585,7 +1592,7 @@
     <string name="duplicates_filter_match_label">Übereinstimmung</string>
     <string name="duplicates_badge_cloud">Cloud</string>
     <string name="duplicates_badge_device">Gerät</string>
-    <string name="onboarding_all_files_subtitle">Empfohlen. Lässt die App wieder eingeblendete Fotos zurück in ihren ursprünglichen Ordner legen (zum Beispiel den Medienordner einer Chat-App, nicht nur Bilder) und Änderungen direkt in deine lokalen Dateien schreiben. Tippe, um die Systemeinstellungen zu öffnen.</string>
+    <string name="onboarding_all_files_subtitle">Empfohlen. Wiederhergestellte ausgeblendete Fotos kehren in ihren ursprünglichen Ordner zurück, und die App kann deine lokalen Dateien direkt aktualisieren.</string>
     <string name="onboarding_all_files_title">Zugriff auf alle Dateien</string>
     <string name="permissions_action_allow">Erlauben</string>
     <string name="permissions_allfiles_title">Zugriff auf alle Dateien</string>
@@ -2520,7 +2527,7 @@
     <string name="viewer_save_to_drive_failed">Speichern in Drive fehlgeschlagen</string>
     <string name="viewer_remove_shared_confirm_body">Das Foto wird aus dem geteilten Album entfernt. Es bleibt beim Besitzer des Albums und ist hier nicht mehr zu sehen.</string>
     <string name="onboarding_ml_title">Smarte Funktionen auf deinem Gerät</string>
-    <string name="onboarding_ml_subtitle">Finde Personen und Dinge in deinen Fotos und kopiere Text daraus. Alles läuft auf diesem Telefon, nichts verlässt es. Wähle jetzt aus, was du möchtest, oder ändere es später in den Einstellungen.</string>
+    <string name="onboarding_ml_subtitle">Finde Personen und Dinge auf deinen Fotos und kopiere Text daraus. Alles läuft auf diesem Telefon, nichts verlässt es.</string>
     <string name="onboarding_ml_size">%1$s Download</string>
     <string name="onboarding_ml_note">Die Modelle werden einmal nach der Einrichtung im Hintergrund geladen. WLAN wird empfohlen, denn ohne WLAN verbraucht der Download mobile Daten.</string>
 </resources>

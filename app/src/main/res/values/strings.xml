@@ -5,7 +5,8 @@
     <!-- Onboarding wizard (first-launch, post-sign-in) -->
     <string name="onboarding_back">Back</string>
     <string name="onboarding_continue">Continue</string>
-    <string name="onboarding_skip">Skip for now</string>
+    <string name="onboarding_not_now">Not now</string>
+    <string name="onboarding_get_started">Get started</string>
     <string name="onboarding_allow">Allow</string>
     <string name="onboarding_open_settings">Open settings</string>
     <string name="onboarding_permission_granted">Granted</string>
@@ -18,9 +19,9 @@
     <string name="onboarding_backup_title">Choose what to back up</string>
     <string name="onboarding_backup_subtitle">You can change this any time in Settings.</string>
     <string name="onboarding_backup_everything">Back up everything</string>
-    <string name="onboarding_backup_everything_desc">All photos and videos on your device, with any folders you exclude later.</string>
+    <string name="onboarding_backup_everything_desc">All photos and videos on this device. On the next screen you can leave out folders.</string>
     <string name="onboarding_backup_folders">Choose specific folders</string>
-    <string name="onboarding_backup_folders_desc">Pick which folders to back up from Settings. Nothing uploads until you choose.</string>
+    <string name="onboarding_backup_folders_desc">Only the folders you pick on the next screen.</string>
     <string name="onboarding_backup_nothing">Nothing for now</string>
     <string name="onboarding_backup_nothing_desc">Browse what\'s already on Proton Drive without backing up new photos.</string>
 
@@ -41,7 +42,7 @@
 
     <string name="onboarding_manage_media_title">Manage media</string>
     <string name="onboarding_all_files_title">All files access</string>
-    <string name="onboarding_all_files_subtitle">Recommended. Lets the app put restored hidden photos back into their original folder (for example a chat app media folder, not just Pictures) and write changes to your local files in place. Tap to open system settings.</string>
+    <string name="onboarding_all_files_subtitle">Recommended. Restored hidden photos go back to their original folder, and the app can update your local files in place.</string>
     <string name="permissions_title">Permissions</string>
     <string name="permissions_intro">Manage what Photos for Proton can access. Each item explains why it is used.</string>
     <string name="permissions_state_granted">Granted</string>
@@ -61,7 +62,7 @@
     <string name="permissions_install_title">Install updates</string>
     <string name="permissions_install_why">To install app updates you download inside the app.</string>
     <string name="permissions_network_note">Network access is always on, and used only to talk to Proton Drive.</string>
-    <string name="onboarding_manage_media_subtitle">Strongly recommended. Lets the app edit, delete and rename photos and videos on your device without a system confirmation dialog every single time. Used for in app editing, save back to device, the trash flow, and Delete after backup. Tap to open system settings.</string>
+    <string name="onboarding_manage_media_subtitle">Strongly recommended. The app can edit, delete and rename photos on this device without asking you to confirm each one.</string>
     <string name="onboarding_folders_include_title">Folders to back up</string>
     <string name="onboarding_folders_include_subtitle">Pick which folders should be uploaded to Drive. Items in other folders stay on this device only.</string>
     <string name="onboarding_folders_exclude_title">Folders to skip</string>
@@ -74,7 +75,6 @@
 
     <string name="onboarding_about_title">Independent third party client</string>
     <string name="onboarding_about_subtitle">Made by one developer. Not affiliated with Proton AG. Source available, GPL licensed, no telemetry of its own.</string>
-    <string name="onboarding_about_author_subtitle">Personal site of the developer.</string>
     <string name="onboarding_about_github_subtitle">Full source code on GitHub.</string>
 
     <string name="onboarding_appearance_title">Make it yours</string>
@@ -87,7 +87,15 @@
     <string name="onboarding_lock_timeout_label">Re-lock after</string>
 
     <string name="onboarding_done_title">You\'re all set</string>
-    <string name="onboarding_done_subtitle">Your settings are saved. Anything here is adjustable from the Settings page later.</string>
+    <string name="onboarding_done_subtitle">This is what will be set up. You can change any of it later in Settings.</string>
+    <string name="onboarding_done_backup_everything">Backup: every photo and video</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Backup: %d folder</item>
+        <item quantity="other">Backup: %d folders</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Backup: off for now</string>
+    <string name="onboarding_done_ml">Downloads after setup: %s</string>
+    <string name="onboarding_done_lock">App lock: on</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Private, end-to-end encrypted photo backup.</string>
@@ -1187,7 +1195,6 @@
     <!-- FAQ -->
     <string name="faq_title">Frequently asked questions</string>
     <string name="faq_settings_entry">FAQ</string>
-    <string name="faq_onboarding_intro">A few quick answers to get you started. You can find these later in Settings.</string>
     <string name="faq_q_cloud_icons">What do the cloud icons mean?</string>
     <string name="faq_a_cloud_icons">A green cloud means the photo is backed up to Proton Drive and still on this device. A white cloud means it is only in Proton Drive, not on this device. No icon means it is only on this device and not backed up yet.</string>
     <string name="faq_q_backup">How does backup work?</string>
@@ -2560,7 +2567,7 @@
     <string name="viewer_save_to_drive_failed">Couldn\'t save to Drive</string>
     <string name="viewer_remove_shared_confirm_body">This takes the photo out of the shared album. It stays with the album\'s owner, and you won\'t see it here any more.</string>
     <string name="onboarding_ml_title">Smart features on your device</string>
-    <string name="onboarding_ml_subtitle">Find people and things in your photos, and copy text from them. It all runs on this phone and nothing leaves it. Pick what you want now or change it later in Settings.</string>
+    <string name="onboarding_ml_subtitle">Find people and things in your photos and copy text from them. Everything runs on this phone and nothing leaves it.</string>
     <string name="onboarding_ml_size">%1$s download</string>
     <string name="onboarding_ml_note">Models download once, after setup, in the background. Wi-Fi is recommended, because without Wi-Fi the download uses mobile data.</string>
 </resources>

@@ -33,24 +33,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.onboarding.components.SmallLabel
 import eu.akoos.photos.presentation.onboarding.components.StepHeader
-import eu.akoos.photos.presentation.onboarding.components.ToggleCard
+import eu.akoos.photos.presentation.settings.components.SettingsCard
+import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
 
 @Composable
@@ -63,19 +61,20 @@ internal fun AppLockStep(
     val colors = AppColors.current
     Column {
         StepHeader(
-            icon = Icons.Default.Lock,
             title = stringResource(R.string.onboarding_lock_title),
             subtitle = stringResource(R.string.onboarding_lock_subtitle),
         )
-        Spacer(Modifier.height(20.dp))
-        ToggleCard(
-            label = stringResource(R.string.onboarding_lock_enable),
-            description = stringResource(R.string.onboarding_lock_enable_desc),
-            checked = enabled,
-            onChange = onEnabledChange,
-        )
+        Spacer(Modifier.height(24.dp))
+        SettingsCard {
+            ToggleRow(
+                label = stringResource(R.string.onboarding_lock_enable),
+                description = stringResource(R.string.onboarding_lock_enable_desc),
+                checked = enabled,
+                onCheckedChange = onEnabledChange,
+            )
+        }
         if (enabled) {
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(20.dp))
             SmallLabel(stringResource(R.string.onboarding_lock_timeout_label))
             Spacer(Modifier.height(8.dp))
             val options = listOf(0, 5, 10, 30, 60, 300, 600, 900, 3600)
@@ -95,11 +94,7 @@ internal fun AppLockStep(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(text = timeoutLabel(secs), color = colors.fgPrimary, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
-                        if (selected) {
-                            Box(modifier = Modifier.size(20.dp).background(colors.accent, CircleShape), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            }
-                        }
+                        if (selected) Icon(Icons.Default.Check, null, tint = colors.accent, modifier = Modifier.size(20.dp))
                     }
                     if (idx < options.lastIndex) {
                         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).height(0.5.dp).background(colors.cardBorder))

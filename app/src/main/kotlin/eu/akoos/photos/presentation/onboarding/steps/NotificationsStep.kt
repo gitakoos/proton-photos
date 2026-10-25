@@ -28,28 +28,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import eu.akoos.photos.R
-import eu.akoos.photos.presentation.onboarding.components.AllowButton
+import eu.akoos.photos.presentation.onboarding.components.PermissionRow
 import eu.akoos.photos.presentation.onboarding.components.StepHeader
+import eu.akoos.photos.presentation.settings.components.SettingsCard
 
 @Composable
-internal fun NotificationsStep(granted: Boolean, onAllow: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+internal fun NotificationsStep(granted: Boolean) {
+    Column {
         StepHeader(
-            icon = Icons.Default.NotificationsActive,
             title = stringResource(R.string.onboarding_notif_title),
             subtitle = stringResource(R.string.onboarding_notif_subtitle),
         )
-        Spacer(Modifier.height(20.dp))
-        AllowButton(
-            label = if (granted) stringResource(R.string.onboarding_permission_granted)
-            else stringResource(R.string.onboarding_allow),
-            granted = granted,
-            onClick = onAllow,
-        )
+        Spacer(Modifier.height(24.dp))
+        SettingsCard {
+            PermissionRow(Icons.Default.NotificationsActive, stringResource(R.string.permissions_notifications_title), granted)
+        }
     }
 }

@@ -5,7 +5,8 @@
     <!-- Onboarding varázsló -->
     <string name="onboarding_back">Vissza</string>
     <string name="onboarding_continue">Tovább</string>
-    <string name="onboarding_skip">Kihagyás most</string>
+    <string name="onboarding_not_now">Most nem</string>
+    <string name="onboarding_get_started">Kezdés</string>
     <string name="onboarding_allow">Engedélyezés</string>
     <string name="onboarding_open_settings">Beállítások megnyitása</string>
     <string name="onboarding_permission_granted">Engedélyezve</string>
@@ -18,9 +19,9 @@
     <string name="onboarding_backup_title">Válaszd ki, mi kerüljön mentésre</string>
     <string name="onboarding_backup_subtitle">Bármikor módosíthatod a Beállításokban.</string>
     <string name="onboarding_backup_everything">Mindent</string>
-    <string name="onboarding_backup_everything_desc">Az eszközöd összes fotója és videója, kivéve amit később kizársz.</string>
+    <string name="onboarding_backup_everything_desc">Az eszköz összes fotója és videója. A következő oldalon kihagyhatsz mappákat.</string>
     <string name="onboarding_backup_folders">Mappák kiválasztása</string>
-    <string name="onboarding_backup_folders_desc">A Beállításokban választod ki a mappákat. Addig semmi nem töltődik fel.</string>
+    <string name="onboarding_backup_folders_desc">Csak a következő oldalon kiválasztott mappák.</string>
     <string name="onboarding_backup_nothing">Egyelőre semmit</string>
     <string name="onboarding_backup_nothing_desc">Böngészd a Proton Drive-on már fent lévő fotókat új feltöltés nélkül.</string>
 
@@ -41,7 +42,7 @@
 
     <string name="onboarding_manage_media_title">Média kezelése</string>
     <string name="onboarding_all_files_title">Hozzáférés minden fájlhoz</string>
-    <string name="onboarding_all_files_subtitle">Ajánlott. Lehetővé teszi, hogy a visszahozott rejtett fotók az eredeti mappájukba kerüljenek (például egy csevegőalkalmazás média-mappájába, ne csak a Picturesbe), és a helyi fájlok a helyükön frissüljenek. Koppints a rendszerbeállítások megnyitásához.</string>
+    <string name="onboarding_all_files_subtitle">Ajánlott. A visszahozott rejtett fotók az eredeti mappájukba kerülnek, és az app a helyükön frissítheti a helyi fájlokat.</string>
     <string name="permissions_title">Engedélyek</string>
     <string name="permissions_intro">Itt kezelheted, mihez férhet hozzá a Photos for Proton. Mindegyiknél látod, miért kell.</string>
     <string name="permissions_state_granted">Megadva</string>
@@ -61,7 +62,7 @@
     <string name="permissions_install_title">Frissítések telepítése</string>
     <string name="permissions_install_why">Hogy telepíteni tudd az appon belül letöltött frissítéseket.</string>
     <string name="permissions_network_note">A hálózati hozzáférés mindig aktív, és kizárólag a Proton Drive-val való kommunikációra szolgál.</string>
-    <string name="onboarding_manage_media_subtitle">Erősen ajánlott. Engedi, hogy az app a rendszer megerősítő ablaka nélkül szerkessze, törölje és nevezze át az eszközöd fotóit és videóit. Az appon belüli szerkesztéshez, az eszközre mentéshez, a kukába helyezéshez és a mentés utáni törléshez kell. Koppints a rendszerbeállítások megnyitásához.</string>
+    <string name="onboarding_manage_media_subtitle">Erősen ajánlott. Az app megerősítés kérése nélkül szerkesztheti, törölheti és nevezheti át a fotókat az eszközön.</string>
     <string name="onboarding_folders_include_title">Mentendő mappák</string>
     <string name="onboarding_folders_include_subtitle">Válaszd ki, mely mappák kerüljenek a Drive-ra. A többi mappa tartalma csak az eszközön marad.</string>
     <string name="onboarding_folders_exclude_title">Kihagyandó mappák</string>
@@ -74,7 +75,6 @@
 
     <string name="onboarding_about_title">Független, harmadik féltől származó kliens</string>
     <string name="onboarding_about_subtitle">Egyetlen fejlesztő készíti. Nem áll kapcsolatban a Proton AG-vel. Nyílt forráskódú, GPL-licencű, és nem küld saját telemetriát.</string>
-    <string name="onboarding_about_author_subtitle">A fejlesztő személyes oldala.</string>
     <string name="onboarding_about_github_subtitle">Teljes forráskód a GitHubon.</string>
 
     <string name="onboarding_appearance_title">Tedd a sajátoddá</string>
@@ -87,7 +87,15 @@
     <string name="onboarding_lock_timeout_label">Újrazárás ennyi után</string>
 
     <string name="onboarding_done_title">Készen állsz</string>
-    <string name="onboarding_done_subtitle">A beállításaid el lettek mentve. Bármelyik később módosítható a Beállítások oldalon.</string>
+    <string name="onboarding_done_subtitle">Ezeket állítja be az app. Bármelyiket módosíthatod később a Beállításokban.</string>
+    <string name="onboarding_done_backup_everything">Mentés: minden fotó és videó</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Mentés: %d mappa</item>
+        <item quantity="other">Mentés: %d mappa</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Mentés: egyelőre kikapcsolva</string>
+    <string name="onboarding_done_ml">Letöltés a beállítás után: %s</string>
+    <string name="onboarding_done_lock">Alkalmazászár: bekapcsolva</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Privát, végpontok közötti titkosítású fotómentés.</string>
@@ -1510,7 +1518,6 @@
     <!-- FAQ -->
     <string name="faq_title">Gyakori kérdések</string>
     <string name="faq_settings_entry">GYIK</string>
-    <string name="faq_onboarding_intro">Néhány gyors válasz a kezdéshez. Ezeket később a Beállításokban is megtalálod.</string>
     <string name="faq_q_cloud_icons">Mit jelentenek a felhő ikonok?</string>
     <string name="faq_a_cloud_icons">A zöld felhő azt jelenti, hogy a fotó mentve van a Proton Drive-ra, és még ezen az eszközön is megvan. A fehér felhő azt jelenti, hogy csak a Proton Drive-on van, ezen az eszközön nincs. Ha nincs ikon, akkor csak ezen az eszközön van, és még nincs mentve.</string>
     <string name="faq_q_backup">Hogyan működik a mentés?</string>
@@ -2519,7 +2526,7 @@
     <string name="viewer_save_to_drive_failed">Nem sikerült a Drive-ra menteni</string>
     <string name="viewer_remove_shared_confirm_body">Ez kiveszi a fotót a megosztott albumból. Az album tulajdonosánál marad, és te már nem látod itt.</string>
     <string name="onboarding_ml_title">Okos funkciók az eszközödön</string>
-    <string name="onboarding_ml_subtitle">Embereket és tárgyakat találhatsz a fotóidon, és szöveget másolhatsz ki belőlük. Minden ezen a telefonon fut, és semmi nem hagyja el. Válaszd ki most, mit szeretnél, vagy módosítsd később a Beállításokban.</string>
+    <string name="onboarding_ml_subtitle">Embereket és tárgyakat találhatsz a fotóidon, és szöveget másolhatsz ki belőlük. Minden ezen a telefonon fut, és semmi nem hagyja el.</string>
     <string name="onboarding_ml_size">%1$s letöltés</string>
     <string name="onboarding_ml_note">A modellek egyszer töltődnek le, a beállítás után, a háttérben. A Wi-Fi ajánlott, mert Wi-Fi nélkül a letöltés mobiladatot használ.</string>
 </resources>

@@ -5,7 +5,8 @@
     <!-- Onboarding wizard (first-launch, post-sign-in) -->
     <string name="onboarding_back">Terug</string>
     <string name="onboarding_continue">Doorgaan</string>
-    <string name="onboarding_skip">Nu overslaan</string>
+    <string name="onboarding_not_now">Niet nu</string>
+    <string name="onboarding_get_started">Aan de slag</string>
     <string name="onboarding_allow">Toestaan</string>
     <string name="onboarding_open_settings">Instellingen openen</string>
     <string name="onboarding_permission_granted">Verleend</string>
@@ -18,9 +19,9 @@
     <string name="onboarding_backup_title">Kies wat je wilt back-uppen</string>
     <string name="onboarding_backup_subtitle">Je kunt dit altijd wijzigen in Instellingen.</string>
     <string name="onboarding_backup_everything">Alles back-uppen</string>
-    <string name="onboarding_backup_everything_desc">Alle foto\'s en video\'s op je apparaat, minus de mappen die je later uitsluit.</string>
+    <string name="onboarding_backup_everything_desc">Alle foto\'s en video\'s op dit apparaat. Op het volgende scherm kun je mappen uitsluiten.</string>
     <string name="onboarding_backup_folders">Specifieke mappen kiezen</string>
-    <string name="onboarding_backup_folders_desc">Kies in Instellingen welke mappen je wilt back-uppen. Er wordt niets geüpload tot je kiest.</string>
+    <string name="onboarding_backup_folders_desc">Alleen de mappen die je op het volgende scherm kiest.</string>
     <string name="onboarding_backup_nothing">Voorlopig niets</string>
     <string name="onboarding_backup_nothing_desc">Bekijk wat al op Proton Drive staat zonder nieuwe foto\'s te back-uppen.</string>
 
@@ -40,7 +41,7 @@
     <string name="onboarding_photos_subtitle">Leestoegang tot je foto\'s en video\'s is nodig om ze te versleutelen en naar Drive te back-uppen.</string>
 
     <string name="onboarding_manage_media_title">Media beheren</string>
-    <string name="onboarding_manage_media_subtitle">Sterk aanbevolen. Hiermee kan de app foto\'s en video\'s op je apparaat bewerken, verwijderen en hernoemen zonder telkens een systeemvenster ter bevestiging. Gebruikt voor bewerken in de app, terug opslaan op apparaat, de prullenbakflow en Verwijderen na back-up. Tik om de systeeminstellingen te openen.</string>
+    <string name="onboarding_manage_media_subtitle">Sterk aanbevolen. De app kan foto\'s op dit apparaat bewerken, verwijderen en hernoemen zonder elke keer om bevestiging te vragen.</string>
     <string name="onboarding_folders_include_title">Mappen om te back-uppen</string>
     <string name="onboarding_folders_include_subtitle">Kies welke mappen naar Drive geüpload moeten worden. Items in andere mappen blijven alleen op dit apparaat.</string>
     <string name="onboarding_folders_exclude_title">Mappen om over te slaan</string>
@@ -53,7 +54,6 @@
 
     <string name="onboarding_about_title">Onafhankelijke externe client</string>
     <string name="onboarding_about_subtitle">Gemaakt door één ontwikkelaar. Niet verbonden met Proton AG. Broncode beschikbaar, GPL-gelicentieerd, geen eigen telemetrie.</string>
-    <string name="onboarding_about_author_subtitle">Persoonlijke site van de ontwikkelaar.</string>
     <string name="onboarding_about_github_subtitle">Volledige broncode op GitHub.</string>
 
     <string name="onboarding_appearance_title">Maak het je eigen</string>
@@ -66,7 +66,15 @@
     <string name="onboarding_lock_timeout_label">Opnieuw vergrendelen na</string>
 
     <string name="onboarding_done_title">Je bent helemaal klaar</string>
-    <string name="onboarding_done_subtitle">Je instellingen zijn opgeslagen. Alles hier kun je later aanpassen op de pagina Instellingen.</string>
+    <string name="onboarding_done_subtitle">Dit wordt ingesteld. Je kunt alles later wijzigen in Instellingen.</string>
+    <string name="onboarding_done_backup_everything">Back-up: alle foto\'s en video\'s</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Back-up: %d map</item>
+        <item quantity="other">Back-up: %d mappen</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Back-up: voorlopig uit</string>
+    <string name="onboarding_done_ml">Download na de installatie: %s</string>
+    <string name="onboarding_done_lock">App-vergrendeling: aan</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Privé, end-to-end versleutelde fotoback-up.</string>
@@ -1502,7 +1510,6 @@
     <!-- FAQ -->
     <string name="faq_title">Veelgestelde vragen</string>
     <string name="faq_settings_entry">Veelgestelde vragen</string>
-    <string name="faq_onboarding_intro">Een paar korte antwoorden om te beginnen. Je vindt ze later terug in Instellingen.</string>
     <string name="faq_q_cloud_icons">Wat betekenen de wolkpictogrammen?</string>
     <string name="faq_a_cloud_icons">Een groene wolk betekent dat de foto is geback-upt naar Proton Drive en nog op dit apparaat staat. Een witte wolk betekent dat hij alleen in Proton Drive staat, niet op dit apparaat. Geen pictogram betekent dat hij alleen op dit apparaat staat en nog niet is geback-upt.</string>
     <string name="faq_q_backup">Hoe werkt de back-up?</string>
@@ -1607,7 +1614,7 @@
 
     <!-- Onboarding all-files access -->
     <string name="onboarding_all_files_title">Toegang tot alle bestanden</string>
-    <string name="onboarding_all_files_subtitle">Aanbevolen. Hiermee kan de app herstelde verborgen foto\'s terugzetten in hun oorspronkelijke map (bijvoorbeeld de mediamap van een chat-app, niet alleen Afbeeldingen) en wijzigingen rechtstreeks in je lokale bestanden schrijven. Tik om de systeeminstellingen te openen.</string>
+    <string name="onboarding_all_files_subtitle">Aanbevolen. Herstelde verborgen foto\'s gaan terug naar hun oorspronkelijke map en de app kan je lokale bestanden ter plekke bijwerken.</string>
 
     <!-- Permissions screen -->
     <string name="permissions_title">Machtigingen</string>
@@ -2547,7 +2554,7 @@
     <string name="viewer_save_to_drive_failed">Opslaan in Drive mislukt</string>
     <string name="viewer_remove_shared_confirm_body">De foto wordt uit het gedeelde album gehaald. Ze blijft bij de eigenaar van het album en is hier niet meer te zien.</string>
     <string name="onboarding_ml_title">Slimme functies op je apparaat</string>
-    <string name="onboarding_ml_subtitle">Vind mensen en dingen in je foto\'s en kopieer er tekst uit. Alles draait op deze telefoon en niets verlaat hem. Kies nu wat je wilt of pas het later aan in Instellingen.</string>
+    <string name="onboarding_ml_subtitle">Vind mensen en dingen in je foto\'s en kopieer er tekst uit. Alles draait op deze telefoon en niets verlaat hem.</string>
     <string name="onboarding_ml_size">%1$s download</string>
     <string name="onboarding_ml_note">De modellen worden eenmalig gedownload, na de installatie, op de achtergrond. Wifi wordt aanbevolen, want zonder wifi gebruikt de download mobiele data.</string>
 </resources>

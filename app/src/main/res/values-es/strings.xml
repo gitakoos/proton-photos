@@ -6,7 +6,8 @@
     <!-- Asistente de incorporación -->
     <string name="onboarding_back">Atrás</string>
     <string name="onboarding_continue">Continuar</string>
-    <string name="onboarding_skip">Omitir por ahora</string>
+    <string name="onboarding_not_now">Ahora no</string>
+    <string name="onboarding_get_started">Empezar</string>
     <string name="onboarding_allow">Permitir</string>
     <string name="onboarding_open_settings">Abrir ajustes</string>
     <string name="onboarding_permission_granted">Concedido</string>
@@ -19,9 +20,9 @@
     <string name="onboarding_backup_title">Elige qué respaldar</string>
     <string name="onboarding_backup_subtitle">Lo puedes cambiar cuando quieras desde Ajustes.</string>
     <string name="onboarding_backup_everything">Respaldar todo</string>
-    <string name="onboarding_backup_everything_desc">Todas las fotos y vídeos del dispositivo, salvo las carpetas que excluyas después.</string>
+    <string name="onboarding_backup_everything_desc">Todas las fotos y vídeos de este dispositivo. En la siguiente pantalla puedes excluir carpetas.</string>
     <string name="onboarding_backup_folders">Elegir carpetas concretas</string>
-    <string name="onboarding_backup_folders_desc">Selecciona carpetas en Ajustes. No se sube nada hasta que elijas.</string>
+    <string name="onboarding_backup_folders_desc">Solo las carpetas que elijas en la siguiente pantalla.</string>
     <string name="onboarding_backup_nothing">Nada por ahora</string>
     <string name="onboarding_backup_nothing_desc">Explora lo que ya tienes en Proton Drive sin subir nuevas fotos.</string>
 
@@ -41,7 +42,7 @@
     <string name="onboarding_photos_subtitle">Se necesita permiso de lectura de tus fotos y vídeos para cifrarlos y respaldarlos en Drive.</string>
 
     <string name="onboarding_manage_media_title">Gestionar medios</string>
-    <string name="onboarding_manage_media_subtitle">Muy recomendado. Permite a la app editar, eliminar y renombrar fotos y vídeos del dispositivo sin un diálogo del sistema cada vez: se usa para editar en la app, guardar en el dispositivo, la papelera y Eliminar tras respaldar. Toca para abrir los ajustes del sistema.</string>
+    <string name="onboarding_manage_media_subtitle">Muy recomendado. La app puede editar, eliminar y renombrar fotos en este dispositivo sin pedirte confirmación cada vez.</string>
     <string name="onboarding_folders_include_title">Carpetas a respaldar</string>
     <string name="onboarding_folders_include_subtitle">Elige qué carpetas subir a Drive. El resto se queda solo en este dispositivo.</string>
     <string name="onboarding_folders_exclude_title">Carpetas a omitir</string>
@@ -54,7 +55,6 @@
 
     <string name="onboarding_about_title">Cliente independiente de terceros</string>
     <string name="onboarding_about_subtitle">Hecho por una sola persona. Sin relación con Proton AG. Código abierto, licencia GPL, sin telemetría propia.</string>
-    <string name="onboarding_about_author_subtitle">Sitio personal del desarrollador.</string>
     <string name="onboarding_about_github_subtitle">Código fuente completo en GitHub.</string>
 
     <string name="onboarding_appearance_title">Hazlo tuyo</string>
@@ -67,7 +67,16 @@
     <string name="onboarding_lock_timeout_label">Volver a bloquear tras</string>
 
     <string name="onboarding_done_title">Todo listo</string>
-    <string name="onboarding_done_subtitle">Tus ajustes están guardados. Todo lo de aquí se puede modificar después desde Ajustes.</string>
+    <string name="onboarding_done_subtitle">Esto es lo que se configurará. Puedes cambiar cualquier cosa más tarde en Ajustes.</string>
+    <string name="onboarding_done_backup_everything">Copia: todas las fotos y vídeos</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Copia: %d carpeta</item>
+        <item quantity="many">Copia: %d carpetas</item>
+        <item quantity="other">Copia: %d carpetas</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Copia: desactivada por ahora</string>
+    <string name="onboarding_done_ml">Descarga tras la configuración: %s</string>
+    <string name="onboarding_done_lock">Bloqueo de la app: activado</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Copia de seguridad de tus fotos, privada y cifrada de extremo a extremo.</string>
@@ -1510,7 +1519,6 @@
     <!-- FAQ -->
     <string name="faq_title">Preguntas frecuentes</string>
     <string name="faq_settings_entry">Preguntas frecuentes</string>
-    <string name="faq_onboarding_intro">Unas respuestas rápidas para empezar. Las encontrarás más tarde en Ajustes.</string>
     <string name="faq_q_cloud_icons">¿Qué significan los iconos de nube?</string>
     <string name="faq_a_cloud_icons">Una nube verde significa que la foto está respaldada en Proton Drive y sigue en este dispositivo. Una nube blanca significa que solo está en Proton Drive, no en este dispositivo. Sin icono significa que solo está en este dispositivo y aún no se ha respaldado.</string>
     <string name="faq_q_backup">¿Cómo funciona el respaldo?</string>
@@ -1615,7 +1623,7 @@
 
     <!-- Onboarding — all files access -->
     <string name="onboarding_all_files_title">Acceso a todos los archivos</string>
-    <string name="onboarding_all_files_subtitle">Recomendado. Permite a la app devolver las fotos ocultas restauradas a su carpeta original (por ejemplo, la carpeta de medios de una app de chat, no solo Imágenes) y escribir los cambios en tus archivos locales en su sitio. Toca para abrir los ajustes del sistema.</string>
+    <string name="onboarding_all_files_subtitle">Recomendado. Las fotos ocultas restauradas vuelven a su carpeta original y la app puede actualizar tus archivos locales en su sitio.</string>
 
     <!-- Permissions screen -->
     <string name="permissions_title">Permisos</string>
@@ -2557,7 +2565,7 @@
     <string name="viewer_save_to_drive_failed">No se pudo guardar en Drive</string>
     <string name="viewer_remove_shared_confirm_body">La foto se quita del álbum compartido. Se queda con el propietario del álbum y ya no se verá aquí.</string>
     <string name="onboarding_ml_title">Funciones inteligentes en tu dispositivo</string>
-    <string name="onboarding_ml_subtitle">Encuentra personas y cosas en tus fotos y copia el texto que contienen. Todo funciona en este teléfono y nada sale de él. Elige ahora lo que quieras o cámbialo más tarde en Ajustes.</string>
+    <string name="onboarding_ml_subtitle">Encuentra personas y cosas en tus fotos y copia texto de ellas. Todo funciona en este teléfono y nada sale de él.</string>
     <string name="onboarding_ml_size">Descarga de %1$s</string>
     <string name="onboarding_ml_note">Los modelos se descargan una sola vez, después de la configuración, en segundo plano. Se recomienda wifi, porque sin wifi la descarga usa datos móviles.</string>
 </resources>

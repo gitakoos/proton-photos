@@ -4,7 +4,8 @@
 
     <string name="onboarding_back">Geri</string>
     <string name="onboarding_continue">Devam</string>
-    <string name="onboarding_skip">Şimdilik atla</string>
+    <string name="onboarding_not_now">Şimdi değil</string>
+    <string name="onboarding_get_started">Başla</string>
     <string name="onboarding_allow">İzin ver</string>
     <string name="onboarding_open_settings">Ayarları aç</string>
     <string name="onboarding_permission_granted">İzin verildi</string>
@@ -17,9 +18,9 @@
     <string name="onboarding_backup_title">Neyin yedekleneceğini seç</string>
     <string name="onboarding_backup_subtitle">Bunu istediğin zaman Ayarlar\'dan değiştirebilirsin.</string>
     <string name="onboarding_backup_everything">Her şeyi yedekle</string>
-    <string name="onboarding_backup_everything_desc">Cihazındaki tüm fotoğraf ve videolar, sonradan hariç tuttuğun klasörler dışında.</string>
+    <string name="onboarding_backup_everything_desc">Bu cihazdaki tüm fotoğraflar ve videolar. Sonraki ekranda klasörleri hariç tutabilirsin.</string>
     <string name="onboarding_backup_folders">Belirli klasörleri seç</string>
-    <string name="onboarding_backup_folders_desc">Hangi klasörlerin yedekleneceğini Ayarlar\'dan seç. Sen seçene kadar hiçbir şey yüklenmez.</string>
+    <string name="onboarding_backup_folders_desc">Yalnızca sonraki ekranda seçtiğin klasörler.</string>
     <string name="onboarding_backup_nothing">Şimdilik hiçbiri</string>
     <string name="onboarding_backup_nothing_desc">Yeni fotoğrafları yedeklemeden Proton Drive\'da zaten olanlara göz at.</string>
 
@@ -40,7 +41,7 @@
 
     <string name="onboarding_manage_media_title">Medyayı yönet</string>
     <string name="onboarding_all_files_title">Tüm dosyalara erişim</string>
-    <string name="onboarding_all_files_subtitle">Önerilir. Uygulamanın, geri yüklenen gizli fotoğrafları orijinal klasörlerine (örneğin yalnızca Resimler değil, bir sohbet uygulamasının medya klasörü) geri koymasını ve yerel dosyalarındaki değişiklikleri yerinde yazmasını sağlar. Sistem ayarlarını açmak için dokun.</string>
+    <string name="onboarding_all_files_subtitle">Önerilir. Geri getirilen gizli fotoğraflar orijinal klasörlerine döner ve uygulama yerel dosyalarını yerinde güncelleyebilir.</string>
     <string name="permissions_title">İzinler</string>
     <string name="permissions_intro">Photos for Proton\'un nelere erişebileceğini yönet. Her öğe neden kullanıldığını açıklar.</string>
     <string name="permissions_state_granted">İzin verildi</string>
@@ -60,7 +61,7 @@
     <string name="permissions_install_title">Güncellemeleri kur</string>
     <string name="permissions_install_why">Uygulama içinden indirdiğin uygulama güncellemelerini kurmak için.</string>
     <string name="permissions_network_note">Ağ erişimi her zaman açıktır ve yalnızca Proton Drive ile iletişim kurmak için kullanılır.</string>
-    <string name="onboarding_manage_media_subtitle">Kesinlikle önerilir. Uygulamanın, cihazındaki fotoğrafları ve videoları her seferinde bir sistem onay penceresi göstermeden düzenlemesini, silmesini ve yeniden adlandırmasını sağlar. Uygulama içi düzenleme, cihaza geri kaydetme, çöp kutusu akışı ve Yedeklemeden sonra sil için kullanılır. Sistem ayarlarını açmak için dokun.</string>
+    <string name="onboarding_manage_media_subtitle">Kesinlikle önerilir. Uygulama bu cihazdaki fotoğrafları her seferinde onay istemeden düzenleyebilir, silebilir ve yeniden adlandırabilir.</string>
     <string name="onboarding_folders_include_title">Yedeklenecek klasörler</string>
     <string name="onboarding_folders_include_subtitle">Hangi klasörlerin Drive\'a yükleneceğini seç. Diğer klasörlerdeki öğeler yalnızca bu cihazda kalır.</string>
     <string name="onboarding_folders_exclude_title">Atlanacak klasörler</string>
@@ -73,7 +74,6 @@
 
     <string name="onboarding_about_title">Bağımsız üçüncü taraf istemci</string>
     <string name="onboarding_about_subtitle">Tek bir geliştirici tarafından yapıldı. Proton AG ile bağlantılı değildir. Kaynak kodu açık, GPL lisanslı, kendine ait telemetrisi yok.</string>
-    <string name="onboarding_about_author_subtitle">Geliştiricinin kişisel sitesi.</string>
     <string name="onboarding_about_github_subtitle">GitHub\'da tam kaynak kodu.</string>
 
     <string name="onboarding_appearance_title">Kendine göre ayarla</string>
@@ -86,7 +86,15 @@
     <string name="onboarding_lock_timeout_label">Yeniden kilitleme süresi</string>
 
     <string name="onboarding_done_title">Her şey hazır</string>
-    <string name="onboarding_done_subtitle">Ayarların kaydedildi. Buradaki her şey daha sonra Ayarlar sayfasından değiştirilebilir.</string>
+    <string name="onboarding_done_subtitle">Ayarlanacaklar bunlar. Hepsini daha sonra Ayarlar\'dan değiştirebilirsin.</string>
+    <string name="onboarding_done_backup_everything">Yedekleme: tüm fotoğraflar ve videolar</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Yedekleme: %d klasör</item>
+        <item quantity="other">Yedekleme: %d klasör</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Yedekleme: şimdilik kapalı</string>
+    <string name="onboarding_done_ml">Kurulumdan sonra indirilecek: %s</string>
+    <string name="onboarding_done_lock">Uygulama kilidi: açık</string>
 
     <string name="sign_in_subtitle">Özel, uçtan uca şifreli fotoğraf yedekleme.</string>
     <string name="sign_in_unofficial_tag">Resmi olmayan üçüncü taraf uygulama, Proton AG ile bağlantılı değildir</string>
@@ -1128,7 +1136,6 @@
 
     <string name="faq_title">Sık sorulan sorular</string>
     <string name="faq_settings_entry">SSS</string>
-    <string name="faq_onboarding_intro">Başlamana yardımcı olacak birkaç kısa cevap. Bunları sonra Ayarlar\'da da bulabilirsin.</string>
     <string name="faq_q_cloud_icons">Bulut simgeleri ne anlama geliyor?</string>
     <string name="faq_a_cloud_icons">Yeşil bulut, fotoğrafın Proton Drive\'a yedeklendiği ve hâlâ bu cihazda olduğu anlamına gelir. Beyaz bulut, fotoğrafın yalnızca Proton Drive\'da olduğu, bu cihazda olmadığı anlamına gelir. Simge yoksa fotoğraf yalnızca bu cihazdadır ve henüz yedeklenmemiştir.</string>
     <string name="faq_q_backup">Yedekleme nasıl çalışır?</string>
@@ -2437,7 +2444,7 @@
     <string name="viewer_save_to_drive_failed">Drive\'a kaydedilemedi</string>
     <string name="viewer_remove_shared_confirm_body">Fotoğraf paylaşılan albümden çıkarılır. Albümün sahibinde kalır ve burada artık görünmez.</string>
     <string name="onboarding_ml_title">Cihazında akıllı özellikler</string>
-    <string name="onboarding_ml_subtitle">Fotoğraflarındaki kişileri ve nesneleri bul, içlerindeki metni kopyala. Her şey bu telefonda çalışır ve hiçbir şey telefondan çıkmaz. Ne istediğini şimdi seç ya da sonra Ayarlar\'dan değiştir.</string>
+    <string name="onboarding_ml_subtitle">Fotoğraflarındaki kişileri ve nesneleri bul, içlerindeki metni kopyala. Her şey bu telefonda çalışır ve hiçbir şey dışarı çıkmaz.</string>
     <string name="onboarding_ml_size">%1$s indirme</string>
     <string name="onboarding_ml_note">Modeller kurulumdan sonra arka planda bir kez indirilir. Wi-Fi önerilir, çünkü Wi-Fi yokken indirme mobil veri kullanır.</string>
 </resources>

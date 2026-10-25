@@ -22,13 +22,9 @@
 
 package eu.akoos.photos.presentation.onboarding.components
 
-import eu.akoos.photos.presentation.common.PrimaryButton
-import eu.akoos.photos.presentation.common.SecondaryButton
-
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -38,104 +34,76 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.theme.PillBg
+import eu.akoos.photos.presentation.theme.PillBorder
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared building blocks
-// ─────────────────────────────────────────────────────────────────────────────
-
+/**
+ * The wizard's top row, built like the app's floating header: the round back button on the left and a pill in the
+ * middle saying which step this is. The first and the last step have no back button.
+ */
 @Composable
-internal fun ProgressDots(currentIndex: Int, total: Int) {
-    val colors = AppColors.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        for (i in 0 until total) {
-            val isActive = i == currentIndex
-            val isPast = i < currentIndex
-            Box(
+internal fun WizardTopBar(step: Int, total: Int, onBack: (() -> Unit)?) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(40.dp)) {
+            if (onBack != null) {
+                IconBubble(
+                    icon = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.onboarding_back),
+                    onClick = onBack,
+                )
+            }
+        }
+        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            Text(
+                "$step / $total",
+                color = AppColors.current.fgPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
-                    .padding(horizontal = 2.dp)
-                    .size(width = if (isActive) 18.dp else 6.dp, height = 6.dp)
-                    .background(
-                        color = when {
-                            isActive -> colors.accent
-                            isPast -> colors.accent.copy(alpha = 0.5f)
-                            else -> colors.cardBorder
-                        },
-                        shape = RoundedCornerShape(3.dp),
-                    ),
+                    .background(PillBg, RoundedCornerShape(20.dp))
+                    .border(0.5.dp, PillBorder, RoundedCornerShape(20.dp))
+                    .padding(horizontal = 18.dp, vertical = 9.dp),
             )
         }
+        Spacer(Modifier.size(40.dp))
     }
 }
 
+/** A step's title and one line under it, left-aligned like the app's page headers. */
 @Composable
-internal fun StepHeader(icon: ImageVector, title: String, subtitle: String) {
+internal fun StepHeader(title: String, subtitle: String) {
     val colors = AppColors.current
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier.size(72.dp).background(
-                Brush.linearGradient(
-                    listOf(colors.accent, colors.accent2),
-                    Offset.Zero,
-                    Offset(180f, 180f),
-                ),
-                CircleShape,
-            ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, null, tint = Color.White, modifier = Modifier.size(34.dp))
-        }
-        Spacer(Modifier.height(16.dp))
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             title,
             color = colors.fgPrimary,
-            fontSize = 22.sp,
+            fontSize = 26.sp,
+            lineHeight = 32.sp,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
+            letterSpacing = (-0.44).sp,
         )
         Spacer(Modifier.height(8.dp))
-        Text(
-            subtitle,
-            color = colors.fgMute,
-            fontSize = 13.5.sp,
-            lineHeight = 19.sp,
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
-        )
+        Text(subtitle, color = colors.fgMute, fontSize = 14.sp, lineHeight = 20.sp)
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Small reusable composables
-// ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 internal fun SmallLabel(text: String) {
@@ -174,136 +142,48 @@ internal fun LinkCard(title: String, subtitle: String, onClick: () -> Unit) {
     }
 }
 
+/** One option of a single choice, as a row inside a settings card; the chosen one carries an accent check. */
 @Composable
-internal fun ChoiceCard(
-    label: String,
-    description: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    recommended: Boolean = false,
-) {
+internal fun ChoiceRow(label: String, description: String, selected: Boolean, onClick: () -> Unit) {
     val colors = AppColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(
-                color = if (selected) colors.accent.copy(alpha = 0.15f) else colors.cardBg,
-                shape = RoundedCornerShape(14.dp),
-            )
-            .border(
-                width = if (selected) 1.5.dp else 0.5.dp,
-                color = if (selected) colors.accent else colors.cardBorder,
-                shape = RoundedCornerShape(14.dp),
-            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(label, color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                if (recommended) {
-                    Spacer(Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .background(colors.accent.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                    ) {
-                        Text(
-                            stringResource(R.string.onboarding_recommended),
-                            color = colors.accent,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(description, color = colors.fgMute, fontSize = 12.5.sp, lineHeight = 18.sp)
+            Text(label, color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(description, color = colors.fgMute, fontSize = 12.5.sp)
         }
         Spacer(Modifier.width(12.dp))
-        Box(
-            modifier = Modifier
-                .size(22.dp)
-                .background(
-                    color = if (selected) colors.accent else Color.Transparent,
-                    shape = CircleShape,
-                )
-                .border(
-                    width = if (selected) 0.dp else 1.5.dp,
-                    color = colors.cardBorder,
-                    shape = CircleShape,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (selected) Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(14.dp))
+        Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            if (selected) Icon(Icons.Default.Check, null, tint = colors.accent, modifier = Modifier.size(22.dp))
         }
     }
 }
 
+/** What a permission step asks for, as a settings row that reads "Granted" once it is in place. */
 @Composable
-internal fun ToggleCard(label: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun PermissionRow(icon: ImageVector, label: String, granted: Boolean) {
     val colors = AppColors.current
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(colors.cardBg, RoundedCornerShape(14.dp))
-            .border(0.5.dp, colors.cardBorder, RoundedCornerShape(14.dp))
-            .clickable { onChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(3.dp))
-            Text(description, color = colors.fgMute, fontSize = 12.sp, lineHeight = 18.sp)
+        Icon(icon, null, tint = colors.fgDim, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(14.dp))
+        Text(label, color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        if (granted) {
+            Icon(Icons.Default.Check, null, tint = colors.accent, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                stringResource(R.string.permissions_state_granted),
+                color = colors.accent,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onChange, colors = onboardingSwitchColors())
-    }
-}
-
-@Composable
-internal fun SubToggle(label: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    val colors = AppColors.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onChange(!checked) }
-            .padding(start = 32.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, color = colors.fgPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Text(description, color = colors.fgMute, fontSize = 11.sp, lineHeight = 16.sp)
-        }
-        Spacer(Modifier.width(8.dp))
-        Switch(checked = checked, onCheckedChange = onChange, colors = onboardingSwitchColors())
-    }
-}
-
-@Composable
-internal fun onboardingSwitchColors() = SwitchDefaults.colors(
-    checkedThumbColor = Color.White,
-    checkedTrackColor = AppColors.current.accent,
-    uncheckedThumbColor = AppColors.current.fgDim,
-    uncheckedTrackColor = AppColors.current.surfaceWeak,
-    uncheckedBorderColor = AppColors.current.cardBorder,
-)
-
-@Composable
-internal fun AllowButton(label: String, granted: Boolean, onClick: () -> Unit) {
-    // Granted shows a neutral "done" state with a check; not-yet-granted is the accent CTA.
-    // Both route through the shared buttons so onboarding matches the rest of the app.
-    if (granted) {
-        SecondaryButton(
-            label = label,
-            onClick = {},
-            modifier = Modifier.fillMaxWidth(),
-            icon = Icons.Default.Check,
-            enabled = false,
-        )
-    } else {
-        PrimaryButton(label = label, onClick = onClick, modifier = Modifier.fillMaxWidth())
     }
 }

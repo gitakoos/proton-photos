@@ -6,7 +6,8 @@
     <!-- Onboarding wizard (first-launch, post-sign-in) -->
     <string name="onboarding_back">Nazaj</string>
     <string name="onboarding_continue">Naprej</string>
-    <string name="onboarding_skip">Za zdaj preskoči</string>
+    <string name="onboarding_not_now">Ne zdaj</string>
+    <string name="onboarding_get_started">Začni</string>
     <string name="onboarding_allow">Dovoli</string>
     <string name="onboarding_open_settings">Odpri nastavitve</string>
     <string name="onboarding_permission_granted">Dovoljeno</string>
@@ -19,9 +20,9 @@
     <string name="onboarding_backup_title">Izberite, kaj naj se varnostno kopira</string>
     <string name="onboarding_backup_subtitle">To lahko kadar koli spremenite v nastavitvah.</string>
     <string name="onboarding_backup_everything">Varnostno kopiraj vse</string>
-    <string name="onboarding_backup_everything_desc">Vse fotografije in videoposnetke v napravi, razen map, ki jih pozneje izključite.</string>
+    <string name="onboarding_backup_everything_desc">Vse fotografije in videoposnetki v tej napravi. Na naslednjem zaslonu lahko izpustite mape.</string>
     <string name="onboarding_backup_folders">Izberi določene mape</string>
-    <string name="onboarding_backup_folders_desc">V nastavitvah izberite, katere mape naj se varnostno kopirajo. Do takrat se nič ne naloži.</string>
+    <string name="onboarding_backup_folders_desc">Samo mape, ki jih izberete na naslednjem zaslonu.</string>
     <string name="onboarding_backup_nothing">Za zdaj nič</string>
     <string name="onboarding_backup_nothing_desc">Brskajte po obstoječih fotografijah na Proton Drive, ne da bi varnostno kopirali nove.</string>
 
@@ -41,7 +42,7 @@
     <string name="onboarding_photos_subtitle">Dostop za branje vaših fotografij in videoposnetkov je potreben za njihovo šifriranje in varnostno kopiranje v Drive.</string>
 
     <string name="onboarding_manage_media_title">Upravljanje predstavnosti</string>
-    <string name="onboarding_manage_media_subtitle">Močno priporočeno. Aplikaciji omogoča urejanje, brisanje in preimenovanje fotografij in videoposnetkov v napravi brez sistemskega potrditvenega okna vsakič znova. Uporablja se za urejanje v aplikaciji, shranjevanje nazaj v napravo, postopek koša in brisanje po varnostnem kopiranju. Tapnite, da odprete sistemske nastavitve.</string>
+    <string name="onboarding_manage_media_subtitle">Zelo priporočeno. Aplikacija lahko ureja, briše in preimenuje fotografije v tej napravi, ne da bi vsakič zahtevala potrditev.</string>
     <string name="onboarding_folders_include_title">Mape za varnostno kopiranje</string>
     <string name="onboarding_folders_include_subtitle">Izberite, katere mape naj se naložijo v Drive. Vsebina drugih map ostane samo v tej napravi.</string>
     <string name="onboarding_folders_exclude_title">Mape, ki naj se preskočijo</string>
@@ -54,7 +55,6 @@
 
     <string name="onboarding_about_title">Neodvisni odjemalec tretje osebe</string>
     <string name="onboarding_about_subtitle">Izdelal en sam razvijalec. Ni povezan s Proton AG. Izvorna koda je na voljo, licencirana po GPL, brez lastne telemetrije.</string>
-    <string name="onboarding_about_author_subtitle">Osebna stran razvijalca.</string>
     <string name="onboarding_about_github_subtitle">Celotna izvorna koda na GitHubu.</string>
 
     <string name="onboarding_appearance_title">Prilagodite po svoje</string>
@@ -67,7 +67,17 @@
     <string name="onboarding_lock_timeout_label">Znova zakleni po</string>
 
     <string name="onboarding_done_title">Vse je pripravljeno</string>
-    <string name="onboarding_done_subtitle">Vaše nastavitve so shranjene. Vse to lahko pozneje prilagodite na strani z nastavitvami.</string>
+    <string name="onboarding_done_subtitle">To bo nastavljeno. Karkoli lahko pozneje spremenite v nastavitvah.</string>
+    <string name="onboarding_done_backup_everything">Varnostna kopija: vse fotografije in videoposnetki</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Varnostna kopija: %d mapa</item>
+        <item quantity="two">Varnostna kopija: %d mapi</item>
+        <item quantity="few">Varnostna kopija: %d mape</item>
+        <item quantity="other">Varnostna kopija: %d map</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Varnostna kopija: zaenkrat izklopljena</string>
+    <string name="onboarding_done_ml">Prenos po nastavitvi: %s</string>
+    <string name="onboarding_done_lock">Zaklep aplikacije: vklopljen</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Zasebno varnostno kopiranje fotografij, šifrirano od konca do konca.</string>
@@ -1566,7 +1576,6 @@
     <!-- FAQ -->
     <string name="faq_title">Pogosta vprašanja</string>
     <string name="faq_settings_entry">Pogosta vprašanja</string>
-    <string name="faq_onboarding_intro">Nekaj hitrih odgovorov za začetek. Pozneje jih najdete v Nastavitvah.</string>
     <string name="faq_q_cloud_icons">Kaj pomenijo ikone oblaka?</string>
     <string name="faq_a_cloud_icons">Zelen oblak pomeni, da je fotografija varnostno kopirana v Proton Drive in je še vedno v tej napravi. Bel oblak pomeni, da je samo v Proton Drive, ne v tej napravi. Brez ikone pomeni, da je samo v tej napravi in še ni varnostno kopirana.</string>
     <string name="faq_q_backup">Kako deluje varnostno kopiranje?</string>
@@ -1668,7 +1677,7 @@
     <string name="duplicates_badge_device">Naprava</string>
 
     <!-- Onboarding + Settings: all-files access, install permission -->
-    <string name="onboarding_all_files_subtitle">Priporočeno. Aplikaciji omogoča, da obnovljene skrite fotografije vrne v njihovo izvirno mapo (na primer mapo s predstavnostjo klepetalne aplikacije, ne le Slike) in spremembe zapiše neposredno v vaše lokalne datoteke. Tapnite, da odprete sistemske nastavitve.</string>
+    <string name="onboarding_all_files_subtitle">Priporočeno. Obnovljene skrite fotografije se vrnejo v svojo prvotno mapo, aplikacija pa lahko lokalne datoteke posodobi na mestu.</string>
     <string name="onboarding_all_files_title">Dostop do vseh datotek</string>
 
     <!-- Permissions screen -->
@@ -2638,7 +2647,7 @@
     <string name="viewer_save_to_drive_failed">Shranjevanje v Drive ni uspelo</string>
     <string name="viewer_remove_shared_confirm_body">Fotografija bo odstranjena iz deljenega albuma. Ostane pri lastniku albuma in tu ne bo več vidna.</string>
     <string name="onboarding_ml_title">Pametne funkcije v vaši napravi</string>
-    <string name="onboarding_ml_subtitle">Poiščite osebe in stvari na svojih fotografijah ter iz njih kopirajte besedilo. Vse deluje na tem telefonu in nič ga ne zapusti. Izberite zdaj, kaj želite, ali pa to kasneje spremenite v Nastavitvah.</string>
+    <string name="onboarding_ml_subtitle">Poiščite ljudi in stvari na fotografijah in kopirajte besedilo z njih. Vse teče na tem telefonu in nič ga ne zapusti.</string>
     <string name="onboarding_ml_size">Prenos %1$s</string>
     <string name="onboarding_ml_note">Modeli se prenesejo enkrat, po nastavitvi, v ozadju. Priporočljiv je Wi-Fi, saj brez Wi-Fi prenos porabi mobilne podatke.</string>
 </resources>
