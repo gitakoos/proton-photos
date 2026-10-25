@@ -28,8 +28,8 @@ jobs:
       # Replaces the archived gradle/wrapper-validation-action.
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      - name: Unit tests
-        run: ./gradlew testDebugUnitTest
+      - name: Build, lint, and unit tests
+        run: ./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest
 
       # schemas/ is committed for MigrationTestHelper / review. Fail if a schema
       # change was produced by the test build but not committed.
