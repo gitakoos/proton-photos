@@ -9,9 +9,7 @@
     <string name="onboarding_get_started">Get started</string>
     <string name="onboarding_allow">Allow</string>
     <string name="onboarding_open_settings">Open settings</string>
-    <string name="onboarding_permission_granted">Granted</string>
     <string name="onboarding_finish">Open my gallery</string>
-    <string name="onboarding_recommended">Recommended</string>
 
     <string name="onboarding_welcome_title">Welcome to Photos for Proton</string>
     <string name="onboarding_welcome_subtitle">Your photos and videos, end-to-end encrypted on Proton Drive. Set up a few preferences so the app fits how you want to use it.</string>
@@ -1198,13 +1196,40 @@
     <string name="faq_q_cloud_icons">What do the cloud icons mean?</string>
     <string name="faq_a_cloud_icons">A green cloud means the photo is backed up to Proton Drive and still on this device. A white cloud means it is only in Proton Drive, not on this device. No icon means it is only on this device and not backed up yet.</string>
     <string name="faq_q_backup">How does backup work?</string>
-    <string name="faq_a_backup">New photos and videos back up automatically once backup is on. You can keep backups to Wi-Fi only in Settings, so they pause on mobile data.</string>
+    <string name="faq_a_backup">New photos and videos back up automatically once backup is on. Tap the round button at the top right of the \"%3$s\" tab and open \"%1$s\" to change how, for example with \"%2$s\".</string>
     <string name="faq_q_albums">What are albums, and what does folder mirroring do?</string>
-    <string name="faq_a_albums">Albums group photos on Proton Drive. \"Mirror device folders as Drive albums\" makes your phone folders, like Camera or Screenshots, appear as matching albums on Drive as they back up.</string>
-    <string name="faq_q_mirror_local">What does \"Mirror changes to local files\" do?</string>
+    <string name="faq_a_albums">Albums group photos on Proton Drive. In \"%1$s\", under \"%2$s\", each folder has a checkbox called \"%3$s\". Tick it and the folder gets a matching album on Drive as it backs up.</string>
+    <string name="faq_q_mirror_local">What does \"%1$s\" do?</string>
     <string name="faq_a_mirror_local">When the app strips metadata or renames a photo as it backs it up, it applies those same changes to the original on your phone too, so the local file and the backed-up copy stay identical. It applies only to photos this app backs up, going forward, and does not pull edits you make on Proton Drive web back to your phone.</string>
     <string name="faq_q_existing">Does the app change my existing photos?</string>
     <string name="faq_a_existing">No. Metadata changes happen only when the app backs up a photo, and only if you turn on metadata stripping or local mirroring. Photos already on your phone are left as they are unless you choose a per-photo action.</string>
+    <string name="faq_section_backup">Backup</string>
+    <string name="faq_section_albums">Albums</string>
+    <string name="faq_section_where">Where to find things</string>
+    <string name="faq_q_folders">How do I choose which folders back up?</string>
+    <string name="faq_a_folders">Tap the round button at the top right of the \"%4$s\" tab and open \"%1$s\". Turn on \"%2$s\", or pick the folders one by one under \"%3$s\".</string>
+    <string name="faq_q_free_space">How do I free up space on my phone?</string>
+    <string name="faq_a_free_space">Photos already on Proton Drive can leave this phone. Turn on \"%1$s\" in \"%2$s\", or select photos, tap delete and choose \"%3$s\". The Drive copy stays.</string>
+    <string name="faq_q_album_create">How do I make an album and add photos?</string>
+    <string name="faq_a_album_create">On the \"%1$s\" tab, tap \"%2$s\" (the folder with a plus). To add photos, select them in the timeline and tap \"%3$s\", or open the album and choose \"%4$s\" from its menu.</string>
+    <string name="faq_q_album_share">How do I share an album?</string>
+    <string name="faq_a_album_share">Open the album, tap its menu and choose \"%1$s\". Invite people by email as viewers or editors. Someone without a Proton account gets an email invitation. Albums shared with you are under \"%2$s\" on the \"%3$s\" tab.</string>
+    <string name="faq_q_album_contribute">Can I add photos to an album someone shared with me?</string>
+    <string name="faq_a_album_contribute">Yes, if they let you edit it. Add photos the same way as to your own album. The album gets a copy, which counts toward the owner\'s storage, and your original stays where it is.</string>
+    <string name="faq_q_folders_albums">What is the difference between folders and albums?</string>
+    <string name="faq_a_folders_albums">Albums live on Proton Drive. Folders are the folders on this phone, like Camera or Screenshots, and carry a \"%1$s\" badge. The filter on the \"%4$s\" tab shows one kind at a time with \"%2$s\" or \"%3$s\".</string>
+    <string name="faq_q_album_delete">What happens when I remove or delete photos?</string>
+    <string name="faq_a_album_delete">\"%1$s\" only takes photos out of the album, they stay in your timeline. Deleting a photo moves it to \"%2$s\", where you can restore it. Deleting an album keeps its photos in Proton Drive.</string>
+    <string name="faq_q_where_ml">Where do I turn on faces, search and Copy text?</string>
+    <string name="faq_a_where_ml">Tap the round button at the top right of the \"%3$s\" tab, then \"%1$s\" > \"%2$s\". Each feature has its own switch and downloads its model once. Everything runs on this phone.</string>
+    <string name="faq_q_where_lock">Where are the app lock and hidden photos?</string>
+    <string name="faq_a_where_lock">In \"%1$s\" > \"%2$s\" you find \"%3$s\" and \"%4$s\". To hide photos, select them and choose \"%5$s\".</string>
+    <string name="faq_q_where_drive">How do faces, labels and hidden items reach my other devices?</string>
+    <string name="faq_a_where_drive">Turn on \"%3$s\" in \"%1$s\", under \"%2$s\". Faces and names, the search index, labels and hidden items are then saved to Proton Drive and kept the same on your other devices, the desktop app included.</string>
+    <string name="faq_q_where_trash">Where do deleted photos go?</string>
+    <string name="faq_a_where_trash">To \"%1$s\". Tap the round button at the top right of the \"%2$s\" tab to open it. Photos deleted from this phone and from Proton Drive wait there and can be restored.</string>
+    <string name="faq_q_no_account">Can I use the app without a Proton account?</string>
+    <string name="faq_a_no_account">Yes. On the sign-in screen choose \"%1$s\". Browsing, editing, folders, hidden photos, faces and search all work on this phone. Backing up to Proton Drive needs an account.</string>
 
     <!-- Albums -->
     <string name="albums_new_album">New Album</string>
