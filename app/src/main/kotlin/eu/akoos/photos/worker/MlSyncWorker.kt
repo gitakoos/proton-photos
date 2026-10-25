@@ -657,11 +657,12 @@ class MlSyncWorker @AssistedInject constructor(
                 val saveStarted = System.currentTimeMillis()
                 val kindTally = MlSyncTally(MlSyncOperation.SAVE, filesTotal = 1)
                 saveKind(userId, kind, ownDeviceId, index, ML_SYNC_KIND_ORDER.size, kindTally, scratch)
-                val saved = kindTally.outcome().let { if (kind == MlDriveFileKind.FACES) it.faces else it.search }
+                val kindOutcome = kindTally.outcome()
+                val saved = if (kind == MlDriveFileKind.FACES) kindOutcome.faces else kindOutcome.search
                 if (saved == MlSyncPartStatus.DONE || saved == MlSyncPartStatus.EMPTY) {
                     sharedBackupStore.mlSaved(kind, saveStarted)
                 } else {
-                    failedParts += "save ${kind.name.lowercase()}"
+                    failedParts += "save ${kind.name.lowercase()}" + (kindOutcome.failure?.let { ": $it" } ?: "")
                 }
             }
             val now = System.currentTimeMillis()

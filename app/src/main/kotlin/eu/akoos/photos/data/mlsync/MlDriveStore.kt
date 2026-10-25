@@ -31,6 +31,7 @@ import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.sdk.SdkDriveClientProvider
+import eu.akoos.photos.util.SyncDiagnostics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
@@ -296,7 +297,8 @@ class MlDriveStore @Inject constructor(
             clientProvider.withClient(userId) { client -> block(client) } ?: MlDriveResult.NotCapable
         } catch (t: Throwable) {
             ensureActive()
-            Log.w(TAG, "$operation failed: ${describe(t)}")
+            // Class names and the API's numeric codes only, so the line is safe in a shared diagnostics log.
+            SyncDiagnostics.log("drive data: $operation failed: ${describe(t)}")
             if (isConflict(t)) MlDriveResult.Conflict else MlDriveResult.Failed(failureName(t))
         }
     }
@@ -500,8 +502,12 @@ class MlDriveStore @Inject constructor(
     }
 
     private fun describe(t: Throwable): String {
-        val error = sdkErrors(t).firstOrNull() ?: return failureName(t)
-        return "${failureName(t)} (${error.domain}, ${error.primaryCode}/${error.secondaryCode})"
+        val errors = sdkErrors(t).toList()
+        if (errors.isEmpty()) return failureName(t)
+        val chain = errors.joinToString(" < ") { error ->
+            "${error.type.substringAfterLast('.').take(MAX_NAME_LENGTH)} (${error.domain}, ${error.primaryCode}/${error.secondaryCode})"
+        }
+        return "${failureName(t)}: $chain"
     }
 
     private sealed interface Lookup {
