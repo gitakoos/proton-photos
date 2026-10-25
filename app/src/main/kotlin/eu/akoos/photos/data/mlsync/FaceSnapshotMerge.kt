@@ -179,6 +179,15 @@ internal fun nameChangeApplies(heldNamedAt: Long, changedAt: Long): Boolean = ch
  */
 internal fun curationChangeApplies(heldAt: Long, changedAt: Long): Boolean = changedAt > heldAt
 
+/**
+ * Whether a "not this person" mark set by hand on another install at [markAddedAt] outranks this device's own
+ * confirmation of the face under that name. A rename confirms every face of the person, so without this a photo
+ * taken off a named person elsewhere would never leave them here. Only a timed mark later than what this device
+ * holds for it ([heldAt]: its own setting or removal of the same mark, 0 when none) does.
+ */
+internal fun handMarkOverridesConfirmation(markAddedAt: Long, heldAt: Long): Boolean =
+    markAddedAt > 0L && curationChangeApplies(heldAt, markAddedAt)
+
 internal fun notPersonMarkApplies(localConfirmedName: String?, markName: String): Boolean =
     localConfirmedName != markName
 

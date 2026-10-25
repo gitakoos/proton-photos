@@ -540,9 +540,20 @@ internal class FaceSnapshotApplier(
         if (!importsFaceRows(mode, record.photoKey in scannedHere)) {
             // A photo scanned here: the mark follows its face onto the local face it was paired with.
             val match = notPersonMatches[record.faceId] ?: return
-            if (notPersonMarkApplies(match.confirmedName, record.personName)) {
+            val heldAt = curation[CurationKey(MlSnapshotFormat.REMOVAL_NOT_PERSON, record.personName, match.localFaceId)]?.changedAt ?: 0L
+            val overrides = match.confirmedName == record.personName &&
+                handMarkOverridesConfirmation(record.addedAtMillis, heldAt)
+            if (notPersonMarkApplies(match.confirmedName, record.personName) || overrides) {
                 addNotPersonRow(NotPersonEntity(account, record.personName, match.localFaceId))
                 noteMark(record, match.localFaceId)
+                localBlockedNames.getOrPut(match.localFaceId) { HashSet() }.add(record.personName)
+            }
+            if (overrides) {
+                // Taken off the person by hand there after this device confirmed it: it leaves them here too,
+                // free to regroup, as a photo taken off a person here does.
+                faceDao.clearManualNameByIds(listOf(match.localFaceId))
+                faceDao.unassignFaces(listOf(match.localFaceId))
+                personIdByName[record.personName]?.let { touchedPeople += it }
             }
             return
         }

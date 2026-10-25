@@ -530,6 +530,25 @@ class FaceSnapshotRoundTripTest {
     }
 
     @Test
+    fun `a photo taken off a named person on the other device leaves them here, though this device confirmed it`() = runTest {
+        seedSource()
+        source.notPersonDao().add(listOf(NotPersonEntity(ACCOUNT, "Alice", "linkA#0")))
+        FaceCurationLog.notPerson(source.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkA#0"), removed = false, 200L)
+        target.personDao().upsert(PersonEntity(id = 10, userId = ACCOUNT, displayName = "Alice", faceCount = 1))
+        target.faceDao().upsert(
+            listOf(face("linkA#0", "linkA", 0.10f, 0.10f, 0.30f, 0.40f, seed = 21, personId = 10, manualName = "Alice")),
+        )
+        target.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkA")))
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertTrue("Alice" to "linkA#0" in notPersons())
+        val face = faces().getValue("linkA#0")
+        assertNull(face.manualName)
+        assertNull(face.personId)
+    }
+
+    @Test
     fun `what the other device set before a removal made here is not brought back`() = runTest {
         seedSource()
         FaceCurationLog.manualPhotos(source.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkE"), removed = false, 200L)
