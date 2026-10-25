@@ -118,6 +118,19 @@ object MlDriveNaming {
     /** True for a well-formed device id. */
     fun isDeviceId(value: String): Boolean = DEVICE_ID.matches(value)
 
+    /**
+     * An install id that stays the same across a reinstall: a name-based UUID of the phone's Android id, which
+     * Android keeps per app signing key and user until a factory reset. Without one (null, blank, or the value a
+     * known emulator bug hands every device), a random id, as before.
+     */
+    fun stableDeviceId(androidId: String?): String {
+        val id = androidId?.trim()?.lowercase()
+        if (id.isNullOrEmpty() || id == BROKEN_ANDROID_ID) return java.util.UUID.randomUUID().toString()
+        return java.util.UUID.nameUUIDFromBytes("photos-for-proton/drive-data/$id".toByteArray()).toString()
+    }
+
+    private const val BROKEN_ANDROID_ID = "9774d56d682e549c"
+
     /** The file name [kind]'s snapshot of install [deviceId] is stored under. */
     fun fileName(kind: MlDriveFileKind, deviceId: String): String {
         require(isDeviceId(deviceId)) { "Not a device id" }

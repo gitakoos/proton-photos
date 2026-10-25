@@ -69,6 +69,24 @@ data class SharedBackupListing(
     val hidden: List<MlDriveFile>,
 )
 
+/** One install's copies on Drive, as the list of the backups shows them: when it saved last, and its files. */
+data class DriveDeviceCopies(val deviceId: String, val name: String?, val lastSavedMs: Long, val nodeUids: List<String>)
+
+/**
+ * The copies in [listing], by the install that wrote them: every file of the three folders whose name carries an
+ * install id, newest install first. Pure, so it is unit-tested directly.
+ */
+internal fun copiesByDevice(listing: SharedBackupListing, names: Map<String, String>): List<DriveDeviceCopies> {
+    val files = listing.ml.mapNotNull { f -> MlDriveNaming.parse(f.name)?.let { SharedBackupCopy(it.deviceId, f) } } +
+        listing.labels.mapNotNull { f -> LabelDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } } +
+        listing.hidden.mapNotNull { f -> HiddenDriveNaming.parse(f.name)?.let { SharedBackupCopy(it, f) } }
+    return files.groupBy { it.deviceId }
+        .map { (id, copies) ->
+            DriveDeviceCopies(id, names[id], copies.maxOf { it.madeAtMs }, copies.map { it.file.nodeUid })
+        }
+        .sortedByDescending { it.lastSavedMs }
+}
+
 /** One other install's file a round takes in, with the time the copy carries for the "taken in" record. */
 data class SharedBackupCopy(val deviceId: String, val file: MlDriveFile) {
     /** When the writing install made the copy, as far as Drive tells before the download. */
@@ -170,6 +188,7 @@ class SharedBackupRunner @Inject constructor(
         val copies = newerCopies(listing.labels, LabelDriveNaming::parse, ownDeviceId, applied)
         if (copies.isEmpty()) return true
         val read = copies.map { copy -> copy to (readLabels(userId, copy) ?: return false) }
+        store.rememberDeviceNames(read.associate { (copy, snapshot) -> copy.deviceId to snapshot.deviceLabel }.filterValues { it.isNotBlank() })
         val before = labels.loadSyncState(userId)
         val after = before.deepCopy()
         if (retake) after.applied.clear()
@@ -192,6 +211,7 @@ class SharedBackupRunner @Inject constructor(
         val copies = newerCopies(listing.hidden, HiddenDriveNaming::parse, ownDeviceId, applied)
         if (copies.isEmpty()) return true
         val read = copies.map { copy -> copy to (readHidden(userId, copy) ?: return false) }
+        store.rememberDeviceNames(read.associate { (copy, snapshot) -> copy.deviceId to snapshot.deviceLabel }.filterValues { it.isNotBlank() })
         val state = hidden.load()
         var changes = HiddenCopyMerge.Changes()
         for ((_, snapshot) in read) changes += HiddenCopyMerge.takeIn(state, snapshot, ownDeviceId)
@@ -226,6 +246,31 @@ class SharedBackupRunner @Inject constructor(
         return upload(userId, HiddenDriveNaming.fileName(ownDeviceId), sealed, HiddenDriveNaming.MEDIA_TYPE, DriveDataFolder.HIDDEN)
             ?.also { store.recordSaved(SharedBackupKind.HIDDEN, same) }
     }
+
+    /**
+     * The backups on Drive, one entry per install, for the list on the Drive card. A device whose name was never
+     * read gets it from its label or hidden-list copy, the small ones, when it has one. Null when the folders could
+     * not be listed.
+     */
+    suspend fun devices(userId: UserId): List<DriveDeviceCopies>? {
+        val listing = list(userId) ?: return null
+        val known = store.deviceNames()
+        val learned = HashMap<String, String>()
+        for (entry in copiesByDevice(listing, known)) {
+            if (entry.name != null) continue
+            val label = listing.labels.firstOrNull { LabelDriveNaming.parse(it.name) == entry.deviceId }
+                ?.let { readLabels(userId, SharedBackupCopy(entry.deviceId, it))?.deviceLabel }
+            val name = label ?: listing.hidden.firstOrNull { HiddenDriveNaming.parse(it.name) == entry.deviceId }
+                ?.let { readHidden(userId, SharedBackupCopy(entry.deviceId, it))?.deviceLabel }
+            if (!name.isNullOrBlank()) learned[entry.deviceId] = name
+        }
+        store.rememberDeviceNames(learned)
+        return copiesByDevice(listing, known + learned)
+    }
+
+    /** Moves an install's copies to the Drive trash. False when Drive kept one. */
+    suspend fun trash(userId: UserId, copies: DriveDeviceCopies): Boolean =
+        driveStore.trash(userId, copies.nodeUids) is MlDriveResult.Ok
 
     /** Makes sure the [area] folder exists, creating it (the shared backup's switch is the user's agreement). */
     suspend fun ensureFolder(userId: UserId, area: DriveDataFolder): Boolean =

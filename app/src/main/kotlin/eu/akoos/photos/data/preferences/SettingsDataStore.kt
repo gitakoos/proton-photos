@@ -858,6 +858,15 @@ object SettingsKeys {
      *  so it outlives a sign-out: the same account signing back in finds its backup on again, another does not. */
     val SHARED_BACKUP_ACCOUNTS = stringSetPreferencesKey("shared_backup_accounts")
 
+    /** The names of the devices whose copies on Drive this one has read, as `"deviceId=name"`, for the list of the
+     *  backups on Drive: a file's name carries only the install id, the name is inside the copy. */
+    val SHARED_BACKUP_DEVICE_NAMES = stringSetPreferencesKey("shared_backup_device_names")
+
+    /** Set once a round took this install's own copies on Drive in, after a fresh install or a sign-out. Until then
+     *  a round reads the copies named after this install too: they were written by an earlier install on this phone
+     *  (the install id lasts across a reinstall) or before the sign-out wiped the data they hold. */
+    val SHARED_BACKUP_OWN_COPY_TAKEN = booleanPreferencesKey("shared_backup_own_copy_taken")
+
     /** Set once the older per-kind automatic saves were folded into the automatic Drive backup. */
     val SHARED_BACKUP_AUTOSAVE_FOLDED = booleanPreferencesKey("shared_backup_autosave_folded")
 

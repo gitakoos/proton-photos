@@ -24,6 +24,7 @@ package eu.akoos.photos.data.mlsync
 
 import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -59,6 +60,7 @@ import me.proton.drive.sdk.entity.FileRevisionUploaderRequest
 import me.proton.drive.sdk.entity.FileUploaderRequest
 import me.proton.drive.sdk.entity.FolderNode
 import me.proton.drive.sdk.entity.Node
+import me.proton.drive.sdk.entity.NodeResultPair
 import me.proton.drive.sdk.entity.NodeUid
 import me.proton.drive.sdk.entity.RevisionUid
 import me.proton.drive.sdk.entity.UploadResult
@@ -93,6 +95,9 @@ sealed interface MlDriveResult<out T> {
         companion object {
             /** A node of the wrong type (a file where a folder belongs, or the reverse) holds the name. */
             const val NAME_TAKEN = "NameTaken"
+
+            /** Drive kept one or more of the files a trash asked for. */
+            const val TRASH_REFUSED = "TrashRefused"
 
             /** The name is not one of this install's own file names. */
             const val FOREIGN_NAME = "ForeignName"
@@ -147,8 +152,11 @@ class MlDriveStore @Inject constructor(
 
     /**
      * This install's id, created the first time it is asked for and kept in
-     * [SettingsKeys.ML_SYNC_DEVICE_ID] across sign-outs. Throws the preferences store's IOException
-     * when the value can be neither read nor written.
+     * [SettingsKeys.ML_SYNC_DEVICE_ID] across sign-outs. A new one is made from the phone's Android id
+     * ([stableDeviceId]), which stays the same across a reinstall of the app on the same phone, so a
+     * reinstall writes on in its earlier files instead of leaving them behind next to a new set; an
+     * install that already has an id keeps it. Throws the preferences store's IOException when the value
+     * can be neither read nor written.
      */
     suspend fun deviceId(): String {
         cachedDeviceId?.let { return it }
@@ -157,7 +165,9 @@ class MlDriveStore @Inject constructor(
                 val saved = context.settingsDataStore.edit { prefs ->
                     val stored = prefs[SettingsKeys.ML_SYNC_DEVICE_ID]
                     if (stored == null || !MlDriveNaming.isDeviceId(stored)) {
-                        prefs[SettingsKeys.ML_SYNC_DEVICE_ID] = UUID.randomUUID().toString()
+                        prefs[SettingsKeys.ML_SYNC_DEVICE_ID] = MlDriveNaming.stableDeviceId(
+                            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID),
+                        )
                     }
                 }[SettingsKeys.ML_SYNC_DEVICE_ID]
                 checkNotNull(saved).also { cachedDeviceId = it }
@@ -294,6 +304,17 @@ class MlDriveStore @Inject constructor(
                 createdFile = existing == null,
             ),
         )
+    }
+
+    /**
+     * Moves the files [nodeUids] (ones [list] returned) to the Drive trash, where they can be restored from. Ok when
+     * every one went, or was gone already.
+     */
+    suspend fun trash(userId: UserId, nodeUids: List<String>): MlDriveResult<Unit> = sdkCall("trash", userId) { client ->
+        if (nodeUids.isEmpty()) return@sdkCall MlDriveResult.Ok(Unit)
+        var refused = 0
+        client.trashNodes(nodeUids.map { NodeUid(it) }).collect { if (it is NodeResultPair.Failure) refused++ }
+        if (refused == 0) MlDriveResult.Ok(Unit) else MlDriveResult.Failed(MlDriveResult.Failed.TRASH_REFUSED)
     }
 
     /**

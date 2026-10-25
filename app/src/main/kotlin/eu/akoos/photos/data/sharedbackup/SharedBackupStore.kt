@@ -92,6 +92,32 @@ class SharedBackupStore @Inject constructor(@ApplicationContext private val cont
         }
     }
 
+    /** Whether a round has taken this install's own copies in since a fresh install or a sign-out
+     *  ([SettingsKeys.SHARED_BACKUP_OWN_COPY_TAKEN]). */
+    suspend fun ownCopyTaken(): Boolean =
+        context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_OWN_COPY_TAKEN] == true
+
+    suspend fun markOwnCopyTaken() {
+        context.settingsDataStore.edit { it[SettingsKeys.SHARED_BACKUP_OWN_COPY_TAKEN] = true }
+    }
+
+    /** The device names read from copies on Drive so far, by install id. */
+    suspend fun deviceNames(): Map<String, String> =
+        (context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_DEVICE_NAMES] ?: emptySet())
+            .mapNotNull { entry -> entry.indexOf('=').takeIf { it > 0 }?.let { entry.substring(0, it) to entry.substring(it + 1) } }
+            .toMap()
+
+    /** Notes the [names] of devices (install id to name) read from their copies. */
+    suspend fun rememberDeviceNames(names: Map<String, String>) {
+        if (names.isEmpty()) return
+        context.settingsDataStore.edit { prefs ->
+            val merged = (prefs[SettingsKeys.SHARED_BACKUP_DEVICE_NAMES] ?: emptySet())
+                .filterNot { it.substringBefore('=') in names }
+                .toSet() + names.map { (id, name) -> "$id=$name" }
+            prefs[SettingsKeys.SHARED_BACKUP_DEVICE_NAMES] = merged
+        }
+    }
+
     /** Whether the account [userId] had the automatic backup on, before a sign-out wiped its switch. */
     suspend fun rememberedOn(userId: String): Boolean =
         accountHash(userId) in (context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_ACCOUNTS] ?: emptySet())

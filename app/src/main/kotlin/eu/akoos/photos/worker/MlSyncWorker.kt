@@ -617,8 +617,13 @@ class MlSyncWorker @AssistedInject constructor(
         val listing = sharedBackupRunner.list(userId)
             ?: return endRound(tally.outcome(MlSyncResult.FAILED, READ_FAILURE), failed = true)
 
+        // After a fresh install or a sign-out, the copies named after this install hold what an earlier install on
+        // this phone, or this one before the sign-out, saved, so they are read like any other device's until a round
+        // has taken them in. An id no copy carries stands in for this install's own while reading.
+        val takesOwnCopy = !sharedBackupStore.ownCopyTaken()
+        val readsAs = if (takesOwnCopy) EARLIER_INSTALL else ownDeviceId
         val unread = HashSet<MlDriveFileKind>()
-        val plan = planRestore(sharedBackupRunner.mlFilesToTake(userId, listing, ownDeviceId, retake), FaceSnapshotMode.Merge)
+        val plan = planRestore(sharedBackupRunner.mlFilesToTake(userId, listing, readsAs, retake), FaceSnapshotMode.Merge)
         if (plan.isNotEmpty()) {
             promoteToForeground()
             val pause = MlSyncFacePause.read(applicationContext)
@@ -641,8 +646,9 @@ class MlSyncWorker @AssistedInject constructor(
                 withContext(NonCancellable) { walks.handBack(userId) }
             }
         }
-        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, ownDeviceId, retake)
-        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, ownDeviceId, retake)
+        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, readsAs, retake)
+        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, readsAs, retake)
+        if (takesOwnCopy && unread.isEmpty() && labelsRead && hiddenRead) sharedBackupStore.markOwnCopyTaken()
         val failedParts = ArrayList<String>()
         unread.mapTo(failedParts) { "read ${it.name.lowercase()}" }
         if (!labelsRead) failedParts += "read labels"
@@ -917,6 +923,9 @@ class MlSyncWorker @AssistedInject constructor(
 
         /** The failure a round names when it could not read the copies on Drive. */
         private const val READ_FAILURE = "ReadFailed"
+
+        /** The install id a round reads as while it takes this install's own copies in: no copy carries it. */
+        private const val EARLIER_INSTALL = ""
 
         /** How long a restore waits for a stood-down walk to put its model session away before importing
          *  anyway; the import's single transaction still holds the walk's writes back until it commits. */

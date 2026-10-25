@@ -30,6 +30,7 @@ import eu.akoos.photos.data.mlsync.HiddenDriveNaming
 import eu.akoos.photos.data.mlsync.MlDriveFileKind
 import eu.akoos.photos.data.mlsync.LabelDriveNaming
 import eu.akoos.photos.data.mlsync.MlDriveFile
+import eu.akoos.photos.data.mlsync.MlDriveNaming
 import eu.akoos.photos.data.mlsync.MlSyncOperation
 import eu.akoos.photos.data.mlsync.MlSyncRequest
 import eu.akoos.photos.data.mlsync.MlSyncWorkData
@@ -79,6 +80,48 @@ class SharedBackupRulesTest {
             applied = mapOf(pc to 100L, tablet to 50L),
         )
         assertEquals(listOf(pc to 150L), newer.map { it.deviceId to it.madeAtMs })
+    }
+
+    @Test
+    fun `after a reinstall or a sign-out, the copy named after this install is read like another device's`() {
+        val files = listOf(
+            file(LabelDriveNaming.fileName(pc), claimed = 100),
+            file(LabelDriveNaming.fileName(own), claimed = 300),
+        )
+        // The round reads as an id no copy carries until it has taken this install's own copy in.
+        val readsAs = ""
+        assertEquals(setOf(pc, own), newerCopies(files, LabelDriveNaming::parse, readsAs, emptyMap()).map { it.deviceId }.toSet())
+    }
+
+    @Test
+    fun `the backups on Drive list each device once, with its newest copy's time and all its files`() {
+        val listing = SharedBackupListing(
+            ml = listOf(file(MlDriveNaming.fileName(MlDriveFileKind.FACES, pc), claimed = 100), file("notes.txt", claimed = 900)),
+            labels = listOf(file(LabelDriveNaming.fileName(pc), claimed = 400), file(LabelDriveNaming.fileName(tablet), claimed = 50)),
+            hidden = listOf(file(HiddenDriveNaming.fileName(tablet), claimed = 70)),
+        )
+        val devices = copiesByDevice(listing, mapOf(pc to "Galaxy S23"))
+        assertEquals(listOf(pc, tablet), devices.map { it.deviceId })
+        assertEquals(listOf(400L, 70L), devices.map { it.lastSavedMs })
+        assertEquals(listOf("Galaxy S23", null), devices.map { it.name })
+        assertEquals(2, devices.first().nodeUids.size)
+    }
+
+    @Test
+    fun `a reinstall on the same phone keeps the install id, so it writes on in its earlier files`() {
+        val first = MlDriveNaming.stableDeviceId("a1b2c3d4e5f60718")
+        assertEquals(first, MlDriveNaming.stableDeviceId("A1B2C3D4E5F60718"))
+        assertTrue(MlDriveNaming.isDeviceId(first))
+        assertFalse(first == MlDriveNaming.stableDeviceId("0000000000000001"))
+    }
+
+    @Test
+    fun `without a usable Android id every install gets a fresh random id`() {
+        val a = MlDriveNaming.stableDeviceId(null)
+        val b = MlDriveNaming.stableDeviceId("9774d56d682e549c")
+        assertTrue(MlDriveNaming.isDeviceId(a) && MlDriveNaming.isDeviceId(b))
+        assertFalse(a == b)
+        assertFalse(a == MlDriveNaming.stableDeviceId(""))
     }
 
     @Test

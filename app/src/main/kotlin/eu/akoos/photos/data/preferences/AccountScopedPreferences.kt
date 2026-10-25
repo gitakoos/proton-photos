@@ -106,6 +106,8 @@ object AccountScopedPreferences {
                         SettingsKeys.HIDDEN_ALBUM_SHOW_TIMES,
                         SettingsKeys.HIDDEN_REMOTE_HIDE_QUEUE,
                         SettingsKeys.SHARED_BACKUP_ENABLED,
+                        SettingsKeys.SHARED_BACKUP_OWN_COPY_TAKEN,
+                        SettingsKeys.SHARED_BACKUP_DEVICE_NAMES,
                         SettingsKeys.SHARED_BACKUP_LAST_AT,
                         SettingsKeys.SHARED_BACKUP_LAST_FAILED,
                         SettingsKeys.SHARED_BACKUP_SAVED,
