@@ -1283,8 +1283,22 @@
     <string name="viewer_meta_source_cloud">Alleen Proton Drive</string>
     <string name="viewer_meta_strip">Verwijderen</string>
     <string name="viewer_meta_strip_all">Alle privémetadata verwijderen</string>
-    <string name="viewer_meta_shortcut_private">Privé</string>
     <string name="viewer_meta_all_details">Alle details</string>
+    <string name="details_adjust">Aanpassen</string>
+    <string name="details_edit">Bewerken</string>
+    <string name="details_add">Toevoegen</string>
+    <string name="details_add_location">Locatie toevoegen</string>
+    <string name="details_time">Tijd</string>
+    <string name="details_remove_private">Privégegevens verwijderen</string>
+    <string name="details_private_intro">Dit staat nu in het bestand. Kies wat weg moet.</string>
+    <string name="details_private_undo">Dit kan niet ongedaan worden gemaakt.</string>
+    <string name="details_private_dates">Datumtags</string>
+    <string name="details_private_author">Auteur</string>
+    <string name="details_place_hint">Sleep de kaart onder de speld</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">%d item verwijderen</item>
+        <item quantity="other">%d items verwijderen</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Verwijdert GPS, camera-informatie en software-, maker- en copyrightvelden uit dit bestand</string>
     <string name="viewer_meta_strip_confirm_title">Metadata verwijderen?</string>
     <string name="viewer_meta_strip_confirm_message">Hiermee wordt %1$s permanent uit het bestand op je apparaat verwijderd. Dit kan niet ongedaan worden gemaakt.</string>

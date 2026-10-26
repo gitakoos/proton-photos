@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.viewer
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -71,6 +72,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.presentation.common.cardFill
 import eu.akoos.photos.presentation.map.vector.FAR_CULL_COS
 import eu.akoos.photos.presentation.map.vector.WorldMapData
 import eu.akoos.photos.presentation.map.vector.appendBorder
@@ -78,6 +80,8 @@ import eu.akoos.photos.presentation.map.vector.appendFill
 import eu.akoos.photos.presentation.map.vector.cosCentral
 import eu.akoos.photos.presentation.map.darkTileFilter
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.theme.CardBg
+import eu.akoos.photos.presentation.theme.Line2
 import kotlinx.coroutines.flow.map
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -121,6 +125,8 @@ internal fun DetailsMapBox(
     placeLabel: String?,
     onOpen: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /** Opens the Location page from the Adjust button on the map. Null leaves the button out. */
+    onAdjust: (() -> Unit)? = null,
 ) {
     if (mappablePoint(latitude, longitude) == null) return
     val context = LocalContext.current
@@ -128,10 +134,16 @@ internal fun DetailsMapBox(
     val mapStyleOsm by remember {
         context.settingsDataStore.data.map { it[SettingsKeys.MAP_STYLE_OSM] ?: false }
     }.collectAsStateWithLifecycle<Boolean?>(initialValue = null)
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(14.dp)
 
     Box(modifier = modifier) {
-        MetadataSection(label = stringResource(R.string.map_title)) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(shape)
+                .background(cardFill(CardBg))
+                .border(0.5.dp, Line2, shape),
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -210,6 +222,7 @@ internal fun DetailsMapBox(
                         .fillMaxSize()
                         .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } },
                 )
+                if (onAdjust != null) AdjustPill(onAdjust, Modifier.align(Alignment.TopEnd).padding(8.dp))
             }
         }
     }

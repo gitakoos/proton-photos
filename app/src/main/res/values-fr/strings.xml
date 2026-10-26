@@ -1269,8 +1269,22 @@
     <string name="viewer_meta_source_cloud">Proton Drive uniquement</string>
     <string name="viewer_meta_strip">Supprimer</string>
     <string name="viewer_meta_strip_all">Supprimer toutes les métadonnées privées</string>
-    <string name="viewer_meta_shortcut_private">Privé</string>
     <string name="viewer_meta_all_details">Tous les détails</string>
+    <string name="details_adjust">Ajuster</string>
+    <string name="details_edit">Modifier</string>
+    <string name="details_add">Ajouter</string>
+    <string name="details_add_location">Ajouter un lieu</string>
+    <string name="details_time">Heure</string>
+    <string name="details_remove_private">Supprimer les infos privées</string>
+    <string name="details_private_intro">Voici ce que contient le fichier. Choisissez ce qui part.</string>
+    <string name="details_private_undo">Action irréversible.</string>
+    <string name="details_private_dates">Balises de date</string>
+    <string name="details_private_author">Auteur</string>
+    <string name="details_place_hint">Faites glisser la carte sous l’épingle</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">Supprimer %d élément</item>
+        <item quantity="other">Supprimer %d éléments</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Supprime le GPS, les infos de l\'appareil photo et les champs logiciel, auteur et droits d\'auteur de ce fichier</string>
     <string name="viewer_meta_strip_confirm_title">Supprimer les métadonnées ?</string>
     <string name="viewer_meta_strip_confirm_message">Cela supprimera définitivement %1$s du fichier sur votre appareil. Cette action est irréversible.</string>

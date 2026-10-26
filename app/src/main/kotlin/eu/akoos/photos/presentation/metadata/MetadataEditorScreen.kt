@@ -970,7 +970,7 @@ private fun FieldHeaderRow(label: String, editable: Boolean, onEdit: () -> Unit)
 }
 
 @Composable
-private fun LockNote(lock: EditLock) {
+internal fun LockNote(lock: EditLock) {
     val res = when (lock) {
         EditLock.CLOUD -> R.string.metadata_editor_note_cloud
         EditLock.SHARED -> R.string.metadata_editor_note_shared
@@ -994,7 +994,7 @@ private fun formatDateTime(ms: Long): String = formatDateTimeMinute(ms)
 
 /** UTC midnight of the day [ms] falls on in the device zone. This is the seed a Material date picker
  *  expects, since its calendar reads the selected value in UTC. */
-private fun toUtcMidnight(ms: Long): Long {
+internal fun toUtcMidnight(ms: Long): Long {
     val localDate = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
     return localDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
 }
@@ -1015,7 +1015,7 @@ private fun daysUpTo(maxEarliestMs: Long): SelectableDates {
 
 /** Combines a picker day (UTC midnight) with a wall-clock [hour]/[minute] in the device zone. Reading
  *  the day back in UTC keeps the calendar date the user tapped from drifting across the zone offset. */
-private fun combineDateTime(dateUtcMs: Long, hour: Int, minute: Int): Long {
+internal fun combineDateTime(dateUtcMs: Long, hour: Int, minute: Int): Long {
     val localDate = Instant.ofEpochMilli(dateUtcMs).atZone(ZoneOffset.UTC).toLocalDate()
     return localDate.atTime(hour, minute)
         .atZone(ZoneId.systemDefault())

@@ -1505,8 +1505,24 @@
     <string name="viewer_meta_source_cloud">Jen Proton Drive</string>
     <string name="viewer_meta_strip">Odstranit</string>
     <string name="viewer_meta_strip_all">Odstranit všechna soukromá metadata</string>
-    <string name="viewer_meta_shortcut_private">Soukromé</string>
     <string name="viewer_meta_all_details">Všechny podrobnosti</string>
+    <string name="details_adjust">Změnit</string>
+    <string name="details_edit">Upravit</string>
+    <string name="details_add">Přidat</string>
+    <string name="details_add_location">Přidat polohu</string>
+    <string name="details_time">Čas</string>
+    <string name="details_remove_private">Odebrat soukromé údaje</string>
+    <string name="details_private_intro">Tohle je teď v souboru. Vyber, co odebrat.</string>
+    <string name="details_private_undo">Nelze vrátit zpět.</string>
+    <string name="details_private_dates">Datumové značky</string>
+    <string name="details_private_author">Autor</string>
+    <string name="details_place_hint">Posuň mapu pod špendlík</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">Odebrat %d položku</item>
+        <item quantity="few">Odebrat %d položky</item>
+        <item quantity="many">Odebrat %d položky</item>
+        <item quantity="other">Odebrat %d položek</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Odstraní z tohoto souboru GPS, informace o fotoaparátu, pole softwaru, autora a autorská práva</string>
     <string name="viewer_meta_strip_confirm_title">Odstranit metadata?</string>
     <string name="viewer_meta_strip_confirm_message">Tímto se ze souboru ve vašem zařízení trvale odstraní %1$s. Tuto akci nelze vrátit zpět.</string>

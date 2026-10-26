@@ -2027,8 +2027,22 @@
     <string name="viewer_meta_source_cloud">Proton Drive only</string>
     <string name="viewer_meta_strip">Strip</string>
     <string name="viewer_meta_strip_all">Strip all private metadata</string>
-    <string name="viewer_meta_shortcut_private">Private</string>
     <string name="viewer_meta_all_details">All details</string>
+    <string name="details_adjust">Adjust</string>
+    <string name="details_edit">Edit</string>
+    <string name="details_add">Add</string>
+    <string name="details_add_location">Add a location</string>
+    <string name="details_time">Time</string>
+    <string name="details_remove_private">Remove private info</string>
+    <string name="details_private_intro">What this file holds now. Pick what goes.</string>
+    <string name="details_private_undo">This can\'t be undone.</string>
+    <string name="details_private_dates">Date tags</string>
+    <string name="details_private_author">Author</string>
+    <string name="details_place_hint">Drag the map under the pin</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">Remove %d item</item>
+        <item quantity="other">Remove %d items</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Removes GPS, camera info, software, artist and copyright fields from this file</string>
     <string name="label_section_title">Labels</string>
     <string name="label_add_hint">Add a label</string>

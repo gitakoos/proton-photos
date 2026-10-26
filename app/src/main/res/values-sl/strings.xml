@@ -1506,8 +1506,24 @@
     <string name="viewer_meta_source_cloud">Samo Proton Drive</string>
     <string name="viewer_meta_strip">Odstrani</string>
     <string name="viewer_meta_strip_all">Odstrani vse zasebne metapodatke</string>
-    <string name="viewer_meta_shortcut_private">Zasebno</string>
     <string name="viewer_meta_all_details">Vse podrobnosti</string>
+    <string name="details_adjust">Prilagodi</string>
+    <string name="details_edit">Uredi</string>
+    <string name="details_add">Dodaj</string>
+    <string name="details_add_location">Dodaj lokacijo</string>
+    <string name="details_time">Čas</string>
+    <string name="details_remove_private">Odstrani zasebne podatke</string>
+    <string name="details_private_intro">To je zdaj v datoteki. Izberi, kaj gre ven.</string>
+    <string name="details_private_undo">Tega ni mogoče razveljaviti.</string>
+    <string name="details_private_dates">Datumske oznake</string>
+    <string name="details_private_author">Avtor</string>
+    <string name="details_place_hint">Povleci zemljevid pod žebljiček</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">Odstrani %d element</item>
+        <item quantity="two">Odstrani %d elementa</item>
+        <item quantity="few">Odstrani %d elemente</item>
+        <item quantity="other">Odstrani %d elementov</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Odstrani polja GPS, podatke o fotoaparatu in programski opremi ter avtorja in avtorske pravice iz te datoteke</string>
     <string name="viewer_meta_strip_confirm_title">Odstraniti metapodatke?</string>
     <string name="viewer_meta_strip_confirm_message">S tem se %1$s trajno odstrani iz datoteke v vaši napravi. Tega ni mogoče razveljaviti.</string>

@@ -1267,8 +1267,22 @@
     <string name="viewer_meta_source_cloud">Nur Proton Drive</string>
     <string name="viewer_meta_strip">Entfernen</string>
     <string name="viewer_meta_strip_all">Alle privaten Metadaten entfernen</string>
-    <string name="viewer_meta_shortcut_private">Privat</string>
     <string name="viewer_meta_all_details">Alle Details</string>
+    <string name="details_adjust">Anpassen</string>
+    <string name="details_edit">Bearbeiten</string>
+    <string name="details_add">Hinzufügen</string>
+    <string name="details_add_location">Ort hinzufügen</string>
+    <string name="details_time">Uhrzeit</string>
+    <string name="details_remove_private">Private Daten entfernen</string>
+    <string name="details_private_intro">Das steht jetzt in der Datei. Wähle aus, was entfernt wird.</string>
+    <string name="details_private_undo">Das kann nicht rückgängig gemacht werden.</string>
+    <string name="details_private_dates">Datumsangaben</string>
+    <string name="details_private_author">Urheber</string>
+    <string name="details_place_hint">Karte unter die Nadel ziehen</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">%d Eintrag entfernen</item>
+        <item quantity="other">%d Einträge entfernen</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Entfernt GPS-, Kamera-, Software-, Urheber- und Copyright-Informationen aus dieser Datei</string>
     <string name="viewer_meta_strip_confirm_title">Metadaten entfernen?</string>
     <string name="viewer_meta_strip_confirm_message">Dadurch werden %1$s dauerhaft aus der Datei auf deinem Gerät entfernt. Dies kann nicht rückgängig gemacht werden.</string>

@@ -1179,7 +1179,6 @@ fun NavGraph(
                     metadataEditorRequest = MetadataEditorRequest(listOf(item), readOnlyAlbum)
                     navController.navigate(Screen.MetadataEditor.route)
                 },
-                onOpenLabelsSettings = { navController.navigate(Screen.LabelsSettings.route) },
                 onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
                 // The map in the user's style, centred on the photo's place. Before a style has ever been
                 // picked the one-time chooser comes first and carries the place through to the chosen map.

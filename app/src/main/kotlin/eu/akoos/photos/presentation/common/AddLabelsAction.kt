@@ -381,8 +381,70 @@ private fun AddLabelsSheet(
     onDismiss: () -> Unit,
     onConfirm: (List<String>) -> Unit,
 ) {
-    val usage by viewModel.usage.collectAsStateWithLifecycle()
     val appColors = AppColors.current
+    AppModalSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = SheetBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        LabelsEditor(
+            initial = initial,
+            editing = editing,
+            viewModel = viewModel,
+            onConfirm = onConfirm,
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 36.dp),
+            header = { _, _ ->
+                Text(
+                    stringResource(R.string.label_bulk_action), color = appColors.fgPrimary,
+                    fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                )
+            },
+            footer = { canConfirm, confirm ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.cancel), color = appColors.fgDim)
+                    }
+                    TextButton(
+                        enabled = canConfirm,
+                        onClick = confirm,
+                    ) {
+                        Text(
+                            stringResource(if (editing) R.string.metadata_editor_done else R.string.label_bulk_confirm),
+                            color = if (canConfirm) Accent else appColors.fgDim,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            },
+        )
+    }
+}
+
+/**
+ * The pill field and the labels already in use, between a [header] and a [footer] the caller draws: the
+ * shared sheet puts its title and buttons there, the details sheet its page title and Done. Each slot is
+ * handed whether the edit can be saved and the save itself.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun LabelsEditor(
+    initial: List<String>,
+    editing: Boolean,
+    viewModel: AddLabelsViewModel,
+    onConfirm: (List<String>) -> Unit,
+    header: @Composable (canConfirm: Boolean, confirm: () -> Unit) -> Unit,
+    modifier: Modifier = Modifier,
+    footer: @Composable (canConfirm: Boolean, confirm: () -> Unit) -> Unit = { _, _ -> },
+) {
+    val usage by viewModel.usage.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf(LabelPillsInput(initial, "")) }
     val full = BulkLabelInput.isFull(input.pills)
     val result = BulkLabelInput.labelsToAdd(input)
@@ -400,98 +462,66 @@ private fun AddLabelsSheet(
             )
         else -> null
     }
-
-    AppModalSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = SheetBg,
-        scrimColor = Color.Black.copy(alpha = 0.5f),
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(
-                stringResource(R.string.label_bulk_action), color = appColors.fgPrimary,
-                fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+        header(canConfirm, confirm)
+        Column {
+            LabelPillField(
+                input = input,
+                full = full,
+                placeholder = stringResource(
+                    if (input.pills.isEmpty()) R.string.label_bulk_hint else R.string.label_add_hint,
+                ),
+                focus = focus,
+                onText = { input = BulkLabelInput.onEdit(input.pills, it) },
+                onRemove = { label -> input = input.copy(pills = BulkLabelInput.remove(input.pills, label)) },
+                onBackspace = {
+                    val next = BulkLabelInput.onBackspace(input.pills, input.text)
+                    if (next != null) input = input.copy(pills = next)
+                    next != null
+                },
+                onDone = {
+                    if (input.text.isBlank()) {
+                        defaultKeyboardAction(ImeAction.Done)
+                    } else {
+                        input = LabelPillsInput(BulkLabelInput.commit(input.pills, input.text), "")
+                    }
+                },
             )
-            Column {
-                LabelPillField(
-                    input = input,
-                    full = full,
-                    placeholder = stringResource(
-                        if (input.pills.isEmpty()) R.string.label_bulk_hint else R.string.label_add_hint,
-                    ),
-                    focus = focus,
-                    onText = { input = BulkLabelInput.onEdit(input.pills, it) },
-                    onRemove = { label -> input = input.copy(pills = BulkLabelInput.remove(input.pills, label)) },
-                    onBackspace = {
-                        val next = BulkLabelInput.onBackspace(input.pills, input.text)
-                        if (next != null) input = input.copy(pills = next)
-                        next != null
-                    },
-                    onDone = {
-                        if (input.text.isBlank()) {
-                            defaultKeyboardAction(ImeAction.Done)
-                        } else {
-                            input = LabelPillsInput(BulkLabelInput.commit(input.pills, input.text), "")
-                        }
-                    },
+            if (hint != null) {
+                Text(
+                    hint, color = FgMute, fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 6.dp, start = 4.dp),
                 )
-                if (hint != null) {
-                    Text(
-                        hint, color = FgMute, fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 6.dp, start = 4.dp),
-                    )
-                }
             }
-            if (!full && suggestions.isNotEmpty()) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    suggestions.forEach { label ->
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(CardBg)
-                                .border(0.5.dp, Line2, RoundedCornerShape(20.dp))
-                                .clickable {
-                                    input = LabelPillsInput(BulkLabelInput.commit(input.pills, label), "")
-                                }
-                                .padding(horizontal = 12.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = FgMute, modifier = Modifier.size(14.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(label, color = FgMute, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        }
+        }
+        if (!full && suggestions.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                suggestions.forEach { label ->
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(cardFill(CardBg))
+                            .border(0.5.dp, Line2, RoundedCornerShape(20.dp))
+                            .clickable {
+                                input = LabelPillsInput(BulkLabelInput.commit(input.pills, label), "")
+                            }
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, tint = FgMute, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(label, color = FgMute, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(R.string.cancel), color = appColors.fgDim)
-                }
-                TextButton(
-                    enabled = canConfirm,
-                    onClick = confirm,
-                ) {
-                    Text(
-                        stringResource(if (editing) R.string.metadata_editor_done else R.string.label_bulk_confirm),
-                        color = if (canConfirm) Accent else appColors.fgDim,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
         }
+        footer(canConfirm, confirm)
     }
 }
 

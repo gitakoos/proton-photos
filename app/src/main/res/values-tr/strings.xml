@@ -1922,8 +1922,22 @@
     <string name="viewer_meta_source_cloud">Yalnızca Proton Drive</string>
     <string name="viewer_meta_strip">Temizle</string>
     <string name="viewer_meta_strip_all">Tüm özel meta verileri temizle</string>
-    <string name="viewer_meta_shortcut_private">Gizli</string>
     <string name="viewer_meta_all_details">Tüm ayrıntılar</string>
+    <string name="details_adjust">Ayarla</string>
+    <string name="details_edit">Düzenle</string>
+    <string name="details_add">Ekle</string>
+    <string name="details_add_location">Konum ekle</string>
+    <string name="details_time">Saat</string>
+    <string name="details_remove_private">Özel bilgileri kaldır</string>
+    <string name="details_private_intro">Dosyada şu an bunlar var. Neyin gideceğini seç.</string>
+    <string name="details_private_undo">Bu geri alınamaz.</string>
+    <string name="details_private_dates">Tarih etiketleri</string>
+    <string name="details_private_author">Yazar</string>
+    <string name="details_place_hint">Haritayı iğnenin altına sürükle</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">%d öğeyi kaldır</item>
+        <item quantity="other">%d öğeyi kaldır</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Bu dosyadan GPS, kamera bilgisi, yazılım, sanatçı ve telif hakkı alanlarını kaldırır</string>
     <string name="label_section_title">Etiketler</string>
     <string name="label_add_hint">Etiket ekle</string>

@@ -97,7 +97,6 @@ import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
 import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PanelChip
-import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
 
@@ -222,18 +221,6 @@ internal fun RenameDialog(
     onDismiss: () -> Unit,
     onConfirm: (newName: String, replaceOriginal: Boolean) -> Unit,
 ) {
-    var text by remember(currentName) {
-        mutableStateOf(
-            androidx.compose.ui.text.input.TextFieldValue(
-                text = currentName,
-                selection = androidx.compose.ui.text.TextRange(0, splitName(currentName).first.length),
-            ),
-        )
-    }
-    val trimmed = text.text.trim()
-    val unchanged = trimmed == currentName
-    val canSubmit = !isWorking && trimmed.isNotEmpty() && !unchanged
-
     androidx.compose.ui.window.Dialog(onDismissRequest = { if (!isWorking) onDismiss() }) {
         Column(
             modifier = Modifier
@@ -243,55 +230,7 @@ internal fun RenameDialog(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(stringResource(R.string.rename_sheet_title), color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-            Text(
-                if (isCloud) stringResource(R.string.rename_sheet_subtitle_cloud)
-                else stringResource(R.string.rename_sheet_subtitle_local),
-                color = FgMute, fontSize = 13.sp,
-            )
-
-            androidx.compose.material3.OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true,
-                enabled = !isWorking,
-                label = { Text(stringResource(R.string.rename_sheet_name_label)) },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = FgPrimary,
-                    unfocusedTextColor = FgPrimary,
-                    focusedLabelColor = Accent,
-                    unfocusedLabelColor = FgMute,
-                    focusedBorderColor = Accent,
-                    unfocusedBorderColor = FgMute.copy(alpha = 0.4f),
-                    cursorColor = Accent,
-                ),
-            )
-
-            if (errorMessage != null) {
-                Text(errorMessage, color = ErrorColor, fontSize = 12.sp)
-            }
-
-            RenameOptionButton(
-                title = if (isCloud) stringResource(R.string.rename_sheet_option_cloud_title)
-                    else stringResource(R.string.rename_sheet_option_local_title),
-                subtitle = if (isCloud) stringResource(R.string.rename_sheet_option_cloud_subtitle)
-                    else stringResource(R.string.rename_sheet_option_local_subtitle),
-                accent = true,
-                enabled = canSubmit,
-                onClick = { onConfirm(trimmed, /* replaceOriginal = */ true) },
-            )
-            RenameOptionButton(
-                title = stringResource(R.string.rename_sheet_option_copy_title),
-                subtitle = when {
-                    isCloud -> stringResource(R.string.rename_sheet_option_copy_subtitle_cloud)
-                    isVaulted -> stringResource(R.string.rename_sheet_option_copy_subtitle_vault)
-                    else -> stringResource(R.string.rename_sheet_option_copy_subtitle_local)
-                },
-                accent = false,
-                enabled = canSubmit,
-                onClick = { onConfirm(trimmed, /* replaceOriginal = */ false) },
-            )
+            RenameForm(currentName, isCloud, isVaulted, isWorking, errorMessage, onConfirm)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -308,6 +247,81 @@ internal fun RenameDialog(
                 }
             }
         }
+    }
+}
+
+/** The rename's own content, shared by the dialog and the details sheet's File name page: what renaming
+ *  does here, the name field with the base name selected, and the two ways to apply it. */
+@Composable
+internal fun RenameForm(
+    currentName: String,
+    isCloud: Boolean,
+    isVaulted: Boolean,
+    isWorking: Boolean,
+    errorMessage: String?,
+    onConfirm: (newName: String, replaceOriginal: Boolean) -> Unit,
+) {
+    var text by remember(currentName) {
+        mutableStateOf(
+            androidx.compose.ui.text.input.TextFieldValue(
+                text = currentName,
+                selection = androidx.compose.ui.text.TextRange(0, splitName(currentName).first.length),
+            ),
+        )
+    }
+    val trimmed = text.text.trim()
+    val unchanged = trimmed == currentName
+    val canSubmit = !isWorking && trimmed.isNotEmpty() && !unchanged
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(
+            if (isCloud) stringResource(R.string.rename_sheet_subtitle_cloud)
+            else stringResource(R.string.rename_sheet_subtitle_local),
+            color = FgMute, fontSize = 13.sp,
+        )
+
+        androidx.compose.material3.OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            singleLine = true,
+            enabled = !isWorking,
+            label = { Text(stringResource(R.string.rename_sheet_name_label)) },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                focusedTextColor = FgPrimary,
+                unfocusedTextColor = FgPrimary,
+                focusedLabelColor = Accent,
+                unfocusedLabelColor = FgMute,
+                focusedBorderColor = Accent,
+                unfocusedBorderColor = FgMute.copy(alpha = 0.4f),
+                cursorColor = Accent,
+            ),
+        )
+
+        if (errorMessage != null) {
+            Text(errorMessage, color = ErrorColor, fontSize = 12.sp)
+        }
+
+        RenameOptionButton(
+            title = if (isCloud) stringResource(R.string.rename_sheet_option_cloud_title)
+                else stringResource(R.string.rename_sheet_option_local_title),
+            subtitle = if (isCloud) stringResource(R.string.rename_sheet_option_cloud_subtitle)
+                else stringResource(R.string.rename_sheet_option_local_subtitle),
+            accent = true,
+            enabled = canSubmit,
+            onClick = { onConfirm(trimmed, /* replaceOriginal = */ true) },
+        )
+        RenameOptionButton(
+            title = stringResource(R.string.rename_sheet_option_copy_title),
+            subtitle = when {
+                isCloud -> stringResource(R.string.rename_sheet_option_copy_subtitle_cloud)
+                isVaulted -> stringResource(R.string.rename_sheet_option_copy_subtitle_vault)
+                else -> stringResource(R.string.rename_sheet_option_copy_subtitle_local)
+            },
+            accent = false,
+            enabled = canSubmit,
+            onClick = { onConfirm(trimmed, /* replaceOriginal = */ false) },
+        )
     }
 }
 

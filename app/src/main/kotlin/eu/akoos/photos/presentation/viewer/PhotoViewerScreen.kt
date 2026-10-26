@@ -399,8 +399,6 @@ fun PhotoViewerScreen(
     /** Opens the date + place metadata editor for the current item. Suppressed for a shared-with-me
      *  album (the sheet hides the affordance), mirroring the rename gate. */
     onEditMetadata: (GalleryItem) -> Unit = {},
-    /** Opens the Labels settings page, from the title of the details panel's Labels section. */
-    onOpenLabelsSettings: () -> Unit = {},
     /** Opens the page of the person the face index grouped, from the "people in this photo" bar. */
     onOpenPerson: (Long) -> Unit = {},
     /** Opens the full map centred on the photo's place, from the map box in the details panel. */
@@ -1128,7 +1126,7 @@ fun PhotoViewerScreen(
     }
 
     var showMetadata by remember { mutableStateOf(false) }
-    var metadataShowAll by remember { mutableStateOf(false) }
+    var metadataPages by remember { mutableStateOf(listOf(DetailsPage.Main)) }
     // Every trash action confirms in-app, since a device delete under MANAGE_MEDIA runs with no OS
     // dialog. Null hides the confirm; "restore" or "delete" name the pending action.
     var trashConfirmAction by remember { mutableStateOf<String?>(null) }
@@ -3017,16 +3015,18 @@ fun PhotoViewerScreen(
             detailsPlace?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
         }
         AppModalSheet(
-            onDismissRequest = { showMetadata = false; metadataShowAll = false },
+            onDismissRequest = { showMetadata = false; metadataPages = listOf(DetailsPage.Main) },
             sheetState = metadataSheetState,
             containerColor = SheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
-            onBackStep = { metadataShowAll.also { metadataShowAll = false } },
+            onBackStep = {
+                (metadataPages.size > 1).also { stepped -> if (stepped) metadataPages = metadataPages.dropLast(1) }
+            },
         ) {
             PhotoMetadataSheet(
                 item = item,
-                showAll = metadataShowAll,
-                onShowAllChange = { metadataShowAll = it },
+                pages = metadataPages,
+                onPagesChange = { metadataPages = it },
                 exif = metadata,
                 place = placeLabel,
                 resolvedGps = detailsGps,
@@ -3046,35 +3046,43 @@ fun PhotoViewerScreen(
                     }
                     if (uri != null) viewModel.stripMetadataFromLocal(uri, config)
                 },
-                onRenameClick = {
-                    // Rename is a node-level mutation we don't grant guests of a
-                    // shared-with-me album. The metadata sheet's button is hidden
-                    // when no callback fires, and this stays a no-op on that path.
-                    if (!isReadOnlyAlbum) {
-                        showMetadata = false
-                        showRenameDialog = true
+                // Date and place: none on a shared-with-me album, and none for an item no editor can change, so
+                // the Adjust buttons show exactly where the multi-select entry does.
+                metadataEditable = !isReadOnlyAlbum && item != null && anyMetadataEditable(listOf(item)),
+                isReadOnlyAlbum = isReadOnlyAlbum,
+                onMetadataSaved = {
+                    when (item) {
+                        is GalleryItem.LocalOnly -> viewModel.loadMetadata(item.local.uri)
+                        is GalleryItem.Synced -> viewModel.loadMetadata(item.local.uri)
+                        else -> Unit
                     }
-                },
-                // Edit date + place. Null on a shared-with-me album, and null for an item the editor
-                // cannot change, so the row shows exactly where the multi-select entry does (a cloud or
-                // synced video included, whose capture date it can change).
-                onEditMetadata = if (isReadOnlyAlbum || item == null ||
-                    !anyMetadataEditable(listOf(item))
-                ) null else {
-                    { showMetadata = false; onEditMetadata(item) }
+                    item?.let { viewModel.loadDetailsPlace(it) }
                 },
                 // Labels are the user's own: none on a vaulted or hidden photo, nor on someone else's.
-                // The details sheet closes first, so neither the Add labels sheet nor the settings
-                // page opens over it.
-                onOpenLabels = if (item != null && !detailsPrivate && !isReadOnlyAlbum) {
-                    addLabelsAction?.let { add -> { showMetadata = false; add.onClick() } }
+                labelsSection = if (item != null && !detailsPrivate && !isReadOnlyAlbum) {
+                    { onEdit -> DetailsLabels(viewModel, item, onEdit = onEdit) }
                 } else null,
-                labelsBox = {
-                    if (item != null && !detailsPrivate && !isReadOnlyAlbum) DetailsLabels(
-                        viewModel, item,
-                        onAddLabels = addLabelsAction?.let { add -> { showMetadata = false; add.onClick() } },
-                        onOpenSettings = { showMetadata = false; onOpenLabelsSettings() },
-                    )
+                labelsPage = if (item != null && !detailsPrivate && !isReadOnlyAlbum) {
+                    { close -> DetailsLabelsPage(viewModel, item, onClose = close) }
+                } else null,
+                // Rename is a node-level mutation a guest of a shared-with-me album is not granted.
+                renamePage = if (item == null || isReadOnlyAlbum) null else {
+                    { _ ->
+                        RenameForm(
+                            currentName = when (item) {
+                                is GalleryItem.LocalOnly -> item.local.displayName
+                                is GalleryItem.Synced -> item.local.displayName
+                                is GalleryItem.CloudOnly -> item.cloud.displayName
+                            },
+                            isCloud = item is GalleryItem.CloudOnly,
+                            isVaulted = isVaultedItem,
+                            isWorking = renameState is PhotoViewerViewModel.RenameState.Working,
+                            errorMessage = (renameState as? PhotoViewerViewModel.RenameState.Failed)?.message,
+                            onConfirm = { newName, replaceOriginal ->
+                                viewModel.renameItem(item, newName, replaceOriginal, sourceAlbumLinkId)
+                            },
+                        )
+                    }
                 },
                 peopleBox = {
                     if (showPeopleBox) {
@@ -3140,6 +3148,7 @@ fun PhotoViewerScreen(
         if (rs is PhotoViewerViewModel.RenameState.Done) {
             items.getOrNull(pagerState.settledPage)?.let { viewModel.invalidateAfterRename(it) }
             showRenameDialog = false
+            if (metadataPages.lastOrNull() == DetailsPage.Rename) metadataPages = listOf(DetailsPage.Main)
             viewModel.resetRenameState()
         } else if (rs is PhotoViewerViewModel.RenameState.NeedsPermission) {
             runCatching {

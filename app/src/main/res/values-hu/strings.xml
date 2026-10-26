@@ -1290,8 +1290,22 @@
     <string name="viewer_meta_source_cloud">Csak a Proton Drive-on</string>
     <string name="viewer_meta_strip">Eltávolítás</string>
     <string name="viewer_meta_strip_all">Minden privát metaadat eltávolítása</string>
-    <string name="viewer_meta_shortcut_private">Privát</string>
     <string name="viewer_meta_all_details">Összes részlet</string>
+    <string name="details_adjust">Módosítás</string>
+    <string name="details_edit">Szerkesztés</string>
+    <string name="details_add">Hozzáadás</string>
+    <string name="details_add_location">Hely hozzáadása</string>
+    <string name="details_time">Idő</string>
+    <string name="details_remove_private">Privát adatok eltávolítása</string>
+    <string name="details_private_intro">Ezek vannak most a fájlban. Válaszd ki, mi kerüljön ki.</string>
+    <string name="details_private_undo">Ez nem vonható vissza.</string>
+    <string name="details_private_dates">Dátumcímkék</string>
+    <string name="details_private_author">Szerző</string>
+    <string name="details_place_hint">Húzd a térképet a tű alá</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">%d elem eltávolítása</item>
+        <item quantity="other">%d elem eltávolítása</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Eltávolítja a GPS-, kamera- és szoftveradatokat, valamint a szerzőt és a szerzői jogot ebből a fájlból</string>
     <string name="viewer_meta_strip_confirm_title">Metaadat eltávolítása?</string>
     <string name="viewer_meta_strip_confirm_message">Ez véglegesen eltávolítja a következőt az eszközön lévő fájlból: %1$s. Ez nem vonható vissza.</string>

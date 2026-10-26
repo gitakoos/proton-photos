@@ -1282,8 +1282,22 @@
     <string name="viewer_meta_source_cloud">Solo Proton Drive</string>
     <string name="viewer_meta_strip">Quitar</string>
     <string name="viewer_meta_strip_all">Quitar todos los metadatos privados</string>
-    <string name="viewer_meta_shortcut_private">Privado</string>
     <string name="viewer_meta_all_details">Todos los detalles</string>
+    <string name="details_adjust">Ajustar</string>
+    <string name="details_edit">Editar</string>
+    <string name="details_add">Añadir</string>
+    <string name="details_add_location">Añadir ubicación</string>
+    <string name="details_time">Hora</string>
+    <string name="details_remove_private">Quitar datos privados</string>
+    <string name="details_private_intro">Esto contiene ahora el archivo. Elige qué quitar.</string>
+    <string name="details_private_undo">No se puede deshacer.</string>
+    <string name="details_private_dates">Etiquetas de fecha</string>
+    <string name="details_private_author">Autor</string>
+    <string name="details_place_hint">Arrastra el mapa bajo el pin</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">Quitar %d elemento</item>
+        <item quantity="other">Quitar %d elementos</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Elimina el GPS, la información de la cámara y los campos de software, artista y copyright de este archivo</string>
     <string name="viewer_meta_strip_confirm_title">¿Quitar metadatos?</string>
     <string name="viewer_meta_strip_confirm_message">Esto eliminará permanentemente %1$s del archivo en tu dispositivo. No se puede deshacer.</string>

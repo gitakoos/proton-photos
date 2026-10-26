@@ -1505,8 +1505,24 @@
     <string name="viewer_meta_source_cloud">Tylko Proton Drive</string>
     <string name="viewer_meta_strip">Usuń</string>
     <string name="viewer_meta_strip_all">Usuń wszystkie prywatne metadane</string>
-    <string name="viewer_meta_shortcut_private">Prywatne</string>
     <string name="viewer_meta_all_details">Wszystkie szczegóły</string>
+    <string name="details_adjust">Dostosuj</string>
+    <string name="details_edit">Edytuj</string>
+    <string name="details_add">Dodaj</string>
+    <string name="details_add_location">Dodaj lokalizację</string>
+    <string name="details_time">Godzina</string>
+    <string name="details_remove_private">Usuń dane prywatne</string>
+    <string name="details_private_intro">To jest teraz w pliku. Wybierz, co usunąć.</string>
+    <string name="details_private_undo">Tej operacji nie można cofnąć.</string>
+    <string name="details_private_dates">Znaczniki daty</string>
+    <string name="details_private_author">Autor</string>
+    <string name="details_place_hint">Przesuń mapę pod pinezkę</string>
+    <plurals name="details_private_remove">
+        <item quantity="one">Usuń %d element</item>
+        <item quantity="few">Usuń %d elementy</item>
+        <item quantity="many">Usuń %d elementów</item>
+        <item quantity="other">Usuń %d elementu</item>
+    </plurals>
     <string name="viewer_meta_strip_all_desc">Usuwa z tego pliku GPS, informacje o aparacie oraz pola oprogramowania, autora i praw autorskich</string>
     <string name="viewer_meta_strip_confirm_title">Usunąć metadane?</string>
     <string name="viewer_meta_strip_confirm_message">Spowoduje to trwałe usunięcie %1$s z pliku na Twoim urządzeniu. Tej operacji nie można cofnąć.</string>
