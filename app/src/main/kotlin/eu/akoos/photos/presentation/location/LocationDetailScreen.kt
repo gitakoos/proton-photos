@@ -92,6 +92,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -342,6 +344,8 @@ fun LocationPhotosContent(
 
     // The host modifier shapes the surface (a tall sheet band or a full-screen page); the grid fills
     // and scrolls inside, with the selection bar and action dock within these bounds.
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(backgroundColor)
     Box(
         modifier = modifier.background(backgroundColor),
     ) {
@@ -386,7 +390,7 @@ fun LocationPhotosContent(
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            modifier = Modifier.fillMaxSize().then(dragSelectModifier),
+            modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier),
         ) {
             // Hero header - cover, place name and count, plus the "Save as album" action.
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -694,6 +698,7 @@ fun LocationPhotosContent(
             )
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = isSelectionMode,
             items = remember(selectedItems) { selectedItems.toList() },
             actions = locationSelectionActions,

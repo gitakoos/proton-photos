@@ -433,6 +433,7 @@ fun SelectionDrawer(
     modifier: Modifier = Modifier,
     selectAllCount: Int? = null,
     onSelectAll: (() -> Unit)? = null,
+    backdrop: GlassBackdrop? = null,
 ) {
     // Selection mode is derived from the selection itself, so clearing it empties [items] and
     // [actions] while the drawer is still animating out. The drawer renders this snapshot whenever
@@ -465,6 +466,7 @@ fun SelectionDrawer(
             cacheThumbnails = cacheThumbnails,
             selectAllCount = if (live) selectAllCount else frozen.selectAllCount,
             onSelectAll = if (live) onSelectAll else frozen.onSelectAll,
+            backdrop = backdrop,
         )
     }
 }
@@ -485,6 +487,7 @@ private fun SelectionDrawerBody(
     cacheThumbnails: Boolean,
     selectAllCount: Int?,
     onSelectAll: (() -> Unit)?,
+    backdrop: GlassBackdrop?,
 ) {
     val colors = AppColors.current
     val density = LocalDensity.current
@@ -642,7 +645,9 @@ private fun SelectionDrawerBody(
             // elevated sheets the rest of the app uses (the modal bottom sheets and the import bars).
             .shadow(6.dp, shape)
             .clip(shape)
-            .background(SheetBg)
+            // Glass over the photos behind it when the frosted pills are on and the screen hands its
+            // grid in as [backdrop]; the plain sheet otherwise.
+            .glassPanel(backdrop, SheetBg, shape)
             .navigationBarsPadding()
             .then(detentDrag),
     ) {

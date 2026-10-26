@@ -54,6 +54,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.ScrollDateLabel
 import eu.akoos.photos.presentation.gallery.TimelineScrubber
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
@@ -565,6 +567,8 @@ fun AlbumDetailScreen(
     // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
     var scrubberDragging by remember { mutableStateOf(false) }
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(appColors.bg0)
     Box(modifier = Modifier.fillMaxSize().background(appColors.bg0)) {
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = state.isLoading && state.photos.isNotEmpty(),
@@ -623,7 +627,7 @@ fun AlbumDetailScreen(
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(groupingPinch),
+            modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier).then(groupingPinch),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 val headerVideoCount = state.photos.count { it.mimeType.startsWith("video/") }
@@ -1158,6 +1162,7 @@ fun AlbumDetailScreen(
             }
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = state.isSelectionMode,
             items = selectedAlbumItems,
             actions = albumSelectionActions,

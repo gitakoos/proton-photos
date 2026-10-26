@@ -88,6 +88,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
@@ -97,6 +98,7 @@ import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.SelectionShareState
 import eu.akoos.photos.presentation.common.addToAlbumResultText
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog
 import eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog
 import eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog
@@ -358,6 +360,8 @@ fun PersonDetailScreen(
         }
     }
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(appColors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -408,7 +412,7 @@ fun PersonDetailScreen(
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-                    modifier = Modifier.fillMaxSize().then(dragSelectModifier),
+                    modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier),
                 ) {
                     // The Unsorted bucket explains itself at the top of its grid, so it is never mistaken
                     // for a person the app thinks it recognised.
@@ -477,6 +481,7 @@ fun PersonDetailScreen(
         // page, with this page's own (cover, merge, remove, not a person) beside them.
         val selectAllCount = selectAllCountFor(total = state.items.size, selected = selection.size)
         SelectionDrawer(
+            backdrop = glass,
             visible = selecting,
             items = remember(selectedItems) { selectedItems.toList() },
             actions = personSelectionActions,

@@ -69,6 +69,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.settings.HiddenSettingsSheet
 import eu.akoos.photos.presentation.settings.VaultPasswordFlow
 import eu.akoos.photos.presentation.settings.VaultPasswordStep
@@ -224,6 +226,8 @@ fun HiddenAlbumScreen(
         }
     }
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(Bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -432,7 +436,7 @@ fun HiddenAlbumScreen(
                         ),
                         horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                         verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
-                        modifier = Modifier.fillMaxSize().then(dragMod),
+                        modifier = Modifier.glassSource(glass).fillMaxSize().then(dragMod),
                     ) {
                         // Photos hidden before the vault covered backed-up ones keep their device
                         // file in the phone's gallery, so they are hidden here and visible in every
@@ -694,6 +698,7 @@ fun HiddenAlbumScreen(
             // Selection drawer: the shared surface every multi-select uses, so the vault's bulk
             // actions sit in one list, in the order every other surface lists them.
             SelectionDrawer(
+                backdrop = glass,
                 visible = state.isSelectionMode,
                 items = selectedItems,
                 actions = hiddenSelectionActions,

@@ -92,6 +92,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -445,6 +447,8 @@ fun DeviceFolderDetailScreen(
         else -> photosText
     }
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(Bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -515,7 +519,7 @@ fun DeviceFolderDetailScreen(
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(pinchModifier),
+            modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier).then(pinchModifier),
         ) {
             // Hero header — cover, folder name and count, like the cloud-album detail page.
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -924,6 +928,7 @@ fun DeviceFolderDetailScreen(
             }
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = isSelectionMode,
             items = selectedItems,
             actions = folderSelectionActions,

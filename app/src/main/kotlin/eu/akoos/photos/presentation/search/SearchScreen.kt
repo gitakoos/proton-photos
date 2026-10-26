@@ -96,6 +96,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.Text
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.PhotoCell
@@ -615,6 +617,8 @@ fun SearchScreen(
     val pickBottom = pickBottomBase + 62.dp + if (searchTerms.isNotEmpty()) 32.dp else 0.dp
 
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -848,7 +852,7 @@ fun SearchScreen(
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
-                    modifier = Modifier
+                    modifier = Modifier.glassSource(glass)
                         .fillMaxSize()
                         .then(if (pick == null) Modifier.navigationBarsPadding() else Modifier)
                         .then(dragSelectModifier),
@@ -1264,6 +1268,7 @@ fun SearchScreen(
             )
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = pick == null && isSelectionMode,
             items = remember(selectedItems) { selectedItems.toList() },
             actions = searchSelectionActions,

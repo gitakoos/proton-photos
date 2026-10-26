@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSimple
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -226,11 +227,12 @@ private class PillSurfaceNode(
         val lightLabels = backdrop.base.luminance() < 0.5f
         val shaded = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
         val radius = cornerRadius(outline, pill)
-        val key = listOf(padded, pill, radius, color.toArgb(), lightLabels, shaded, panel)
+        val bottomRadius = (outline as? Outline.Rounded)?.roundRect?.bottomLeftCornerRadius?.x ?: radius
+        val key = listOf(padded, pill, radius, bottomRadius, color.toArgb(), lightLabels, shaded, panel)
         if (key != effectKey) {
             effectKey = key
             glass.renderEffect = if (shaded) {
-                lensEffect(margin.toFloat(), pill, radius, color, lightLabels)
+                lensEffect(margin.toFloat(), pill, radius, bottomRadius, color, lightLabels)
             } else {
                 val blur = (if (panel) BLUR_PANEL else BLUR_PLAIN).toPx()
                 BlurEffect(blur, blur, TileMode.Clamp)
@@ -248,7 +250,13 @@ private class PillSurfaceNode(
         }
         when (outline) {
             is Outline.Rectangle -> clip.setRectOutline()
-            is Outline.Rounded -> clip.setRoundRectOutline(cornerRadius = radius)
+            // Corners of different sizes (a sheet rounded on top only) clip to the box; the parent's own clip
+            // rounds them, as the renderer clips only a uniformly rounded box smoothly.
+            is Outline.Rounded -> if (outline.roundRect.isSimple) {
+                clip.setRoundRectOutline(cornerRadius = radius)
+            } else {
+                clip.setRectOutline()
+            }
             is Outline.Generic -> clip.setPathOutline(outline.path)
         }
         clip.clip = true
@@ -272,6 +280,7 @@ private class PillSurfaceNode(
         margin: Float,
         pill: IntSize,
         radius: Float,
+        bottomRadius: Float,
         tint: Color,
         lightLabels: Boolean,
     ): RenderEffect {
@@ -279,6 +288,7 @@ private class PillSurfaceNode(
         shader.setFloatUniform("origin", margin, margin)
         shader.setFloatUniform("pillSize", pill.width.toFloat(), pill.height.toFloat())
         shader.setFloatUniform("radius", radius)
+        shader.setFloatUniform("bottomRadius", bottomRadius)
         shader.setFloatUniform("bevel", min(BEVEL.toPx(), min(pill.width, pill.height) / 2f))
         shader.setFloatUniform("refraction", REFRACTION.toPx())
         shader.setFloatUniform("tint", tint.red, tint.green, tint.blue, min(tint.alpha, if (panel) PANEL_TINT else LENS_TINT))
@@ -342,6 +352,7 @@ uniform shader content;
 uniform float2 origin;
 uniform float2 pillSize;
 uniform float radius;
+uniform float bottomRadius;
 uniform float bevel;
 uniform float refraction;
 uniform float4 tint;
@@ -355,7 +366,7 @@ float roundBox(float2 p, float2 halfSize, float r) {
 half4 main(float2 coord) {
     float2 halfSize = pillSize * 0.5;
     float2 p = coord - (origin + halfSize);
-    float r = min(radius, min(halfSize.x, halfSize.y));
+    float r = min(p.y < 0.0 ? radius : bottomRadius, min(halfSize.x, halfSize.y));
     float d = roundBox(p, halfSize, r);
     float2 grad = float2(
         roundBox(p + float2(1.0, 0.0), halfSize, r) - roundBox(p - float2(1.0, 0.0), halfSize, r),

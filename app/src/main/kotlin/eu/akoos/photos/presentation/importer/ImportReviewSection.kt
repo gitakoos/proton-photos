@@ -106,6 +106,8 @@ import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ScrollScrubber
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SelectionAction
@@ -229,6 +231,8 @@ fun ImportReviewSection(
     // is a back handler here rather than a swipe that would pop the whole screen to Settings.
     BackHandler(enabled = selectionMode) { clearSelection() }
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -244,7 +248,7 @@ fun ImportReviewSection(
         LazyVerticalGrid(
             state = gridState,
             columns = GridCells.Adaptive(100.dp),
-            modifier = Modifier
+            modifier = Modifier.glassSource(glass)
                 .fillMaxSize()
                 .then(dragSelectModifier),
             contentPadding = PaddingValues(
@@ -404,6 +408,7 @@ fun ImportReviewSection(
             }
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = selectionMode,
             items = selectedItems,
             actions = selectionActions,

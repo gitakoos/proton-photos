@@ -1428,6 +1428,7 @@ fun GalleryScreen(
             selected = state.selectedItems.size,
         )
         SelectionDrawer(
+            backdrop = glass,
             visible = state.isSelectionMode,
             items = remember(state.selectedItems) { state.selectedItems.toList() },
             actions = selectionActions,

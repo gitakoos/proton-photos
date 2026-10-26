@@ -100,6 +100,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.delay
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -169,6 +171,8 @@ fun DuplicateFinderScreen(
     }
 
     val colors = AppColors.current
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -313,7 +317,7 @@ fun DuplicateFinderScreen(
                 )
             else -> LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.glassSource(glass).fillMaxSize(),
                 contentPadding = PaddingValues(
                     16.dp, contentTopPad, 16.dp,
                     // Reserve the selection drawer's resting height (its handle, count row, thumbnail
@@ -507,6 +511,7 @@ fun DuplicateFinderScreen(
         // copies ride in its strip, its single Delete action removes them across every group at once,
         // and its close bubble clears the whole selection. This replaces the per-group card delete.
         SelectionDrawer(
+            backdrop = glass,
             visible = selectedItems.isNotEmpty(),
             items = selectedItems,
             actions = listOf(
