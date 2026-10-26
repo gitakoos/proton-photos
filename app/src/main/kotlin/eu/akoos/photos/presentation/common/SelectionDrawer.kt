@@ -83,6 +83,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -457,6 +458,8 @@ fun SelectionDrawer(
         exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(200)),
     ) {
         if (shownItems.isEmpty() && shownActions.isEmpty()) return@AnimatedVisibility
+        // The drawer's own buttons frost the same photos as its sheet, so they read as glass on glass.
+        CompositionLocalProvider(LocalGlassBackdrop provides backdrop) {
         SelectionDrawerBody(
             items = shownItems,
             actions = shownActions,
@@ -468,6 +471,7 @@ fun SelectionDrawer(
             onSelectAll = if (live) onSelectAll else frozen.onSelectAll,
             backdrop = backdrop,
         )
+        }
     }
 }
 
@@ -911,8 +915,7 @@ private fun SelectAllPill(label: String, style: TextStyle, onClick: () -> Unit) 
     Box(
         modifier = Modifier
             .defaultMinSize(minHeight = HEADER_CONTROL_SIZE)
-            .background(PillBg, CircleShape)
-            .border(0.5.dp, PillBorder, CircleShape)
+            .pillSurface(PillBg, CircleShape, border = PillBorder)
             .clickable(onClick = onClick)
             .padding(horizontal = SELECT_ALL_PADDING_H, vertical = SELECT_ALL_PADDING_V),
         contentAlignment = Alignment.Center,
@@ -976,8 +979,7 @@ private fun PrimaryActionButton(
     val label = action.shownLabel()
     Box(
         modifier = modifier
-            .background(PillBg, shape)
-            .border(0.5.dp, PillBorder, shape)
+            .pillSurface(PillBg, shape, border = PillBorder)
             .clickable(enabled = live && action.takesTaps(), onClick = action.onClick)
             .semantics { contentDescription = label }
             .padding(horizontal = PRIMARY_BUTTON_PADDING_H, vertical = PRIMARY_BUTTON_PADDING_V),
@@ -995,8 +997,7 @@ private fun PrimaryGlyphButton(action: SelectionAction, live: Boolean) {
     Box(
         modifier = Modifier
             .size(HEADER_CONTROL_SIZE)
-            .background(PillBg, CircleShape)
-            .border(0.5.dp, PillBorder, CircleShape)
+            .pillSurface(PillBg, CircleShape, border = PillBorder)
             .clickable(enabled = live && action.takesTaps(), onClick = action.onClick)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,

@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,7 +55,10 @@ import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import eu.akoos.photos.presentation.albums.rememberCoverGifModel
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
 import eu.akoos.photos.presentation.common.fullBleedHorizontal
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -88,12 +92,16 @@ internal fun AlbumHeroHeader(
     val heroCover = rememberCoverGifModel(coverLinkId, coverModel as? String, resolveCoverGif) ?: coverModel
     // Full-bleed: cancel the parent grid's 20.dp side contentPadding so the cover banner and the
     // title block span edge-to-edge, while the photo cells below stay inset by that padding.
+    // The cover as the buttons beside the title frost it, when the frosted pills are on; under them it is the
+    // page itself, so they read as glass on it.
+    val heroGlass = rememberGlassBackdrop(AppColors.current.bg0)
     Column(modifier = Modifier.fullBleedHorizontal(20.dp)) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(4f / 3f)
                 .clipToBounds()
+                .glassSource(heroGlass)
                 .background(Bg2),
         ) {
             if (heroCover != null) {
@@ -179,7 +187,9 @@ internal fun AlbumHeroHeader(
                         // filler still pins the actions to the trailing edge.
                         Spacer(Modifier.weight(1f))
                     }
-                    titleActions?.invoke(this)
+                    if (titleActions != null) {
+                        CompositionLocalProvider(LocalGlassBackdrop provides heroGlass) { titleActions(this) }
+                    }
                 }
             }
         }

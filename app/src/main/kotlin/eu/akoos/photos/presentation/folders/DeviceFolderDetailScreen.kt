@@ -704,6 +704,7 @@ fun DeviceFolderDetailScreen(
                 .padding(start = 12.dp, top = 8.dp),
         ) {
             IconBubble(
+                backdrop = glass,
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = if (isSelectionMode)
                     stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
@@ -1195,6 +1196,7 @@ fun DeviceFolderDetailScreen(
                 .padding(bottom = 24.dp),
         ) {
             IconBubble(
+                backdrop = glass,
                 icon = Icons.Default.KeyboardArrowUp,
                 contentDescription = stringResource(R.string.cd_scroll_to_top),
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },

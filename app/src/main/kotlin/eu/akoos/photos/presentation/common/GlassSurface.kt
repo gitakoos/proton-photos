@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
@@ -64,6 +65,7 @@ import androidx.compose.ui.platform.LocalGraphicsContext
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toIntSize
+import kotlin.math.ceil
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -88,6 +90,14 @@ class GlassBackdrop internal constructor(
     internal val base: Color,
     internal val frozen: ImageBitmap? = null,
     originOnScreen: Offset = Offset.Zero,
+    /** The content at [FROST_SCALE] of its size, already softened, drawn once a frame for every pill above it:
+     *  each pill then shows this one small picture instead of drawing the whole content again, which on a heavy
+     *  screen (a map) multiplied its cost by the number of pills. Null for a [frozen] backdrop. */
+    internal val frost: GraphicsLayer? = null,
+    /** For content too heavy to be seen through the glass every frame (a map, which moves under a pan and
+     *  costs most of a frame to draw already): the pills are glass over the plain [base], drawn once, rather
+     *  than over the moving content. Measured on a map, live glass added a third more late frames. */
+    internal val still: Boolean = false,
 ) {
     internal var originOnScreen by mutableStateOf(originOnScreen)
 
@@ -101,10 +111,11 @@ class GlassBackdrop internal constructor(
  * 11 and older), so the pills keep their plain fill there.
  */
 @Composable
-fun rememberGlassBackdrop(base: Color): GlassBackdrop? {
+fun rememberGlassBackdrop(base: Color, heavy: Boolean = false): GlassBackdrop? {
     if (!LocalLiquidGlass.current || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
     val layer = rememberGraphicsLayer()
-    return remember(layer, base) { GlassBackdrop(layer, base) }
+    val frost = rememberGraphicsLayer()
+    return remember(layer, frost, base, heavy) { GlassBackdrop(layer, base, frost = frost, still = heavy) }
 }
 
 /**
@@ -115,12 +126,12 @@ fun Modifier.glassSource(backdrop: GlassBackdrop?): Modifier =
     if (backdrop == null) this else this then GlassSourceElement(backdrop)
 
 /**
- * A floating pill's surface: [color] in [shape] with a [border] hairline, or, with a [LocalGlassBackdrop]
- * provided, glass: the content behind it seen through a lens that bends it at the rim, softened, its tone
+ * A floating pill's surface: [color] in [shape] with a [border] hairline, or, with a [backdrop] handed in or a
+ * [LocalGlassBackdrop] provided, glass: the content behind it seen through a lens that bends it at the rim, softened, its tone
  * pulled toward what keeps the pill's labels legible over it, tinted by [color] and lit along the top edge.
  */
-fun Modifier.pillSurface(color: Color, shape: Shape, border: Color? = null): Modifier =
-    this then PillSurfaceElement(shape, border, useLocal = true, explicit = null, panel = false) { color }
+fun Modifier.pillSurface(color: Color, shape: Shape, border: Color? = null, backdrop: GlassBackdrop? = null): Modifier =
+    this then PillSurfaceElement(shape, border, useLocal = backdrop == null, explicit = backdrop, panel = false) { color }
 
 /** [pillSurface] with a fill read as the pill draws, for a tint that animates without recomposing. */
 fun Modifier.pillSurface(shape: Shape, border: Color? = null, color: () -> Color): Modifier =
@@ -132,6 +143,77 @@ fun Modifier.pillSurface(shape: Shape, border: Color? = null, color: () -> Color
  */
 fun Modifier.glassPanel(backdrop: GlassBackdrop?, color: Color, shape: Shape): Modifier =
     this then PillSurfaceElement(shape, null, useLocal = false, explicit = backdrop, panel = true) { color }
+
+/**
+ * The veil behind a floating header as glass: the content under it softened, darkened (or, on a light theme,
+ * lightened) a little toward [tint], and fading out downward over the last [fadeFrom]..1 of its height, so the
+ * header sits on frosted content instead of a dark band. Draws nothing without a live [LocalGlassBackdrop].
+ */
+fun Modifier.glassVeil(tint: Color, fadeFrom: Float = 0.55f): Modifier = this then GlassVeilElement(tint, fadeFrom)
+
+private data class GlassVeilElement(val tint: Color, val fadeFrom: Float) : ModifierNodeElement<GlassVeilNode>() {
+    override fun create() = GlassVeilNode(tint, fadeFrom)
+    override fun update(node: GlassVeilNode) {
+        node.tint = tint
+        node.fadeFrom = fadeFrom
+        node.invalidateDraw()
+    }
+    override fun InspectorInfo.inspectableProperties() {
+        name = "glassVeil"
+    }
+}
+
+private class GlassVeilNode(var tint: Color, var fadeFrom: Float) :
+    Modifier.Node(), DrawModifierNode, GlobalPositionAwareModifierNode, CompositionLocalConsumerModifierNode {
+
+    private var positionOnScreen = Offset.Zero
+    private var veilLayer: GraphicsLayer? = null
+    private var releaseLayer: ((GraphicsLayer) -> Unit)? = null
+
+    override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
+        val position = coordinates.positionOnScreen()
+        if (position != positionOnScreen) {
+            positionOnScreen = position
+            invalidateDraw()
+        }
+    }
+
+    override fun ContentDrawScope.draw() {
+        val backdrop = currentValueOf(LocalGlassBackdrop)
+        val frost = backdrop?.frost
+        if (backdrop == null || frost == null || backdrop.still || size.minDimension <= 0f) {
+            drawContent()
+            return
+        }
+        val context = currentValueOf(LocalGraphicsContext)
+        releaseLayer = context::releaseGraphicsLayer
+        val layer = veilLayer ?: context.createGraphicsLayer().also {
+            // Its own buffer, so the fade below cuts the softened content away rather than the screen.
+            it.compositingStrategy = androidx.compose.ui.graphics.layer.CompositingStrategy.Offscreen
+            veilLayer = it
+        }
+        val shift = backdrop.originOnScreen - positionOnScreen
+        layer.record(size.toIntSize()) {
+            translate(shift.x, shift.y) {
+                scale(1f / FROST_SCALE, 1f / FROST_SCALE, pivot = Offset.Zero) { drawLayer(frost) }
+            }
+            drawRect(tint)
+            drawRect(
+                androidx.compose.ui.graphics.Brush.verticalGradient(
+                    0f to Color.Black, fadeFrom to Color.Black, 1f to Color.Transparent,
+                ),
+                blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+            )
+        }
+        drawLayer(layer)
+        drawContent()
+    }
+
+    override fun onDetach() {
+        veilLayer?.let { releaseLayer?.invoke(it) }
+        veilLayer = null
+    }
+}
 
 private data class GlassSourceElement(val backdrop: GlassBackdrop) : ModifierNodeElement<GlassSourceNode>() {
     override fun create() = GlassSourceNode(backdrop)
@@ -146,14 +228,33 @@ private data class GlassSourceElement(val backdrop: GlassBackdrop) : ModifierNod
 private class GlassSourceNode(var backdrop: GlassBackdrop) :
     Modifier.Node(), DrawModifierNode, GlobalPositionAwareModifierNode {
 
+
     override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
         backdrop.originOnScreen = coordinates.positionOnScreen()
     }
 
+    private var frostBlurPx = -1f
+
     override fun ContentDrawScope.draw() {
+        if (backdrop.still) {
+            drawContent()
+            return
+        }
         val layer = backdrop.layer
         layer.record(size.toIntSize()) { this@draw.drawContent() }
         drawLayer(layer)
+        val frost = backdrop.frost ?: return
+        val blur = FROST_BLUR.toPx() * FROST_SCALE
+        if (blur != frostBlurPx) {
+            frostBlurPx = blur
+            frost.renderEffect = BlurEffect(blur, blur, TileMode.Clamp)
+        }
+        val small = IntSize(ceil(size.width * FROST_SCALE).toInt().coerceAtLeast(1), ceil(size.height * FROST_SCALE).toInt().coerceAtLeast(1))
+        // Not drawn here: only the pills above draw it, each its own part of it.
+        frost.record(small) {
+            drawRect(backdrop.base)
+            scale(FROST_SCALE, FROST_SCALE, pivot = Offset.Zero) { drawLayer(layer) }
+        }
     }
 }
 
@@ -232,14 +333,21 @@ private class PillSurfaceNode(
         val shaded = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
         val radius = cornerRadius(outline, pill)
         val bottomRadius = (outline as? Outline.Rounded)?.roundRect?.bottomLeftCornerRadius?.x ?: radius
-        val key = listOf(padded, pill, radius, bottomRadius, color.toArgb(), lightLabels, shaded, panel)
+        // A live backdrop's frost is softened already; a still picture is blurred here, at full size.
+        val presoftened = backdrop.frozen == null && backdrop.frost != null
+        val key = listOf(padded, pill, radius, bottomRadius, color.toArgb(), lightLabels, shaded, panel, presoftened)
         if (key != effectKey) {
             effectKey = key
             glass.renderEffect = if (shaded) {
-                lensEffect(margin.toFloat(), pill, radius, bottomRadius, color, lightLabels)
+                lensEffect(margin.toFloat(), pill, radius, bottomRadius, color, lightLabels, presoftened)
             } else {
-                val blur = (if (panel) BLUR_PANEL else BLUR_PLAIN).toPx()
-                BlurEffect(blur, blur, TileMode.Clamp)
+                val blur = when {
+                    presoftened && panel -> (BLUR_PANEL - FROST_BLUR).toPx()
+                    presoftened -> 0f
+                    panel -> BLUR_PANEL.toPx()
+                    else -> BLUR_PLAIN.toPx()
+                }
+                if (blur > 0f) BlurEffect(blur, blur, TileMode.Clamp) else null
             }
         }
         // Reading the backdrop's origin here redraws the pill when the content moves under it; a live recording is
@@ -249,7 +357,13 @@ private class PillSurfaceNode(
             drawRect(backdrop.base)
             translate(shift.x + margin, shift.y + margin) {
                 val still = backdrop.frozen
-                if (still != null) drawImage(still) else drawLayer(backdrop.layer)
+                val frost = backdrop.frost
+                when {
+                    still != null -> drawImage(still)
+                    backdrop.still -> Unit
+                    frost != null -> scale(1f / FROST_SCALE, 1f / FROST_SCALE, pivot = Offset.Zero) { drawLayer(frost) }
+                    else -> drawLayer(backdrop.layer)
+                }
             }
         }
         when (outline) {
@@ -287,6 +401,7 @@ private class PillSurfaceNode(
         bottomRadius: Float,
         tint: Color,
         lightLabels: Boolean,
+        presoftened: Boolean,
     ): RenderEffect {
         val shader = (lens ?: GlassLens().also { lens = it }).shader
         shader.setFloatUniform("origin", margin, margin)
@@ -297,9 +412,16 @@ private class PillSurfaceNode(
         shader.setFloatUniform("refraction", REFRACTION.toPx())
         shader.setFloatUniform("tint", tint.red, tint.green, tint.blue, min(tint.alpha, if (panel) PANEL_TINT else LENS_TINT))
         shader.setFloatUniform("lightLabels", if (lightLabels) 1f else 0f)
-        val blur = (if (panel) BLUR_PANEL else BLUR_LENS).toPx()
+        val lensOnly = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
+        val blur = when {
+            presoftened && panel -> (BLUR_PANEL - FROST_BLUR).toPx()
+            presoftened -> 0f
+            panel -> BLUR_PANEL.toPx()
+            else -> BLUR_LENS.toPx()
+        }
+        if (blur <= 0f) return lensOnly.asComposeRenderEffect()
         return android.graphics.RenderEffect.createChainEffect(
-            android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content"),
+            lensOnly,
             android.graphics.RenderEffect.createBlurEffect(blur, blur, android.graphics.Shader.TileMode.CLAMP),
         ).asComposeRenderEffect()
     }
@@ -324,6 +446,13 @@ private fun cornerRadius(outline: Outline, pill: IntSize): Float = when (outline
 private class GlassLens {
     val shader = RuntimeShader(LENS_SHADER)
 }
+
+/** The size of a live backdrop's frost against the content: a quarter, so a frame redraws a sixteenth of the
+ *  pixels for it, and a softened picture loses nothing to the smaller size. */
+private const val FROST_SCALE = 0.25f
+
+/** How much the frost is softened, in full-size terms; a pill's lens adds no blur of its own over it. */
+private val FROST_BLUR = 7.dp
 
 private val MARGIN = 28.dp
 private val BEVEL = 16.dp

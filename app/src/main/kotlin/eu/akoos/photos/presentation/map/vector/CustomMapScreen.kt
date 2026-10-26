@@ -32,7 +32,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
+import androidx.compose.runtime.CompositionLocalProvider
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
 import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.pillSurface
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.Canvas
@@ -364,7 +367,7 @@ fun CustomMapScreen(
     }
 
     // The page as its floating header frosts it, when the frosted pills are on.
-    val glass = rememberGlassBackdrop(colors.bg0)
+    val glass = rememberGlassBackdrop(colors.bg0, heavy = true)
     Box(modifier = Modifier.fillMaxSize().background(colors.bg0)) {
         Box(Modifier.fillMaxSize().glassSource(glass)) {
             if (world == null || !centered || baseFrame == null) {
@@ -587,40 +590,42 @@ fun CustomMapScreen(
                 }
             }
 
-            // An opaque search bar along the bottom; tapping it raises the same drawer the Places screen uses,
-            // which slides up above the keyboard with its field visible. It hides while the drawer is open, so
-            // the pressed bar reads as having risen into the drawer.
-            AnimatedVisibility(
-                visible = chromeVisible && cities.isNotEmpty() && !showSearch,
-                modifier = Modifier.align(Alignment.BottomCenter),
-                enter = fadeIn(tween(240)) + slideInVertically(tween(280)) { it / 2 },
-                exit = fadeOut(tween(160)),
+        }
+
+        // An opaque search bar along the bottom; tapping it raises the same drawer the Places screen uses,
+        // which slides up above the keyboard with its field visible. It hides while the drawer is open, so
+        // the pressed bar reads as having risen into the drawer.
+        CompositionLocalProvider(LocalGlassBackdrop provides glass) {
+        AnimatedVisibility(
+            visible = chromeVisible && cities.isNotEmpty() && !showSearch,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(240)) + slideInVertically(tween(280)) { it / 2 },
+            exit = fadeOut(tween(160)),
+        ) {
+            val pill = RoundedCornerShape(14.dp)
+            Row(
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(bottom = 20.dp, start = 20.dp, end = 20.dp)
+                    .fillMaxWidth()
+                    .clip(pill)
+                    .pillSurface(colors.bg2, pill, border = colors.line2)
+                    .clickable { showSearch = true }
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                val pill = RoundedCornerShape(14.dp)
-                Row(
-                    modifier = Modifier
-                        .navigationBarsPadding()
-                        .padding(bottom = 20.dp, start = 20.dp, end = 20.dp)
-                        .fillMaxWidth()
-                        .clip(pill)
-                        .background(colors.bg2, pill)
-                        .border(0.5.dp, colors.line2, pill)
-                        .clickable { showSearch = true }
-                        .padding(horizontal = 18.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = colors.fgDim, modifier = Modifier.size(18.dp))
-                    Text(stringResource(R.string.map_search_places), color = colors.fgMute, fontSize = 14.sp)
-                }
+                Icon(Icons.Default.Search, contentDescription = null, tint = colors.fgDim, modifier = Modifier.size(18.dp))
+                Text(stringResource(R.string.map_search_places), color = colors.fgMute, fontSize = 14.sp)
             }
-            if (showSearch) {
-                PlaceSearchSheet(
-                    cities = cities,
-                    onPick = { showSearch = false; onCityClick(it.latitude, it.longitude) },
-                    onDismiss = { showSearch = false },
-                )
-            }
+        }
+        }
+        if (showSearch) {
+            PlaceSearchSheet(
+                cities = cities,
+                onPick = { showSearch = false; onCityClick(it.latitude, it.longitude) },
+                onDismiss = { showSearch = false },
+            )
         }
 
         AnimatedVisibility(

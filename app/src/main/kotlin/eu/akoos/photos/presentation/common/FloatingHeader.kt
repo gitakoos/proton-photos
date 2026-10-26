@@ -92,6 +92,16 @@ fun floatingHeaderContentTopPadding(): Dp =
 @Composable
 fun FloatingHeaderScrim(modifier: Modifier = Modifier) {
     val pageBg = AppColors.current.pageBg
+    if (LocalGlassBackdrop.current != null) {
+        // With the frosted pills on, the page under the header is softened instead of veiled in a dark band.
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(floatingHeaderContentTopPadding())
+                .glassVeil(pageBg.copy(alpha = 0.35f)),
+        )
+        return
+    }
     Box(
         modifier = modifier
             .fillMaxWidth()

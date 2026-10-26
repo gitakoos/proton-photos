@@ -52,6 +52,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,7 +77,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
 import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.pillSurface
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.map.vector.PinFootprint
 import eu.akoos.photos.presentation.map.vector.keptPins
@@ -194,6 +197,8 @@ fun MapScreen(
         }
     }
 
+    // Glass for the floating header and search bar, over the plain page rather than the moving map.
+    val glass = rememberGlassBackdrop(AppColors.current.bg0, heavy = true)
     // Build the MapView once; the lifecycle bridge below resumes/pauses/detaches it. Keeping the
     // instance in remember avoids re-inflating the heavy view on every recomposition.
     val mapView = remember {
@@ -399,8 +404,6 @@ fun MapScreen(
         }
     }
 
-    // The page as its floating header frosts it, when the frosted pills are on.
-    val glass = rememberGlassBackdrop(colors.bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -455,42 +458,44 @@ fun MapScreen(
                 }
             }
 
-            // An opaque search bar along the bottom raises the same drawer the Places screen uses; it hides
-            // while the drawer is open, so the pressed bar reads as having risen into the drawer.
-            AnimatedVisibility(
-                visible = chromeVisible && cities.isNotEmpty() && !showSearch,
-                modifier = Modifier.align(Alignment.BottomCenter),
-                enter = fadeIn(tween(240)) + slideInVertically(tween(280)) { it / 2 },
-                exit = fadeOut(tween(160)),
+        }
+
+        // An opaque search bar along the bottom raises the same drawer the Places screen uses; it hides
+        // while the drawer is open, so the pressed bar reads as having risen into the drawer.
+        CompositionLocalProvider(LocalGlassBackdrop provides glass) {
+        AnimatedVisibility(
+            visible = chromeVisible && cities.isNotEmpty() && !showSearch,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(240)) + slideInVertically(tween(280)) { it / 2 },
+            exit = fadeOut(tween(160)),
+        ) {
+            val pill = RoundedCornerShape(14.dp)
+            Row(
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(bottom = 20.dp, start = 20.dp, end = 20.dp)
+                    .fillMaxWidth()
+                    .clip(pill)
+                    .pillSurface(colors.bg2, pill, border = colors.line2)
+                    .clickable { showSearch = true }
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                val pill = RoundedCornerShape(14.dp)
-                Row(
-                    modifier = Modifier
-                        .navigationBarsPadding()
-                        .padding(bottom = 20.dp, start = 20.dp, end = 20.dp)
-                        .fillMaxWidth()
-                        .clip(pill)
-                        .background(colors.bg2, pill)
-                        .border(0.5.dp, colors.line2, pill)
-                        .clickable { showSearch = true }
-                        .padding(horizontal = 18.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Icon(Icons.Default.Search, contentDescription = null, tint = colors.fgDim, modifier = Modifier.size(18.dp))
-                    Text(stringResource(R.string.map_search_places), color = colors.fgMute, fontSize = 14.sp)
-                }
+                Icon(Icons.Default.Search, contentDescription = null, tint = colors.fgDim, modifier = Modifier.size(18.dp))
+                Text(stringResource(R.string.map_search_places), color = colors.fgMute, fontSize = 14.sp)
             }
-            if (showSearch) {
-                PlaceSearchSheet(
-                    cities = cities,
-                    onPick = { city ->
-                        showSearch = false
-                        onOpenPlace(city.latitude, city.longitude)
-                    },
-                    onDismiss = { showSearch = false },
-                )
-            }
+        }
+        }
+        if (showSearch) {
+            PlaceSearchSheet(
+                cities = cities,
+                onPick = { city ->
+                    showSearch = false
+                    onOpenPlace(city.latitude, city.longitude)
+                },
+                onDismiss = { showSearch = false },
+            )
         }
 
         // Floating header, a later sibling drawn over the map, carrying its own status-bar padding. It
