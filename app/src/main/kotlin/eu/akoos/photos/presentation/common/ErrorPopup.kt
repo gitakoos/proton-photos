@@ -38,7 +38,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.graphics.Color
 import eu.akoos.photos.presentation.theme.Bg2
@@ -121,7 +120,7 @@ fun ErrorPopup(
         message
     }
 
-    ModalBottomSheet(
+    AppModalSheet(
         // Reported once the sheet has animated away, even when the lock takes it down mid-animation, so
         // one that arrives while locked is dropped and the error shows again on the unlock.
         onDismissRequest = { if (!appLock.isLocked) onDismiss() },

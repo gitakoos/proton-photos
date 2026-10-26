@@ -55,7 +55,6 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -83,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.common.AppModalSheet
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
@@ -670,7 +670,7 @@ private fun SharedWithMeAlbumActionSheet(
     onLeave: () -> Unit,
 ) {
     val colors = AppColors.current
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         containerColor = colors.sheetBg,
         scrimColor = Color.Black.copy(alpha = 0.5f),

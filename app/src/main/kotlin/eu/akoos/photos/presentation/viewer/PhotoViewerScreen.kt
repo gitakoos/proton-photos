@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.GlassBackdrop
 import eu.akoos.photos.presentation.common.LocalGlassBackdrop
 import eu.akoos.photos.presentation.common.glassPanel
@@ -105,7 +106,6 @@ import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -3015,7 +3015,7 @@ fun PhotoViewerScreen(
         val placeLabel = remember(detailsPlace, locale) {
             detailsPlace?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
         }
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { showMetadata = false },
             sheetState = metadataSheetState,
             containerColor = SheetBg,
@@ -3295,7 +3295,7 @@ fun PhotoViewerScreen(
         val item = items.getOrNull(pagerState.settledPage)
         if (item != null) {
             val deleteSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            ModalBottomSheet(
+            AppModalSheet(
                 onDismissRequest = { showDeleteSheet = false },
                 sheetState = deleteSheetState,
                 containerColor = SheetBg,

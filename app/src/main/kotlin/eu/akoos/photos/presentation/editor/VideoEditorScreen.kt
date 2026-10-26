@@ -71,6 +71,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -112,7 +113,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -1096,7 +1096,7 @@ fun VideoEditorScreen(
 
     val hasCloudCounterpart by vm.hasCloudCounterpart.collectAsStateWithLifecycle()
     if (showSaveSheet && hasSource) {
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { if (!state.isSaving) showSaveSheet = false },
             sheetState = saveSheetState,
             containerColor = SheetBg,
@@ -2737,7 +2737,7 @@ private fun undoActionIcon(labelRes: Int): ImageVector = when (labelRes) {
 @Composable
 private fun EditorActionSheet(actions: List<EditorSheetAction>, onDismiss: () -> Unit, title: String? = null) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = SheetBg,

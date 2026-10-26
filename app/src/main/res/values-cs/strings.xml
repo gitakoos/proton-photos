@@ -754,7 +754,7 @@
     <string name="map_style_modern_summary">Moderní glóbus, kterým můžete otáčet ke svým místům.</string>
     <string name="settings_amoled_black">Čistá černá (AMOLED)</string>
     <string name="settings_liquid_glass">Tekuté sklo</string>
-    <string name="settings_liquid_glass_desc">Nabídka, štítky nahoře a ovládací prvky prohlížeče rozmazávají to, co je pod nimi</string>
+    <string name="settings_liquid_glass_desc">Nabídky, záhlaví, panely a ovládací prvky prohlížeče rozmazávají to, co je pod nimi</string>
     <string name="settings_tint_cloud">Odznaky cloudu v barvě akcentu</string>
     <string name="settings_gif_autoplay_grid">Přehrávat GIFy v mřížkách</string>
     <string name="settings_gif_autoplay_covers">Přehrávat GIF obaly alb</string>

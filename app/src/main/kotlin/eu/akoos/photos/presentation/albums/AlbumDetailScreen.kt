@@ -904,6 +904,7 @@ fun AlbumDetailScreen(
             )
         }
         StickyAlbumHeader(
+            backdrop = glass,
             visible = stickyShown,
             title = state.albumName.ifBlank { albumName },
             onBack = onBack,

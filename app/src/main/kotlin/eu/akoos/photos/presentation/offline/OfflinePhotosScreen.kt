@@ -223,6 +223,7 @@ fun OfflinePhotosScreen(
         // cannot pop the screen and drop the selection; the drawer then carries cancel and count.
         if (!inSelectionMode) {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.offline_screen_title),
                 onBack = onBack,
             )

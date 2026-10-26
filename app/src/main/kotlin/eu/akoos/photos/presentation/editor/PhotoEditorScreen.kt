@@ -23,6 +23,7 @@
 package eu.akoos.photos.presentation.editor
 
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.editor.components.SaveOptionRow
@@ -139,7 +140,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -916,7 +916,7 @@ fun PhotoEditorScreen(
 
     val hasCloudCounterpart by vm.hasCloudCounterpart.collectAsStateWithLifecycle()
     if (showSaveSheet && state.source != null) {
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { showSaveSheet = false },
             sheetState = saveSheetState,
             containerColor = SheetBg,

@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -124,6 +125,22 @@ fun FloatingHeader(
     trailing: (@Composable RowScope.() -> Unit)? = null,
     menuItems: List<Pair<String, () -> Unit>>? = null,
     showScrim: Boolean = true,
+    backdrop: GlassBackdrop? = null,
+) {
+    // The page's content as the header's bubbles and title pill frost it, the trailing controls included.
+    CompositionLocalProvider(LocalGlassBackdrop provides backdrop) {
+        FloatingHeaderContent(title, onBack, modifier, trailing, menuItems, showScrim)
+    }
+}
+
+@Composable
+private fun FloatingHeaderContent(
+    title: String,
+    onBack: () -> Unit,
+    modifier: Modifier,
+    trailing: (@Composable RowScope.() -> Unit)?,
+    menuItems: List<Pair<String, () -> Unit>>?,
+    showScrim: Boolean,
 ) {
     val colors = AppColors.current
     val debouncedBack = rememberDebouncedBack(onBack)
@@ -152,8 +169,7 @@ fun FloatingHeader(
                 Column(
                     modifier = Modifier
                         .clip(titleShape)
-                        .background(colors.pillBg, titleShape)
-                        .border(0.5.dp, colors.pillBorder, titleShape)
+                        .pillSurface(colors.pillBg, titleShape, border = colors.pillBorder)
                         .animateContentSize(),
                 ) {
                     Row(

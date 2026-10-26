@@ -32,6 +32,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import eu.akoos.photos.presentation.common.AppModalSheet
 import kotlinx.coroutines.flow.map
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -109,7 +110,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Collections
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.rememberModalBottomSheetState
 import eu.akoos.photos.presentation.common.ActionSheetRow
@@ -1038,7 +1038,7 @@ fun AlbumsScreen(
     // ── Create Album dialog ────────────────────────────────────────────────────
     if (showCreateDialog) {
         var albumName by remember { mutableStateOf("") }
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { showCreateDialog = false; albumName = "" },
             containerColor = SheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
@@ -1284,7 +1284,7 @@ private fun CloudAlbumActionSheet(
         }
     }
 
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = colors.sheetBg,

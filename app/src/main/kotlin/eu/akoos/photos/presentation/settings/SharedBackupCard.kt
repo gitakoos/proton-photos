@@ -45,7 +45,6 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -81,6 +80,7 @@ import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
 import eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
 import eu.akoos.photos.data.sharedbackup.SharedBackupStatus
 import eu.akoos.photos.data.sharedbackup.SharedBackupStore
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.settings.components.ActionRow
@@ -321,7 +321,7 @@ private fun DriveCopiesSheet(
     val colors = AppColors.current
     val context = LocalContext.current
     var confirm by remember { mutableStateOf<DriveDeviceCopies?>(null) }
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,

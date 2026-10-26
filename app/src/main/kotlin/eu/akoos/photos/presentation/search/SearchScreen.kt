@@ -91,11 +91,11 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.Text
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.PersonTile
@@ -1392,7 +1392,7 @@ fun SearchScreen(
     }
 
     if (showFilterSheet) {
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = filterSheetState,
             containerColor = colors.sheetBg,

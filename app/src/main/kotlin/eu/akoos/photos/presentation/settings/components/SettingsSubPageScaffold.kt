@@ -39,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.AppColors
 
 /**
@@ -59,21 +61,25 @@ internal fun SettingsSubPageScaffold(
     content: @Composable () -> Unit,
 ) {
     val colors = AppColors.current
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val contentTopPad = floatingHeaderContentTopPadding()
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
-        ) {
-            Spacer(Modifier.height(contentTopPad))
-            content()
-            Spacer(Modifier.height(32.dp + navBottom))
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp),
+            ) {
+                Spacer(Modifier.height(contentTopPad))
+                content()
+                Spacer(Modifier.height(32.dp + navBottom))
+            }
         }
 
-        FloatingHeader(title = title, onBack = onBack)
+        FloatingHeader(backdrop = glass, title = title, onBack = onBack)
     }
 }

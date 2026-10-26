@@ -76,6 +76,8 @@ import eu.akoos.photos.presentation.common.DestructiveButton
 import eu.akoos.photos.presentation.common.EmptyState
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.viewer.formatMsWithTime
@@ -132,6 +134,8 @@ fun ImportHistoryDetail(
     // while it is open, closing it rather than leaving the import screen.
     BackHandler(enabled = true) { onClose() }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -140,64 +144,66 @@ fun ImportHistoryDetail(
         val contentTopPad = floatingHeaderContentTopPadding()
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-        when {
-            detail == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = colors.accent, strokeWidth = 2.dp)
-            }
-            photos.isEmpty() -> Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = contentTopPad, bottom = navBottom),
-            ) {
-                ImportDetailSummary(detail, modifier = Modifier.padding(horizontal = 20.dp))
-                EmptyState(
-                    title = stringResource(R.string.import_detail_empty),
-                    icon = Icons.Default.Inventory2,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-            else -> LazyVerticalGrid(
-                columns = GridCells.Adaptive(100.dp),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 12.dp,
-                    top = contentTopPad,
-                    end = 12.dp,
-                    // Clear the undo bar so the last thumbnails stay reachable when it is shown.
-                    bottom = (if (showBar) 130.dp else 24.dp) + navBottom,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                item(span = { GridItemSpan(maxLineSpan) }, key = "summary") {
-                    ImportDetailSummary(detail, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            when {
+                detail == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = colors.accent, strokeWidth = 2.dp)
                 }
-                items(photos, key = { it.linkId }) { photo ->
-                    Box {
-                        CloudPhotoCell(
-                            localUri = null,
-                            cloudThumbnailUrl = photo.thumbnailUrl,
-                            cloudLinkId = photo.linkId,
-                            isVideo = photo.mimeType.startsWith("video/"),
-                            isSelectionMode = false,
-                            isSelected = false,
-                            // Read-only preview grid: no long-press, and a tap does nothing.
-                            onLongClick = null,
-                            onClick = {},
-                            onRequestThumbnail = onRequestThumbnail,
-                            onCancelThumbnail = onCancelThumbnail,
-                        )
-                        // A photo the run did not upload because Drive already held it: mark the cell so it
-                        // reads as skipped rather than freshly imported.
-                        if (photo.linkId in alreadyIds) {
-                            AlreadyInDriveBadge(modifier = Modifier.align(Alignment.BottomStart))
+                photos.isEmpty() -> Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = contentTopPad, bottom = navBottom),
+                ) {
+                    ImportDetailSummary(detail, modifier = Modifier.padding(horizontal = 20.dp))
+                    EmptyState(
+                        title = stringResource(R.string.import_detail_empty),
+                        icon = Icons.Default.Inventory2,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Adaptive(100.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 12.dp,
+                        top = contentTopPad,
+                        end = 12.dp,
+                        // Clear the undo bar so the last thumbnails stay reachable when it is shown.
+                        bottom = (if (showBar) 130.dp else 24.dp) + navBottom,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    item(span = { GridItemSpan(maxLineSpan) }, key = "summary") {
+                        ImportDetailSummary(detail, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+                    }
+                    items(photos, key = { it.linkId }) { photo ->
+                        Box {
+                            CloudPhotoCell(
+                                localUri = null,
+                                cloudThumbnailUrl = photo.thumbnailUrl,
+                                cloudLinkId = photo.linkId,
+                                isVideo = photo.mimeType.startsWith("video/"),
+                                isSelectionMode = false,
+                                isSelected = false,
+                                // Read-only preview grid: no long-press, and a tap does nothing.
+                                onLongClick = null,
+                                onClick = {},
+                                onRequestThumbnail = onRequestThumbnail,
+                                onCancelThumbnail = onCancelThumbnail,
+                            )
+                            // A photo the run did not upload because Drive already held it: mark the cell so it
+                            // reads as skipped rather than freshly imported.
+                            if (photo.linkId in alreadyIds) {
+                                AlreadyInDriveBadge(modifier = Modifier.align(Alignment.BottomStart))
+                            }
                         }
                     }
                 }
             }
         }
 
-        FloatingHeader(title = stringResource(R.string.import_detail_title), onBack = onClose)
+        FloatingHeader(backdrop = glass, title = stringResource(R.string.import_detail_title), onBack = onClose)
 
         if (showBar) {
             ImportUndoBar(

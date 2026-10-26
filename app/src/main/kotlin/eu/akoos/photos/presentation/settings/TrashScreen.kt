@@ -493,11 +493,12 @@ fun TrashScreen(
 
         if (trashSelecting) {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.album_picker_selected, trashSelectedCount),
                 onBack = { clearTrashSelection() },
             )
         } else {
-            FloatingHeader(title = stringResource(R.string.trash_title), onBack = onBack)
+            FloatingHeader(backdrop = glass, title = stringResource(R.string.trash_title), onBack = onBack)
         }
     }
 

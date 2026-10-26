@@ -36,7 +36,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -54,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.FaqAccordion
 import eu.akoos.photos.presentation.onboarding.components.StepHeader
 import eu.akoos.photos.presentation.settings.components.ActionRow
@@ -112,7 +112,7 @@ internal fun WelcomeStep() {
     }
 
     if (showFaq) {
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { showFaq = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = SheetBg,

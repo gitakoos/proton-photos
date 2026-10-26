@@ -619,6 +619,7 @@ fun HiddenAlbumScreen(
             // leave the vault mid-selection.
             if (!state.isSelectionMode) {
                 FloatingHeader(
+                    backdrop = glass,
                     title = stringResource(R.string.hidden_photos_title),
                     onBack = onBack,
                     trailing = {

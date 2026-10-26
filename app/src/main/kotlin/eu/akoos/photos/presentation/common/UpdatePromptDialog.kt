@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.graphics.Color
 import eu.akoos.photos.presentation.theme.Bg2
@@ -100,7 +99,7 @@ fun UpdatePromptDialog(
     val colors = AppColors.current
     val title = stringResource(R.string.update_available_title)
 
-    ModalBottomSheet(
+    AppModalSheet(
         // A download is stopped from its own Cancel button rather than by a tap outside, so a stray
         // tap cannot throw away a part-downloaded APK.
         onDismissRequest = if (state is UpdatePromptState.Downloading) {

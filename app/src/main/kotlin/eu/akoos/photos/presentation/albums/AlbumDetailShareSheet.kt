@@ -52,7 +52,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -76,6 +75,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.ShareExternalInvitation
 import eu.akoos.photos.domain.entity.ShareInvitation
 import eu.akoos.photos.domain.entity.ShareMember
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
 import eu.akoos.photos.presentation.theme.Accent
@@ -142,7 +142,7 @@ internal fun ShareAlbumSheet(
         members.isNotEmpty() || invitations.isNotEmpty() || externalInvitations.isNotEmpty()
     val hasPendingInvites = pendingEmails.isNotEmpty()
 
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = { resetInputs(); onDismiss() },
         sheetState = sheetState,
         containerColor = appColors.sheetBg,
@@ -807,7 +807,7 @@ internal fun SharedWithMeInfoSheet(
     sharedByEmail: String,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = AppColors.current.sheetBg,

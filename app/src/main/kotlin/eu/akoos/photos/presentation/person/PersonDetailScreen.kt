@@ -501,6 +501,7 @@ fun PersonDetailScreen(
         // person's own add + edit + overflow there instead. The two never show at once.
         if (selecting) {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.album_picker_selected, selection.size),
                 onBack = { clearSelection() },
             )
@@ -519,6 +520,7 @@ fun PersonDetailScreen(
                 baseTitle
             }
             FloatingHeader(
+                backdrop = glass,
                 title = headerTitle,
                 onBack = onBack,
                 trailing = {

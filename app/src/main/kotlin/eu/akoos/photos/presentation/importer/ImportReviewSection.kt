@@ -68,7 +68,6 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -102,6 +101,7 @@ import eu.akoos.photos.data.db.entity.ImportStagedEntity
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.importer.ImportAlbumMode
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
@@ -318,6 +318,7 @@ fun ImportReviewSection(
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.import_review_title),
             onBack = { if (selectionMode) clearSelection() else onBack() },
         )
@@ -457,7 +458,7 @@ fun ImportReviewSection(
     }
 
     if (showAlbumSheet) {
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { showAlbumSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = colors.sheetBg,
@@ -796,6 +797,8 @@ private fun ImportReviewDetail(
     onClose: () -> Unit,
 ) {
     val colors = AppColors.current
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -803,69 +806,72 @@ private fun ImportReviewDetail(
     ) {
         val contentTopPad = floatingHeaderContentTopPadding()
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp),
-        ) {
-            Spacer(Modifier.height(contentTopPad))
-            Box(
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(colors.cardBg),
-                contentAlignment = Alignment.Center,
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp),
             ) {
-                val thumb = row.thumbPath
-                if (thumb != null) {
-                    AsyncImage(
-                        model = File(thumb),
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
-                    )
-                } else {
-                    Icon(
-                        Icons.Default.BrokenImage,
-                        contentDescription = null,
-                        tint = colors.fgMute,
-                        modifier = Modifier.size(48.dp).padding(vertical = 40.dp),
-                    )
+                Spacer(Modifier.height(contentTopPad))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(colors.cardBg),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val thumb = row.thumbPath
+                    if (thumb != null) {
+                        AsyncImage(
+                            model = File(thumb),
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.BrokenImage,
+                            contentDescription = null,
+                            tint = colors.fgMute,
+                            modifier = Modifier.size(48.dp).padding(vertical = 40.dp),
+                        )
+                    }
                 }
-            }
-            Spacer(Modifier.height(20.dp))
-            MetadataSection(label = stringResource(R.string.import_review_meta_section)) {
-                MetaRow(
-                    label = stringResource(R.string.import_review_detail_date),
-                    value = row.dateMs?.let { formatMsWithTime(it) }
-                        ?: stringResource(R.string.import_review_no_date),
-                )
-                val lat = row.lat
-                val lng = row.lng
-                if (lat != null && lng != null) {
+                Spacer(Modifier.height(20.dp))
+                MetadataSection(label = stringResource(R.string.import_review_meta_section)) {
                     MetaRow(
-                        label = stringResource(R.string.import_review_detail_location),
-                        value = String.format(Locale.US, "%.5f, %.5f", lat, lng),
+                        label = stringResource(R.string.import_review_detail_date),
+                        value = row.dateMs?.let { formatMsWithTime(it) }
+                            ?: stringResource(R.string.import_review_no_date),
+                    )
+                    val lat = row.lat
+                    val lng = row.lng
+                    if (lat != null && lng != null) {
+                        MetaRow(
+                            label = stringResource(R.string.import_review_detail_location),
+                            value = String.format(Locale.US, "%.5f, %.5f", lat, lng),
+                        )
+                    }
+                    row.description?.takeIf { it.isNotBlank() }?.let { desc ->
+                        MetaRow(label = stringResource(R.string.import_review_detail_description), value = desc)
+                    }
+                    MetaRow(
+                        label = stringResource(R.string.import_review_detail_filename),
+                        value = row.title?.takeIf { it.isNotBlank() } ?: row.entryName,
+                    )
+                    MetaRow(
+                        label = stringResource(R.string.import_review_detail_source),
+                        value = stringResource(R.string.import_review_source),
                     )
                 }
-                row.description?.takeIf { it.isNotBlank() }?.let { desc ->
-                    MetaRow(label = stringResource(R.string.import_review_detail_description), value = desc)
-                }
-                MetaRow(
-                    label = stringResource(R.string.import_review_detail_filename),
-                    value = row.title?.takeIf { it.isNotBlank() } ?: row.entryName,
-                )
-                MetaRow(
-                    label = stringResource(R.string.import_review_detail_source),
-                    value = stringResource(R.string.import_review_source),
-                )
+                Spacer(Modifier.height(32.dp + navBottom))
             }
-            Spacer(Modifier.height(32.dp + navBottom))
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = row.title?.takeIf { it.isNotBlank() } ?: row.entryName,
             onBack = onClose,
         )

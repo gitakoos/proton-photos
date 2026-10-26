@@ -771,6 +771,7 @@ fun LocationPhotosContent(
                 )
             }
             StickyAlbumHeader(
+                backdrop = glass,
                 visible = stickyShown,
                 title = placeTitle,
                 onBack = onBack,

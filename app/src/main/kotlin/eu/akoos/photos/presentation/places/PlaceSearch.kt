@@ -35,7 +35,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -52,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.usecase.PlaceCity
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.settings.components.SectionLabel
@@ -141,7 +141,7 @@ internal fun PlaceSearchSheet(
     }
     val filtered = remember(cities, query, countryLabelOf) { filterPlaceCities(cities, query, countryLabelOf) }
 
-    ModalBottomSheet(
+    AppModalSheet(
         sheetState = sheetState,
         onDismissRequest = onDismiss,
         containerColor = colors.sheetBg,

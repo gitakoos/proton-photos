@@ -90,7 +90,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -139,6 +138,7 @@ import eu.akoos.photos.data.semantic.SemanticModelAssets
 import eu.akoos.photos.data.semantic.SemanticStatusLabel
 import eu.akoos.photos.data.semantic.semanticStatusLabel
 import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.DestructiveButton
 import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.gallery.PersonTile
@@ -1623,7 +1623,7 @@ private fun FaceMaintenanceCard(
 @Composable
 private fun FaceClearWhereSheet(onPick: (everywhere: Boolean) -> Unit, onDismiss: () -> Unit) {
     val colors = AppColors.current
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,

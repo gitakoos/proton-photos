@@ -41,6 +41,8 @@ import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.SharedFilter
 import eu.akoos.photos.presentation.theme.AppColors
 
@@ -62,18 +64,23 @@ fun SharedPage(
     var activeEmailFilter by rememberSaveable { mutableStateOf<String?>(null) }
     var showFilterSheet by remember { mutableStateOf(false) }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
-        Box(modifier = Modifier.fillMaxSize().padding(top = floatingHeaderContentTopPadding())) {
-            SharedScreen(
-                filter = filter,
-                activeEmailFilter = activeEmailFilter,
-                onAlbumClick = onAlbumClick,
-                viewModel = viewModel,
-            )
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            Box(modifier = Modifier.fillMaxSize().padding(top = floatingHeaderContentTopPadding())) {
+                SharedScreen(
+                    filter = filter,
+                    activeEmailFilter = activeEmailFilter,
+                    onAlbumClick = onAlbumClick,
+                    viewModel = viewModel,
+                )
+            }
         }
         // The same floating header every other page wears: back button left, title centred, and the
         // filter at the right end.
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.gallery_tab_shared),
             onBack = onBack,
             modifier = Modifier.align(Alignment.TopCenter),

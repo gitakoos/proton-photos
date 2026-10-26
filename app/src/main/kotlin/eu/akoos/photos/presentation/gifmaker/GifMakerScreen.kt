@@ -70,7 +70,6 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -106,6 +105,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.decoderFallbackRenderersFactory
 import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
@@ -360,7 +360,7 @@ private fun GifMakerContent(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GifQualitySheet(onDismiss: () -> Unit, onPick: (Int) -> Unit) {
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(),
         containerColor = Bg2,

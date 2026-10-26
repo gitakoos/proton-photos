@@ -37,7 +37,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -61,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.data.hidden.HiddenRescue
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.DestructiveButton
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SecondaryButton
@@ -158,7 +158,7 @@ internal fun VaultPasswordSheet(
     val problem = vaultPasswordProblem(password, repeat)
     // The hint shows once something is typed, so the empty sheet opens without an error.
     val shownProblem = problem.takeIf { password.isNotEmpty() }
-    ModalBottomSheet(
+    AppModalSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss,
         containerColor = SheetBg,
@@ -225,7 +225,7 @@ internal fun VaultPasswordChoiceSheet(
     onRemove: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
+    AppModalSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss,
         containerColor = SheetBg,
@@ -270,7 +270,7 @@ internal fun VaultPasswordRemoveSheet(
     val colors = AppColors.current
     var current by remember { mutableStateOf("") }
     val fieldsReady = rememberSheetFieldsReady()
-    ModalBottomSheet(
+    AppModalSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss,
         containerColor = SheetBg,
@@ -385,7 +385,7 @@ internal fun HiddenSettingsSheet(
     onOpenPassword: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
+    AppModalSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss,
         containerColor = SheetBg,

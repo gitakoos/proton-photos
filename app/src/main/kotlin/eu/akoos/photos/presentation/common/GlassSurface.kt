@@ -70,6 +70,10 @@ import kotlin.math.roundToInt
 /** Whether the user turned the frosted pills on (Appearance), provided once at the root. */
 val LocalLiquidGlass = staticCompositionLocalOf { false }
 
+/** The whole app's content, for the sheets and menus that open in windows of their own over it and frost a
+ *  [GlassBackdrop.freeze]d picture of it. Never handed to a pill inside the app's content, which it records. */
+val LocalRootGlass = staticCompositionLocalOf<GlassBackdrop?> { null }
+
 /** The backdrop the pills above a screen's content frost, or null where they draw their plain fill. */
 val LocalGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
 

@@ -547,7 +547,7 @@
     <string name="map_style_modern_summary">Un globo terráqueo moderno que puedes girar hacia tus lugares.</string>
     <string name="settings_amoled_black">Negro puro (AMOLED)</string>
     <string name="settings_liquid_glass">Cristal líquido</string>
-    <string name="settings_liquid_glass_desc">El menú, las píldoras de arriba y los controles del visor desenfocan lo que hay debajo</string>
+    <string name="settings_liquid_glass_desc">Los menús, las cabeceras, los paneles y los controles del visor desenfocan lo que hay debajo</string>
     <string name="settings_tint_cloud">Insignias de nube con color de acento</string>
     <string name="settings_gif_autoplay_grid">Reproducir GIF en las cuadrículas</string>
     <string name="settings_gif_autoplay_covers">Reproducir portadas de álbum GIF</string>

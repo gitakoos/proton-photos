@@ -61,6 +61,10 @@ import androidx.lifecycle.lifecycleScope
 import androidx.work.WorkManager
 import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.presentation.common.LocalLiquidGlass
+import eu.akoos.photos.presentation.common.LocalRootGlass
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
+import eu.akoos.photos.presentation.theme.AppColors
 import java.util.Locale
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -511,6 +515,10 @@ class MainActivity : AppCompatActivity() {
                             // dialog and sheet, the content under it stays covered and inert, and back
                             // leaves the app instead of reaching it.
                             AppLockGate(state = lockGate, onLeave = { leaveWhileLocked() }) {
+                              // The whole app as the sheets frost it, when the frosted pills are on.
+                              val rootGlass = rememberGlassBackdrop(AppColors.current.bg0)
+                              Box(Modifier.fillMaxSize().glassSource(rootGlass)) {
+                              CompositionLocalProvider(LocalRootGlass provides rootGlass) {
                                 NavGraph(
                                     onStartLogin = { authOrchestrator.startLoginWorkflow(null) },
                                     onCheckForUpdates = { runManualUpdateCheck() },
@@ -523,6 +531,8 @@ class MainActivity : AppCompatActivity() {
                                     onExternalPickDone = ::answerExternalPick,
                                     onExternalPickCancel = { finish() },
                                 )
+                              }
+                              }
                             }
                             // An update prompt would open inside the app that asked for a photo.
                             UpdaterHost(promptAllowed = !lockGate.isInert && externalPickRequest == null)

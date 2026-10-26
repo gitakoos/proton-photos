@@ -81,6 +81,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.calendar.components.MonthGrid
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBorder
 import java.text.SimpleDateFormat
@@ -123,6 +125,8 @@ fun CalendarScreen(
         viewModel.setSearchActive(false)
     }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.bg0)
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -142,77 +146,80 @@ fun CalendarScreen(
         // Each stacked month fills exactly the page below the header, so one month shows per page —
         // the next month sits right at the screen's bottom edge (off-screen), nothing bleeds in.
         val pageHeight = maxHeight - contentTopPad
-        when {
-            state.isLoading -> {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = colors.accent)
-                }
-            }
-            else -> {
-                // Stacked vertical scroll — the legacy default. `contentTopPad` ensures
-                // the first month header doesn't slip under the floating bar.
-                LazyColumn(
-                    state = stackedListState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(
-                            if (state.isSearchActive && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                                Modifier.blur(16.dp)
-                            } else {
-                                Modifier
-                            },
-                        ),
-                    flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(stackedListState),
-                    contentPadding = PaddingValues(top = contentTopPad),
-                    verticalArrangement = Arrangement.spacedBy(0.dp),
-                ) {
-                    items(
-                        items = state.months,
-                        key = { bucket -> "${bucket.year}-${bucket.month}" },
-                    ) { bucket ->
-                        // Each month tile takes a full screen so day cells stay generously
-                        // sized in both stacked and per-month modes. fillParentMaxHeight
-                        // gives the inner expanded grid a concrete height to weight against.
-                        // Empty months render as a blank grid (no caption) so the per-month
-                        // height rhythm stays consistent while scrolling.
-                        Box(modifier = Modifier.height(pageHeight)) {
-                            MonthGrid(
-                                bucket = bucket,
-                                onDayClick = { day -> onDayClick(day.date) },
-                                expanded = true,
-                            )
-                        }
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            when {
+                state.isLoading -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = colors.accent)
                     }
                 }
+                else -> {
+                    // Stacked vertical scroll — the legacy default. `contentTopPad` ensures
+                    // the first month header doesn't slip under the floating bar.
+                    LazyColumn(
+                        state = stackedListState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(
+                                if (state.isSearchActive && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                    Modifier.blur(16.dp)
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(stackedListState),
+                        contentPadding = PaddingValues(top = contentTopPad),
+                        verticalArrangement = Arrangement.spacedBy(0.dp),
+                    ) {
+                        items(
+                            items = state.months,
+                            key = { bucket -> "${bucket.year}-${bucket.month}" },
+                        ) { bucket ->
+                            // Each month tile takes a full screen so day cells stay generously
+                            // sized in both stacked and per-month modes. fillParentMaxHeight
+                            // gives the inner expanded grid a concrete height to weight against.
+                            // Empty months render as a blank grid (no caption) so the per-month
+                            // height rhythm stays consistent while scrolling.
+                            Box(modifier = Modifier.height(pageHeight)) {
+                                MonthGrid(
+                                    bucket = bucket,
+                                    onDayClick = { day -> onDayClick(day.date) },
+                                    expanded = true,
+                                )
+                            }
+                        }
+                    }
 
+                }
             }
-        }
 
-        // Search overlay — dims the calendar; typing a month or year lists the matching months
-        // to jump to. Sits below the floating header so the header's close button stays on top.
-        if (state.isSearchActive) {
-            CalendarSearchOverlay(
-                query = state.searchQuery,
-                onQueryChange = viewModel::setSearchQuery,
-                months = state.months,
-                onMonthPick = { year, month ->
-                    val idx = state.months.indexOfFirst { it.year == year && it.month == month }
-                    if (idx >= 0) stackedTargetIndex = idx
-                    viewModel.setSearchActive(false)
-                },
-                searchResults = state.searchResults,
-                onDayClick = { day ->
-                    viewModel.setSearchActive(false)
-                    onDayClick(day.date)
-                },
-                onClose = { viewModel.setSearchActive(false) },
-            )
+            // Search overlay — dims the calendar; typing a month or year lists the matching months
+            // to jump to. Sits below the floating header so the header's close button stays on top.
+            if (state.isSearchActive) {
+                CalendarSearchOverlay(
+                    query = state.searchQuery,
+                    onQueryChange = viewModel::setSearchQuery,
+                    months = state.months,
+                    onMonthPick = { year, month ->
+                        val idx = state.months.indexOfFirst { it.year == year && it.month == month }
+                        if (idx >= 0) stackedTargetIndex = idx
+                        viewModel.setSearchActive(false)
+                    },
+                    searchResults = state.searchResults,
+                    onDayClick = { day ->
+                        viewModel.setSearchActive(false)
+                        onDayClick(day.date)
+                    },
+                    onClose = { viewModel.setSearchActive(false) },
+                )
+            }
         }
 
         // ───────────── Floating header ─────────────
         // The title pill floats over the calendar (drawn on top via zIndex) so the content
         // scrolls under it. It carries its own statusBarsPadding, so it isn't wrapped in another inset.
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.calendar_title),
             onBack = onBack,
             trailing = {

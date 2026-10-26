@@ -32,6 +32,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -361,260 +363,264 @@ fun CustomMapScreen(
         }
     }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.bg0)
     Box(modifier = Modifier.fillMaxSize().background(colors.bg0)) {
-        if (world == null || !centered || baseFrame == null) {
-            CircularProgressIndicator(color = colors.accent, modifier = Modifier.align(Alignment.Center))
-        }
-
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .onSizeChanged { canvasSize = it }
-                .pointerInput(world, shownPins, highlightCodes) {
-                    // One handler for rotate/pinch, a glide after a flick, AND tap: a gesture that barely
-                    // moved is treated as a tap and hit-tested, so a separate tap detector can't miss it.
-                    awaitEachGesture {
-                        flingJob?.cancel()
-                        val tracker = VelocityTracker()
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        moving = true
-                        tracker.addPosition(down.uptimeMillis, down.position)
-                        val downPos = down.position
-                        var maxMove = 0f
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val zoomChange = event.calculateZoom()
-                            val before = event.calculateCentroid(useCurrent = false)
-                            val now = event.calculateCentroid(useCurrent = true)
-                            if (before.isSpecified && now.isSpecified && (zoomChange != 1f || before != now)) {
-                                val gx = size.width / 2f
-                                val gy = size.height / 2f
-                                val oldRadius = globeRadius(size.width.toFloat(), size.height.toFloat(), zoom).toDouble()
-                                val anchor = geoAt(before.x, before.y, gx, gy, oldRadius, centerLat.toDouble(), centerLng.toDouble())
-                                if (zoomChange != 1f) zoom = (zoom * zoomChange).coerceIn(1f, MAX_ZOOM)
-                                val newRadius = globeRadius(size.width.toFloat(), size.height.toFloat(), zoom).toDouble()
-                                // The spot between the fingers stays between them, whatever the zoom does. Near the
-                                // edge of the globe that cannot be kept, so there the globe turns by the finger's travel.
-                                val nearCentre = hypot((before.x - gx).toDouble(), (before.y - gy).toDouble()) < oldRadius * ANCHOR_REACH
-                                val kept = if (anchor != null && nearCentre) {
-                                    centerKeepingPoint(
-                                        anchor.first, anchor.second, now.x, now.y, gx, gy, newRadius,
-                                        centerLat.toDouble(), centerLng.toDouble(),
-                                    )
-                                } else {
-                                    null
-                                }
-                                if (kept != null) {
-                                    centerLat = kept.first.toFloat()
-                                    centerLng = kept.second.toFloat()
-                                } else {
-                                    val perPixel = degreesPerPixel(newRadius).toFloat()
-                                    val acrossScale = 1f / max(0.1f, cos(Math.toRadians(centerLat.toDouble())).toFloat())
-                                    centerLng -= (now.x - before.x) * perPixel * acrossScale
-                                    centerLat = (centerLat + (now.y - before.y) * perPixel).coerceIn(-MAX_CENTER_LAT.toFloat(), MAX_CENTER_LAT.toFloat())
-                                }
-                            }
-                            event.changes.firstOrNull()?.let {
-                                tracker.addPosition(it.uptimeMillis, it.position)
-                                maxMove = max(maxMove, (it.position - downPos).getDistance())
-                            }
-                            event.changes.forEach { if (it.positionChanged()) it.consume() }
-                            if (event.changes.none { it.pressed }) break
-                        }
-                        if (maxMove < 24f) {
-                            moving = false
-                            val cx = size.width / 2f
-                            val cy = size.height / 2f
-                            val radius = min(size.width, size.height) / 2f * 0.92f * zoom
-                            val cLat = centerLat.toDouble()
-                            val cLng = centerLng.toDouble()
-                            val tapped = placePins(
-                                shownPins, size.width.toFloat(), size.height.toFloat(), radius.toDouble(), cLat, cLng,
-                                placeholderPin.width, placeholderPin.height,
-                            ).sortedByDescending { it.asPin }
-                                .firstOrNull { it.hit(downPos.x, downPos.y, density, placeholderPin.width, placeholderPin.height) }
-                            if (tapped != null) {
-                                onCityClick(tapped.pin.latitude, tapped.pin.longitude)
-                            } else {
-                                val w = world
-                                val hit = if (w != null) countryAtDetail(downPos.x, downPos.y, cx, cy, radius, cLat, cLng, w, hotOwner) else null
-                                if (hit != null) onCountryClick(hit)
-                            }
-                        } else {
-                            val v = tracker.calculateVelocity()
-                            flingJob = flingScope.launch {
-                                var vx = v.x
-                                var vy = v.y
-                                while (abs(vx) > 40f || abs(vy) > 40f) {
-                                    withFrameNanos { }
-                                    // One pixel of the glide turns the globe exactly as far as one pixel of a drag.
-                                    val perPixel = degreesPerPixel(
-                                        globeRadius(size.width.toFloat(), size.height.toFloat(), zoom).toDouble(),
-                                    ).toFloat()
-                                    val acrossScale = 1f / max(0.1f, cos(Math.toRadians(centerLat.toDouble())).toFloat())
-                                    centerLng -= (vx / 60f) * perPixel * acrossScale
-                                    centerLat = (centerLat + (vy / 60f) * perPixel).coerceIn(-MAX_CENTER_LAT.toFloat(), MAX_CENTER_LAT.toFloat())
-                                    vx *= 0.90f
-                                    vy *= 0.90f
-                                }
-                                moving = false
-                            }
-                        }
-                    }
-                },
-        ) {
-            val w = world ?: return@Canvas
-            val cx = size.width / 2f
-            val cy = size.height / 2f
-            val radius = (min(size.width, size.height) / 2f * 0.92f * zoom).toDouble()
-            val cLat = centerLat.toDouble()
-            val cLng = centerLng.toDouble()
-
-            val view = GlobeView(cx, cy, radius, cLat, cLng, size.width, size.height)
-            val style = baseStyle
-            if (style != null && radius <= view.halfDiagonal * DIRECT_DRAW_FACTOR) {
-                // A globe that still shows its edge turns inside it, which a shifted picture cannot show, and it is
-                // cheap enough to draw in place.
-                val current = BaseView(cLat, cLng, zoom, moving, size.width.toInt(), size.height.toInt())
-                if (fade < 0.999f) {
-                    drawIntoCanvas { it.saveLayer(Rect(0f, 0f, size.width, size.height), Paint().apply { alpha = fade }) }
-                    drawGlobeBase(style, current)
-                    drawIntoCanvas { it.restore() }
-                } else {
-                    drawGlobeBase(style, current)
-                }
-            } else {
-                baseFrame?.let { frame ->
-                    // Until the next picture is ready the latest one is shifted and scaled to the current view.
-                    val placement = placeFrame(frame, cLat, cLng, radius)
-                    withTransform({
-                        translate(placement.shiftX, placement.shiftY)
-                        scale(placement.scale, placement.scale, Offset(cx, cy))
-                    }) {
-                        drawImage(frame.bitmap, Offset(-frame.view.pad.toFloat(), -frame.view.pad.toFloat()), alpha = fade)
-                    }
-                }
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            if (world == null || !centered || baseFrame == null) {
+                CircularProgressIndicator(color = colors.accent, modifier = Modifier.align(Alignment.Center))
             }
 
-            // Country names, only for the visited ones, faint so they never crowd the map.
-            for (country in countries) {
-                val shape = shapeByIso[country.countryCode.uppercase()] ?: continue
-                val gp = GlobeProjection.project(shape.centreLat.toDouble(), shape.centreLng.toDouble(), cLat, cLng, radius)
-                if (!gp.visible) continue
-                countryPaint.alpha = (150 * fade).toInt()
-                val label = countryLabels[country.countryCode] ?: country.countryName
-                drawIntoCanvas { it.nativeCanvas.drawText(label, cx + gp.x, cy + gp.y, countryPaint) }
-            }
-
-            // The same pins as the OSM map: a pin where it has room, none until a zoom gives it space. The
-            // pins earlier in the list claim their room first.
-            val placements = placePins(shownPins, size.width, size.height, radius, cLat, cLng, placeholderPin.width, placeholderPin.height)
-
-            // Names of populated places, biggest first, each only where it fits clear of the names and pins
-            // already placed. More of them appear as the globe is zoomed in.
-            val labelZoom = labelZoomFor(radius, density)
-            val footprints = ArrayList<PinFootprint>()
-            for (place in placements) {
-                if (place.asPin) {
-                    footprints += PinFootprint(place.x, place.y, placeholderPin.width / 2f, placeholderPin.height.toFloat(), 0f)
-                }
-            }
-            val pinFootprintCount = footprints.size
-            val shown = ArrayList<PlaceLabelSpot>()
-            val dotRadius = 2.6f * density
-            val gap = 4f * density
-            // The list is biggest first, so the walk ends at the first place too small to show even in the middle.
-            val centreThreshold = populationForLabel(labelZoom)
-            for (place in placesByPopulation) {
-                if (shown.size >= MAX_PLACE_LABELS) break
-                if (place.population < centreThreshold) break
-                val gp = GlobeProjection.project(place.lat.toDouble(), place.lng.toDouble(), cLat, cLng, radius)
-                if (!gp.visible) continue
-                val x = cx + gp.x
-                val y = cy + gp.y
-                if (x < 0f || x > size.width || y < 0f || y > size.height) continue
-                val fromCentre = hypot((x - cx).toDouble(), (y - cy).toDouble()) / view.halfDiagonal
-                if (place.population < populationForLabelAt(labelZoom, fromCentre)) continue
-                val textWidth = placePaint.measureText(place.name)
-                footprints += PinFootprint(
-                    x = x + dotRadius + gap + textWidth / 2f,
-                    y = y,
-                    halfWidth = textWidth / 2f + dotRadius + gap,
-                    above = placePaint.textSize * 0.6f,
-                    below = placePaint.textSize * 0.6f,
-                )
-                shown += PlaceLabelSpot(place.name, x, y)
-            }
-            val labelKept = keptPins(footprints, gap = 2f * density)
-            placePaint.alpha = (230 * fade).toInt()
-            placeHaloPaint.alpha = (200 * fade).toInt()
-            for (i in shown.indices) {
-                if (!labelKept[pinFootprintCount + i]) continue
-                val spot = shown[i]
-                drawCircle(Color.White, dotRadius + 1f * density, Offset(spot.x, spot.y), alpha = fade)
-                drawCircle(land, dotRadius, Offset(spot.x, spot.y), alpha = fade)
-                drawIntoCanvas {
-                    val textX = spot.x + dotRadius + gap
-                    val textY = spot.y + placePaint.textSize * 0.35f
-                    it.nativeCanvas.drawText(spot.name, textX, textY, placeHaloPaint)
-                    it.nativeCanvas.drawText(spot.name, textX, textY, placePaint)
-                }
-            }
-
-            for (place in placements) {
-                if (!place.asPin) continue
-                val image = pinThumbs[place.pin.id] ?: placeholderPin
-                // The bottom of the pin (its pointer tip) sits on the spot, as on the OSM map.
-                drawImage(image, Offset(place.x - image.width / 2f, place.y - image.height), alpha = fade)
-            }
-
-            // The place the globe was opened on: an accent dot in a white ring inside a faint accent halo,
-            // drawn last so it sits over the city pins, and kept compact so the name under a pin's tip
-            // stays mostly readable.
-            if (focus != null) {
-                val gp = GlobeProjection.project(focus.latitude, focus.longitude, cLat, cLng, radius)
-                if (gp.visible) {
-                    val at = Offset(cx + gp.x, cy + gp.y)
-                    drawCircle(highlight, 16f * density, at, alpha = 0.28f * fade)
-                    drawCircle(Color.White, 7.5f * density, at, alpha = fade)
-                    drawCircle(highlight, 5.5f * density, at, alpha = fade)
-                }
-            }
-        }
-
-        // An opaque search bar along the bottom; tapping it raises the same drawer the Places screen uses,
-        // which slides up above the keyboard with its field visible. It hides while the drawer is open, so
-        // the pressed bar reads as having risen into the drawer.
-        AnimatedVisibility(
-            visible = chromeVisible && cities.isNotEmpty() && !showSearch,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn(tween(240)) + slideInVertically(tween(280)) { it / 2 },
-            exit = fadeOut(tween(160)),
-        ) {
-            val pill = RoundedCornerShape(14.dp)
-            Row(
+            Canvas(
                 modifier = Modifier
-                    .navigationBarsPadding()
-                    .padding(bottom = 20.dp, start = 20.dp, end = 20.dp)
-                    .fillMaxWidth()
-                    .clip(pill)
-                    .background(colors.bg2, pill)
-                    .border(0.5.dp, colors.line2, pill)
-                    .clickable { showSearch = true }
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    .fillMaxSize()
+                    .onSizeChanged { canvasSize = it }
+                    .pointerInput(world, shownPins, highlightCodes) {
+                        // One handler for rotate/pinch, a glide after a flick, AND tap: a gesture that barely
+                        // moved is treated as a tap and hit-tested, so a separate tap detector can't miss it.
+                        awaitEachGesture {
+                            flingJob?.cancel()
+                            val tracker = VelocityTracker()
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            moving = true
+                            tracker.addPosition(down.uptimeMillis, down.position)
+                            val downPos = down.position
+                            var maxMove = 0f
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val zoomChange = event.calculateZoom()
+                                val before = event.calculateCentroid(useCurrent = false)
+                                val now = event.calculateCentroid(useCurrent = true)
+                                if (before.isSpecified && now.isSpecified && (zoomChange != 1f || before != now)) {
+                                    val gx = size.width / 2f
+                                    val gy = size.height / 2f
+                                    val oldRadius = globeRadius(size.width.toFloat(), size.height.toFloat(), zoom).toDouble()
+                                    val anchor = geoAt(before.x, before.y, gx, gy, oldRadius, centerLat.toDouble(), centerLng.toDouble())
+                                    if (zoomChange != 1f) zoom = (zoom * zoomChange).coerceIn(1f, MAX_ZOOM)
+                                    val newRadius = globeRadius(size.width.toFloat(), size.height.toFloat(), zoom).toDouble()
+                                    // The spot between the fingers stays between them, whatever the zoom does. Near the
+                                    // edge of the globe that cannot be kept, so there the globe turns by the finger's travel.
+                                    val nearCentre = hypot((before.x - gx).toDouble(), (before.y - gy).toDouble()) < oldRadius * ANCHOR_REACH
+                                    val kept = if (anchor != null && nearCentre) {
+                                        centerKeepingPoint(
+                                            anchor.first, anchor.second, now.x, now.y, gx, gy, newRadius,
+                                            centerLat.toDouble(), centerLng.toDouble(),
+                                        )
+                                    } else {
+                                        null
+                                    }
+                                    if (kept != null) {
+                                        centerLat = kept.first.toFloat()
+                                        centerLng = kept.second.toFloat()
+                                    } else {
+                                        val perPixel = degreesPerPixel(newRadius).toFloat()
+                                        val acrossScale = 1f / max(0.1f, cos(Math.toRadians(centerLat.toDouble())).toFloat())
+                                        centerLng -= (now.x - before.x) * perPixel * acrossScale
+                                        centerLat = (centerLat + (now.y - before.y) * perPixel).coerceIn(-MAX_CENTER_LAT.toFloat(), MAX_CENTER_LAT.toFloat())
+                                    }
+                                }
+                                event.changes.firstOrNull()?.let {
+                                    tracker.addPosition(it.uptimeMillis, it.position)
+                                    maxMove = max(maxMove, (it.position - downPos).getDistance())
+                                }
+                                event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                if (event.changes.none { it.pressed }) break
+                            }
+                            if (maxMove < 24f) {
+                                moving = false
+                                val cx = size.width / 2f
+                                val cy = size.height / 2f
+                                val radius = min(size.width, size.height) / 2f * 0.92f * zoom
+                                val cLat = centerLat.toDouble()
+                                val cLng = centerLng.toDouble()
+                                val tapped = placePins(
+                                    shownPins, size.width.toFloat(), size.height.toFloat(), radius.toDouble(), cLat, cLng,
+                                    placeholderPin.width, placeholderPin.height,
+                                ).sortedByDescending { it.asPin }
+                                    .firstOrNull { it.hit(downPos.x, downPos.y, density, placeholderPin.width, placeholderPin.height) }
+                                if (tapped != null) {
+                                    onCityClick(tapped.pin.latitude, tapped.pin.longitude)
+                                } else {
+                                    val w = world
+                                    val hit = if (w != null) countryAtDetail(downPos.x, downPos.y, cx, cy, radius, cLat, cLng, w, hotOwner) else null
+                                    if (hit != null) onCountryClick(hit)
+                                }
+                            } else {
+                                val v = tracker.calculateVelocity()
+                                flingJob = flingScope.launch {
+                                    var vx = v.x
+                                    var vy = v.y
+                                    while (abs(vx) > 40f || abs(vy) > 40f) {
+                                        withFrameNanos { }
+                                        // One pixel of the glide turns the globe exactly as far as one pixel of a drag.
+                                        val perPixel = degreesPerPixel(
+                                            globeRadius(size.width.toFloat(), size.height.toFloat(), zoom).toDouble(),
+                                        ).toFloat()
+                                        val acrossScale = 1f / max(0.1f, cos(Math.toRadians(centerLat.toDouble())).toFloat())
+                                        centerLng -= (vx / 60f) * perPixel * acrossScale
+                                        centerLat = (centerLat + (vy / 60f) * perPixel).coerceIn(-MAX_CENTER_LAT.toFloat(), MAX_CENTER_LAT.toFloat())
+                                        vx *= 0.90f
+                                        vy *= 0.90f
+                                    }
+                                    moving = false
+                                }
+                            }
+                        }
+                    },
             ) {
-                Icon(Icons.Default.Search, contentDescription = null, tint = colors.fgDim, modifier = Modifier.size(18.dp))
-                Text(stringResource(R.string.map_search_places), color = colors.fgMute, fontSize = 14.sp)
+                val w = world ?: return@Canvas
+                val cx = size.width / 2f
+                val cy = size.height / 2f
+                val radius = (min(size.width, size.height) / 2f * 0.92f * zoom).toDouble()
+                val cLat = centerLat.toDouble()
+                val cLng = centerLng.toDouble()
+
+                val view = GlobeView(cx, cy, radius, cLat, cLng, size.width, size.height)
+                val style = baseStyle
+                if (style != null && radius <= view.halfDiagonal * DIRECT_DRAW_FACTOR) {
+                    // A globe that still shows its edge turns inside it, which a shifted picture cannot show, and it is
+                    // cheap enough to draw in place.
+                    val current = BaseView(cLat, cLng, zoom, moving, size.width.toInt(), size.height.toInt())
+                    if (fade < 0.999f) {
+                        drawIntoCanvas { it.saveLayer(Rect(0f, 0f, size.width, size.height), Paint().apply { alpha = fade }) }
+                        drawGlobeBase(style, current)
+                        drawIntoCanvas { it.restore() }
+                    } else {
+                        drawGlobeBase(style, current)
+                    }
+                } else {
+                    baseFrame?.let { frame ->
+                        // Until the next picture is ready the latest one is shifted and scaled to the current view.
+                        val placement = placeFrame(frame, cLat, cLng, radius)
+                        withTransform({
+                            translate(placement.shiftX, placement.shiftY)
+                            scale(placement.scale, placement.scale, Offset(cx, cy))
+                        }) {
+                            drawImage(frame.bitmap, Offset(-frame.view.pad.toFloat(), -frame.view.pad.toFloat()), alpha = fade)
+                        }
+                    }
+                }
+
+                // Country names, only for the visited ones, faint so they never crowd the map.
+                for (country in countries) {
+                    val shape = shapeByIso[country.countryCode.uppercase()] ?: continue
+                    val gp = GlobeProjection.project(shape.centreLat.toDouble(), shape.centreLng.toDouble(), cLat, cLng, radius)
+                    if (!gp.visible) continue
+                    countryPaint.alpha = (150 * fade).toInt()
+                    val label = countryLabels[country.countryCode] ?: country.countryName
+                    drawIntoCanvas { it.nativeCanvas.drawText(label, cx + gp.x, cy + gp.y, countryPaint) }
+                }
+
+                // The same pins as the OSM map: a pin where it has room, none until a zoom gives it space. The
+                // pins earlier in the list claim their room first.
+                val placements = placePins(shownPins, size.width, size.height, radius, cLat, cLng, placeholderPin.width, placeholderPin.height)
+
+                // Names of populated places, biggest first, each only where it fits clear of the names and pins
+                // already placed. More of them appear as the globe is zoomed in.
+                val labelZoom = labelZoomFor(radius, density)
+                val footprints = ArrayList<PinFootprint>()
+                for (place in placements) {
+                    if (place.asPin) {
+                        footprints += PinFootprint(place.x, place.y, placeholderPin.width / 2f, placeholderPin.height.toFloat(), 0f)
+                    }
+                }
+                val pinFootprintCount = footprints.size
+                val shown = ArrayList<PlaceLabelSpot>()
+                val dotRadius = 2.6f * density
+                val gap = 4f * density
+                // The list is biggest first, so the walk ends at the first place too small to show even in the middle.
+                val centreThreshold = populationForLabel(labelZoom)
+                for (place in placesByPopulation) {
+                    if (shown.size >= MAX_PLACE_LABELS) break
+                    if (place.population < centreThreshold) break
+                    val gp = GlobeProjection.project(place.lat.toDouble(), place.lng.toDouble(), cLat, cLng, radius)
+                    if (!gp.visible) continue
+                    val x = cx + gp.x
+                    val y = cy + gp.y
+                    if (x < 0f || x > size.width || y < 0f || y > size.height) continue
+                    val fromCentre = hypot((x - cx).toDouble(), (y - cy).toDouble()) / view.halfDiagonal
+                    if (place.population < populationForLabelAt(labelZoom, fromCentre)) continue
+                    val textWidth = placePaint.measureText(place.name)
+                    footprints += PinFootprint(
+                        x = x + dotRadius + gap + textWidth / 2f,
+                        y = y,
+                        halfWidth = textWidth / 2f + dotRadius + gap,
+                        above = placePaint.textSize * 0.6f,
+                        below = placePaint.textSize * 0.6f,
+                    )
+                    shown += PlaceLabelSpot(place.name, x, y)
+                }
+                val labelKept = keptPins(footprints, gap = 2f * density)
+                placePaint.alpha = (230 * fade).toInt()
+                placeHaloPaint.alpha = (200 * fade).toInt()
+                for (i in shown.indices) {
+                    if (!labelKept[pinFootprintCount + i]) continue
+                    val spot = shown[i]
+                    drawCircle(Color.White, dotRadius + 1f * density, Offset(spot.x, spot.y), alpha = fade)
+                    drawCircle(land, dotRadius, Offset(spot.x, spot.y), alpha = fade)
+                    drawIntoCanvas {
+                        val textX = spot.x + dotRadius + gap
+                        val textY = spot.y + placePaint.textSize * 0.35f
+                        it.nativeCanvas.drawText(spot.name, textX, textY, placeHaloPaint)
+                        it.nativeCanvas.drawText(spot.name, textX, textY, placePaint)
+                    }
+                }
+
+                for (place in placements) {
+                    if (!place.asPin) continue
+                    val image = pinThumbs[place.pin.id] ?: placeholderPin
+                    // The bottom of the pin (its pointer tip) sits on the spot, as on the OSM map.
+                    drawImage(image, Offset(place.x - image.width / 2f, place.y - image.height), alpha = fade)
+                }
+
+                // The place the globe was opened on: an accent dot in a white ring inside a faint accent halo,
+                // drawn last so it sits over the city pins, and kept compact so the name under a pin's tip
+                // stays mostly readable.
+                if (focus != null) {
+                    val gp = GlobeProjection.project(focus.latitude, focus.longitude, cLat, cLng, radius)
+                    if (gp.visible) {
+                        val at = Offset(cx + gp.x, cy + gp.y)
+                        drawCircle(highlight, 16f * density, at, alpha = 0.28f * fade)
+                        drawCircle(Color.White, 7.5f * density, at, alpha = fade)
+                        drawCircle(highlight, 5.5f * density, at, alpha = fade)
+                    }
+                }
             }
-        }
-        if (showSearch) {
-            PlaceSearchSheet(
-                cities = cities,
-                onPick = { showSearch = false; onCityClick(it.latitude, it.longitude) },
-                onDismiss = { showSearch = false },
-            )
+
+            // An opaque search bar along the bottom; tapping it raises the same drawer the Places screen uses,
+            // which slides up above the keyboard with its field visible. It hides while the drawer is open, so
+            // the pressed bar reads as having risen into the drawer.
+            AnimatedVisibility(
+                visible = chromeVisible && cities.isNotEmpty() && !showSearch,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = fadeIn(tween(240)) + slideInVertically(tween(280)) { it / 2 },
+                exit = fadeOut(tween(160)),
+            ) {
+                val pill = RoundedCornerShape(14.dp)
+                Row(
+                    modifier = Modifier
+                        .navigationBarsPadding()
+                        .padding(bottom = 20.dp, start = 20.dp, end = 20.dp)
+                        .fillMaxWidth()
+                        .clip(pill)
+                        .background(colors.bg2, pill)
+                        .border(0.5.dp, colors.line2, pill)
+                        .clickable { showSearch = true }
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = null, tint = colors.fgDim, modifier = Modifier.size(18.dp))
+                    Text(stringResource(R.string.map_search_places), color = colors.fgMute, fontSize = 14.sp)
+                }
+            }
+            if (showSearch) {
+                PlaceSearchSheet(
+                    cities = cities,
+                    onPick = { showSearch = false; onCityClick(it.latitude, it.longitude) },
+                    onDismiss = { showSearch = false },
+                )
+            }
         }
 
         AnimatedVisibility(
@@ -624,6 +630,7 @@ fun CustomMapScreen(
             exit = fadeOut(tween(160)),
         ) {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.map_vector_title),
                 onBack = onBack,
                 trailing = {

@@ -722,6 +722,7 @@ fun DeviceFolderDetailScreen(
             )
         }
         StickyAlbumHeader(
+            backdrop = glass,
             visible = stickyShown,
             title = bucketName,
             onBack = { if (folderVault != null) viewModel.cancelFolderVault() else onBack() },

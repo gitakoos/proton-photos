@@ -82,8 +82,7 @@ fun IconBubble(
     Box(
         modifier = modifier
             .size(diameter)
-            .background(background, CircleShape)
-            .let { m -> if (borderColor != null) m.border(0.5.dp, borderColor, CircleShape) else m }
+            .pillSurface(background, CircleShape, border = borderColor)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

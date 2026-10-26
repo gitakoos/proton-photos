@@ -75,6 +75,8 @@ import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.albums.AlbumRowCoverSize
 import eu.akoos.photos.presentation.albums.AlbumRowGap
 import eu.akoos.photos.presentation.albums.AlbumRowPadding
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.AlbumsViewMode
 import eu.akoos.photos.presentation.gallery.PersonCard
 import eu.akoos.photos.presentation.gallery.PersonRow
@@ -127,6 +129,8 @@ fun PeopleScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -139,76 +143,79 @@ fun PeopleScreen(
             shown.isEmpty() -> 1
             else -> 2
         }
-        Crossfade(targetState = phase, label = "peopleContent", modifier = Modifier.fillMaxSize()) { p ->
-            when (p) {
-                0 ->
-                    // Skeleton in the same layout as the real cards or rows, so there is no jump when
-                    // they arrive.
-                    LazyVerticalGrid(
-                        columns = columns,
-                        contentPadding = contentPadding,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(rowSpacing),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(8) {
-                            if (listView) {
-                                PersonRowShimmer()
-                            } else {
-                                ShimmerBox(
-                                    modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
-                                    cornerRadius = 16.dp,
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            Crossfade(targetState = phase, label = "peopleContent", modifier = Modifier.fillMaxSize()) { p ->
+                when (p) {
+                    0 ->
+                        // Skeleton in the same layout as the real cards or rows, so there is no jump when
+                        // they arrive.
+                        LazyVerticalGrid(
+                            columns = columns,
+                            contentPadding = contentPadding,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(rowSpacing),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(8) {
+                                if (listView) {
+                                    PersonRowShimmer()
+                                } else {
+                                    ShimmerBox(
+                                        modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
+                                        cornerRadius = 16.dp,
+                                    )
+                                }
+                            }
+                        }
+                    1 ->
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 40.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.people_none_named),
+                                    color = colors.fgMute,
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Center,
+                                )
+                                Spacer(Modifier.height(14.dp))
+                                // Surface the count so a guest with unnamed clusters sees groups exist
+                                // and can tap through to name them, instead of a bare empty message.
+                                SecondaryButton(
+                                    label = if (suggestionCount > 0) {
+                                        stringResource(R.string.person_suggestions_review_count, suggestionCount)
+                                    } else {
+                                        stringResource(R.string.person_suggestions_review)
+                                    },
+                                    onClick = onReviewSuggestions,
                                 )
                             }
                         }
-                    }
-                1 ->
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 40.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
+                    else ->
+                        LazyVerticalGrid(
+                            columns = columns,
+                            contentPadding = contentPadding,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(rowSpacing),
+                            modifier = Modifier.fillMaxSize(),
                         ) {
-                            Text(
-                                text = stringResource(R.string.people_none_named),
-                                color = colors.fgMute,
-                                fontSize = 14.sp,
-                                textAlign = TextAlign.Center,
-                            )
-                            Spacer(Modifier.height(14.dp))
-                            // Surface the count so a guest with unnamed clusters sees groups exist
-                            // and can tap through to name them, instead of a bare empty message.
-                            SecondaryButton(
-                                label = if (suggestionCount > 0) {
-                                    stringResource(R.string.person_suggestions_review_count, suggestionCount)
+                            items(items = shown, key = { it.personId }) { person ->
+                                if (listView) {
+                                    PersonRow(person = person, onClick = { onPersonClick(person.personId) })
                                 } else {
-                                    stringResource(R.string.person_suggestions_review)
-                                },
-                                onClick = onReviewSuggestions,
-                            )
-                        }
-                    }
-                else ->
-                    LazyVerticalGrid(
-                        columns = columns,
-                        contentPadding = contentPadding,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(rowSpacing),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(items = shown, key = { it.personId }) { person ->
-                            if (listView) {
-                                PersonRow(person = person, onClick = { onPersonClick(person.personId) })
-                            } else {
-                                PersonCard(person = person, onClick = { onPersonClick(person.personId) })
+                                    PersonCard(person = person, onClick = { onPersonClick(person.personId) })
+                                }
                             }
                         }
-                    }
+                }
             }
         }
 
         // Floating pill header (back + title), matching the app's other detail surfaces, with a
         // three-dot overflow that jumps straight to the AI settings.
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.gallery_category_people),
             onBack = onBack,
             trailing = {

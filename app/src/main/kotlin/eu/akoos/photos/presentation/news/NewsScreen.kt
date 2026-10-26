@@ -62,6 +62,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.api.model.NewsItem
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.ToggleRow
@@ -98,129 +100,134 @@ fun NewsScreen(onBack: () -> Unit) {
         runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
     }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     androidx.compose.foundation.layout.Box(
         modifier = Modifier.fillMaxSize().background(colors.pageBg),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-        ) {
-            Spacer(Modifier.height(floatingHeaderContentTopPadding()))
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+            ) {
+                Spacer(Modifier.height(floatingHeaderContentTopPadding()))
 
-            inbox.feedbackUrl?.let { feedbackUrl ->
-                SettingsCard {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
-                        Text(
-                            stringResource(R.string.news_feedback_heading),
-                            color = colors.fgPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            stringResource(R.string.news_feedback_body),
-                            color = colors.fgMute,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp,
-                        )
-                        Spacer(Modifier.height(10.dp))
-                        Text(
-                            stringResource(R.string.news_feedback_note),
-                            color = colors.fgMute,
-                            fontSize = 11.5.sp,
-                            lineHeight = 16.sp,
-                        )
-                        Spacer(Modifier.height(14.dp))
-                        Button(
-                            onClick = { openUrl(feedbackUrl) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = colors.accent,
-                                contentColor = Color.White,
-                            ),
-                        ) {
+                inbox.feedbackUrl?.let { feedbackUrl ->
+                    SettingsCard {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
                             Text(
-                                stringResource(R.string.news_feedback_button),
-                                fontSize = 14.sp,
+                                stringResource(R.string.news_feedback_heading),
+                                color = colors.fgPrimary,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium,
                             )
-                        }
-                        inbox.feedbackJoinUrl?.let { joinUrl ->
-                            Spacer(Modifier.height(12.dp))
+                            Spacer(Modifier.height(4.dp))
                             Text(
-                                stringResource(R.string.news_feedback_join),
-                                color = colors.accent,
+                                stringResource(R.string.news_feedback_body),
+                                color = colors.fgMute,
                                 fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { openUrl(joinUrl) }
-                                    .padding(vertical = 4.dp),
+                                lineHeight = 18.sp,
                             )
-                        }
-                        inbox.feedbackEmail?.let { email ->
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                stringResource(R.string.news_feedback_email, email),
-                                color = colors.accent,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { openUrl("mailto:$email") }
-                                    .padding(vertical = 4.dp),
+                                stringResource(R.string.news_feedback_note),
+                                color = colors.fgMute,
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp,
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            Button(
+                                onClick = { openUrl(feedbackUrl) },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = colors.accent,
+                                    contentColor = Color.White,
+                                ),
+                            ) {
+                                Text(
+                                    stringResource(R.string.news_feedback_button),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                            inbox.feedbackJoinUrl?.let { joinUrl ->
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    stringResource(R.string.news_feedback_join),
+                                    color = colors.accent,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { openUrl(joinUrl) }
+                                        .padding(vertical = 4.dp),
+                                )
+                            }
+                            inbox.feedbackEmail?.let { email ->
+                                Spacer(Modifier.height(10.dp))
+                                Text(
+                                    stringResource(R.string.news_feedback_email, email),
+                                    color = colors.accent,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { openUrl("mailto:$email") }
+                                        .padding(vertical = 4.dp),
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+
+                // The switch sits up here rather than below the messages: with a long feed it would
+                // otherwise be an entire scroll away, so it stays reachable the moment the screen opens.
+                SettingsCard {
+                    ToggleRow(
+                        label = stringResource(R.string.news_show_title),
+                        checked = newsEnabled,
+                        onCheckedChange = vm::setNewsEnabled,
+                    )
+                }
+
+                // A line between the controls above and the messages below.
+                Spacer(Modifier.height(24.dp))
+                androidx.compose.foundation.layout.Box(
+                    Modifier.fillMaxWidth().height(0.5.dp).background(colors.line),
+                )
+                Spacer(Modifier.height(24.dp))
+
+                if (inbox.items.isEmpty()) {
+                    Text(
+                        stringResource(R.string.news_empty),
+                        color = colors.fgMute,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                    )
+                } else {
+                    SettingsCard {
+                        inbox.items.forEachIndexed { index, item ->
+                            if (index > 0) RowDivider()
+                            NewsEntry(
+                                item,
+                                isNew = item.id in newAtOpen,
+                                onOpenItem = { openUrl(NEWS_WEBSITE_URL + "#" + it.id) },
+                                onOpenLink = ::openUrl,
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(16.dp))
+
+                Spacer(Modifier.height(navBottom + 24.dp))
             }
-
-            // The switch sits up here rather than below the messages: with a long feed it would
-            // otherwise be an entire scroll away, so it stays reachable the moment the screen opens.
-            SettingsCard {
-                ToggleRow(
-                    label = stringResource(R.string.news_show_title),
-                    checked = newsEnabled,
-                    onCheckedChange = vm::setNewsEnabled,
-                )
-            }
-
-            // A line between the controls above and the messages below.
-            Spacer(Modifier.height(24.dp))
-            androidx.compose.foundation.layout.Box(
-                Modifier.fillMaxWidth().height(0.5.dp).background(colors.line),
-            )
-            Spacer(Modifier.height(24.dp))
-
-            if (inbox.items.isEmpty()) {
-                Text(
-                    stringResource(R.string.news_empty),
-                    color = colors.fgMute,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                )
-            } else {
-                SettingsCard {
-                    inbox.items.forEachIndexed { index, item ->
-                        if (index > 0) RowDivider()
-                        NewsEntry(
-                            item,
-                            isNew = item.id in newAtOpen,
-                            onOpenItem = { openUrl(NEWS_WEBSITE_URL + "#" + it.id) },
-                            onOpenLink = ::openUrl,
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(navBottom + 24.dp))
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.news_title),
             onBack = onBack,
         )

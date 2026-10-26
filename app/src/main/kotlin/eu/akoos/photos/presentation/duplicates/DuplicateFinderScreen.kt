@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
@@ -75,7 +76,6 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -471,6 +471,7 @@ fun DuplicateFinderScreen(
         // Ticking all but the first of groups the user chose to leave alone would work against that choice.
         val showSelectAllButFirst = listedGroups.isNotEmpty() && !showIgnored
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.duplicates_title),
             onBack = confirmedOnBack,
             trailing = {
@@ -602,7 +603,7 @@ fun DuplicateFinderScreen(
         }
 
         if (showFilterSheet) {
-            ModalBottomSheet(
+            AppModalSheet(
                 onDismissRequest = { showFilterSheet = false },
                 sheetState = filterSheetState,
                 containerColor = colors.sheetBg,

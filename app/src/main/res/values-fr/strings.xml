@@ -543,7 +543,7 @@
     <string name="map_style_modern_summary">Un globe moderne que vous pouvez faire pivoter vers vos lieux.</string>
     <string name="settings_amoled_black">Noir pur (AMOLED)</string>
     <string name="settings_liquid_glass">Verre liquide</string>
-    <string name="settings_liquid_glass_desc">Le menu, les pastilles du haut et les commandes de la visionneuse floutent ce qui se trouve dessous</string>
+    <string name="settings_liquid_glass_desc">Les menus, les en-têtes, les panneaux et les commandes de la visionneuse floutent ce qui se trouve dessous</string>
     <string name="settings_tint_cloud">Badges cloud dans la couleur d\'accent</string>
     <string name="settings_gif_autoplay_grid">Lire les GIF dans les grilles</string>
     <string name="settings_gif_autoplay_covers">Lire les couvertures d\'album GIF</string>

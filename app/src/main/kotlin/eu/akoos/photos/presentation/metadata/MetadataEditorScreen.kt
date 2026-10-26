@@ -113,6 +113,8 @@ import androidx.activity.compose.BackHandler
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.ThemedSnackbarHost
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.common.FloatingHeader
@@ -198,97 +200,102 @@ fun MetadataEditorScreen(
     }
     BackHandler { handleBack() }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
         val contentTopPad = floatingHeaderContentTopPadding()
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                // The text fields sit at the bottom of a single scrolling column, so the keyboard has
-                // to shrink the scroll viewport rather than cover it. Insetting before the scroll
-                // modifier is what lets a focused field scroll clear of the keyboard.
-                .imePadding()
-                .verticalScroll(rememberScrollState()),
-        ) {
-            Spacer(Modifier.height(contentTopPad))
-            // A single photo highlights its thumbnail; a bulk set highlights none (the edit is for all).
-            MetadataThumbnailStrip(items = items, selectedIndex = if (items.size == 1) 0 else -1)
-            Spacer(Modifier.height(22.dp))
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
             Column(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    // The text fields sit at the bottom of a single scrolling column, so the keyboard has
+                    // to shrink the scroll viewport rather than cover it. Insetting before the scroll
+                    // modifier is what lets a focused field scroll clear of the keyboard.
+                    .imePadding()
+                    .verticalScroll(rememberScrollState()),
             ) {
-                // A multi-select (or any list carrying read-only members) gets a count line, so the
-                // user sees how many photos the edit lands on and how many are skipped.
-                if (state.bulk || (state.editableCount > 0 && state.skippedCount > 0)) {
-                    val summary = if (state.skippedCount > 0) {
-                        stringResource(
-                            R.string.metadata_editor_bulk_summary_skipped,
-                            state.editableCount, state.skippedCount,
-                        )
-                    } else {
-                        stringResource(R.string.metadata_editor_bulk_summary, state.editableCount)
+                Spacer(Modifier.height(contentTopPad))
+                // A single photo highlights its thumbnail; a bulk set highlights none (the edit is for all).
+                MetadataThumbnailStrip(items = items, selectedIndex = if (items.size == 1) 0 else -1)
+                Spacer(Modifier.height(22.dp))
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    // A multi-select (or any list carrying read-only members) gets a count line, so the
+                    // user sees how many photos the edit lands on and how many are skipped.
+                    if (state.bulk || (state.editableCount > 0 && state.skippedCount > 0)) {
+                        val summary = if (state.skippedCount > 0) {
+                            stringResource(
+                                R.string.metadata_editor_bulk_summary_skipped,
+                                state.editableCount, state.skippedCount,
+                            )
+                        } else {
+                            stringResource(R.string.metadata_editor_bulk_summary, state.editableCount)
+                        }
+                        Text(summary, color = colors.fgMute, fontSize = 13.sp)
                     }
-                    Text(summary, color = colors.fgMute, fontSize = 13.sp)
-                }
-                // A cloud edit waits for the Done checkmark, so a staged change is called out here:
-                // leaving by the back arrow instead would drop it.
-                if (state.stagedCloudCount > 0) {
-                    Text(
-                        stringResource(R.string.metadata_editor_cloud_staged_hint),
-                        color = colors.accent,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
+                    // A cloud edit waits for the Done checkmark, so a staged change is called out here:
+                    // leaving by the back arrow instead would drop it.
+                    if (state.stagedCloudCount > 0) {
+                        Text(
+                            stringResource(R.string.metadata_editor_cloud_staged_hint),
+                            color = colors.accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    DateField(
+                        state = state,
+                        onPickDate = viewModel::setDate,
+                        onShiftDates = viewModel::shiftDatesTo,
+                        onFixDatesFromName = viewModel::fixDatesFromName,
+                    )
+                    PlaceField(
+                        state = state,
+                        onPickPoint = viewModel::pickPoint,
+                        onRemoveLocation = viewModel::removeLocation,
+                    )
+                    // The tag labels are the ones the viewer's details sheet shows, so the same EXIF tag
+                    // reads the same wherever it appears.
+                    TextTagField(
+                        label = stringResource(R.string.viewer_meta_row_description),
+                        field = state.description,
+                        bulk = state.bulk,
+                        isSaving = state.isSaving,
+                        // A caption is a sentence, so it wraps instead of scrolling out of sight sideways.
+                        maxLines = 3,
+                        onValueChange = { viewModel.setText(MetadataTextTag.DESCRIPTION, it) },
+                    )
+                    TextTagField(
+                        label = stringResource(
+                            if (state.bulk) R.string.metadata_editor_bulk_artist_label
+                            else R.string.viewer_meta_row_artist,
+                        ),
+                        field = state.artist,
+                        bulk = state.bulk,
+                        isSaving = state.isSaving,
+                        onValueChange = { viewModel.setText(MetadataTextTag.ARTIST, it) },
+                    )
+                    TextTagField(
+                        label = stringResource(
+                            if (state.bulk) R.string.metadata_editor_bulk_copyright_label
+                            else R.string.viewer_meta_row_copyright,
+                        ),
+                        field = state.copyright,
+                        bulk = state.bulk,
+                        isSaving = state.isSaving,
+                        onValueChange = { viewModel.setText(MetadataTextTag.COPYRIGHT, it) },
                     )
                 }
-                DateField(
-                    state = state,
-                    onPickDate = viewModel::setDate,
-                    onShiftDates = viewModel::shiftDatesTo,
-                    onFixDatesFromName = viewModel::fixDatesFromName,
-                )
-                PlaceField(
-                    state = state,
-                    onPickPoint = viewModel::pickPoint,
-                    onRemoveLocation = viewModel::removeLocation,
-                )
-                // The tag labels are the ones the viewer's details sheet shows, so the same EXIF tag
-                // reads the same wherever it appears.
-                TextTagField(
-                    label = stringResource(R.string.viewer_meta_row_description),
-                    field = state.description,
-                    bulk = state.bulk,
-                    isSaving = state.isSaving,
-                    // A caption is a sentence, so it wraps instead of scrolling out of sight sideways.
-                    maxLines = 3,
-                    onValueChange = { viewModel.setText(MetadataTextTag.DESCRIPTION, it) },
-                )
-                TextTagField(
-                    label = stringResource(
-                        if (state.bulk) R.string.metadata_editor_bulk_artist_label
-                        else R.string.viewer_meta_row_artist,
-                    ),
-                    field = state.artist,
-                    bulk = state.bulk,
-                    isSaving = state.isSaving,
-                    onValueChange = { viewModel.setText(MetadataTextTag.ARTIST, it) },
-                )
-                TextTagField(
-                    label = stringResource(
-                        if (state.bulk) R.string.metadata_editor_bulk_copyright_label
-                        else R.string.viewer_meta_row_copyright,
-                    ),
-                    field = state.copyright,
-                    bulk = state.bulk,
-                    isSaving = state.isSaving,
-                    onValueChange = { viewModel.setText(MetadataTextTag.COPYRIGHT, it) },
-                )
+                Spacer(Modifier.height(32.dp + navBottom))
             }
-            Spacer(Modifier.height(32.dp + navBottom))
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.metadata_editor_title),
             onBack = { handleBack() },
             trailing = {
