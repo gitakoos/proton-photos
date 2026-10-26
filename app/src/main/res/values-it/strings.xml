@@ -1291,6 +1291,7 @@
     <string name="details_remove_private">Rimuovi dati privati</string>
     <string name="details_private_intro">Ecco cosa contiene ora il file. Scegli cosa togliere.</string>
     <string name="details_private_undo">Non si può annullare.</string>
+    <string name="details_private_none">Questo file non contiene dati privati.</string>
     <string name="details_private_dates">Tag della data</string>
     <string name="details_private_author">Autore</string>
     <string name="details_place_hint">Trascina la mappa sotto il segnaposto</string>

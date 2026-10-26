@@ -1931,6 +1931,7 @@
     <string name="details_remove_private">Özel bilgileri kaldır</string>
     <string name="details_private_intro">Dosyada şu an bunlar var. Neyin gideceğini seç.</string>
     <string name="details_private_undo">Bu geri alınamaz.</string>
+    <string name="details_private_none">Bu dosyada özel bilgi yok.</string>
     <string name="details_private_dates">Tarih etiketleri</string>
     <string name="details_private_author">Yazar</string>
     <string name="details_place_hint">Haritayı iğnenin altına sürükle</string>

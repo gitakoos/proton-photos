@@ -1276,6 +1276,7 @@
     <string name="details_remove_private">Private Daten entfernen</string>
     <string name="details_private_intro">Das steht jetzt in der Datei. Wähle aus, was entfernt wird.</string>
     <string name="details_private_undo">Das kann nicht rückgängig gemacht werden.</string>
+    <string name="details_private_none">Diese Datei enthält keine privaten Daten.</string>
     <string name="details_private_dates">Datumsangaben</string>
     <string name="details_private_author">Urheber</string>
     <string name="details_place_hint">Karte unter die Nadel ziehen</string>

@@ -1514,6 +1514,7 @@
     <string name="details_remove_private">Odstrániť súkromné údaje</string>
     <string name="details_private_intro">Toto je teraz v súbore. Vyber, čo odstrániť.</string>
     <string name="details_private_undo">Nedá sa to vrátiť späť.</string>
+    <string name="details_private_none">Tento súbor neobsahuje žiadne súkromné údaje.</string>
     <string name="details_private_dates">Dátumové značky</string>
     <string name="details_private_author">Autor</string>
     <string name="details_place_hint">Posuň mapu pod špendlík</string>

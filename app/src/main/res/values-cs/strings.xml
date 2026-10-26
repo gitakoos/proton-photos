@@ -1514,6 +1514,7 @@
     <string name="details_remove_private">Odebrat soukromé údaje</string>
     <string name="details_private_intro">Tohle je teď v souboru. Vyber, co odebrat.</string>
     <string name="details_private_undo">Nelze vrátit zpět.</string>
+    <string name="details_private_none">Tento soubor neobsahuje žádné soukromé údaje.</string>
     <string name="details_private_dates">Datumové značky</string>
     <string name="details_private_author">Autor</string>
     <string name="details_place_hint">Posuň mapu pod špendlík</string>

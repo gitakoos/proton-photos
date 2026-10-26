@@ -1278,6 +1278,7 @@
     <string name="details_remove_private">Supprimer les infos privées</string>
     <string name="details_private_intro">Voici ce que contient le fichier. Choisissez ce qui part.</string>
     <string name="details_private_undo">Action irréversible.</string>
+    <string name="details_private_none">Ce fichier ne contient aucune info privée.</string>
     <string name="details_private_dates">Balises de date</string>
     <string name="details_private_author">Auteur</string>
     <string name="details_place_hint">Faites glisser la carte sous l’épingle</string>

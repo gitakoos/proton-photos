@@ -1130,7 +1130,6 @@ fun PhotoViewerScreen(
     // Every trash action confirms in-app, since a device delete under MANAGE_MEDIA runs with no OS
     // dialog. Null hides the confirm; "restore" or "delete" name the pending action.
     var trashConfirmAction by remember { mutableStateOf<String?>(null) }
-    var showStripPicker by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     val renameState by viewModel.renameState.collectAsStateWithLifecycle()
     val metadataSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -2379,7 +2378,10 @@ fun PhotoViewerScreen(
                                         tint = Accent, modifier = Modifier.size(20.dp)) },
                                     onClick = {
                                         menuExpanded = false
-                                        showStripPicker = true
+                                        // The details sheet's own page: what this file holds, each group
+                                        // picked on its own, rather than a fixed list of checkboxes.
+                                        metadataPages = listOf(DetailsPage.Main, DetailsPage.Private)
+                                        showMetadata = true
                                     },
                                 )
                             }
@@ -2966,22 +2968,6 @@ fun PhotoViewerScreen(
     }
 
     // ── Metadata sheet ─────────────────────────────────────────────────────────
-    if (showStripPicker) {
-        val stripItem = items.getOrNull(pagerState.settledPage)
-        MetadataStripPickerDialog(
-            onConfirm = { config ->
-                showStripPicker = false
-                val uri = when (stripItem) {
-                    is GalleryItem.LocalOnly -> stripItem.local.uri
-                    is GalleryItem.Synced -> stripItem.local.uri
-                    else -> null
-                }
-                if (uri != null) viewModel.stripMetadataFromLocal(uri, config)
-            },
-            onDismiss = { showStripPicker = false },
-        )
-    }
-
     if (showMetadata) {
         val item = items.getOrNull(pagerState.settledPage)
         LaunchedEffect(item) {

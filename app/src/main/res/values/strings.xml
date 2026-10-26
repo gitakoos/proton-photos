@@ -2036,6 +2036,7 @@
     <string name="details_remove_private">Remove private info</string>
     <string name="details_private_intro">What this file holds now. Pick what goes.</string>
     <string name="details_private_undo">This can\'t be undone.</string>
+    <string name="details_private_none">Nothing private in this file.</string>
     <string name="details_private_dates">Date tags</string>
     <string name="details_private_author">Author</string>
     <string name="details_place_hint">Drag the map under the pin</string>

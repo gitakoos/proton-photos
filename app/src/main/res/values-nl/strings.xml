@@ -1292,6 +1292,7 @@
     <string name="details_remove_private">Privégegevens verwijderen</string>
     <string name="details_private_intro">Dit staat nu in het bestand. Kies wat weg moet.</string>
     <string name="details_private_undo">Dit kan niet ongedaan worden gemaakt.</string>
+    <string name="details_private_none">Dit bestand bevat geen privégegevens.</string>
     <string name="details_private_dates">Datumtags</string>
     <string name="details_private_author">Auteur</string>
     <string name="details_place_hint">Sleep de kaart onder de speld</string>

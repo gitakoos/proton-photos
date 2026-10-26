@@ -35,6 +35,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +46,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -51,9 +54,11 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -76,13 +81,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -168,9 +178,16 @@ internal fun PhotoMetadataSheet(
     val push = { next: DetailsPage -> onPagesChange(pages + next) }
     val back = { onPagesChange(pages.dropLast(1).ifEmpty { listOf(DetailsPage.Main) }) }
     val home = { onPagesChange(listOf(DetailsPage.Main)) }
-    // Another photo starts on the main page; the identity is the file, so the item a write refreshes
-    // keeps the page it is on.
-    LaunchedEffect(detailsKey(item)) { if (pages != listOf(DetailsPage.Main)) home() }
+    // Another photo starts on the main page; the identity is the file, so the item a write refreshes keeps
+    // the page it is on, and the page the sheet was opened on (the menu's Strip metadata) stays.
+    val key = detailsKey(item)
+    var shownKey by remember { mutableStateOf(key) }
+    LaunchedEffect(key) {
+        if (key != shownKey) {
+            shownKey = key
+            home()
+        }
+    }
 
     val isLocal = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
     val localMedia = (item as? GalleryItem.LocalOnly)?.local ?: (item as? GalleryItem.Synced)?.local
@@ -596,12 +613,12 @@ internal fun DetailsPageHeader(
                 contentDescription = stringResource(R.string.onboarding_back),
                 tint = FgPrimary,
                 modifier = Modifier
+                    .offset(x = (-9).dp)
                     .clip(CircleShape)
                     .clickable(onClick = onBack)
-                    .padding(6.dp)
+                    .padding(9.dp)
                     .size(22.dp),
             )
-            Spacer(Modifier.width(6.dp))
         }
         Text(
             title,
@@ -617,9 +634,10 @@ internal fun DetailsPageHeader(
                 color = if (actionEnabled) Accent else FgMute,
                 fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .offset(x = 12.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .clickable(enabled = actionEnabled, onClick = onAction)
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
             )
         }
     }
@@ -648,16 +666,56 @@ internal fun DetailsDivider() {
 /** The Adjust button on the thing it changes: the date on the summary card, the map. */
 @Composable
 internal fun AdjustPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Text(
-        stringResource(R.string.details_adjust),
-        color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+    val interaction = remember { MutableInteractionSource() }
+    // The pill is small, the area that takes the press is not: a tap just beside it still lands on it.
+    Box(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(SheetBg.copy(alpha = 0.55f))
-            .background(Accent.copy(alpha = 0.16f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-    )
+            .pressArea(ADJUST_TOUCH_X, ADJUST_TOUCH_Y)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .padding(horizontal = ADJUST_TOUCH_X, vertical = ADJUST_TOUCH_Y),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .height(26.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(SheetBg.copy(alpha = 0.55f))
+                .background(Accent.copy(alpha = 0.16f))
+                .indication(interaction, ripple())
+                .padding(horizontal = 11.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+        // The line box trimmed to the glyphs and the font's own padding off, so the word sits in the
+        // middle of the pill rather than on the line's lower half.
+        Text(
+            stringResource(R.string.details_adjust),
+            color = Accent, maxLines = 1,
+            style = TextStyle(
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                lineHeight = 12.sp,
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                lineHeightStyle = LineHeightStyle(alignment = LineHeightStyle.Alignment.Center, trim = LineHeightStyle.Trim.Both),
+            ),
+        )
+        }
+    }
+}
+
+/** How far the Adjust pill's press area reaches past the pill itself. */
+private val ADJUST_TOUCH_X = 10.dp
+private val ADJUST_TOUCH_Y = 9.dp
+
+/**
+ * Lets the press area reach [horizontal] and [vertical] past each side of what follows without the element
+ * taking any more room or moving: what follows is measured that much larger and placed back by as much.
+ * Goes before the click, with the same padding after it.
+ */
+internal fun Modifier.pressArea(horizontal: Dp, vertical: Dp): Modifier = layout { measurable, constraints ->
+    val dx = horizontal.roundToPx()
+    val dy = vertical.roundToPx()
+    val placeable = measurable.measure(constraints.offset(2 * dx, 2 * dy))
+    layout(placeable.width - 2 * dx, placeable.height - 2 * dy) { placeable.place(-dx, -dy) }
 }
 
 /**
@@ -855,6 +913,10 @@ private fun DetailsPrivatePage(
 ) {
     var picked by remember(items) {
         mutableStateOf(items.map { it.kind }.filter { it != PrivateInfoKind.DATES }.toSet())
+    }
+    if (items.isEmpty()) {
+        Text(stringResource(R.string.details_private_none), color = FgDim, fontSize = 13.sp)
+        return
     }
     Text(stringResource(R.string.details_private_intro), color = FgDim, fontSize = 13.sp)
     DetailsCard {

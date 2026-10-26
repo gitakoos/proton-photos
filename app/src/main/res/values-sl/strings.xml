@@ -1515,6 +1515,7 @@
     <string name="details_remove_private">Odstrani zasebne podatke</string>
     <string name="details_private_intro">To je zdaj v datoteki. Izberi, kaj gre ven.</string>
     <string name="details_private_undo">Tega ni mogoče razveljaviti.</string>
+    <string name="details_private_none">Ta datoteka nima zasebnih podatkov.</string>
     <string name="details_private_dates">Datumske oznake</string>
     <string name="details_private_author">Avtor</string>
     <string name="details_place_hint">Povleci zemljevid pod žebljiček</string>

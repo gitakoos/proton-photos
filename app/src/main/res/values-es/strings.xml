@@ -1291,6 +1291,7 @@
     <string name="details_remove_private">Quitar datos privados</string>
     <string name="details_private_intro">Esto contiene ahora el archivo. Elige qué quitar.</string>
     <string name="details_private_undo">No se puede deshacer.</string>
+    <string name="details_private_none">Este archivo no tiene datos privados.</string>
     <string name="details_private_dates">Etiquetas de fecha</string>
     <string name="details_private_author">Autor</string>
     <string name="details_place_hint">Arrastra el mapa bajo el pin</string>

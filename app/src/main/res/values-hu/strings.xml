@@ -1299,6 +1299,7 @@
     <string name="details_remove_private">Privát adatok eltávolítása</string>
     <string name="details_private_intro">Ezek vannak most a fájlban. Válaszd ki, mi kerüljön ki.</string>
     <string name="details_private_undo">Ez nem vonható vissza.</string>
+    <string name="details_private_none">Ebben a fájlban nincs privát adat.</string>
     <string name="details_private_dates">Dátumcímkék</string>
     <string name="details_private_author">Szerző</string>
     <string name="details_place_hint">Húzd a térképet a tű alá</string>

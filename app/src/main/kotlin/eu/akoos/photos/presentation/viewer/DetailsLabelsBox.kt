@@ -176,10 +176,12 @@ internal fun DetailsChipSection(
                 Text(
                     stringResource(R.string.details_edit),
                     color = Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                    // The word is small; its press area fills the row and reaches past its end.
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
+                        .pressArea(10.dp, 8.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .clickable(onClick = onEdit)
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                        .padding(horizontal = 16.dp, vertical = 11.dp),
                 )
             }
         }
