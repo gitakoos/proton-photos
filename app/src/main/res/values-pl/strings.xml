@@ -753,6 +753,8 @@
     <string name="map_style_modern">Mapa świata</string>
     <string name="map_style_modern_summary">Nowoczesny globus, który możesz obracać do swoich miejsc.</string>
     <string name="settings_amoled_black">Czysta czerń (AMOLED)</string>
+    <string name="settings_liquid_glass">Płynne szkło</string>
+    <string name="settings_liquid_glass_desc">Menu, pigułki u góry i przyciski przeglądarki zdjęć rozmywają to, co jest pod nimi</string>
     <string name="settings_tint_cloud">Odznaki chmury w kolorze akcentu</string>
     <string name="settings_gif_autoplay_grid">Odtwarzaj GIF-y w siatkach</string>
     <string name="settings_gif_autoplay_covers">Odtwarzaj okładki albumów GIF</string>

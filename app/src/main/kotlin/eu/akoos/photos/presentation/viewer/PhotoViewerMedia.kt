@@ -102,6 +102,7 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.decoderFallbackRenderersFactory
+import eu.akoos.photos.presentation.common.pillSurface
 import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
 import eu.akoos.photos.presentation.theme.FgPrimary
 import androidx.compose.ui.graphics.toArgb
@@ -295,8 +296,7 @@ internal fun VideoControlPill(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
-            .background(PillBgOpaque, infoPillShape)
-            .border(0.5.dp, PillBorder, infoPillShape)
+            .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),

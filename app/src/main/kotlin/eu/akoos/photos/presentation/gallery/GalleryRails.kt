@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.gallery
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.datastore.preferences.core.edit
+import eu.akoos.photos.presentation.common.pillSurface
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -304,7 +305,7 @@ private fun AlbumsRailPills(
                 Box(
                     modifier = Modifier
                         .size(38.dp)
-                        .background(AppColors.current.filterPillBg, pillShape)
+                        .pillSurface(AppColors.current.filterPillBg, pillShape)
                         .clickable { onNewAlbumClick() },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -320,7 +321,7 @@ private fun AlbumsRailPills(
                 Box(
                     modifier = Modifier
                         .size(38.dp)
-                        .background(AppColors.current.filterPillBg, pillShape)
+                        .pillSurface(AppColors.current.filterPillBg, pillShape)
                         .clickable { onNewLocalFolder() },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -401,12 +402,12 @@ internal fun AvatarButton(
         modifier = Modifier
             .height(46.dp)
             .width(pillWidth)
+            .pillSurface(pillBgColor, pillShape)
             .drawBehind {
                 val strokePx = 2.6.dp.toPx()
                 val h = size.height
                 val radius = h / 2f
-                // Pill fill + border track around the whole rounded rectangle.
-                drawRoundRect(color = pillBgColor, cornerRadius = CornerRadius(radius, radius))
+                // Border track around the whole rounded rectangle, over the pill's surface.
                 drawRoundRect(
                     color = trackColor,
                     topLeft = androidx.compose.ui.geometry.Offset(strokePx / 2f, strokePx / 2f),
@@ -711,9 +712,7 @@ private fun rememberPillActiveAmount(active: Boolean): State<Float> =
 private fun Modifier.tintedPill(idle: Color, active: Color, amount: () -> Float): Modifier = this
     .animateContentSize(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
     .height(38.dp)
-    .drawBehind {
-        drawOutline(pillShape.createOutline(size, layoutDirection, this), lerp(idle, active, amount()))
-    }
+    .pillSurface(pillShape) { lerp(idle, active, amount()) }
 
 /** A pill's label. A new [text] fades in over the old one, which fades out as it does, in the same spot,
  *  while the label's width eases to the new text's, so the words never vanish between two states. */
@@ -859,8 +858,7 @@ internal fun CategoryRail(
                     modifier = Modifier
                         .height(34.dp)
                         .clip(shape)
-                        .background(chipBg, shape)
-                        .then(if (!selected) Modifier.border(0.5.dp, PillBorder, shape) else Modifier)
+                        .pillSurface(shape, border = if (!selected) PillBorder else null) { chipBg }
                         .clickable { onFilterSelected(if (selected) GalleryFilter.All else cat) }
                         .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -887,8 +885,7 @@ internal fun CategoryRail(
                         modifier = Modifier
                             .height(34.dp)
                             .clip(shape)
-                            .background(chipBg, shape)
-                            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, shape) else Modifier)
+                            .pillSurface(shape, border = if (!selected) PillBorder else null) { chipBg }
                             .clickable { peopleRail.onToggle() }
                             .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1378,8 +1375,7 @@ internal fun BottomDock(
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(
             modifier = Modifier
-                .background(PillBgOpaque, pillShape)
-                .border(0.5.dp, PillBorder, pillShape)
+                .pillSurface(PillBgOpaque, pillShape, border = PillBorder)
                 .padding(4.dp),
         ) {
             // The sliding fill, drawn behind the tab row and animated to the active tab's bounds.

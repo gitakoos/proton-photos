@@ -70,6 +70,8 @@ data class SettingsUiState(
     /** When true, dark mode forces base surfaces to true black for OLED panels. Off by default;
      *  has no effect in light mode. */
     val amoledBlack: Boolean = false,
+    /** Frosted pills over the gallery and the viewer. Off by default. */
+    val liquidGlass: Boolean = false,
     /** Tint the green "backed up" cloud badges with the palette accent instead of green. Off by default. */
     val tintCloudWithAccent: Boolean = false,
     /** Animate GIFs in the timeline, album, and device-folder grids. Off shows a still first frame. */

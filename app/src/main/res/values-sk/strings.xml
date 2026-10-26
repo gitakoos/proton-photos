@@ -753,6 +753,8 @@
     <string name="map_style_modern">Mapa sveta</string>
     <string name="map_style_modern_summary">Moderný glóbus, ktorým môžete otáčať k svojim miestam.</string>
     <string name="settings_amoled_black">Čistá čierna (AMOLED)</string>
+    <string name="settings_liquid_glass">Tekuté sklo</string>
+    <string name="settings_liquid_glass_desc">Ponuka, štítky hore a ovládacie prvky prehliadača rozmazávajú to, čo je pod nimi</string>
     <string name="settings_tint_cloud">Odznaky cloudu vo farbe akcentu</string>
     <string name="settings_gif_autoplay_grid">Prehrávať GIFy v mriežkach</string>
     <string name="settings_gif_autoplay_covers">Prehrávať GIF obaly albumov</string>

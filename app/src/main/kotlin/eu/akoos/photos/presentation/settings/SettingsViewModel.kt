@@ -1004,6 +1004,7 @@ class SettingsViewModel @Inject constructor(
                     themeMode = ThemeMode.fromKey(migratedPrefs[SettingsKeys.THEME_MODE]),
                     palette = ThemePalette.fromKey(migratedPrefs[SettingsKeys.THEME_PALETTE]),
                     amoledBlack = migratedPrefs[SettingsKeys.AMOLED_BLACK] ?: false,
+                    liquidGlass = migratedPrefs[SettingsKeys.LIQUID_GLASS] ?: false,
                     tintCloudWithAccent = migratedPrefs[SettingsKeys.TINT_CLOUD_WITH_ACCENT] ?: false,
                     gifAutoplayGrid = migratedPrefs[SettingsKeys.GIF_AUTOPLAY_GRID] ?: false,
                     gifAutoplayCovers = migratedPrefs[SettingsKeys.GIF_AUTOPLAY_COVERS] ?: false,
@@ -1273,6 +1274,13 @@ class SettingsViewModel @Inject constructor(
      * swap: MainActivity re-collects the key and re-themes live, so no boot mirror and no
      * AppCompatDelegate recreate are needed.
      */
+    fun setLiquidGlass(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[SettingsKeys.LIQUID_GLASS] = enabled }
+            _uiState.update { it.copy(liquidGlass = enabled) }
+        }
+    }
+
     fun setAmoledBlack(enabled: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.AMOLED_BLACK] = enabled }

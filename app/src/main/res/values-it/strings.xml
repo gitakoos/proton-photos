@@ -546,6 +546,8 @@
     <string name="map_style_modern">Mappa del mondo</string>
     <string name="map_style_modern_summary">Un globo moderno che puoi ruotare verso i tuoi luoghi.</string>
     <string name="settings_amoled_black">Nero puro (AMOLED)</string>
+    <string name="settings_liquid_glass">Vetro liquido</string>
+    <string name="settings_liquid_glass_desc">Il menu, le pillole in alto e i controlli del visualizzatore sfocano ciò che sta sotto</string>
     <string name="settings_tint_cloud">Badge del cloud con colore d\'accento</string>
     <string name="settings_gif_autoplay_grid">Riproduci le GIF nelle griglie</string>
     <string name="settings_gif_autoplay_covers">Riproduci le copertine GIF degli album</string>

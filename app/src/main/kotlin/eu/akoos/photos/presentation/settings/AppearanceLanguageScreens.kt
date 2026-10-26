@@ -248,6 +248,19 @@ fun ThemeSettingsScreen(
             )
         }
 
+        // Frosted pills blur a layer of the screen, which Android 11 and older cannot do.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            Spacer(Modifier.height(20.dp))
+            SettingsCard {
+                ToggleRow(
+                    label = stringResource(R.string.settings_liquid_glass),
+                    description = stringResource(R.string.settings_liquid_glass_desc),
+                    checked = state.liquidGlass,
+                    onCheckedChange = { viewModel.setLiquidGlass(it) },
+                )
+            }
+        }
+
         // ── AMOLED pure-black toggle — only takes effect in dark mode, so it shows only when the
         // effective theme is dark: an explicit Dark choice, or System while the system is dark. ──
         val darkEffective = state.themeMode == ThemeMode.Dark ||

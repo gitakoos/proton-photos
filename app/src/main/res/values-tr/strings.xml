@@ -1092,6 +1092,8 @@
     <string name="map_style_modern">Dünya haritası</string>
     <string name="map_style_modern_summary">Yerlerine doğru döndürebileceğin modern bir küre.</string>
     <string name="settings_amoled_black">Saf siyah (AMOLED)</string>
+    <string name="settings_liquid_glass">Sıvı cam</string>
+    <string name="settings_liquid_glass_desc">Menü, üstteki haplar ve fotoğraf görüntüleyicinin düğmeleri altlarındakini bulanıklaştırır</string>
     <string name="settings_tint_cloud">Vurgu renkli bulut rozetleri</string>
 
     <string name="language_en">İngilizce, English</string>

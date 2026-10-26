@@ -30,6 +30,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.datastore.preferences.core.edit
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -1157,6 +1160,8 @@ fun GalleryScreen(
     val newsUnread by viewModel.newsUnread.collectAsStateWithLifecycle()
     val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
 
+    // The grid as the floating header and dock frost it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(appColors.bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1172,7 +1177,7 @@ fun GalleryScreen(
         HorizontalPager(
             state = pagerState,
             userScrollEnabled = !state.isSelectionMode,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().glassSource(glass),
         ) { page ->
         when (page) {
             0 -> {
@@ -1335,7 +1340,7 @@ fun GalleryScreen(
         ) {
             Box(modifier = Modifier.animateContentSize()) {
                 Crossfade(targetState = pagerState.currentPage, label = "headerTab") { page ->
-                    CompositionLocalProvider(LocalPeopleRail provides peopleRail) {
+                    CompositionLocalProvider(LocalPeopleRail provides peopleRail, LocalGlassBackdrop provides glass) {
                     GalleryHeader(
                         selectedTab = page,
                         galleryState = state,
@@ -1534,6 +1539,7 @@ fun GalleryScreen(
                 .navigationBarsPadding()
                 .padding(bottom = 24.dp),
         ) {
+            CompositionLocalProvider(LocalGlassBackdrop provides glass) {
             BottomDock(
                 // The live fractional page position drives the sliding highlight, so it follows a swipe.
                 position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
@@ -1565,6 +1571,7 @@ fun GalleryScreen(
                     tabScope.launch { pagerState.animateScrollToPage(tab) }
                 },
             )
+            }
         }
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(

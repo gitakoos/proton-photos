@@ -565,6 +565,8 @@
     <string name="map_style_modern">Világtérkép</string>
     <string name="map_style_modern_summary">Modern földgömb, amelyet a helyeidhez pörgethetsz.</string>
     <string name="settings_amoled_black">Tiszta fekete (AMOLED)</string>
+    <string name="settings_liquid_glass">Liquid glass</string>
+    <string name="settings_liquid_glass_desc">Az alsó menü, a felső pillek és a fotónézegető gombjai elmossák a mögöttük lévő tartalmat</string>
     <string name="settings_tint_cloud">Felhő jelvények a paletta színével</string>
     <string name="settings_gif_autoplay_grid">GIF-ek lejátszása a rácsokban</string>
     <string name="settings_gif_autoplay_covers">GIF album borítók lejátszása</string>

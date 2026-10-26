@@ -213,6 +213,10 @@ object SettingsKeys {
      */
     val AMOLED_BLACK = booleanPreferencesKey("amoled_black")
 
+    /** Frosted pills: the menu, the top bar's pills and the photo viewer's blur what is under them. Off by
+     *  default, and only offered on Android 12 and newer. */
+    val LIQUID_GLASS = booleanPreferencesKey("liquid_glass")
+
     /** When true, the green "backed up" cloud badges are tinted with the palette accent colour instead of
      *  the fixed green. Off by default, so the badges stay green unless the user turns it on. */
     val TINT_CLOUD_WITH_ACCENT = booleanPreferencesKey("tint_cloud_with_accent")

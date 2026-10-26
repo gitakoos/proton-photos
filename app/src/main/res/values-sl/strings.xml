@@ -754,6 +754,8 @@
     <string name="map_style_modern">Zemljevid sveta</string>
     <string name="map_style_modern_summary">Sodoben globus, ki ga lahko zavrtite do svojih krajev.</string>
     <string name="settings_amoled_black">Čisto črna (AMOLED)</string>
+    <string name="settings_liquid_glass">Tekoče steklo</string>
+    <string name="settings_liquid_glass_desc">Meni, gumbi na vrhu in kontrolniki pregledovalnika zameglijo, kar je pod njimi</string>
     <string name="settings_tint_cloud">Oznake oblaka v poudarni barvi</string>
     <string name="settings_gif_autoplay_grid">Predvajaj GIF-e v mrežah</string>
     <string name="settings_gif_autoplay_covers">Predvajaj GIF ovitke albumov</string>

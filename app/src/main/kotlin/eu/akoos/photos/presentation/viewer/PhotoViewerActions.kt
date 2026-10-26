@@ -82,6 +82,7 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.deleteConfirmRows
 import eu.akoos.photos.presentation.common.deleteRowDescription
 import eu.akoos.photos.presentation.common.deleteRowTitleRes
+import eu.akoos.photos.presentation.common.pillSurface
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Bg0
@@ -204,8 +205,7 @@ internal fun ViewerBubble(onClick: () -> Unit, size: androidx.compose.ui.unit.Dp
     Box(
         modifier = Modifier
             .size(size)
-            .background(PillBgOpaque, bubbleShape)
-            .border(0.5.dp, PillBorder, bubbleShape)
+            .pillSurface(PillBgOpaque, bubbleShape, border = PillBorder)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { content() }

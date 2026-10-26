@@ -60,6 +60,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.work.WorkManager
 import dagger.hilt.android.AndroidEntryPoint
+import eu.akoos.photos.presentation.common.LocalLiquidGlass
 import java.util.Locale
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -425,6 +426,11 @@ class MainActivity : AppCompatActivity() {
             }
             val amoledBlack by amoledFlow.collectAsState(initial = false)
 
+            val liquidGlassFlow = remember {
+                settingsDataStore.data.map { it[SettingsKeys.LIQUID_GLASS] == true }
+            }
+            val liquidGlass by liquidGlassFlow.collectAsState(initial = false)
+
             // Tint the green "backed up" cloud badges with the palette accent — DataStore-backed, live.
             val tintCloudFlow = remember {
                 settingsDataStore.data.map { it[SettingsKeys.TINT_CLOUD_WITH_ACCENT] == true }
@@ -488,6 +494,7 @@ class MainActivity : AppCompatActivity() {
                   CompositionLocalProvider(
                       LocalStaticImageLoader provides staticImageLoader,
                       LocalIs24Hour provides is24Hour,
+                      LocalLiquidGlass provides liquidGlass,
                   ) {
                     val forceUpdateFlow = remember {
                         settingsDataStore.data.map { it[FORCE_UPDATE_REQUIRED] == true }

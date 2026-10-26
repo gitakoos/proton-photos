@@ -44,11 +44,18 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Panorama
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import eu.akoos.photos.presentation.common.GlassBackdrop
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
+import eu.akoos.photos.presentation.common.glassPanel
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.pillSurface
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -1301,6 +1308,8 @@ fun PhotoViewerScreen(
     val rootTopBar by rememberUpdatedState(topBarBounds)
     val rootBottomBar by rememberUpdatedState(bottomBarBounds)
     val rootOrigin by rememberUpdatedState(viewerOrigin)
+    // The photo as the viewer's pills frost it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(Bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1450,7 +1459,7 @@ fun PhotoViewerScreen(
             // Compose and load one page either side, so swiping onto a neighbour finds its thumbnail
             // already decoded instead of a blank Bg0 frame while it loads.
             beyondViewportPageCount = 1,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().glassSource(glass),
             // Key each page slot to its item's stable identity so a live reconcile rebinds per-page
             // state (video flags, painted-thumb gate) to the photo rather than the position. When a
             // LocalOnly is swapped for the Synced it became, its stable id changes (uri → linkId)
@@ -2027,8 +2036,7 @@ fun PhotoViewerScreen(
                 Row(
                     modifier = Modifier
                         .height(48.dp)
-                        .background(PillBgOpaque, infoPillShape)
-                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2101,8 +2109,7 @@ fun PhotoViewerScreen(
             Row(
                 modifier = Modifier
                     .height(40.dp)
-                    .background(PillBgOpaque, infoPillShape)
-                    .border(0.5.dp, PillBorder, infoPillShape)
+                    .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                     .clickable { showMetadata = true }
                     .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2156,6 +2163,7 @@ fun PhotoViewerScreen(
         }
 
         // ── Top bar (fades with overlays) ─────────────────────────────────────
+        CompositionLocalProvider(LocalGlassBackdrop provides glass) {
         AnimatedVisibility(
             visible = showChrome,
             enter = fadeIn(),
@@ -2211,12 +2219,24 @@ fun PhotoViewerScreen(
                                     tint = FgPrimary, modifier = Modifier.size(20.dp))
                             }
                         }
+                        // The menu opens in a window of its own, over a photo that stands still while it is open,
+                        // so its glass frosts one picture of the photo taken as it opens.
+                        val liveGlass = LocalGlassBackdrop.current
+                        var menuGlass by remember { mutableStateOf<GlassBackdrop?>(null) }
+                        LaunchedEffect(menuExpanded, liveGlass) {
+                            menuGlass = if (menuExpanded) liveGlass?.freeze() else null
+                        }
+                        val menuShape = RoundedCornerShape(18.dp)
                         androidx.compose.material3.DropdownMenu(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false },
-                            shape = RoundedCornerShape(18.dp),
-                            containerColor = appColors.cardBg,
-                            border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
+                            shape = menuShape,
+                            containerColor = if (menuGlass != null) Color.Transparent else appColors.cardBg,
+                            border = androidx.compose.foundation.BorderStroke(
+                                0.5.dp,
+                                if (menuGlass != null) Color.White.copy(alpha = 0.10f) else appColors.pillBorder,
+                            ),
+                            modifier = Modifier.glassPanel(menuGlass, appColors.cardBg, menuShape),
                         ) {
                             // Menu order: the favourite and edit listed turned sideways, then the people and
                             // metadata cluster, then the album and storage actions, then playback, and hide
@@ -2603,7 +2623,10 @@ fun PhotoViewerScreen(
             }
         }
 
+        }
+
         // ── Bottom section — hidden when overlays are off ────────────────────
+        CompositionLocalProvider(LocalGlassBackdrop provides glass) {
         AnimatedVisibility(
             visible = showChrome,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -2637,8 +2660,7 @@ fun PhotoViewerScreen(
             if (fullResBlockedByMetered && !meteredHintDismissed) {
                 Row(
                     modifier = Modifier
-                        .background(PillBgOpaque, RoundedCornerShape(999.dp))
-                        .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                        .pillSurface(PillBgOpaque, RoundedCornerShape(999.dp), border = PillBorder)
                         .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2711,8 +2733,7 @@ fun PhotoViewerScreen(
                 val motionPlaying = motionVideoFile != null
                 Row(
                     modifier = Modifier
-                        .background(PillBgOpaque, infoPillShape)
-                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                         .clickable(enabled = !isExtractingMotion) {
                             if (motionPlaying) viewModel.stopMotionPhoto()
                             else viewModel.playMotionPhoto(motionKey)
@@ -2750,8 +2771,7 @@ fun PhotoViewerScreen(
                 state is PhotoViewerViewModel.ViewerState.ShowImage) {
                 Row(
                     modifier = Modifier
-                        .background(PillBgOpaque, infoPillShape)
-                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                         .clickable { viewModel.enterPanorama() }
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -2809,8 +2829,7 @@ fun PhotoViewerScreen(
                 ) {
                     Row(
                         modifier = Modifier
-                            .background(PillBgOpaque, infoPillShape)
-                            .border(0.5.dp, PillBorder, infoPillShape)
+                            .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                             .clickable { if (settledItem != null) trashConfirmAction = "restore" }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -2829,8 +2848,7 @@ fun PhotoViewerScreen(
                     }
                     Row(
                         modifier = Modifier
-                            .background(PillBgOpaque, infoPillShape)
-                            .border(0.5.dp, PillBorder, infoPillShape)
+                            .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                             .clickable { if (settledItem != null) trashConfirmAction = "delete" }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -2851,6 +2869,7 @@ fun PhotoViewerScreen(
             }
         }
         } // AnimatedVisibility
+        }
 
         // Text mode takes the viewer's own chrome down, so this is the only thing on screen that
         // names the mode and the only control it needs; everything the user does with the words
