@@ -35,6 +35,18 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Label
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -131,6 +143,11 @@ internal fun PhotoMetadataSheet(
     showMapBox: Boolean = false,
     /** Opens the full map centred on the photo's fix from the Map box. Null leaves the box inert. */
     onOpenMap: ((latitude: Double, longitude: Double) -> Unit)? = null,
+    /** Opens the Add labels sheet from the Labels shortcut. Null leaves the shortcut out. */
+    onOpenLabels: (() -> Unit)? = null,
+    /** True while the sheet shows every field (the All details page) rather than the summary. */
+    showAll: Boolean = false,
+    onShowAllChange: (Boolean) -> Unit = {},
 ) {
     if (item == null) return
     val isLocal = item is GalleryItem.LocalOnly || item is GalleryItem.Synced
@@ -139,12 +156,17 @@ internal fun PhotoMetadataSheet(
     val isDeviceOnly = item is GalleryItem.LocalOnly
     var showStripConfirm by remember { mutableStateOf(false) }
     var pendingStripConfig by remember { mutableStateOf<MetadataStripConfig?>(null) }
+    // The sheet shows a short summary under a row of shortcuts; every field the file carries waits one tap away.
+    // The page is held by the caller, so the sheet's back gesture can step back to the summary first.
+    LaunchedEffect(item) { onShowAllChange(false) }
 
     // Every group is on screen at once, so the sheet takes most of the height it can get; the
     // remaining gap keeps the panel clear of the status bar and the content still scrolls inside
     // that ceiling for a photo carrying the full EXIF set.
     val maxSheetHeight = (LocalConfiguration.current.screenHeightDp * 0.85f).dp
     androidx.compose.foundation.rememberScrollState().let { scrollState ->
+        // Each page opens at its top, its title and way back in view.
+        LaunchedEffect(showAll) { scrollState.scrollTo(0) }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -155,24 +177,28 @@ internal fun PhotoMetadataSheet(
                 .padding(bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(
-                stringResource(R.string.viewer_menu_details),
-                color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
-            )
-
-            // Who is in the photo and where it was taken lead the panel, ahead of the file's details.
-            // The map places the same fix the Location rows below state.
-            peopleBox()
-            val shown = shownCoordinates(resolvedGps, exif)
-            val mapPoint = if (showMapBox) mappablePoint(shown.latitude, shown.longitude) else null
-            if (mapPoint != null) {
-                DetailsMapBox(
-                    latitude = mapPoint.latitude,
-                    longitude = mapPoint.longitude,
-                    placeLabel = place,
-                    onOpen = onOpenMap?.let { open -> { open(mapPoint.latitude, mapPoint.longitude) } },
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (showAll) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.onboarding_back),
+                        tint = FgPrimary,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { onShowAllChange(false) }
+                            .padding(6.dp)
+                            .size(22.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(
+                    stringResource(if (showAll) R.string.viewer_meta_all_details else R.string.viewer_menu_details),
+                    color = FgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 )
             }
+
+            val shown = shownCoordinates(resolvedGps, exif)
+            val mapPoint = if (showMapBox) mappablePoint(shown.latitude, shown.longitude) else null
 
             val rowFile = stringResource(R.string.viewer_meta_row_file)
             val rowDate = stringResource(R.string.viewer_meta_row_date)
@@ -207,8 +233,60 @@ internal fun PhotoMetadataSheet(
                 else -> stringResource(R.string.viewer_meta_source_backed_up)
             }
 
+            val isVideo = mimeType.startsWith("video/")
+            if (!showAll) {
+                val stripAll = MetadataStripConfig(
+                    stripGps = true,
+                    stripCameraInfo = true,
+                    stripTimestamp = false,
+                    stripSoftwareInfo = true,
+                    stripAuthorship = true,
+                )
+                DetailsShortcuts(
+                    onDate = onEditMetadata,
+                    onPlace = onEditMetadata,
+                    onLabels = onOpenLabels,
+                    tags = photoTags,
+                    onToggleTag = onToggleTag,
+                    onPrivate = if (isLocal && exif != null) {
+                        { pendingStripConfig = stripAll; showStripConfirm = true }
+                    } else null,
+                    privateWorking = isStripping,
+                )
+                // Who is in the photo and where it was taken lead the summary.
+                peopleBox()
+                if (mapPoint != null) {
+                    DetailsMapBox(
+                        latitude = mapPoint.latitude,
+                        longitude = mapPoint.longitude,
+                        placeLabel = place,
+                        onOpen = onOpenMap?.let { open -> { open(mapPoint.latitude, mapPoint.longitude) } },
+                    )
+                }
+                val durationMs = if (isVideo) videoDurationMs(localMedia?.duration, cloud?.durationMs, cloudVideoMeta?.durationMs) else null
+                DetailsSummary(
+                    dateMs = dateMs,
+                    fileName = localMedia?.displayName ?: cloud?.displayName ?: "",
+                    facts = listOfNotNull(
+                        formatOf(mimeType).takeIf { it.isNotBlank() },
+                        if (resW != null && resH != null) megapixelsText(resW, resH) else null,
+                        if (resW != null && resH != null) "$resW × $resH" else null,
+                        durationMs?.let { eu.akoos.photos.presentation.util.formatVideoTime(it) },
+                        sizeBytes.takeIf { it > 0 }?.let { formatBytes(it) },
+                    ),
+                    onRename = onRenameClick,
+                )
+                DetailsWhere(
+                    source = source,
+                    inCloud = item !is GalleryItem.LocalOnly || hasCloudCopy,
+                    where = (localFolder ?: localMedia?.bucketName)?.takeIf { it.isNotBlank() }
+                        ?: cloudAlbums.takeIf { it.isNotEmpty() }?.joinToString(", "),
+                )
+                labelsBox()
+                DetailsAllRow(onClick = { onShowAllChange(true) })
+            } else {
             // When and where lead, the moments a person looks the photo up by; the camera, the picture and
-            // the file follow, and the labels and categories the user sets close the facts.
+            // the file follow.
             // The Date row is the capture moment the app itself works with and the one the pencil
             // edits, so it leads. The raw EXIF pair earns a row only where it disagrees with that
             // moment, which keeps an untouched photo down to a single timestamp.
@@ -304,7 +382,6 @@ internal fun PhotoMetadataSheet(
             // and height, so it is the one geometry row and the raw EXIF dimensions stay out. A
             // video keeps the section on screen with dash placeholders while a cloud-only read
             // resolves, so its two rows fill in rather than pop in.
-            val isVideo = mimeType.startsWith("video/")
             if (resW != null || isVideo || exif?.orientation in TURNED_ORIENTATIONS) {
                 MetadataSection(stringResource(R.string.viewer_meta_section_image)) {
                     MetaRow(rowResolution, if (resW != null && resH != null) resolutionText(resW, resH) else "—")
@@ -349,9 +426,6 @@ internal fun PhotoMetadataSheet(
                 MetaRow(rowSource, source)
             }
 
-            labelsBox()
-            CategoryEditor(tags = photoTags, onToggle = onToggleTag)
-
             if (exif != null &&
                 (exif.description != null || exif.software != null || exif.artist != null || exif.copyright != null)
             ) {
@@ -379,44 +453,6 @@ internal fun PhotoMetadataSheet(
                 }
             }
 
-            if (isLocal && exif != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(DeleteTint, RoundedCornerShape(12.dp))
-                        .border(0.5.dp, ErrorColor.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                        .clickable(enabled = !isStripping) {
-                            pendingStripConfig = MetadataStripConfig(
-                                stripGps = true,
-                                stripCameraInfo = true,
-                                stripTimestamp = false,
-                                stripSoftwareInfo = true,
-                                stripAuthorship = true,
-                            )
-                            showStripConfirm = true
-                        }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column {
-                        Text(
-                            stringResource(R.string.viewer_meta_strip_all),
-                            color = ErrorColor, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            stringResource(R.string.viewer_meta_strip_all_desc),
-                            color = FgMute, fontSize = 11.5.sp,
-                        )
-                    }
-                    if (isStripping) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                            color = ErrorColor,
-                        )
-                    }
-                }
             }
         }
     }
@@ -528,9 +564,8 @@ internal fun MetaRow(label: String, value: String, onEdit: (() -> Unit)? = null)
     }
 }
 
-/** Toggleable category chips. Excludes tag 0 Favorites (own heart button) and 2 Videos (derived
- *  from mime type); labels reuse the gallery category-filter strings. One list for every photo,
- *  backed up or not, so a category offered on one is offered on all of them. */
+/** The categories a photo can be put in by hand. Favorites (its own heart) and Videos (read from the file) are
+ *  not among them; the names are the gallery's category names. */
 private val EDITABLE_CATEGORY_TAGS = listOf(
     1 to R.string.gallery_filter_screenshots,
     3 to R.string.gallery_filter_live_photos,
@@ -542,49 +577,157 @@ private val EDITABLE_CATEGORY_TAGS = listOf(
     9 to R.string.gallery_filter_raw,
 )
 
+/**
+ * The shortcuts across the top of the details: edit the date or the place, add labels, put the photo in a
+ * category from a small menu that opens over the button, and strip its private metadata. A shortcut with no
+ * action here is left out.
+ */
+@Composable
+private fun DetailsShortcuts(
+    onDate: (() -> Unit)?,
+    onPlace: (() -> Unit)?,
+    onLabels: (() -> Unit)?,
+    tags: Set<Int>,
+    onToggleTag: (Int, Boolean) -> Unit,
+    onPrivate: (() -> Unit)?,
+    privateWorking: Boolean,
+) {
+    var categoriesOpen by remember { mutableStateOf(false) }
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+        onDate?.let { DetailsShortcut(Icons.Default.Event, stringResource(R.string.viewer_meta_row_date), onClick = it) }
+        onPlace?.let { DetailsShortcut(Icons.Default.Place, stringResource(R.string.viewer_meta_row_place), onClick = it) }
+        onLabels?.let { DetailsShortcut(Icons.AutoMirrored.Filled.Label, stringResource(R.string.label_section_title), onClick = it) }
+        Box {
+            DetailsShortcut(
+                Icons.Default.Category,
+                stringResource(R.string.gallery_filter_categories),
+                active = tags.any { tag -> EDITABLE_CATEGORY_TAGS.any { it.first == tag } },
+                onClick = { categoriesOpen = true },
+            )
+            // The same raised card the viewer's own menu falls back to, lifted off the sheet beneath it.
+            val appColors = eu.akoos.photos.presentation.theme.AppColors.current
+            androidx.compose.material3.DropdownMenu(
+                expanded = categoriesOpen,
+                onDismissRequest = { categoriesOpen = false },
+                shape = RoundedCornerShape(18.dp),
+                containerColor = appColors.cardBg,
+                border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
+                shadowElevation = 12.dp,
+            ) {
+                EDITABLE_CATEGORY_TAGS.forEach { (tagId, labelRes) ->
+                    val selected = tagId in tags
+                    androidx.compose.material3.DropdownMenuItem(
+                        text = { Text(stringResource(labelRes), color = FgPrimary, fontSize = 14.sp) },
+                        trailingIcon = {
+                            if (selected) Icon(Icons.Default.Check, contentDescription = null, tint = Accent, modifier = Modifier.size(18.dp))
+                        },
+                        // The menu stays open, so several categories can be set in one go.
+                        onClick = { onToggleTag(tagId, !selected) },
+                    )
+                }
+            }
+        }
+        onPrivate?.let {
+            DetailsShortcut(
+                Icons.Default.Shield,
+                stringResource(R.string.viewer_meta_shortcut_private),
+                tint = ErrorColor,
+                enabled = !privateWorking,
+                onClick = it,
+            )
+        }
+    }
+}
+
+/** One shortcut: a round button over its name. [active] rings it in the accent, for a choice already made. */
+@Composable
+private fun DetailsShortcut(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color = Accent,
+    active: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .alpha(if (enabled) 1f else 0.5f)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .background(if (active) Accent.copy(alpha = 0.18f) else cardFill(CardBg))
+                .border(0.5.dp, if (active) Accent else Line2, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            label,
+            color = FgDim,
+            fontSize = 11.5.sp,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** The photo in a glance: the day it was taken, the time and the file name (tap to rename), and its format,
+ *  size and length as small tags. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CategoryEditor(tags: Set<Int>, onToggle: (Int, Boolean) -> Unit) {
-    Column {
-        Text(
-            stringResource(R.string.gallery_filter_categories).uppercase(),
-            color = FgMute, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.8.sp,
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-        // One sliding row of the chips the gallery's category rail uses, the ones set first, rather than a
-        // wrapped block four rows tall for a choice most photos never need.
-        val ordered = remember(tags) { EDITABLE_CATEGORY_TAGS.sortedByDescending { it.first in tags } }
-        val chipFill = cardFill(CardBg)
-        androidx.compose.foundation.lazy.LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fullBleedRow(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
+private fun DetailsSummary(dateMs: Long, fileName: String, facts: List<String>, onRename: () -> Unit) {
+    val locale = java.util.Locale.getDefault()
+    val is24Hour = eu.akoos.photos.presentation.util.LocalIs24Hour.current
+    val day = remember(dateMs, locale) {
+        val pattern = android.text.format.DateFormat.getBestDateTimePattern(locale, "EEEEyMMMMd")
+        java.text.SimpleDateFormat(pattern, locale).format(java.util.Date(dateMs))
+    }
+    val time = remember(dateMs, locale, is24Hour) { eu.akoos.photos.presentation.util.formatTimeOfDay(dateMs, locale, is24Hour) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(cardFill(CardBg), RoundedCornerShape(14.dp))
+            .border(0.5.dp, Line2, RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Text(day, color = FgPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier.padding(top = 3.dp).clip(RoundedCornerShape(6.dp)).clickable(onClick = onRename),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            items(ordered.size, key = { ordered[it].first }) { index ->
-                val (tagId, labelRes) = ordered[index]
-                val selected = tagId in tags
-                Row(
-                    modifier = Modifier
-                        .height(34.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(if (selected) Accent.copy(alpha = 0.18f) else chipFill)
-                        .border(0.5.dp, if (selected) Accent else Line2, RoundedCornerShape(20.dp))
-                        .clickable { onToggle(tagId, !selected) }
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        if (selected) Icons.Default.Check else Icons.Default.Add,
-                        contentDescription = null,
-                        tint = if (selected) Accent else FgMute,
-                        modifier = Modifier.size(14.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
+            Text(
+                "$time · $fileName",
+                color = FgDim,
+                fontSize = 13.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.cd_viewer_metadata_edit), tint = Accent, modifier = Modifier.size(14.dp))
+        }
+        if (facts.isNotEmpty()) {
+            FlowRow(
+                modifier = Modifier.padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                facts.forEach { fact ->
                     Text(
-                        stringResource(labelRes),
-                        color = if (selected) FgPrimary else FgMute,
-                        fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                        fact,
+                        color = FgPrimary.copy(alpha = 0.85f),
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .background(FgPrimary.copy(alpha = 0.07f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
                     )
                 }
             }
@@ -592,15 +735,55 @@ private fun CategoryEditor(tags: Set<Int>, onToggle: (Int, Boolean) -> Unit) {
     }
 }
 
+/** Where the photo is kept: on the phone, on Drive or both, and the folder or the albums it is in. */
+@Composable
+private fun DetailsWhere(source: String, inCloud: Boolean, where: String?) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(cardFill(CardBg), RoundedCornerShape(14.dp))
+            .border(0.5.dp, Line2, RoundedCornerShape(14.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (inCloud) Icons.Default.Cloud else Icons.Default.PhoneAndroid,
+            contentDescription = null,
+            tint = FgDim,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(source, color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            where?.let { Text(it, color = FgMute, fontSize = 12.5.sp, maxLines = 2) }
+        }
+    }
+}
+
+/** Opens every field the file carries, on the sheet's second page. */
+@Composable
+private fun DetailsAllRow(onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(cardFill(CardBg))
+            .border(0.5.dp, Line2, RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(R.string.viewer_meta_all_details),
+            color = FgPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = FgMute, modifier = Modifier.size(20.dp))
+    }
+}
+
 /** The EXIF orientations that turn a photo, the only ones the details name. */
 private val TURNED_ORIENTATIONS = setOf(3, 6, 8)
-
-/** A row that reaches the sheet's edges past its 20.dp side padding, so a sliding row runs off the screen edge. */
-private fun Modifier.fullBleedRow(): Modifier = layout { measurable, constraints ->
-    val extra = 40.dp.roundToPx()
-    val placeable = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + extra, minWidth = constraints.minWidth + extra))
-    layout(constraints.maxWidth, placeable.height) { placeable.place(-extra / 2, 0) }
-}
 
 /** The format a person knows a file by, from its media type: JPEG for image/jpeg, MOV for video/quicktime. */
 internal fun formatOf(mimeType: String): String {
@@ -614,6 +797,10 @@ internal fun formatOf(mimeType: String): String {
         else -> sub.substringBefore('+').uppercase()
     }
 }
+
+/** The megapixels alone, "12 MP", the decimal written the [locale]'s way below ten. */
+internal fun megapixelsText(width: Int, height: Int, locale: java.util.Locale = java.util.Locale.getDefault()): String =
+    resolutionText(width, height, locale).substringAfter(" · ")
 
 /** Width by height, with the megapixels a camera is known by: "4000 × 3000 · 12 MP", the decimal written the
  *  [locale]'s way. */

@@ -2027,6 +2027,8 @@
     <string name="viewer_meta_source_cloud">Proton Drive only</string>
     <string name="viewer_meta_strip">Strip</string>
     <string name="viewer_meta_strip_all">Strip all private metadata</string>
+    <string name="viewer_meta_shortcut_private">Private</string>
+    <string name="viewer_meta_all_details">All details</string>
     <string name="viewer_meta_strip_all_desc">Removes GPS, camera info, software, artist and copyright fields from this file</string>
     <string name="label_section_title">Labels</string>
     <string name="label_add_hint">Add a label</string>

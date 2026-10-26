@@ -1282,6 +1282,8 @@
     <string name="viewer_meta_source_cloud">Solo Proton Drive</string>
     <string name="viewer_meta_strip">Rimuovi</string>
     <string name="viewer_meta_strip_all">Rimuovi tutti i metadati privati</string>
+    <string name="viewer_meta_shortcut_private">Privato</string>
+    <string name="viewer_meta_all_details">Tutti i dettagli</string>
     <string name="viewer_meta_strip_all_desc">Rimuove GPS, informazioni della fotocamera e campi software, artista e copyright da questo file</string>
     <string name="viewer_meta_strip_confirm_title">Rimuovere i metadati?</string>
     <string name="viewer_meta_strip_confirm_message">Questo rimuoverà definitivamente %1$s dal file sul tuo dispositivo. L\'operazione non può essere annullata.</string>

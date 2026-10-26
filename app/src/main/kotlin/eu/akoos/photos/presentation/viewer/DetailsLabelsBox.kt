@@ -106,6 +106,8 @@ private fun LabelsChips(
     onOpenSettings: () -> Unit,
     onRemove: (String) -> Unit,
 ) {
+    // A photo without labels shows nothing here: the Labels shortcut above adds the first one.
+    if (labels.isEmpty() && !locked && !showNote) return
     Column {
         Row(
             modifier = Modifier

@@ -1290,6 +1290,8 @@
     <string name="viewer_meta_source_cloud">Csak a Proton Drive-on</string>
     <string name="viewer_meta_strip">Eltávolítás</string>
     <string name="viewer_meta_strip_all">Minden privát metaadat eltávolítása</string>
+    <string name="viewer_meta_shortcut_private">Privát</string>
+    <string name="viewer_meta_all_details">Összes részlet</string>
     <string name="viewer_meta_strip_all_desc">Eltávolítja a GPS-, kamera- és szoftveradatokat, valamint a szerzőt és a szerzői jogot ebből a fájlból</string>
     <string name="viewer_meta_strip_confirm_title">Metaadat eltávolítása?</string>
     <string name="viewer_meta_strip_confirm_message">Ez véglegesen eltávolítja a következőt az eszközön lévő fájlból: %1$s. Ez nem vonható vissza.</string>

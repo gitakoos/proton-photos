@@ -1505,6 +1505,8 @@
     <string name="viewer_meta_source_cloud">Jen Proton Drive</string>
     <string name="viewer_meta_strip">Odstranit</string>
     <string name="viewer_meta_strip_all">Odstranit všechna soukromá metadata</string>
+    <string name="viewer_meta_shortcut_private">Soukromé</string>
+    <string name="viewer_meta_all_details">Všechny podrobnosti</string>
     <string name="viewer_meta_strip_all_desc">Odstraní z tohoto souboru GPS, informace o fotoaparátu, pole softwaru, autora a autorská práva</string>
     <string name="viewer_meta_strip_confirm_title">Odstranit metadata?</string>
     <string name="viewer_meta_strip_confirm_message">Tímto se ze souboru ve vašem zařízení trvale odstraní %1$s. Tuto akci nelze vrátit zpět.</string>

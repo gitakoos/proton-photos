@@ -1267,6 +1267,8 @@
     <string name="viewer_meta_source_cloud">Nur Proton Drive</string>
     <string name="viewer_meta_strip">Entfernen</string>
     <string name="viewer_meta_strip_all">Alle privaten Metadaten entfernen</string>
+    <string name="viewer_meta_shortcut_private">Privat</string>
+    <string name="viewer_meta_all_details">Alle Details</string>
     <string name="viewer_meta_strip_all_desc">Entfernt GPS-, Kamera-, Software-, Urheber- und Copyright-Informationen aus dieser Datei</string>
     <string name="viewer_meta_strip_confirm_title">Metadaten entfernen?</string>
     <string name="viewer_meta_strip_confirm_message">Dadurch werden %1$s dauerhaft aus der Datei auf deinem Gerät entfernt. Dies kann nicht rückgängig gemacht werden.</string>

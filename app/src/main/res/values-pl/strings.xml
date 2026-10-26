@@ -1505,6 +1505,8 @@
     <string name="viewer_meta_source_cloud">Tylko Proton Drive</string>
     <string name="viewer_meta_strip">Usuń</string>
     <string name="viewer_meta_strip_all">Usuń wszystkie prywatne metadane</string>
+    <string name="viewer_meta_shortcut_private">Prywatne</string>
+    <string name="viewer_meta_all_details">Wszystkie szczegóły</string>
     <string name="viewer_meta_strip_all_desc">Usuwa z tego pliku GPS, informacje o aparacie oraz pola oprogramowania, autora i praw autorskich</string>
     <string name="viewer_meta_strip_confirm_title">Usunąć metadane?</string>
     <string name="viewer_meta_strip_confirm_message">Spowoduje to trwałe usunięcie %1$s z pliku na Twoim urządzeniu. Tej operacji nie można cofnąć.</string>

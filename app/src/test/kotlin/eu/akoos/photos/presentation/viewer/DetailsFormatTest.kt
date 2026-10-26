@@ -48,4 +48,11 @@ class DetailsFormatTest {
         assertEquals("4000 × 3000 · 12 MP", resolutionText(4000, 3000, Locale.US))
         assertEquals("8160 × 6120 · 50 MP", resolutionText(8160, 6120, Locale.US))
     }
+
+    @Test
+    fun `the summary tag carries the megapixels alone`() {
+        assertEquals("1.9 MP", megapixelsText(1200, 1600, Locale.US))
+        assertEquals("1,9 MP", megapixelsText(1200, 1600, Locale.forLanguageTag("hu")))
+        assertEquals("12 MP", megapixelsText(4000, 3000, Locale.US))
+    }
 }

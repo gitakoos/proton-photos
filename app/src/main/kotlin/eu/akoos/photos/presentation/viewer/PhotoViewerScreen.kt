@@ -1128,6 +1128,7 @@ fun PhotoViewerScreen(
     }
 
     var showMetadata by remember { mutableStateOf(false) }
+    var metadataShowAll by remember { mutableStateOf(false) }
     // Every trash action confirms in-app, since a device delete under MANAGE_MEDIA runs with no OS
     // dialog. Null hides the confirm; "restore" or "delete" name the pending action.
     var trashConfirmAction by remember { mutableStateOf<String?>(null) }
@@ -3016,13 +3017,16 @@ fun PhotoViewerScreen(
             detailsPlace?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
         }
         AppModalSheet(
-            onDismissRequest = { showMetadata = false },
+            onDismissRequest = { showMetadata = false; metadataShowAll = false },
             sheetState = metadataSheetState,
             containerColor = SheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
+            onBackStep = { metadataShowAll.also { metadataShowAll = false } },
         ) {
             PhotoMetadataSheet(
                 item = item,
+                showAll = metadataShowAll,
+                onShowAllChange = { metadataShowAll = it },
                 exif = metadata,
                 place = placeLabel,
                 resolvedGps = detailsGps,
@@ -3062,6 +3066,9 @@ fun PhotoViewerScreen(
                 // Labels are the user's own: none on a vaulted or hidden photo, nor on someone else's.
                 // The details sheet closes first, so neither the Add labels sheet nor the settings
                 // page opens over it.
+                onOpenLabels = if (item != null && !detailsPrivate && !isReadOnlyAlbum) {
+                    addLabelsAction?.let { add -> { showMetadata = false; add.onClick() } }
+                } else null,
                 labelsBox = {
                     if (item != null && !detailsPrivate && !isReadOnlyAlbum) DetailsLabels(
                         viewModel, item,
