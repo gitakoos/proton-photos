@@ -50,6 +50,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -72,6 +73,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import eu.akoos.photos.presentation.common.AppModalSheet
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
+import eu.akoos.photos.presentation.common.pillSurface
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -819,6 +823,9 @@ fun VideoEditorScreen(
     // Back reaches it first.
     androidx.activity.compose.BackHandler(enabled = videoOption != null) { videoOption = null }
 
+    // The editor's pills are glass over its plain background, drawn once: nothing they sample moves.
+    val glass = rememberGlassBackdrop(Bg0, heavy = true)
+    CompositionLocalProvider(LocalGlassBackdrop provides glass) {
     Column(
         Modifier.fillMaxSize().background(Bg0).statusBarsPadding(),
     ) {
@@ -1031,8 +1038,7 @@ fun VideoEditorScreen(
                 modifier = Modifier
                     .padding(horizontal = 18.dp)
                     .fillMaxWidth()
-                    .background(PillBgOpaque, RoundedCornerShape(999.dp))
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                    .pillSurface(PillBgOpaque, RoundedCornerShape(999.dp), border = PillBorder)
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
@@ -1046,6 +1052,7 @@ fun VideoEditorScreen(
                 }
             }
         }
+    }
     }
 
     if (showDiscardDialog) {
@@ -2305,8 +2312,7 @@ private fun VideoEditorPlayPill(
 
     Row(
         modifier = Modifier
-            .background(PillBg, editorPillShape)
-            .border(0.5.dp, PillBorder, editorPillShape)
+            .pillSurface(PillBg, editorPillShape, border = PillBorder)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),

@@ -95,8 +95,9 @@ class GlassBackdrop internal constructor(
      *  screen (a map) multiplied its cost by the number of pills. Null for a [frozen] backdrop. */
     internal val frost: GraphicsLayer? = null,
     /** For content too heavy to be seen through the glass every frame (a map, which moves under a pan and
-     *  costs most of a frame to draw already): the pills are glass over the plain [base], drawn once, rather
-     *  than over the moving content. Measured on a map, live glass added a third more late frames. */
+     *  costs most of a frame to draw already), or none under the pills at all (an editor's controls below the
+     *  photo): the pills are glass over the plain [base], drawn once, keeping their own fill whole, with the
+     *  glass's rim and light on it. Measured on a map, live glass added a third more late frames. */
     internal val still: Boolean = false,
 ) {
     internal var originOnScreen by mutableStateOf(originOnScreen)
@@ -335,11 +336,11 @@ private class PillSurfaceNode(
         val bottomRadius = (outline as? Outline.Rounded)?.roundRect?.bottomLeftCornerRadius?.x ?: radius
         // A live backdrop's frost is softened already; a still picture is blurred here, at full size.
         val presoftened = backdrop.frozen == null && backdrop.frost != null
-        val key = listOf(padded, pill, radius, bottomRadius, color.toArgb(), lightLabels, shaded, panel, presoftened)
+        val key = listOf(padded, pill, radius, bottomRadius, color.toArgb(), lightLabels, shaded, panel, presoftened, backdrop.still)
         if (key != effectKey) {
             effectKey = key
             glass.renderEffect = if (shaded) {
-                lensEffect(margin.toFloat(), pill, radius, bottomRadius, color, lightLabels, presoftened)
+                lensEffect(margin.toFloat(), pill, radius, bottomRadius, color, lightLabels, presoftened, backdrop.still)
             } else {
                 val blur = when {
                     presoftened && panel -> (BLUR_PANEL - FROST_BLUR).toPx()
@@ -384,7 +385,7 @@ private class PillSurfaceNode(
         drawLayer(clip)
         if (!shaded) {
             // Without the lens, a plain tint keeps the labels legible and a faint line marks the edge.
-            drawOutline(outline, color.copy(alpha = min(color.alpha, PLAIN_TINT)))
+            drawOutline(outline, if (backdrop.still) color else color.copy(alpha = min(color.alpha, PLAIN_TINT)))
             if (border != null) {
                 val edge = if (lightLabels) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.08f)
                 drawOutline(outline, edge, style = Stroke(hairline))
@@ -402,6 +403,7 @@ private class PillSurfaceNode(
         tint: Color,
         lightLabels: Boolean,
         presoftened: Boolean,
+        still: Boolean,
     ): RenderEffect {
         val shader = (lens ?: GlassLens().also { lens = it }).shader
         shader.setFloatUniform("origin", margin, margin)
@@ -410,7 +412,8 @@ private class PillSurfaceNode(
         shader.setFloatUniform("bottomRadius", bottomRadius)
         shader.setFloatUniform("bevel", min(BEVEL.toPx(), min(pill.width, pill.height) / 2f))
         shader.setFloatUniform("refraction", REFRACTION.toPx())
-        shader.setFloatUniform("tint", tint.red, tint.green, tint.blue, min(tint.alpha, if (panel) PANEL_TINT else LENS_TINT))
+        val tintAlpha = if (still) tint.alpha else min(tint.alpha, if (panel) PANEL_TINT else LENS_TINT)
+        shader.setFloatUniform("tint", tint.red, tint.green, tint.blue, tintAlpha)
         shader.setFloatUniform("lightLabels", if (lightLabels) 1f else 0f)
         val lensOnly = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
         val blur = when {

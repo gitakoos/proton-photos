@@ -22,10 +22,14 @@
 
 package eu.akoos.photos.presentation.editor
 
+import androidx.compose.runtime.CompositionLocalProvider
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
+import eu.akoos.photos.presentation.common.pillSurface
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.editor.components.SaveOptionRow
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
@@ -527,6 +531,9 @@ fun PhotoEditorScreen(
     }
     androidx.activity.compose.BackHandler(enabled = panelOpen) { closePanel() }
 
+    // The editor's pills are glass over its plain background: nothing of the photo lies under them.
+    val glass = rememberGlassBackdrop(Bg0, heavy = true)
+    CompositionLocalProvider(LocalGlassBackdrop provides glass) {
     Column(Modifier.fillMaxSize().background(Bg0).statusBarsPadding()) {
         TopBar(
             // Busy while a Hide-faces detection runs too, so a save cannot start before the covers land
@@ -848,8 +855,7 @@ fun PhotoEditorScreen(
                     .systemGestureExclusion()
                     .padding(horizontal = 18.dp)
                     .fillMaxWidth()
-                    .background(PillBgOpaque, pillShape)
-                    .border(0.5.dp, PillBorder, pillShape)
+                    .pillSurface(PillBgOpaque, pillShape, border = PillBorder)
                     .padding(horizontal = 6.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
@@ -867,6 +873,7 @@ fun PhotoEditorScreen(
                 }
             }
         }
+    }
     }
 
     if (showDiscardDialog) {
@@ -1074,8 +1081,7 @@ private fun ExportChip(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .clip(pillShape)
-            .background(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape)
-            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+            .pillSurface(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape, border = if (!selected) PillBorder else null)
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 9.dp),
     ) {
@@ -1162,8 +1168,7 @@ private fun IconBubble(onClick: () -> Unit, enabled: Boolean = true, content: @C
     Box(
         modifier = Modifier
             .size(40.dp)
-            .background(PillBg, CircleShape)
-            .border(0.5.dp, PillBorder, CircleShape)
+            .pillSurface(PillBg, CircleShape, border = PillBorder)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { content() }
@@ -2098,8 +2103,7 @@ internal fun ToolCircle(
         modifier = Modifier
             .size(56.dp)
             .clip(CircleShape)
-            .background(if (selected) FgPrimary else PillBg, CircleShape)
-            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, CircleShape) else Modifier)
+            .pillSurface(if (selected) FgPrimary else PillBg, CircleShape, border = if (!selected) PillBorder else null)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -2269,8 +2273,7 @@ internal fun OptionPill(items: List<PillAction>) {
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Row(
             modifier = Modifier
-                .background(PillBgOpaque, pillShape)
-                .border(0.5.dp, PillBorder, pillShape)
+                .pillSurface(PillBgOpaque, pillShape, border = PillBorder)
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -2543,8 +2546,7 @@ private fun ToolTile(icon: ImageVector, label: String, onClick: () -> Unit) {
         modifier = Modifier
             .width(76.dp)
             .height(64.dp)
-            .background(PillBg, RoundedCornerShape(16.dp))
-            .border(0.5.dp, PillBorder, RoundedCornerShape(16.dp))
+            .pillSurface(PillBg, RoundedCornerShape(16.dp), border = PillBorder)
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .padding(6.dp),
@@ -3116,8 +3118,7 @@ private fun OptionChip(label: String, selected: Boolean, onClick: () -> Unit) {
         modifier = Modifier
             .height(38.dp)
             .clip(pillShape)
-            .background(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape)
-            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+            .pillSurface(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape, border = if (!selected) PillBorder else null)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
@@ -3179,7 +3180,7 @@ private fun ColorPanel(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().background(PillBgOpaque, pillShape).border(0.5.dp, PillBorder, pillShape).padding(4.dp),
+            modifier = Modifier.fillMaxWidth().pillSurface(PillBgOpaque, pillShape, border = PillBorder).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             PillSegment(stringResource(R.string.editor_color_curves), Icons.Default.Gradient, mode == ColorMode.Curves, { onMode(ColorMode.Curves) }, Modifier.weight(1f))
@@ -3219,7 +3220,7 @@ private fun CurvesSection(state: EditorUiState, vm: PhotoEditorViewModel, channe
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().background(PillBgOpaque, pillShape).border(0.5.dp, PillBorder, pillShape).padding(4.dp),
+            modifier = Modifier.fillMaxWidth().pillSurface(PillBgOpaque, pillShape, border = PillBorder).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             ChannelSegment("RGB", FgPrimary, channel == CurveChannel.RGB, { onChannel(CurveChannel.RGB) }, Modifier.weight(1f))
@@ -3531,8 +3532,7 @@ private fun ModeChip(
     Row(
         modifier = modifier
             .height(40.dp)
-            .background(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape)
-            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, pillShape) else Modifier)
+            .pillSurface(if (selected) Accent.copy(alpha = 0.18f) else PillBg, pillShape, border = if (!selected) PillBorder else null)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -3559,8 +3559,7 @@ internal fun ActionChip(
     Row(
         modifier = modifier
             .height(40.dp)
-            .background(PillBg, pillShape)
-            .border(0.5.dp, PillBorder, pillShape)
+            .pillSurface(PillBg, pillShape, border = PillBorder)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
