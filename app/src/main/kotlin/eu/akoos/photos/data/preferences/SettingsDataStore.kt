@@ -867,6 +867,15 @@ object SettingsKeys {
      *  (the install id lasts across a reinstall) or before the sign-out wiped the data they hold. */
     val SHARED_BACKUP_OWN_COPY_TAKEN = booleanPreferencesKey("shared_backup_own_copy_taken")
 
+    /** When the account's face data was last deleted on every device, by this one or another one whose copy on
+     *  Drive carried it, epoch milliseconds. This device's face copy carries it on, and a copy that carries an
+     *  older one holds face data from before the delete, so it is not taken in. */
+    val SHARED_BACKUP_FACES_WIPED_AT = longPreferencesKey("shared_backup_faces_wiped_at")
+
+    /** Set by a delete of the face data everywhere made here, until a round has moved the other devices' face
+     *  copies on Drive to the trash. */
+    val SHARED_BACKUP_FACES_TRASH_PENDING = booleanPreferencesKey("shared_backup_faces_trash_pending")
+
     /** Set once the older per-kind automatic saves were folded into the automatic Drive backup. */
     val SHARED_BACKUP_AUTOSAVE_FOLDED = booleanPreferencesKey("shared_backup_autosave_folded")
 

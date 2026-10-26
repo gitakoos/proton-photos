@@ -1876,6 +1876,9 @@
     <string name="settings_ai_clear">Effacer les données de visages</string>
     <string name="settings_ai_clear_confirm_title">Effacer les données de visages ?</string>
     <string name="settings_ai_clear_confirm_msg">Cela supprime toutes les personnes trouvées et toutes les données de visages. Vos photos ne sont pas affectées. Les visages sont de nouveau détectés au prochain indexage.</string>
+    <string name="settings_ai_clear_where_msg">Tes données de visages sont aussi sauvegardées sur Proton Drive.\n\nSur ce téléphone uniquement : elles sont supprimées ici et reviennent aussitôt depuis Drive.\n\nPartout : elles sont supprimées ici, sur Proton Drive et sur tes autres appareils, et la reconnaissance des visages se désactive sur chacun. Tes photos ne sont pas touchées.</string>
+    <string name="settings_ai_clear_here">Sur ce téléphone uniquement</string>
+    <string name="settings_ai_clear_everywhere">Partout</string>
     <string name="gallery_add_to_person">Ajouter à une personne</string>
     <string name="people_search_hint">Rechercher des personnes</string>
     <string name="person_set_cover">Définir comme couverture</string>

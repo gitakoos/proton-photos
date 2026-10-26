@@ -1969,6 +1969,9 @@
     <string name="settings_ai_clear">Vymazať údaje tvárí</string>
     <string name="settings_ai_clear_confirm_title">Vymazať údaje tvárí?</string>
     <string name="settings_ai_clear_confirm_msg">Týmto sa odstránia všetky nájdené osoby a všetky údaje tvárí. Vaše fotografie zostanú nedotknuté. Tváre sa znova rozpoznajú pri ďalšom indexovaní.</string>
+    <string name="settings_ai_clear_where_msg">Tvoje údaje o tvárach sú zálohované aj na Proton Drive.\n\nLen na tomto telefóne: vymažú sa tu a hneď sa vrátia z Drive.\n\nVšade: vymažú sa tu, na Proton Drive aj na tvojich ďalších zariadeniach a rozpoznávanie tvárí sa na každom vypne. Tvojich fotiek sa to nedotkne.</string>
+    <string name="settings_ai_clear_here">Len na tomto telefóne</string>
+    <string name="settings_ai_clear_everywhere">Všade</string>
     <string name="gallery_add_to_person">Pridať k osobe</string>
     <string name="people_search_hint">Hľadať osoby</string>
     <string name="person_set_cover">Nastaviť ako obálku</string>

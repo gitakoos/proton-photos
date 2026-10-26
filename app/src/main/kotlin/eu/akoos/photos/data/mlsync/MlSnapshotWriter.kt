@@ -90,6 +90,7 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
         if (header is MlSnapshotHeader.Faces) {
             require(header.faceModelVersion >= 0) { "faceModelVersion is negative" }
             require(header.clusterParamsVersion >= 0) { "clusterParamsVersion is negative" }
+            require(header.facesWipedAtMillis >= 0) { "facesWipedAt is negative" }
         }
         out.bytes(MlSnapshotFormat.MAGIC)
         out.i32(
@@ -111,6 +112,7 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
             is MlSnapshotHeader.Search -> out.str(modelText)
         }
         out.i32(dim)
+        if (header is MlSnapshotHeader.Faces) out.i64(header.facesWipedAtMillis)
         for (section in sections) out.i32(section.count)
     }
 

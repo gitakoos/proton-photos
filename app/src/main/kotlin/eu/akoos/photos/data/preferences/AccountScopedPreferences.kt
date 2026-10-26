@@ -108,6 +108,8 @@ object AccountScopedPreferences {
                         SettingsKeys.SHARED_BACKUP_ENABLED,
                         SettingsKeys.SHARED_BACKUP_OWN_COPY_TAKEN,
                         SettingsKeys.SHARED_BACKUP_DEVICE_NAMES,
+                        SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT,
+                        SettingsKeys.SHARED_BACKUP_FACES_TRASH_PENDING,
                         SettingsKeys.SHARED_BACKUP_LAST_AT,
                         SettingsKeys.SHARED_BACKUP_LAST_FAILED,
                         SettingsKeys.SHARED_BACKUP_SAVED,

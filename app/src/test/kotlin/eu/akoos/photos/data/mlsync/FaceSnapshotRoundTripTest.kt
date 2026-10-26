@@ -804,6 +804,63 @@ class FaceSnapshotRoundTripTest {
         assertTrue(taken is FaceSnapshotImportResult.Imported)
     }
 
+    private suspend fun seedTargetOnlyFace() {
+        target.personDao().upsert(PersonEntity(id = 50, userId = ACCOUNT, displayName = "Zed", faceCount = 1))
+        target.faceDao().upsert(listOf(face("linkQ#0", "linkQ", 0.1f, 0.1f, 0.3f, 0.3f, seed = 40, personId = 50, manualName = "Zed")))
+        target.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkQ")))
+    }
+
+    private suspend fun exportWiped(atMs: Long): ByteArray {
+        context.settingsDataStore.edit { it[SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT] = atMs }
+        return export().also { context.settingsDataStore.edit { it.remove(SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT) } }
+    }
+
+    private suspend fun importKnowingWipe(sealed: ByteArray, knownWipeAtMillis: Long?): FaceSnapshotImportResult =
+        FaceSnapshotImporter(context, target, sealing())
+            .import(user, ByteArrayInputStream(sealed), FaceSnapshotMode.Merge, knownWipeAtMillis = knownWipeAtMillis)
+
+    @Test
+    fun `a copy written before a delete everywhere is turned away and changes nothing`() = runTest {
+        seedSource()
+        seedTargetOnlyFace()
+
+        val result = importKnowingWipe(export(), knownWipeAtMillis = 100L)
+
+        assertEquals(FaceSnapshotImportResult.BeforeWipe, result)
+        assertEquals(setOf("linkQ#0"), faces().keys)
+        assertEquals(mapOf("Zed" to 50L), namedPeople())
+    }
+
+    @Test
+    fun `a copy carrying a newer delete everywhere deletes this device's face data before it is taken in`() = runTest {
+        seedSource()
+        seedTargetOnlyFace()
+
+        val result = importKnowingWipe(exportWiped(200L), knownWipeAtMillis = 100L)
+
+        assertTrue(result is FaceSnapshotImportResult.Imported)
+        assertEquals(200L, (result as FaceSnapshotImportResult.Imported).newerWipeAtMillis)
+        assertFalse("linkQ#0" in faces())
+        assertFalse("Zed" in namedPeople())
+        assertTrue(faces().keys.containsAll(listOf("linkA#0", "linkB#0")))
+        assertTrue(target.faceScanDao().scannedKeysForUser(ACCOUNT).none { it == "linkQ" })
+    }
+
+    @Test
+    fun `a copy carrying the delete already known, or one the user picked, is taken in with nothing deleted`() = runTest {
+        seedSource()
+        seedTargetOnlyFace()
+        val sealed = exportWiped(200L)
+
+        val known = importKnowingWipe(sealed, knownWipeAtMillis = 200L)
+        assertEquals(0L, (known as FaceSnapshotImportResult.Imported).newerWipeAtMillis)
+        assertTrue("linkQ#0" in faces())
+
+        val picked = importKnowingWipe(sealed, knownWipeAtMillis = null)
+        assertEquals(0L, (picked as FaceSnapshotImportResult.Imported).newerWipeAtMillis)
+        assertTrue("linkQ#0" in faces())
+    }
+
     @Test
     fun `forgetting an account deletes its faces, people, curation and waiting names, and nothing else`() = runTest {
         seedSource()

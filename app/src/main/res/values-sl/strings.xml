@@ -1966,6 +1966,9 @@
     <string name="settings_ai_clear">Počisti podatke obrazov</string>
     <string name="settings_ai_clear_confirm_title">Počisti podatke obrazov?</string>
     <string name="settings_ai_clear_confirm_msg">To odstrani vse najdene osebe in vse podatke obrazov. Vaše fotografije ostanejo nedotaknjene. Obrazi bodo znova zaznani ob naslednjem indeksiranju.</string>
+    <string name="settings_ai_clear_where_msg">Tvoji podatki o obrazih so varnostno kopirani tudi na Proton Drive.\n\nSamo na tem telefonu: tukaj se izbrišejo in se takoj vrnejo z Drive.\n\nPovsod: izbrišejo se tukaj, na Proton Drive in na tvojih drugih napravah, prepoznavanje obrazov pa se izklopi na vsaki. Tvoje fotografije ostanejo nedotaknjene.</string>
+    <string name="settings_ai_clear_here">Samo na tem telefonu</string>
+    <string name="settings_ai_clear_everywhere">Povsod</string>
     <string name="gallery_add_to_person">Dodaj k osebi</string>
     <string name="people_search_hint">Iskanje oseb</string>
     <string name="person_set_cover">Nastavi kot naslovnico</string>

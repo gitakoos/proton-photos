@@ -1959,6 +1959,9 @@
     <string name="settings_ai_clear">Wyczyść dane twarzy</string>
     <string name="settings_ai_clear_confirm_title">Wyczyścić dane twarzy?</string>
     <string name="settings_ai_clear_confirm_msg">Usuwa to wszystkie znalezione osoby i wszystkie dane twarzy. Twoje zdjęcia pozostają nienaruszone. Twarze zostaną wykryte ponownie przy następnym indeksowaniu.</string>
+    <string name="settings_ai_clear_where_msg">Twoje dane twarzy mają też kopię na Proton Drive.\n\nTylko na tym telefonie: zostaną usunięte tutaj i od razu wrócą z Drive.\n\nWszędzie: zostaną usunięte tutaj, na Proton Drive i na innych twoich urządzeniach, a rozpoznawanie twarzy wyłączy się na każdym z nich. Twoje zdjęcia pozostaną nietknięte.</string>
+    <string name="settings_ai_clear_here">Tylko na tym telefonie</string>
+    <string name="settings_ai_clear_everywhere">Wszędzie</string>
     <string name="gallery_add_to_person">Dodaj do osoby</string>
     <string name="people_search_hint">Szukaj osób</string>
     <string name="person_set_cover">Ustaw jako okładkę</string>

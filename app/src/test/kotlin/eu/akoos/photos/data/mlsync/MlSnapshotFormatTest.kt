@@ -188,7 +188,7 @@ class MlSnapshotFormatTest {
     // Golden FACES snapshot, embedding width 2. The four parts are kept apart so a test can find a record.
     private val goldenFacesHeader = unhex(
         "50 50 4D 4C 53 4E 41 50", // magic "PPMLSNAP"
-        "05 00 00 00", // version 5
+        "06 00 00 00", // version 6
         "01", // kind FACES
         "02 00 64 31", // device id "d1"
         "05 00 50 68 6F 6E 65", // device label "Phone"
@@ -197,6 +197,7 @@ class MlSnapshotFormatTest {
         "02 00 61 62", // face model sha "ab"
         "01 00 00 00", // clustering parameters version 1
         "02 00 00 00", // embedding width 2
+        "0B 00 00 00 00 00 00 00", // faces deleted everywhere at 11
         "02 00 00 00", // keys
         "02 00 00 00", // people
         "01 00 00 00", // name changes
@@ -214,6 +215,14 @@ class MlSnapshotFormatTest {
         "02 04 00 5A 6F C3 AB 00 00 00 00 00 00 00 00", // PERSON 1 "Zoë" (e-diaeresis as two UTF-8 bytes), time unknown
         "09 02 00 41 6C 03 00 41 6E 6E 08 00 00 00 00 00 00 00", // NAME_CHANGE "Al" to "Ann" at 8
         "0A 01 03 00 41 6E 6E 02 00 6B 33 00 00 00 00 0A 00 00 00 00 00 00 00", // REMOVAL manual photo "Ann" "k3" at 10
+    )
+
+    // The same snapshot as version 5 wrote it: no time of a delete everywhere in the header.
+    private val goldenFacesV5Header = unhex(
+        "50 50 4D 4C 53 4E 41 50", "05 00 00 00", "01", "02 00 64 31", "05 00 50 68 6F 6E 65",
+        "08 07 06 05 04 03 02 01", "07 00 00 00", "02 00 61 62", "01 00 00 00", "02 00 00 00",
+        "02 00 00 00", "02 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00",
+        "01 00 00 00", "02 00 00 00",
     )
 
     // The same snapshot as version 4 wrote it: seven counts, and people without a naming time or name changes.
@@ -255,6 +264,7 @@ class MlSnapshotFormatTest {
     )
     private val goldenFacesBytes = goldenFacesHeader + goldenFacesTables + goldenFace + goldenFacesRest
     private val goldenFacesV4 = goldenFacesV4Bytes + goldenFace + goldenFacesRestV4
+    private val goldenFacesV5 = goldenFacesV5Header + goldenFacesTables + goldenFace + goldenFacesRest
     private val goldenFaceStart = goldenFacesHeader.size + goldenFacesTables.size
 
     private fun goldenFacesRecords(): List<MlSnapshotRecord> = listOf(
@@ -276,7 +286,7 @@ class MlSnapshotFormatTest {
         ScanMarker("k2", hiResScanned = true),
     )
 
-    private fun goldenFacesHeaderValue(records: List<MlSnapshotRecord>) = facesHeader(
+    private fun goldenFacesHeaderValue(records: List<MlSnapshotRecord>, facesWipedAtMillis: Long = 11L) = facesHeader(
         records,
         embeddingDim = 2,
         deviceId = "d1",
@@ -284,7 +294,7 @@ class MlSnapshotFormatTest {
         createdAtMillis = 0x0102030405060708L,
         faceModelVersion = 7,
         faceModelSha256 = "ab",
-    )
+    ).copy(facesWipedAtMillis = facesWipedAtMillis)
 
     @Test
     fun `a faces snapshot round-trips every record kind`() {
@@ -374,16 +384,24 @@ class MlSnapshotFormatTest {
                 else -> it
             }
         }
-        assertEquals(goldenFacesHeaderValue(expected), header)
+        assertEquals(goldenFacesHeaderValue(expected, facesWipedAtMillis = 0L), header)
         assertEquals(0, (header as MlSnapshotHeader.Faces).nameChangeCount)
         assertEquals(0, header.removalCount)
         assertEquals(expected, records)
     }
 
     @Test
-    fun `a faces snapshot is written as version 5 and a search snapshot as version 4`() {
+    fun `a version 5 faces snapshot still reads, as one written before any delete everywhere`() {
+        val (header, records) = readAll(goldenFacesV5)
+
+        assertEquals(goldenFacesHeaderValue(goldenFacesRecords(), facesWipedAtMillis = 0L), header)
+        assertEquals(goldenFacesRecords(), records)
+    }
+
+    @Test
+    fun `a faces snapshot is written as version 6 and a search snapshot as version 4`() {
         val faces = snapshotBytes(goldenFacesHeaderValue(goldenFacesRecords()), goldenFacesRecords())
-        assertEquals(5, faces[8].toInt())
+        assertEquals(6, faces[8].toInt())
         val search = listOf(PhotoKey("k"), SearchEmbedding("k", floats(1f, 2f)))
         assertEquals(4, snapshotBytes(searchHeader(search, embeddingDim = 2), search)[8].toInt())
     }
@@ -513,7 +531,7 @@ class MlSnapshotFormatTest {
 
     @Test
     fun `an unknown version is refused before any record is read`() {
-        for (version in listOf(6L, 3L, 0xFFFFFFFFL)) {
+        for (version in listOf(7L, 3L, 0xFFFFFFFFL)) {
             val bytes = goldenFacesBytes.copyOf()
             for (b in 0 until 4) bytes[8 + b] = (version ushr (8 * b)).toByte()
             val error = assertThrows(UnsupportedMlSnapshotVersionException::class.java) {

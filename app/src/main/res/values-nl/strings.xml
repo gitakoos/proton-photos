@@ -1898,6 +1898,9 @@
     <string name="settings_ai_clear">Gezichtsgegevens wissen</string>
     <string name="settings_ai_clear_confirm_title">Gezichtsgegevens wissen?</string>
     <string name="settings_ai_clear_confirm_msg">Dit verwijdert alle gevonden personen en alle gezichtsgegevens. Je foto\'s blijven ongemoeid. Gezichten worden opnieuw gedetecteerd bij de volgende indexering.</string>
+    <string name="settings_ai_clear_where_msg">Je gezichtsgegevens staan ook als back-up op Proton Drive.\n\nAlleen op deze telefoon: ze worden hier gewist en komen meteen terug van Drive.\n\nOveral: ze worden hier, op Proton Drive en op je andere apparaten gewist, en gezichtsherkenning gaat op elk apparaat uit. Je foto\'s blijven onaangeroerd.</string>
+    <string name="settings_ai_clear_here">Alleen op deze telefoon</string>
+    <string name="settings_ai_clear_everywhere">Overal</string>
     <string name="gallery_add_to_person">Aan persoon toevoegen</string>
     <string name="people_search_hint">Personen zoeken</string>
     <string name="person_set_cover">Als omslag instellen</string>

@@ -38,6 +38,10 @@ interface DriveCopyAppliedDao {
     @Upsert
     suspend fun upsert(rows: List<DriveCopyAppliedEntity>)
 
+    /** Forgets the copies of [kind] taken in for [userId], so the next round takes them in again. */
+    @Query("DELETE FROM drive_copy_applied WHERE userId = :userId AND kind = :kind")
+    suspend fun deleteKind(userId: String, kind: String): Int
+
     /** Forgets every copy taken in for [userId], for the sign-out wipe. */
     @Query("DELETE FROM drive_copy_applied WHERE userId = :userId")
     suspend fun deleteForUser(userId: String): Int

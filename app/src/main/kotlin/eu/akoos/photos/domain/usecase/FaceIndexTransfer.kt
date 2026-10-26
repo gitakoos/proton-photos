@@ -425,7 +425,9 @@ internal fun FaceSnapshotImportResult.toFaceIndexImportOutcome(): FaceIndexImpor
     is FaceSnapshotImportResult.Imported -> FaceIndexImportOutcome.Success(faces + facesUpdated, people)
     is FaceSnapshotImportResult.NamesStaged -> FaceIndexImportOutcome.ReattachScheduled(people)
     FaceSnapshotImportResult.WrongAccount -> FaceIndexImportOutcome.WrongAccount
-    FaceSnapshotImportResult.UnsupportedVersion, FaceSnapshotImportResult.Unreadable -> FaceIndexImportOutcome.Unreadable
+    FaceSnapshotImportResult.UnsupportedVersion,
+    FaceSnapshotImportResult.Unreadable,
+    FaceSnapshotImportResult.BeforeWipe -> FaceIndexImportOutcome.Unreadable
     FaceSnapshotImportResult.NotEnoughSpace -> FaceIndexImportOutcome.NotEnoughSpace
 }
 

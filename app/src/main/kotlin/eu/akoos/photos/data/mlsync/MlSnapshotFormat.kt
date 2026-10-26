@@ -41,7 +41,7 @@ import java.io.IOException
  * Header
  *
  *     magic                 8 bytes  ASCII "PPMLSNAP"
- *     version               u32      5 for FACES, 4 for SEARCH (a reader takes 4 and 5 for either kind)
+ *     version               u32      6 for FACES, 4 for SEARCH (a reader takes 4 to 6 for either kind)
  *     kind                  u8       1 = FACES, 2 = SEARCH
  *     deviceId              str      the writing device's id
  *     deviceLabel           str      the writing device's human-readable name
@@ -51,6 +51,8 @@ import java.io.IOException
  *     faceModelSha256       str      hex SHA-256 of the recognition model file
  *     clusterParamsVersion  u32      clustering parameters generation
  *     embeddingDim          u32      components per face embedding
+ *     facesWipedAt          i64      when the account's face data was last deleted on every device, epoch
+ *                                    milliseconds, 0 when never (versions 4 and 5 carry no such field)
  *     9 x u32 counts: keys, people, nameChanges, removals, faces, manualPhotos, notPersons, covers,
  *     scanMarkers (version 4: 7 counts, no nameChanges or removals)
  *   SEARCH continues with
@@ -81,6 +83,11 @@ import java.io.IOException
  *
  * Meaning
  *
+ * - facesWipedAt: a "delete face data everywhere" made on some device of the account, carried on by every
+ *   device that has seen it, the newest one each knows. A reader that knows of a newer delete than a file
+ *   carries (a version 4 or 5 file carries none) takes nothing from that file: it was written by a device
+ *   that had not seen the delete yet, so it holds face data from before it. A reader that finds a newer
+ *   delete in a file than it knows deletes its own face data first, then reads the file.
  * - KEY: a photo's Proton Drive link id, the identity every device of the account shares. Keys are
  *   numbered from 0 in stream order, and every later record names a photo by that number.
  * - PERSON: a person name, numbered from 0 the same way. Every name a later record uses is listed once.
@@ -123,9 +130,9 @@ import java.io.IOException
 object MlSnapshotFormat {
 
     /** The version this build writes for a face snapshot, and the newest it reads. */
-    const val FACES_VERSION = 5
+    const val FACES_VERSION = 6
 
-    /** The version this build writes for a search snapshot, whose layout version 5 left as it was. */
+    /** The version this build writes for a search snapshot, whose layout versions 5 and 6 left as it was. */
     const val SEARCH_VERSION = 4
 
     /** The oldest version this build reads. */
@@ -288,6 +295,8 @@ sealed interface MlSnapshotHeader {
         val scanMarkerCount: Int,
         val nameChangeCount: Int = 0,
         val removalCount: Int = 0,
+        /** When the account's face data was last deleted on every device, 0 when never. */
+        val facesWipedAtMillis: Long = 0L,
     ) : MlSnapshotHeader {
         override val kind: MlSnapshotKind get() = MlSnapshotKind.FACES
     }

@@ -85,6 +85,9 @@ enum class MlSyncPartStatus {
      *  those photos itself. */
     MODEL_MISMATCH,
 
+    /** Round: the copy was written before the face data was deleted everywhere, so nothing of it was taken. */
+    BEFORE_WIPE,
+
     /** Restore: no key of this account opens the snapshot. */
     WRONG_ACCOUNT,
 
@@ -106,7 +109,7 @@ enum class MlSyncPartStatus {
 
     /** Finished as asked: a names-only or model-mismatched restore took what it could and nothing broke. */
     val finished: Boolean
-        get() = this == DONE || this == NAMES_ONLY || this == MODEL_MISMATCH
+        get() = this == DONE || this == NAMES_ONLY || this == MODEL_MISMATCH || this == BEFORE_WIPE
 
     /** Something went wrong with this file. [EMPTY] is neither finished nor failed. */
     val failed: Boolean

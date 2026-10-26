@@ -1746,17 +1746,7 @@ class FaceIndexingScheduler @Inject constructor(
     suspend fun wipeFaceData(userId: UserId?, thenIndex: Boolean = true) = withContext(NonCancellable) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         reset()
-        appDatabase.withTransaction {
-            faceDao.clearForUser(account)
-            personDao.clearForUser(account)
-            faceScanDao.clearForUser(account)
-            personManualPhotoDao.clearForUser(account)
-            notPersonDao.clearForUser(account)
-            appDatabase.personCoverDao().clearForUser(account)
-            appDatabase.personNameDao().clearForUser(account)
-            appDatabase.faceCurationTimeDao().clearForUser(account)
-            appDatabase.clusterSummaryDao().clearForUser(account)
-        }
+        appDatabase.withTransaction { appDatabase.clearFaceData(account) }
         if (thenIndex) requestIndex(userId)
     }
 

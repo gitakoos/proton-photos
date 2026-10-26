@@ -893,6 +893,9 @@
     <string name="settings_ai_clear">Yüz verilerini temizle</string>
     <string name="settings_ai_clear_confirm_title">Yüz verileri temizlensin mi?</string>
     <string name="settings_ai_clear_confirm_msg">Bu işlem bulunan tüm kişileri ve tüm yüz verilerini kaldırır. Fotoğrafların etkilenmez. Yüzler, dizinleme bir sonraki çalıştığında yeniden algılanır.</string>
+    <string name="settings_ai_clear_where_msg">Yüz verilerinin Proton Drive\'da da yedeği var.\n\nYalnızca bu telefonda: burada silinir ve hemen Drive\'dan geri gelir.\n\nHer yerde: burada, Proton Drive\'da ve diğer cihazlarında silinir ve yüz tanıma her birinde kapanır. Fotoğrafların etkilenmez.</string>
+    <string name="settings_ai_clear_here">Yalnızca bu telefonda</string>
+    <string name="settings_ai_clear_everywhere">Her yerde</string>
     <string name="settings_privacy">Gizlilik</string>
     <string name="settings_privacy_desc">Önbellek, çevrimdışı fotoğraflar ve telemetri</string>
     <string name="settings_metadata">Yükleme işlemleri</string>

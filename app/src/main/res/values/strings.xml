@@ -942,6 +942,9 @@
     <string name="settings_ai_clear">Clear face data</string>
     <string name="settings_ai_clear_confirm_title">Clear face data?</string>
     <string name="settings_ai_clear_confirm_msg">This removes every found person and all face data. Your photos are not affected. Faces are detected again the next time indexing runs.</string>
+    <string name="settings_ai_clear_where_msg">Your face data is also backed up on Proton Drive.\n\nOnly on this phone: it is deleted here and comes back from Drive at once.\n\nEverywhere: it is deleted here, on Proton Drive and on your other devices, and face recognition turns off on each. Your photos are not affected.</string>
+    <string name="settings_ai_clear_here">Only on this phone</string>
+    <string name="settings_ai_clear_everywhere">Everywhere</string>
     <string name="settings_privacy">Privacy</string>
     <string name="settings_privacy_desc">Cache, offline photos, and telemetry</string>
     <string name="settings_metadata">Upload processing</string>

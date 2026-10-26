@@ -1907,6 +1907,9 @@
     <string name="settings_ai_clear">Borrar datos faciales</string>
     <string name="settings_ai_clear_confirm_title">¿Borrar datos faciales?</string>
     <string name="settings_ai_clear_confirm_msg">Esto elimina todas las personas encontradas y todos los datos faciales. Tus fotos no se ven afectadas. Los rostros se detectan de nuevo la próxima vez que se ejecute la indexación.</string>
+    <string name="settings_ai_clear_where_msg">Tus datos de caras también tienen copia en Proton Drive.\n\nSolo en este teléfono: se borran aquí y vuelven de Drive al momento.\n\nEn todas partes: se borran aquí, en Proton Drive y en tus otros dispositivos, y el reconocimiento facial se desactiva en cada uno. Tus fotos no se ven afectadas.</string>
+    <string name="settings_ai_clear_here">Solo en este teléfono</string>
+    <string name="settings_ai_clear_everywhere">En todas partes</string>
     <string name="gallery_add_to_person">Añadir a persona</string>
     <string name="people_search_hint">Buscar personas</string>
     <string name="person_set_cover">Establecer como portada</string>

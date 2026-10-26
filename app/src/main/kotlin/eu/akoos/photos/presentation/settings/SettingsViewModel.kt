@@ -33,6 +33,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkManager
 import coil.imageLoader
+import eu.akoos.photos.data.sharedbackup.FaceDataDelete
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -207,6 +208,7 @@ class SettingsViewModel @Inject constructor(
     private val mlWalkGate: MlWalkGate,
     private val mlSyncSignOut: MlSyncSignOut,
     private val videoEncoderCapabilities: VideoEncoderCapabilities,
+    private val faceDataDelete: FaceDataDelete,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -1721,13 +1723,20 @@ class SettingsViewModel @Inject constructor(
     /**
      * Wipe every detected face and clustered person for the account. Stands the running walk down
      * first, mirroring the sign-out order, then clears the face and person tables; the next indexing
-     * run detects faces again from scratch. The photos themselves are untouched.
+     * run detects faces again from scratch. The photos themselves are untouched. With the Drive backup
+     * on, the user picked where: [everywhere] also deletes it on Drive and the other devices
+     * ([FaceDataDelete.everywhere]), otherwise the copies on Drive are read back ([FaceDataDelete.onlyHere]).
      */
-    fun clearFaceIndex() {
+    fun clearFaceIndex(everywhere: Boolean = false) {
         viewModelScope.launch {
-            // Face recognition stays on, and indexing is automatic, so a fresh walk starts right after
-            // the wipe rather than leaving a bare "0 people" until the gallery is next opened.
-            faceIndexingScheduler.wipeFaceData(accountManager.getPrimaryUserId().first())
+            val userId = accountManager.getPrimaryUserId().first()
+            when {
+                userId != null && _uiState.value.sharedBackupOn && everywhere -> faceDataDelete.everywhere(userId)
+                userId != null && _uiState.value.sharedBackupOn -> faceDataDelete.onlyHere(userId)
+                // Face recognition stays on, and indexing is automatic, so a fresh walk starts right after
+                // the wipe rather than leaving a bare "0 people" until the gallery is next opened.
+                else -> faceIndexingScheduler.wipeFaceData(userId)
+            }
         }
     }
 

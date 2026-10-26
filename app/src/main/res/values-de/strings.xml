@@ -1871,6 +1871,9 @@
     <string name="settings_ai_clear">Gesichtsdaten löschen</string>
     <string name="settings_ai_clear_confirm_title">Gesichtsdaten löschen?</string>
     <string name="settings_ai_clear_confirm_msg">Dies entfernt alle gefundenen Personen und alle Gesichtsdaten. Deine Fotos sind nicht betroffen. Gesichter werden beim nächsten Indexieren erneut erkannt.</string>
+    <string name="settings_ai_clear_where_msg">Deine Gesichtsdaten sind auch auf Proton Drive gesichert.\n\nNur auf diesem Telefon: Sie werden hier gelöscht und kommen sofort von Drive zurück.\n\nÜberall: Sie werden hier, auf Proton Drive und auf deinen anderen Geräten gelöscht, und die Gesichtserkennung wird überall ausgeschaltet. Deine Fotos bleiben unberührt.</string>
+    <string name="settings_ai_clear_here">Nur auf diesem Telefon</string>
+    <string name="settings_ai_clear_everywhere">Überall</string>
     <string name="gallery_add_to_person">Zu Person hinzufügen</string>
     <string name="people_search_hint">Personen suchen</string>
     <string name="person_set_cover">Als Titelbild festlegen</string>

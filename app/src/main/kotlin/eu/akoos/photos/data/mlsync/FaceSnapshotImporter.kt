@@ -33,6 +33,7 @@ import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachData
 import eu.akoos.photos.data.face.FaceReattachSnapshot
+import eu.akoos.photos.data.face.clearFaceData
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
@@ -77,6 +78,7 @@ sealed interface FaceSnapshotImportResult {
         val people: Int,
         val scanMarkers: Int,
         val regroupRequested: Boolean,
+        val newerWipeAtMillis: Long = 0L,
     ) : FaceSnapshotImportResult
 
     /**
@@ -84,7 +86,13 @@ sealed interface FaceSnapshotImportResult {
      * be put back on this device's own faces by where each sat once the library is detected, and
      * [facesUpdated] faces already here took theirs at once in a Merge.
      */
-    data class NamesStaged(val people: Int, val facesUpdated: Int) : FaceSnapshotImportResult
+    data class NamesStaged(val people: Int, val facesUpdated: Int, val newerWipeAtMillis: Long = 0L) : FaceSnapshotImportResult
+
+    /**
+     * The snapshot carries an older delete of the face data everywhere than the importing device knows: it was
+     * written by a device that had not seen the delete yet, so nothing of it was taken.
+     */
+    data object BeforeWipe : FaceSnapshotImportResult
 
     /** No key of this account opens the envelope: another account's snapshot. */
     data object WrongAccount : FaceSnapshotImportResult
@@ -188,12 +196,19 @@ class FaceSnapshotImporter internal constructor(
      * written ([snapshotFromExpectedDevice]). Null for a file picked from storage. [releaseInput] runs once
      * the envelope has opened and verified, before anything is written: [input] is read to its end by then,
      * so a caller can close it and delete the file behind it, leaving that space to the import.
+     *
+     * [knownWipeAtMillis] is the newest delete of the face data everywhere the caller knows of, for a shared backup
+     * round; null for an import the user picked, which never deletes anything for it. A snapshot that carries an
+     * older one is turned away ([FaceSnapshotImportResult.BeforeWipe]); one that carries a newer one deletes this
+     * account's face data in the import's own transaction before it is taken in, and says so in its result's
+     * `newerWipeAtMillis`.
      */
     suspend fun import(
         userId: UserId,
         input: InputStream,
         mode: FaceSnapshotMode,
         expectedDeviceId: String? = null,
+        knownWipeAtMillis: Long? = null,
         releaseInput: () -> Unit = {},
     ): FaceSnapshotImportResult =
         withContext(Dispatchers.IO) {
@@ -202,7 +217,7 @@ class FaceSnapshotImporter internal constructor(
                 when (val opened = open(userId, input, plaintext)) {
                     is EnvelopeOpenResult.Opened -> {
                         releaseInput()
-                        importPlaintext(userId, plaintext, mode, expectedDeviceId)
+                        importPlaintext(userId, plaintext, mode, expectedDeviceId, knownWipeAtMillis)
                     }
                     EnvelopeOpenResult.WrongKey -> FaceSnapshotImportResult.WrongAccount
                     is EnvelopeOpenResult.UnsupportedVersion -> FaceSnapshotImportResult.UnsupportedVersion
@@ -262,13 +277,14 @@ class FaceSnapshotImporter internal constructor(
     /**
      * Imports the verified plaintext snapshot in [plaintext] into [userId]'s face data under [mode], unless
      * it names another install than [expectedDeviceId] or a full import would not fit in the free space. A
-     * null [userId] writes the guest partition.
+     * null [userId] writes the guest partition. [knownWipeAtMillis] as for [import].
      */
     internal suspend fun importPlaintext(
         userId: UserId?,
         plaintext: File,
         mode: FaceSnapshotMode,
         expectedDeviceId: String? = null,
+        knownWipeAtMillis: Long? = null,
     ): FaceSnapshotImportResult {
         val survey = try {
             FileInputStream(plaintext).use { surveyFaceSnapshot(it) } ?: return FaceSnapshotImportResult.Unreadable
@@ -282,6 +298,12 @@ class FaceSnapshotImporter internal constructor(
             Log.w(TAG, "snapshot refused: another install wrote it")
             return FaceSnapshotImportResult.Unreadable
         }
+        val carriedWipe = survey.header.facesWipedAtMillis
+        if (knownWipeAtMillis != null && carriedWipe < knownWipeAtMillis) {
+            Log.i(TAG, "snapshot passed over: written before the face data was deleted everywhere")
+            return FaceSnapshotImportResult.BeforeWipe
+        }
+        val newerWipe = if (knownWipeAtMillis != null && carriedWipe > knownWipeAtMillis) carriedWipe else 0L
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val fit = faceSnapshotFit(survey.header)
         // A names-only import writes no vectors, so only a full one is measured against the free space.
@@ -291,6 +313,8 @@ class FaceSnapshotImporter internal constructor(
         }
         val applied = try {
             appDatabase.withStorageAwareTransaction {
+                // Deleted everywhere since this device last read: what it holds is from before the delete.
+                if (newerWipe > 0L) appDatabase.clearFaceData(account)
                 val applier = FaceSnapshotApplier(appDatabase, account, mode, fit, survey)
                 val result = FileInputStream(plaintext).use { applier.run(MlSnapshotReader(it)) }
                 // Inside the transaction, so a failure to stage the names rolls the rows back with it.
@@ -318,9 +342,10 @@ class FaceSnapshotImporter internal constructor(
                     people = applied.people,
                     scanMarkers = applied.scanMarkers,
                     regroupRequested = regroup,
+                    newerWipeAtMillis = newerWipe,
                 )
             }
-            FaceSnapshotFit.NamesOnly -> FaceSnapshotImportResult.NamesStaged(applied.people, applied.facesUpdated)
+            FaceSnapshotFit.NamesOnly -> FaceSnapshotImportResult.NamesStaged(applied.people, applied.facesUpdated, newerWipe)
         }
     }
 

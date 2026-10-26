@@ -85,6 +85,7 @@ internal data class FaceSnapshotOrigin(
     val faceModelSha256: String,
     val clusterParamsVersion: Int,
     val createdAtMillis: Long,
+    val facesWipedAtMillis: Long = 0L,
 )
 
 /** The face index changed under every one of an export's attempts, so nothing was sealed. */
@@ -144,6 +145,7 @@ class FaceSnapshotExporter internal constructor(
             faceModelSha256 = FaceModelAssets.EMBED_MODEL.sha256,
             clusterParamsVersion = prefs[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] ?: FACE_CLUSTER_PARAMS_VERSION,
             createdAtMillis = System.currentTimeMillis(),
+            facesWipedAtMillis = prefs[SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT] ?: 0L,
         )
         sealing.sealKeys(userId).use { keys ->
             val plaintext = FaceSnapshotScratch.newFile(context)
@@ -402,6 +404,7 @@ class FaceSnapshotExporter internal constructor(
             scanMarkerCount = markers.size,
             nameChangeCount = nameChanges.size,
             removalCount = removals.size,
+            facesWipedAtMillis = origin.facesWipedAtMillis,
         )
 
         /** When the piece [ref] of [name]'s curation of [kind] was set by hand, 0 when unknown. */

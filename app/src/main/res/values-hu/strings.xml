@@ -1870,6 +1870,9 @@
     <string name="settings_ai_clear">Arcadatok törlése</string>
     <string name="settings_ai_clear_confirm_title">Arcadatok törlése?</string>
     <string name="settings_ai_clear_confirm_msg">Ez eltávolít minden megtalált embert és az összes arcadatot. A fotóidat nem érinti. Az arcokat a következő indexeléskor újra megtalálja.</string>
+    <string name="settings_ai_clear_where_msg">Az arcadataid a Proton Drive-on is mentve vannak.\n\nCsak ezen a telefonon: itt törlődnek, és a Drive-ról azonnal visszajönnek.\n\nMindenhol: itt, a Proton Drive-on és a többi eszközödön is törlődnek, és mindegyiken kikapcsol az arcfelismerés. A fotóidat nem érinti.</string>
+    <string name="settings_ai_clear_here">Csak ezen a telefonon</string>
+    <string name="settings_ai_clear_everywhere">Mindenhol</string>
     <string name="gallery_add_to_person">Hozzáadás emberhez</string>
     <string name="people_search_hint">Emberek keresése</string>
     <string name="person_set_cover">Beállítás borítóként</string>

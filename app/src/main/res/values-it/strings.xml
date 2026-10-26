@@ -1906,6 +1906,9 @@
     <string name="settings_ai_clear">Cancella dati dei volti</string>
     <string name="settings_ai_clear_confirm_title">Cancellare i dati dei volti?</string>
     <string name="settings_ai_clear_confirm_msg">Rimuove tutte le persone trovate e tutti i dati dei volti. Le tue foto non vengono toccate. I volti vengono rilevati di nuovo alla prossima indicizzazione.</string>
+    <string name="settings_ai_clear_where_msg">I tuoi dati dei volti hanno anche un backup su Proton Drive.\n\nSolo su questo telefono: vengono eliminati qui e tornano subito da Drive.\n\nOvunque: vengono eliminati qui, su Proton Drive e sugli altri tuoi dispositivi, e il riconoscimento dei volti si disattiva su ciascuno. Le tue foto non vengono toccate.</string>
+    <string name="settings_ai_clear_here">Solo su questo telefono</string>
+    <string name="settings_ai_clear_everywhere">Ovunque</string>
     <string name="gallery_add_to_person">Aggiungi a persona</string>
     <string name="people_search_hint">Cerca persone</string>
     <string name="person_set_cover">Imposta come copertina</string>

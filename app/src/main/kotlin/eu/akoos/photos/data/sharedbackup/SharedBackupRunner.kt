@@ -46,6 +46,7 @@ import eu.akoos.photos.data.mlsync.DriveDataFolder
 import eu.akoos.photos.data.mlsync.HiddenDriveNaming
 import eu.akoos.photos.data.mlsync.LabelDriveNaming
 import eu.akoos.photos.data.mlsync.MlDriveFile
+import eu.akoos.photos.data.mlsync.MlDriveFileKind
 import eu.akoos.photos.data.mlsync.MlDriveNaming
 import eu.akoos.photos.data.mlsync.MlDriveResult
 import eu.akoos.photos.data.mlsync.MlDriveStore
@@ -155,20 +156,28 @@ class SharedBackupRunner @Inject constructor(
         appliedDao.upsert(listOf(DriveCopyAppliedEntity(userId.id, kind.key, deviceId, madeAtMs)))
     }
 
+    /** Forgets which copies of [kind] were taken in, so the next round takes every install's newest one again. */
+    suspend fun forgetApplied(userId: UserId, kind: SharedBackupKind) {
+        appliedDao.deleteKind(userId.id, kind.key)
+    }
+
     /**
      * The other installs' face and search files newer than the copy of each taken in last, as restore files: each
      * install's newest file of each kind, never this install's own. A kind this device holds nothing of (its face
      * data deleted, wiped by a model change, or its search index reset) takes every other install's newest file
      * again, whatever was taken in before: filling gaps twice changes nothing. So does every kind when [retake], the
-     * user's "Load from Drive".
+     * user's "Load from Drive". Not so the faces once they were deleted everywhere ([facesWiped]): a copy from before
+     * the delete is turned away as it is read, and one turned away once is not fetched again until it changes.
      */
     suspend fun mlFilesToTake(
         userId: UserId,
         listing: SharedBackupListing,
         ownDeviceId: String,
         retake: Boolean = false,
+        facesWiped: Boolean = false,
     ): List<MlRestoreFile> {
-        val faces = if (!retake && faceScanDao.hasAnyForUser(userId.id)) applied(userId, SharedBackupKind.FACES) else emptyMap()
+        val holdsFaces = facesWiped || faceScanDao.hasAnyForUser(userId.id)
+        val faces = if (!retake && holdsFaces) applied(userId, SharedBackupKind.FACES) else emptyMap()
         val search = if (!retake && imageEmbeddingDao.countForUser(userId.id) > 0) applied(userId, SharedBackupKind.SEARCH) else emptyMap()
         return MlDriveNaming.selectForImport(listing.ml, ownDeviceId).mapNotNull { pick ->
             val taken = if (pick.kind == eu.akoos.photos.data.mlsync.MlDriveFileKind.FACES) faces else search
@@ -266,6 +275,20 @@ class SharedBackupRunner @Inject constructor(
         }
         store.rememberDeviceNames(learned)
         return copiesByDevice(listing, known + learned)
+    }
+
+    /**
+     * Moves the face copies of every install but [ownDeviceId] in [listing] to the Drive trash, after a delete of the
+     * face data everywhere made here. False when Drive kept one.
+     */
+    suspend fun trashOtherFaceCopies(userId: UserId, listing: SharedBackupListing, ownDeviceId: String): Boolean {
+        val others = listing.ml.filter { file ->
+            MlDriveNaming.parse(file.name)?.let { it.kind == MlDriveFileKind.FACES && it.deviceId != ownDeviceId } == true
+        }
+        if (others.isEmpty()) return true
+        val trashed = driveStore.trash(userId, others.map { it.nodeUid }) is MlDriveResult.Ok
+        SyncDiagnostics.log("shared backup: ${others.size} face copy(ies) of other devices to the trash: ${if (trashed) "done" else "refused"}")
+        return trashed
     }
 
     /** Moves an install's copies to the Drive trash. False when Drive kept one. */

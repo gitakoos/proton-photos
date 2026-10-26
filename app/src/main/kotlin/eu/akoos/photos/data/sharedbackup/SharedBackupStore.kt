@@ -101,6 +101,35 @@ class SharedBackupStore @Inject constructor(@ApplicationContext private val cont
         context.settingsDataStore.edit { it[SettingsKeys.SHARED_BACKUP_OWN_COPY_TAKEN] = true }
     }
 
+    /** Reads this install's own copies on Drive back in at the next round, as after a fresh install. */
+    suspend fun forgetOwnCopyTaken() {
+        context.settingsDataStore.edit { it.remove(SettingsKeys.SHARED_BACKUP_OWN_COPY_TAKEN) }
+    }
+
+    /** When the account's face data was last deleted everywhere, as far as this device knows, 0 when never. */
+    suspend fun facesWipedAt(): Long = context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT] ?: 0L
+
+    /**
+     * Notes a delete of the face data everywhere at [atMs]: made here when [madeHere], which also leaves the other
+     * devices' face copies on Drive for a round to move to the trash, or read from another device's copy. An older
+     * time than the one known changes nothing.
+     */
+    suspend fun recordFacesWiped(atMs: Long, madeHere: Boolean) {
+        context.settingsDataStore.edit { prefs ->
+            if (atMs <= (prefs[SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT] ?: 0L)) return@edit
+            prefs[SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT] = atMs
+            if (madeHere) prefs[SettingsKeys.SHARED_BACKUP_FACES_TRASH_PENDING] = true
+        }
+    }
+
+    /** Whether the other devices' face copies still wait to go to the Drive trash after a delete made here. */
+    suspend fun facesTrashPending(): Boolean =
+        context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_FACES_TRASH_PENDING] == true
+
+    suspend fun facesTrashDone() {
+        context.settingsDataStore.edit { it.remove(SettingsKeys.SHARED_BACKUP_FACES_TRASH_PENDING) }
+    }
+
     /** The device names read from copies on Drive so far, by install id. */
     suspend fun deviceNames(): Map<String, String> =
         (context.settingsDataStore.data.first()[SettingsKeys.SHARED_BACKUP_DEVICE_NAMES] ?: emptySet())

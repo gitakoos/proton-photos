@@ -170,6 +170,7 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
                 val faceModelSha256 = source.str()
                 val clusterParamsVersion = nonNegative(source.i32(), "clustering parameters version")
                 val embeddingDim = embeddingDim(source.i32())
+                val facesWipedAt = if (version >= 6) nonNegative(source.i64(), "faces wiped time") else 0L
                 val keyCount = nonNegative(source.i32(), "key count")
                 val personCount = nonNegative(source.i32(), "person count")
                 val nameChangeCount = if (version >= 5) nonNegative(source.i32(), "name change count") else 0
@@ -191,6 +192,7 @@ class MlSnapshotReader(input: InputStream) : Iterator<MlSnapshotRecord> {
                     scanMarkerCount = nonNegative(source.i32(), "scan marker count"),
                     nameChangeCount = nameChangeCount,
                     removalCount = removalCount,
+                    facesWipedAtMillis = facesWipedAt,
                 )
             }
             MlSnapshotKind.SEARCH -> MlSnapshotHeader.Search(

@@ -29,6 +29,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.datastore.preferences.core.edit
 import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -85,6 +86,8 @@ import eu.akoos.photos.data.mlsync.planRestore
 import eu.akoos.photos.data.mlsync.uploadDecision
 import eu.akoos.photos.data.mlsync.DriveDataFolder
 import eu.akoos.photos.data.mlsync.faceIndexingPausedByUser
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.sharedbackup.DriveJobLock
 import eu.akoos.photos.data.sharedbackup.SharedBackupKind
 import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
@@ -178,6 +181,13 @@ class MlSyncWorker @AssistedInject constructor(
     /** When this run began and how it ended, so the automatic save can record a finished save. */
     private var runStartedMs = 0L
     private var lastOutcome: MlSyncOutcome? = null
+
+    /** While a round reads: the newest delete of the face data everywhere it knows of, which every face copy it
+     *  imports is held against. Null outside a round, so a restore never deletes anything for it. */
+    private var roundWipeAtMs: Long? = null
+
+    /** While a round reads: set when it reads this install's own copies back after a fresh install or a sign-out. */
+    private var roundAfterFreshStart = false
 
     /**
      * Tracked whole, the hand-back included, so a sign-out can stop the run and wait for it to end. Held under the
@@ -399,8 +409,9 @@ class MlSyncWorker @AssistedInject constructor(
     private suspend fun export(userId: UserId, kind: MlDriveFileKind, into: File): SnapshotExport = when (kind) {
         MlDriveFileKind.FACES -> {
             val export = FileOutputStream(into).buffered().use { faceExporter.export(userId, it) }
-            // A face-free library still exports its scan markers, which spare another device the scan.
-            if (export.faces == 0 && export.scanMarkers == 0) {
+            // A face-free library still exports its scan markers, which spare another device the scan, and once the
+            // faces were deleted everywhere an empty copy carries that delete on to the other devices.
+            if (export.faces == 0 && export.scanMarkers == 0 && sharedBackupStore.facesWipedAt() == 0L) {
                 SnapshotExport.Empty
             } else {
                 SnapshotExport.Written(faces = export.faces, people = export.people, scanMarkers = export.scanMarkers)
@@ -533,12 +544,18 @@ class MlSyncWorker @AssistedInject constructor(
         val result = faceIndexingScheduler.withImportFence {
             FileInputStream(file).use { input ->
                 // Opened and verified, the download is spent: deleted before the import writes, freeing its space.
-                faceImporter.import(userId, input, mode, expectedDeviceId = step.file.deviceId) {
+                faceImporter.import(userId, input, mode, expectedDeviceId = step.file.deviceId, knownWipeAtMillis = roundWipeAtMs) {
                     runCatching { input.close() }
                     file.delete()
                 }
             }
         }
+        val newerWipe = when (result) {
+            is FaceSnapshotImportResult.Imported -> result.newerWipeAtMillis
+            is FaceSnapshotImportResult.NamesStaged -> result.newerWipeAtMillis
+            else -> 0L
+        }
+        if (newerWipe > 0L) takeFacesWipe(newerWipe)
         val status = result.partStatus()
         tally.record(MlDriveFileKind.FACES, status)
         when (result) {
@@ -555,9 +572,24 @@ class MlSyncWorker @AssistedInject constructor(
             FaceSnapshotImportResult.WrongAccount,
             FaceSnapshotImportResult.UnsupportedVersion,
             FaceSnapshotImportResult.Unreadable,
+            FaceSnapshotImportResult.BeforeWipe,
             FaceSnapshotImportResult.NotEnoughSpace -> Unit
         }
         return status
+    }
+
+    /**
+     * Another device deleted the face data everywhere at [atMs], later than this one knew; the import has deleted
+     * the face data here already. Notes the time, so this device's copy carries it on and older copies are turned
+     * away, and turns face recognition off, as on the device that deleted. Not so on a fresh install or after a
+     * sign-out: there was nothing here to delete, and the switch is the one just set.
+     */
+    private suspend fun takeFacesWipe(atMs: Long) {
+        roundWipeAtMs = atMs
+        sharedBackupStore.recordFacesWiped(atMs, madeHere = false)
+        sharedBackupStore.markChanged(listOf(SharedBackupKind.FACES), System.currentTimeMillis(), byUser = true)
+        if (!roundAfterFreshStart) applicationContext.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
+        SyncDiagnostics.log("shared backup: face data was deleted everywhere on another device, deleted here too")
     }
 
     /** Imports the search file [file] of [step] and returns the status it ended in. */
@@ -623,7 +655,13 @@ class MlSyncWorker @AssistedInject constructor(
         val takesOwnCopy = !sharedBackupStore.ownCopyTaken()
         val readsAs = if (takesOwnCopy) EARLIER_INSTALL else ownDeviceId
         val unread = HashSet<MlDriveFileKind>()
-        val plan = planRestore(sharedBackupRunner.mlFilesToTake(userId, listing, readsAs, retake), FaceSnapshotMode.Merge)
+        val knownWipe = sharedBackupStore.facesWipedAt()
+        roundWipeAtMs = knownWipe
+        roundAfterFreshStart = takesOwnCopy
+        val plan = planRestore(
+            sharedBackupRunner.mlFilesToTake(userId, listing, readsAs, retake, facesWiped = knownWipe > 0L),
+            FaceSnapshotMode.Merge,
+        )
         if (plan.isNotEmpty()) {
             promoteToForeground()
             val pause = MlSyncFacePause.read(applicationContext)
@@ -671,6 +709,14 @@ class MlSyncWorker @AssistedInject constructor(
                 val saved = if (kind == MlDriveFileKind.FACES) kindOutcome.faces else kindOutcome.search
                 if (saved == MlSyncPartStatus.DONE || saved == MlSyncPartStatus.EMPTY) {
                     sharedBackupStore.mlSaved(kind, saveStarted)
+                    // This device's copy now carries the delete made here, so the other devices' copies can go.
+                    if (kind == MlDriveFileKind.FACES && sharedBackupStore.facesTrashPending()) {
+                        if (sharedBackupRunner.trashOtherFaceCopies(userId, listing, ownDeviceId)) {
+                            sharedBackupStore.facesTrashDone()
+                        } else {
+                            failedParts += "trash faces"
+                        }
+                    }
                 } else {
                     failedParts += "save ${kind.name.lowercase()}" + (kindOutcome.failure?.let { ": $it" } ?: "")
                 }
