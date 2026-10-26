@@ -76,6 +76,16 @@ val LocalLiquidGlass = staticCompositionLocalOf { false }
  *  [GlassBackdrop.freeze]d picture of it. Never handed to a pill inside the app's content, which it records. */
 val LocalRootGlass = staticCompositionLocalOf<GlassBackdrop?> { null }
 
+/** True inside a sheet drawn as glass, so the cards in it let the glass show through instead of covering it. */
+val LocalOnGlassSheet = staticCompositionLocalOf { false }
+
+/** A card's fill: [solid] as it is, or lighter inside a glass sheet ([LocalOnGlassSheet]). */
+@Composable
+fun cardFill(solid: Color): Color = if (LocalOnGlassSheet.current) solid.copy(alpha = solid.alpha * GLASS_CARD_ALPHA) else solid
+
+/** How much of a card's fill stays inside a glass sheet: enough to group its rows, little enough to show the glass. */
+private const val GLASS_CARD_ALPHA = 0.45f
+
 /** The backdrop the pills above a screen's content frost, or null where they draw their plain fill. */
 val LocalGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
 

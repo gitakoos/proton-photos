@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.cardFill
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.CardBg
 import eu.akoos.photos.presentation.theme.FgDim
@@ -160,7 +161,7 @@ private fun LabelsChips(
                     modifier = Modifier
                         .alpha(if (canAdd) 1f else 0.4f)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(CardBg)
+                        .background(cardFill(CardBg))
                         .border(0.5.dp, Line2, RoundedCornerShape(20.dp))
                         .clickable(enabled = canAdd, onClick = onAddLabels)
                         .padding(start = 10.dp, end = 12.dp, top = 7.dp, bottom = 7.dp),

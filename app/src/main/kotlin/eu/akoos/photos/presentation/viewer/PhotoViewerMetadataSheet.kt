@@ -33,7 +33,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -64,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.cardFill
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.CardBg
 import eu.akoos.photos.presentation.theme.DeleteTint
@@ -204,58 +207,8 @@ internal fun PhotoMetadataSheet(
                 else -> stringResource(R.string.viewer_meta_source_backed_up)
             }
 
-            MetadataSection(stringResource(R.string.viewer_meta_section_file_info)) {
-                MetaRow(rowFile, localMedia?.displayName ?: cloud?.displayName ?: "", onEdit = onRenameClick)
-                // A compressed or stripped upload differs from the phone's copy, so name both sizes.
-                val driveSizeBytes = (item as? GalleryItem.Synced)?.cloud?.sizeBytes ?: 0L
-                if (sizeBytes > 0 && driveSizeBytes > 0 && formatBytes(driveSizeBytes) != formatBytes(sizeBytes)) {
-                    MetaRow(stringResource(R.string.viewer_meta_row_size_device), formatBytes(sizeBytes))
-                    MetaRow(stringResource(R.string.viewer_meta_row_size_drive), formatBytes(driveSizeBytes))
-                } else {
-                    MetaRow(rowSize, if (sizeBytes > 0) formatBytes(sizeBytes) else "-")
-                }
-                MetaRow(rowType, mimeType)
-                (localFolder ?: localMedia?.bucketName)?.takeIf { it.isNotBlank() }?.let {
-                    MetaRow(stringResource(R.string.viewer_meta_row_local_folder), it)
-                }
-                cloudAlbums.takeIf { it.isNotEmpty() }?.let {
-                    MetaRow(stringResource(R.string.viewer_meta_row_cloud_albums), it.joinToString(", "))
-                }
-                MetaRow(rowSource, source)
-            }
-
-            // Resolution already merges the device, EXIF and cloud-video readings of the same width
-            // and height, so it is the one geometry row and the raw EXIF dimensions stay out. A
-            // video keeps the section on screen with dash placeholders while a cloud-only read
-            // resolves, so its two rows fill in rather than pop in.
-            val isVideo = mimeType.startsWith("video/")
-            if (resW != null || isVideo || exif?.orientation != null) {
-                MetadataSection(stringResource(R.string.viewer_meta_section_image)) {
-                    MetaRow(rowResolution, if (resW != null && resH != null) "$resW × $resH" else "—")
-                    if (isVideo) {
-                        val durMs = videoDurationMs(localMedia?.duration, cloud?.durationMs, cloudVideoMeta?.durationMs)
-                        MetaRow(rowDuration, if (durMs != null) eu.akoos.photos.presentation.util.formatVideoTime(durMs) else "—")
-                    }
-                    val orientNormal = stringResource(R.string.viewer_meta_orientation_normal)
-                    val orient180 = stringResource(R.string.viewer_meta_orientation_180)
-                    val orient90Cw = stringResource(R.string.viewer_meta_orientation_90_cw)
-                    val orient90Ccw = stringResource(R.string.viewer_meta_orientation_90_ccw)
-                    exif?.orientation?.let {
-                        val orientLabel = when (it) {
-                            1 -> orientNormal
-                            3 -> orient180
-                            6 -> orient90Cw
-                            8 -> orient90Ccw
-                            else -> "$it"
-                        }
-                        MetaRow(stringResource(R.string.viewer_meta_row_orientation), orientLabel)
-                    }
-                }
-            }
-
-            labelsBox()
-            CategoryEditor(tags = photoTags, onToggle = onToggleTag)
-
+            // When and where lead, the moments a person looks the photo up by; the camera, the picture and
+            // the file follow, and the labels and categories the user sets close the facts.
             // The Date row is the capture moment the app itself works with and the one the pencil
             // edits, so it leads. The raw EXIF pair earns a row only where it disagrees with that
             // moment, which keeps an untouched photo down to a single timestamp.
@@ -346,6 +299,58 @@ internal fun PhotoMetadataSheet(
                     }
                 }
             }
+
+            // Resolution already merges the device, EXIF and cloud-video readings of the same width
+            // and height, so it is the one geometry row and the raw EXIF dimensions stay out. A
+            // video keeps the section on screen with dash placeholders while a cloud-only read
+            // resolves, so its two rows fill in rather than pop in.
+            val isVideo = mimeType.startsWith("video/")
+            if (resW != null || isVideo || exif?.orientation in TURNED_ORIENTATIONS) {
+                MetadataSection(stringResource(R.string.viewer_meta_section_image)) {
+                    MetaRow(rowResolution, if (resW != null && resH != null) resolutionText(resW, resH) else "—")
+                    if (isVideo) {
+                        val durMs = videoDurationMs(localMedia?.duration, cloud?.durationMs, cloudVideoMeta?.durationMs)
+                        MetaRow(rowDuration, if (durMs != null) eu.akoos.photos.presentation.util.formatVideoTime(durMs) else "—")
+                    }
+                    val orient180 = stringResource(R.string.viewer_meta_orientation_180)
+                    val orient90Cw = stringResource(R.string.viewer_meta_orientation_90_cw)
+                    val orient90Ccw = stringResource(R.string.viewer_meta_orientation_90_ccw)
+                    // Only a turned photo says so: upright (1) is every photo's default, and 0 or a value
+                    // outside the four turns says nothing a person could act on.
+                    exif?.orientation?.let {
+                        val orientLabel = when (it) {
+                            3 -> orient180
+                            6 -> orient90Cw
+                            8 -> orient90Ccw
+                            else -> null
+                        }
+                        orientLabel?.let { label -> MetaRow(stringResource(R.string.viewer_meta_row_orientation), label) }
+                    }
+                }
+            }
+
+            MetadataSection(stringResource(R.string.viewer_meta_section_file_info)) {
+                MetaRow(rowFile, localMedia?.displayName ?: cloud?.displayName ?: "", onEdit = onRenameClick)
+                // A compressed or stripped upload differs from the phone's copy, so name both sizes.
+                val driveSizeBytes = (item as? GalleryItem.Synced)?.cloud?.sizeBytes ?: 0L
+                if (sizeBytes > 0 && driveSizeBytes > 0 && formatBytes(driveSizeBytes) != formatBytes(sizeBytes)) {
+                    MetaRow(stringResource(R.string.viewer_meta_row_size_device), formatBytes(sizeBytes))
+                    MetaRow(stringResource(R.string.viewer_meta_row_size_drive), formatBytes(driveSizeBytes))
+                } else {
+                    MetaRow(rowSize, if (sizeBytes > 0) formatBytes(sizeBytes) else "-")
+                }
+                MetaRow(rowType, formatOf(mimeType))
+                (localFolder ?: localMedia?.bucketName)?.takeIf { it.isNotBlank() }?.let {
+                    MetaRow(stringResource(R.string.viewer_meta_row_local_folder), it)
+                }
+                cloudAlbums.takeIf { it.isNotEmpty() }?.let {
+                    MetaRow(stringResource(R.string.viewer_meta_row_cloud_albums), it.joinToString(", "))
+                }
+                MetaRow(rowSource, source)
+            }
+
+            labelsBox()
+            CategoryEditor(tags = photoTags, onToggle = onToggleTag)
 
             if (exif != null &&
                 (exif.description != null || exif.software != null || exif.artist != null || exif.copyright != null)
@@ -480,7 +485,7 @@ internal fun MetadataSection(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(CardBg, RoundedCornerShape(12.dp))
+                .background(cardFill(CardBg), RoundedCornerShape(12.dp))
                 .border(0.5.dp, Line2, RoundedCornerShape(12.dp)),
         ) {
             Column { content() }
@@ -547,19 +552,26 @@ private fun CategoryEditor(tags: Set<Int>, onToggle: (Int, Boolean) -> Unit) {
             letterSpacing = 0.8.sp,
             modifier = Modifier.padding(bottom = 8.dp),
         )
-        FlowRow(
+        // One sliding row of the chips the gallery's category rail uses, the ones set first, rather than a
+        // wrapped block four rows tall for a choice most photos never need.
+        val ordered = remember(tags) { EDITABLE_CATEGORY_TAGS.sortedByDescending { it.first in tags } }
+        val chipFill = cardFill(CardBg)
+        androidx.compose.foundation.lazy.LazyRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fullBleedRow(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
         ) {
-            EDITABLE_CATEGORY_TAGS.forEach { (tagId, labelRes) ->
+            items(ordered.size, key = { ordered[it].first }) { index ->
+                val (tagId, labelRes) = ordered[index]
                 val selected = tagId in tags
                 Row(
                     modifier = Modifier
+                        .height(34.dp)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(if (selected) Accent.copy(alpha = 0.18f) else CardBg)
+                        .background(if (selected) Accent.copy(alpha = 0.18f) else chipFill)
                         .border(0.5.dp, if (selected) Accent else Line2, RoundedCornerShape(20.dp))
                         .clickable { onToggle(tagId, !selected) }
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                        .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
@@ -578,6 +590,37 @@ private fun CategoryEditor(tags: Set<Int>, onToggle: (Int, Boolean) -> Unit) {
             }
         }
     }
+}
+
+/** The EXIF orientations that turn a photo, the only ones the details name. */
+private val TURNED_ORIENTATIONS = setOf(3, 6, 8)
+
+/** A row that reaches the sheet's edges past its 20.dp side padding, so a sliding row runs off the screen edge. */
+private fun Modifier.fullBleedRow(): Modifier = layout { measurable, constraints ->
+    val extra = 40.dp.roundToPx()
+    val placeable = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + extra, minWidth = constraints.minWidth + extra))
+    layout(constraints.maxWidth, placeable.height) { placeable.place(-extra / 2, 0) }
+}
+
+/** The format a person knows a file by, from its media type: JPEG for image/jpeg, MOV for video/quicktime. */
+internal fun formatOf(mimeType: String): String {
+    val sub = mimeType.substringAfter('/', "").lowercase()
+    return when {
+        sub.isEmpty() -> mimeType
+        sub == "quicktime" -> "MOV"
+        sub == "x-matroska" -> "MKV"
+        sub == "x-adobe-dng" || sub == "dng" -> "DNG"
+        sub.startsWith("x-") -> sub.removePrefix("x-").uppercase()
+        else -> sub.substringBefore('+').uppercase()
+    }
+}
+
+/** Width by height, with the megapixels a camera is known by: "4000 × 3000 · 12 MP", the decimal written the
+ *  [locale]'s way. */
+internal fun resolutionText(width: Int, height: Int, locale: java.util.Locale = java.util.Locale.getDefault()): String {
+    val mp = width.toLong() * height / 1_000_000.0
+    val mpText = if (mp >= 10) String.format(locale, "%.0f", mp) else String.format(locale, "%.1f", mp)
+    return "$width × $height · $mpText MP"
 }
 
 /** Latitude and longitude the Location rows state, each null where nothing carries it. A null leaves

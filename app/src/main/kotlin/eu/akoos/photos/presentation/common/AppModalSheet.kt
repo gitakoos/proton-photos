@@ -33,6 +33,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,7 +86,7 @@ fun AppModalSheet(
                 .windowInsetsPadding(BottomSheetDefaults.windowInsets),
         ) {
             BottomSheetDefaults.DragHandle(modifier = Modifier.align(Alignment.CenterHorizontally))
-            content()
+            CompositionLocalProvider(LocalOnGlassSheet provides (frozen != null)) { content() }
         }
     }
 }

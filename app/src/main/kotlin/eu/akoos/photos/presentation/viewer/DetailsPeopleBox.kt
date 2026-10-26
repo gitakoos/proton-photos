@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.cardFill
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.FaceCropTransformation
 import eu.akoos.photos.presentation.theme.Bg2
@@ -168,7 +169,7 @@ private fun PersonPill(
     Row(
         modifier = Modifier
             .clip(pillShape)
-            .background(CardBg)
+            .background(cardFill(CardBg))
             .border(0.5.dp, Line2, pillShape)
             // One clickable merges the crop and the name into the one element a screen reader announces.
             .clickable(role = Role.Button, onClick = onClick)

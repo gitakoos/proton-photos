@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.cardFill
 import eu.akoos.photos.presentation.settings.FreeUpInterval
 import eu.akoos.photos.presentation.theme.AppColors
 
@@ -161,7 +162,7 @@ internal fun CollapsibleSection(
 internal fun SettingsCard(content: @Composable () -> Unit) {
     val colors = AppColors.current
     Column(
-        modifier = Modifier.fillMaxWidth().background(colors.cardBg, cardShape).border(0.5.dp, colors.cardBorder, cardShape),
+        modifier = Modifier.fillMaxWidth().background(cardFill(colors.cardBg), cardShape).border(0.5.dp, colors.cardBorder, cardShape),
     ) { content() }
 }
 
