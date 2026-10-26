@@ -31,17 +31,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -64,8 +60,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.cardFill
 import eu.akoos.photos.presentation.map.darkTileFilter
@@ -95,126 +89,6 @@ private const val PLACE_LABEL_DELAY_MS = 250L
 private val INLINE_MAP_HEIGHT = 300.dp
 
 private data class PickerResult(val label: String, val latitude: Double, val longitude: Double, val zoom: Double)
-
-/**
- * Full-screen map for choosing where a photo was taken. The pin stays at the centre of the screen and
- * the map moves under it; a tap on the map, or a search result, brings that spot to the pin. The check
- * at the top right confirms the spot under the pin, the back arrow leaves without changing anything.
- * One search box covers countries and cities from the bundled place list, so it works offline.
- */
-@Composable
-internal fun LocationPickerDialog(
-    initialLatitude: Double?,
-    initialLongitude: Double?,
-    onConfirm: (latitude: Double, longitude: Double) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
-        LocationPickerContent(initialLatitude, initialLongitude, onConfirm, onDismiss)
-    }
-}
-
-@Composable
-private fun LocationPickerContent(
-    initialLatitude: Double?,
-    initialLongitude: Double?,
-    onConfirm: (latitude: Double, longitude: Double) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val colors = AppColors.current
-    val context = LocalContext.current
-    val locale = appLocale()
-    var query by remember { mutableStateOf("") }
-    var results by remember { mutableStateOf<List<PickerResult>>(emptyList()) }
-
-    val mapView = rememberPickerMap(initialLatitude, initialLongitude)
-
-    LaunchedEffect(query, locale) {
-        val q = query.trim()
-        results = if (q.length < 2) emptyList() else searchPlacesAndCountries(context, q, locale)
-    }
-
-    Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
-        AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
-        Icon(
-            Icons.Default.LocationOn,
-            contentDescription = null,
-            tint = colors.accent,
-            modifier = Modifier.align(Alignment.Center).offset(y = (-20).dp).size(40.dp),
-        )
-        Column(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp)) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(colors.pillBgOpaque, RoundedCornerShape(28.dp))
-                    .border(0.5.dp, colors.pillBorder, RoundedCornerShape(28.dp))
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = colors.fgPrimary)
-                }
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                    if (query.isEmpty()) {
-                        Text(
-                            stringResource(R.string.metadata_editor_place_search),
-                            color = colors.fgMute,
-                            fontSize = 15.sp,
-                            maxLines = 1,
-                        )
-                    }
-                    BasicTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        singleLine = true,
-                        textStyle = TextStyle(color = colors.fgPrimary, fontSize = 15.sp),
-                        cursorBrush = SolidColor(colors.accent),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                IconButton(onClick = {
-                    val center = mapView.mapCenter
-                    onConfirm(center.latitude, center.longitude)
-                }) {
-                    Icon(
-                        Icons.Default.Check,
-                        contentDescription = stringResource(R.string.metadata_editor_done),
-                        tint = colors.accent,
-                    )
-                }
-            }
-            if (results.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
-                        .background(colors.pillBgOpaque, RoundedCornerShape(16.dp))
-                        .border(0.5.dp, colors.pillBorder, RoundedCornerShape(16.dp)),
-                ) {
-                    results.forEach { result ->
-                        Text(
-                            text = result.label,
-                            color = colors.fgPrimary,
-                            fontSize = 14.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    query = ""
-                                    mapView.controller.setZoom(result.zoom)
-                                    mapView.controller.setCenter(GeoPoint(result.latitude, result.longitude))
-                                }
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 /** The picker's map: centred on the photo's fix (or the world when there is none), the tap that brings a
  *  spot under the pin, the app's lifecycle and the dark tile tint. */

@@ -111,6 +111,10 @@
     <string name="selection_mixed">%1$d fotoğraf, %2$d video</string>
 
     <string name="metadata_editor_title">Meta verileri düzenle</string>
+    <plurals name="metadata_editor_bulk_title">
+        <item quantity="one">%d fotoğrafı düzenle</item>
+        <item quantity="other">%d fotoğrafı düzenle</item>
+    </plurals>
     <string name="metadata_editor_done">Bitti</string>
     <string name="metadata_editor_change">Değiştir</string>
     <string name="metadata_editor_saved">Kaydedildi</string>

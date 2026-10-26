@@ -1828,6 +1828,12 @@
 
     <!-- Metadata editor (#36): edit a photo's capture date and place. -->
     <string name="metadata_editor_title">Edytuj metadane</string>
+    <plurals name="metadata_editor_bulk_title">
+        <item quantity="one">Edytuj %d zdjęcie</item>
+        <item quantity="few">Edytuj %d zdjęcia</item>
+        <item quantity="many">Edytuj %d zdjęć</item>
+        <item quantity="other">Edytuj %d zdjęcia</item>
+    </plurals>
     <string name="metadata_editor_done">Gotowe</string>
     <string name="metadata_editor_change">Zmień</string>
     <string name="metadata_editor_saved">Zapisano</string>

@@ -1838,6 +1838,12 @@
 
     <!-- Metadata editor (#36): edit a photo's capture date and place. -->
     <string name="metadata_editor_title">Upraviť metadáta</string>
+    <plurals name="metadata_editor_bulk_title">
+        <item quantity="one">Upraviť %d fotku</item>
+        <item quantity="few">Upraviť %d fotky</item>
+        <item quantity="many">Upraviť %d fotiek</item>
+        <item quantity="other">Upraviť %d fotky</item>
+    </plurals>
     <string name="metadata_editor_done">Hotovo</string>
     <string name="metadata_editor_change">Zmeniť</string>
     <string name="metadata_editor_saved">Uložené</string>

@@ -23,11 +23,17 @@
 package eu.akoos.photos.presentation.viewer
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -300,7 +306,11 @@ internal fun PhotoMetadataSheet(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(stringResource(labelRes), color = FgPrimary, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                            if (selected) {
+                            AnimatedVisibility(
+                                visible = selected,
+                                enter = scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)) + fadeIn(),
+                                exit = scaleOut(tween(120)) + fadeOut(tween(120)),
+                            ) {
                                 Icon(Icons.Default.Check, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
                             }
                         }
@@ -946,12 +956,15 @@ private fun DetailsPrivatePage(
                     )
                     Text(info.value, color = FgMute, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                Icon(
-                    if (selected) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
-                    contentDescription = null,
-                    tint = if (selected) Accent else FgMute,
-                    modifier = Modifier.size(22.dp),
-                )
+                val boxTint by animateColorAsState(if (selected) Accent else FgMute, label = "privateTint")
+                Crossfade(targetState = selected, animationSpec = tween(160), label = "privateBox") { on ->
+                    Icon(
+                        if (on) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                        contentDescription = null,
+                        tint = boxTint,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
             }
         }
     }

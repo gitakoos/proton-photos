@@ -1741,6 +1741,10 @@
 
     <!-- Metadata editor (#36): edit a photo's capture date and place. -->
     <string name="metadata_editor_title">Metaadatok szerkesztése</string>
+    <plurals name="metadata_editor_bulk_title">
+        <item quantity="one">%d fotó szerkesztése</item>
+        <item quantity="other">%d fotó szerkesztése</item>
+    </plurals>
     <string name="metadata_editor_done">Kész</string>
     <string name="metadata_editor_change">Módosítás</string>
     <string name="metadata_editor_saved">Mentve</string>

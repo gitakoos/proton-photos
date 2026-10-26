@@ -22,6 +22,9 @@
 
 package eu.akoos.photos.presentation.viewer
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -187,7 +190,9 @@ internal fun DetailsChipSection(
         }
         if (chips.isNotEmpty() || onEdit != null) {
             FlowRow(
-                modifier = Modifier.padding(top = 6.dp),
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow)),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {

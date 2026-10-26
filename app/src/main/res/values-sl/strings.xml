@@ -1835,6 +1835,12 @@
 
     <!-- Metadata editor (#36): edit a photo's capture date and place. -->
     <string name="metadata_editor_title">Uredi metapodatke</string>
+    <plurals name="metadata_editor_bulk_title">
+        <item quantity="one">Uredi %d fotografijo</item>
+        <item quantity="two">Uredi %d fotografiji</item>
+        <item quantity="few">Uredi %d fotografije</item>
+        <item quantity="other">Uredi %d fotografij</item>
+    </plurals>
     <string name="metadata_editor_done">Končano</string>
     <string name="metadata_editor_change">Spremeni</string>
     <string name="metadata_editor_saved">Shranjeno</string>
