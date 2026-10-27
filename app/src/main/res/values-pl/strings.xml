@@ -1234,8 +1234,23 @@
     <string name="free_up_checking">Sprawdzanie, co można zwolnić…</string>
     <string name="free_up_verifying">Sprawdzanie na Drive, czy każda kopia jest bezpieczna…</string>
     <string name="free_up_explainer">Każde zdjęcie poniżej ma kopię na Drive. Usuwana jest tylko kopia na tym urządzeniu.</string>
-    <string name="free_up_progress">Zwolniono %1$d z %2$d</string>
-    <string name="free_up_leaving_stops">Opuszczenie tego ekranu zatrzymuje porządkowanie. To, co już zwolniono, pozostaje zwolnione.</string>
+    <string name="free_up_progress">Przetworzono %1$d z %2$d (usunięto: %3$d)</string>
+    <string name="free_up_stop_checking">Zatrzymaj sprawdzanie</string>
+    <string name="free_up_stop_freeing">Zatrzymaj zwalnianie</string>
+    <string name="free_up_continue">Kontynuuj zwalnianie</string>
+    <string name="free_up_stopped">Zatrzymano. Usunięte już kopie na urządzeniu pozostają usunięte.</string>
+    <string name="free_up_verify_channel_name">Zwolnij miejsce</string>
+    <string name="free_up_verify_channel_desc">Pokazuje postęp sprawdzania kopii w Drive przed zwolnieniem miejsca.</string>
+    <string name="free_up_verify_notification_title">Sprawdzanie kopii w Drive…</string>
+    <string name="free_up_verify_progress">Sprawdzono %1$d z %2$d</string>
+    <string name="free_up_delete_notification_title">Zwalnianie miejsca…</string>
+    <string name="free_up_awaiting_consent_notification_title">Do zwolnienia miejsca potrzebne jest uprawnienie</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Otwórz Zwolnij miejsce, aby zezwolić na usunięcie %1$d kopii na urządzeniu.</item>
+        <item quantity="few">Otwórz Zwolnij miejsce, aby zezwolić na usunięcie %1$d kopii na urządzeniu.</item>
+        <item quantity="many">Otwórz Zwolnij miejsce, aby zezwolić na usunięcie %1$d kopii na urządzeniu.</item>
+        <item quantity="other">Otwórz Zwolnij miejsce, aby zezwolić na usunięcie %1$d kopii na urządzeniu.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d zdjęcie, %2$s do zwolnienia</item>
         <item quantity="few">%1$d zdjęcia, %2$s do zwolnienia</item>
@@ -1249,6 +1264,7 @@
         <item quantity="other">Usunąć kopie %1$d zdjęć z urządzenia i zwolnić %2$s? Pozostaną na Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Nie udało się zwolnić miejsca: %1$s</string>
+    <string name="free_up_skipped_pre_r">Niektóre kopie na urządzeniu wymagają Androida 11 lub nowszego do usunięcia i zostały pominięte.</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Wysyłanie…</string>
     <string name="upload_status_encrypting">Szyfrowanie…</string>

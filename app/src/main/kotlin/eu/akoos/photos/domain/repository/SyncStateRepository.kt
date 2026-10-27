@@ -47,6 +47,13 @@ interface SyncStateRepository {
     suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int
 
     suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus)
+
+    /**
+     * Batch form of [updateStatusAndDeleteLocal] for permission-granted reclaim paths. Empty
+     * [localUris] is a no-op; the implementation chunks binds at 500.
+     */
+    suspend fun updateStatusAndDeleteLocal(localUris: List<String>, newStatus: SyncStatus)
+
     suspend fun getByUri(localUri: String): SyncState?
     suspend fun getByCloudId(cloudFileId: String): SyncState?
 

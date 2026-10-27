@@ -30,21 +30,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pure-value coverage for the three gates the automatic free-up sweep runs behind, extracted from
+ * Pure-value coverage for the gates the automatic free-up sweep runs behind, extracted from
  * [FreeUpSpaceWorker.isUsableInterval], [FreeUpSpaceWorker.isCloudStateFreshEnough] and
  * [FreeUpSpaceWorker.sweepConstraints].
  *
  * The interval gate is the dangerous one: it decides whether a sweep request states a real minimum
  * age at all. An interval of zero puts the cutoff at "now", which matches every backed-up photo, so
- * a gate that admits it reclaims the device copy of an entire library in one sweep. The values fed
- * to it are [FreeUpInterval.ms], so the accepted cases read from that enum and this test fails if an
- * interval of zero is ever offered.
+ * a gate that admits it would verify and later permanently delete an entire library. The values fed
+ * to it are [FreeUpInterval.ms], so the accepted cases read from that enum
+ * and this test fails if an interval of zero is ever offered.
  *
- * The constraint assertions are a tripwire: they fail loudly if a network constraint is re-added.
- * The scheduled reclaim path is local - [eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase.invoke]
- * selects backed-up rows from Room and deletes their device copies with no network call - so a
- * network constraint fetches nothing and only stops the sweep running offline. (The manual button
- * adds a cloud verification step, but the scheduled worker never runs it.)
+ * The constraint assertions are a tripwire: scheduled verify talks to Drive, so the sweep must keep
+ * [NetworkType.CONNECTED] (not NOT_REQUIRED). Battery-not-low stays.
  *
  * No Android, no Robolectric, no WorkManager runtime: plain JVM assertions on the inputs.
  */
@@ -141,9 +138,9 @@ class FreeUpSpaceWorkerTest {
     }
 
     @Test
-    fun `the sweep requires no network`() {
+    fun `the sweep requires a connected network for Drive verify`() {
         assertEquals(
-            NetworkType.NOT_REQUIRED,
+            NetworkType.CONNECTED,
             FreeUpSpaceWorker.sweepConstraints().requiredNetworkType,
         )
     }
@@ -151,5 +148,60 @@ class FreeUpSpaceWorkerTest {
     @Test
     fun `the sweep requires battery not low`() {
         assertTrue(FreeUpSpaceWorker.sweepConstraints().requiresBatteryNotLow())
+    }
+
+    @Test
+    fun `auto free-up disabled skips the sweep`() {
+        assertTrue(
+            "turning AUTO_FREE_UP off must short-circuit the automatic pipeline before any reclaim",
+            FreeUpSpaceWorker.shouldSkipWhenAutoFreeUpDisabled(enabled = false),
+        )
+    }
+
+    @Test
+    fun `auto free-up enabled does not skip the sweep`() {
+        assertFalse(FreeUpSpaceWorker.shouldSkipWhenAutoFreeUpDisabled(enabled = true))
+    }
+
+    @Test
+    fun `cancel targets both the periodic and oneshot unique names`() {
+        assertEquals(
+            listOf(FreeUpSpaceWorker.TAG, FreeUpSpaceWorker.NAME_ONESHOT),
+            FreeUpSpaceWorker.uniqueWorkNamesToCancel(),
+        )
+    }
+
+    @Test
+    fun `CancellationException is not classified as a permanent sweep failure`() {
+        // CancellationException is an IllegalStateException; treating it as permanent would turn a
+        // cooperative cancel into Result.failure() and burn the WorkManager retry budget.
+        assertFalse(
+            FreeUpSpaceWorker.isPermanentSweepFailure(
+                kotlinx.coroutines.CancellationException("cancelled"),
+            ),
+        )
+    }
+
+    @Test
+    fun `a real IllegalStateException is still a permanent sweep failure`() {
+        assertTrue(FreeUpSpaceWorker.isPermanentSweepFailure(IllegalStateException("gone")))
+    }
+
+    @Test
+    fun `SecurityException and missing files are permanent sweep failures`() {
+        assertTrue(FreeUpSpaceWorker.isPermanentSweepFailure(SecurityException("denied")))
+        assertTrue(FreeUpSpaceWorker.isPermanentSweepFailure(java.io.FileNotFoundException("gone")))
+    }
+
+    @Test
+    fun `automatic schedule targets the shared pipeline with protect-downloads`() {
+        val data = FreeUpPipelineWorker.automaticInputData(FreeUpInterval.OneDay.ms)
+        assertEquals(
+            FreeUpPipelineWorker.TRIGGER_AUTOMATIC,
+            data.getString(FreeUpPipelineWorker.KEY_TRIGGER),
+        )
+        assertTrue(
+            FreeUpPipelineWorker.protectDownloadedFor(FreeUpPipelineWorker.TRIGGER_AUTOMATIC),
+        )
     }
 }

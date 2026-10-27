@@ -1321,8 +1321,21 @@
     <string name="free_up_checking">Controleren wat kan worden vrijgemaakt…</string>
     <string name="free_up_verifying">Controleren bij Drive of elke kopie er is…</string>
     <string name="free_up_explainer">Elke foto hieronder heeft een kopie op Drive. Alleen de kopie op dit apparaat wordt verwijderd.</string>
-    <string name="free_up_progress">%1$d van %2$d vrijgemaakt</string>
-    <string name="free_up_leaving_stops">Deze pagina verlaten stopt het opruimen. Wat al is vrijgemaakt blijft vrijgemaakt.</string>
+    <string name="free_up_progress">%1$d van %2$d verwerkt (%3$d verwijderd)</string>
+    <string name="free_up_stop_checking">Controle stoppen</string>
+    <string name="free_up_stop_freeing">Vrijmaken stoppen</string>
+    <string name="free_up_continue">Doorgaan met vrijmaken</string>
+    <string name="free_up_stopped">Gestopt. Al verwijderde apparaatkopieën blijven verwijderd.</string>
+    <string name="free_up_verify_channel_name">Ruimte vrijmaken</string>
+    <string name="free_up_verify_channel_desc">Toont de voortgang bij het controleren van Drive-kopieën voordat ruimte wordt vrijgemaakt.</string>
+    <string name="free_up_verify_notification_title">Drive-kopieën controleren…</string>
+    <string name="free_up_verify_progress">%1$d van %2$d gecontroleerd</string>
+    <string name="free_up_delete_notification_title">Ruimte vrijmaken…</string>
+    <string name="free_up_awaiting_consent_notification_title">Toestemming nodig om ruimte vrij te maken</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Open Ruimte vrijmaken om het verwijderen van %1$d apparaatkopie toe te staan.</item>
+        <item quantity="other">Open Ruimte vrijmaken om het verwijderen van %1$d apparaatkopieën toe te staan.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d foto, %2$s vrij te maken</item>
         <item quantity="other">%1$d foto\'s, %2$s vrij te maken</item>
@@ -1332,6 +1345,7 @@
         <item quantity="other">De apparaatkopieën van %1$d foto\'s verwijderen en %2$s vrijmaken? Ze blijven op Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Kon geen ruimte vrijmaken: %1$s</string>
+    <string name="free_up_skipped_pre_r">Sommige apparaatkopieën vereisen Android 11 of nieuwer om te verwijderen en zijn overgeslagen.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Uploaden…</string>

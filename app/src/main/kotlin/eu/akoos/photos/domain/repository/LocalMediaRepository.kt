@@ -46,6 +46,13 @@ interface LocalMediaRepository {
     suspend fun sha1(uri: String): String?
 
     /**
+     * Attempts to delete each device MediaStore row named by [uris]. Classifies outcomes into
+     * deleted / missing / needs-permission without building a system delete request (consent is
+     * owned by presentation).
+     */
+    suspend fun deleteDeviceCopies(uris: List<String>): LocalMediaDeleteResult
+
+    /**
      * Forces a re-query of MediaStore. Use after the user grants the media permission: the
      * MediaStore [android.database.ContentObserver] does not fire on a permission change, so
      * without this trigger the gallery would stay empty until the app restarts. Also the way a

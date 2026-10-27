@@ -1322,8 +1322,21 @@
     <string name="free_up_checking">Comprobando qué se puede liberar…</string>
     <string name="free_up_verifying">Comprobando con Drive que cada copia está a salvo…</string>
     <string name="free_up_explainer">Cada foto de abajo tiene una copia en Drive. Solo se elimina la copia de este dispositivo.</string>
-    <string name="free_up_progress">%1$d de %2$d liberadas</string>
-    <string name="free_up_leaving_stops">Salir de esta pantalla detiene la limpieza. Lo ya liberado sigue liberado.</string>
+    <string name="free_up_progress">Procesadas %1$d de %2$d (%3$d eliminadas)</string>
+    <string name="free_up_stop_checking">Detener comprobación</string>
+    <string name="free_up_stop_freeing">Detener liberación</string>
+    <string name="free_up_continue">Continuar liberando espacio</string>
+    <string name="free_up_stopped">Detenido. Las copias del dispositivo ya eliminadas siguen eliminadas.</string>
+    <string name="free_up_verify_channel_name">Liberar espacio</string>
+    <string name="free_up_verify_channel_desc">Muestra el progreso al comprobar las copias en Drive antes de liberar espacio.</string>
+    <string name="free_up_verify_notification_title">Comprobando copias en Drive…</string>
+    <string name="free_up_verify_progress">Comprobadas %1$d de %2$d</string>
+    <string name="free_up_delete_notification_title">Liberando espacio…</string>
+    <string name="free_up_awaiting_consent_notification_title">Se necesita permiso para liberar espacio</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Abre Liberar espacio para permitir eliminar %1$d copia del dispositivo.</item>
+        <item quantity="other">Abre Liberar espacio para permitir eliminar %1$d copias del dispositivo.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d foto, %2$s por liberar</item>
         <item quantity="other">%1$d fotos, %2$s por liberar</item>
@@ -1333,6 +1346,7 @@
         <item quantity="other">¿Eliminar la copia local de %1$d fotos y liberar %2$s? Seguirán en Drive.</item>
     </plurals>
     <string name="settings_free_up_error">No se pudo liberar espacio: %1$s</string>
+    <string name="free_up_skipped_pre_r">Algunas copias del dispositivo requieren Android 11 o posterior para eliminarse y se omitieron.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Subiendo…</string>

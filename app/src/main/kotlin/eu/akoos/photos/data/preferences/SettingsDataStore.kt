@@ -530,11 +530,13 @@ object SettingsKeys {
 
     /**
      * MediaStore URIs that the upload worker wanted to delete after a successful backup
-     * but could not — typically Android 11+ foreign owned items where the worker has no
-     * Activity to drive `MediaStore.createDeleteRequest` consent. The next time the
-     * user is in the foreground we drain this set through a batched delete request so
-     * the device file actually goes away instead of silently surviving. Capped at
-     * [PENDING_DELETE_URIS_MAX] so a queue the user never consents to can't grow without bound.
+     * but could not — typically Android 11+ foreign-owned items where the worker has no
+     * Activity to drive `MediaStore.createTrashRequest` consent. The next time the user is
+     * in the foreground we drain this set through a batched **trash** request (delete-after-backup
+     * only; recoverable in system trash). Free-up reclaim never writes here — it deletes
+     * directly when allowed, or asks for permanent-delete consent on the Free up screen.
+     * Capped at [PENDING_DELETE_URIS_MAX] so a queue the user never consents to can't grow
+     * without bound.
      */
     val PENDING_DELETE_URIS = stringSetPreferencesKey("pending_delete_uris")
 

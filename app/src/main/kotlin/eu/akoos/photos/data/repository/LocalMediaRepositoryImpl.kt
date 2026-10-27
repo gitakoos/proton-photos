@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -53,9 +54,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.entity.LocalTagEntity
+import eu.akoos.photos.data.mediastore.classifyUnresolvedAfterProbe
+import eu.akoos.photos.data.mediastore.queryExistingMediaStoreRows
+import java.io.IOException
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.LocalMediaItem
+import eu.akoos.photos.domain.repository.LocalMediaDeleteResult
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.HiddenCaptureTime
@@ -90,6 +95,61 @@ class LocalMediaRepositoryImpl @Inject constructor(
     override fun notifyMediaChanged() {
         refreshTrigger.tryEmit(Unit)
     }
+
+    override suspend fun deleteDeviceCopies(uris: List<String>): LocalMediaDeleteResult =
+        withContext(Dispatchers.IO) {
+            if (uris.isEmpty()) {
+                return@withContext LocalMediaDeleteResult(
+                    deleted = emptyList(),
+                    missing = emptyList(),
+                    needsPermission = emptyList(),
+                )
+            }
+            val deleted = mutableListOf<String>()
+            val unresolved = mutableListOf<String>()
+            for (uriString in uris) {
+                val contentUri = Uri.parse(uriString)
+                val removed = try {
+                    context.contentResolver.delete(contentUri, null, null)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    0
+                }
+                if (removed > 0) {
+                    deleted += uriString
+                } else {
+                    unresolved += uriString
+                }
+            }
+            if (unresolved.isEmpty()) {
+                return@withContext LocalMediaDeleteResult(
+                    deleted = deleted,
+                    missing = emptyList(),
+                    needsPermission = emptyList(),
+                )
+            }
+            val probe = queryExistingMediaStoreRows(context.contentResolver, unresolved)
+            val classified = classifyUnresolvedAfterProbe(unresolved, probe)
+            if (classified == null) {
+                // Provider gave no trustworthy answer. Known deletions still count; unresolved
+                // must not become missing/CLOUD_ONLY. With nothing deleted yet, propagate so the
+                // free-up pipeline / WorkManager can retry.
+                if (deleted.isEmpty()) {
+                    throw IOException("MediaStore presence probe inconclusive")
+                }
+                return@withContext LocalMediaDeleteResult(
+                    deleted = deleted,
+                    missing = emptyList(),
+                    needsPermission = emptyList(),
+                )
+            }
+            LocalMediaDeleteResult(
+                deleted = deleted,
+                missing = classified.missing,
+                needsPermission = classified.needsPermission,
+            )
+        }
 
     /**
      * Settle-and-kick scheduler for the auto-sync trigger. OneDrive-style: when a new photo
@@ -137,7 +197,9 @@ class LocalMediaRepositoryImpl @Inject constructor(
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> = callbackFlow {
         val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
-                trySend(Unit)
+                // Observer path is coalesced below — camera / free-up bursts must not each
+                // pay for a full MediaStore scan.
+                trySend(MediaRefreshTrigger.Observer)
                 // New camera photos otherwise sit until the next periodic SyncWorker fire
                 // (up to 15 minutes by default). Kicking here closes the gap to "a few
                 // seconds after the picture is saved", subject to the upload-pipeline's
@@ -153,13 +215,18 @@ class LocalMediaRepositoryImpl @Inject constructor(
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer
         )
 
-        trySend(Unit) // initial query
+        trySend(MediaRefreshTrigger.Immediate) // initial query — not subject to settle
 
         awaitClose {
             context.contentResolver.unregisterContentObserver(observer)
         }
     }.let { contentChanges ->
-        merge(contentChanges, refreshTrigger.asSharedFlow())
+        // Manual / permission refreshes stay Immediate; MediaStore onChange is Observer and
+        // waits for a quiet window so a burst collapses to one trailing queryAllMedia.
+        merge(
+            contentChanges,
+            refreshTrigger.asSharedFlow().map { MediaRefreshTrigger.Immediate },
+        ).coalesceMediaRefresh(MEDIA_REFRESH_SETTLE_MS)
             .let { allTriggers ->
                 flow {
                     allTriggers.collect {
