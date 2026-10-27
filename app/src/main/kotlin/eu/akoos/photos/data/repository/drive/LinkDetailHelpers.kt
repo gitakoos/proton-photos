@@ -71,21 +71,38 @@ class LinkDetailHelpers @Inject constructor(
         linkIds: List<String>,
     ): Map<String, BatchLinkDto> {
         val result = mutableMapOf<String, BatchLinkDto>()
-        val manager = apiProvider.get<DriveApiService>(userId)
         for (chunk in linkIds.chunked(BATCH_SIZE)) {
             try {
-                shareService.networkSemaphore.withPermit {
-                    val response = manager.invoke {
-                        batchGetLinks(volumeId, BatchLinksRequest(chunk))
-                    }.valueOrThrow
-                    for (dto in response.links) {
-                        result[dto.link.linkId] = dto
-                    }
-                }
+                result.putAll(batchFetchLinkDetailsStrict(userId, volumeId, chunk))
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 if (isTransientApiError(e)) throw e
                 Log.e(TAG, "batchFetchLinkDetails chunk failed: ${e.message}")
+            }
+        }
+        return result
+    }
+
+    /**
+     * Per-chunk link fetch that propagates every failure, including offline / UnknownHost, so
+     * callers can retry instead of treating a partial map as success. [batchFetchLinkDetails]
+     * keeps its tolerant API by catching non-transient failures above.
+     */
+    suspend fun batchFetchLinkDetailsStrict(
+        userId: UserId,
+        volumeId: String,
+        linkIds: List<String>,
+    ): Map<String, BatchLinkDto> {
+        val result = mutableMapOf<String, BatchLinkDto>()
+        val manager = apiProvider.get<DriveApiService>(userId)
+        for (chunk in linkIds.chunked(BATCH_SIZE)) {
+            shareService.networkSemaphore.withPermit {
+                val response = manager.invoke {
+                    batchGetLinks(volumeId, BatchLinksRequest(chunk))
+                }.valueOrThrow
+                for (dto in response.links) {
+                    result[dto.link.linkId] = dto
+                }
             }
         }
         return result

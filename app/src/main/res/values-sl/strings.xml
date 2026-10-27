@@ -1235,8 +1235,23 @@
     <string name="free_up_checking">Preverjanje, kaj je mogoče sprostiti…</string>
     <string name="free_up_verifying">Preverjanje na Drive, ali je vsaka kopija na varnem…</string>
     <string name="free_up_explainer">Vsaka fotografija spodaj ima kopijo na Drive. Izbriše se le kopija v tej napravi.</string>
-    <string name="free_up_progress">Sproščenih %1$d od %2$d</string>
-    <string name="free_up_leaving_stops">Odhod s tega zaslona ustavi čiščenje. Kar je že sproščeno, ostane sproščeno.</string>
+    <string name="free_up_progress">Obdelanih %1$d od %2$d (odstranjenih %3$d)</string>
+    <string name="free_up_stop_checking">Ustavi preverjanje</string>
+    <string name="free_up_stop_freeing">Ustavi sproščanje</string>
+    <string name="free_up_continue">Nadaljuj sproščanje</string>
+    <string name="free_up_stopped">Ustavljeno. Že odstranjene kopije v napravi ostanejo odstranjene.</string>
+    <string name="free_up_verify_channel_name">Sprosti prostor</string>
+    <string name="free_up_verify_channel_desc">Prikaže napredek preverjanja kopij na Drive pred sprostitvijo prostora.</string>
+    <string name="free_up_verify_notification_title">Preverjanje kopij na Drive…</string>
+    <string name="free_up_verify_progress">Preverjenih %1$d od %2$d</string>
+    <string name="free_up_delete_notification_title">Sproščanje prostora…</string>
+    <string name="free_up_awaiting_consent_notification_title">Za sprostitev prostora je potrebno dovoljenje</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Odprite Sprosti prostor, da dovolite odstranitev %1$d kopije v napravi.</item>
+        <item quantity="two">Odprite Sprosti prostor, da dovolite odstranitev %1$d kopij v napravi.</item>
+        <item quantity="few">Odprite Sprosti prostor, da dovolite odstranitev %1$d kopij v napravi.</item>
+        <item quantity="other">Odprite Sprosti prostor, da dovolite odstranitev %1$d kopij v napravi.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d fotografija, %2$s za sprostitev</item>
         <item quantity="two">%1$d fotografiji, %2$s za sprostitev</item>
@@ -1250,6 +1265,7 @@
         <item quantity="other">Izbrišem kopije %1$d fotografij v napravi in sprostim %2$s? Na Drive ostanejo.</item>
     </plurals>
     <string name="settings_free_up_error">Prostora ni bilo mogoče sprostiti: %1$s</string>
+    <string name="free_up_skipped_pre_r">Nekatere kopije v napravi za odstranitev potrebujejo Android 11 ali novejšega in so bile preskočene.</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Nalaganje…</string>
     <string name="upload_status_encrypting">Šifriranje…</string>

@@ -24,7 +24,6 @@ package eu.akoos.photos.domain.usecase
 
 import android.app.NotificationManager
 import android.content.Context
-import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
@@ -32,6 +31,10 @@ import androidx.core.app.NotificationCompat
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
+import eu.akoos.photos.data.mediastore.MediaStoreRowsProbe
+import eu.akoos.photos.data.mediastore.mediaStoreRowId
+import eu.akoos.photos.data.mediastore.parseContentUriOrNull
+import eu.akoos.photos.data.mediastore.queryExistingMediaStoreRows
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -70,30 +73,27 @@ class PendingDeleteNotificationUseCase @Inject constructor(
         val pendingRaw = prefs[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
         if (pendingRaw.isEmpty()) return
 
-        // Probe each URI for a row and its trashed flag, and let
-        // [pendingDeleteEntryIsStale] rule on the pair. Stale entries get their
-        // SyncState collapsed to CLOUD_ONLY so the gallery stops painting them as
-        // locally present, and they're removed from the queue so the next
-        // createTrashRequest doesn't trip over them.
+        // Bulk-probe which queued URIs still exist (and whether they are trashed), then let
+        // [pendingDeleteEntryIsStale] rule on each. Stale entries get their SyncState collapsed to
+        // CLOUD_ONLY so the gallery stops painting them as locally present, and they're removed
+        // from the queue so the next createTrashRequest doesn't trip over them.
+        // An inconclusive probe (null cursor / provider failure) must leave the queue and statuses
+        // alone — never treat uncertainty as "all rows missing".
+        val probe = queryExistingMediaStoreRows(context.contentResolver, pendingRaw)
+        val presenceById = when (probe) {
+            MediaStoreRowsProbe.Inconclusive -> {
+                Log.w(TAG, "MediaStore probe inconclusive — leaving delete queue untouched")
+                return
+            }
+            is MediaStoreRowsProbe.Complete -> probe.byId
+        }
         val (aliveAll, stale) = pendingRaw.partition { uriStr ->
-            !runCatching {
-                val uri = Uri.parse(uriStr)
-                context.contentResolver.query(
-                    uri,
-                    arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.IS_TRASHED),
-                    null, null, null,
-                )?.use { c ->
-                    if (!c.moveToFirst()) {
-                        pendingDeleteEntryIsStale(rowExists = false, isTrashed = false)
-                    } else {
-                        val col = c.getColumnIndex(MediaStore.MediaColumns.IS_TRASHED)
-                        pendingDeleteEntryIsStale(
-                            rowExists = true,
-                            isTrashed = col >= 0 && c.getInt(col) != 0,
-                        )
-                    }
-                } ?: pendingDeleteEntryIsStale(rowExists = false, isTrashed = false)
-            }.getOrDefault(true)
+            val id = mediaStoreRowId(uriStr)
+            val presence = id?.let { presenceById[it] }
+            !pendingDeleteEntryIsStale(
+                rowExists = presence != null,
+                isTrashed = presence?.isTrashed == true,
+            )
         }
         // A queue that outgrows the cap is one the user keeps declining; drop the
         // longest-waiting entries so it can't grow without bound. Those files stay on
@@ -111,8 +111,8 @@ class PendingDeleteNotificationUseCase @Inject constructor(
         }
         if (stale.isNotEmpty()) {
             Log.d(TAG, "Pruning ${stale.size} stale URI(s) from delete queue")
-            stale.forEach { uri ->
-                runCatching { syncStateRepo.updateStatusAndDeleteLocal(uri, SyncStatus.CLOUD_ONLY) }
+            runCatching {
+                syncStateRepo.updateStatusAndDeleteLocal(stale, SyncStatus.CLOUD_ONLY)
             }
         }
 
@@ -124,7 +124,9 @@ class PendingDeleteNotificationUseCase @Inject constructor(
             nm.cancel(DELETE_NOTIFICATION_ID)
             return
         }
-        val uris = alive.mapNotNull { runCatching { Uri.parse(it) }.getOrNull() }
+        // createTrashRequest shares the same 2000-URI platform ceiling as createDeleteRequest.
+        val firstChunk = nextMediaStoreRequestBatch(alive)
+        val uris = firstChunk.mapNotNull { parseContentUriOrNull(it) }
         if (uris.isEmpty()) {
             nm.cancel(DELETE_NOTIFICATION_ID)
             return
@@ -189,11 +191,9 @@ class PendingDeleteNotificationUseCase @Inject constructor(
          */
         fun trimPendingDeleteQueue(alive: List<String>, max: Int): List<String> =
             if (alive.size <= max) alive
-            else alive.sortedByDescending { mediaStoreRowId(it) }.take(max)
-
-        /** The trailing MediaStore row id of a queued URI, or -1 when it carries none. */
-        private fun mediaStoreRowId(uri: String): Long =
-            uri.substringAfterLast('/').toLongOrNull() ?: -1L
+            // Shared parser returns null when there is no numeric id; sort those oldest (-1) so
+            // they are the first dropped under the cap.
+            else alive.sortedByDescending { mediaStoreRowId(it) ?: -1L }.take(max)
 
         const val DELETE_CHANNEL_ID = "delete_consent"
         const val DELETE_NOTIFICATION_ID = NotificationIds.DELETE_CONSENT

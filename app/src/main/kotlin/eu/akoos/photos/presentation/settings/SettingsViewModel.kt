@@ -103,7 +103,9 @@ import eu.akoos.photos.service.ScreenshotOverlayService
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.entity.UploadCompressionTier
 import kotlinx.coroutines.flow.combine
+import eu.akoos.photos.data.freeup.cancelFreeUpActionRequiredNotification
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.NewsRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
@@ -149,6 +151,7 @@ class SettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val workManager: WorkManager,
     private val freeUpSpace: FreeUpSpaceUseCase,
+    private val freeUpPendingDelete: FreeUpPendingDeleteQueue,
     private val accountManager: AccountManager,
     private val reconcile: ReconcileSyncStateUseCase,
     private val upload: UploadPendingUseCase,
@@ -1151,6 +1154,12 @@ class SettingsViewModel @Inject constructor(
             context.settingsDataStore.edit { it[SettingsKeys.AUTO_FREE_UP] = enabled }
             _uiState.update { it.copy(autoFreeUp = enabled) }
             applyFreeUpSchedule()
+            if (!enabled) {
+                // Do not leave a pending permanent-delete offer or its action-required
+                // notification stuck after automatic free-up is turned off.
+                freeUpPendingDelete.settleAllPending(granted = false)
+                cancelFreeUpActionRequiredNotification(context)
+            }
         }
     }
 

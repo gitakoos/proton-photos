@@ -86,6 +86,16 @@ object NotificationIds {
      *  recognition and photo search share it, one download at a time). */
     const val MODEL_DOWNLOAD = 4256
 
+    /** Manual free-up pipeline worker's foreground progress notification. */
+    const val MANUAL_FREE_UP = 4257
+
+    /**
+     * Shared free-up "action required" notice (open Free up space / awaiting MediaStore consent).
+     * Used by both manual and automatic triggers. Own id so WorkManager teardown of
+     * [MANUAL_FREE_UP] does not dismiss it.
+     */
+    const val FREE_UP_ACTION_REQUIRED = 4258
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

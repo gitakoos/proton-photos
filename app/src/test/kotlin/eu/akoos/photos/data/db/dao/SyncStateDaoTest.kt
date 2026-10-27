@@ -246,6 +246,33 @@ class SyncStateDaoTest {
     }
 
     @Test
+    fun `updateStatusByLocalUris flips every listed uri to CLOUD_ONLY`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED))
+        dao.upsert(entity("uri://2", status = SyncStatus.SYNCED))
+        dao.upsert(entity("uri://3", status = SyncStatus.SYNCED))
+
+        val updated = dao.updateStatusByLocalUris(
+            listOf("uri://1", "uri://2"),
+            SyncStatus.CLOUD_ONLY,
+        )
+
+        assertEquals(2, updated)
+        assertEquals(SyncStatus.CLOUD_ONLY, dao.getByUri("uri://1")?.status)
+        assertEquals(SyncStatus.CLOUD_ONLY, dao.getByUri("uri://2")?.status)
+        assertEquals(SyncStatus.SYNCED, dao.getByUri("uri://3")?.status)
+    }
+
+    @Test
+    fun `updateStatusByLocalUris is a no-op for an empty list`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED))
+
+        val updated = dao.updateStatusByLocalUris(emptyList(), SyncStatus.CLOUD_ONLY)
+
+        assertEquals(0, updated)
+        assertEquals(SyncStatus.SYNCED, dao.getByUri("uri://1")?.status)
+    }
+
+    @Test
     fun `delete removes the entity`() = runTest {
         dao.upsert(entity("uri://1"))
 

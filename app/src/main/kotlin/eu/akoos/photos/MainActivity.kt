@@ -138,6 +138,8 @@ class MainActivity : AppCompatActivity() {
     private var lockEnabled = false
     /** Photo URI from a home-screen widget tap; NavGraph reads + clears it to route to the viewer. */
     private var widgetPhotoUri by mutableStateOf<String?>(null)
+    /** True when the ready notification asks the startup router to open Free up space. */
+    private var openFreeUpSpace by mutableStateOf(false)
     /** Request from a system "Open with" / "Edit with" intent; NavGraph routes to the editor. */
     private var externalEditRequest by mutableStateOf<ExternalEditRequest?>(null)
     /** Wall-clock of the last ON_STOP, compared against the configured timeout to decide re-lock. */
@@ -164,6 +166,7 @@ class MainActivity : AppCompatActivity() {
 
         // Widget-tap URI from the launching intent (mirrored in onNewIntent for a foregrounded re-tap).
         widgetPhotoUri = intent?.getStringExtra(EXTRA_WIDGET_PHOTO_URI)
+        openFreeUpSpace = intent?.getBooleanExtra(EXTRA_OPEN_FREE_UP, false) == true
         externalEditRequest = parseExternalEditRequest(intent)
 
         // ProtonCore account-state handler. Without it, 2FA / two-pass accounts stall after the
@@ -237,11 +240,14 @@ class MainActivity : AppCompatActivity() {
             if (syncEffectivelyEnabled(this@MainActivity)) {
                 SyncWorker.runNow(this@MainActivity, wifiOnly)
             }
-            // Reclaim eligible device copies on launch too, not just on the hourly worker an OEM
-            // doze can delay for hours. Same age gate; a sweep with no eligible photo is cheap.
+            // Re-bind the periodic unique work (UPDATE replaces a stale/broken class after upgrade),
+            // then reclaim eligible device copies on launch too — the hourly worker an OEM doze can
+            // delay for hours. Same age gate; a sweep with no eligible photo is cheap.
             if (prefs[SettingsKeys.AUTO_FREE_UP] == true) {
                 val freeUpInterval = FreeUpInterval.fromKey(prefs[SettingsKeys.FREE_UP_INTERVAL])
-                FreeUpSpaceWorker.runNow(WorkManager.getInstance(this@MainActivity), freeUpInterval.ms)
+                val freeUpWm = WorkManager.getInstance(this@MainActivity)
+                FreeUpSpaceWorker.schedule(freeUpWm, freeUpInterval.ms)
+                FreeUpSpaceWorker.runNow(freeUpWm, freeUpInterval.ms)
             }
         }
 
@@ -426,6 +432,8 @@ class MainActivity : AppCompatActivity() {
                                     onWidgetPhotoConsumed = { widgetPhotoUri = null },
                                     externalEditRequest = externalEditRequest,
                                     onExternalEditConsumed = { externalEditRequest = null },
+                                    openFreeUpSpace = openFreeUpSpace,
+                                    onOpenFreeUpSpaceConsumed = { openFreeUpSpace = false },
                                 )
                                 UpdaterHost()
                                 if (isLocked) AppLockScreen(onUnlocked = {
@@ -566,6 +574,9 @@ class MainActivity : AppCompatActivity() {
         super.onNewIntent(intent)
         // Foregrounded widget re-tap → grab the new URI for NavGraph's LaunchedEffect.
         intent.getStringExtra(EXTRA_WIDGET_PHOTO_URI)?.let { widgetPhotoUri = it }
+        if (intent.getBooleanExtra(EXTRA_OPEN_FREE_UP, false)) {
+            openFreeUpSpace = true
+        }
         parseExternalEditRequest(intent)?.let { externalEditRequest = it }
     }
 
@@ -676,5 +687,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         /** Intent extra: MediaStore URI string from a home-screen widget tap. */
         const val EXTRA_WIDGET_PHOTO_URI = "widget_photo_uri"
+        /** Intent extra: open the authenticated Free up space route from its ready notification. */
+        const val EXTRA_OPEN_FREE_UP = "open_free_up"
     }
 }

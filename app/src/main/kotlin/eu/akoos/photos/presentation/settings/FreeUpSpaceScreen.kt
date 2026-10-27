@@ -22,10 +22,6 @@
 
 package eu.akoos.photos.presentation.settings
 
-import android.app.Activity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.IntentSenderRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -48,11 +44,13 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -69,29 +67,21 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.ErrorPopup
+import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.gallery.SyncedCloudBadge
 import eu.akoos.photos.presentation.settings.components.SettingsCard
-import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.util.formatBytes
 
 /**
- * Shows exactly which photos will lose their device copy, then reclaims them.
- *
- * The reclaim permanently deletes the local file, often for thousands of photos at once, so the list
- * comes first and the button second. Every cell carries the same green backed-up badge the timeline
- * draws, from the same composable, because the one thing worth checking before agreeing is that each
- * photo really does have a Drive copy to fall back on.
- *
- * Leaving the screen stops the sweep. Nothing is lost by that: each photo is committed on its own,
- * so coming back lists what is left and the count carries on from there.
- *
- * A LazyVerticalGrid with the pill header overlaid, rather than `SettingsSubPageScaffold`, because a
- * library of thousands must not be laid out at once (see that scaffold's own note on the choice).
+ * Shows reclaimable photos and enqueues/cancels the manual Free-up pipeline worker. Progress and
+ * reclaim run under WorkManager; permanent-delete consent (strict prepareBatch + launch-failure
+ * recovery) is handled by [FreeUpPermanentDeleteHandler] mounted on this route.
  */
 @Composable
 fun FreeUpSpaceScreen(
@@ -101,18 +91,8 @@ fun FreeUpSpaceScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
     var showConfirm by remember { mutableStateOf(false) }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) viewModel.onPermissionGranted()
-        else viewModel.onPermissionDenied()
-    }
-    LaunchedEffect(state.pendingIntent) {
-        state.pendingIntent?.let { pi ->
-            permissionLauncher.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-        }
-    }
+    val busy = state.phase == FreeUpSpacePhase.Checking ||
+        state.phase == FreeUpSpacePhase.Freeing
 
     state.message?.let { message ->
         ErrorPopup(
@@ -168,61 +148,93 @@ fun FreeUpSpaceScreen(
                                     )
                                 }
                             }
-                            if (state.running) {
-                                Spacer(Modifier.height(14.dp))
-                                Text(
-                                    // The Drive check has nothing to count, so it says what it is
-                                    // doing rather than showing a bar sitting at zero.
-                                    if (state.verifying) {
-                                        stringResource(R.string.free_up_verifying)
-                                    } else {
-                                        stringResource(R.string.free_up_progress, state.done, state.total)
-                                    },
-                                    color = colors.fgDim,
-                                    fontSize = 12.5.sp,
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                if (state.verifying) {
-                                    LinearProgressIndicator(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = colors.accent,
-                                    )
-                                } else {
-                                    LinearProgressIndicator(
-                                        progress = {
-                                            if (state.total > 0) state.done.toFloat() / state.total else 0f
+                            when (state.phase) {
+                                FreeUpSpacePhase.Checking -> {
+                                    FreeUpProgressSection(
+                                        label = if (state.checkTotal > 0) {
+                                            stringResource(
+                                                R.string.free_up_verify_progress,
+                                                state.checked,
+                                                state.checkTotal,
+                                            )
+                                        } else {
+                                            stringResource(R.string.free_up_verifying)
                                         },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = colors.accent,
+                                        progress = if (state.checkTotal > 0) {
+                                            state.checked.toFloat() / state.checkTotal
+                                        } else {
+                                            null
+                                        },
                                     )
                                 }
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    stringResource(R.string.free_up_leaving_stops),
-                                    color = colors.fgMute,
-                                    fontSize = 11.5.sp,
-                                )
+                                FreeUpSpacePhase.Freeing -> {
+                                    FreeUpProgressSection(
+                                        label = stringResource(
+                                            R.string.free_up_progress,
+                                            state.processed,
+                                            state.deletionTotal,
+                                            state.removed,
+                                        ),
+                                        progress = if (state.deletionTotal > 0) {
+                                            state.processed.toFloat() / state.deletionTotal
+                                        } else {
+                                            0f
+                                        },
+                                    )
+                                }
+                                FreeUpSpacePhase.Stopped -> {
+                                    Spacer(Modifier.height(14.dp))
+                                    Text(
+                                        if (state.awaitingConsentCount > 0) {
+                                            pluralStringResource(
+                                                R.plurals.free_up_awaiting_consent_notification_text,
+                                                state.awaitingConsentCount,
+                                                state.awaitingConsentCount,
+                                            )
+                                        } else {
+                                            stringResource(R.string.free_up_stopped)
+                                        },
+                                        color = colors.fgDim,
+                                        fontSize = 12.5.sp,
+                                    )
+                                }
+                                else -> Unit
                             }
                         }
                     }
-                    if (!state.loading && !state.isEmpty) {
+                    if (!state.loading && (!state.isEmpty || state.phase == FreeUpSpacePhase.Stopped)) {
                         Spacer(Modifier.height(12.dp))
                         SettingsCard {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable(enabled = !state.running) { showConfirm = true }
+                                    .clickable {
+                                        when (state.phase) {
+                                            FreeUpSpacePhase.Checking,
+                                            FreeUpSpacePhase.Freeing,
+                                            -> viewModel.stop()
+                                            FreeUpSpacePhase.Stopped -> viewModel.continueWork()
+                                            else -> showConfirm = true
+                                        }
+                                    }
                                     .padding(horizontal = 16.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Text(
-                                    stringResource(R.string.settings_storage_free_up),
-                                    color = if (state.running) colors.fgMute else colors.accent,
+                                    stringResource(
+                                        when (state.phase) {
+                                            FreeUpSpacePhase.Checking -> R.string.free_up_stop_checking
+                                            FreeUpSpacePhase.Freeing -> R.string.free_up_stop_freeing
+                                            FreeUpSpacePhase.Stopped -> R.string.free_up_continue
+                                            else -> R.string.settings_storage_free_up
+                                        },
+                                    ),
+                                    color = colors.accent,
                                     fontSize = 14.5.sp,
                                     fontWeight = FontWeight.Medium,
                                 )
-                                if (state.running) {
+                                if (busy) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(18.dp),
                                         strokeWidth = 2.dp,
@@ -237,6 +249,10 @@ fun FreeUpSpaceScreen(
             }
 
             items(state.candidates, key = { it.localUri }) { row ->
+                // Dead localUri (already pruned from MediaStore) leaves Coil with nothing to
+                // draw — track Error and show a muted broken-image glyph over cardBg so the
+                // tile is not an unexplained black square.
+                var decodeFailed by remember(row.localUri) { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
                         .aspectRatio(1f)
@@ -247,11 +263,25 @@ fun FreeUpSpaceScreen(
                         model = row.localUri,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
+                        onState = { st ->
+                            when (st) {
+                                is AsyncImagePainter.State.Success -> decodeFailed = false
+                                is AsyncImagePainter.State.Error -> decodeFailed = true
+                                else -> Unit
+                            }
+                        },
                         modifier = Modifier.fillMaxSize(),
                     )
-                    // The same badge the timeline draws, from the same composable. The point of this
-                    // screen is that the user can see each photo has a Drive copy before its device
-                    // copy goes, and a lookalike drawn here could drift from the real one.
+                    if (decodeFailed) {
+                        Icon(
+                            Icons.Default.BrokenImage,
+                            contentDescription = null,
+                            tint = colors.fgDim.copy(alpha = 0.45f),
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(28.dp),
+                        )
+                    }
                     SyncedCloudBadge()
                 }
             }
@@ -273,6 +303,34 @@ fun FreeUpSpaceScreen(
             dismissLabel = stringResource(R.string.cancel),
             onConfirm = { showConfirm = false; viewModel.start() },
             onDismiss = { showConfirm = false },
+        )
+    }
+}
+
+/** Shared Checking / Freeing progress: label + determinate or indeterminate bar. */
+@Composable
+private fun FreeUpProgressSection(
+    label: String,
+    progress: Float?,
+) {
+    val colors = AppColors.current
+    Spacer(Modifier.height(14.dp))
+    Text(
+        label,
+        color = colors.fgDim,
+        fontSize = 12.5.sp,
+    )
+    Spacer(Modifier.height(8.dp))
+    if (progress != null) {
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth(),
+            color = colors.accent,
+        )
+    } else {
+        LinearProgressIndicator(
+            modifier = Modifier.fillMaxWidth(),
+            color = colors.accent,
         )
     }
 }

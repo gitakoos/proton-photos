@@ -581,6 +581,7 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         override suspend fun updateDomainColumnsIfNotSyncedWithCloud(state: SyncState, userId: UserId): Int = 0
         override suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int = 0
         override suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus) {}
+        override suspend fun updateStatusAndDeleteLocal(localUris: List<String>, newStatus: SyncStatus) {}
         override suspend fun getByCloudId(cloudFileId: String): SyncState? = null
         override suspend fun cloudPairedLinkIds(userId: UserId, localUris: List<String>): Map<String, String> = emptyMap()
         override suspend fun claimForUpload(localUri: String): Int = 0

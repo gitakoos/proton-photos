@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.mediastore.MediaStoreRowsProbe
+import eu.akoos.photos.data.mediastore.canPrunePendingDeleteFromProbe
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase.Companion.pendingDeleteEntryIsStale
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase.Companion.trimPendingDeleteQueue
 import org.junit.Assert.assertEquals
@@ -137,5 +139,14 @@ class PendingDeleteQueueTest {
     @Test
     fun `a cap of zero empties the queue`() {
         assertEquals(emptyList<String>(), trimPendingDeleteQueue(listOf(uri(1), uri(2)), max = 0))
+    }
+
+    // ─── inconclusive MediaStore probe ────────────────────────────────────────
+
+    @Test
+    fun `an inconclusive probe must not prune the pending-delete queue`() {
+        // Null cursor / provider failure used to become emptyMap() and mark every URI stale.
+        assertFalse(canPrunePendingDeleteFromProbe(MediaStoreRowsProbe.Inconclusive))
+        assertTrue(canPrunePendingDeleteFromProbe(MediaStoreRowsProbe.Complete(emptyMap())))
     }
 }

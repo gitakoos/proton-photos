@@ -295,6 +295,13 @@ interface SyncStateDao {
     @Query("UPDATE sync_state SET status = :newStatus WHERE localUri = :localUri")
     suspend fun updateStatus(localUri: String, newStatus: SyncStatus)
 
+    /**
+     * Batch status flip for permission-granted reclaim / pending-delete drains. Callers must chunk
+     * [localUris] at 500 (SQLite's bind-variable limit is 999 on older Android).
+     */
+    @Query("UPDATE sync_state SET status = :newStatus WHERE localUri IN (:localUris)")
+    suspend fun updateStatusByLocalUris(localUris: List<String>, newStatus: SyncStatus): Int
+
     @Query("DELETE FROM sync_state WHERE localUri = :localUri")
     suspend fun delete(localUri: String)
 

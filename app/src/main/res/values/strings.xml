@@ -1645,8 +1645,21 @@
     <string name="free_up_checking">Checking what can be freed…</string>
     <string name="free_up_verifying">Checking with Drive that every copy is safe…</string>
     <string name="free_up_explainer">Each photo below has a copy on Drive. Only the copy on this device is deleted.</string>
-    <string name="free_up_progress">Freed %1$d of %2$d</string>
-    <string name="free_up_leaving_stops">Leaving this screen stops the clean-up. Everything already freed stays freed.</string>
+    <string name="free_up_progress">Processed %1$d of %2$d (%3$d removed)</string>
+    <string name="free_up_stop_checking">Stop checking</string>
+    <string name="free_up_stop_freeing">Stop freeing</string>
+    <string name="free_up_continue">Continue freeing</string>
+    <string name="free_up_stopped">Stopped. Device copies already removed stay removed.</string>
+    <string name="free_up_verify_channel_name">Free up space</string>
+    <string name="free_up_verify_channel_desc">Shows progress while checking Drive copies and freeing space.</string>
+    <string name="free_up_verify_notification_title">Checking Drive copies…</string>
+    <string name="free_up_verify_progress">Checked %1$d of %2$d</string>
+    <string name="free_up_delete_notification_title">Freeing up space…</string>
+    <string name="free_up_awaiting_consent_notification_title">Permission needed to free space</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Open Free up space to allow removing %1$d device copy.</item>
+        <item quantity="other">Open Free up space to allow removing %1$d device copies.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d photo, %2$s to free</item>
         <item quantity="other">%1$d photos, %2$s to free</item>
@@ -1656,6 +1669,7 @@
         <item quantity="other">Delete the device copy of %1$d photos and free %2$s? They stay on Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Could not free up space: %1$s</string>
+    <string name="free_up_skipped_pre_r">Some device copies need Android 11 or newer to remove and were skipped.</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Uploading…</string>
     <string name="upload_status_encrypting">Encrypting…</string>

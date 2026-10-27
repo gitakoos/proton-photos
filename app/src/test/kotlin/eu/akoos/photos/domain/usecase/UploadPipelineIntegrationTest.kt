@@ -520,6 +520,12 @@ private class FakeLocalMediaRepository : LocalMediaRepository {
     override suspend fun queryByBucket(bucketName: String): List<LocalMediaItem> =
         items.value.filter { it.bucketName == bucketName }
     override suspend fun sha1(uri: String): String? = null
+    override suspend fun deleteDeviceCopies(uris: List<String>) =
+        eu.akoos.photos.domain.repository.LocalMediaDeleteResult(
+            deleted = emptyList(),
+            missing = emptyList(),
+            needsPermission = uris,
+        )
 
     override fun observeTrashedMedia(): Flow<List<LocalMediaItem>> = MutableStateFlow(emptyList())
     override fun hasMediaPermission(): Flow<Boolean> = MutableStateFlow(true)

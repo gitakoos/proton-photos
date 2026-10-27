@@ -1305,8 +1305,21 @@
     <string name="free_up_checking">Prüfung, was freigegeben werden kann…</string>
     <string name="free_up_verifying">Prüfung mit Drive, dass jede Kopie vorhanden ist…</string>
     <string name="free_up_explainer">Jedes Foto unten hat eine Kopie auf Drive. Nur die Kopie auf diesem Gerät wird gelöscht.</string>
-    <string name="free_up_progress">%1$d von %2$d freigegeben</string>
-    <string name="free_up_leaving_stops">Das Verlassen dieser Seite stoppt die Bereinigung. Bereits Freigegebenes bleibt freigegeben.</string>
+    <string name="free_up_progress">%1$d von %2$d verarbeitet (%3$d entfernt)</string>
+    <string name="free_up_stop_checking">Prüfung stoppen</string>
+    <string name="free_up_stop_freeing">Freigeben stoppen</string>
+    <string name="free_up_continue">Freigeben fortsetzen</string>
+    <string name="free_up_stopped">Gestoppt. Bereits entfernte Gerätekopien bleiben entfernt.</string>
+    <string name="free_up_verify_channel_name">Speicher freigeben</string>
+    <string name="free_up_verify_channel_desc">Zeigt den Fortschritt beim Prüfen der Drive-Kopien vor dem Freigeben.</string>
+    <string name="free_up_verify_notification_title">Drive-Kopien werden geprüft…</string>
+    <string name="free_up_verify_progress">%1$d von %2$d geprüft</string>
+    <string name="free_up_delete_notification_title">Speicher wird freigegeben…</string>
+    <string name="free_up_awaiting_consent_notification_title">Berechtigung zum Freigeben nötig</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Öffne Speicher freigeben, um das Entfernen von %1$d Gerätekopie zu erlauben.</item>
+        <item quantity="other">Öffne Speicher freigeben, um das Entfernen von %1$d Gerätekopien zu erlauben.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d Foto, %2$s freizugeben</item>
         <item quantity="other">%1$d Fotos, %2$s freizugeben</item>
@@ -1316,6 +1329,7 @@
         <item quantity="other">Die Gerätekopien von %1$d Fotos löschen und %2$s freigeben? Sie bleiben auf Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Speicher konnte nicht freigegeben werden: %1$s</string>
+    <string name="free_up_skipped_pre_r">Einige Gerätekopien brauchen Android 11 oder neuer zum Entfernen und wurden übersprungen.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Wird hochgeladen…</string>

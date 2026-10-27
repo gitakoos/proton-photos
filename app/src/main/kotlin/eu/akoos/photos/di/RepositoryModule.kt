@@ -26,10 +26,12 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import eu.akoos.photos.data.freeup.FreeUpPendingDeleteBridge
 import eu.akoos.photos.data.repository.DrivePhotoRepositoryImpl
 import eu.akoos.photos.data.repository.LocalMediaRepositoryImpl
 import eu.akoos.photos.data.repository.SyncStateRepositoryImpl
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.CloudPhotoExifRewriter
@@ -55,4 +57,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindCloudPhotoExifRewriter(impl: CloudPhotoExifRewriterImpl): CloudPhotoExifRewriter
+
+    @Binds
+    @Singleton
+    abstract fun bindFreeUpPendingDeleteQueue(impl: FreeUpPendingDeleteBridge): FreeUpPendingDeleteQueue
 }

@@ -31,6 +31,7 @@ import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.util.flatMapSqlChunks
+import eu.akoos.photos.util.forEachSqlChunk
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -76,6 +77,12 @@ class SyncStateRepositoryImpl @Inject constructor(
     // flips the row's status (to CLOUD_ONLY). It does not itself delete anything.
     override suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus) {
         dao.updateStatus(localUri, newStatus)
+    }
+
+    override suspend fun updateStatusAndDeleteLocal(localUris: List<String>, newStatus: SyncStatus) {
+        localUris.forEachSqlChunk { chunk ->
+            dao.updateStatusByLocalUris(chunk, newStatus)
+        }
     }
 
     override suspend fun getByUri(localUri: String): SyncState? =

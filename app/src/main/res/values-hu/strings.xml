@@ -1328,8 +1328,21 @@
     <string name="free_up_checking">Ellenőrzés, mi szabadítható fel…</string>
     <string name="free_up_verifying">Ellenőrzés a Drive-val, hogy minden másolat megvan…</string>
     <string name="free_up_explainer">Az alábbi fotók mindegyikének van másolata a Drive-on. Csak az eszközön lévő példány törlődik.</string>
-    <string name="free_up_progress">%1$d / %2$d kész</string>
-    <string name="free_up_leaving_stops">A képernyő elhagyása leállítja a takarítást. Ami már felszabadult, az felszabadult marad.</string>
+    <string name="free_up_progress">Feldolgozva: %1$d / %2$d (%3$d eltávolítva)</string>
+    <string name="free_up_stop_checking">Ellenőrzés leállítása</string>
+    <string name="free_up_stop_freeing">Felszabadítás leállítása</string>
+    <string name="free_up_continue">Felszabadítás folytatása</string>
+    <string name="free_up_stopped">Leállítva. A már eltávolított eszközmásolatok eltávolítva maradnak.</string>
+    <string name="free_up_verify_channel_name">Hely felszabadítása</string>
+    <string name="free_up_verify_channel_desc">A Drive-másolatok ellenőrzésének előrehaladását mutatja a helyfelszabadítás előtt.</string>
+    <string name="free_up_verify_notification_title">Drive-másolatok ellenőrzése…</string>
+    <string name="free_up_verify_progress">%1$d / %2$d ellenőrizve</string>
+    <string name="free_up_delete_notification_title">Hely felszabadítása…</string>
+    <string name="free_up_awaiting_consent_notification_title">Engedély szükséges a hely felszabadításához</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Nyisd meg a Hely felszabadítását, hogy engedélyezd %1$d eszközmásolat eltávolítását.</item>
+        <item quantity="other">Nyisd meg a Hely felszabadítását, hogy engedélyezd %1$d eszközmásolat eltávolítását.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d fotó, %2$s szabadul fel</item>
         <item quantity="other">%1$d fotó, %2$s szabadul fel</item>
@@ -1339,6 +1352,7 @@
         <item quantity="other">Törlöd %1$d fotó eszközön lévő példányát, és felszabadítasz %2$s helyet? A Drive-on maradnak.</item>
     </plurals>
     <string name="settings_free_up_error">Nem sikerült helyet felszabadítani: %1$s</string>
+    <string name="free_up_skipped_pre_r">Egyes eszközmásolatok eltávolításához Android 11 vagy újabb kell; ezeket kihagytuk.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Feltöltés…</string>

@@ -1234,8 +1234,23 @@
     <string name="free_up_checking">Kontrola, co lze uvolnit…</string>
     <string name="free_up_verifying">Ověřování na Drive, že každá kopie je v bezpečí…</string>
     <string name="free_up_explainer">Každá fotka níže má kopii na Drive. Maže se jen kopie v tomto zařízení.</string>
-    <string name="free_up_progress">Uvolněno %1$d z %2$d</string>
-    <string name="free_up_leaving_stops">Opuštění této obrazovky úklid zastaví. Co už je uvolněné, uvolněné zůstane.</string>
+    <string name="free_up_progress">Zpracováno %1$d z %2$d (%3$d odstraněno)</string>
+    <string name="free_up_stop_checking">Zastavit kontrolu</string>
+    <string name="free_up_stop_freeing">Zastavit uvolňování</string>
+    <string name="free_up_continue">Pokračovat v uvolňování</string>
+    <string name="free_up_stopped">Zastaveno. Již odstraněné kopie v zařízení zůstanou odstraněné.</string>
+    <string name="free_up_verify_channel_name">Uvolnění místa</string>
+    <string name="free_up_verify_channel_desc">Zobrazuje průběh kontroly kopií na Drive před uvolněním místa.</string>
+    <string name="free_up_verify_notification_title">Kontrola kopií na Drive…</string>
+    <string name="free_up_verify_progress">Zkontrolováno %1$d z %2$d</string>
+    <string name="free_up_delete_notification_title">Uvolňování místa…</string>
+    <string name="free_up_awaiting_consent_notification_title">K uvolnění místa je potřeba oprávnění</string>
+    <plurals name="free_up_awaiting_consent_notification_text">
+        <item quantity="one">Otevřete Uvolnit místo a povolte odstranění %1$d kopie v zařízení.</item>
+        <item quantity="few">Otevřete Uvolnit místo a povolte odstranění %1$d kopie v zařízení.</item>
+        <item quantity="many">Otevřete Uvolnit místo a povolte odstranění %1$d kopie v zařízení.</item>
+        <item quantity="other">Otevřete Uvolnit místo a povolte odstranění %1$d kopií v zařízení.</item>
+    </plurals>
     <plurals name="free_up_summary">
         <item quantity="one">%1$d fotka, %2$s k uvolnění</item>
         <item quantity="few">%1$d fotky, %2$s k uvolnění</item>
@@ -1249,6 +1264,7 @@
         <item quantity="other">Smazat kopie %1$d fotek v zařízení a uvolnit %2$s? Na Drive zůstanou.</item>
     </plurals>
     <string name="settings_free_up_error">Nepodařilo se uvolnit místo: %1$s</string>
+    <string name="free_up_skipped_pre_r">Některé kopie v zařízení vyžadují k odstranění Android 11 nebo novější a byly přeskočeny.</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Nahrávání…</string>
     <string name="upload_status_encrypting">Šifrování…</string>

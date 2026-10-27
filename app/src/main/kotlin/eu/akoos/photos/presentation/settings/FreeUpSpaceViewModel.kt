@@ -22,17 +22,22 @@
 
 package eu.akoos.photos.presentation.settings
 
-import android.app.PendingIntent
 import android.content.Context
+import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.R
+import eu.akoos.photos.data.freeup.cancelFreeUpActionRequiredNotification
 import eu.akoos.photos.domain.entity.SyncState
-import eu.akoos.photos.domain.entity.SyncStatus
-import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.repository.FreeUpPendingDeleteQueue
+import eu.akoos.photos.domain.repository.isFreeUpPendingOfferStale
 import eu.akoos.photos.domain.usecase.FreeUpSpaceUseCase
+import eu.akoos.photos.worker.FreeUpPipelineWorker
+import eu.akoos.photos.worker.ManualFreeUpWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,50 +48,31 @@ import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 
 /**
- * Backs the Free up space screen: the photos whose device copy can be reclaimed, shown before
- * anything is deleted, and the progress of the sweep that deletes them.
- *
- * The screen exists because the reclaim is a permanent local delete of potentially thousands of
- * files, and the Storage row it replaced started that with nothing but a spinner. Listing the exact
- * rows first lets the user check them, and every row here is `SYNCED`, so the backed-up badge each
- * cell draws is a check rather than a decoration.
- *
- * The sweep is deliberately tied to this screen's lifetime: leaving cancels it. Nothing is lost by
- * that, since each photo is committed on its own, and [load] on the next open lists what is left.
+ * Free up space screen: lists reclaimable candidates, enqueues/cancels [ManualFreeUpWorker]
+ * (shared [FreeUpPipelineWorker]), and observes WorkInfo phase/counts. The worker owns verification,
+ * reclaim, and consent handoff; this ViewModel renders its state.
  */
 @HiltViewModel
 class FreeUpSpaceViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val freeUpSpace: FreeUpSpaceUseCase,
-    private val syncStateRepo: SyncStateRepository,
     private val localRepo: eu.akoos.photos.domain.repository.LocalMediaRepository,
     private val accountManager: AccountManager,
+    private val pendingDeleteBridge: FreeUpPendingDeleteQueue,
 ) : ViewModel() {
 
     data class UiState(
         val loading: Boolean = true,
-        /** The rows the sweep will act on, in the order it will act on them. */
         val candidates: List<SyncState> = emptyList(),
-        val running: Boolean = false,
-        /** The Drive check that runs before a single file is deleted. Its own flag because it is the
-         *  part with nothing to count: the screen says what it is doing instead of showing 0 of 0. */
-        val verifying: Boolean = false,
-        val done: Int = 0,
-        val total: Int = 0,
-        /** Terminal message for the finished sweep, shown on this screen rather than the one the
-         *  button used to live on. */
+        val phase: FreeUpSpacePhase = FreeUpSpacePhase.Idle,
+        val checked: Int = 0,
+        val checkTotal: Int = 0,
+        val processed: Int = 0,
+        val removed: Int = 0,
+        val deletionTotal: Int = 0,
+        /** Non-zero when WorkInfo reports awaiting_consent; drives awaiting-consent copy. */
+        val awaitingConsentCount: Int = 0,
         val message: String? = null,
-        /** Android 11+ batch consent for files this app does not own. */
-        val pendingIntent: PendingIntent? = null,
-        /**
-         * How much device space the listed photos actually occupy.
-         *
-         * Resolved when the list is built rather than summed off the rows: a sync row's own
-         * `sizeBytes` is 0 on rows minted by a path that never had the local file's size to hand, so
-         * summing the column alone reports 0 B for a real list of photos. MediaStore is asked once
-         * for every local item and the row's own value is used only where MediaStore has nothing
-         * (the same "trust the non-zero one" rule `HiddenFolderRecords` already applies).
-         */
         val reclaimableBytes: Long = 0L,
     ) {
         val isEmpty: Boolean get() = !loading && candidates.isEmpty()
@@ -95,118 +81,337 @@ class FreeUpSpaceViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
-    /** URIs handed to the system consent dialog, settled once it returns. */
-    private var pendingLocalUris: List<String> = emptyList()
+    /** User-initiated stop; cleared by [start] / [continueWork]. Does not freeze WorkInfo counts. */
+    private var stoppedLatch = false
 
-    init { load() }
+    /** Tracks WorkInfo id+state so Done/Error messages fire once per terminal transition. */
+    private var lastTerminalWorkKey: String? = null
 
     /**
-     * Re-read what can be reclaimed. Called on open and after a sweep, so a screen returned to shows
-     * what is actually left rather than the list it was opened with.
+     * Work ids observed while active during this ViewModel lifetime. Terminal Done/Error publishes
+     * only for these — retained unique-work history must not replay on route reopen.
      */
+    private val observedActiveWorkIds = mutableSetOf<String>()
+
+    /**
+     * Cumulative frees for the current Start→Done session: direct worker removals plus every
+     * granted consent chunk.
+     */
+    private var sessionFreed = 0
+
+    init {
+        load()
+        observeWorker()
+        observeConsentSettlement()
+    }
+
     fun load() {
         viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: run {
-                _uiState.update { it.copy(loading = false, candidates = emptyList()) }
-                return@launch
-            }
-            _uiState.update { it.copy(loading = true) }
-            // Long.MAX_VALUE and protectDownloaded = false are what the Storage button always passed:
-            // an explicit tap reclaims every backed-up copy, including ones downloaded back.
-            val rows = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
-            _uiState.update {
-                it.copy(loading = false, candidates = rows, reclaimableBytes = totalBytes(rows))
-            }
+            refreshFromStore()
         }
     }
 
+    /**
+     * Refresh candidates from the store. While Checking or Freeing, preserves the live grid
+     * (candidates + reclaimableBytes) so an empty mid-run query cannot flash "nothing to free".
+     */
+    private suspend fun refreshFromStore() {
+        val userId = accountManager.getPrimaryUserId().first() ?: run {
+            _uiState.update { it.copy(loading = false, candidates = emptyList()) }
+            return
+        }
+        _uiState.update { it.copy(loading = true) }
+        val rows = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
+        val bytes = totalBytes(rows)
+        _uiState.update {
+            val liveGrid = it.phase == FreeUpSpacePhase.Checking ||
+                it.phase == FreeUpSpacePhase.Freeing
+            it.copy(
+                loading = false,
+                candidates = if (liveGrid) it.candidates else rows,
+                reclaimableBytes = if (liveGrid) it.reclaimableBytes else bytes,
+            )
+        }
+    }
+
+    /**
+     * Enqueue the manual pipeline. No-ops while Checking/Freeing, or while a **fresh** consent
+     * chunk is queued. Stale offers are cleared so Continue/Start can re-verify.
+     */
     fun start() {
-        if (_uiState.value.running) return
-        viewModelScope.launch {
-            val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            _uiState.update {
-                it.copy(running = true, verifying = true, done = 0, total = it.candidates.size, message = null)
+        if (_uiState.value.phase in setOf(
+                FreeUpSpacePhase.Checking,
+                FreeUpSpacePhase.Freeing,
+            )
+        ) return
+        if (hasFreshPendingConsent()) return
+        stoppedLatch = false
+        sessionFreed = 0
+        _uiState.update {
+            it.copy(
+                phase = FreeUpSpacePhase.Checking,
+                checked = 0,
+                checkTotal = 0,
+                processed = 0,
+                removed = 0,
+                deletionTotal = 0,
+                awaitingConsentCount = 0,
+                message = null,
+            )
+        }
+        ManualFreeUpWorker.enqueue(context)
+    }
+
+    /** Resume after Stopped (including awaiting-consent Continue when the queue is empty/stale). */
+    fun continueWork() {
+        when (_uiState.value.phase) {
+            FreeUpSpacePhase.Stopped -> {
+                if (hasFreshPendingConsent()) return
+                stoppedLatch = false
+                ManualFreeUpWorker.enqueue(context)
             }
-            try {
-                // Check against Drive before deleting anything. This reclaims every backed-up photo,
-                // including copies the user downloaded back, so acting on a sync_state that nothing
-                // has verified lately could take a last copy. The check confirms only the on-device
-                // candidates' cloud links are active right now (one batched call per 50), which is
-                // bounded by the on-device count. The refresh-plus-reconcile pass this replaced walked
-                // the entire Drive volume first, so on a large library it ran past the point the sweep
-                // could start and nothing was reclaimed.
-                //
-                // A thrown transient error (a rate-limited verification batch) is deliberately NOT
-                // swallowed: sweeping against links that could not be confirmed is the situation this
-                // exists to prevent, so it falls through to the catch and the sweep does not run.
-                val candidates = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
-                val verified = freeUpSpace.verifyActiveBackups(userId, candidates)
-                // Settle the grid onto the confirmed set before a single file is deleted: only links
-                // that came back active survive here, so a candidate whose cloud copy is gone or
-                // trashed is dropped rather than reclaimed.
-                _uiState.update {
-                    it.copy(
-                        verifying = false,
-                        candidates = verified,
-                        reclaimableBytes = totalBytes(verified),
-                        done = 0,
-                        total = verified.size,
-                    )
-                }
-                val result = freeUpSpace.reclaimCandidates(
-                    candidates = verified,
-                    onProgress = { done, total ->
-                        _uiState.update { it.copy(done = done, total = total) }
-                    },
-                )
-                when (result) {
-                    is FreeUpSpaceUseCase.FreeUpResult.Done -> {
-                        _uiState.update { it.copy(running = false, verifying = false, message = freedMessage(result.freed)) }
-                        load()
-                    }
-                    is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
-                        pendingLocalUris = result.localUris
-                        _uiState.update { it.copy(running = false, verifying = false, pendingIntent = result.pendingIntent) }
-                    }
-                }
-            } catch (e: Exception) {
-                // Cancellation is the ordinary way this ends: the user left the screen, which stops
-                // the sweep by design. Everything already reclaimed stays reclaimed.
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                _uiState.update {
-                    it.copy(
-                        running = false,
-                        verifying = false,
-                        message = context.getString(R.string.settings_free_up_error, e.message ?: ""),
-                    )
-                }
-            }
+            else -> Unit
         }
     }
 
-    /** The system consent dialog returned OK: it did the deleting, so only the rows move here. */
-    fun onPermissionGranted() {
-        viewModelScope.launch {
-            val uris = pendingLocalUris
-            pendingLocalUris = emptyList()
-            uris.forEach { syncStateRepo.updateStatusAndDeleteLocal(it, SyncStatus.CLOUD_ONLY) }
-            _uiState.update { it.copy(pendingIntent = null, message = freedMessage(uris.size)) }
-            load()
+    /** Cancel manual unique work only. */
+    fun stop() {
+        when (_uiState.value.phase) {
+            FreeUpSpacePhase.Checking,
+            FreeUpSpacePhase.Freeing,
+            -> {
+                stoppedLatch = true
+                ManualFreeUpWorker.cancel(context)
+                _uiState.update { it.copy(phase = FreeUpSpacePhase.Stopped) }
+                load()
+            }
+            else -> Unit
         }
-    }
-
-    fun onPermissionDenied() {
-        pendingLocalUris = emptyList()
-        _uiState.update { it.copy(pendingIntent = null) }
-        load()
     }
 
     fun clearMessage() = _uiState.update { it.copy(message = null) }
 
     /**
-     * Device bytes the [rows] occupy. One MediaStore read for the whole library rather than a query
-     * per photo, matching how the upload pass resolves the same kind of per-uri fact.
+     * True when the consent queue holds a non-stale offer. Clears stale offers via
+     * [FreeUpPendingDeleteQueue.settleAllPending] so Start/Continue can re-run the pipeline.
      */
+    private fun hasFreshPendingConsent(nowMs: Long = System.currentTimeMillis()): Boolean {
+        if (pendingDeleteBridge.uris.value.isEmpty()) return false
+        if (isFreeUpPendingOfferStale(pendingDeleteBridge.offeredAtMs, nowMs)) {
+            pendingDeleteBridge.settleAllPending(granted = false)
+            cancelFreeUpActionRequiredNotification(context)
+            return false
+        }
+        return true
+    }
+
+    private fun observeWorker() {
+        viewModelScope.launch {
+            WorkManager.getInstance(context)
+                .getWorkInfosForUniqueWorkFlow(ManualFreeUpWorker.UNIQUE_NAME)
+                .collect { infos ->
+                    val kinds = infos.map { info ->
+                        when (info.state) {
+                            WorkInfo.State.RUNNING,
+                            WorkInfo.State.ENQUEUED,
+                            WorkInfo.State.BLOCKED,
+                            -> FreeUpWorkInfoKind.Active
+                            WorkInfo.State.SUCCEEDED,
+                            WorkInfo.State.FAILED,
+                            WorkInfo.State.CANCELLED,
+                            -> FreeUpWorkInfoKind.Terminal
+                        }
+                    }
+                    val preferredIndex = selectPreferredFreeUpWorkInfoIndex(kinds)
+                    val info = preferredIndex?.let { infos.getOrNull(it) }
+                    val workState = info?.state
+                    val running = workState == WorkInfo.State.RUNNING ||
+                        workState == WorkInfo.State.ENQUEUED ||
+                        workState == WorkInfo.State.BLOCKED
+                    val succeeded = workState == WorkInfo.State.SUCCEEDED
+                    val failed = workState == WorkInfo.State.FAILED
+                    val cancelled = workState == WorkInfo.State.CANCELLED
+
+                    val workId = info?.id?.toString()
+                    if (running && workId != null) {
+                        observedActiveWorkIds.add(workId)
+                    }
+
+                    val progress = info?.progress
+                    val output = info?.outputData
+                    val workerPhase = workString(progress, output, FreeUpPipelineWorker.KEY_PHASE)
+                    val processed = workInt(progress, output, FreeUpPipelineWorker.KEY_PROCESSED)
+                    val total = workInt(progress, output, FreeUpPipelineWorker.KEY_TOTAL)
+                    val removed = workInt(progress, output, FreeUpPipelineWorker.KEY_REMOVED)
+                    val needsPermission = workInt(
+                        progress,
+                        output,
+                        FreeUpPipelineWorker.KEY_NEEDS_PERMISSION_COUNT,
+                    )
+
+                    val current = _uiState.value
+                    val terminalKey = info?.let { "${it.id}:$workState" }
+                    val observedActive = shouldPublishFreeUpTerminal(workId, observedActiveWorkIds)
+                    val isNewTerminal = terminalKey != null &&
+                        terminalKey != lastTerminalWorkKey &&
+                        (succeeded || failed) &&
+                        observedActive
+                    if (isNewTerminal) lastTerminalWorkKey = terminalKey
+
+                    val awaitingConsent = workerPhase == FreeUpPipelineWorker.PHASE_AWAITING_CONSENT ||
+                        needsPermission > 0
+                    val preRAllSkipped = isNewTerminal &&
+                        succeeded &&
+                        !awaitingConsent &&
+                        removed == 0 &&
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.R &&
+                        (current.checkTotal > 0 || current.candidates.isNotEmpty())
+                    // Publish Done for every successful terminal observed this lifetime, including
+                    // successful zero-removal (refresh + "nothing removed" copy).
+                    val shouldPublishDone = isNewTerminal &&
+                        succeeded &&
+                        !awaitingConsent
+                    val doneMessage = shouldPublishDone ||
+                        (current.message != null && current.phase == FreeUpSpacePhase.Done)
+
+                    val phase = deriveFreeUpSpaceState(
+                        workRunning = running,
+                        workSucceeded = succeeded,
+                        workFailed = failed,
+                        doneMessage = doneMessage && !running,
+                        workerPhase = workerPhase,
+                        stopped = stoppedLatch,
+                        workCancelled = cancelled,
+                    )
+
+                    _uiState.update { state ->
+                        var next = state.copy(
+                            phase = phase,
+                            awaitingConsentCount = if (awaitingConsent) {
+                                needsPermission.coerceAtLeast(state.awaitingConsentCount)
+                            } else if (phase == FreeUpSpacePhase.Stopped && stoppedLatch) {
+                                state.awaitingConsentCount
+                            } else {
+                                0
+                            },
+                        )
+                        when (workerPhase) {
+                            FreeUpPipelineWorker.PHASE_DELETING,
+                            FreeUpPipelineWorker.PHASE_AWAITING_CONSENT,
+                            -> {
+                                next = next.copy(
+                                    processed = processed,
+                                    removed = removed,
+                                    deletionTotal = total,
+                                )
+                            }
+                            else -> {
+                                // verifying / enqueued / unknown — drive the check progress bar
+                                if (running || succeeded || failed) {
+                                    next = next.copy(checked = processed, checkTotal = total)
+                                }
+                            }
+                        }
+                        when {
+                            shouldPublishDone -> {
+                                sessionFreed = sessionFreed.coerceAtLeast(removed)
+                                next.copy(
+                                    phase = FreeUpSpacePhase.Done,
+                                    message = when {
+                                        preRAllSkipped ->
+                                            context.getString(R.string.free_up_skipped_pre_r)
+                                        else -> freedMessage(sessionFreed)
+                                    },
+                                    awaitingConsentCount = 0,
+                                )
+                            }
+                            isNewTerminal && failed -> next.copy(
+                                phase = FreeUpSpacePhase.Error,
+                                message = context.getString(
+                                    R.string.settings_free_up_error,
+                                    "",
+                                ),
+                            )
+                            isNewTerminal && succeeded && awaitingConsent -> {
+                                // Seed session with direct removals before consent chunks accumulate.
+                                sessionFreed = removed
+                                next.copy(
+                                    phase = FreeUpSpacePhase.Stopped,
+                                    awaitingConsentCount = needsPermission.coerceAtLeast(1),
+                                )
+                            }
+                            else -> next
+                        }
+                    }
+
+                    if (shouldPublishDone) {
+                        refreshFromStore()
+                    }
+                }
+        }
+    }
+
+    /**
+     * Reconcile typed MediaStore consent outcomes when not mid pipeline run.
+     * Grant: refresh store; Done when nothing left, else Stopped for further Continue.
+     * Deny / technical clear: Stopped (or Idle), refresh; do not auto-relaunch consent.
+     */
+    private fun observeConsentSettlement() {
+        viewModelScope.launch {
+            pendingDeleteBridge.settled.collect { settlement ->
+                if (pendingDeleteBridge.uris.value.isEmpty()) {
+                    cancelFreeUpActionRequiredNotification(context)
+                }
+                val phase = _uiState.value.phase
+                if (phase == FreeUpSpacePhase.Checking ||
+                    phase == FreeUpSpacePhase.Freeing
+                ) {
+                    return@collect
+                }
+                if (settlement.granted) {
+                    sessionFreed += settlement.uris.size
+                    refreshFromStore()
+                    val remaining = _uiState.value.candidates
+                    if (remaining.isEmpty() && pendingDeleteBridge.uris.value.isEmpty()) {
+                        _uiState.update {
+                            it.copy(
+                                phase = if (sessionFreed > 0) {
+                                    FreeUpSpacePhase.Done
+                                } else {
+                                    FreeUpSpacePhase.Idle
+                                },
+                                message = if (sessionFreed > 0) freedMessage(sessionFreed) else null,
+                                awaitingConsentCount = 0,
+                            )
+                        }
+                    } else {
+                        // More chunks or residual candidates — Continue can re-run if queue empty.
+                        _uiState.update {
+                            it.copy(
+                                phase = FreeUpSpacePhase.Stopped,
+                                awaitingConsentCount = pendingDeleteBridge.uris.value.size,
+                            )
+                        }
+                    }
+                } else {
+                    val hasCandidates = _uiState.value.candidates.isNotEmpty()
+                    if (hasCandidates) {
+                        stoppedLatch = true
+                        _uiState.update {
+                            it.copy(phase = FreeUpSpacePhase.Stopped, awaitingConsentCount = 0)
+                        }
+                    } else {
+                        stoppedLatch = false
+                        _uiState.update {
+                            it.copy(phase = FreeUpSpacePhase.Idle, awaitingConsentCount = 0)
+                        }
+                    }
+                    refreshFromStore()
+                }
+            }
+        }
+    }
+
     private suspend fun totalBytes(rows: List<SyncState>): Long {
         if (rows.isEmpty()) return 0L
         val sizeByUri = runCatching {
@@ -223,4 +428,25 @@ class FreeUpSpaceViewModel @Inject constructor(
         } else {
             context.getString(R.string.settings_free_up_none)
         }
+
+    private fun workString(
+        progress: androidx.work.Data?,
+        output: androidx.work.Data?,
+        key: String,
+    ): String? = when {
+        progress?.keyValueMap?.containsKey(key) == true -> progress.getString(key)
+        output?.keyValueMap?.containsKey(key) == true -> output.getString(key)
+        else -> null
+    }
+
+    private fun workInt(
+        progress: androidx.work.Data?,
+        output: androidx.work.Data?,
+        key: String,
+        default: Int = 0,
+    ): Int = when {
+        progress?.keyValueMap?.containsKey(key) == true -> progress.getInt(key, default)
+        output?.keyValueMap?.containsKey(key) == true -> output.getInt(key, default)
+        else -> default
+    }
 }
