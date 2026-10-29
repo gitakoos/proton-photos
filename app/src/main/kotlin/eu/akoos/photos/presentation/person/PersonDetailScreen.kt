@@ -104,6 +104,9 @@ import eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog
 import eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog
 import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
+import eu.akoos.photos.presentation.location.LocationGridRow
+import eu.akoos.photos.presentation.location.LocationMonthHeader
+import eu.akoos.photos.presentation.location.locationGridRows
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.people.AddToPersonFaceSheet
@@ -120,6 +123,9 @@ import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgMute
+import eu.akoos.photos.presentation.util.monthYearFormat
+import java.util.Date
+import java.util.TimeZone
 
 /**
  * Full-screen detail for one clustered person: a photo grid over every item they appear in, built
@@ -386,6 +392,10 @@ fun PersonDetailScreen(
                 // Long-press a photo then drag to sweep a range, the way the timeline and albums select. The
                 // hint and merge rows at the top carry no photo key, so they are never part of a sweep.
                 val selectableIds = remember(state.items) { state.items.map { it.stableId } }
+                val gridRows = remember(state.items) {
+                    val fmt = monthYearFormat()
+                    locationGridRows(state.items, TimeZone.getDefault(), keyOf = { it.stableId }) { fmt.format(Date(it)) }
+                }
                 val idToIndex = remember(selectableIds) { selectableIds.withIndex().associate { (i, id) -> id to i } }
                 // Armed at the long-press anchor so the cell's release-tap does not toggle it straight back off.
                 val tapGuard = remember { mutableStateOf(false) }
@@ -443,7 +453,19 @@ fun PersonDetailScreen(
                             )
                         }
                     }
-                    items(items = state.items, key = { it.stableId }) { item ->
+                    // A header over each month, as on a place's page and the desktop, so a person's photos
+                    // read as a story through the years rather than one unbroken wall.
+                    items(
+                        items = gridRows,
+                        key = { row -> row.key },
+                        span = { row -> GridItemSpan(if (row is LocationGridRow.Header) maxLineSpan else 1) },
+                        contentType = { row -> row is LocationGridRow.Header },
+                    ) { row ->
+                        if (row is LocationGridRow.Header) {
+                            LocationMonthHeader(label = row.label, seamless = seamless)
+                            return@items
+                        }
+                        val item = (row as LocationGridRow.Photo).item
                         val inputs = remember(item) { photoCellInputsFor(item) }
                         PhotoCell(
                             imageData = inputs.imageData,

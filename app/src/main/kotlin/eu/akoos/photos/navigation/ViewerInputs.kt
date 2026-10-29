@@ -44,6 +44,9 @@ internal data class ViewerInputs(
     val trashMode: Boolean,
     val secure: Boolean,
     val autoplay: Boolean,
+    /** The person whose page opened the viewer, so the photo can be made their cover or taken off them
+     *  from the viewer itself; null from anywhere else. */
+    val person: ViewerPerson? = null,
 ) {
     /**
      * The inputs of a viewer that is closing: the flags its exit resets in nav scope drop here too, so a
@@ -57,6 +60,10 @@ internal data class ViewerInputs(
  * The [ViewerInputs] of one viewer back-stack entry, taken when the entry first composes. Scoped to the
  * entry, so it survives the viewer leaving the composition while a page it opened is on top.
  */
+/** A person page that opened the viewer: who, and whether they have a name (only a named person keeps a
+ *  cover and can have a photo taken off them). */
+internal data class ViewerPerson(val personId: Long, val named: Boolean)
+
 internal class ViewerInputsHolder(opened: ViewerInputs) : ViewModel() {
     /** State, so a reset recomposes the viewer in the same frame (see [ViewerInputs.closed]). */
     var inputs: ViewerInputs by mutableStateOf(opened)

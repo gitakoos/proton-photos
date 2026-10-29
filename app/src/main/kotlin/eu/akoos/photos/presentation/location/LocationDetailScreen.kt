@@ -914,10 +914,10 @@ fun LocationPhotosContent(
     )
 }
 
-/** A month header over the place grid's photos, styled like the device-folder and album pages'. The
- *  label keeps clear of the screen edge in seamless mode, where the tiles below bleed to 0. */
+/** A month header over a grid of photos (a place's, a person's), styled like the device-folder and album
+ *  pages'. The label keeps clear of the screen edge in seamless mode, where the tiles below bleed to 0. */
 @Composable
-private fun LocationMonthHeader(label: String, seamless: Boolean) {
+internal fun LocationMonthHeader(label: String, seamless: Boolean) {
     Text(
         label,
         color = FgPrimary,

@@ -39,10 +39,12 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Panorama
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -401,6 +403,10 @@ fun PhotoViewerScreen(
     onEditMetadata: (GalleryItem) -> Unit = {},
     /** Opens the page of the person the face index grouped, from the "people in this photo" bar. */
     onOpenPerson: (Long) -> Unit = {},
+    /** Opened from a named person's page: make the photo on screen that person's cover, or take it off
+     *  them. Null anywhere else, which leaves both out of the menu. */
+    onSetPersonCover: ((GalleryItem) -> Unit)? = null,
+    onRemoveFromPerson: ((GalleryItem) -> Unit)? = null,
     /** Opens the full map centred on the photo's place, from the map box in the details panel. */
     onOpenMapAt: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
     /** True when the viewer was opened from the Trash screen: adds a Restore / Delete-forever bar to
@@ -1131,6 +1137,8 @@ fun PhotoViewerScreen(
     // dialog. Null hides the confirm; "restore" or "delete" name the pending action.
     var trashConfirmAction by remember { mutableStateOf<String?>(null) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var pendingPersonCover by remember { mutableStateOf<GalleryItem?>(null) }
+    var pendingPersonRemove by remember { mutableStateOf<GalleryItem?>(null) }
     val renameState by viewModel.renameState.collectAsStateWithLifecycle()
     val metadataSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -2327,6 +2335,32 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
+                            // From a person's page the photo can be made their cover or taken off them right
+                            // here, the same two actions (and confirms) the page's own selection offers.
+                            if (settledItem != null && !trashMode && !secure) {
+                                onSetPersonCover?.let { setCover ->
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.person_set_cover), color = FgPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.AccountCircle, null,
+                                            tint = Accent, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            pendingPersonCover = settledItem
+                                        },
+                                    )
+                                }
+                                onRemoveFromPerson?.let {
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.person_remove_from), color = FgPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.PersonRemove, null,
+                                            tint = Accent, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            pendingPersonRemove = settledItem
+                                        },
+                                    )
+                                }
+                            }
                             // Recognize text runs the read the long press starts, so it is in reach however the
                             // long press is set. Offered for an image shown as itself, not a panorama, an inline
                             // motion clip, or a photo the device hide keeps behind a blur. With Copy text off the
@@ -3098,6 +3132,34 @@ fun PhotoViewerScreen(
                 },
             )
         }
+    }
+
+    pendingPersonCover?.let { item ->
+        ConfirmDialog(
+            title = stringResource(R.string.person_set_cover_confirm_title),
+            message = stringResource(R.string.person_set_cover_confirm_body),
+            confirmLabel = stringResource(R.string.person_set_cover),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                onSetPersonCover?.invoke(item)
+                pendingPersonCover = null
+            },
+            onDismiss = { pendingPersonCover = null },
+        )
+    }
+    pendingPersonRemove?.let { item ->
+        ConfirmDialog(
+            title = stringResource(R.string.person_remove_confirm_title),
+            message = stringResource(R.string.person_remove_confirm_body),
+            confirmLabel = stringResource(R.string.person_remove_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            destructive = true,
+            onConfirm = {
+                onRemoveFromPerson?.invoke(item)
+                pendingPersonRemove = null
+            },
+            onDismiss = { pendingPersonRemove = null },
+        )
     }
 
     // ── Rename dialog ─────────────────────────────────────────────────────────

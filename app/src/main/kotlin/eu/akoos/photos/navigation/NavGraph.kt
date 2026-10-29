@@ -441,6 +441,10 @@ fun NavGraph(
     // chooser, or the place the switched-from map was opened on; null for a plain open.
     var mapStyleFocus by remember { mutableStateOf<MapFocus?>(null) }
     var selectedViewerItems by remember { mutableStateOf<List<GalleryItem>>(emptyList()) }
+    // The person page that last opened the viewer, with the very list it handed over. A viewer opened from
+    // anywhere else hands over another list, so the pair no longer matches and the viewer offers no
+    // person actions, without every other opener having to clear it.
+    var viewerPersonFor by remember { mutableStateOf<Pair<ViewerPerson, List<GalleryItem>>?>(null) }
     var selectedViewerIndex by remember { mutableIntStateOf(0) }
     // The return leg of the line above: the photo the viewer closed on, for the grid underneath to
     // land on. Held as the State itself rather than a delegate because it is handed down through
@@ -1034,6 +1038,7 @@ fun NavGraph(
                     // not an album's members, so viewerFromAlbum stays false.
                     val items = personState.items
                     selectedViewerItems = items
+                    viewerPersonFor = ViewerPerson(personId, named = personState.personName != null) to items
                     selectedViewerIndex = items.indexOfFirst { it.stableId == item.stableId }.coerceAtLeast(0)
                     selectedViewerHiddenLinkIds = emptySet()
                     viewerFromAlbum = false
@@ -1125,10 +1130,23 @@ fun NavGraph(
                         trashMode = viewerTrashMode,
                         secure = viewerSecure,
                         autoplay = viewerAutoplay,
+                        person = viewerPersonFor?.takeIf { it.second === selectedViewerItems }?.first,
                     ),
                 )
             }
             val inputs = inputsHolder.inputs
+            // A person page's own actions on the photo on screen. The calls write to the face tables, which
+            // the person page underneath reads, so it follows without being told.
+            val viewerPerson = inputs.person?.takeIf { it.named }
+            val personActions = viewerPerson?.let { hiltViewModel<PersonDetailViewModel>(backStackEntry) }
+            val personActionMessage = personActions?.message?.collectAsStateWithLifecycle()?.value
+            val personActionCtx = androidx.compose.ui.platform.LocalContext.current
+            LaunchedEffect(personActionMessage) {
+                personActionMessage?.let {
+                    android.widget.Toast.makeText(personActionCtx, personActionCtx.getString(it), android.widget.Toast.LENGTH_SHORT).show()
+                    personActions.clearMessage()
+                }
+            }
             // When the viewer was opened from an album, propagate the album linkId to the
             // viewer + editor so edited/renamed copies land back in the same album.
             val sourceAlbumLinkId = if (inputs.fromAlbum) inputs.album?.linkId else null
@@ -1180,6 +1198,12 @@ fun NavGraph(
                     navController.navigate(Screen.MetadataEditor.route)
                 },
                 onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
+                onSetPersonCover = if (viewerPerson != null && personActions != null) {
+                    { item -> personActions.setCover(viewerPerson.personId, item.stableId) }
+                } else null,
+                onRemoveFromPerson = if (viewerPerson != null && personActions != null) {
+                    { item -> personActions.removePhotos(viewerPerson.personId, listOf(item.stableId)) }
+                } else null,
                 // The map in the user's style, centred on the photo's place. Before a style has ever been
                 // picked the one-time chooser comes first and carries the place through to the chosen map.
                 onOpenMapAt = { lat, lon ->

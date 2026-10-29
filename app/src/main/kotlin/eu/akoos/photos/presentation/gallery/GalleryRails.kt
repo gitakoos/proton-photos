@@ -990,13 +990,17 @@ internal fun PersonTile(
         val name = person.displayName?.takeIf { it.isNotBlank() }
         // Reserve the caption line whether or not the person is named, so a row that mixes named and
         // not-yet-named tiles keeps one height instead of shrinking as it scrolls onto the unnamed ones.
+        // The line is measured in sp with its own line height, so a larger system font grows the line
+        // with the text instead of the tile's clip cutting the name in half.
         Spacer(Modifier.height(4.dp))
-        Box(modifier = Modifier.height(16.dp), contentAlignment = Alignment.Center) {
+        val captionHeight = with(LocalDensity.current) { PERSON_CAPTION_LINE.toDp() }
+        Box(modifier = Modifier.height(captionHeight), contentAlignment = Alignment.Center) {
             if (name != null) {
                 Text(
                     name,
                     color = if (selected) Accent else FgDim,
                     fontSize = 11.sp,
+                    lineHeight = PERSON_CAPTION_LINE,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1005,6 +1009,9 @@ internal fun PersonTile(
         }
     }
 }
+
+/** The line a person tile's name takes, in sp so it follows the system font size. */
+private val PERSON_CAPTION_LINE = 15.sp
 
 /**
  * Album-style People card: the person's face-cropped cover filling a rounded rectangle, captioned with
