@@ -79,10 +79,12 @@ class PendingCloudCompressDaoTest {
     @Test
     fun `a row kept for a retry is not served again in the same run, and is in the next`() = runTest {
         dao.insertAll(listOf(row("a"), row("b")))
-        dao.markTried("a", "run1")
+        dao.markTried("a", "run1", attempts = 1)
 
         assertEquals(listOf("b"), dao.nextSlice("run1", 20).map { it.linkId })
-        assertEquals(listOf("a", "b"), dao.nextSlice("run2", 20).map { it.linkId })
+        val next = dao.nextSlice("run2", 20)
+        assertEquals(listOf("a", "b"), next.map { it.linkId })
+        assertEquals(1, next.first().attempts)
     }
 
     @Test
@@ -97,12 +99,35 @@ class PendingCloudCompressDaoTest {
     }
 
     @Test
-    fun `a cancel drops what has not started and keeps a photo whose copy is already up`() = runTest {
-        dao.insertAll(listOf(row("started", at = 5L), row("waiting", at = 5L), row("later", at = 50L)))
+    fun `a photo asked for again after a cancel is not dropped by that cancel`() = runTest {
+        dao.insertAll(listOf(row("kept", at = 5L), row("uploaded", at = 5L)))
+        dao.setNewLinkId("uploaded", "copy")
+
+        dao.requeue(listOf("kept", "uploaded"), enqueuedAt = 20L)
+        dao.clearNotStarted(enqueuedUpTo = 10L, running = emptyList())
+
+        val rows = dao.nextSlice("run", 20).associateBy { it.linkId }
+        assertEquals(20L, rows.getValue("kept").enqueuedAt)
+        assertEquals(5L, rows.getValue("uploaded").enqueuedAt)
+    }
+
+    @Test
+    fun `the move of labels and faces to the copy is remembered across runs`() = runTest {
+        dao.insertAll(listOf(row("a")))
+        dao.setCarriedOver("a")
+
+        assertTrue(dao.nextSlice("run", 20).single().carriedOver)
+    }
+
+    @Test
+    fun `a cancel drops what has not started and keeps the running photo and one whose copy is up`() = runTest {
+        dao.insertAll(
+            listOf(row("started", at = 5L), row("running", at = 5L), row("waiting", at = 5L), row("later", at = 50L)),
+        )
         dao.setNewLinkId("started", "copy")
 
-        dao.clearNotStarted(enqueuedUpTo = 10L)
+        dao.clearNotStarted(enqueuedUpTo = 10L, running = listOf("running"))
 
-        assertEquals(listOf("started", "later"), dao.nextSlice("run", 20).map { it.linkId })
+        assertEquals(listOf("running", "started", "later"), dao.nextSlice("run", 20).map { it.linkId })
     }
 }

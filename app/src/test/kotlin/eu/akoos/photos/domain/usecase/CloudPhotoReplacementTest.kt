@@ -77,10 +77,70 @@ class CloudPhotoReplacementTest {
         cloud.add(photo)
         cloud.albumIdsByPhoto = mapOf("orig" to setOf("albumA"))
         cloud.downloadBytes = ByteArray(4096) { it.toByte() }
-        replacement = CloudPhotoReplacement(
-            context, cloud, CarryOverToReplacement(cloud, noListingRow(), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)),
-        )
+        replacement = replacementWith(live = true)
         workDir.deleteRecursively()
+    }
+
+    private fun replacementWith(live: Boolean) = CloudPhotoReplacement(
+        context,
+        cloud,
+        CarryOverToReplacement(cloud, noListingRow(), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)),
+    ) { _, _ -> live }
+
+    private fun passThrough() = CloudPhotoReplacement.Prepare { working ->
+        CloudPhotoReplacement.Prepared(
+            file = File(working.parentFile, "copy-${System.nanoTime()}.png").apply { writeBytes(working.readBytes()) },
+            item = LocalMediaItem(Uri.fromFile(working).toString(), photo.captureTimeMs, "IMG_1.png", "image/png", working.length(), null),
+            xAttr = UploadXAttrMetadata(),
+        )
+    }
+
+    @Test
+    fun `a resume whose recorded copy is gone starts over instead of trashing the original`() = runTest {
+        val result = replacementWith(live = false).replace(userId, photo, passThrough(), resumeUploadedLinkId = "deleted-copy")
+
+        assertTrue(result is CloudPhotoReplacement.Result.Success)
+        val fresh = cloud.uploadedLinkIds.single()
+        assertEquals(CloudPhotoReplacement.Result.Success(fresh), result)
+        assertEquals(listOf(fresh), cloud.albumMembers("albumA"))
+        assertTrue(cloud.callLog.indexOf("UPLOAD") < cloud.callLog.indexOf("DELETE"))
+    }
+
+    @Test
+    fun `a resume whose copy cannot be checked keeps the original and fails for a retry`() = runTest {
+        val unreachable = CloudPhotoReplacement(
+            context, cloud,
+            CarryOverToReplacement(cloud, noListingRow(), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)),
+        ) { _, _ -> error("offline") }
+
+        val result = unreachable.replace(userId, photo, passThrough(), resumeUploadedLinkId = "copy")
+
+        assertTrue(result is CloudPhotoReplacement.Result.Failed && result.transient)
+        assertFalse(cloud.callLog.contains("DELETE"))
+        assertTrue(cloud.photos.value.any { it.linkId == "orig" })
+    }
+
+    @Test
+    fun `a trash the server refuses is a failure that keeps the copy, not a success`() = runTest {
+        cloud.refuseTrash = setOf("orig")
+
+        val result = replacement.replace(userId, photo, passThrough())
+
+        assertTrue(result is CloudPhotoReplacement.Result.Failed)
+        result as CloudPhotoReplacement.Result.Failed
+        assertTrue(result.transient)
+        assertTrue(result.carriedOver)
+        assertEquals(cloud.uploadedLinkIds.single(), result.copyLinkId)
+        assertTrue(cloud.photos.value.any { it.linkId == "orig" })
+    }
+
+    @Test
+    fun `a preparation that only reads gets the downloaded file, which is never changed`() = runTest {
+        var source: File? = null
+        replacement.replace(userId, photo, { s -> source = s; null }, prepareWrites = false)
+
+        assertArrayEquals(ByteArray(4096) { it.toByte() }, source?.readBytes() ?: cloud.downloadBytes)
+        assertTrue(workDir.listFiles().orEmpty().isEmpty())
     }
 
     @Test
@@ -149,6 +209,87 @@ class CloudPhotoReplacementTest {
         assertTrue(result is CloudPhotoReplacement.Result.Failed)
         assertFalse(cloud.callLog.contains("DELETE"))
         assertTrue(cloud.photos.value.any { it.linkId == "orig" })
+    }
+
+    @Test
+    fun `the downloaded original leaves the full-res cache unless the viewer had it before`() = runTest {
+        val cacheDir = File(context.cacheDir, "fullres").apply { deleteRecursively() }
+        cloud.fullResCacheDir = cacheDir
+        val cached = File(cacheDir, "orig.png")
+
+        replacement.replace(userId, photo, { null })
+        assertFalse("a download made for the replacement goes", cached.exists())
+
+        cached.parentFile?.mkdirs()
+        cached.writeBytes(ByteArray(10))
+        replacement.replace(userId, photo, { null })
+        assertTrue("a file the viewer had cached stays when the photo stays", cached.exists())
+
+        replacement.replace(userId, photo, { working ->
+            CloudPhotoReplacement.Prepared(
+                file = working,
+                item = LocalMediaItem(Uri.fromFile(working).toString(), photo.captureTimeMs, "IMG_1.png", "image/png", working.length(), null),
+                xAttr = UploadXAttrMetadata(),
+            )
+        })
+        assertFalse("the original is trashed, so its cached file goes too", cached.exists())
+    }
+
+    @Test
+    fun `a resume whose copy already holds the labels and faces never starts over when that copy is gone`() = runTest {
+        val result = replacementWith(live = false).replace(
+            userId, photo, passThrough(), resumeUploadedLinkId = "copy", resumeCarriedOver = true,
+        )
+
+        assertTrue(result is CloudPhotoReplacement.Result.Failed && result.carriedOver && !result.transient)
+        assertTrue(cloud.uploadedLinkIds.isEmpty())
+        assertTrue(cloud.trashRequests.isEmpty())
+        assertTrue(cloud.photos.value.any { it.linkId == "orig" })
+    }
+
+    @Test
+    fun `a copy whose link could not be recorded is taken back and the original kept`() = runTest {
+        val result = replacement.replace(userId, photo, passThrough(), onUploaded = { error("disk full") })
+
+        assertTrue(result is CloudPhotoReplacement.Result.Failed && result.transient)
+        result as CloudPhotoReplacement.Result.Failed
+        assertEquals(null, result.copyLinkId)
+        assertEquals(listOf(cloud.uploadedLinkIds.single()), cloud.trashRequests)
+        assertTrue(cloud.photos.value.any { it.linkId == "orig" })
+    }
+
+    @Test
+    fun `the move of labels and faces is reported before the original goes to the trash`() = runTest {
+        var trashesBeforeCarry = -1
+        val result = replacement.replace(
+            userId, photo, passThrough(), onCarriedOver = { trashesBeforeCarry = cloud.trashRequests.size },
+        )
+
+        assertTrue(result is CloudPhotoReplacement.Result.Success)
+        assertEquals(0, trashesBeforeCarry)
+        assertEquals(listOf("orig"), cloud.trashRequests)
+    }
+
+    @Test
+    fun `a failure after the move of labels and faces says so, so the copy is never taken back`() = runTest {
+        cloud.refuseTrash = setOf("orig")
+        val first = replacement.replace(userId, photo, passThrough()) as CloudPhotoReplacement.Result.Failed
+
+        cloud.failVerifiedAlbumIdsOnce = true
+        val resumed = replacement.replace(
+            userId, photo, passThrough(), resumeUploadedLinkId = first.copyLinkId, resumeCarriedOver = true,
+        )
+
+        assertTrue(resumed is CloudPhotoReplacement.Result.Failed && resumed.carriedOver)
+    }
+
+    @Test
+    fun `only one replacement of a photo is claimed at a time`() {
+        assertTrue(CloudPhotoReplacement.Claims.tryClaim("p"))
+        assertFalse(CloudPhotoReplacement.Claims.tryClaim("p"))
+        CloudPhotoReplacement.Claims.release("p")
+        assertTrue(CloudPhotoReplacement.Claims.tryClaim("p"))
+        CloudPhotoReplacement.Claims.release("p")
     }
 
     @Test

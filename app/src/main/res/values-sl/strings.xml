@@ -1523,6 +1523,8 @@
     <string name="cloud_compress_confirm_title">Stisniti na Drive?</string>
     <string name="cloud_compress_confirm">Stisni</string>
     <string name="cloud_compress_started">Stiskanje poteka v ozadju</string>
+    <string name="cloud_compress_waiting_wifi">Čaka na Wi-Fi, ker varnostno kopiranje teče samo prek Wi-Fi</string>
+    <string name="cloud_compress_confirm_stop">Ustaviš ga lahko kadar koli v obvestilu ali na strani Dejavnost.</string>
     <string name="cloud_compress_progress">%1$d od %2$d</string>
     <string name="cloud_compress_done">Stisnjenih %1$d, prihranjeno %2$s.</string>
     <string name="cloud_compress_done_left">Nespremenjenih: %1$d.</string>

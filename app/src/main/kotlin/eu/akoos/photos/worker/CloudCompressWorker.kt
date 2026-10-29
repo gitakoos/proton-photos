@@ -46,12 +46,17 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import eu.akoos.photos.R
 import eu.akoos.photos.data.db.dao.PendingCloudCompressDao
+import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
 import eu.akoos.photos.data.db.entity.PendingCloudCompressEntity
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
+import eu.akoos.photos.data.transfer.TransferCenter
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.usecase.CloudCompressQueue
+import eu.akoos.photos.domain.usecase.CloudPhotoReplacement
 import eu.akoos.photos.domain.usecase.CompressCloudPhotoUseCase
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -65,6 +70,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import me.proton.core.domain.entity.UserId
 
 /**
  * Works through the queue of photos and videos on Drive waiting to be compressed in place, as a foreground
@@ -84,6 +90,9 @@ class CloudCompressWorker @AssistedInject constructor(
     private val dao: PendingCloudCompressDao,
     private val compress: CompressCloudPhotoUseCase,
     private val driveRepo: DrivePhotoRepository,
+    private val transferCenter: TransferCenter,
+    private val queue: CloudCompressQueue,
+    private val metadataEdits: PendingMetadataEditDao,
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
@@ -107,19 +116,38 @@ class CloudCompressWorker @AssistedInject constructor(
         var total = dao.count()
         runCatching { setForeground(foregroundInfo(0, total, null)) }
             .onFailure { Log.w(TAG, "setForeground failed: ${it.message}") }
+        // Listed on the Activity screen beside the uploads, where Cancel does what the notification's does.
+        val transferId = transferCenter.start(
+            TransferCenter.Kind.UPLOAD,
+            total = total,
+            name = context.getString(R.string.cloud_compress_title),
+            onCancel = { queue.cancel() },
+        )
 
         fun publish(fraction: Float?) {
             runCatching { setForegroundAsync(foregroundInfo(done.get(), total, fraction)) }
+            runCatching { transferCenter.progress(transferId, done.get()) }
         }
 
-        suspend fun process(row: PendingCloudCompressEntity) {
+        suspend fun advance() {
+            done.incrementAndGet()
+            publish(null)
+        }
+
+        /** Keeps [row] for a later run; [failedTry] counts it as one of the photo's own failures. */
+        suspend fun keep(row: PendingCloudCompressEntity, failedTry: Boolean) {
+            kept.set(true)
+            dao.markTried(row.linkId, runId, if (failedTry) row.attempts + 1 else row.attempts)
+        }
+
+        suspend fun compressClaimed(row: PendingCloudCompressEntity) {
             val photo = driveRepo.observePhotosByLinkIds(listOf(row.linkId)).first().firstOrNull()
             if (photo == null) {
-                // Trashed or deleted elsewhere, or another account's: nothing left to compress.
+                // Trashed or deleted elsewhere, another account's, or already replaced by a run stopped just
+                // before it dropped the row: nothing left to compress.
                 dao.delete(row.linkId)
                 skipped.incrementAndGet()
-                done.incrementAndGet()
-                publish(null)
+                advance()
                 return
             }
             val result = compress(
@@ -127,34 +155,75 @@ class CloudCompressWorker @AssistedInject constructor(
                 onCompressProgress = { publish(it) },
                 resumeUploadedLinkId = row.newLinkId,
                 onUploaded = { link -> dao.setNewLinkId(row.linkId, link) },
+                resumeCarriedOver = row.carriedOver,
+                onCarriedOver = { dao.setCarriedOver(row.linkId) },
             )
-            val drop = when (result) {
+            when (result) {
                 is CompressCloudPhotoUseCase.Result.Compressed -> {
                     compressed.incrementAndGet()
                     saved.addAndGet(result.savedBytes)
-                    true
+                    // A date or place edit saved while this ran follows the photo to its smaller copy.
+                    runCatching { metadataEdits.retarget(row.linkId, result.newLinkId) }
+                    dao.delete(row.linkId)
                 }
                 CompressCloudPhotoUseCase.Result.Skipped -> {
                     skipped.incrementAndGet()
-                    true
+                    dao.delete(row.linkId)
                 }
                 is CompressCloudPhotoUseCase.Result.Failed -> {
                     Log.w(TAG, "compress failed for ${row.linkId}: ${result.reason}")
-                    when (metadataDrainDecision(result.transient, runAttemptCount)) {
-                        MetadataDrainDecision.KEEP_AND_RETRY -> {
-                            kept.set(true)
-                            false
-                        }
-                        else -> {
+                    val action = compressFailureAction(
+                        transient = result.transient,
+                        attemptsBefore = row.attempts,
+                        copyLinkId = result.copyLinkId,
+                        carriedOver = result.carriedOver || row.carriedOver,
+                    )
+                    when (action) {
+                        CompressFailureAction.KEEP -> keep(row, failedTry = true)
+                        CompressFailureAction.ROLL_BACK_AND_DROP, CompressFailureAction.DROP -> {
+                            // Given up. A copy on Drive that nothing moved to yet goes to the trash, so the
+                            // photo is back to just its original; one that holds the original's labels and
+                            // faces stays beside it, where nothing is lost.
+                            val copy = result.copyLinkId
+                            if (action == CompressFailureAction.ROLL_BACK_AND_DROP && copy != null) {
+                                runCatching { driveRepo.deleteFiles(UserId(row.userId), listOf(copy)) }
+                                    .onFailure { Log.w(TAG, "rollback of copy $copy failed: ${it.message}") }
+                            }
                             failed.incrementAndGet()
-                            true
+                            dao.delete(row.linkId)
                         }
                     }
                 }
             }
-            if (drop) dao.delete(row.linkId) else dao.markTried(row.linkId, runId)
-            done.incrementAndGet()
-            publish(null)
+            advance()
+        }
+
+        suspend fun process(row: PendingCloudCompressEntity) {
+            // Marked running before the stop check: a Cancel sets the stop before it reads this set, so a
+            // photo is either dropped here or kept by the Cancel, never dropped under a running compression.
+            running.add(row.linkId)
+            try {
+                // A Cancel drops the photos not started yet. One already uploaded is finished, so no photo is
+                // left on Drive twice.
+                if (row.newLinkId == null && row.enqueuedAt <= stopRequestedAt.value) {
+                    dao.delete(row.linkId)
+                    return
+                }
+                // A date or place edit of the same photo replaces it too: this one waits while that edit is
+                // queued or running, so the two never both upload a copy.
+                if (metadataEdits.has(row.linkId) || !CloudPhotoReplacement.Claims.tryClaim(row.linkId)) {
+                    keep(row, failedTry = false)
+                    advance()
+                    return
+                }
+                try {
+                    compressClaimed(row)
+                } finally {
+                    CloudPhotoReplacement.Claims.release(row.linkId)
+                }
+            } finally {
+                running.remove(row.linkId)
+            }
         }
 
         return try {
@@ -176,8 +245,14 @@ class CloudCompressWorker @AssistedInject constructor(
                                     throw e
                                 } catch (e: Exception) {
                                     Log.w(TAG, "compress of ${row.linkId} threw: ${e.message}")
-                                    kept.set(true)
-                                    runCatching { dao.markTried(row.linkId, runId) }
+                                    runCatching {
+                                        if (row.attempts + 1 < MAX_PHOTO_ATTEMPTS) {
+                                            keep(row, failedTry = true)
+                                        } else {
+                                            failed.incrementAndGet()
+                                            dao.delete(row.linkId)
+                                        }
+                                    }
                                     done.incrementAndGet()
                                 }
                             }
@@ -193,6 +268,7 @@ class CloudCompressWorker @AssistedInject constructor(
             Log.e(TAG, "compress drain failed", e)
             if (runAttemptCount < MAX_RUN_ATTEMPTS) Result.retry() else Result.failure()
         } finally {
+            transferCenter.finish(transferId)
             runCatching { NotificationManagerCompat.from(context).cancel(NotificationIds.CLOUD_COMPRESS) }
         }
     }
@@ -248,8 +324,15 @@ class CloudCompressWorker @AssistedInject constructor(
     }
 
     companion object {
-        /** Drains of this process inside doWork right now, so a cancel can wait for the run to stop. */
+        /** Drains of this process inside doWork right now, so a cancel knows whether one is running. */
         internal val activeDrains = MutableStateFlow(0)
+
+        /** When the last Cancel was asked for: rows queued by then and not started are dropped, not run. */
+        internal val stopRequestedAt = MutableStateFlow(0L)
+
+        /** The photos being compressed right now, which a Cancel lets finish. */
+        internal val running: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
 
         const val TAG = "cloud_compress_worker"
         const val UNIQUE_NAME = "cloud_compress"
@@ -297,4 +380,26 @@ class CloudCompressWorker @AssistedInject constructor(
             )
         }
     }
+}
+
+/** Failed tries of one photo before it is given up. */
+internal const val MAX_PHOTO_ATTEMPTS = 5
+
+/** What the drain does with a photo whose compression failed. */
+internal enum class CompressFailureAction { KEEP, ROLL_BACK_AND_DROP, DROP }
+
+/**
+ * A transient failure inside the photo's own budget of [MAX_PHOTO_ATTEMPTS] keeps it for a later run. Past
+ * that, or on a permanent failure, the photo is given up: a copy already on Drive is taken back only while
+ * nothing moved to it ([carriedOver] false), so the photo is left with its original alone. Pure.
+ */
+internal fun compressFailureAction(
+    transient: Boolean,
+    attemptsBefore: Int,
+    copyLinkId: String?,
+    carriedOver: Boolean,
+): CompressFailureAction = when {
+    transient && attemptsBefore + 1 < MAX_PHOTO_ATTEMPTS -> CompressFailureAction.KEEP
+    copyLinkId != null && !carriedOver -> CompressFailureAction.ROLL_BACK_AND_DROP
+    else -> CompressFailureAction.DROP
 }

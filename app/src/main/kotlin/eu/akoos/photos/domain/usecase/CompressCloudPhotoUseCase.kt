@@ -64,16 +64,24 @@ class CompressCloudPhotoUseCase @Inject constructor(
     private val exifRewriter: CloudPhotoExifRewriter,
     private val compressionStep: UploadCompressionStep,
     carryOver: CarryOverToReplacement,
+    linkCheck: CloudLinkCheck,
 ) {
-    private val replacement = CloudPhotoReplacement(context, cloudRepo, carryOver)
+    private val replacement = CloudPhotoReplacement(context, cloudRepo, carryOver, linkCheck::isLive)
 
     sealed interface Result {
-        data class Compressed(val savedBytes: Long) : Result
+        data class Compressed(val savedBytes: Long, val newLinkId: String) : Result
 
         /** Compression does not apply to this file or would not make it smaller; Drive is unchanged. */
         data object Skipped : Result
 
-        data class Failed(val reason: String, val transient: Boolean = false) : Result
+        /** As [CloudPhotoReplacement.Result.Failed]: [copyLinkId] is a copy already on Drive, [carriedOver]
+         *  says the original's labels and faces already moved to it. */
+        data class Failed(
+            val reason: String,
+            val transient: Boolean = false,
+            val copyLinkId: String? = null,
+            val carriedOver: Boolean = false,
+        ) : Result
     }
 
     suspend operator fun invoke(
@@ -82,16 +90,24 @@ class CompressCloudPhotoUseCase @Inject constructor(
         onCompressProgress: ((Float) -> Unit)? = null,
         resumeUploadedLinkId: String? = null,
         onUploaded: (suspend (String) -> Unit)? = null,
+        resumeCarriedOver: Boolean = false,
+        onCarriedOver: (suspend () -> Unit)? = null,
     ): Result = withContext(Dispatchers.IO) {
         val mime = photo.mimeType.lowercase()
         val isVideo = mime.startsWith("video/")
         if (!isVideo && !mime.startsWith("image/")) return@withContext Result.Skipped
+        // A photo whose meaning lives beside its pixels is left as it is: a Live Photo or Motion Photo (its
+        // video), a burst (its group), a panorama (its viewer metadata) or a RAW file (it would turn into a
+        // JPEG). The Drive tag says so even where the bytes alone would not.
+        if (photo.tags.any { it in KEEP_AS_IS_TAGS } || RAW_MIME.any { it in mime }) return@withContext Result.Skipped
         val userId = accountManager.getPrimaryUserId().first() ?: return@withContext Result.Failed("not signed in")
-        // A download plus its compressed copy has to fit with room to spare, or the phone is left full.
-        val needed = photo.sizeBytes.coerceAtLeast(0L) * 2 + MIN_FREE_BYTES
+        // The download, its compressed copy and the upload's encrypted blocks have to fit with room to spare,
+        // for each of the photos running at once, or the phone is left full.
+        val needed = photo.sizeBytes.coerceAtLeast(0L) * 3 * PARALLEL_PHOTOS + MIN_FREE_BYTES
         if (resumeUploadedLinkId == null && context.cacheDir.usableSpace < needed) {
             Log.w(TAG, "not enough free space for ${photo.linkId}")
-            return@withContext Result.Skipped
+            // Kept in the queue for a later run rather than counted as done: room may come back.
+            return@withContext Result.Failed("not enough free space", transient = true)
         }
         val prefs = context.settingsDataStore.data.first()
         // A hidden photo is hidden by its link, and the copy gets a new one, so compressing it would bring
@@ -143,22 +159,45 @@ class CompressCloudPhotoUseCase @Inject constructor(
                     duration = xAttr.durationMillis ?: photo.durationMs ?: 0L,
                 ),
                 xAttr = xAttr,
+                // The categories Drive set on the original (a selfie, a portrait) go with the copy.
+                extraTags = photo.tags.filter { it in CARRIED_TAGS }.toSet(),
             )
         }
         var compressedBytes = 0L
         val tracking = CloudPhotoReplacement.Prepare { working ->
             prepare.prepare(working)?.also { compressedBytes = it.item.sizeBytes }
         }
-        when (val r = replacement.replace(userId, photo, tracking, onPhase, resumeUploadedLinkId, onUploaded)) {
-            is CloudPhotoReplacement.Result.Success ->
-                Result.Compressed(if (compressedBytes > 0) (originalBytes - compressedBytes).coerceAtLeast(0L) else 0L)
+        // The compressors only read the original, so it is read where it was downloaded, not copied first.
+        val r = replacement.replace(
+            userId, photo, tracking, onPhase, resumeUploadedLinkId, onUploaded,
+            prepareWrites = false, resumeCarriedOver = resumeCarriedOver, onCarriedOver = onCarriedOver,
+        )
+        when (r) {
+            is CloudPhotoReplacement.Result.Success -> Result.Compressed(
+                if (compressedBytes > 0) (originalBytes - compressedBytes).coerceAtLeast(0L) else 0L,
+                r.newLinkId,
+            )
             CloudPhotoReplacement.Result.Skipped -> Result.Skipped
-            is CloudPhotoReplacement.Result.Failed -> Result.Failed(r.reason, r.transient)
+            is CloudPhotoReplacement.Result.Failed -> Result.Failed(r.reason, r.transient, r.copyLinkId, r.carriedOver)
         }
     }
 
     private companion object {
         /** Free space kept on top of the download and its copy. */
-        const val MIN_FREE_BYTES = 300L * 1024 * 1024
+        const val MIN_FREE_BYTES = 500L * 1024 * 1024
+
+        /** Photos the compression worker runs at once, each needing its own room. */
+        const val PARALLEL_PHOTOS = 2
+
+        /** Drive PhotoTags of photos left as they are: Live Photos (3), Motion Photos (4), bursts (7),
+         *  panoramas (8) and RAW (9). */
+        val KEEP_AS_IS_TAGS = setOf(3, 4, 7, 8, 9)
+
+        /** Drive PhotoTags the server set on the original that the copy is sent with: selfies (5) and
+         *  portraits (6). Favourite (0) is carried by its own call; screenshots and videos are re-detected. */
+        val CARRIED_TAGS = setOf(5, 6)
+
+        /** RAW containers, which the image compressor could decode but would replace with a JPEG. */
+        val RAW_MIME = listOf("dng", "raw", "x-canon", "x-nikon", "x-sony", "x-fuji", "x-panasonic", "x-olympus")
     }
 }

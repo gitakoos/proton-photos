@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.db.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -34,7 +35,10 @@ import androidx.room.PrimaryKey
  *
  * [newLinkId] is the compressed copy once its upload returned, recorded before the album re-add and the
  * trash so a kill there resumes from that link instead of uploading a second copy. [attemptRun] marks the
- * drain run that last tried the row and kept it for a retry, so the same run never picks it up again.
+ * drain run that last tried the row and kept it for a retry, so the same run never picks it up again, and
+ * [attempts] counts the failed tries of this photo alone, so a long batch never gives a photo up early.
+ * [carriedOver] records that the original's labels, faces and favourite moved to the copy, after which the
+ * copy is never taken back.
  */
 @Entity(tableName = "pending_cloud_compress", indices = [Index(value = ["enqueuedAt"])])
 data class PendingCloudCompressEntity(
@@ -43,4 +47,6 @@ data class PendingCloudCompressEntity(
     val enqueuedAt: Long,
     val newLinkId: String? = null,
     val attemptRun: String? = null,
+    @ColumnInfo(defaultValue = "0") val attempts: Int = 0,
+    @ColumnInfo(defaultValue = "0") val carriedOver: Boolean = false,
 )

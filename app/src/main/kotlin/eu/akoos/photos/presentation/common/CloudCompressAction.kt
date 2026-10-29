@@ -29,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
@@ -41,6 +42,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.CloudCompressQueue
 import eu.akoos.photos.domain.usecase.compressibleLinkIds
+import kotlinx.coroutines.launch
 
 @EntryPoint
 @InstallIn(SingletonComponent::class)
@@ -57,6 +59,7 @@ internal interface CloudCompressAccess {
 @Composable
 fun rememberCloudCompressAction(items: Collection<GalleryItem>, isSignedIn: Boolean): SelectionAction? {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var asking by remember { mutableStateOf<List<GalleryItem>?>(null) }
     val list = remember(items) { items.toList() }
     val count = remember(list) { compressibleLinkIds(list).size }
@@ -65,7 +68,8 @@ fun rememberCloudCompressAction(items: Collection<GalleryItem>, isSignedIn: Bool
         val n = remember(pending) { compressibleLinkIds(pending).size }
         val leftOut = pending.size - n
         val body = pluralStringResource(R.plurals.cloud_compress_confirm_body, n, n) +
-            if (leftOut > 0) "\n\n" + pluralStringResource(R.plurals.cloud_compress_confirm_left_out, leftOut, leftOut) else ""
+            (if (leftOut > 0) "\n\n" + pluralStringResource(R.plurals.cloud_compress_confirm_left_out, leftOut, leftOut) else "") +
+            "\n\n" + stringResource(R.string.cloud_compress_confirm_stop)
         ConfirmSheet(
             title = stringResource(R.string.cloud_compress_confirm_title),
             message = body,
@@ -76,7 +80,14 @@ fun rememberCloudCompressAction(items: Collection<GalleryItem>, isSignedIn: Bool
                 val queue = EntryPointAccessors.fromApplication(context.applicationContext, CloudCompressAccess::class.java)
                     .cloudCompressQueue()
                 if (queue.enqueue(pending) > 0) {
-                    Toast.makeText(context, context.getString(R.string.cloud_compress_started), Toast.LENGTH_SHORT).show()
+                    scope.launch {
+                        val waits = queue.waitsForWifi()
+                        Toast.makeText(
+                            context,
+                            context.getString(if (waits) R.string.cloud_compress_waiting_wifi else R.string.cloud_compress_started),
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                 }
             },
             onDismiss = { asking = null },

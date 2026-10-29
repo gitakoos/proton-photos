@@ -2587,10 +2587,6 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Back up: force-upload a not-yet-backed-up local photo. Only
-                            // LocalOnly qualifies; Synced / CloudOnly are already on Drive.
-                            // A vaulted photo never does: uploading it undoes the hide. Same
-                            // wording the selection drawers give the same action.
                             compressAction?.let { action ->
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(action.label, color = FgPrimary) },
@@ -2602,6 +2598,10 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
+                            // Back up: force-upload a not-yet-backed-up local photo. Only
+                            // LocalOnly qualifies; Synced / CloudOnly are already on Drive.
+                            // A vaulted photo never does: uploading it undoes the hide. Same
+                            // wording the selection drawers give the same action.
                             if (settledItem is GalleryItem.LocalOnly && outbound.backUpToDrive && isSignedIn) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.sel_label_back_up),

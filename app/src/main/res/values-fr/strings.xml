@@ -1286,6 +1286,8 @@
     <string name="cloud_compress_confirm_title">Compresser sur Drive ?</string>
     <string name="cloud_compress_confirm">Compresser</string>
     <string name="cloud_compress_started">Compression en arrière-plan</string>
+    <string name="cloud_compress_waiting_wifi">Attend le Wi-Fi, la sauvegarde étant réglée sur Wi-Fi uniquement</string>
+    <string name="cloud_compress_confirm_stop">Arrêtez-la à tout moment depuis la notification ou la page Activité.</string>
     <string name="cloud_compress_progress">%1$d sur %2$d</string>
     <string name="cloud_compress_done">%1$d compressés, %2$s économisés.</string>
     <string name="cloud_compress_done_left">%1$d laissés tels quels.</string>

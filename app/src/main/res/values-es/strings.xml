@@ -1299,6 +1299,8 @@
     <string name="cloud_compress_confirm_title">¿Comprimir en Drive?</string>
     <string name="cloud_compress_confirm">Comprimir</string>
     <string name="cloud_compress_started">Comprimiendo en segundo plano</string>
+    <string name="cloud_compress_waiting_wifi">Espera a la wifi, porque la copia está configurada solo con wifi</string>
+    <string name="cloud_compress_confirm_stop">Detenlo cuando quieras desde la notificación o la página Actividad.</string>
     <string name="cloud_compress_progress">%1$d de %2$d</string>
     <string name="cloud_compress_done">%1$d comprimidos, %2$s ahorrados.</string>
     <string name="cloud_compress_done_left">%1$d se quedaron como estaban.</string>

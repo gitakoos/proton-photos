@@ -74,6 +74,9 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
     lateinit var networkObserver: eu.akoos.photos.util.NetworkObserver
 
     @Inject
+    lateinit var cloudCompressQueue: eu.akoos.photos.domain.usecase.CloudCompressQueue
+
+    @Inject
     lateinit var photoListingDao: eu.akoos.photos.data.db.dao.PhotoListingDao
 
     @Inject
@@ -127,6 +130,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
         appScope.launch {
             runCatching { eu.akoos.photos.util.CrashLogStore.pruneToVersion(filesDir, BuildConfig.VERSION_CODE) }
         }
+        // Photos still queued for compression on Drive go on after a run the system stopped or a reboot.
+        cloudCompressQueue.resumeIfPending()
         if (BuildConfig.DEBUG) {
             android.os.StrictMode.setVmPolicy(
                 android.os.StrictMode.VmPolicy.Builder()

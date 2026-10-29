@@ -2048,6 +2048,8 @@
     <string name="cloud_compress_confirm_title">Compress on Drive?</string>
     <string name="cloud_compress_confirm">Compress</string>
     <string name="cloud_compress_started">Compressing in the background</string>
+    <string name="cloud_compress_waiting_wifi">Waits for Wi-Fi, as your back-up is set to Wi-Fi only</string>
+    <string name="cloud_compress_confirm_stop">Stop it any time from the notification or the Activity page.</string>
     <string name="cloud_compress_progress">%1$d of %2$d</string>
     <string name="cloud_compress_done">Compressed %1$d, saved %2$s.</string>
     <string name="cloud_compress_done_left">%1$d left as they were.</string>

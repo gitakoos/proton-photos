@@ -23,6 +23,7 @@
 package eu.akoos.photos.domain.usecase
 
 import android.content.Context
+import androidx.work.WorkManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.dao.PendingCloudCompressDao
 import eu.akoos.photos.data.db.entity.PendingCloudCompressEntity
@@ -30,6 +31,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.util.NetworkObserver
 import eu.akoos.photos.worker.CloudCompressWorker
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,7 +39,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.accountmanager.domain.AccountManager
 
 /**
@@ -51,7 +52,13 @@ class CloudCompressQueue @Inject constructor(
     private val dao: PendingCloudCompressDao,
     private val accountManager: AccountManager,
     @AppScope private val appScope: CoroutineScope,
+    private val network: NetworkObserver,
 ) {
+    /** True when a start right now would wait: the back-up is set to Wi-Fi only and the phone is not on
+     *  an unmetered network. */
+    suspend fun waitsForWifi(): Boolean =
+        (context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] ?: false) && !network.isUnmetered.value
+
     /** How many photos are waiting or being compressed. */
     val pending: Flow<Int> = dao.observeCount()
 
@@ -64,33 +71,47 @@ class CloudCompressQueue @Inject constructor(
             val userId = accountManager.getPrimaryUserId().first()?.id ?: return@launch
             val now = System.currentTimeMillis()
             linkIds.chunked(CHUNK).forEachIndexed { slice, ids ->
-                // One enqueue time per slice, rising, so the queue keeps the selection's order.
+                // One enqueue time per slice, rising, so the queue keeps the selection's order. A photo
+                // still queued from before is asked for again, so an earlier Cancel does not drop it.
+                dao.requeue(ids, now + slice)
                 dao.insertAll(ids.map { PendingCloudCompressEntity(linkId = it, userId = userId, enqueuedAt = now + slice) })
             }
-            val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] ?: false
-            CloudCompressWorker.enqueue(context, wifiOnly)
+            start()
         }
         return linkIds.size
     }
 
-    /** Stops the drain and drops every queued photo whose copy is not on Drive yet; one already uploaded is
-     *  finished, so no photo is left on Drive twice. */
+    /**
+     * Stops the compression without interrupting a photo halfway: every queued photo not started yet is
+     * dropped, while the ones being compressed right now and any whose copy is already on Drive are finished,
+     * so no photo is left on Drive twice. A running drain sees the stop before each next photo; a drain only
+     * waiting for its turn is called off.
+     */
     fun cancel() {
         val cancelledAt = System.currentTimeMillis()
-        androidx.work.WorkManager.getInstance(context).cancelUniqueWork(CloudCompressWorker.UNIQUE_NAME)
+        CloudCompressWorker.stopRequestedAt.value = cancelledAt
         appScope.launch {
-            withTimeoutOrNull(CANCEL_STOP_WAIT_MS) { CloudCompressWorker.activeDrains.first { it == 0 } }
-            dao.clearNotStarted(cancelledAt)
-            if (dao.count() > 0) {
-                val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] ?: false
-                CloudCompressWorker.enqueue(context, wifiOnly)
+            val drainRunning = CloudCompressWorker.activeDrains.value > 0
+            if (!drainRunning) {
+                WorkManager.getInstance(context).cancelUniqueWork(CloudCompressWorker.UNIQUE_NAME)
             }
+            dao.clearNotStarted(cancelledAt, CloudCompressWorker.running.toList())
+            if (!drainRunning && dao.count() > 0) start()
         }
+    }
+
+    /** Picks up photos still queued from an earlier session (a run the system stopped, a reboot). */
+    fun resumeIfPending() {
+        appScope.launch { if (dao.count() > 0) start() }
+    }
+
+    private suspend fun start() {
+        val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] ?: false
+        CloudCompressWorker.enqueue(context, wifiOnly)
     }
 
     private companion object {
         const val CHUNK = 500
-        const val CANCEL_STOP_WAIT_MS = 10_000L
     }
 }
 

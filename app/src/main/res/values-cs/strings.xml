@@ -1522,6 +1522,8 @@
     <string name="cloud_compress_confirm_title">Komprimovat na Drive?</string>
     <string name="cloud_compress_confirm">Komprimovat</string>
     <string name="cloud_compress_started">Komprimuje se na pozadí</string>
+    <string name="cloud_compress_waiting_wifi">Čeká na Wi-Fi, protože zálohování běží jen přes Wi-Fi</string>
+    <string name="cloud_compress_confirm_stop">Zastavit to můžeš kdykoli v oznámení nebo na stránce Aktivita.</string>
     <string name="cloud_compress_progress">%1$d z %2$d</string>
     <string name="cloud_compress_done">Komprimováno %1$d, ušetřeno %2$s.</string>
     <string name="cloud_compress_done_left">Beze změny: %1$d.</string>

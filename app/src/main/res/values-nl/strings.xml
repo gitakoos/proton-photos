@@ -1300,6 +1300,8 @@
     <string name="cloud_compress_confirm_title">Comprimeren op Drive?</string>
     <string name="cloud_compress_confirm">Comprimeren</string>
     <string name="cloud_compress_started">Wordt op de achtergrond gecomprimeerd</string>
+    <string name="cloud_compress_waiting_wifi">Wacht op wifi, omdat de back-up alleen via wifi loopt</string>
+    <string name="cloud_compress_confirm_stop">Stop het wanneer je wilt via de melding of de pagina Activiteit.</string>
     <string name="cloud_compress_progress">%1$d van %2$d</string>
     <string name="cloud_compress_done">%1$d gecomprimeerd, %2$s bespaard.</string>
     <string name="cloud_compress_done_left">%1$d gelaten zoals ze waren.</string>

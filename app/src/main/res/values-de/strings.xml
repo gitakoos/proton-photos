@@ -1284,6 +1284,8 @@
     <string name="cloud_compress_confirm_title">Auf Drive komprimieren?</string>
     <string name="cloud_compress_confirm">Komprimieren</string>
     <string name="cloud_compress_started">Wird im Hintergrund komprimiert</string>
+    <string name="cloud_compress_waiting_wifi">Wartet auf WLAN, da die Sicherung nur über WLAN läuft</string>
+    <string name="cloud_compress_confirm_stop">Jederzeit über die Benachrichtigung oder die Seite Aktivität stoppen.</string>
     <string name="cloud_compress_progress">%1$d von %2$d</string>
     <string name="cloud_compress_done">%1$d komprimiert, %2$s gespart.</string>
     <string name="cloud_compress_done_left">%1$d unverändert gelassen.</string>

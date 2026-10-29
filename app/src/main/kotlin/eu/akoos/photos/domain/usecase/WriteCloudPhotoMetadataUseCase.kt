@@ -126,8 +126,9 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
     private val accountManager: AccountManager,
     private val exifRewriter: CloudPhotoExifRewriter,
     private val carryOver: CarryOverToReplacement,
+    private val linkCheck: CloudLinkCheck,
 ) {
-    private val replacement = CloudPhotoReplacement(context, cloudRepo, carryOver)
+    private val replacement = CloudPhotoReplacement(context, cloudRepo, carryOver, linkCheck::isLive)
 
     sealed interface Result {
         data object Success : Result

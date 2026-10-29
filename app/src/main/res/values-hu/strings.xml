@@ -1307,6 +1307,8 @@
     <string name="cloud_compress_confirm_title">Tömörítés a Drive-on?</string>
     <string name="cloud_compress_confirm">Tömörítés</string>
     <string name="cloud_compress_started">A tömörítés a háttérben fut</string>
+    <string name="cloud_compress_waiting_wifi">Wi-Fi-re vár, mert a mentés csak Wi-Fi-n fut</string>
+    <string name="cloud_compress_confirm_stop">Bármikor leállíthatod az értesítésből vagy a Tevékenység oldalon.</string>
     <string name="cloud_compress_progress">%1$d / %2$d</string>
     <string name="cloud_compress_done">%1$d tömörítve, %2$s megtakarítva.</string>
     <string name="cloud_compress_done_left">%1$d változatlan maradt.</string>

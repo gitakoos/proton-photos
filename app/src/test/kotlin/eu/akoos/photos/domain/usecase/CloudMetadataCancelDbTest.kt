@@ -75,6 +75,16 @@ class CloudMetadataCancelDbTest {
         cancelPendingEdits(dao, cancelledAt = at, awaitStopped = whileStopping, enqueue = { enqueued++ })
 
     @Test
+    fun `an edit saved while the photo was compressed follows it to the smaller copy`() = runTest {
+        dao.upsertAll(listOf(row("a"), row("b", newLinkId = "b-copy")))
+
+        dao.retarget("a", "a-small")
+        dao.retarget("b", "b-small")
+
+        assertEquals(setOf("a-small", "b"), dao.getAll().map { it.linkId }.toSet())
+    }
+
+    @Test
     fun `an edit whose copy is already in Drive survives the cancel and is handed back to the drain`() = runTest {
         dao.upsertAll(listOf(row("a"), row("b", newLinkId = "b-copy"), row("c")))
 
