@@ -1293,8 +1293,8 @@
     <string name="cloud_compress_done_left">%1$d laissés tels quels.</string>
     <string name="cloud_compress_channel_desc">Avancement de la compression des photos déjà sur Drive</string>
     <plurals name="cloud_compress_confirm_body">
-        <item quantity="one">%1$d photo ou vidéo sur Drive est téléchargée, compressée avec vos réglages de compression à l’envoi et renvoyée. L’original part dans la corbeille de Drive une fois sa copie plus légère dans ses albums. Ce qui ne deviendrait pas plus léger reste tel quel.</item>
-        <item quantity="other">%1$d photos et vidéos sur Drive sont téléchargées, compressées avec vos réglages de compression à l’envoi et renvoyées. Chaque original part dans la corbeille de Drive une fois sa copie plus légère dans ses albums. Ce qui ne deviendrait pas plus léger reste tel quel.</item>
+        <item quantity="one">%1$d photo ou vidéo sur Drive est téléchargée, compressée avec vos réglages de compression à l’envoi et renvoyée. L’original part dans la corbeille de Drive une fois sa copie plus légère dans ses albums. Ce qui ne deviendrait pas au moins 10 %% plus léger reste tel quel.</item>
+        <item quantity="other">%1$d photos et vidéos sur Drive sont téléchargées, compressées avec vos réglages de compression à l’envoi et renvoyées. Chaque original part dans la corbeille de Drive une fois sa copie plus légère dans ses albums. Ce qui ne deviendrait pas au moins 10 %% plus léger reste tel quel.</item>
     </plurals>
     <plurals name="cloud_compress_confirm_left_out">
         <item quantity="one">%1$d élément aussi présent sur ce téléphone est laissé de côté.</item>

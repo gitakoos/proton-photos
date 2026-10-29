@@ -138,7 +138,7 @@ class CompressCloudPhotoUseCase @Inject constructor(
             }
             if (compressed == null) return@Prepare null
             // Never replace a photo with a copy that is not clearly smaller.
-            if (compressed.length() <= 0L || compressed.length() >= originalBytes) {
+            if (!worthReplacing(originalBytes, compressed.length())) {
                 compressed.delete()
                 return@Prepare null
             }
@@ -201,3 +201,11 @@ class CompressCloudPhotoUseCase @Inject constructor(
         val RAW_MIME = listOf("dng", "raw", "x-canon", "x-nikon", "x-sony", "x-fuji", "x-panasonic", "x-olympus")
     }
 }
+
+/** Whether a copy of [compressedBytes] is worth replacing an original of [originalBytes] with: at least
+ *  [MIN_SAVING_PERCENT] percent smaller, so an already compact file is not swapped for a few bytes. Pure. */
+internal fun worthReplacing(originalBytes: Long, compressedBytes: Long): Boolean =
+    compressedBytes > 0L && originalBytes > 0L && compressedBytes * 100 <= originalBytes * (100 - MIN_SAVING_PERCENT)
+
+/** The least saving, in percent of the original, that makes a compressed copy replace it. */
+internal const val MIN_SAVING_PERCENT = 10

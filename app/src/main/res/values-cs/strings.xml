@@ -1529,10 +1529,10 @@
     <string name="cloud_compress_done_left">Beze změny: %1$d.</string>
     <string name="cloud_compress_channel_desc">Průběh komprimace fotek, které už jsou na Drive</string>
     <plurals name="cloud_compress_confirm_body">
-        <item quantity="one">%1$d fotka nebo video na Drive se stáhne, zkomprimuje podle nastavení komprimace při nahrávání a znovu nahraje. Originál jde do koše Drive, jakmile je menší kopie v jeho albech. Co by nebylo menší, zůstane beze změny.</item>
-        <item quantity="few">%1$d fotky a videa na Drive se stáhnou, zkomprimují podle nastavení komprimace při nahrávání a znovu nahrají. Každý originál jde do koše Drive, jakmile je jeho menší kopie v albech. Co by nebylo menší, zůstane beze změny.</item>
-        <item quantity="many">%1$d fotky a videa na Drive se stáhne, zkomprimuje podle nastavení komprimace při nahrávání a znovu nahraje. Každý originál jde do koše Drive, jakmile je jeho menší kopie v albech. Co by nebylo menší, zůstane beze změny.</item>
-        <item quantity="other">%1$d fotek a videí na Drive se stáhne, zkomprimuje podle nastavení komprimace při nahrávání a znovu nahraje. Každý originál jde do koše Drive, jakmile je jeho menší kopie v albech. Co by nebylo menší, zůstane beze změny.</item>
+        <item quantity="one">%1$d fotka nebo video na Drive se stáhne, zkomprimuje podle nastavení komprimace při nahrávání a znovu nahraje. Originál jde do koše Drive, jakmile je menší kopie v jeho albech. Co by nebylo aspoň o 10 %% menší, zůstane beze změny.</item>
+        <item quantity="few">%1$d fotky a videa na Drive se stáhnou, zkomprimují podle nastavení komprimace při nahrávání a znovu nahrají. Každý originál jde do koše Drive, jakmile je jeho menší kopie v albech. Co by nebylo aspoň o 10 %% menší, zůstane beze změny.</item>
+        <item quantity="many">%1$d fotky a videa na Drive se stáhne, zkomprimuje podle nastavení komprimace při nahrávání a znovu nahraje. Každý originál jde do koše Drive, jakmile je jeho menší kopie v albech. Co by nebylo aspoň o 10 %% menší, zůstane beze změny.</item>
+        <item quantity="other">%1$d fotek a videí na Drive se stáhne, zkomprimuje podle nastavení komprimace při nahrávání a znovu nahraje. Každý originál jde do koše Drive, jakmile je jeho menší kopie v albech. Co by nebylo aspoň o 10 %% menší, zůstane beze změny.</item>
     </plurals>
     <plurals name="cloud_compress_confirm_left_out">
         <item quantity="one">Vynechá se %1$d položka, která je i v tomto telefonu.</item>

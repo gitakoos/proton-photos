@@ -1950,8 +1950,8 @@
     <string name="cloud_compress_done_left">%1$d olduğu gibi bırakıldı.</string>
     <string name="cloud_compress_channel_desc">Drive\'daki fotoğrafların sıkıştırılma ilerlemesi</string>
     <plurals name="cloud_compress_confirm_body">
-        <item quantity="one">Drive\'daki %1$d fotoğraf veya video indirilir, yükleme sıkıştırma ayarlarınla sıkıştırılır ve yeniden yüklenir. Küçük kopyası albümlerine girince orijinal Drive çöp kutusuna gider. Küçülmeyecek olan olduğu gibi kalır.</item>
-        <item quantity="other">Drive\'daki %1$d fotoğraf ve video indirilir, yükleme sıkıştırma ayarlarınla sıkıştırılır ve yeniden yüklenir. Her orijinal, küçük kopyası albümlerine girince Drive çöp kutusuna gider. Küçülmeyecek olan olduğu gibi kalır.</item>
+        <item quantity="one">Drive\'daki %1$d fotoğraf veya video indirilir, yükleme sıkıştırma ayarlarınla sıkıştırılır ve yeniden yüklenir. Küçük kopyası albümlerine girince orijinal Drive çöp kutusuna gider. En az %%10 küçülmeyecek olan olduğu gibi kalır.</item>
+        <item quantity="other">Drive\'daki %1$d fotoğraf ve video indirilir, yükleme sıkıştırma ayarlarınla sıkıştırılır ve yeniden yüklenir. Her orijinal, küçük kopyası albümlerine girince Drive çöp kutusuna gider. En az %%10 küçülmeyecek olan olduğu gibi kalır.</item>
     </plurals>
     <plurals name="cloud_compress_confirm_left_out">
         <item quantity="one">Bu telefonda da olan %1$d öğe atlanır.</item>

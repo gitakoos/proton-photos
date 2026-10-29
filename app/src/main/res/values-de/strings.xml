@@ -1291,8 +1291,8 @@
     <string name="cloud_compress_done_left">%1$d unverändert gelassen.</string>
     <string name="cloud_compress_channel_desc">Fortschritt beim Komprimieren von Fotos auf Drive</string>
     <plurals name="cloud_compress_confirm_body">
-        <item quantity="one">%1$d Foto oder Video auf Drive wird heruntergeladen, mit deinen Einstellungen für die Upload-Komprimierung komprimiert und erneut hochgeladen. Das Original kommt in den Drive-Papierkorb, sobald die kleinere Kopie in seinen Alben ist. Was nicht kleiner würde, bleibt unverändert.</item>
-        <item quantity="other">%1$d Fotos und Videos auf Drive werden heruntergeladen, mit deinen Einstellungen für die Upload-Komprimierung komprimiert und erneut hochgeladen. Jedes Original kommt in den Drive-Papierkorb, sobald seine kleinere Kopie in seinen Alben ist. Was nicht kleiner würde, bleibt unverändert.</item>
+        <item quantity="one">%1$d Foto oder Video auf Drive wird heruntergeladen, mit deinen Einstellungen für die Upload-Komprimierung komprimiert und erneut hochgeladen. Das Original kommt in den Drive-Papierkorb, sobald die kleinere Kopie in seinen Alben ist. Was nicht mindestens 10 %% kleiner würde, bleibt unverändert.</item>
+        <item quantity="other">%1$d Fotos und Videos auf Drive werden heruntergeladen, mit deinen Einstellungen für die Upload-Komprimierung komprimiert und erneut hochgeladen. Jedes Original kommt in den Drive-Papierkorb, sobald seine kleinere Kopie in seinen Alben ist. Was nicht mindestens 10 %% kleiner würde, bleibt unverändert.</item>
     </plurals>
     <plurals name="cloud_compress_confirm_left_out">
         <item quantity="one">%1$d Element, das auch auf diesem Telefon ist, wird ausgelassen.</item>

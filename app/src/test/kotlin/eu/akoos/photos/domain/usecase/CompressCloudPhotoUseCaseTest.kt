@@ -27,6 +27,8 @@ import eu.akoos.photos.domain.entity.CloudPhoto
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -66,6 +68,17 @@ class CompressCloudPhotoUseCaseTest {
             assertEquals("tag $tag", CompressCloudPhotoUseCase.Result.Skipped, useCase(photo(tags = setOf(tag))))
         }
         assertEquals(CompressCloudPhotoUseCase.Result.Skipped, useCase(photo(mime = "image/x-adobe-dng")))
+    }
+
+    @Test
+    fun `a copy replaces the original only when it is at least a tenth smaller`() {
+        assertTrue(worthReplacing(1_000_000L, 250_000L))
+        assertTrue(worthReplacing(1_000_000L, 900_000L))
+        assertFalse(worthReplacing(1_000_000L, 900_001L))
+        assertFalse(worthReplacing(10_240L, 10_173L))
+        assertFalse(worthReplacing(1_000L, 1_200L))
+        assertFalse(worthReplacing(1_000L, 0L))
+        assertFalse(worthReplacing(0L, 0L))
     }
 
     @Test

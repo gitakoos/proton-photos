@@ -1306,8 +1306,8 @@
     <string name="cloud_compress_done_left">%1$d lasciati come erano.</string>
     <string name="cloud_compress_channel_desc">Avanzamento della compressione delle foto già su Drive</string>
     <plurals name="cloud_compress_confirm_body">
-        <item quantity="one">%1$d foto o video su Drive viene scaricato, compresso con le impostazioni di compressione del caricamento e ricaricato. L’originale va nel cestino di Drive quando la copia più piccola è nei suoi album. Ciò che non diventerebbe più piccolo resta com’è.</item>
-        <item quantity="other">%1$d foto e video su Drive vengono scaricati, compressi con le impostazioni di compressione del caricamento e ricaricati. Ogni originale va nel cestino di Drive quando la sua copia più piccola è nei suoi album. Ciò che non diventerebbe più piccolo resta com’è.</item>
+        <item quantity="one">%1$d foto o video su Drive viene scaricato, compresso con le impostazioni di compressione del caricamento e ricaricato. L’originale va nel cestino di Drive quando la copia più piccola è nei suoi album. Ciò che non diventerebbe almeno del 10%% più piccolo resta com’è.</item>
+        <item quantity="other">%1$d foto e video su Drive vengono scaricati, compressi con le impostazioni di compressione del caricamento e ricaricati. Ogni originale va nel cestino di Drive quando la sua copia più piccola è nei suoi album. Ciò che non diventerebbe almeno del 10%% più piccolo resta com’è.</item>
     </plurals>
     <plurals name="cloud_compress_confirm_left_out">
         <item quantity="one">%1$d elemento presente anche su questo telefono viene escluso.</item>

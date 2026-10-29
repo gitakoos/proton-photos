@@ -1314,8 +1314,8 @@
     <string name="cloud_compress_done_left">%1$d változatlan maradt.</string>
     <string name="cloud_compress_channel_desc">A Drive-on lévő fotók tömörítésének állapota</string>
     <plurals name="cloud_compress_confirm_body">
-        <item quantity="one">%1$d Drive-on lévő fotó vagy videó letöltődik, a feltöltési tömörítés beállításaival tömörítődik, és újra feltöltődik. Az eredeti a Drive kukájába kerül, amint a kisebb másolat bekerült az albumaiba. Ami nem lenne kisebb, az változatlan marad.</item>
-        <item quantity="other">%1$d Drive-on lévő fotó és videó letöltődik, a feltöltési tömörítés beállításaival tömörítődik, és újra feltöltődik. Minden eredeti a Drive kukájába kerül, amint a kisebb másolata bekerült az albumaiba. Ami nem lenne kisebb, az változatlan marad.</item>
+        <item quantity="one">%1$d Drive-on lévő fotó vagy videó letöltődik, a feltöltési tömörítés beállításaival tömörítődik, és újra feltöltődik. Az eredeti a Drive kukájába kerül, amint a kisebb másolat bekerült az albumaiba. Ami nem lenne legalább 10%%-kal kisebb, az változatlan marad.</item>
+        <item quantity="other">%1$d Drive-on lévő fotó és videó letöltődik, a feltöltési tömörítés beállításaival tömörítődik, és újra feltöltődik. Minden eredeti a Drive kukájába kerül, amint a kisebb másolata bekerült az albumaiba. Ami nem lenne legalább 10%%-kal kisebb, az változatlan marad.</item>
     </plurals>
     <plurals name="cloud_compress_confirm_left_out">
         <item quantity="one">%1$d elem, ami a telefonon is megvan, kimarad.</item>
