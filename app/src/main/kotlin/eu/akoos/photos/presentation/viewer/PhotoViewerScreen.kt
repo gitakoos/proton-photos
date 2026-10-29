@@ -1138,6 +1138,12 @@ fun PhotoViewerScreen(
     var trashConfirmAction by remember { mutableStateOf<String?>(null) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var pendingPersonCover by remember { mutableStateOf<GalleryItem?>(null) }
+    // Compress on Drive for the photo on screen, when it lives only on Drive and is the user's own.
+    val compressItem = items.getOrNull(pagerState.settledPage)
+        ?.takeIf { !isReadOnlyAlbum && !trashMode && !secure && (it as? GalleryItem.CloudOnly)?.cloud?.linkId !in hiddenCloudLinkIds }
+    val compressAction = eu.akoos.photos.presentation.common.rememberCloudCompressAction(
+        listOfNotNull(compressItem), isSignedIn,
+    )
     var pendingPersonRemove by remember { mutableStateOf<GalleryItem?>(null) }
     val renameState by viewModel.renameState.collectAsStateWithLifecycle()
     val metadataSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -2585,6 +2591,17 @@ fun PhotoViewerScreen(
                             // LocalOnly qualifies; Synced / CloudOnly are already on Drive.
                             // A vaulted photo never does: uploading it undoes the hide. Same
                             // wording the selection drawers give the same action.
+                            compressAction?.let { action ->
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(action.label, color = FgPrimary) },
+                                    leadingIcon = { Icon(action.icon, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        action.onClick()
+                                    },
+                                )
+                            }
                             if (settledItem is GalleryItem.LocalOnly && outbound.backUpToDrive && isSignedIn) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.sel_label_back_up),

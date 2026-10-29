@@ -28,6 +28,7 @@ import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.CloudAlbumEntity
 import eu.akoos.photos.data.db.entity.ListingSweepSnapshotEntity
 import eu.akoos.photos.data.db.entity.LocalTagEntity
+import eu.akoos.photos.data.db.entity.PendingCloudCompressEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelDeletedEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelNameEntity
@@ -49,6 +50,7 @@ import eu.akoos.photos.data.db.entity.SyncStateEntity
         PhotoLabelNameEntity::class,
         PhotoLabelStateEntity::class,
         PhotoLabelDeletedEntity::class,
+        PendingCloudCompressEntity::class,
     ],
     version = 1,
     exportSchema = false,
@@ -62,4 +64,5 @@ abstract class TestDatabase : RoomDatabase() {
     abstract fun localTagDao(): LocalTagDao
     abstract fun photoLocationDao(): PhotoLocationDao
     abstract fun photoLabelDao(): PhotoLabelDao
+    abstract fun pendingCloudCompressDao(): PendingCloudCompressDao
 }

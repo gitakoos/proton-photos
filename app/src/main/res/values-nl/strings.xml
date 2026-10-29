@@ -1296,6 +1296,22 @@
     <string name="details_private_dates">Datumtags</string>
     <string name="details_private_author">Auteur</string>
     <string name="details_place_hint">Sleep de kaart onder de speld</string>
+    <string name="cloud_compress_title">Comprimeren op Drive</string>
+    <string name="cloud_compress_confirm_title">Comprimeren op Drive?</string>
+    <string name="cloud_compress_confirm">Comprimeren</string>
+    <string name="cloud_compress_started">Wordt op de achtergrond gecomprimeerd</string>
+    <string name="cloud_compress_progress">%1$d van %2$d</string>
+    <string name="cloud_compress_done">%1$d gecomprimeerd, %2$s bespaard.</string>
+    <string name="cloud_compress_done_left">%1$d gelaten zoals ze waren.</string>
+    <string name="cloud_compress_channel_desc">Voortgang van het comprimeren van foto\'s die al op Drive staan</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d foto of video op Drive wordt gedownload, gecomprimeerd met je instellingen voor uploadcompressie en opnieuw geüpload. Het origineel gaat naar de prullenbak van Drive zodra de kleinere kopie in de albums staat. Wat niet kleiner zou worden, blijft zoals het is.</item>
+        <item quantity="other">%1$d foto\'s en video\'s op Drive worden gedownload, gecomprimeerd met je instellingen voor uploadcompressie en opnieuw geüpload. Elk origineel gaat naar de prullenbak van Drive zodra de kleinere kopie in de albums staat. Wat niet kleiner zou worden, blijft zoals het is.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">%1$d item dat ook op deze telefoon staat, wordt overgeslagen.</item>
+        <item quantity="other">%1$d items die ook op deze telefoon staan, worden overgeslagen.</item>
+    </plurals>
     <plurals name="details_private_remove">
         <item quantity="one">%d item verwijderen</item>
         <item quantity="other">%d items verwijderen</item>

@@ -101,6 +101,12 @@ object NotificationIds {
     /** The notice that an edit of a cloud-only photo or video could not be uploaded to Proton Drive. */
     const val EDIT_UPLOAD_FAILED = 4260
 
+    /** The compression of photos already on Drive: its foreground progress. */
+    const val CLOUD_COMPRESS = 4261
+
+    /** Its summary once a run ends, apart from the progress post WorkManager takes down. */
+    const val CLOUD_COMPRESS_DONE = 4262
+
     /**
      * Reserved for album downloads, which take one id per run so two concurrent downloads keep
      * separate entries in the shade instead of overwriting each other. No fixed id may fall in here.

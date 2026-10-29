@@ -24,24 +24,21 @@ package eu.akoos.photos.domain.usecase
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.repository.drive.UploadXAttrMetadata
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.util.isTransientApiError
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
-import java.io.File
-import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val TAG = "WriteCloudMetadata"
 
 /** How the caller wants a cloud photo's GPS place changed. A capture-date-only edit passes
  *  [Unchanged] so the location block is left exactly as the file already holds it. */
@@ -130,6 +127,7 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
     private val exifRewriter: CloudPhotoExifRewriter,
     private val carryOver: CarryOverToReplacement,
 ) {
+    private val replacement = CloudPhotoReplacement(context, cloudRepo, carryOver)
 
     sealed interface Result {
         data object Success : Result
@@ -163,47 +161,25 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
             ?: return@withContext Result.Failed("not signed in")
         onPhase?.invoke(CloudSavePhase.PREPARING)
 
-        // On a resume the corrected copy is already uploaded (its link was persisted the moment the
-        // upload returned), so there is nothing to download, rewrite, hash, or upload: this run finishes
-        // from the album re-add and the trash using the recorded link. working stays null so the finally
-        // has nothing to clean up.
-        val workDir = File(context.cacheDir, "metadata_edit").also { it.mkdirs() }
-        var working: File? = null
-        try {
-            val newLinkId: String
-            val albumIds: Set<String>
-            val toAdd: Set<String>
-            if (resumeUploadedLinkId == null) {
-                // Copy the downloaded original's bytes into a private working file. The download cache
-                // file is shared with the viewer and TTL-swept, so the lossless EXIF rewrite must never
-                // mutate it in place.
-                val file = File(workDir, "cloud_${photo.linkId.take(24)}_${System.currentTimeMillis()}")
-                working = file
-                val original = cloudRepo.downloadFullResPhoto(userId, photo)
-                original.inputStream().use { input ->
-                    file.outputStream().use { output -> input.copyTo(output) }
-                }
-
-                // The correction inherits the original capture time when only the place changed, so the
-                // corrected copy sorts exactly where the original did.
-                val effectiveCaptureMs = newCaptureMs ?: photo.captureTimeMs
-                val xAttr = exifRewriter.rewrite(
-                    file = file,
-                    mimeType = photo.mimeType,
-                    writeCaptureMs = newCaptureMs,
-                    xAttrCaptureMs = effectiveCaptureMs,
-                    location = location,
-                    description = description,
-                    artist = artist,
-                    copyright = copyright,
-                )
-
-                // Same displayName: this is a correction, not a copy, and the original is trashed right
-                // after a verified upload so the same-name window is brief.
-                // dims and duration come from the xAttr the rewriter derived from the corrected file
-                // (real values for a video, 0 for an image); the video's own already-known cloud duration
-                // is the fallback when the container could not be probed.
-                val item = LocalMediaItem(
+        // Only the changed EXIF tags are rewritten on the working copy, losslessly; the pixels are never
+        // decoded. A place-only change keeps the original capture time, so the copy sorts where it did.
+        val prepare = CloudPhotoReplacement.Prepare { file ->
+            val effectiveCaptureMs = newCaptureMs ?: photo.captureTimeMs
+            val xAttr = exifRewriter.rewrite(
+                file = file,
+                mimeType = photo.mimeType,
+                writeCaptureMs = newCaptureMs,
+                xAttrCaptureMs = effectiveCaptureMs,
+                location = location,
+                description = description,
+                artist = artist,
+                copyright = copyright,
+            )
+            // Same displayName: this is a correction, not a copy. Dims and duration come from the xAttr the
+            // rewriter derived from the corrected file; the known cloud duration is the fallback.
+            CloudPhotoReplacement.Prepared(
+                file = file,
+                item = LocalMediaItem(
                     uri = Uri.fromFile(file).toString(),
                     dateTaken = effectiveCaptureMs,
                     displayName = photo.displayName,
@@ -213,122 +189,14 @@ class WriteCloudPhotoMetadataUseCase @Inject constructor(
                     width = xAttr.displayWidth ?: 0,
                     height = xAttr.displayHeight ?: 0,
                     duration = xAttr.durationMillis ?: photo.durationMs ?: 0L,
-                )
-
-                // Hash exactly the bytes being uploaded, AFTER the EXIF write, because Drive's
-                // ContentHash is derived from these bytes.
-                val hash = sha1(file)
-
-                // Enumerate every album the ORIGINAL belongs to before the upload, so the re-add below
-                // can never miss one because of a mid-flight change. The verified read throws rather than
-                // return a silent partial, so a transient album-list failure fails the save here (before
-                // any upload) instead of trashing the original against an under-reported album set.
-                albumIds = try {
-                    cloudRepo.getVerifiedAlbumIdsByPhoto(userId)[photo.linkId].orEmpty()
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    return@withContext Result.Failed(
-                        "could not read album membership: ${e.message}",
-                        transient = isTransientApiError(e),
-                    )
-                }
-
-                onPhase?.invoke(CloudSavePhase.UPLOADING)
-                newLinkId = try {
-                    cloudRepo.uploadFile(userId, item, hash, item.uri, xAttr)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.w(TAG, "upload failed for ${photo.linkId}: ${e.message}")
-                    return@withContext Result.Failed("upload failed: ${e.message}", transient = isTransientApiError(e))
-                }
-                // The corrected copy must be a new photo: the original is trashed below.
-                if (newLinkId == photo.linkId) {
-                    return@withContext Result.Failed("upload returned the original photo; original kept")
-                }
-                if (newLinkId.isBlank()) return@withContext Result.Failed("upload returned no link id")
-
-                // Persist the new link the moment the upload is verified, BEFORE any album re-add or
-                // trash, so a process kill from here on resumes from the recorded link instead of
-                // re-uploading a second copy. The just-uploaded link is in no album yet, so re-add
-                // targets the full original set.
-                onUploaded?.invoke(newLinkId)
-                toAdd = albumIds
-            } else {
-                // Resume: the recorded link already exists. Read the album map once so the re-add can
-                // skip any album a prior run already joined (the server treats an already-member link as
-                // a per-entry rejection), while albumIds still names the full original set for the trash
-                // guard's accounting.
-                newLinkId = resumeUploadedLinkId
-                val map = try {
-                    cloudRepo.getVerifiedAlbumIdsByPhoto(userId)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    return@withContext Result.Failed(
-                        "could not read album membership: ${e.message}",
-                        transient = isTransientApiError(e),
-                    )
-                }
-                albumIds = map[photo.linkId].orEmpty()
-                val alreadyJoined = map[newLinkId].orEmpty()
-                toAdd = albumIds - alreadyJoined
-            }
-
-            onPhase?.invoke(CloudSavePhase.FINISHING)
-            // Re-add the new link to every album that still needs it. A re-add counts only when the
-            // server confirms the new link joined; a crypto-partial or thrown add is a miss.
-            val failedAlbums = mutableListOf<String>()
-            // A single transient miss makes the whole re-add worth retrying, so OR the classification
-            // across every swallowed per-album failure.
-            var anyTransientAlbumMiss = false
-            for (albumId in toAdd) {
-                val joined = try {
-                    cloudRepo.addPhotosToAlbum(userId, albumId, listOf(newLinkId))
-                        .succeededLinkIds.contains(newLinkId)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    Log.w(TAG, "album re-add failed for $albumId: ${e.message}")
-                    anyTransientAlbumMiss = anyTransientAlbumMiss || isTransientApiError(e)
-                    false
-                }
-                if (!joined) failedAlbums.add(albumId)
-            }
-
-            // The trash guard: only reached once the upload is verified. If any album re-add missed,
-            // leave the original completely untouched and report the partial so no album loses the
-            // photo. Otherwise trash the original last (best-effort, like the editor's path).
-            if (failedAlbums.isNotEmpty()) {
-                return@withContext Result.Failed(
-                    "re-add failed for ${failedAlbums.size} of ${albumIds.size} album(s); original kept",
-                    transient = anyTransientAlbumMiss,
-                )
-            }
-            // The corrected copy now stands in for the original, so the original's favourite, labels,
-            // faces and search index move to it before the original goes.
-            carryOver(userId, photo.linkId, newLinkId, original = photo)
-            runCatching { cloudRepo.deleteFiles(userId, listOf(photo.linkId)) }
-                .onFailure { Log.w(TAG, "trash of original ${photo.linkId} failed: ${it.message}") }
-            Result.Success
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "metadata write failed for ${photo.linkId}: ${e.message}")
-            Result.Failed(e.message ?: "metadata write failed", transient = isTransientApiError(e))
-        } finally {
-            working?.delete()
+                ),
+                xAttr = xAttr,
+            )
         }
-    }
-
-    private fun sha1(file: File): String {
-        val digest = MessageDigest.getInstance("SHA-1")
-        file.inputStream().use { stream ->
-            val buf = ByteArray(8192)
-            var read: Int
-            while (stream.read(buf).also { read = it } != -1) digest.update(buf, 0, read)
+        when (val r = replacement.replace(userId, photo, prepare, onPhase, resumeUploadedLinkId, onUploaded)) {
+            is CloudPhotoReplacement.Result.Success -> Result.Success
+            CloudPhotoReplacement.Result.Skipped -> Result.NothingToDo
+            is CloudPhotoReplacement.Result.Failed -> Result.Failed(r.reason, r.transient)
         }
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }

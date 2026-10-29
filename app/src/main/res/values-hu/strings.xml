@@ -1303,6 +1303,22 @@
     <string name="details_private_dates">Dátumcímkék</string>
     <string name="details_private_author">Szerző</string>
     <string name="details_place_hint">Húzd a térképet a tű alá</string>
+    <string name="cloud_compress_title">Tömörítés a Drive-on</string>
+    <string name="cloud_compress_confirm_title">Tömörítés a Drive-on?</string>
+    <string name="cloud_compress_confirm">Tömörítés</string>
+    <string name="cloud_compress_started">A tömörítés a háttérben fut</string>
+    <string name="cloud_compress_progress">%1$d / %2$d</string>
+    <string name="cloud_compress_done">%1$d tömörítve, %2$s megtakarítva.</string>
+    <string name="cloud_compress_done_left">%1$d változatlan maradt.</string>
+    <string name="cloud_compress_channel_desc">A Drive-on lévő fotók tömörítésének állapota</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d Drive-on lévő fotó vagy videó letöltődik, a feltöltési tömörítés beállításaival tömörítődik, és újra feltöltődik. Az eredeti a Drive kukájába kerül, amint a kisebb másolat bekerült az albumaiba. Ami nem lenne kisebb, az változatlan marad.</item>
+        <item quantity="other">%1$d Drive-on lévő fotó és videó letöltődik, a feltöltési tömörítés beállításaival tömörítődik, és újra feltöltődik. Minden eredeti a Drive kukájába kerül, amint a kisebb másolata bekerült az albumaiba. Ami nem lenne kisebb, az változatlan marad.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">%1$d elem, ami a telefonon is megvan, kimarad.</item>
+        <item quantity="other">%1$d elem, ami a telefonon is megvan, kimarad.</item>
+    </plurals>
     <plurals name="details_private_remove">
         <item quantity="one">%d elem eltávolítása</item>
         <item quantity="other">%d elem eltávolítása</item>

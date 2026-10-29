@@ -29,7 +29,9 @@ package eu.akoos.photos.data.db
 import androidx.room.Database
 import androidx.room.TypeConverters
 import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
+import eu.akoos.photos.data.db.dao.PendingCloudCompressDao
 import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
+import eu.akoos.photos.data.db.entity.PendingCloudCompressEntity
 import me.proton.core.account.data.db.AccountConverters
 import me.proton.core.account.data.db.AccountDatabase
 import me.proton.core.account.data.db.AccountDao
@@ -193,6 +195,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         PerceptualHashEntity::class,
         UploadAlbumTargetEntity::class,
         PendingMetadataEditEntity::class,
+        PendingCloudCompressEntity::class,
         ImportStagedEntity::class,
         ImportHistoryEntity::class,
         ImportUploadedEntity::class,
@@ -253,7 +256,7 @@ import eu.akoos.photos.data.db.entity.UploadAlbumTargetEntity
         // Telemetry
         TelemetryEventEntity::class,
     ],
-    version = 51,
+    version = 52,
     exportSchema = true,
 )
 abstract class AppDatabase : BaseDatabase(),
@@ -283,6 +286,7 @@ abstract class AppDatabase : BaseDatabase(),
     abstract fun perceptualHashDao(): PerceptualHashDao
     abstract fun uploadAlbumTargetDao(): UploadAlbumTargetDao
     abstract fun pendingMetadataEditDao(): PendingMetadataEditDao
+    abstract fun pendingCloudCompressDao(): PendingCloudCompressDao
     abstract fun importStagedDao(): ImportStagedDao
     abstract fun importHistoryDao(): ImportHistoryDao
     abstract fun importUploadedDao(): ImportUploadedDao

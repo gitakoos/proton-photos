@@ -1295,6 +1295,22 @@
     <string name="details_private_dates">Etiquetas de fecha</string>
     <string name="details_private_author">Autor</string>
     <string name="details_place_hint">Arrastra el mapa bajo el pin</string>
+    <string name="cloud_compress_title">Comprimir en Drive</string>
+    <string name="cloud_compress_confirm_title">¿Comprimir en Drive?</string>
+    <string name="cloud_compress_confirm">Comprimir</string>
+    <string name="cloud_compress_started">Comprimiendo en segundo plano</string>
+    <string name="cloud_compress_progress">%1$d de %2$d</string>
+    <string name="cloud_compress_done">%1$d comprimidos, %2$s ahorrados.</string>
+    <string name="cloud_compress_done_left">%1$d se quedaron como estaban.</string>
+    <string name="cloud_compress_channel_desc">Progreso de la compresión de fotos que ya están en Drive</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d foto o vídeo de Drive se descarga, se comprime con tus ajustes de compresión de subida y se vuelve a subir. El original va a la papelera de Drive cuando la copia más pequeña está en sus álbumes. Lo que no quedaría más pequeño se deja como está.</item>
+        <item quantity="other">%1$d fotos y vídeos de Drive se descargan, se comprimen con tus ajustes de compresión de subida y se vuelven a subir. Cada original va a la papelera de Drive cuando su copia más pequeña está en sus álbumes. Lo que no quedaría más pequeño se deja como está.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">Se omite %1$d elemento que también está en este teléfono.</item>
+        <item quantity="other">Se omiten %1$d elementos que también están en este teléfono.</item>
+    </plurals>
     <plurals name="details_private_remove">
         <item quantity="one">Quitar %d elemento</item>
         <item quantity="other">Quitar %d elementos</item>

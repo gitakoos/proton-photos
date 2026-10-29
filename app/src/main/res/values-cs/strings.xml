@@ -1518,6 +1518,26 @@
     <string name="details_private_dates">Datumové značky</string>
     <string name="details_private_author">Autor</string>
     <string name="details_place_hint">Posuň mapu pod špendlík</string>
+    <string name="cloud_compress_title">Komprimovat na Drive</string>
+    <string name="cloud_compress_confirm_title">Komprimovat na Drive?</string>
+    <string name="cloud_compress_confirm">Komprimovat</string>
+    <string name="cloud_compress_started">Komprimuje se na pozadí</string>
+    <string name="cloud_compress_progress">%1$d z %2$d</string>
+    <string name="cloud_compress_done">Komprimováno %1$d, ušetřeno %2$s.</string>
+    <string name="cloud_compress_done_left">Beze změny: %1$d.</string>
+    <string name="cloud_compress_channel_desc">Průběh komprimace fotek, které už jsou na Drive</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d fotka nebo video na Drive se stáhne, zkomprimuje podle nastavení komprimace při nahrávání a znovu nahraje. Originál jde do koše Drive, jakmile je menší kopie v jeho albech. Co by nebylo menší, zůstane beze změny.</item>
+        <item quantity="few">%1$d fotky a videa na Drive se stáhnou, zkomprimují podle nastavení komprimace při nahrávání a znovu nahrají. Každý originál jde do koše Drive, jakmile je jeho menší kopie v albech. Co by nebylo menší, zůstane beze změny.</item>
+        <item quantity="many">%1$d fotky a videa na Drive se stáhne, zkomprimuje podle nastavení komprimace při nahrávání a znovu nahraje. Každý originál jde do koše Drive, jakmile je jeho menší kopie v albech. Co by nebylo menší, zůstane beze změny.</item>
+        <item quantity="other">%1$d fotek a videí na Drive se stáhne, zkomprimuje podle nastavení komprimace při nahrávání a znovu nahraje. Každý originál jde do koše Drive, jakmile je jeho menší kopie v albech. Co by nebylo menší, zůstane beze změny.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">Vynechá se %1$d položka, která je i v tomto telefonu.</item>
+        <item quantity="few">Vynechají se %1$d položky, které jsou i v tomto telefonu.</item>
+        <item quantity="many">Vynechá se %1$d položky, které jsou i v tomto telefonu.</item>
+        <item quantity="other">Vynechá se %1$d položek, které jsou i v tomto telefonu.</item>
+    </plurals>
     <plurals name="details_private_remove">
         <item quantity="one">Odebrat %d položku</item>
         <item quantity="few">Odebrat %d položky</item>

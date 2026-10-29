@@ -89,6 +89,7 @@ import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.hasDownloadable
 import eu.akoos.photos.presentation.common.offlinePinnableLinkIds
 import eu.akoos.photos.presentation.common.offlineTurnsOn
+import eu.akoos.photos.presentation.common.rememberCloudCompressAction
 import eu.akoos.photos.presentation.common.selectionDrawerRestingHeight
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ErrorColor
@@ -211,6 +212,7 @@ fun rememberGallerySelectionActions(
     val isDeleting = multiDeleteState is MultiDeleteState.Working
 
     var showStripPicker by remember { mutableStateOf(false) }
+    val compressAction = rememberCloudCompressAction(selectedItems, isSignedIn)
 
     // Which way the offline row goes, so it names the press rather than the state: a pin while
     // anything pinnable in the selection is still un-pinned, a removal once none is.
@@ -347,6 +349,9 @@ fun rememberGallerySelectionActions(
                 )
             )
         }
+        // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
+        // smaller copy is up.
+        compressAction?.let(::add)
         // Move the selected on-device photos into a real DCIM/<name>/ folder other gallery apps can
         // see. The move keeps each file's content URI, so a backed-up photo stays paired, and the Drive
         // albums of mirrored folders follow it (FolderMoveAlbumFollow); it is an in-place scoped-storage

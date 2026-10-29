@@ -1939,6 +1939,22 @@
     <string name="details_private_dates">Tarih etiketleri</string>
     <string name="details_private_author">Yazar</string>
     <string name="details_place_hint">Haritayı iğnenin altına sürükle</string>
+    <string name="cloud_compress_title">Drive\'da sıkıştır</string>
+    <string name="cloud_compress_confirm_title">Drive\'da sıkıştırılsın mı?</string>
+    <string name="cloud_compress_confirm">Sıkıştır</string>
+    <string name="cloud_compress_started">Arka planda sıkıştırılıyor</string>
+    <string name="cloud_compress_progress">%1$d / %2$d</string>
+    <string name="cloud_compress_done">%1$d sıkıştırıldı, %2$s kazanıldı.</string>
+    <string name="cloud_compress_done_left">%1$d olduğu gibi bırakıldı.</string>
+    <string name="cloud_compress_channel_desc">Drive\'daki fotoğrafların sıkıştırılma ilerlemesi</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">Drive\'daki %1$d fotoğraf veya video indirilir, yükleme sıkıştırma ayarlarınla sıkıştırılır ve yeniden yüklenir. Küçük kopyası albümlerine girince orijinal Drive çöp kutusuna gider. Küçülmeyecek olan olduğu gibi kalır.</item>
+        <item quantity="other">Drive\'daki %1$d fotoğraf ve video indirilir, yükleme sıkıştırma ayarlarınla sıkıştırılır ve yeniden yüklenir. Her orijinal, küçük kopyası albümlerine girince Drive çöp kutusuna gider. Küçülmeyecek olan olduğu gibi kalır.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">Bu telefonda da olan %1$d öğe atlanır.</item>
+        <item quantity="other">Bu telefonda da olan %1$d öğe atlanır.</item>
+    </plurals>
     <plurals name="details_private_remove">
         <item quantity="one">%d öğeyi kaldır</item>
         <item quantity="other">%d öğeyi kaldır</item>

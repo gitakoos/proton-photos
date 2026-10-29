@@ -2044,6 +2044,22 @@
     <string name="details_private_dates">Date tags</string>
     <string name="details_private_author">Author</string>
     <string name="details_place_hint">Drag the map under the pin</string>
+    <string name="cloud_compress_title">Compress on Drive</string>
+    <string name="cloud_compress_confirm_title">Compress on Drive?</string>
+    <string name="cloud_compress_confirm">Compress</string>
+    <string name="cloud_compress_started">Compressing in the background</string>
+    <string name="cloud_compress_progress">%1$d of %2$d</string>
+    <string name="cloud_compress_done">Compressed %1$d, saved %2$s.</string>
+    <string name="cloud_compress_done_left">%1$d left as they were.</string>
+    <string name="cloud_compress_channel_desc">Progress of compressing photos already on Drive</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d photo or video on Drive is downloaded, compressed with your upload compression settings and uploaded again. The original goes to the Drive trash once its smaller copy is in its albums. One that would not get smaller is left as it is.</item>
+        <item quantity="other">%1$d photos and videos on Drive are downloaded, compressed with your upload compression settings and uploaded again. Each original goes to the Drive trash once its smaller copy is in its albums. One that would not get smaller is left as it is.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">%1$d item that is also on this phone is left out.</item>
+        <item quantity="other">%1$d items that are also on this phone are left out.</item>
+    </plurals>
     <plurals name="details_private_remove">
         <item quantity="one">Remove %d item</item>
         <item quantity="other">Remove %d items</item>

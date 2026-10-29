@@ -1519,6 +1519,26 @@
     <string name="details_private_dates">Datumske oznake</string>
     <string name="details_private_author">Avtor</string>
     <string name="details_place_hint">Povleci zemljevid pod žebljiček</string>
+    <string name="cloud_compress_title">Stisni na Drive</string>
+    <string name="cloud_compress_confirm_title">Stisniti na Drive?</string>
+    <string name="cloud_compress_confirm">Stisni</string>
+    <string name="cloud_compress_started">Stiskanje poteka v ozadju</string>
+    <string name="cloud_compress_progress">%1$d od %2$d</string>
+    <string name="cloud_compress_done">Stisnjenih %1$d, prihranjeno %2$s.</string>
+    <string name="cloud_compress_done_left">Nespremenjenih: %1$d.</string>
+    <string name="cloud_compress_channel_desc">Napredek stiskanja fotografij, ki so že na Drive</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d fotografija ali videoposnetek na Drive se prenese, stisne z nastavitvami stiskanja ob nalaganju in znova naloži. Izvirnik gre v koš Drive, ko je manjša kopija v njegovih albumih. Kar ne bi bilo manjše, ostane nespremenjeno.</item>
+        <item quantity="two">%1$d fotografiji ali videoposnetka na Drive se preneseta, stisneta z nastavitvami stiskanja ob nalaganju in znova naložita. Vsak izvirnik gre v koš Drive, ko je njegova manjša kopija v albumih. Kar ne bi bilo manjše, ostane nespremenjeno.</item>
+        <item quantity="few">%1$d fotografije in videoposnetki na Drive se prenesejo, stisnejo z nastavitvami stiskanja ob nalaganju in znova naložijo. Vsak izvirnik gre v koš Drive, ko je njegova manjša kopija v albumih. Kar ne bi bilo manjše, ostane nespremenjeno.</item>
+        <item quantity="other">%1$d fotografij in videoposnetkov na Drive se prenese, stisne z nastavitvami stiskanja ob nalaganju in znova naloži. Vsak izvirnik gre v koš Drive, ko je njegova manjša kopija v albumih. Kar ne bi bilo manjše, ostane nespremenjeno.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">Izpuščen je %1$d element, ki je tudi na tem telefonu.</item>
+        <item quantity="two">Izpuščena sta %1$d elementa, ki sta tudi na tem telefonu.</item>
+        <item quantity="few">Izpuščeni so %1$d elementi, ki so tudi na tem telefonu.</item>
+        <item quantity="other">Izpuščenih je %1$d elementov, ki so tudi na tem telefonu.</item>
+    </plurals>
     <plurals name="details_private_remove">
         <item quantity="one">Odstrani %d element</item>
         <item quantity="two">Odstrani %d elementa</item>

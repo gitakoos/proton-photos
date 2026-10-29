@@ -181,6 +181,14 @@
             native PGP call and crash the process. Not exported: only our own PendingIntent fires it.
         -->
         <receiver
+            android:name=".worker.CloudCompressCancelReceiver"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="eu.akoos.photos.action.CANCEL_CLOUD_COMPRESS" />
+            </intent-filter>
+        </receiver>
+        <receiver
             android:name=".worker.MetadataEditCancelReceiver"
             android:exported="false"
             android:enabled="true">

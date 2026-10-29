@@ -32,6 +32,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.Multibinds
 import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
+import eu.akoos.photos.data.db.dao.PendingCloudCompressDao
 import me.proton.core.eventmanager.domain.EventListener
 import me.proton.core.account.data.db.AccountDatabase
 import me.proton.core.auth.data.db.AuthDatabase
@@ -187,6 +188,11 @@ abstract class DatabaseModule {
         @Singleton
         fun providePendingMetadataEditDao(db: AppDatabase): PendingMetadataEditDao =
             db.pendingMetadataEditDao()
+
+        @Provides
+        @Singleton
+        fun providePendingCloudCompressDao(db: AppDatabase): PendingCloudCompressDao =
+            db.pendingCloudCompressDao()
 
         @Provides
         @Singleton

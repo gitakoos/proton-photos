@@ -1518,6 +1518,26 @@
     <string name="details_private_dates">Znaczniki daty</string>
     <string name="details_private_author">Autor</string>
     <string name="details_place_hint">Przesuń mapę pod pinezkę</string>
+    <string name="cloud_compress_title">Kompresuj na Drive</string>
+    <string name="cloud_compress_confirm_title">Kompresować na Drive?</string>
+    <string name="cloud_compress_confirm">Kompresuj</string>
+    <string name="cloud_compress_started">Kompresowanie w tle</string>
+    <string name="cloud_compress_progress">%1$d z %2$d</string>
+    <string name="cloud_compress_done">Skompresowano %1$d, zaoszczędzono %2$s.</string>
+    <string name="cloud_compress_done_left">Bez zmian: %1$d.</string>
+    <string name="cloud_compress_channel_desc">Postęp kompresji zdjęć, które już są na Drive</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d zdjęcie lub film z Drive zostanie pobrane, skompresowane według ustawień kompresji przesyłania i przesłane ponownie. Oryginał trafi do kosza Drive, gdy mniejsza kopia znajdzie się w jego albumach. To, co nie byłoby mniejsze, zostaje bez zmian.</item>
+        <item quantity="few">%1$d zdjęcia i filmy z Drive zostaną pobrane, skompresowane według ustawień kompresji przesyłania i przesłane ponownie. Każdy oryginał trafi do kosza Drive, gdy mniejsza kopia znajdzie się w jego albumach. To, co nie byłoby mniejsze, zostaje bez zmian.</item>
+        <item quantity="many">%1$d zdjęć i filmów z Drive zostanie pobranych, skompresowanych według ustawień kompresji przesyłania i przesłanych ponownie. Każdy oryginał trafi do kosza Drive, gdy mniejsza kopia znajdzie się w jego albumach. To, co nie byłoby mniejsze, zostaje bez zmian.</item>
+        <item quantity="other">%1$d zdjęcia i filmu z Drive zostanie pobrane, skompresowane według ustawień kompresji przesyłania i przesłane ponownie. Każdy oryginał trafi do kosza Drive, gdy mniejsza kopia znajdzie się w jego albumach. To, co nie byłoby mniejsze, zostaje bez zmian.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">Pominięto %1$d element, który jest też na tym telefonie.</item>
+        <item quantity="few">Pominięto %1$d elementy, które są też na tym telefonie.</item>
+        <item quantity="many">Pominięto %1$d elementów, które są też na tym telefonie.</item>
+        <item quantity="other">Pominięto %1$d elementu, które są też na tym telefonie.</item>
+    </plurals>
     <plurals name="details_private_remove">
         <item quantity="one">Usuń %d element</item>
         <item quantity="few">Usuń %d elementy</item>
