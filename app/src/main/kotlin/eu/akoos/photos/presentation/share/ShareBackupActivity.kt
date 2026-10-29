@@ -28,16 +28,14 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import eu.akoos.photos.R
-import eu.akoos.photos.data.share.SharedMediaResolver
+import eu.akoos.photos.data.share.backUpSharedMedia
 import eu.akoos.photos.data.share.sharedUrisOf
 import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import eu.akoos.photos.domain.usecase.ForceUploadLocalUrisUseCase
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import javax.inject.Inject
 
@@ -68,18 +66,9 @@ class ShareBackupActivity : ComponentActivity() {
                 return@launch
             }
             // Matched and copied while the share lasts: the sender's read grant ends with this screen.
-            val resolved = withContext(Dispatchers.IO) { SharedMediaResolver(contentResolver).resolve(shared, intent.type) }
-            val onDrive = if (resolved.uris.isEmpty()) 0 else withContext(Dispatchers.IO) {
-                resolved.uris.chunked(500).sumOf { slice -> syncStateRepo.getByUris(slice).count { it.cloudFileId != null } }
-            }
-            val message = when {
-                resolved.uris.isEmpty() -> getString(R.string.share_backup_unreadable)
-                resolved.unreadable > 0 -> getString(R.string.share_backup_some_unreadable, resolved.unreadable, shared.size)
-                onDrive == resolved.uris.size -> getString(R.string.device_folder_already_backed_up)
-                resolved.saved > 0 -> getString(R.string.share_backup_saved_to_phone)
-                else -> getString(R.string.backup_started)
-            }
-            if (resolved.uris.size > onDrive) appScope.launch { forceUpload.forceUpload(userId, resolved.uris) }
+            val message = backUpSharedMedia(
+                this@ShareBackupActivity, userId, shared, intent.type, syncStateRepo, forceUpload, appScope,
+            )
             toast(message)
             finish()
         }

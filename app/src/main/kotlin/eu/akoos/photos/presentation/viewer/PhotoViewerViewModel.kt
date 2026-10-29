@@ -248,6 +248,8 @@ class PhotoViewerViewModel @Inject constructor(
     private val moveController: MoveToFolderController,
     private val labelRepo: PhotoLabelRepository,
     private val outgoingUris: eu.akoos.photos.util.OutgoingPhotoUris,
+    private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
+    @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) : ViewModel() {
 
     private companion object {
@@ -1371,11 +1373,18 @@ class PhotoViewerViewModel @Inject constructor(
      * path the gallery selection and device-folder views use. No-op for already-synced or
      * cloud-only items. The viewer's sync badge flips once the upload lands.
      */
+    /** Backs up a photo that is on the phone only. A photo another app opened here ("Open with" from a
+     *  mail or chat app) carries that app's own uri, which the back-up cannot read once this screen is
+     *  gone, so it goes through the same matching and saving a share to the app does, and the outcome
+     *  is said in a snackbar either way. */
     fun backUpItem(item: GalleryItem) {
-        val uri = (item as? GalleryItem.LocalOnly)?.local?.uri ?: return
+        val local = (item as? GalleryItem.LocalOnly)?.local ?: return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            forceUploadLocalUris.forceUpload(userId, listOf(uri))
+            _transientError.value = eu.akoos.photos.data.share.backUpSharedMedia(
+                context, userId, listOf(android.net.Uri.parse(local.uri)), local.mimeType.takeIf { it.isNotBlank() },
+                syncStateRepo, forceUploadLocalUris, appScope,
+            )
         }
     }
 
