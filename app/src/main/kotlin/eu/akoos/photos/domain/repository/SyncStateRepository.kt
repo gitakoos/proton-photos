@@ -125,6 +125,9 @@ interface SyncStateRepository {
     suspend fun clearQueued(localUri: String)
     /** Unguarded queued clear for the success / pairing path, where the row is known backed up. */
     suspend fun clearQueuedForSynced(localUri: String)
+
+    /** The device photo's Drive copy is gone: keep the folder backup from uploading it again. */
+    suspend fun markRemovedFromDrive(localUri: String)
     /** [clearQueuedForSynced] for every one of [localUris], in as few writes as the SQL limit allows. */
     suspend fun clearQueuedForSyncedAll(localUris: List<String>) {
         for (uri in localUris) clearQueuedForSynced(uri)

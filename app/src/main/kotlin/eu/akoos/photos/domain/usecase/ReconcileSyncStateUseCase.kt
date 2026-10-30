@@ -271,12 +271,13 @@ class ReconcileSyncStateUseCase @Inject constructor(
                         // Demote only while the row still carries the cloud id this snapshot saw: a twin
                         // genuinely gone still matches and is demoted, but one an upload re-promoted
                         // mid-pass now carries a different id and is left alone (its pairing survives).
-                        syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
-                        // The cloud copy is genuinely gone (past the grace window). This row's prior
-                        // upload intent is spent, so clear it: without this the stranded-intent
-                        // recovery below would re-queue a photo the user deleted from the cloud and
-                        // upload it straight back, on every pass.
-                        syncStateRepo.clearQueuedForSynced(state.localUri)
+                        val demoted = syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
+                        // The cloud copy is genuinely gone (past the grace window): removed from Drive
+                        // here, on another device or on the web. The row is marked so, which spends its
+                        // prior upload intent: without it the folder backup (a null or AUTO_FOLDER source)
+                        // or the stranded-intent recovery below (a MANUAL one) would upload the photo
+                        // straight back on the next pass, a deleted photo coming back.
+                        if (demoted > 0) syncStateRepo.markRemovedFromDrive(state.localUri)
                     }
                 // Local file removed from MediaStore → demote to CLOUD_ONLY so we stop telling the
                 // user the photo is "on this device" when it actually isn't. Only on a scan that saw

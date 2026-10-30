@@ -1012,6 +1012,26 @@ class ReconcileSyncStateUseCaseTest {
         }
     }
 
+    @Test
+    fun `a photo removed from Drive is not queued again by the folder backup`() = runTest {
+        // The user removed the Drive copy and kept the device file: the folder backup must not upload
+        // it straight back on the next pass.
+        val local = localItem("uri://removed")
+        val removed = syncState("uri://removed", cloudId = null, status = SyncStatus.LOCAL_ONLY,
+            queued = false, queueSource = eu.akoos.photos.domain.entity.QueueSource.REMOVED_FROM_DRIVE)
+        coEvery { localRepo.freshScan() } returns completeScan(listOf(local))
+        coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
+        every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(removed))
+        coEvery { syncStateRepo.getByUri(any()) } returns removed
+
+        useCase(userId).toList()
+
+        coVerify(exactly = 0) { syncStateRepo.markQueued(eq("uri://removed"), any(), any()) }
+        coVerify(exactly = 0) {
+            syncStateRepo.markQueuedAll(match { "uri://removed" in it }, any(), any())
+        }
+    }
+
     // ─── explicit-intent queue robustness (piece 5a) ──────────────────────────
 
     @Test
@@ -1123,9 +1143,9 @@ class ReconcileSyncStateUseCaseTest {
     fun `a backed-up photo whose cloud copy is deleted is NOT re-queued for upload`() = runTest {
         // Regression: a photo that was backed up (SYNCED) but still carries a leftover
         // queueSource=MANUAL, then had its cloud copy deleted by the user, must NOT be re-uploaded.
-        // The cloud-absent demotion flips it to LOCAL_ONLY+cloudFileId=null AND clears the stale
-        // intent via clearQueuedForSynced, so the stranded-intent recovery does not re-queue it into
-        // an endless re-upload of the deletion. The local file is still on the device (cloud-absent
+        // The cloud-absent demotion flips it to LOCAL_ONLY+cloudFileId=null AND marks it removed from
+        // Drive, so neither the folder backup nor the stranded-intent recovery re-queues it into an
+        // endless re-upload of the deletion. The local file is still on the device (cloud-absent
         // branch, not the local-gone CLOUD_ONLY branch).
         val local = LocalMediaItem(
             uri = "content://media/external/images/media/50",
@@ -1144,11 +1164,12 @@ class ReconcileSyncStateUseCaseTest {
         coEvery { listingDao.getOwnStreamPairingRows(userId.id) } returns pairingRows(emptyList())
         every { syncStateRepo.observeAll(userId) } returns flowOf(listOf(deletedCloudSync))
         coEvery { syncStateRepo.getByUri(any()) } returns deletedCloudSync
+        coEvery { syncStateRepo.demoteToLocalIfCloudIdMatches(local.uri, "link-del") } returns 1
 
         useCase(userId).toList()
 
-        // The demotion clears the spent intent, and the recovery must NOT re-queue the row.
-        coVerify { syncStateRepo.clearQueuedForSynced(local.uri) }
+        // The demotion marks the row removed from Drive, and the recovery must NOT re-queue the row.
+        coVerify { syncStateRepo.markRemovedFromDrive(local.uri) }
         coVerify(exactly = 0) { syncStateRepo.markQueued(eq(local.uri), any(), any()) }
     }
 

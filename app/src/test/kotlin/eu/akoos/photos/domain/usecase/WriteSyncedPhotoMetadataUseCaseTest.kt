@@ -592,6 +592,8 @@ class WriteSyncedPhotoMetadataUseCaseTest {
             rows[localUri]?.let { rows[localUri] = it.copy(queued = true, queueSource = source) }
         }
 
+        override suspend fun markRemovedFromDrive(localUri: String) {}
+
         override suspend fun clearQueuedForSynced(localUri: String) {
             rows[localUri]?.let { rows[localUri] = it.copy(queued = false, queueSource = null) }
         }

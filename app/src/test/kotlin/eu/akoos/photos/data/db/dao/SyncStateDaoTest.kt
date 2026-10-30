@@ -109,6 +109,32 @@ class SyncStateDaoTest {
     }
 
     @Test
+    fun `a Drive copy trashed here marks its device photo removed from Drive`() = runTest {
+        dao.upsert(entity("uri://1", status = SyncStatus.SYNCED, cloudFileId = "cloud-1"))
+        dao.markQueued("uri://1", "MANUAL", 1L)
+
+        dao.demoteSyncedByCloudIds(listOf("cloud-1"))
+
+        val row = dao.getByUri("uri://1")!!
+        assertEquals(SyncStatus.LOCAL_ONLY, row.status)
+        assertEquals(null, row.cloudFileId)
+        assertEquals("REMOVED_FROM_DRIVE", row.queueSource)
+        assertEquals(false, row.queued)
+    }
+
+    @Test
+    fun `only a device-only row is marked removed from Drive`() = runTest {
+        dao.upsert(entity("uri://local", status = SyncStatus.LOCAL_ONLY))
+        dao.upsert(entity("uri://synced", status = SyncStatus.SYNCED, cloudFileId = "c"))
+
+        dao.markRemovedFromDrive("uri://local")
+        dao.markRemovedFromDrive("uri://synced")
+
+        assertEquals("REMOVED_FROM_DRIVE", dao.getByUri("uri://local")?.queueSource)
+        assertEquals(null, dao.getByUri("uri://synced")?.queueSource)
+    }
+
+    @Test
     fun `a batch status update moves exactly the listed rows`() = runTest {
         dao.upsertAll(listOf(entity("uri://1", status = SyncStatus.SYNCED), entity("uri://2", status = SyncStatus.SYNCED), entity("uri://3", status = SyncStatus.SYNCED)))
 

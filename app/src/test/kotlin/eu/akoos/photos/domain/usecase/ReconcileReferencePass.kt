@@ -225,8 +225,8 @@ internal class ReconcileReferencePass(
             when {
                 state.cloudFileId !in cloudByLinkId ->
                     if (nowMs - (state.lastSyncSuccessMs ?: 0L) > CLOUD_ABSENCE_GRACE_MS) {
-                        syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
-                        syncStateRepo.clearQueuedForSynced(state.localUri)
+                        val demoted = syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
+                        if (demoted > 0) syncStateRepo.markRemovedFromDrive(state.localUri)
                     }
                 goneFromDevice(state, localUriSet) -> goneCandidates += state
             }
