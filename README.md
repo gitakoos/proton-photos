@@ -42,6 +42,24 @@
 
 Download the latest APK from the [releases page](https://github.com/gitakoos/proton-photos/releases/latest) and tap to install.
 
+### Verify your download
+
+Every release asset shows its SHA-256 on the [releases page](https://github.com/gitakoos/proton-photos/releases). Compare it on a computer with:
+
+```bash
+shasum -a 256 photosforproton-arm64-v8a-release.apk
+```
+
+The APK signing certificate is always:
+
+`SHA-256: 873eaac45e7027873d7a5161b5c96af29de0556072f6b52413f1b6a999fbfc6c`
+
+Check it on Android with [AppVerifier](https://github.com/soupslurpr/AppVerifier), or on a computer with:
+
+```bash
+apksigner verify --print-certs photosforproton-arm64-v8a-release.apk
+```
+
 ## Architecture
 
 Clean architecture in a single module, with strict one-way layer dependencies:
