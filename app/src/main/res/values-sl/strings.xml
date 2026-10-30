@@ -426,7 +426,7 @@
     <!-- Settings -->
     <string name="settings_title">Nastavitve</string>
     <string name="settings_more_title">Več nastavitev</string>
-    <string name="settings_more_desc">UI, zasebnost, obvestila in pomoč</string>
+    <string name="settings_more_desc">Strojno učenje, zasebnost, obvestila in pomoč</string>
     <string name="settings_search_hint">Iskanje nastavitev</string>
     <string name="settings_search_no_results">Ni ujemajočih se nastavitev</string>
     <string name="settings_sync_wifi_only">Sinhroniziraj samo prek Wi‑Fi</string>
@@ -447,7 +447,7 @@
     <string name="settings_sign_out">Odjava</string>
     <string name="settings_sign_out_desc">Končaj to sejo v tej napravi.</string>
     <string name="sign_out_dialog_title">Odjava?</string>
-    <string name="sign_out_dialog_message">Z odjavo se ti podatki v tej napravi izbrišejo in se ob ponovni prijavi ne obnovijo (če jih potrebujete, jih najprej izvozite):</string>
+    <string name="sign_out_dialog_message">Z odjavo se ti podatki v tej napravi izbrišejo in se ob ponovni prijavi ne obnovijo:</string>
     <string name="sign_out_dialog_item_faces">Poimenovane osebe in podatki o obrazih</string>
     <string name="sign_out_dialog_item_day_notes">Opombe v koledarju</string>
     <string name="sign_out_dialog_item_vault">Skrite fotografije</string>
@@ -1913,7 +1913,7 @@
     </plurals>
     <string name="settings_section_about">O aplikaciji</string>
     <string name="settings_ai_section">Strojno učenje</string>
-    <string name="settings_ai_nav_desc">Kopiranje besedila, skrivanje obrazov in več, na napravi</string>
+    <string name="settings_ai_nav_desc">Prepoznavanje obrazov, iskanje po tem, kar je na fotografiji, in kopiranje besedila</string>
     <string name="settings_ai_enable">Vklopi strojno učenje</string>
     <string name="settings_ai_ocr">Kopiranje besedila</string>
     <string name="settings_ai_ocr_desc">Prepozna in kopira besedilo, ki ga vidite na fotografiji</string>
@@ -1926,7 +1926,7 @@
     <string name="settings_ai_ocr_remove_confirm">Odstrani</string>
     <string name="settings_ai_ocr_remove_keep">Obdrži</string>
     <string name="settings_ai_face_toggle">Prepoznavanje obrazov</string>
-    <string name="settings_ai_face_desc">Razvrsti fotografije po osebah na njih, v vaši napravi</string>
+    <string name="settings_ai_face_desc">Razvrsti fotografije po osebah na njih, v tem telefonu</string>
     <string name="settings_ai_face_downloading">Prenašanje…</string>
     <string name="settings_ai_face_download_failed">Modela obrazov ni bilo mogoče prenesti.</string>
     <string name="settings_ai_face_download_retry">Za ponovni poskus znova vklopite stikalo.</string>
@@ -1937,19 +1937,19 @@
     <string name="settings_ai_face_download_confirm">Prenesi</string>
     <string name="settings_ai_face_model_missing">Modela obrazov ni v tej napravi.</string>
     <string name="settings_ai_face_remove_title">Odstranim podatke obrazov?</string>
-    <string name="settings_ai_face_remove_message">Prepoznavanje obrazov je izklopljeno. Ali naj s te naprave odstranim model obrazov ter vse zaznane obraze in imena? Če želite obdržati kopijo, jih najprej izvozite na strani Prepoznani obrazi.</string>
+    <string name="settings_ai_face_remove_message">Prepoznavanje obrazov je izklopljeno. Ali naj s te naprave odstranim model obrazov ter vse zaznane obraze in imena?</string>
     <string name="settings_ai_face_remove_confirm">Odstrani</string>
     <string name="settings_ai_face_remove_keep">Obdrži</string>
     <string name="settings_ai_face_remove_confirm_title">Ali ste prepričani?</string>
-    <string name="settings_ai_face_remove_confirm_message">S tem trajno odstranite model obrazov ter vse prepoznane obraze in imena. Tega ni mogoče razveljaviti.</string>
-    <string name="settings_ai_semantic">Pomensko iskanje</string>
+    <string name="settings_ai_face_remove_confirm_message">S tem iz te naprave odstranite model obrazov ter vse prepoznane obraze in imena. Kopija, shranjena v Proton Drive, ostane.</string>
+    <string name="settings_ai_semantic">Iskanje po tem, kar je na fotografiji</string>
     <string name="settings_ai_semantic_desc">Poiščite fotografije z opisom tega, kaj je na njih</string>
     <string name="settings_ai_semantic_downloading">Prenašanje…</string>
     <string name="settings_ai_semantic_download_failed">Modelov za iskanje ni bilo mogoče prenesti.</string>
     <string name="settings_ai_semantic_download_retry">Za ponovni poskus znova vklopite stikalo.</string>
     <string name="settings_ai_semantic_download_title">Prenesem modele za iskanje?</string>
-    <string name="settings_ai_semantic_download_message">Pomensko iskanje potrebuje prenos modela velikosti %1$s. Deluje prek katere koli povezave, priporočljiv pa je Wi-Fi.</string>
-    <string name="settings_ai_semantic_download_message_metered">Pomensko iskanje potrebuje prenos modela velikosti %1$s. Wi-Fi ni povezan, zato bo ta prenos uporabil mobilne podatke.</string>
+    <string name="settings_ai_semantic_download_message">Iskanje fotografij potrebuje prenos modela velikosti %1$s. Deluje prek katere koli povezave, priporočljiv pa je Wi-Fi.</string>
+    <string name="settings_ai_semantic_download_message_metered">Iskanje fotografij potrebuje prenos modela velikosti %1$s. Wi-Fi ni povezan, zato bo ta prenos uporabil mobilne podatke.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Prenesi</string>
     <string name="settings_ai_semantic_remove_title">Odstranim prenesene modele?</string>
@@ -2129,7 +2129,7 @@
     <string name="settings_ml_drive_save_failed">Shranjevanje v Drive ni uspelo</string>
     <string name="settings_ml_drive_restore_failed">Obnova iz Drive ni uspela</string>
     <string name="settings_ml_drive_nothing_title">Ni še ničesar za shranjevanje</string>
-    <string name="settings_ml_drive_nothing_message">Ta naprava še nima podatkov o obrazih ali iskanju. Najprej naj prepoznavanje obrazov ali pomensko iskanje pregleda vaše fotografije.</string>
+    <string name="settings_ml_drive_nothing_message">Ta naprava še nima podatkov o obrazih ali iskanju. Najprej naj prepoznavanje obrazov ali iskanje fotografij pregleda vaše fotografije.</string>
     <string name="settings_ml_drive_not_capable">Ni na voljo v tej napravi</string>
     <string name="settings_ml_drive_faces_not_saved">Podatkov o obrazih ni bilo mogoče shraniti.</string>
     <string name="settings_ml_drive_search_not_saved">Podatkov o iskanju ni bilo mogoče shraniti.</string>
@@ -2501,7 +2501,13 @@
     <string name="face_excluded_undo">Razveljavi</string>
     <string name="albums_search_hint">Iskanje albumov</string>
     <string name="albums_search_no_results">Noben album se ne ujema z iskanjem.</string>
-    <string name="settings_ai_groups_found">%1$d skupin</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d skupina</item>
+        <item quantity="two">%1$d skupini</item>
+        <item quantity="few">%1$d skupine</item>
+        <item quantity="other">%1$d skupin</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Iskanje fotografij</string>
     <string name="settings_ai_faces_found">%1$d obrazov</string>
     <string name="person_rename_merge_confirm_title">Združiti z obstoječo osebo?</string>
     <string name="person_rename_merge_confirm_body">Oseba z imenom %1$s že obstaja. Uporaba tega imena združi obe v eno, česar ni mogoče razveljaviti. Združiti?</string>

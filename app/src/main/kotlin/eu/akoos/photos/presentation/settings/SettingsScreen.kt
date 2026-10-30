@@ -118,6 +118,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -1432,7 +1433,7 @@ private fun FaceStatusCard(
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
                 when {
-                    groups.isNotEmpty() -> stringResource(R.string.settings_ai_groups_found, groups.size)
+                    groups.isNotEmpty() -> pluralStringResource(R.plurals.settings_ai_groups_found, groups.size, groups.size)
                     faceCount > 0 -> stringResource(R.string.settings_ai_faces_found, faceCount)
                     else -> stringResource(R.string.settings_ai_face_desc)
                 },
@@ -1683,7 +1684,7 @@ fun SemanticSearchScreen(
     // kick. Paused-respecting and idempotent (see the VM), so it is safe on every entry.
     LaunchedEffect(Unit) { viewModel.resumeSemanticIndexingIfNeeded() }
 
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_semantic), onBack = onBack) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_semantic_page_title), onBack = onBack) {
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_ai_semantic),

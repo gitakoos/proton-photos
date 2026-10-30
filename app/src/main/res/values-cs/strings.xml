@@ -425,7 +425,7 @@
     <!-- Settings -->
     <string name="settings_title">Nastavení</string>
     <string name="settings_more_title">Další nastavení</string>
-    <string name="settings_more_desc">AI, soukromí, oznámení a nápověda</string>
+    <string name="settings_more_desc">Strojové učení, soukromí, oznámení a nápověda</string>
     <string name="settings_search_hint">Hledat v nastavení</string>
     <string name="settings_search_no_results">Žádné odpovídající nastavení</string>
     <string name="settings_sync_wifi_only">Synchronizovat jen přes Wi‑Fi</string>
@@ -446,7 +446,7 @@
     <string name="settings_sign_out">Odhlásit se</string>
     <string name="settings_sign_out_desc">Ukončit toto sezení na tomto zařízení.</string>
     <string name="sign_out_dialog_title">Odhlásit se?</string>
-    <string name="sign_out_dialog_message">Odhlášením se tato data v tomto zařízení smažou a po opětovném přihlášení se neobnoví (pokud je potřebujete, nejdříve si je exportujte):</string>
+    <string name="sign_out_dialog_message">Odhlášením se tato data v tomto zařízení smažou a po opětovném přihlášení se neobnoví:</string>
     <string name="sign_out_dialog_item_faces">Pojmenované osoby a data obličejů</string>
     <string name="sign_out_dialog_item_day_notes">Poznámky v Kalendáři</string>
     <string name="sign_out_dialog_item_vault">Skryté fotky</string>
@@ -1914,7 +1914,7 @@
     </plurals>
     <string name="settings_section_about">O aplikaci</string>
     <string name="settings_ai_section">Strojové učení</string>
-    <string name="settings_ai_nav_desc">Kopírování textu, skrývání obličejů a další, přímo v zařízení</string>
+    <string name="settings_ai_nav_desc">Rozpoznávání obličejů, hledání podle toho, co je na fotce, a kopírování textu</string>
     <string name="settings_ai_enable">Zapnout strojové učení</string>
     <string name="settings_ai_ocr">Kopírovat text</string>
     <string name="settings_ai_ocr_desc">Rozpozná a zkopíruje text, který vidíte na fotografii</string>
@@ -1927,7 +1927,7 @@
     <string name="settings_ai_ocr_remove_confirm">Odebrat</string>
     <string name="settings_ai_ocr_remove_keep">Ponechat</string>
     <string name="settings_ai_face_toggle">Rozpoznávání obličejů</string>
-    <string name="settings_ai_face_desc">Seskupí fotografie podle osob na nich, ve vašem zařízení</string>
+    <string name="settings_ai_face_desc">Seskupí fotografie podle osob na nich, v tomto telefonu</string>
     <string name="settings_ai_face_downloading">Stahování…</string>
     <string name="settings_ai_face_download_failed">Model obličejů se nepodařilo stáhnout.</string>
     <string name="settings_ai_face_download_retry">Opětovným zapnutím přepínače to zkuste znovu.</string>
@@ -1938,19 +1938,19 @@
     <string name="settings_ai_face_download_confirm">Stáhnout</string>
     <string name="settings_ai_face_model_missing">Model obličejů není v tomto zařízení.</string>
     <string name="settings_ai_face_remove_title">Odebrat data obličejů?</string>
-    <string name="settings_ai_face_remove_message">Rozpoznávání obličejů je vypnuté. Odebrat z tohoto zařízení model obličejů a všechny rozpoznané obličeje i jména? Pokud si chcete ponechat kopii, nejprve je vyexportujte na stránce Rozpoznané obličeje.</string>
+    <string name="settings_ai_face_remove_message">Rozpoznávání obličejů je vypnuté. Odebrat z tohoto zařízení model obličejů a všechny rozpoznané obličeje i jména?</string>
     <string name="settings_ai_face_remove_confirm">Odebrat</string>
     <string name="settings_ai_face_remove_keep">Ponechat</string>
     <string name="settings_ai_face_remove_confirm_title">Opravdu?</string>
-    <string name="settings_ai_face_remove_confirm_message">Tímto se trvale odebere model obličejů a všechny rozpoznané obličeje i jména. Akci nelze vrátit zpět.</string>
-    <string name="settings_ai_semantic">Sémantické vyhledávání</string>
+    <string name="settings_ai_face_remove_confirm_message">Tím se z tohoto zařízení odstraní model obličejů a všechny rozpoznané obličeje a jména. Kopie zálohovaná na Proton Drive zůstane zachována.</string>
+    <string name="settings_ai_semantic">Hledat podle toho, co je na fotce</string>
     <string name="settings_ai_semantic_desc">Najděte fotografie popisem toho, co je na nich</string>
     <string name="settings_ai_semantic_downloading">Stahování…</string>
     <string name="settings_ai_semantic_download_failed">Vyhledávací modely se nepodařilo stáhnout.</string>
     <string name="settings_ai_semantic_download_retry">Opětovným zapnutím přepínače to zkuste znovu.</string>
     <string name="settings_ai_semantic_download_title">Stáhnout vyhledávací modely?</string>
-    <string name="settings_ai_semantic_download_message">Sémantické vyhledávání potřebuje stáhnout model o velikosti %1$s. Funguje na jakémkoli připojení, ale doporučuje se Wi-Fi.</string>
-    <string name="settings_ai_semantic_download_message_metered">Sémantické vyhledávání potřebuje stáhnout model o velikosti %1$s. Wi-Fi není připojena, takže toto stahování využije mobilní data.</string>
+    <string name="settings_ai_semantic_download_message">Vyhledávání fotek potřebuje stáhnout model o velikosti %1$s. Funguje na jakémkoli připojení, ale doporučuje se Wi-Fi.</string>
+    <string name="settings_ai_semantic_download_message_metered">Vyhledávání fotek potřebuje stáhnout model o velikosti %1$s. Wi-Fi není připojena, takže toto stahování využije mobilní data.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Stáhnout</string>
     <string name="settings_ai_semantic_remove_title">Odebrat stažené modely?</string>
@@ -2130,7 +2130,7 @@
     <string name="settings_ml_drive_save_failed">Uložení na Drive se nezdařilo</string>
     <string name="settings_ml_drive_restore_failed">Obnovení z Drive se nezdařilo</string>
     <string name="settings_ml_drive_nothing_title">Zatím není co uložit</string>
-    <string name="settings_ml_drive_nothing_message">Toto zařízení zatím nemá žádná data obličejů ani vyhledávání. Nejprve nechte rozpoznávání obličejů nebo sémantické vyhledávání prohledat vaše fotky.</string>
+    <string name="settings_ml_drive_nothing_message">Toto zařízení zatím nemá žádná data obličejů ani vyhledávání. Nejprve nechte rozpoznávání obličejů nebo vyhledávání fotek prohledat vaše fotky.</string>
     <string name="settings_ml_drive_not_capable">Na tomto zařízení není k dispozici</string>
     <string name="settings_ml_drive_faces_not_saved">Data obličejů se nepodařilo uložit.</string>
     <string name="settings_ml_drive_search_not_saved">Data vyhledávání se nepodařilo uložit.</string>
@@ -2507,7 +2507,13 @@
     <string name="face_excluded_undo">Zpět</string>
     <string name="albums_search_hint">Hledat v albech</string>
     <string name="albums_search_no_results">Žádná alba neodpovídají hledání.</string>
-    <string name="settings_ai_groups_found">%1$d skupin</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d skupina</item>
+        <item quantity="few">%1$d skupiny</item>
+        <item quantity="many">%1$d skupiny</item>
+        <item quantity="other">%1$d skupin</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Vyhledávání fotek</string>
     <string name="settings_ai_faces_found">%1$d obličejů</string>
     <string name="person_rename_merge_confirm_title">Sloučit s existující osobou?</string>
     <string name="person_rename_merge_confirm_body">Osoba se jménem %1$s již existuje. Použití tohoto jména sloučí obě v jednu, což nelze vrátit zpět. Sloučit?</string>

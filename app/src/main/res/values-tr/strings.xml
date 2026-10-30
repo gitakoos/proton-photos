@@ -572,7 +572,7 @@
 
     <string name="settings_title">Ayarlar</string>
     <string name="settings_more_title">Diğer ayarlar</string>
-    <string name="settings_more_desc">Yapay zeka, gizlilik, bildirimler ve yardım</string>
+    <string name="settings_more_desc">Makine öğrenimi, gizlilik, bildirimler ve yardım</string>
     <string name="settings_sync_wifi_only">Yalnızca Wi‑Fi\'de eşitle</string>
     <string name="settings_sync_now">Şimdi eşitle</string>
     <string name="settings_storage_section">Depolama alanı</string>
@@ -591,7 +591,7 @@
     <string name="settings_sign_out">Oturumu kapat</string>
     <string name="settings_sign_out_desc">Bu cihazdaki oturumu sonlandır.</string>
     <string name="sign_out_dialog_title">Oturum kapatılsın mı?</string>
-    <string name="sign_out_dialog_message">Oturumu kapatmak bu cihazdaki şu verileri siler ve tekrar oturum açtığında geri yüklenmezler (gerekirse önce dışa aktar):</string>
+    <string name="sign_out_dialog_message">Oturumu kapatmak bu cihazdaki şu verileri siler ve tekrar oturum açtığında geri yüklenmezler:</string>
     <string name="sign_out_dialog_item_faces">Adlandırılmış kişiler ve yüz verileri</string>
     <string name="sign_out_dialog_item_day_notes">Takvim notları</string>
     <string name="sign_out_dialog_item_vault">Gizli fotoğraflar</string>
@@ -728,7 +728,7 @@
     <string name="settings_section_extras">Ekstralar</string>
     <string name="settings_section_about">Hakkında</string>
     <string name="settings_ai_section">Makine öğrenimi</string>
-    <string name="settings_ai_nav_desc">Cihaz üzerinde metin kopyalama, yüz gizleme ve daha fazlası</string>
+    <string name="settings_ai_nav_desc">Yüz tanıma, fotoğrafta ne olduğuna göre arama ve metin kopyalama</string>
     <string name="settings_ai_enable">Makine öğrenimini etkinleştir</string>
     <string name="settings_ai_ocr">Metni kopyala</string>
     <string name="settings_ai_ocr_desc">Fotoğrafta gördüğün metni tanı ve kopyala</string>
@@ -741,7 +741,7 @@
     <string name="settings_ai_ocr_remove_confirm">Kaldır</string>
     <string name="settings_ai_ocr_remove_keep">Koru</string>
     <string name="settings_ai_face_toggle">Yüz tanıma</string>
-    <string name="settings_ai_face_desc">Fotoğrafları içindeki kişilere göre cihazında grupla</string>
+    <string name="settings_ai_face_desc">Fotoğrafları içindeki kişilere göre bu telefonda gruplar</string>
     <string name="settings_ai_face_downloading">İndiriliyor…</string>
     <string name="settings_ai_face_download_failed">Yüz modeli indirilemedi.</string>
     <string name="settings_ai_face_download_retry">Tekrar denemek için anahtarı yeniden aç.</string>
@@ -752,19 +752,19 @@
     <string name="settings_ai_face_download_confirm">İndir</string>
     <string name="settings_ai_face_model_missing">Yüz modeli bu cihazda yok.</string>
     <string name="settings_ai_face_remove_title">Yüz verileri kaldırılsın mı?</string>
-    <string name="settings_ai_face_remove_message">Yüz tanıma kapalı. Yüz modeli ve algılanan tüm yüzler ve adlar bu cihazdan kaldırılsın mı? Bir kopyasını saklamak istersen önce Tanınan yüzler sayfasından dışa aktar.</string>
+    <string name="settings_ai_face_remove_message">Yüz tanıma kapalı. Yüz modeli ve algılanan tüm yüzler ve adlar bu cihazdan kaldırılsın mı?</string>
     <string name="settings_ai_face_remove_confirm">Kaldır</string>
     <string name="settings_ai_face_remove_keep">Koru</string>
     <string name="settings_ai_face_remove_confirm_title">Emin misin?</string>
-    <string name="settings_ai_face_remove_confirm_message">Bu işlem yüz modelini ve tanınan tüm yüzleri ve adları kalıcı olarak kaldırır. Geri alınamaz.</string>
-    <string name="settings_ai_semantic">Anlamsal arama</string>
+    <string name="settings_ai_face_remove_confirm_message">Bu işlem yüz modelini ve tanınan tüm yüzleri ve adları bu cihazdan kaldırır. Proton Drive\'a yedeklenen kopya korunur.</string>
+    <string name="settings_ai_semantic">Fotoğrafta ne olduğuna göre ara</string>
     <string name="settings_ai_semantic_desc">Fotoğrafları içinde ne olduğunu tarif ederek bul</string>
     <string name="settings_ai_semantic_downloading">İndiriliyor…</string>
     <string name="settings_ai_semantic_download_failed">Arama modelleri indirilemedi.</string>
     <string name="settings_ai_semantic_download_retry">Tekrar denemek için anahtarı yeniden aç.</string>
     <string name="settings_ai_semantic_download_title">Arama modelleri indirilsin mi?</string>
-    <string name="settings_ai_semantic_download_message">Anlamsal arama için %1$s boyutunda bir model indirilmesi gerekir. Her bağlantıda çalışır, ancak Wi-Fi önerilir.</string>
-    <string name="settings_ai_semantic_download_message_metered">Anlamsal arama için %1$s boyutunda bir model indirilmesi gerekir. Wi-Fi bağlı değil, bu yüzden bu indirme mobil veri kullanacak.</string>
+    <string name="settings_ai_semantic_download_message">Fotoğraf arama için %1$s boyutunda bir model indirilmesi gerekir. Her bağlantıda çalışır, ancak Wi-Fi önerilir.</string>
+    <string name="settings_ai_semantic_download_message_metered">Fotoğraf arama için %1$s boyutunda bir model indirilmesi gerekir. Wi-Fi bağlı değil, bu yüzden bu indirme mobil veri kullanacak.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">İndir</string>
     <string name="settings_ai_semantic_remove_title">İndirilen modeller kaldırılsın mı?</string>
@@ -867,7 +867,7 @@
     <string name="settings_ml_drive_save_failed">Drive\'a kaydedilemedi</string>
     <string name="settings_ml_drive_restore_failed">Drive\'dan geri yüklenemedi</string>
     <string name="settings_ml_drive_nothing_title">Henüz kaydedilecek bir şey yok</string>
-    <string name="settings_ml_drive_nothing_message">Bu cihazda henüz yüz veya arama verisi yok. Önce yüz tanımanın ya da anlamsal aramanın fotoğraflarını taramasına izin ver.</string>
+    <string name="settings_ml_drive_nothing_message">Bu cihazda henüz yüz veya arama verisi yok. Önce yüz tanımanın ya da fotoğraf aramanın fotoğraflarını taramasına izin ver.</string>
     <string name="settings_ml_drive_not_capable">Bu cihazda kullanılamıyor</string>
     <string name="settings_ml_drive_faces_not_saved">Yüz verileri kaydedilemedi.</string>
     <string name="settings_ml_drive_search_not_saved">Arama verileri kaydedilemedi.</string>
@@ -2380,7 +2380,11 @@
     <string name="permissions_action_open">Aç</string>
     <string name="albums_search_hint">Albümlerde ara</string>
     <string name="albums_search_no_results">Aramanla eşleşen albüm yok.</string>
-    <string name="settings_ai_groups_found">%1$d grup</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d grup</item>
+        <item quantity="other">%1$d grup</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Fotoğraf arama</string>
     <string name="settings_ai_faces_found">%1$d yüz</string>
     <string name="person_rename_merge_confirm_title">Mevcut kişiyle birleştirilsin mi?</string>
     <string name="person_rename_merge_confirm_body">%1$s adlı bir kişi zaten var. Bu adı kullanmak ikisini tek kişide birleştirir ve geri alınamaz. Birleştirilsin mi?</string>

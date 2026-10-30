@@ -613,7 +613,7 @@
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_more_title">More settings</string>
-    <string name="settings_more_desc">AI, privacy, notifications and help</string>
+    <string name="settings_more_desc">Machine learning, privacy, notifications and help</string>
     <string name="settings_sync_wifi_only">Sync on Wi‑Fi only</string>
     <string name="settings_sync_now">Sync now</string>
     <string name="settings_storage_section">Storage</string>
@@ -632,7 +632,7 @@
     <string name="settings_sign_out">Sign out</string>
     <string name="settings_sign_out_desc">End this session on this device.</string>
     <string name="sign_out_dialog_title">Sign out?</string>
-    <string name="sign_out_dialog_message">Signing out deletes this on-device data, and it is not restored when you sign back in (export it first if needed):</string>
+    <string name="sign_out_dialog_message">Signing out deletes this on-device data, and it is not restored when you sign back in:</string>
     <string name="sign_out_dialog_item_faces">Named people and face data</string>
     <string name="sign_out_dialog_item_day_notes">Calendar notes</string>
     <string name="sign_out_dialog_item_vault">Hidden Photos</string>
@@ -776,7 +776,7 @@
     <string name="settings_section_extras">Extras</string>
     <string name="settings_section_about">About</string>
     <string name="settings_ai_section">Machine learning</string>
-    <string name="settings_ai_nav_desc">On-device Copy text, Hide faces, and more</string>
+    <string name="settings_ai_nav_desc">Face recognition, search by what a photo shows, and copy text</string>
     <string name="settings_ai_enable">Enable machine learning</string>
     <string name="settings_ai_ocr">Copy text</string>
     <string name="settings_ai_ocr_desc">Recognise and copy text you see in a photo</string>
@@ -789,7 +789,7 @@
     <string name="settings_ai_ocr_remove_confirm">Remove</string>
     <string name="settings_ai_ocr_remove_keep">Keep</string>
     <string name="settings_ai_face_toggle">Face recognition</string>
-    <string name="settings_ai_face_desc">Group photos by the people in them, on your device</string>
+    <string name="settings_ai_face_desc">Groups photos by the people in them, on this phone</string>
     <string name="settings_ai_face_downloading">Downloading…</string>
     <string name="settings_ai_face_download_failed">The face model could not be downloaded.</string>
     <string name="settings_ai_face_download_retry">Turn the switch on again to retry.</string>
@@ -800,19 +800,19 @@
     <string name="settings_ai_face_download_confirm">Download</string>
     <string name="settings_ai_face_model_missing">The face model isn\'t on this device.</string>
     <string name="settings_ai_face_remove_title">Remove face data?</string>
-    <string name="settings_ai_face_remove_message">Face recognition is off. Remove the face model and every detected face and name from this device? Export them from the Recognized faces page first if you want to keep a copy.</string>
+    <string name="settings_ai_face_remove_message">Face recognition is off. Remove the face model and every detected face and name from this device?</string>
     <string name="settings_ai_face_remove_confirm">Remove</string>
     <string name="settings_ai_face_remove_keep">Keep</string>
     <string name="settings_ai_face_remove_confirm_title">Are you sure?</string>
-    <string name="settings_ai_face_remove_confirm_message">This permanently removes the face model and every recognized face and name. It cannot be undone.</string>
-    <string name="settings_ai_semantic">Semantic search</string>
-    <string name="settings_ai_semantic_desc">Find photos by describing what is in them</string>
+    <string name="settings_ai_face_remove_confirm_message">This removes the face model and every recognized face and name from this device. A copy backed up to Proton Drive is kept.</string>
+    <string name="settings_ai_semantic">Search by what a photo shows</string>
+    <string name="settings_ai_semantic_desc">Finds photos by describing what is in them</string>
     <string name="settings_ai_semantic_downloading">Downloading…</string>
     <string name="settings_ai_semantic_download_failed">The search models could not be downloaded.</string>
     <string name="settings_ai_semantic_download_retry">Turn the switch on again to retry.</string>
     <string name="settings_ai_semantic_download_title">Download the search models?</string>
-    <string name="settings_ai_semantic_download_message">Semantic search needs a %1$s model download. It works on any connection, though Wi-Fi is recommended.</string>
-    <string name="settings_ai_semantic_download_message_metered">Semantic search needs a %1$s model download. Wi-Fi is not connected, so this download will use mobile data.</string>
+    <string name="settings_ai_semantic_download_message">Photo search needs a %1$s model download. It works on any connection, though Wi-Fi is recommended.</string>
+    <string name="settings_ai_semantic_download_message_metered">Photo search needs a %1$s model download. Wi-Fi is not connected, so this download will use mobile data.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Download</string>
     <string name="settings_ai_semantic_remove_title">Remove the downloaded models?</string>
@@ -916,7 +916,7 @@
     <string name="settings_ml_drive_save_failed">Could not save to Drive</string>
     <string name="settings_ml_drive_restore_failed">Could not restore from Drive</string>
     <string name="settings_ml_drive_nothing_title">Nothing to save yet</string>
-    <string name="settings_ml_drive_nothing_message">This device has no face or search data yet. Let face recognition or semantic search scan your photos first.</string>
+    <string name="settings_ml_drive_nothing_message">This device has no face or search data yet. Let face recognition or photo search scan your photos first.</string>
     <string name="settings_ml_drive_not_capable">Not available on this device</string>
     <string name="settings_ml_drive_faces_not_saved">The face data could not be saved.</string>
     <string name="settings_ml_drive_search_not_saved">The search data could not be saved.</string>
@@ -2499,7 +2499,11 @@
     <string name="permissions_action_open">Open</string>
     <string name="albums_search_hint">Search albums</string>
     <string name="albums_search_no_results">No albums match your search.</string>
-    <string name="settings_ai_groups_found">%1$d groups</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d group</item>
+        <item quantity="other">%1$d groups</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Photo search</string>
     <string name="settings_ai_faces_found">%1$d faces</string>
     <string name="person_rename_merge_confirm_title">Merge with existing person?</string>
     <string name="person_rename_merge_confirm_body">A person named %1$s already exists. Using that name merges the two into one, which cannot be undone. Merge them?</string>

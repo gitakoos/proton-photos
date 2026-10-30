@@ -206,7 +206,7 @@
     <!-- Settings -->
     <string name="settings_title">Einstellungen</string>
     <string name="settings_more_title">Weitere Einstellungen</string>
-    <string name="settings_more_desc">KI, Datenschutz, Benachrichtigungen und Hilfe</string>
+    <string name="settings_more_desc">Maschinelles Lernen, Datenschutz, Benachrichtigungen und Hilfe</string>
     <string name="settings_search_hint">Einstellungen durchsuchen</string>
     <string name="settings_search_no_results">Keine passenden Einstellungen</string>
     <string name="settings_sync_wifi_only">Nur über WLAN synchronisieren</string>
@@ -229,7 +229,7 @@
     <string name="settings_sign_out">Abmelden</string>
     <string name="settings_sign_out_desc">Sitzung auf diesem Gerät beenden.</string>
     <string name="sign_out_dialog_title">Abmelden?</string>
-    <string name="sign_out_dialog_message">Beim Abmelden werden diese Daten auf diesem Gerät gelöscht und beim erneuten Anmelden nicht wiederhergestellt (exportiere sie vorher, falls du sie brauchst):</string>
+    <string name="sign_out_dialog_message">Beim Abmelden werden diese Daten auf diesem Gerät gelöscht und beim erneuten Anmelden nicht wiederhergestellt:</string>
     <string name="sign_out_dialog_item_faces">Benannte Personen und Gesichtsdaten</string>
     <string name="sign_out_dialog_item_day_notes">Kalendernotizen</string>
     <string name="sign_out_dialog_item_vault">Versteckte Fotos</string>
@@ -1812,7 +1812,7 @@
     </plurals>
     <string name="settings_section_about">Info</string>
     <string name="settings_ai_section">Maschinelles Lernen</string>
-    <string name="settings_ai_nav_desc">Text kopieren, Gesichter verbergen und mehr, direkt auf dem Gerät</string>
+    <string name="settings_ai_nav_desc">Gesichtserkennung, Suche nach dem, was ein Foto zeigt, und Text kopieren</string>
     <string name="settings_ai_enable">Maschinelles Lernen aktivieren</string>
     <string name="settings_ai_ocr">Text kopieren</string>
     <string name="settings_ai_ocr_desc">Text in einem Foto erkennen und kopieren</string>
@@ -1825,7 +1825,7 @@
     <string name="settings_ai_ocr_remove_confirm">Entfernen</string>
     <string name="settings_ai_ocr_remove_keep">Behalten</string>
     <string name="settings_ai_face_toggle">Gesichtserkennung</string>
-    <string name="settings_ai_face_desc">Fotos nach den Personen darauf gruppieren, auf deinem Gerät</string>
+    <string name="settings_ai_face_desc">Fotos nach den Personen darauf gruppieren, auf diesem Telefon</string>
     <string name="settings_ai_face_downloading">Wird heruntergeladen…</string>
     <string name="settings_ai_face_download_failed">Das Gesichtsmodell konnte nicht heruntergeladen werden.</string>
     <string name="settings_ai_face_download_retry">Schalter erneut einschalten, um es noch einmal zu versuchen.</string>
@@ -1836,19 +1836,19 @@
     <string name="settings_ai_face_download_confirm">Herunterladen</string>
     <string name="settings_ai_face_model_missing">Das Gesichtsmodell ist nicht auf diesem Gerät.</string>
     <string name="settings_ai_face_remove_title">Gesichtsdaten entfernen?</string>
-    <string name="settings_ai_face_remove_message">Die Gesichtserkennung ist aus. Das Gesichtsmodell und alle erkannten Gesichter und Namen von diesem Gerät entfernen? Exportiere sie zuerst auf der Seite Erkannte Gesichter, wenn du eine Kopie behalten möchtest.</string>
+    <string name="settings_ai_face_remove_message">Die Gesichtserkennung ist aus. Das Gesichtsmodell und alle erkannten Gesichter und Namen von diesem Gerät entfernen?</string>
     <string name="settings_ai_face_remove_confirm">Entfernen</string>
     <string name="settings_ai_face_remove_keep">Behalten</string>
     <string name="settings_ai_face_remove_confirm_title">Bist du sicher?</string>
-    <string name="settings_ai_face_remove_confirm_message">Dadurch werden das Gesichtsmodell und alle erkannten Gesichter und Namen dauerhaft entfernt. Dies kann nicht rückgängig gemacht werden.</string>
-    <string name="settings_ai_semantic">Semantische Suche</string>
+    <string name="settings_ai_face_remove_confirm_message">Dadurch werden das Gesichtsmodell und alle erkannten Gesichter und Namen von diesem Gerät entfernt. Eine auf Proton Drive gesicherte Kopie bleibt erhalten.</string>
+    <string name="settings_ai_semantic">Nach dem suchen, was ein Foto zeigt</string>
     <string name="settings_ai_semantic_desc">Fotos finden, indem du beschreibst, was darauf zu sehen ist</string>
     <string name="settings_ai_semantic_downloading">Wird heruntergeladen…</string>
     <string name="settings_ai_semantic_download_failed">Die Suchmodelle konnten nicht heruntergeladen werden.</string>
     <string name="settings_ai_semantic_download_retry">Schalter erneut einschalten, um es noch einmal zu versuchen.</string>
     <string name="settings_ai_semantic_download_title">Suchmodelle herunterladen?</string>
-    <string name="settings_ai_semantic_download_message">Semantische Suche benötigt einen Modell-Download von %1$s. Es funktioniert über jede Verbindung, WLAN wird jedoch empfohlen.</string>
-    <string name="settings_ai_semantic_download_message_metered">Semantische Suche benötigt einen Modell-Download von %1$s. WLAN ist nicht verbunden, daher nutzt dieser Download mobile Daten.</string>
+    <string name="settings_ai_semantic_download_message">Fotosuche benötigt einen Modell-Download von %1$s. Es funktioniert über jede Verbindung, WLAN wird jedoch empfohlen.</string>
+    <string name="settings_ai_semantic_download_message_metered">Fotosuche benötigt einen Modell-Download von %1$s. WLAN ist nicht verbunden, daher nutzt dieser Download mobile Daten.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Herunterladen</string>
     <string name="settings_ai_semantic_remove_title">Heruntergeladene Modelle entfernen?</string>
@@ -2026,7 +2026,7 @@
     <string name="settings_ml_drive_save_failed">Speichern auf Drive fehlgeschlagen</string>
     <string name="settings_ml_drive_restore_failed">Wiederherstellen von Drive fehlgeschlagen</string>
     <string name="settings_ml_drive_nothing_title">Noch nichts zu speichern</string>
-    <string name="settings_ml_drive_nothing_message">Auf diesem Gerät gibt es noch keine Gesichts- oder Suchdaten. Lass zuerst die Gesichtserkennung oder die semantische Suche deine Fotos scannen.</string>
+    <string name="settings_ml_drive_nothing_message">Auf diesem Gerät gibt es noch keine Gesichts- oder Suchdaten. Lass zuerst die Gesichtserkennung oder die Fotosuche deine Fotos scannen.</string>
     <string name="settings_ml_drive_not_capable">Auf diesem Gerät nicht verfügbar</string>
     <string name="settings_ml_drive_faces_not_saved">Die Gesichtsdaten konnten nicht gespeichert werden.</string>
     <string name="settings_ml_drive_search_not_saved">Die Suchdaten konnten nicht gespeichert werden.</string>
@@ -2387,7 +2387,11 @@
     <string name="face_excluded_undo">Rückgängig</string>
     <string name="albums_search_hint">Alben durchsuchen</string>
     <string name="albums_search_no_results">Keine Alben entsprechen der Suche.</string>
-    <string name="settings_ai_groups_found">%1$d Gruppen</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d Gruppe</item>
+        <item quantity="other">%1$d Gruppen</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Fotosuche</string>
     <string name="settings_ai_faces_found">%1$d Gesichter</string>
     <string name="person_rename_merge_confirm_title">Mit vorhandener Person zusammenführen?</string>
     <string name="person_rename_merge_confirm_body">Eine Person namens %1$s existiert bereits. Dieser Name führt die beiden zu einer zusammen, was nicht rückgängig gemacht werden kann. Zusammenführen?</string>

@@ -293,7 +293,7 @@
     <!-- Settings -->
     <string name="settings_title">Instellingen</string>
     <string name="settings_more_title">Meer instellingen</string>
-    <string name="settings_more_desc">AI, privacy, meldingen en help</string>
+    <string name="settings_more_desc">Machine learning, privacy, meldingen en help</string>
     <string name="settings_search_hint">Instellingen zoeken</string>
     <string name="settings_search_no_results">Geen overeenkomende instellingen</string>
     <string name="settings_sync_wifi_only">Alleen synchroniseren via wifi</string>
@@ -314,7 +314,7 @@
     <string name="settings_sign_out">Afmelden</string>
     <string name="settings_sign_out_desc">Beëindig deze sessie op dit apparaat.</string>
     <string name="sign_out_dialog_title">Afmelden?</string>
-    <string name="sign_out_dialog_message">Bij afmelden worden deze gegevens op dit apparaat verwijderd en niet hersteld wanneer je opnieuw inlogt (exporteer ze eerst als je ze nodig hebt):</string>
+    <string name="sign_out_dialog_message">Bij afmelden worden deze gegevens op dit apparaat verwijderd en niet hersteld wanneer je opnieuw inlogt:</string>
     <string name="sign_out_dialog_item_faces">Personen met een naam en gezichtsgegevens</string>
     <string name="sign_out_dialog_item_day_notes">Kalendernotities</string>
     <string name="sign_out_dialog_item_vault">Verborgen foto\'s</string>
@@ -1839,7 +1839,7 @@
     </plurals>
     <string name="settings_section_about">Info</string>
     <string name="settings_ai_section">Machine learning</string>
-    <string name="settings_ai_nav_desc">Tekst kopiëren, gezichten verbergen en meer, op het apparaat</string>
+    <string name="settings_ai_nav_desc">Gezichtsherkenning, zoeken op wat een foto laat zien en tekst kopiëren</string>
     <string name="settings_ai_enable">Machine learning inschakelen</string>
     <string name="settings_ai_ocr">Tekst kopiëren</string>
     <string name="settings_ai_ocr_desc">Herkent en kopieert tekst die je in een foto ziet</string>
@@ -1852,7 +1852,7 @@
     <string name="settings_ai_ocr_remove_confirm">Verwijderen</string>
     <string name="settings_ai_ocr_remove_keep">Behouden</string>
     <string name="settings_ai_face_toggle">Gezichtsherkenning</string>
-    <string name="settings_ai_face_desc">Groepeert foto\'s op de mensen die erop staan, op je apparaat</string>
+    <string name="settings_ai_face_desc">Groepeert foto\'s op de mensen die erop staan, op deze telefoon</string>
     <string name="settings_ai_face_downloading">Downloaden…</string>
     <string name="settings_ai_face_download_failed">Het gezichtsmodel kon niet worden gedownload.</string>
     <string name="settings_ai_face_download_retry">Zet de schakelaar opnieuw aan om het nog eens te proberen.</string>
@@ -1863,19 +1863,19 @@
     <string name="settings_ai_face_download_confirm">Downloaden</string>
     <string name="settings_ai_face_model_missing">Het gezichtsmodel staat niet op dit apparaat.</string>
     <string name="settings_ai_face_remove_title">Gezichtsgegevens verwijderen?</string>
-    <string name="settings_ai_face_remove_message">Gezichtsherkenning is uit. Het gezichtsmodel en alle gedetecteerde gezichten en namen van dit apparaat verwijderen? Exporteer ze eerst vanaf de pagina Herkende gezichten als je een kopie wilt bewaren.</string>
+    <string name="settings_ai_face_remove_message">Gezichtsherkenning is uit. Het gezichtsmodel en alle gedetecteerde gezichten en namen van dit apparaat verwijderen?</string>
     <string name="settings_ai_face_remove_confirm">Verwijderen</string>
     <string name="settings_ai_face_remove_keep">Behouden</string>
     <string name="settings_ai_face_remove_confirm_title">Weet je het zeker?</string>
-    <string name="settings_ai_face_remove_confirm_message">Hiermee worden het gezichtsmodel en alle herkende gezichten en namen definitief verwijderd. Dit kan niet ongedaan worden gemaakt.</string>
-    <string name="settings_ai_semantic">Semantisch zoeken</string>
+    <string name="settings_ai_face_remove_confirm_message">Hiermee worden het gezichtsmodel en alle herkende gezichten en namen van dit apparaat verwijderd. Een kopie die op Proton Drive is opgeslagen, blijft bewaard.</string>
+    <string name="settings_ai_semantic">Zoeken op wat een foto toont</string>
     <string name="settings_ai_semantic_desc">Vind foto\'s door te beschrijven wat erop staat</string>
     <string name="settings_ai_semantic_downloading">Downloaden…</string>
     <string name="settings_ai_semantic_download_failed">De zoekmodellen konden niet worden gedownload.</string>
     <string name="settings_ai_semantic_download_retry">Zet de schakelaar opnieuw aan om het nog eens te proberen.</string>
     <string name="settings_ai_semantic_download_title">De zoekmodellen downloaden?</string>
-    <string name="settings_ai_semantic_download_message">Semantisch zoeken vereist een modeldownload van %1$s. Het werkt via elke verbinding, maar wifi wordt aanbevolen.</string>
-    <string name="settings_ai_semantic_download_message_metered">Semantisch zoeken vereist een modeldownload van %1$s. Er is geen wifi verbonden, dus deze download gebruikt mobiele data.</string>
+    <string name="settings_ai_semantic_download_message">Foto\'s zoeken vereist een modeldownload van %1$s. Het werkt via elke verbinding, maar wifi wordt aanbevolen.</string>
+    <string name="settings_ai_semantic_download_message_metered">Foto\'s zoeken vereist een modeldownload van %1$s. Er is geen wifi verbonden, dus deze download gebruikt mobiele data.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Downloaden</string>
     <string name="settings_ai_semantic_remove_title">De gedownloade modellen verwijderen?</string>
@@ -2053,7 +2053,7 @@
     <string name="settings_ml_drive_save_failed">Opslaan in Drive mislukt</string>
     <string name="settings_ml_drive_restore_failed">Herstellen uit Drive mislukt</string>
     <string name="settings_ml_drive_nothing_title">Nog niets om op te slaan</string>
-    <string name="settings_ml_drive_nothing_message">Dit apparaat heeft nog geen gezichts- of zoekgegevens. Laat eerst gezichtsherkenning of semantisch zoeken je foto\'s scannen.</string>
+    <string name="settings_ml_drive_nothing_message">Dit apparaat heeft nog geen gezichts- of zoekgegevens. Laat eerst gezichtsherkenning of foto\'s zoeken je foto\'s scannen.</string>
     <string name="settings_ml_drive_not_capable">Niet beschikbaar op dit apparaat</string>
     <string name="settings_ml_drive_faces_not_saved">De gezichtsgegevens konden niet worden opgeslagen.</string>
     <string name="settings_ml_drive_search_not_saved">De zoekgegevens konden niet worden opgeslagen.</string>
@@ -2414,7 +2414,11 @@
     <string name="face_excluded_undo">Ongedaan maken</string>
     <string name="albums_search_hint">Albums zoeken</string>
     <string name="albums_search_no_results">Geen album komt overeen met de zoekopdracht.</string>
-    <string name="settings_ai_groups_found">%1$d groepen</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d groep</item>
+        <item quantity="other">%1$d groepen</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Foto\'s zoeken</string>
     <string name="settings_ai_faces_found">%1$d gezichten</string>
     <string name="person_rename_merge_confirm_title">Samenvoegen met bestaande persoon?</string>
     <string name="person_rename_merge_confirm_body">Er bestaat al een persoon met de naam %1$s. Die naam voegt de twee samen tot één, wat niet ongedaan kan worden gemaakt. Samenvoegen?</string>

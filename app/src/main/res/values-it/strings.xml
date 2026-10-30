@@ -207,7 +207,7 @@
     <!-- Settings -->
     <string name="settings_title">Impostazioni</string>
     <string name="settings_more_title">Altre impostazioni</string>
-    <string name="settings_more_desc">IA, privacy, notifiche e guida</string>
+    <string name="settings_more_desc">Apprendimento automatico, privacy, notifiche e guida</string>
     <string name="settings_search_hint">Cerca nelle impostazioni</string>
     <string name="settings_search_no_results">Nessuna impostazione corrispondente</string>
     <string name="settings_sync_wifi_only">Sincronizza solo con Wi-Fi</string>
@@ -230,7 +230,7 @@
     <string name="settings_sign_out">Esci</string>
     <string name="settings_sign_out_desc">Termina la sessione su questo dispositivo.</string>
     <string name="sign_out_dialog_title">Uscire?</string>
-    <string name="sign_out_dialog_message">Uscendo, questi dati su questo dispositivo vengono eliminati e non vengono ripristinati al nuovo accesso (esportali prima, se ti servono):</string>
+    <string name="sign_out_dialog_message">Uscendo, questi dati su questo dispositivo vengono eliminati e non vengono ripristinati al nuovo accesso:</string>
     <string name="sign_out_dialog_item_faces">Persone con nome e dati dei volti</string>
     <string name="sign_out_dialog_item_day_notes">Note del Calendario</string>
     <string name="sign_out_dialog_item_vault">Foto nascoste</string>
@@ -1847,7 +1847,7 @@
     </plurals>
     <string name="settings_section_about">Informazioni</string>
     <string name="settings_ai_section">Apprendimento automatico</string>
-    <string name="settings_ai_nav_desc">Copia testo, nascondi volti e altro, sul dispositivo</string>
+    <string name="settings_ai_nav_desc">Riconoscimento dei volti, ricerca per ciò che mostra una foto e copia del testo</string>
     <string name="settings_ai_enable">Attiva l\'apprendimento automatico</string>
     <string name="settings_ai_ocr">Copia testo</string>
     <string name="settings_ai_ocr_desc">Riconosce e copia il testo che vedi in una foto</string>
@@ -1860,7 +1860,7 @@
     <string name="settings_ai_ocr_remove_confirm">Rimuovi</string>
     <string name="settings_ai_ocr_remove_keep">Mantieni</string>
     <string name="settings_ai_face_toggle">Riconoscimento facciale</string>
-    <string name="settings_ai_face_desc">Raggruppa le foto in base alle persone presenti, sul tuo dispositivo</string>
+    <string name="settings_ai_face_desc">Raggruppa le foto in base alle persone presenti, su questo telefono</string>
     <string name="settings_ai_face_downloading">Download in corso…</string>
     <string name="settings_ai_face_download_failed">Non è stato possibile scaricare il modello dei volti.</string>
     <string name="settings_ai_face_download_retry">Riattiva l\'interruttore per riprovare.</string>
@@ -1871,19 +1871,19 @@
     <string name="settings_ai_face_download_confirm">Scarica</string>
     <string name="settings_ai_face_model_missing">Il modello dei volti non è su questo dispositivo.</string>
     <string name="settings_ai_face_remove_title">Rimuovere i dati dei volti?</string>
-    <string name="settings_ai_face_remove_message">Il riconoscimento facciale è disattivato. Rimuovere da questo dispositivo il modello dei volti e tutti i volti e i nomi rilevati? Esportali prima dalla pagina Volti riconosciuti se vuoi conservarne una copia.</string>
+    <string name="settings_ai_face_remove_message">Il riconoscimento facciale è disattivato. Rimuovere da questo dispositivo il modello dei volti e tutti i volti e i nomi rilevati?</string>
     <string name="settings_ai_face_remove_confirm">Rimuovi</string>
     <string name="settings_ai_face_remove_keep">Mantieni</string>
     <string name="settings_ai_face_remove_confirm_title">Sei sicuro?</string>
-    <string name="settings_ai_face_remove_confirm_message">Questa operazione rimuove definitivamente il modello dei volti e tutti i volti e i nomi riconosciuti. Non può essere annullata.</string>
-    <string name="settings_ai_semantic">Ricerca semantica</string>
+    <string name="settings_ai_face_remove_confirm_message">Questo rimuove da questo dispositivo il modello dei volti e tutti i volti e i nomi riconosciuti. Una copia salvata su Proton Drive viene mantenuta.</string>
+    <string name="settings_ai_semantic">Cerca in base a ciò che mostra una foto</string>
     <string name="settings_ai_semantic_desc">Trova le foto descrivendo cosa contengono</string>
     <string name="settings_ai_semantic_downloading">Download in corso…</string>
     <string name="settings_ai_semantic_download_failed">Non è stato possibile scaricare i modelli di ricerca.</string>
     <string name="settings_ai_semantic_download_retry">Riattiva l\'interruttore per riprovare.</string>
     <string name="settings_ai_semantic_download_title">Scaricare i modelli di ricerca?</string>
-    <string name="settings_ai_semantic_download_message">La ricerca semantica richiede il download di un modello da %1$s. Funziona con qualsiasi connessione, ma è consigliato il Wi-Fi.</string>
-    <string name="settings_ai_semantic_download_message_metered">La ricerca semantica richiede il download di un modello da %1$s. Il Wi-Fi non è connesso, quindi questo download userà i dati mobili.</string>
+    <string name="settings_ai_semantic_download_message">La ricerca di foto richiede il download di un modello da %1$s. Funziona con qualsiasi connessione, ma è consigliato il Wi-Fi.</string>
+    <string name="settings_ai_semantic_download_message_metered">La ricerca di foto richiede il download di un modello da %1$s. Il Wi-Fi non è connesso, quindi questo download userà i dati mobili.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Scarica</string>
     <string name="settings_ai_semantic_remove_title">Rimuovere i modelli scaricati?</string>
@@ -2061,7 +2061,7 @@
     <string name="settings_ml_drive_save_failed">Impossibile salvare su Drive</string>
     <string name="settings_ml_drive_restore_failed">Impossibile ripristinare da Drive</string>
     <string name="settings_ml_drive_nothing_title">Ancora nulla da salvare</string>
-    <string name="settings_ml_drive_nothing_message">Questo dispositivo non ha ancora dati dei volti né di ricerca. Lascia prima che il riconoscimento facciale o la ricerca semantica analizzino le tue foto.</string>
+    <string name="settings_ml_drive_nothing_message">Questo dispositivo non ha ancora dati dei volti né di ricerca. Lascia prima che il riconoscimento facciale o la ricerca di foto analizzino le tue foto.</string>
     <string name="settings_ml_drive_not_capable">Non disponibile su questo dispositivo</string>
     <string name="settings_ml_drive_faces_not_saved">Non è stato possibile salvare i dati dei volti.</string>
     <string name="settings_ml_drive_search_not_saved">Non è stato possibile salvare i dati di ricerca.</string>
@@ -2426,7 +2426,11 @@
     <string name="face_excluded_undo">Undo</string>
     <string name="albums_search_hint">Cerca album</string>
     <string name="albums_search_no_results">Nessun album corrisponde alla ricerca.</string>
-    <string name="settings_ai_groups_found">%1$d gruppi</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d gruppo</item>
+        <item quantity="other">%1$d gruppi</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Ricerca di foto</string>
     <string name="settings_ai_faces_found">%1$d volti</string>
     <string name="person_rename_merge_confirm_title">Unire alla persona esistente?</string>
     <string name="person_rename_merge_confirm_body">Esiste già una persona di nome %1$s. Usare quel nome unisce le due in una sola, operazione irreversibile. Unire?</string>

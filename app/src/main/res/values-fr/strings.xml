@@ -206,7 +206,7 @@
     <!-- Settings -->
     <string name="settings_title">Paramètres</string>
     <string name="settings_more_title">Autres réglages</string>
-    <string name="settings_more_desc">IA, confidentialité, notifications et aide</string>
+    <string name="settings_more_desc">Apprentissage automatique, confidentialité, notifications et aide</string>
     <string name="settings_search_hint">Rechercher dans les paramètres</string>
     <string name="settings_search_no_results">Aucun paramètre correspondant</string>
     <string name="settings_sync_wifi_only">Synchroniser en Wi-Fi uniquement</string>
@@ -229,7 +229,7 @@
     <string name="settings_sign_out">Se déconnecter</string>
     <string name="settings_sign_out_desc">Terminer la session sur cet appareil.</string>
     <string name="sign_out_dialog_title">Se déconnecter ?</string>
-    <string name="sign_out_dialog_message">La déconnexion supprime ces données sur cet appareil et elles ne sont pas restaurées lors de la reconnexion (exportez-les au préalable si nécessaire) :</string>
+    <string name="sign_out_dialog_message">La déconnexion supprime ces données sur cet appareil et elles ne sont pas restaurées lors de la reconnexion :</string>
     <string name="sign_out_dialog_item_faces">Personnes nommées et données de visage</string>
     <string name="sign_out_dialog_item_day_notes">Notes du Calendrier</string>
     <string name="sign_out_dialog_item_vault">Photos masquées</string>
@@ -1817,7 +1817,7 @@
     </plurals>
     <string name="settings_section_about">À propos</string>
     <string name="settings_ai_section">Apprentissage automatique</string>
-    <string name="settings_ai_nav_desc">Copier le texte, masquer les visages et plus, sur l\'appareil</string>
+    <string name="settings_ai_nav_desc">Reconnaissance des visages, recherche par ce que montre une photo et copie du texte</string>
     <string name="settings_ai_enable">Activer l\'apprentissage automatique</string>
     <string name="settings_ai_ocr">Copier le texte</string>
     <string name="settings_ai_ocr_desc">Reconnaît et copie le texte visible sur une photo</string>
@@ -1830,7 +1830,7 @@
     <string name="settings_ai_ocr_remove_confirm">Supprimer</string>
     <string name="settings_ai_ocr_remove_keep">Conserver</string>
     <string name="settings_ai_face_toggle">Reconnaissance faciale</string>
-    <string name="settings_ai_face_desc">Regroupe les photos selon les personnes qui y figurent, sur votre appareil</string>
+    <string name="settings_ai_face_desc">Regroupe les photos selon les personnes qui y figurent, sur ce téléphone</string>
     <string name="settings_ai_face_downloading">Téléchargement…</string>
     <string name="settings_ai_face_download_failed">Le modèle de visage n\'a pas pu être téléchargé.</string>
     <string name="settings_ai_face_download_retry">Réactivez le commutateur pour réessayer.</string>
@@ -1841,19 +1841,19 @@
     <string name="settings_ai_face_download_confirm">Télécharger</string>
     <string name="settings_ai_face_model_missing">Le modèle de visage n\'est pas sur cet appareil.</string>
     <string name="settings_ai_face_remove_title">Supprimer les données de visages ?</string>
-    <string name="settings_ai_face_remove_message">La reconnaissance faciale est désactivée. Supprimer de cet appareil le modèle de visages et tous les visages et noms détectés ? Exportez-les d\'abord depuis la page Visages reconnus si vous souhaitez en conserver une copie.</string>
+    <string name="settings_ai_face_remove_message">La reconnaissance faciale est désactivée. Supprimer de cet appareil le modèle de visages et tous les visages et noms détectés ?</string>
     <string name="settings_ai_face_remove_confirm">Supprimer</string>
     <string name="settings_ai_face_remove_keep">Conserver</string>
     <string name="settings_ai_face_remove_confirm_title">Êtes-vous sûr ?</string>
-    <string name="settings_ai_face_remove_confirm_message">Cette action supprime définitivement le modèle de visages et tous les visages et noms reconnus. Elle est irréversible.</string>
-    <string name="settings_ai_semantic">Recherche sémantique</string>
+    <string name="settings_ai_face_remove_confirm_message">Cela supprime de cet appareil le modèle de visages et tous les visages et noms reconnus. Une copie sauvegardée sur Proton Drive est conservée.</string>
+    <string name="settings_ai_semantic">Rechercher selon ce que montre une photo</string>
     <string name="settings_ai_semantic_desc">Trouvez des photos en décrivant ce qu\'elles contiennent</string>
     <string name="settings_ai_semantic_downloading">Téléchargement…</string>
     <string name="settings_ai_semantic_download_failed">Les modèles de recherche n\'ont pas pu être téléchargés.</string>
     <string name="settings_ai_semantic_download_retry">Réactivez le commutateur pour réessayer.</string>
     <string name="settings_ai_semantic_download_title">Télécharger les modèles de recherche ?</string>
-    <string name="settings_ai_semantic_download_message">La recherche sémantique nécessite le téléchargement d\'un modèle de %1$s. Cela fonctionne sur toute connexion, mais le Wi-Fi est recommandé.</string>
-    <string name="settings_ai_semantic_download_message_metered">La recherche sémantique nécessite le téléchargement d\'un modèle de %1$s. Le Wi-Fi n\'est pas connecté, ce téléchargement utilisera donc les données mobiles.</string>
+    <string name="settings_ai_semantic_download_message">La recherche de photos nécessite le téléchargement d\'un modèle de %1$s. Cela fonctionne sur toute connexion, mais le Wi-Fi est recommandé.</string>
+    <string name="settings_ai_semantic_download_message_metered">La recherche de photos nécessite le téléchargement d\'un modèle de %1$s. Le Wi-Fi n\'est pas connecté, ce téléchargement utilisera donc les données mobiles.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Télécharger</string>
     <string name="settings_ai_semantic_remove_title">Supprimer les modèles téléchargés ?</string>
@@ -2031,7 +2031,7 @@
     <string name="settings_ml_drive_save_failed">Impossible d\'enregistrer sur Drive</string>
     <string name="settings_ml_drive_restore_failed">Impossible de restaurer depuis Drive</string>
     <string name="settings_ml_drive_nothing_title">Rien à enregistrer pour l\'instant</string>
-    <string name="settings_ml_drive_nothing_message">Cet appareil n\'a pas encore de données des visages ni de recherche. Laissez d\'abord la reconnaissance faciale ou la recherche sémantique analyser vos photos.</string>
+    <string name="settings_ml_drive_nothing_message">Cet appareil n\'a pas encore de données des visages ni de recherche. Laissez d\'abord la reconnaissance faciale ou la recherche de photos analyser vos photos.</string>
     <string name="settings_ml_drive_not_capable">Non disponible sur cet appareil</string>
     <string name="settings_ml_drive_faces_not_saved">Les données des visages n\'ont pas pu être enregistrées.</string>
     <string name="settings_ml_drive_search_not_saved">Les données de recherche n\'ont pas pu être enregistrées.</string>
@@ -2389,7 +2389,11 @@
     <string name="face_excluded_undo">Annuler</string>
     <string name="albums_search_hint">Rechercher des albums</string>
     <string name="albums_search_no_results">Aucun album ne correspond à la recherche.</string>
-    <string name="settings_ai_groups_found">%1$d groupes</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d groupe</item>
+        <item quantity="other">%1$d groupes</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Recherche de photos</string>
     <string name="settings_ai_faces_found">%1$d visages</string>
     <string name="person_rename_merge_confirm_title">Fusionner avec la personne existante ?</string>
     <string name="person_rename_merge_confirm_body">Une personne nommée %1$s existe déjà. Utiliser ce nom fusionne les deux en une seule, ce qui est irréversible. Fusionner ?</string>

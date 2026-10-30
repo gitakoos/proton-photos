@@ -226,7 +226,7 @@
     <!-- Settings -->
     <string name="settings_title">Beállítások</string>
     <string name="settings_more_title">További beállítások</string>
-    <string name="settings_more_desc">AI, adatvédelem, értesítések és súgó</string>
+    <string name="settings_more_desc">Gépi tanulás, adatvédelem, értesítések és súgó</string>
     <string name="settings_search_hint">Beállítások keresése</string>
     <string name="settings_search_no_results">Nincs megfelelő beállítás</string>
     <string name="settings_sync_wifi_only">Szinkronizálás csak Wi‑Fi-n</string>
@@ -247,7 +247,7 @@
     <string name="settings_sign_out">Kijelentkezés</string>
     <string name="settings_sign_out_desc">Munkamenet befejezése ezen az eszközön.</string>
     <string name="sign_out_dialog_title">Kijelentkezés?</string>
-    <string name="sign_out_dialog_message">A kijelentkezés törli ezeket az eszközön tárolt adatokat, és nem állnak vissza, amikor újra bejelentkezel (ha szükséged van rájuk, előbb exportáld őket):</string>
+    <string name="sign_out_dialog_message">A kijelentkezés törli ezeket az eszközön tárolt adatokat, és nem állnak vissza, amikor újra bejelentkezel:</string>
     <string name="sign_out_dialog_item_faces">Elnevezett emberek és arcadatok</string>
     <string name="sign_out_dialog_item_day_notes">Naptárjegyzetek</string>
     <string name="sign_out_dialog_item_vault">Rejtett fotók</string>
@@ -1811,7 +1811,7 @@
     </plurals>
     <string name="settings_section_about">Névjegy</string>
     <string name="settings_ai_section">Gépi tanulás</string>
-    <string name="settings_ai_nav_desc">Szövegmásolás, arcelrejtés és még több, közvetlenül az eszközön</string>
+    <string name="settings_ai_nav_desc">Arcfelismerés, keresés aszerint, mi van a fotón, és szöveg másolása</string>
     <string name="settings_ai_enable">Gépi tanulás bekapcsolása</string>
     <string name="settings_ai_ocr">Szöveg másolása</string>
     <string name="settings_ai_ocr_desc">Felismeri és lemásolja a fényképen látható szöveget</string>
@@ -1824,7 +1824,7 @@
     <string name="settings_ai_ocr_remove_confirm">Eltávolítás</string>
     <string name="settings_ai_ocr_remove_keep">Megtartás</string>
     <string name="settings_ai_face_toggle">Arcfelismerés</string>
-    <string name="settings_ai_face_desc">Csoportosítja a fényképeket a rajtuk lévő személyek szerint, az eszközödön</string>
+    <string name="settings_ai_face_desc">Csoportosítja a fényképeket a rajtuk lévő személyek szerint, ezen a telefonon</string>
     <string name="settings_ai_face_downloading">Letöltés…</string>
     <string name="settings_ai_face_download_failed">Az arcmodellt nem sikerült letölteni.</string>
     <string name="settings_ai_face_download_retry">A kapcsoló ismételt bekapcsolásával újrapróbálható.</string>
@@ -1835,19 +1835,19 @@
     <string name="settings_ai_face_download_confirm">Letöltés</string>
     <string name="settings_ai_face_model_missing">Az arcmodell nincs ezen az eszközön.</string>
     <string name="settings_ai_face_remove_title">Eltávolítja az arcadatokat?</string>
-    <string name="settings_ai_face_remove_message">Az arcfelismerés ki van kapcsolva. Eltávolítja erről az eszközről az arcmodellt és az összes felismert arcot és nevet? Ha szeretne megőrizni egy másolatot, előbb exportálja őket a Felismert arcok oldalról.</string>
+    <string name="settings_ai_face_remove_message">Az arcfelismerés ki van kapcsolva. Eltávolítja erről az eszközről az arcmodellt és az összes felismert arcot és nevet?</string>
     <string name="settings_ai_face_remove_confirm">Eltávolítás</string>
     <string name="settings_ai_face_remove_keep">Megtartás</string>
     <string name="settings_ai_face_remove_confirm_title">Biztos benne?</string>
-    <string name="settings_ai_face_remove_confirm_message">Ezzel véglegesen eltávolítja az arcmodellt és az összes felismert arcot és nevet. A művelet nem vonható vissza.</string>
-    <string name="settings_ai_semantic">Szemantikus keresés</string>
+    <string name="settings_ai_face_remove_confirm_message">Ezzel eltávolítod erről az eszközről az arcmodellt és az összes felismert arcot és nevet. A Proton Drive-ra mentett másolat megmarad.</string>
+    <string name="settings_ai_semantic">Keresés aszerint, mi van a képen</string>
     <string name="settings_ai_semantic_desc">Fényképek keresése annak leírásával, hogy mi látható rajtuk</string>
     <string name="settings_ai_semantic_downloading">Letöltés…</string>
     <string name="settings_ai_semantic_download_failed">A keresési modelleket nem sikerült letölteni.</string>
     <string name="settings_ai_semantic_download_retry">A kapcsoló ismételt bekapcsolásával újrapróbálható.</string>
     <string name="settings_ai_semantic_download_title">Letölti a keresési modelleket?</string>
-    <string name="settings_ai_semantic_download_message">A szemantikus kereséshez le kell tölteni egy %1$s méretű modellt. Bármilyen kapcsolaton működik, de a Wi-Fi ajánlott.</string>
-    <string name="settings_ai_semantic_download_message_metered">A szemantikus kereséshez le kell tölteni egy %1$s méretű modellt. A Wi-Fi nincs csatlakoztatva, ezért ez a letöltés mobiladatot használ.</string>
+    <string name="settings_ai_semantic_download_message">A fotókereséshez le kell tölteni egy %1$s méretű modellt. Bármilyen kapcsolaton működik, de a Wi-Fi ajánlott.</string>
+    <string name="settings_ai_semantic_download_message_metered">A fotókereséshez le kell tölteni egy %1$s méretű modellt. A Wi-Fi nincs csatlakoztatva, ezért ez a letöltés mobiladatot használ.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Letöltés</string>
     <string name="settings_ai_semantic_remove_title">Eltávolítja a letöltött modelleket?</string>
@@ -2025,7 +2025,7 @@
     <string name="settings_ml_drive_save_failed">Nem sikerült menteni a Drive-ra</string>
     <string name="settings_ml_drive_restore_failed">Nem sikerült visszaállítani a Drive-ról</string>
     <string name="settings_ml_drive_nothing_title">Még nincs mit menteni</string>
-    <string name="settings_ml_drive_nothing_message">Ezen az eszközön még nincsenek arc- vagy keresési adatok. Előbb hagyd, hogy az arcfelismerés vagy a szemantikus keresés átvizsgálja a fotóidat.</string>
+    <string name="settings_ml_drive_nothing_message">Ezen az eszközön még nincsenek arc- vagy keresési adatok. Előbb hagyd, hogy az arcfelismerés vagy a fotókeresés átvizsgálja a fotóidat.</string>
     <string name="settings_ml_drive_not_capable">Ezen az eszközön nem érhető el</string>
     <string name="settings_ml_drive_faces_not_saved">Az arcadatokat nem sikerült menteni.</string>
     <string name="settings_ml_drive_search_not_saved">A keresési adatokat nem sikerült menteni.</string>
@@ -2386,7 +2386,11 @@
     <string name="face_excluded_undo">Visszavonás</string>
     <string name="albums_search_hint">Albumok keresése</string>
     <string name="albums_search_no_results">Nincs a keresésnek megfelelő album.</string>
-    <string name="settings_ai_groups_found">%1$d csoport</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d csoport</item>
+        <item quantity="other">%1$d csoport</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Fotókeresés</string>
     <string name="settings_ai_faces_found">%1$d arc</string>
     <string name="person_rename_merge_confirm_title">Összevonás a meglévő személlyel?</string>
     <string name="person_rename_merge_confirm_body">Már létezik egy %1$s nevű személy. Ezt a nevet használva a kettő eggyé olvad, ami nem vonható vissza. Összevonod?</string>
