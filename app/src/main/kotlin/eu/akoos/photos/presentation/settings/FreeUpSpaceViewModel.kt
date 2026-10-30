@@ -76,6 +76,8 @@ class FreeUpSpaceViewModel @Inject constructor(
         /** Terminal message for the finished sweep, shown on this screen rather than the one the
          *  button used to live on. */
         val message: String? = null,
+        /** Whether [message] reports a failure rather than what the sweep freed. */
+        val messageIsError: Boolean = false,
         /** Android 11+ batch consent for files this app does not own. */
         val pendingIntent: PendingIntent? = null,
         /**
@@ -162,7 +164,7 @@ class FreeUpSpaceViewModel @Inject constructor(
                     it.copy(
                         running = false,
                         verifying = false,
-                        message = context.getString(R.string.settings_free_up_error, e.message ?: ""),
+                        message = context.getString(R.string.settings_free_up_error, e.message ?: ""), messageIsError = true,
                     )
                 }
             }
@@ -174,7 +176,10 @@ class FreeUpSpaceViewModel @Inject constructor(
             is FreeUpSpaceUseCase.FreeUpResult.Done -> {
                 freedThisRun += result.freed
                 _uiState.update {
-                    it.copy(running = false, verifying = false, pendingIntent = null, message = doneMessage(result.skipped))
+                    it.copy(
+                        running = false, verifying = false, pendingIntent = null,
+                        message = doneMessage(result.skipped), messageIsError = false,
+                    )
                 }
                 load()
             }
@@ -201,7 +206,7 @@ class FreeUpSpaceViewModel @Inject constructor(
             _uiState.update { it.copy(pendingIntent = null) }
             val userId = accountManager.getPrimaryUserId().first()
             if (next.isEmpty() || userId == null) {
-                _uiState.update { it.copy(message = doneMessage(0)) }
+                _uiState.update { it.copy(message = doneMessage(0), messageIsError = false) }
                 load()
                 return@launch
             }
@@ -209,7 +214,7 @@ class FreeUpSpaceViewModel @Inject constructor(
                 handle(freeUpSpace.consentFor(userId, next))
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                _uiState.update { it.copy(message = context.getString(R.string.settings_free_up_error, e.message ?: "")) }
+                _uiState.update { it.copy(message = context.getString(R.string.settings_free_up_error, e.message ?: ""), messageIsError = true) }
                 load()
             }
         }

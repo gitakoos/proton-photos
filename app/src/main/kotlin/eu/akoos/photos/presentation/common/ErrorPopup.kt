@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -85,6 +86,9 @@ import eu.akoos.photos.presentation.theme.ErrorColor
  *  - Optional "Copy" button — clipboard write happens here; the [onCopy] callback
  *    runs after the write so the caller can show a "Copied" snackbar.
  *  - Dismiss button always last, matching M3's primary-action-rightmost convention.
+ *
+ * [isError] false turns the same sheet into a plain result: a check in the accent colour instead of
+ * the warning mark, for an outcome that went as asked.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,6 +101,7 @@ fun ErrorPopup(
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
     dismissLabel: String? = null,
+    isError: Boolean = true,
 ) {
     // The sheet is a window of its own, so one raised while the app lock shows would open above it. It
     // waits instead: nothing is composed while locked, the caller keeps its error, and the sheet shows on
@@ -137,9 +142,9 @@ fun ErrorPopup(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = Icons.Default.ErrorOutline,
+                    imageVector = if (isError) Icons.Default.ErrorOutline else Icons.Default.CheckCircle,
                     contentDescription = null,
-                    tint = ErrorColor,
+                    tint = if (isError) ErrorColor else colors.accent,
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.width(10.dp))

@@ -121,6 +121,7 @@ fun FreeUpSpaceScreen(
             title = stringResource(R.string.settings_storage_free_up),
             message = message,
             onDismiss = viewModel::clearMessage,
+            isError = state.messageIsError,
         )
     }
 
