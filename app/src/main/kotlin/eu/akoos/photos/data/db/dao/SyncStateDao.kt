@@ -381,6 +381,10 @@ interface SyncStateDao {
     @Query("UPDATE sync_state SET status = :newStatus WHERE localUri = :localUri")
     suspend fun updateStatus(localUri: String, newStatus: SyncStatus)
 
+    /** [updateStatus] for many rows in one statement; callers pass at most `SQL_CHUNK_SIZE` URIs. */
+    @Query("UPDATE sync_state SET status = :newStatus WHERE localUri IN (:localUris)")
+    suspend fun updateStatusByLocalUris(localUris: List<String>, newStatus: SyncStatus): Int
+
     @Query("DELETE FROM sync_state WHERE localUri = :localUri")
     suspend fun delete(localUri: String)
 

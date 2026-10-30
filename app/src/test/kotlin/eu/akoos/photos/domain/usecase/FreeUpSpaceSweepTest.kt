@@ -104,7 +104,7 @@ class FreeUpSpaceSweepTest {
     fun `the sweep reclaims the rows Drive confirms and keeps the ones it does not`() = runTest {
         val rows = (1..3).map { eligible(it) }
         coEvery { repo.getSyncedBefore(userId, any()) } returns rows
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns mapOf(
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns mapOf(
             "cloud-1" to linkAt("cloud-1", state = 1),
             "cloud-2" to linkAt("cloud-2", state = 2),
         )
@@ -121,7 +121,7 @@ class FreeUpSpaceSweepTest {
     @Test
     fun `a lookup that fails deletes nothing`() = runTest {
         coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(eligible(1), eligible(2))
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } throws IOException("offline")
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } throws IOException("offline")
 
         var thrown: IOException? = null
         try {
@@ -138,12 +138,80 @@ class FreeUpSpaceSweepTest {
     @Test
     fun `a photo gone from Drive is never reclaimed on the strength of its sync row`() = runTest {
         coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(eligible(1))
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns emptyMap()
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns emptyMap()
 
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
 
         assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
         verify(exactly = 0) { resolver.delete(any(), any(), any()) }
+    }
+
+    @Test
+    fun `each slice of 50 is checked just before it is deleted`() = runTest {
+        val rows = (1..120).map { eligible(it) }
+        coEvery { repo.getSyncedBefore(userId, any()) } returns rows
+        val events = mutableListOf<String>()
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } answers {
+            val ids = thirdArg<List<String>>()
+            events += "check ${ids.size}"
+            ids.associateWith { linkAt(it, state = 1) }
+        }
+        every { resolver.delete(any(), any(), any()) } answers { events += "delete"; 1 }
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(120, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
+        assertEquals(listOf("check 50", "check 50", "check 20"), events.filter { it.startsWith("check") })
+        // check, its 50 deletes, the next check: no slice is deleted before its own check.
+        val checks = events.withIndex().filter { it.value.startsWith("check") }.map { it.index }
+        assertEquals(listOf(0, 51, 102), checks)
+    }
+
+    @Test
+    fun `a slice whose check fails keeps what earlier slices freed and touches nothing after`() = runTest {
+        val rows = (1..120).map { eligible(it) }
+        coEvery { repo.getSyncedBefore(userId, any()) } returns rows
+        var calls = 0
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } answers {
+            calls++
+            if (calls == 2) throw IOException("rate limited")
+            thirdArg<List<String>>().associateWith { linkAt(it, state = 1) }
+        }
+
+        var thrown: IOException? = null
+        try {
+            useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+        } catch (e: IOException) {
+            thrown = e
+        }
+
+        assertTrue(thrown != null)
+        verify(exactly = 50) { resolver.delete(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a copy the app may not delete is reported as skipped where there is no system dialog`() = runTest {
+        // A plain JVM run reports SDK_INT 0, below Android 11.
+        coEvery { repo.getSyncedBefore(userId, any()) } returns listOf(eligible(1), eligible(2))
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns mapOf(
+            "cloud-1" to linkAt("cloud-1", state = 1),
+            "cloud-2" to linkAt("cloud-2", state = 1),
+        )
+        every { resolver.delete(any(), any(), any()) } returnsMany listOf(1, 0)
+
+        val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
+
+        assertEquals(FreeUpSpaceUseCase.FreeUpResult.Done(freed = 1, skipped = 1), result)
+    }
+
+    @Test
+    fun `no system dialog carries more than one request's worth`() {
+        val (batch, rest) = FreeUpSpaceUseCase.splitForConsent((1..4_500).toList())
+        assertEquals(FreeUpSpaceUseCase.DELETE_REQUEST_MAX_URIS, batch.size)
+        assertEquals(1, batch.first())
+        assertEquals(2_500, rest.size)
+        assertEquals(2_001, rest.first())
+        assertEquals(listOf(1, 2) to emptyList<Int>(), FreeUpSpaceUseCase.splitForConsent(listOf(1, 2)))
     }
 
     @Test
@@ -153,6 +221,6 @@ class FreeUpSpaceSweepTest {
         val result = useCase.sweepConfirmed(userId, Long.MAX_VALUE)
 
         assertEquals(0, (result as FreeUpSpaceUseCase.FreeUpResult.Done).freed)
-        coVerify(exactly = 0) { linkDetailHelpers.batchFetchLinkDetails(any(), any(), any()) }
+        coVerify(exactly = 0) { linkDetailHelpers.batchFetchLinkDetails(any(), any(), any(), any()) }
     }
 }

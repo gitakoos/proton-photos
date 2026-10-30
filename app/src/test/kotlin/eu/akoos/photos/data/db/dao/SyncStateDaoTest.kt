@@ -109,6 +109,18 @@ class SyncStateDaoTest {
     }
 
     @Test
+    fun `a batch status update moves exactly the listed rows`() = runTest {
+        dao.upsertAll(listOf(entity("uri://1", status = SyncStatus.SYNCED), entity("uri://2", status = SyncStatus.SYNCED), entity("uri://3", status = SyncStatus.SYNCED)))
+
+        val changed = dao.updateStatusByLocalUris(listOf("uri://1", "uri://3", "uri://missing"), SyncStatus.CLOUD_ONLY)
+
+        assertEquals(2, changed)
+        assertEquals(SyncStatus.CLOUD_ONLY, dao.getByUri("uri://1")?.status)
+        assertEquals(SyncStatus.SYNCED, dao.getByUri("uri://2")?.status)
+        assertEquals(SyncStatus.CLOUD_ONLY, dao.getByUri("uri://3")?.status)
+    }
+
+    @Test
     fun `upsertAll inserts multiple entities`() = runTest {
         dao.upsertAll(listOf(entity("uri://1"), entity("uri://2"), entity("uri://3")))
 

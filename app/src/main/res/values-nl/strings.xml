@@ -1493,6 +1493,7 @@
         <item quantity="other">De apparaatkopieën van %1$d foto\'s verwijderen en %2$s vrijmaken? Ze blijven op Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Kon geen ruimte vrijmaken: %1$s</string>
+    <string name="free_up_skipped_pre_r">Sommige apparaatkopieën vereisen Android 11 of nieuwer om te verwijderen en zijn overgeslagen.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Uploaden…</string>

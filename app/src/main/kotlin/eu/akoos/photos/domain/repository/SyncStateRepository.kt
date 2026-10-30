@@ -51,6 +51,9 @@ interface SyncStateRepository {
     suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int
 
     suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus)
+
+    /** [updateStatusAndDeleteLocal] for many rows, a statement per few hundred instead of one each. */
+    suspend fun updateStatuses(localUris: Collection<String>, newStatus: SyncStatus)
     suspend fun getByUri(localUri: String): SyncState?
     suspend fun getByCloudId(cloudFileId: String): SyncState?
 

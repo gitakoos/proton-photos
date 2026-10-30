@@ -70,51 +70,51 @@ class PendingDeleteNotificationUseCase @Inject constructor(
         val pendingRaw = prefs[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
         if (pendingRaw.isEmpty()) return
 
-        // Probe each URI for a row and its trashed flag, and let
-        // [pendingDeleteEntryIsStale] rule on the pair. Stale entries get their
-        // SyncState collapsed to CLOUD_ONLY so the gallery stops painting them as
-        // locally present, and they're removed from the queue so the next
-        // createTrashRequest doesn't trip over them.
-        val (aliveAll, stale) = pendingRaw.partition { uriStr ->
-            !runCatching {
-                val uri = Uri.parse(uriStr)
+        // Probe each URI for a row and its trashed flag, and let [pendingDeleteProbe] rule
+        // on it. Stale entries get their SyncState collapsed to CLOUD_ONLY so the gallery
+        // stops painting them as locally present, and they're removed from the queue so
+        // the next createTrashRequest doesn't trip over them. A probe that could not ask
+        // (no cursor, or a provider error) proves nothing: the entry stays queued and its
+        // row untouched, and only this round's notification leaves it out.
+        val probed = pendingRaw.groupBy { uriStr ->
+            runCatching {
                 context.contentResolver.query(
-                    uri,
+                    Uri.parse(uriStr),
                     arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.IS_TRASHED),
                     null, null, null,
                 )?.use { c ->
                     if (!c.moveToFirst()) {
-                        pendingDeleteEntryIsStale(rowExists = false, isTrashed = false)
+                        pendingDeleteProbe(queried = true, rowExists = false, isTrashed = false)
                     } else {
                         val col = c.getColumnIndex(MediaStore.MediaColumns.IS_TRASHED)
-                        pendingDeleteEntryIsStale(
-                            rowExists = true,
-                            isTrashed = col >= 0 && c.getInt(col) != 0,
-                        )
+                        pendingDeleteProbe(queried = true, rowExists = true, isTrashed = col >= 0 && c.getInt(col) != 0)
                     }
-                } ?: pendingDeleteEntryIsStale(rowExists = false, isTrashed = false)
-            }.getOrDefault(true)
+                } ?: pendingDeleteProbe(queried = false, rowExists = false, isTrashed = false)
+            }.getOrDefault(PendingDeleteProbe.UNKNOWN)
         }
+        val stale = probed[PendingDeleteProbe.STALE].orEmpty()
+        val aliveAll = probed[PendingDeleteProbe.ALIVE].orEmpty()
+        val unknown = probed[PendingDeleteProbe.UNKNOWN].orEmpty()
         // A queue that outgrows the cap is one the user keeps declining; drop the
         // longest-waiting entries so it can't grow without bound. Those files stay on
         // the device with a SYNCED row (free-up-space can still reclaim them), so
         // unlike a stale entry they must NOT be collapsed to CLOUD_ONLY.
-        val alive = trimPendingDeleteQueue(aliveAll, SettingsKeys.PENDING_DELETE_URIS_MAX)
-        val dropped = aliveAll.size - alive.size
+        val kept = trimPendingDeleteQueue(aliveAll + unknown, SettingsKeys.PENDING_DELETE_URIS_MAX)
+        val dropped = aliveAll.size + unknown.size - kept.size
         if (dropped > 0) {
-            Log.w(TAG, "Delete queue over ${SettingsKeys.PENDING_DELETE_URIS_MAX} — dropped $dropped longest-waiting URI(s)")
+            Log.w(TAG, "Delete queue over ${SettingsKeys.PENDING_DELETE_URIS_MAX}, dropped $dropped longest-waiting URI(s)")
         }
         if (stale.isNotEmpty() || dropped > 0) {
             context.settingsDataStore.edit { p ->
-                p[SettingsKeys.PENDING_DELETE_URIS] = alive.toSet()
+                p[SettingsKeys.PENDING_DELETE_URIS] = kept.toSet()
             }
         }
         if (stale.isNotEmpty()) {
             Log.d(TAG, "Pruning ${stale.size} stale URI(s) from delete queue")
-            stale.forEach { uri ->
-                runCatching { syncStateRepo.updateStatusAndDeleteLocal(uri, SyncStatus.CLOUD_ONLY) }
-            }
+            runCatching { syncStateRepo.updateStatuses(stale, SyncStatus.CLOUD_ONLY) }
         }
+        val aliveSet = aliveAll.toSet()
+        val alive = kept.filter { it in aliveSet }
 
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         if (alive.isEmpty()) {
@@ -175,6 +175,18 @@ class PendingDeleteNotificationUseCase @Inject constructor(
             !rowExists || isTrashed
 
         /**
+         * What one probe of a queued URI proves. Only an answered query ([queried]) rules: a row that
+         * is gone or trashed is [PendingDeleteProbe.STALE], any other is [PendingDeleteProbe.ALIVE].
+         * A query that returned no cursor at all is [PendingDeleteProbe.UNKNOWN], never stale, since
+         * reading it as gone would mark a file still on the device as being only on Drive. Pure.
+         */
+        fun pendingDeleteProbe(queried: Boolean, rowExists: Boolean, isTrashed: Boolean): PendingDeleteProbe = when {
+            !queried -> PendingDeleteProbe.UNKNOWN
+            pendingDeleteEntryIsStale(rowExists, isTrashed) -> PendingDeleteProbe.STALE
+            else -> PendingDeleteProbe.ALIVE
+        }
+
+        /**
          * [alive] trimmed to at most [max] entries, dropping the longest-waiting ones. Pure and
          * side-effect-free so the choice can be pinned by a plain JVM test.
          *
@@ -200,3 +212,6 @@ class PendingDeleteNotificationUseCase @Inject constructor(
         private const val TAG = "PendingDeleteNotif"
     }
 }
+
+/** The outcome of probing one queued delete-after-backup URI, see [PendingDeleteNotificationUseCase.pendingDeleteProbe]. */
+enum class PendingDeleteProbe { ALIVE, STALE, UNKNOWN }

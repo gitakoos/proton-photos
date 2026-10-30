@@ -92,9 +92,7 @@ class PendingDeleteViewModel @Inject constructor(
      */
     fun onConsentGranted(uris: Set<String>) {
         viewModelScope.launch {
-            uris.forEach { uri ->
-                runCatching { syncStateRepo.updateStatusAndDeleteLocal(uri, SyncStatus.CLOUD_ONLY) }
-            }
+            runCatching { syncStateRepo.updateStatuses(uris, SyncStatus.CLOUD_ONLY) }
             context.settingsDataStore.edit { p ->
                 val remaining = (p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()) - uris
                 p[SettingsKeys.PENDING_DELETE_URIS] = remaining

@@ -45,11 +45,17 @@ class FreeUpSpaceUseCase @Inject constructor(
     private val linkDetailHelpers: LinkDetailHelpers,
 ) {
     sealed class FreeUpResult {
-        data class Done(val freed: Int) : FreeUpResult()
-        /** Android 11+: system delete dialog must be shown for these URIs. */
+        /** [skipped] counts device copies this app could not delete itself on Android 10 and older,
+         *  where there is no system dialog to ask for them. */
+        data class Done(val freed: Int, val skipped: Int = 0) : FreeUpResult()
+
+        /** Android 11+: the system delete dialog must be shown for [localUris], at most
+         *  [DELETE_REQUEST_MAX_URIS] of them. [remaining] are the confirmed copies still waiting for a
+         *  dialog of their own, asked for through [consentFor] once this one is answered. */
         data class NeedsPermission(
             val pendingIntent: PendingIntent,
             val localUris: List<String>,
+            val remaining: List<SyncState> = emptyList(),
         ) : FreeUpResult()
     }
 
@@ -83,18 +89,23 @@ class FreeUpSpaceUseCase @Inject constructor(
      * returned map, comes back at any State other than 1, or carries no cloudFileId to check with. A
      * transient failure (429 / 5xx / network) from the lookup PROPAGATES so the caller aborts and
      * deletes nothing against an unconfirmed batch, rather than reading a rate-limited short map as an
-     * all-trashed answer.
+     * all-trashed answer. So does any other failed batch apart from a server answer that the link
+     * does not exist, which only drops that link.
      */
     suspend fun verifyActiveBackups(
         userId: UserId,
         candidates: List<SyncState>,
     ): List<SyncState> = withContext(Dispatchers.IO) {
-        val checkable = candidates.filter { !it.cloudFileId.isNullOrBlank() }
-        if (checkable.isEmpty()) return@withContext emptyList<SyncState>()
-        val volumeId = cloudRepo.getVolumeId(userId)
+        if (candidates.none { !it.cloudFileId.isNullOrBlank() }) return@withContext emptyList<SyncState>()
+        confirmActive(userId, cloudRepo.getVolumeId(userId), candidates)
+    }
+
+    private suspend fun confirmActive(userId: UserId, volumeId: String, rows: List<SyncState>): List<SyncState> {
+        val checkable = rows.filter { !it.cloudFileId.isNullOrBlank() }
+        if (checkable.isEmpty()) return emptyList()
         val linkIds = checkable.mapNotNull { it.cloudFileId }.distinct()
-        val details = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, linkIds)
-        checkable.filter { row ->
+        val details = linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, linkIds, strict = true)
+        return checkable.filter { row ->
             val linkId = row.cloudFileId ?: return@filter false
             details[linkId]?.link?.state == ACTIVE_LINK_STATE
         }
@@ -109,8 +120,7 @@ class FreeUpSpaceUseCase @Inject constructor(
      * over a run that takes minutes on a large library. It is called from the IO context this runs on.
      *
      * Selects the candidates and reclaims them in one call, with no cloud check. A caller that deletes
-     * on a schedule uses [sweepConfirmed]; the manual button splits the two itself, verifying the
-     * candidates with [verifyActiveBackups] and handing only the confirmed set to [reclaimCandidates].
+     * on a schedule uses [sweepConfirmed]; the manual button runs [verifyAndReclaim] itself.
      */
     suspend operator fun invoke(
         userId: UserId,
@@ -134,17 +144,81 @@ class FreeUpSpaceUseCase @Inject constructor(
         olderThanMs: Long,
         protectDownloaded: Boolean = false,
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
-    ): FreeUpResult = reclaimCandidates(
-        verifyActiveBackups(userId, candidates(userId, olderThanMs, protectDownloaded)),
-        onProgress,
-    )
+    ): FreeUpResult = verifyAndReclaim(userId, candidates(userId, olderThanMs, protectDownloaded), onProgress)
+
+    /**
+     * Confirms [candidates] against Drive and deletes them a slice of [VERIFY_CHUNK] at a time, each
+     * slice right after its own check, so no copy is deleted on an answer minutes old. A slice whose
+     * check throws stops the run there: what earlier slices freed stays freed, nothing past it is
+     * touched. Copies this app may not delete itself are gathered for the system dialog
+     * ([consentFor]), checked again just before it.
+     */
+    suspend fun verifyAndReclaim(
+        userId: UserId,
+        candidates: List<SyncState>,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+    ): FreeUpResult = withContext(Dispatchers.IO) {
+        val total = candidates.size
+        onProgress(0, total)
+        if (candidates.isEmpty()) return@withContext FreeUpResult.Done(0)
+        val volumeId = cloudRepo.getVolumeId(userId)
+        var freed = 0
+        val needsDialog = mutableListOf<SyncState>()
+        var done = 0
+        for (slice in candidates.chunked(VERIFY_CHUNK)) {
+            for (row in confirmActive(userId, volumeId, slice)) {
+                if (deleteDeviceCopy(row)) freed++ else needsDialog += row
+            }
+            done += slice.size
+            onProgress(done, total)
+        }
+        consentFor(userId, needsDialog, freed)
+    }
+
+    /**
+     * The system delete dialog for [rows], which this app could not delete itself: checked against
+     * Drive once more, since the dialog can come long after the sweep, and capped at
+     * [DELETE_REQUEST_MAX_URIS] per dialog, the most one request may carry. [freed] is what the
+     * caller already reclaimed, reported back when no dialog is needed. Below Android 11 there is no
+     * dialog, so the rows are reported as skipped and stay on the device.
+     */
+    suspend fun consentFor(userId: UserId, rows: List<SyncState>, freed: Int = 0): FreeUpResult =
+        withContext(Dispatchers.IO) {
+            if (rows.isEmpty()) return@withContext FreeUpResult.Done(freed)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                return@withContext FreeUpResult.Done(freed, skipped = rows.size)
+            }
+            val (batch, rest) = splitForConsent(verifyActiveBackups(userId, rows))
+            if (batch.isEmpty()) return@withContext FreeUpResult.Done(freed)
+            // Building the consent request can throw on some OEMs for a foreign batch; fall through to
+            // Done rather than letting it escape uncaught.
+            val pi = runCatching {
+                MediaStore.createDeleteRequest(context.contentResolver, batch.map { Uri.parse(it.localUri) })
+            }.getOrNull() ?: return@withContext FreeUpResult.Done(freed)
+            FreeUpResult.NeedsPermission(pi, batch.map { it.localUri }, rest)
+        }
+
+    /** Deletes [state]'s device copy and marks its row CLOUD_ONLY; false when the system has to ask. */
+    private suspend fun deleteDeviceCopy(state: SyncState): Boolean = try {
+        if (context.contentResolver.delete(Uri.parse(state.localUri), null, null) > 0) {
+            syncStateRepo.updateStatusAndDeleteLocal(state.localUri, SyncStatus.CLOUD_ONLY)
+            true
+        } else {
+            // delete() returned 0, likely needs permission on API 30+
+            false
+        }
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        // SecurityException / RecoverableSecurityException on Android 11+
+        false
+    }
 
     /**
      * Deletes the device copy of each row in [candidates], in order, committing each on its own, and
      * reports how many were freed (or the batched consent request for files this app does not own).
-     * The caller states the exact set: [invoke] passes what [candidates] selected, and the manual
-     * button passes only the rows [verifyActiveBackups] confirmed, so a row that failed the check is
-     * never deleted here.
+     * The caller states the exact set and has checked it already, if at all: [invoke] passes what
+     * [candidates] selected, with no cloud check. [verifyAndReclaim] is the checked path.
      *
      * The body runs on [Dispatchers.IO] rather than the caller's context. `ContentResolver.delete` is
      * a blocking binder call and there is one per photo, so on a library of thousands the loop owns
@@ -157,43 +231,27 @@ class FreeUpSpaceUseCase @Inject constructor(
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
     ): FreeUpResult = withContext(Dispatchers.IO) {
         var freed = 0
-        val needsDialog = mutableListOf<Pair<String, Uri>>()  // localUri → contentUri
+        val needsDialog = mutableListOf<SyncState>()
         val total = candidates.size
         onProgress(0, total)
 
         for ((index, state) in candidates.withIndex()) {
-            val contentUri = Uri.parse(state.localUri)
-            try {
-                val deleted = context.contentResolver.delete(contentUri, null, null)
-                if (deleted > 0) {
-                    syncStateRepo.updateStatusAndDeleteLocal(state.localUri, SyncStatus.CLOUD_ONLY)
-                    freed++
-                } else {
-                    // delete() returned 0, likely needs permission on API 30+
-                    needsDialog += state.localUri to contentUri
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // SecurityException / RecoverableSecurityException on Android 11+
-                needsDialog += state.localUri to contentUri
-            }
+            if (deleteDeviceCopy(state)) freed++ else needsDialog += state
             // Each photo is committed on its own, so a run the user walks away from keeps everything
             // it already reclaimed; the next open lists what is left and picks up from there.
             val done = index + 1
             if (done % PROGRESS_STEP == 0 || done == total) onProgress(done, total)
         }
 
-        if (needsDialog.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Building the consent request can throw on some OEMs for a foreign or oversized batch;
-            // fall through to Done rather than letting it escape uncaught.
-            val pi = runCatching {
-                MediaStore.createDeleteRequest(context.contentResolver, needsDialog.map { it.second })
-            }.getOrNull()
-            if (pi != null) return@withContext FreeUpResult.NeedsPermission(pi, needsDialog.map { it.first })
+        if (needsDialog.isEmpty()) return@withContext FreeUpResult.Done(freed)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return@withContext FreeUpResult.Done(freed, skipped = needsDialog.size)
         }
-
-        FreeUpResult.Done(freed)
+        val (batch, rest) = splitForConsent(needsDialog)
+        val pi = runCatching {
+            MediaStore.createDeleteRequest(context.contentResolver, batch.map { Uri.parse(it.localUri) })
+        }.getOrNull() ?: return@withContext FreeUpResult.Done(freed)
+        FreeUpResult.NeedsPermission(pi, batch.map { it.localUri }, rest)
     }
 
     companion object {
@@ -204,6 +262,17 @@ class FreeUpSpaceUseCase @Inject constructor(
         /** Link.State the batch link-details endpoint returns for a link that exists and is not
          *  trashed. Any other value (or an absent link) means the cloud copy is not confirmed. */
         private const val ACTIVE_LINK_STATE = 1
+
+        /** Candidates checked against Drive at a time, each slice deleted right after its check. */
+        const val VERIFY_CHUNK = 50
+
+        /** The most URIs one system delete request may carry (Android caps it); a larger set is asked
+         *  for in several dialogs. */
+        const val DELETE_REQUEST_MAX_URIS = 2_000
+
+        /** [rows] split into the first system dialog's worth, in order, and the rest. Pure. */
+        fun <T> splitForConsent(rows: List<T>, max: Int = DELETE_REQUEST_MAX_URIS): Pair<List<T>, List<T>> =
+            rows.take(max) to rows.drop(max)
 
         /**
          * Whether free-up-space may reclaim the device copy behind [state]: true only for a photo

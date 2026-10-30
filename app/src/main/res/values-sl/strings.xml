@@ -1341,6 +1341,7 @@
         <item quantity="other">Izbrišem kopije %1$d fotografij v napravi in sprostim %2$s? Na Drive ostanejo.</item>
     </plurals>
     <string name="settings_free_up_error">Prostora ni bilo mogoče sprostiti: %1$s</string>
+    <string name="free_up_skipped_pre_r">Nekatere kopije v napravi za odstranitev potrebujejo Android 11 ali novejšega in so bile preskočene.</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Nalaganje…</string>
     <string name="upload_status_encrypting">Šifriranje…</string>

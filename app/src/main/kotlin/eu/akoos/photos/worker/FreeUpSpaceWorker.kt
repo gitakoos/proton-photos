@@ -85,11 +85,12 @@ class FreeUpSpaceWorker @AssistedInject constructor(
                 is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
                     // A worker has no Activity to drive the system delete dialog, so the URIs go on
                     // the batched consent queue that the foreground handler drains.
+                    val queued = result.localUris + result.remaining.map { it.localUri }
                     context.settingsDataStore.edit { p ->
                         val existing = p[SettingsKeys.PENDING_DELETE_URIS] ?: emptySet()
-                        p[SettingsKeys.PENDING_DELETE_URIS] = existing + result.localUris
+                        p[SettingsKeys.PENDING_DELETE_URIS] = existing + queued
                     }
-                    Log.d(TAG, "Sweep queued ${result.localUris.size} photo(s) for batched consent dialog")
+                    Log.d(TAG, "Sweep queued ${queued.size} photo(s) for batched consent dialog")
                 }
             }
             Result.success()

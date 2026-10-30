@@ -1500,6 +1500,7 @@
         <item quantity="other">Törlöd %1$d fotó eszközön lévő példányát, és felszabadítasz %2$s helyet? A Drive-on maradnak.</item>
     </plurals>
     <string name="settings_free_up_error">Nem sikerült helyet felszabadítani: %1$s</string>
+    <string name="free_up_skipped_pre_r">Egyes eszközön lévő másolatok eltávolításához Android 11 vagy újabb kell, ezek kimaradtak.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Feltöltés…</string>

@@ -1340,6 +1340,7 @@
         <item quantity="other">Smazat kopie %1$d fotek v zařízení a uvolnit %2$s? Na Drive zůstanou.</item>
     </plurals>
     <string name="settings_free_up_error">Nepodařilo se uvolnit místo: %1$s</string>
+    <string name="free_up_skipped_pre_r">Některé kopie v zařízení vyžadují k odstranění Android 11 nebo novější a byly přeskočeny.</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Nahrávání…</string>
     <string name="upload_status_encrypting">Šifrování…</string>

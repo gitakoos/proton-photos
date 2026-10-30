@@ -1765,6 +1765,7 @@
         <item quantity="other">%1$d fotoğrafın cihaz kopyası silinip %2$s yer açılsın mı? Drive\'da kalırlar.</item>
     </plurals>
     <string name="settings_free_up_error">Yer açılamadı: %1$s</string>
+    <string name="free_up_skipped_pre_r">Bazı cihaz kopyalarının kaldırılması için Android 11 veya üstü gerekiyor, bunlar atlandı.</string>
     <string name="upload_status_uploading">Yükleniyor…</string>
     <string name="upload_status_encrypting">Şifreleniyor…</string>
     <string name="upload_status_queued">Sırada</string>

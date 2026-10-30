@@ -1865,6 +1865,7 @@
         <item quantity="other">Delete the device copy of %1$d photos and free %2$s? They stay on Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Could not free up space: %1$s</string>
+    <string name="free_up_skipped_pre_r">Some device copies need Android 11 or newer to remove and were skipped.</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Uploading…</string>
     <string name="upload_status_encrypting">Encrypting…</string>

@@ -1477,6 +1477,7 @@
         <item quantity="other">Die Gerätekopien von %1$d Fotos löschen und %2$s freigeben? Sie bleiben auf Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Speicher konnte nicht freigegeben werden: %1$s</string>
+    <string name="free_up_skipped_pre_r">Einige Gerätekopien brauchen Android 11 oder neuer zum Entfernen und wurden übersprungen.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Wird hochgeladen…</string>

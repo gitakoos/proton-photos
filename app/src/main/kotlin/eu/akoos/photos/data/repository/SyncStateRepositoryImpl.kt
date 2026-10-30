@@ -80,6 +80,10 @@ class SyncStateRepositoryImpl @Inject constructor(
         dao.updateStatus(localUri, newStatus)
     }
 
+    override suspend fun updateStatuses(localUris: Collection<String>, newStatus: SyncStatus) {
+        localUris.toList().forEachSqlChunk { chunk -> dao.updateStatusByLocalUris(chunk, newStatus) }
+    }
+
     override suspend fun getByUri(localUri: String): SyncState? =
         dao.getByUri(localUri)?.toDomain()
 

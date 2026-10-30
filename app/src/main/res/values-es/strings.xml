@@ -1496,6 +1496,7 @@
         <item quantity="other">¿Eliminar la copia local de %1$d fotos y liberar %2$s? Seguirán en Drive.</item>
     </plurals>
     <string name="settings_free_up_error">No se pudo liberar espacio: %1$s</string>
+    <string name="free_up_skipped_pre_r">Algunas copias del dispositivo requieren Android 11 o posterior para eliminarse y se omitieron.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Subiendo…</string>

@@ -1479,6 +1479,7 @@
         <item quantity="other">Supprimer la copie locale de %1$d photos et libérer %2$s ? Elles restent sur Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Impossible de libérer de l\'espace : %1$s</string>
+    <string name="free_up_skipped_pre_r">Certaines copies sur l’appareil nécessitent Android 11 ou plus récent pour être supprimées et ont été ignorées.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Téléversement…</string>
