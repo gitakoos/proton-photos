@@ -159,6 +159,11 @@ ksp {
 }
 
 dependencies {
+    // Media3 brings in an older Guava with a known deserialization flaw; the fixed one is required instead.
+    constraints {
+        implementation(libs.guava)
+    }
+
     // Proton Core
     implementation(libs.proton.drive.sdk)
     implementation(libs.proton.auth)

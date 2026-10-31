@@ -312,7 +312,7 @@ class UploadPipelineIntegrationTest {
             assertEquals(SyncStatus.LOCAL_ONLY, it.status)
             assertNull(it.cloudFileId)
             assertEquals("a demoted deletion must not stay queued", false, it.queued)
-            assertNull(it.queueSource)
+            assertEquals(eu.akoos.photos.domain.entity.QueueSource.REMOVED_FROM_DRIVE, it.queueSource)
         }
 
         // The next upload pass must NOT resurrect it: the row is LOCAL_ONLY but un-queued, and the

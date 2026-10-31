@@ -1,4 +1,5 @@
 [versions]
+guava = "33.7.2-android"
 agp = "9.4.1"
 kotlin = "2.4.21"
 ksp = "2.3.12"
@@ -33,6 +34,7 @@ exifinterface = "1.4.2"
 zip4j = "2.11.5"
 
 [libraries]
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
 # Proton Core
 proton-auth = { module = "me.proton.core:auth", version.ref = "protonCore" }
 proton-auth-presentation = { module = "me.proton.core:auth-presentation", version.ref = "protonCore" }
