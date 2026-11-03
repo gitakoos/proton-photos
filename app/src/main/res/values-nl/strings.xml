@@ -2497,6 +2497,7 @@
     <string name="label_rename_save">Opslaan</string>
     <string name="label_rename_merge">Samenvoegen</string>
     <string name="label_delete_action">Label verwijderen</string>
+    <string name="label_delete_unused_title">Dit label verwijderen?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Dit label van %d foto verwijderen?</item>
         <item quantity="other">Dit label van %d foto\'s verwijderen?</item>
@@ -2537,7 +2538,7 @@
     <string name="compression_unavailable_fallback">%1$s is niet beschikbaar op deze telefoon, dus video’s gebruiken %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Fotolabels</string>
-    <string name="whats_new_260_labels_body">Open een foto, tik op “Details” en voeg tot vijf labels toe in het vak “Labels”, of selecteer meerdere foto\'s en kies “Labels toevoegen”. Zoeken vindt foto\'s op hun labels. Labels hernoemen, samenvoegen en verwijderen, en ze naar Drive back-uppen of terugzetten kan onder “Instellingen > Meer instellingen > Labels”.</string>
+    <string name="whats_new_260_labels_body">Open een foto, tik op “Details” en voeg tot vijf labels toe in het vak “Labels”, of selecteer meerdere foto\'s en kies “Labels toevoegen”. Zoeken vindt foto\'s op hun labels. Labels hernoemen, samenvoegen en verwijderen kan onder “Instellingen > Meer instellingen > Labels”.</string>
     <string name="whats_new_260_compress_title">Videocompressie</string>
     <string name="whats_new_260_compress_body">Zet “Video\'s comprimeren” aan onder “Instellingen > Back-up &amp; opslag > Back-upinstellingen > Kwaliteit en grootte” en kies de codec en de kwaliteit. H.264 is de standaard en speelt overal af. Bij het uploaden zie je de voortgang en de bespaarde ruimte, en je foto\'s blijven uploaden terwijl een video wordt gecomprimeerd.</string>
     <string name="whats_new_260_vault_title">Verborgen foto\'s bij uitloggen</string>
@@ -2561,9 +2562,9 @@
     <string name="whats_new_260_frame_title">Kadergereedschap</string>
     <string name="whats_new_260_frame_body">Plaats in de foto-editor een foto op een canvas met een andere vorm, zoals 1:1, 9:16 of Polaroid, gevuld met een kleur of een zachte vervaging. Het gereedschap is nog in ontwikkeling en er komen meer verbeteringen.</string>
     <string name="whats_new_260_drive_title">Gezichts- en zoekgegevens in Drive</string>
-    <string name="whats_new_260_drive_body">Bewaar gezichtsnamen en zoekgegevens in Drive en zet ze terug op een andere telefoon, waarbij je kiest wat terugkomt, onder “Instellingen > Meer instellingen > Machine learning”.</string>
-    <string name="whats_new_260_autosave_title">Automatisch opslaan in Drive</string>
-    <string name="whats_new_260_autosave_body">Zet “Automatisch opslaan” aan bij de Drive-kopie van je gezichts- en zoekgegevens of van je labels, dan blijft de kopie op de achtergrond actueel: na wijzigingen, dagelijks of wekelijks. Je vindt ze onder “Instellingen > Meer instellingen”, bij “Machine learning” en “Labels”.</string>
+    <string name="whats_new_260_drive_body">Bewaar gezichtsnamen, zoekgegevens, labels en verborgen items in Drive en haal ze op een andere telefoon terug met “Laden van Drive”, onder “Instellingen > Meer instellingen > Back-up naar Proton Drive”.</string>
+    <string name="whats_new_260_autosave_title">Automatische back-up</string>
+    <string name="whats_new_260_autosave_body">Zet “Automatische back-up” aan, dan blijft de Drive-kopie op de achtergrond actueel, een paar minuten na elke wijziging, en gelijk op je andere apparaten. “Nu back-uppen” slaat meteen op.</string>
     <string name="whats_new_260_worldmap_title">Een rijkere wereldkaart</string>
     <string name="whats_new_260_worldmap_body">De wereldkaart tekent nu landen- en provinciegrenzen, kleurt de provincie waar je foto\'s nam, noemt plaatsen terwijl je inzoomt en toont dezelfde markeringen als de klassieke kaart. Hij opent boven Europa, en bij verschuiven en knijpen blijft het punt onder je vingers op zijn plek.</string>
     <string name="whats_new_260_time_title">Tijdnotatie</string>

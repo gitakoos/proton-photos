@@ -2472,6 +2472,7 @@
     <string name="label_rename_save">Enregistrer</string>
     <string name="label_rename_merge">Fusionner</string>
     <string name="label_delete_action">Supprimer l\'étiquette</string>
+    <string name="label_delete_unused_title">Supprimer cette étiquette ?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Retirer cette étiquette de %d photo ?</item>
         <item quantity="other">Retirer cette étiquette de %d photos ?</item>
@@ -2512,7 +2513,7 @@
     <string name="compression_unavailable_fallback">%1$s n’est pas disponible sur ce téléphone, les vidéos utilisent donc %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Libellés de photos</string>
-    <string name="whats_new_260_labels_body">Ouvrez une photo, touchez « Détails » et ajoutez jusqu\'à cinq libellés dans la zone « Étiquettes », ou sélectionnez plusieurs photos et choisissez « Ajouter des étiquettes ». La recherche trouve les photos par leurs libellés. Renommez, fusionnez et supprimez les libellés, et sauvegardez-les sur Drive ou restaurez-les, dans « Paramètres > Autres réglages > Étiquettes ».</string>
+    <string name="whats_new_260_labels_body">Ouvrez une photo, touchez « Détails » et ajoutez jusqu\'à cinq libellés dans la zone « Étiquettes », ou sélectionnez plusieurs photos et choisissez « Ajouter des étiquettes ». La recherche trouve les photos par leurs libellés. Renommez, fusionnez et supprimez les libellés dans « Paramètres > Autres réglages > Étiquettes ».</string>
     <string name="whats_new_260_compress_title">Compression vidéo</string>
     <string name="whats_new_260_compress_body">Activez « Compresser les vidéos » dans « Paramètres > Sauvegarde et stockage > Paramètres de sauvegarde > Qualité et taille », puis choisissez le codec et la qualité. H.264 est le choix par défaut et se lit partout. L\'envoi affiche sa progression et l\'espace économisé, et vos photos continuent d\'être envoyées pendant qu\'une vidéo est compressée.</string>
     <string name="whats_new_260_vault_title">Photos masquées à la déconnexion</string>
@@ -2536,9 +2537,9 @@
     <string name="whats_new_260_frame_title">Outil Cadre</string>
     <string name="whats_new_260_frame_body">Dans l\'éditeur de photos, placez une photo sur un canevas d\'une autre forme, comme 1:1, 9:16 ou Polaroid, rempli d\'une couleur ou d\'un flou doux. L\'outil est encore en cours de développement et d\'autres améliorations arrivent.</string>
     <string name="whats_new_260_drive_title">Données de visages et de recherche sur Drive</string>
-    <string name="whats_new_260_drive_body">Sauvegardez les noms des visages et les données de recherche sur Drive et restaurez-les sur un autre téléphone, en choisissant ce qui revient, dans « Paramètres > Autres réglages > Apprentissage automatique ».</string>
-    <string name="whats_new_260_autosave_title">Enregistrement automatique sur Drive</string>
-    <string name="whats_new_260_autosave_body">Activez « Enregistrer automatiquement » sur la copie Drive de vos données de visages et de recherche ou de vos étiquettes : la copie reste à jour en arrière-plan, après les modifications, chaque jour ou chaque semaine. Vous les trouverez dans « Paramètres > Autres réglages », sous « Apprentissage automatique » et « Étiquettes ».</string>
+    <string name="whats_new_260_drive_body">Sauvegardez les noms des visages, les données de recherche, les étiquettes et les éléments masqués sur Drive et récupérez-les sur un autre téléphone avec « Charger depuis Drive », dans « Paramètres > Autres réglages > Sauvegarde sur Proton Drive ».</string>
+    <string name="whats_new_260_autosave_title">Sauvegarde automatique</string>
+    <string name="whats_new_260_autosave_body">Activez « Sauvegarde automatique » : la copie Drive reste à jour en arrière-plan, quelques minutes après chaque modification, et identique sur vos autres appareils. « Sauvegarder maintenant » enregistre tout de suite.</string>
     <string name="whats_new_260_worldmap_title">Une carte du monde plus riche</string>
     <string name="whats_new_260_worldmap_body">La carte du monde dessine désormais les frontières des pays et des provinces, colore la province où vous avez pris des photos, nomme les lieux quand vous zoomez et affiche les mêmes repères que la carte classique. Elle s\'ouvre sur l\'Europe, et en la déplaçant ou en pinçant, le point sous vos doigts reste en place.</string>
     <string name="whats_new_260_time_title">Format de l\'heure</string>

@@ -2604,6 +2604,7 @@
     <string name="label_rename_save">Uložit</string>
     <string name="label_rename_merge">Sloučit</string>
     <string name="label_delete_action">Smazat štítek</string>
+    <string name="label_delete_unused_title">Smazat tento štítek?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Odebrat tento štítek z %d fotky?</item>
         <item quantity="few">Odebrat tento štítek z %d fotek?</item>
@@ -2646,7 +2647,7 @@
     <string name="compression_unavailable_fallback">%1$s není na tomto telefonu k dispozici, videa proto použijí %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Štítky fotek</string>
-    <string name="whats_new_260_labels_body">Otevřete fotku, klepněte na „Podrobnosti“ a v poli „Štítky“ přidejte až pět štítků, nebo vyberte více fotek a zvolte „Přidat štítky“. Hledání najde fotky podle štítků. Štítky přejmenujete, sloučíte a smažete a zálohujete na Drive nebo obnovíte v „Nastavení > Další nastavení > Štítky“.</string>
+    <string name="whats_new_260_labels_body">Otevřete fotku, klepněte na „Podrobnosti“ a v poli „Štítky“ přidejte až pět štítků, nebo vyberte více fotek a zvolte „Přidat štítky“. Hledání najde fotky podle štítků. Štítky přejmenujete, sloučíte a smažete v „Nastavení > Další nastavení > Štítky“.</string>
     <string name="whats_new_260_compress_title">Komprese videí</string>
     <string name="whats_new_260_compress_body">Zapněte „Komprimovat videa“ v „Nastavení > Zálohování a úložiště > Nastavení zálohování > Kvalita a velikost“ a vyberte kodek a kvalitu. Výchozí je H.264, který přehrají všechna zařízení. Nahrávání ukazuje průběh i ušetřené místo a fotky se nahrávají dál, i když se video komprimuje.</string>
     <string name="whats_new_260_vault_title">Skryté fotky při odhlášení</string>
@@ -2670,9 +2671,9 @@
     <string name="whats_new_260_frame_title">Nástroj Rám</string>
     <string name="whats_new_260_frame_body">V editoru fotek umístěte fotku na plátno jiného tvaru, třeba 1:1, 9:16 nebo Polaroid, vyplněné barvou nebo měkkým rozostřením. Nástroj je stále ve vývoji a další vylepšení přijdou.</string>
     <string name="whats_new_260_drive_title">Data obličejů a hledání na Drive</string>
-    <string name="whats_new_260_drive_body">Uložte jména tváří a data hledání na Drive a obnovte je v jiném telefonu, přičemž si vyberete, co se vrátí, v „Nastavení > Další nastavení > Strojové učení“.</string>
-    <string name="whats_new_260_autosave_title">Automatické ukládání na Drive</string>
-    <string name="whats_new_260_autosave_body">Zapněte „Ukládat automaticky“ u kopie na Drive pro data tváří a hledání nebo pro štítky a kopie se bude na pozadí udržovat aktuální: po změnách, denně nebo týdně. Najdete je v „Nastavení > Další nastavení“, v částech „Strojové učení“ a „Štítky“.</string>
+    <string name="whats_new_260_drive_body">Uložte jména tváří, data hledání, štítky a skryté položky na Drive a v jiném telefonu je vraťte pomocí „Načíst z Drive“, v „Nastavení > Další nastavení > Záloha na Proton Drive“.</string>
+    <string name="whats_new_260_autosave_title">Automatická záloha</string>
+    <string name="whats_new_260_autosave_body">Zapněte „Automatická záloha“ a kopie na Drive se bude na pozadí udržovat aktuální, pár minut po každé změně, a stejná na vašich dalších zařízeních. „Zálohovat nyní“ uloží hned.</string>
     <string name="whats_new_260_worldmap_title">Bohatší mapa světa</string>
     <string name="whats_new_260_worldmap_body">Mapa světa nově kreslí hranice států a provincií, vybarví provincii, kde jste fotili, při přibližování pojmenovává místa a ukazuje stejné špendlíky jako klasická mapa. Otevře se nad Evropou a při posouvání a roztahování zůstává bod pod prsty na místě.</string>
     <string name="whats_new_260_time_title">Formát času</string>

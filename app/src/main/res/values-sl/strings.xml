@@ -2598,6 +2598,7 @@
     <string name="label_rename_save">Shrani</string>
     <string name="label_rename_merge">Združi</string>
     <string name="label_delete_action">Izbriši oznako</string>
+    <string name="label_delete_unused_title">Želite izbrisati to oznako?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Želite to oznako odstraniti z %d fotografije?</item>
         <item quantity="two">Želite to oznako odstraniti z %d fotografij?</item>
@@ -2640,7 +2641,7 @@
     <string name="compression_unavailable_fallback">%1$s na tem telefonu ni na voljo, zato videoposnetki uporabijo %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Oznake fotografij</string>
-    <string name="whats_new_260_labels_body">Odprite fotografijo, tapnite „Podrobnosti“ in v polju „Oznake“ dodajte do pet oznak, ali izberite več fotografij in izberite „Dodaj oznake“. Iskanje najde fotografije po oznakah. Oznake lahko preimenujete, združite in izbrišete ter jih varnostno kopirate v Drive ali obnovite v „Nastavitve > Več nastavitev > Oznake“.</string>
+    <string name="whats_new_260_labels_body">Odprite fotografijo, tapnite „Podrobnosti“ in v polju „Oznake“ dodajte do pet oznak, ali izberite več fotografij in izberite „Dodaj oznake“. Iskanje najde fotografije po oznakah. Oznake lahko preimenujete, združite in izbrišete v „Nastavitve > Več nastavitev > Oznake“.</string>
     <string name="whats_new_260_compress_title">Stiskanje videa</string>
     <string name="whats_new_260_compress_body">Vklopite „Stisni videoposnetke“ v „Nastavitve > Varnostno kopiranje in shramba > Nastavitve varnostnega kopiranja > Kakovost in velikost“, nato izberite kodek in kakovost. Privzet je H.264, ki se predvaja povsod. Nalaganje prikazuje napredek in prihranjen prostor, fotografije pa se nalagajo naprej, medtem ko se video stiska.</string>
     <string name="whats_new_260_vault_title">Skrite fotografije ob odjavi</string>
@@ -2664,9 +2665,9 @@
     <string name="whats_new_260_frame_title">Orodje Okvir</string>
     <string name="whats_new_260_frame_body">V urejevalniku fotografij postavite fotografijo na platno druge oblike, na primer 1:1, 9:16 ali Polaroid, zapolnjeno z barvo ali mehkim zameglenjem. Orodje je še v nastajanju in prihajajo nove izboljšave.</string>
     <string name="whats_new_260_drive_title">Podatki o obrazih in iskanju v Drive</string>
-    <string name="whats_new_260_drive_body">Imena obrazov in podatke iskanja shranite v Drive in jih obnovite na drugem telefonu, pri čemer izberete, kaj se vrne, v „Nastavitve > Več nastavitev > Strojno učenje“.</string>
-    <string name="whats_new_260_autosave_title">Samodejno shranjevanje v Drive</string>
-    <string name="whats_new_260_autosave_body">Vklopite „Samodejno shranjevanje“ pri kopiji v Drive za podatke obrazov in iskanja ali za oznake, pa se kopija v ozadju ohranja posodobljena: po spremembah, dnevno ali tedensko. Najdete jih v „Nastavitve > Več nastavitev“, pod „Strojno učenje“ in „Oznake“.</string>
+    <string name="whats_new_260_drive_body">Imena obrazov, podatke iskanja, oznake in skrite elemente shranite v Drive in jih na drugem telefonu vrnite z „Naloži z Drive“, v „Nastavitve > Več nastavitev > Varnostna kopija na Proton Drive“.</string>
+    <string name="whats_new_260_autosave_title">Samodejna varnostna kopija</string>
+    <string name="whats_new_260_autosave_body">Vklopite „Samodejna varnostna kopija“ in kopija v Drive ostane v ozadju posodobljena, nekaj minut po vsaki spremembi, in enaka na vaših drugih napravah. „Varnostno kopiraj zdaj“ shrani takoj.</string>
     <string name="whats_new_260_worldmap_title">Bogatejši zemljevid sveta</string>
     <string name="whats_new_260_worldmap_body">Zemljevid sveta zdaj riše meje držav in pokrajin, obarva pokrajino, kjer ste fotografirali, ob približevanju poimenuje kraje in kaže iste žebljičke kot klasični zemljevid. Odpre se nad Evropo, pri premikanju in ščipanju pa točka pod prsti ostane na mestu.</string>
     <string name="whats_new_260_time_title">Oblika časa</string>

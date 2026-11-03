@@ -2033,6 +2033,7 @@
     <string name="label_rename_save">Kaydet</string>
     <string name="label_rename_merge">Birleştir</string>
     <string name="label_delete_action">Etiketi sil</string>
+    <string name="label_delete_unused_title">Bu etiket silinsin mi?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Bu etiket %d fotoğraftan kaldırılsın mı?</item>
         <item quantity="other">Bu etiket %d fotoğraftan kaldırılsın mı?</item>
@@ -2427,7 +2428,7 @@
     <string name="compression_unavailable_fallback">%1$s bu telefonda kullanılamıyor, bu yüzden videolarda %2$s kullanılır.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Fotoğraf etiketleri</string>
-    <string name="whats_new_260_labels_body">Bir fotoğrafı açın, “Ayrıntılar” öğesine dokunun ve “Etiketler” kutusuna en fazla beş etiket ekleyin; ya da birkaç fotoğraf seçip “Etiket ekle” öğesini seçin. Arama fotoğrafları etiketlerine göre bulur. Etiketleri yeniden adlandırabilir, birleştirebilir, silebilir, Drive\'a yedekleyebilir veya geri yükleyebilirsiniz: “Ayarlar > Diğer ayarlar > Etiketler”.</string>
+    <string name="whats_new_260_labels_body">Bir fotoğrafı açın, “Ayrıntılar” öğesine dokunun ve “Etiketler” kutusuna en fazla beş etiket ekleyin; ya da birkaç fotoğraf seçip “Etiket ekle” öğesini seçin. Arama fotoğrafları etiketlerine göre bulur. Etiketleri yeniden adlandırabilir, birleştirebilir ve silebilirsiniz: “Ayarlar > Diğer ayarlar > Etiketler”.</string>
     <string name="whats_new_260_compress_title">Video sıkıştırma</string>
     <string name="whats_new_260_compress_body">“Ayarlar > Yedekleme ve depolama > Yedekleme ayarları > Kalite ve boyut” altında “Videoları sıkıştır” seçeneğini açın, sonra kodeki ve kaliteyi seçin. Varsayılan her yerde oynatılan H.264\'tür. Yükleme ilerlemeyi ve kazanılan alanı gösterir, bir video sıkıştırılırken fotoğraflarınız yüklenmeye devam eder.</string>
     <string name="whats_new_260_vault_title">Oturum kapatırken gizli fotoğraflar</string>
@@ -2451,9 +2452,9 @@
     <string name="whats_new_260_frame_title">Çerçeve aracı</string>
     <string name="whats_new_260_frame_body">Fotoğraf düzenleyicide bir fotoğrafı 1:1, 9:16 veya Polaroid gibi başka şekilli bir tuvale, bir renkle veya yumuşak bir bulanıklıkla doldurarak yerleştirin. Araç hâlâ geliştiriliyor ve yeni iyileştirmeler gelecek.</string>
     <string name="whats_new_260_drive_title">Drive\'da yüz ve arama verileri</string>
-    <string name="whats_new_260_drive_body">Yüz adlarını ve arama verilerini Drive\'a kaydedin ve başka bir telefonda geri yükleyin; neyin geri geleceğini siz seçersiniz: “Ayarlar > Diğer ayarlar > Makine öğrenimi”.</string>
-    <string name="whats_new_260_autosave_title">Drive\'a otomatik kayıt</string>
-    <string name="whats_new_260_autosave_body">Yüz ve arama verilerinizin ya da etiketlerinizin Drive kopyasında “Otomatik kaydet” seçeneğini açın; kopya arka planda güncel kalır: değişikliklerden sonra, günlük veya haftalık. Bunları “Ayarlar > Diğer ayarlar” altında, “Makine öğrenimi” ve “Etiketler” bölümlerinde bulabilirsiniz.</string>
+    <string name="whats_new_260_drive_body">Yüz adlarını, arama verilerini, etiketleri ve gizli öğeleri Drive\'a kaydedin ve başka bir telefonda “Drive\'dan yükle” ile geri getirin: “Ayarlar > Diğer ayarlar > Proton Drive\'a yedekle”.</string>
+    <string name="whats_new_260_autosave_title">Otomatik yedekleme</string>
+    <string name="whats_new_260_autosave_body">“Otomatik yedekleme” seçeneğini açın; Drive kopyası arka planda güncel kalır, her değişiklikten birkaç dakika sonra, ve diğer cihazlarınızda da aynı olur. “Şimdi yedekle” hemen kaydeder.</string>
     <string name="whats_new_260_worldmap_title">Daha zengin dünya haritası</string>
     <string name="whats_new_260_worldmap_body">Dünya haritası artık ülke ve il sınırlarını çiziyor, fotoğraf çektiğiniz ili renklendiriyor, yaklaştıkça yerlerin adlarını gösteriyor ve klasik haritayla aynı iğneleri kullanıyor. Avrupa üzerinde açılır; kaydırırken ve sıkıştırırken parmaklarınızın altındaki nokta yerinde kalır.</string>
     <string name="whats_new_260_time_title">Saat biçimi</string>

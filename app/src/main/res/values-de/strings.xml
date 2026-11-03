@@ -2470,6 +2470,7 @@
     <string name="label_rename_save">Speichern</string>
     <string name="label_rename_merge">Zusammenführen</string>
     <string name="label_delete_action">Label löschen</string>
+    <string name="label_delete_unused_title">Dieses Label löschen?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Dieses Label von %d Foto entfernen?</item>
         <item quantity="other">Dieses Label von %d Fotos entfernen?</item>
@@ -2510,7 +2511,7 @@
     <string name="compression_unavailable_fallback">%1$s ist auf diesem Telefon nicht verfügbar, Videos verwenden daher %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Foto-Labels</string>
-    <string name="whats_new_260_labels_body">Öffne ein Foto, tippe auf „Details“ und füge im Feld „Labels“ bis zu fünf Labels hinzu, oder wähle mehrere Fotos und tippe auf „Labels hinzufügen“. Die Suche findet Fotos über ihre Labels. Labels umbenennen, zusammenführen und löschen sowie in Drive sichern oder wiederherstellen kannst du unter „Einstellungen > Weitere Einstellungen > Labels“.</string>
+    <string name="whats_new_260_labels_body">Öffne ein Foto, tippe auf „Details“ und füge im Feld „Labels“ bis zu fünf Labels hinzu, oder wähle mehrere Fotos und tippe auf „Labels hinzufügen“. Die Suche findet Fotos über ihre Labels. Labels umbenennen, zusammenführen und löschen kannst du unter „Einstellungen > Weitere Einstellungen > Labels“.</string>
     <string name="whats_new_260_compress_title">Videokomprimierung</string>
     <string name="whats_new_260_compress_body">Schalte „Videos komprimieren“ unter „Einstellungen > Sicherung &amp; Speicher > Backup-Einstellungen > Qualität und Größe“ ein und wähle Codec und Qualität. H.264 ist die Vorgabe und läuft überall. Beim Hochladen siehst du den Fortschritt und den gesparten Speicher, und deine Fotos werden weiter hochgeladen, während ein Video komprimiert wird.</string>
     <string name="whats_new_260_vault_title">Versteckte Fotos beim Abmelden</string>
@@ -2534,9 +2535,9 @@
     <string name="whats_new_260_frame_title">Rahmen-Werkzeug</string>
     <string name="whats_new_260_frame_body">Setze im Foto-Editor ein Foto auf eine Leinwand anderer Form, etwa 1:1, 9:16 oder Polaroid, gefüllt mit einer Farbe oder einer weichen Unschärfe. Das Werkzeug ist noch in Arbeit, weitere Verbesserungen folgen.</string>
     <string name="whats_new_260_drive_title">Gesichts- und Suchdaten in Drive</string>
-    <string name="whats_new_260_drive_body">Sichere Gesichtsnamen und Suchdaten in Drive und stelle sie auf einem anderen Telefon wieder her, wobei du wählst, was zurückkommt, unter „Einstellungen > Weitere Einstellungen > Maschinelles Lernen“.</string>
-    <string name="whats_new_260_autosave_title">Automatisch in Drive speichern</string>
-    <string name="whats_new_260_autosave_body">Schalte „Automatisch speichern“ bei der Drive-Kopie deiner Gesichts- und Suchdaten oder deiner Labels ein, dann bleibt die Kopie im Hintergrund aktuell: nach Änderungen, täglich oder wöchentlich. Du findest sie unter „Einstellungen > Weitere Einstellungen“, bei „Maschinelles Lernen“ und „Labels“.</string>
+    <string name="whats_new_260_drive_body">Sichere Gesichtsnamen, Suchdaten, Labels und ausgeblendete Elemente in Drive und hole sie auf einem anderen Telefon mit „Von Drive laden“ zurück, unter „Einstellungen > Weitere Einstellungen > Sicherung auf Proton Drive“.</string>
+    <string name="whats_new_260_autosave_title">Automatische Sicherung</string>
+    <string name="whats_new_260_autosave_body">Schalte „Automatische Sicherung“ ein, dann bleibt die Drive-Kopie im Hintergrund aktuell, wenige Minuten nach jeder Änderung, und auf deinen anderen Geräten gleich. „Jetzt sichern“ speichert sofort.</string>
     <string name="whats_new_260_worldmap_title">Eine reichere Weltkarte</string>
     <string name="whats_new_260_worldmap_body">Die Weltkarte zeichnet jetzt Länder- und Provinzgrenzen, färbt die Provinz ein, in der du fotografiert hast, nennt beim Hineinzoomen die Orte und zeigt dieselben Pins wie die klassische Karte. Sie öffnet sich über Europa, und beim Verschieben und Zoomen bleibt der Punkt unter deinen Fingern an seinem Platz.</string>
     <string name="whats_new_260_time_title">Zeitformat</string>

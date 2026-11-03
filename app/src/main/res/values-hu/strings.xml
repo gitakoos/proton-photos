@@ -2469,6 +2469,7 @@
     <string name="label_rename_save">Mentés</string>
     <string name="label_rename_merge">Összevonás</string>
     <string name="label_delete_action">Címke törlése</string>
+    <string name="label_delete_unused_title">Törlöd ezt a címkét?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Eltávolítod ezt a címkét %d fotóról?</item>
         <item quantity="other">Eltávolítod ezt a címkét %d fotóról?</item>
@@ -2509,7 +2510,7 @@
     <string name="compression_unavailable_fallback">A(z) %1$s nem érhető el ezen a telefonon, ezért a videók %2$s kodeket használnak.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Fotócímkék</string>
-    <string name="whats_new_260_labels_body">Nyiss meg egy fotót, koppints a(z) „Részletek” gombra, és a „Címkék” mezőben adj hozzá legfeljebb öt címkét, vagy jelölj ki több fotót, és válaszd a(z) „Címkék hozzáadása” lehetőséget. A keresés a címkék alapján találja meg a fotókat. A címkéket átnevezheted, összevonhatod és törölheted, valamint mentheted Drive-ra vagy visszaállíthatod: „Beállítások > További beállítások > Címkék”.</string>
+    <string name="whats_new_260_labels_body">Nyiss meg egy fotót, koppints a(z) „Részletek” gombra, és a „Címkék” mezőben adj hozzá legfeljebb öt címkét, vagy jelölj ki több fotót, és válaszd a(z) „Címkék hozzáadása” lehetőséget. A keresés a címkék alapján találja meg a fotókat. A címkéket átnevezheted, összevonhatod és törölheted itt: „Beállítások > További beállítások > Címkék”.</string>
     <string name="whats_new_260_compress_title">Videótömörítés</string>
     <string name="whats_new_260_compress_body">Kapcsold be a(z) „Videók tömörítése” beállítást itt: „Beállítások > Biztonsági mentés és tárhely > Mentési beállítások > Minőség és méret”, majd válaszd ki a kodeket és a minőséget. Az alapértelmezett a H.264, amely mindenhol lejátszható. A feltöltés mutatja az előrehaladást és a megtakarított helyet, a fotók pedig tovább töltődnek fel, amíg egy videó tömörítése folyik.</string>
     <string name="whats_new_260_vault_title">Rejtett fotók kijelentkezéskor</string>
@@ -2533,9 +2534,9 @@
     <string name="whats_new_260_frame_title">Keret eszköz</string>
     <string name="whats_new_260_frame_body">A fotószerkesztőben helyezz egy fotót más alakú vászonra, például 1:1, 9:16 vagy Polaroid, színnel vagy lágy elmosással kitöltve. Az eszköz még fejlesztés alatt áll, további fejlesztések érkeznek.</string>
     <string name="whats_new_260_drive_title">Arc- és keresési adatok a Drive-on</string>
-    <string name="whats_new_260_drive_body">Mentsd az arcnevek és a keresési adatok másolatát Drive-ra, és állítsd vissza egy másik telefonon, a visszatérő elemeket kiválasztva, itt: „Beállítások > További beállítások > Gépi tanulás”.</string>
-    <string name="whats_new_260_autosave_title">Automatikus mentés a Drive-ra</string>
-    <string name="whats_new_260_autosave_body">Kapcsold be a(z) „Automatikus mentés” kapcsolót az arc- és keresési adatok vagy a címkék Drive-másolatánál, és a másolat a háttérben naprakész marad: változás után, naponta vagy hetente. Itt találod: „Beállítások > További beállítások”, a(z) „Gépi tanulás” és a(z) „Címkék” részben.</string>
+    <string name="whats_new_260_drive_body">Mentsd az arcneveket, a keresési adatokat, a címkéket és a rejtett elemeket a Drive-ra, és egy másik telefonon hozd vissza őket a(z) „Betöltés a Drive-ról” gombbal, itt: „Beállítások > További beállítások > Mentés a Proton Drive-ra”.</string>
+    <string name="whats_new_260_autosave_title">Automatikus mentés</string>
+    <string name="whats_new_260_autosave_body">Kapcsold be az „Automatikus mentés” kapcsolót, és a Drive-másolat a háttérben naprakész marad, minden változás után pár perccel, a többi eszközödön pedig ugyanaz lesz. A(z) „Mentés most” azonnal ment.</string>
     <string name="whats_new_260_worldmap_title">Gazdagabb világtérkép</string>
     <string name="whats_new_260_worldmap_body">A világtérkép már az országok és tartományok határait is rajzolja, kiszínezi azt a tartományt, ahol fotóztál, nagyításkor kiírja a helyek nevét, és ugyanazokat a tűket mutatja, mint a klasszikus térkép. Európa felett nyílik meg, mozgatáskor és csippentéskor pedig az ujjaid alatti pont a helyén marad.</string>
     <string name="whats_new_260_time_title">Időformátum</string>

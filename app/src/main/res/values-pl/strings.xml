@@ -2598,6 +2598,7 @@
     <string name="label_rename_save">Zapisz</string>
     <string name="label_rename_merge">Scal</string>
     <string name="label_delete_action">Usuń etykietę</string>
+    <string name="label_delete_unused_title">Usunąć tę etykietę?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Usunąć tę etykietę z %d zdjęcia?</item>
         <item quantity="few">Usunąć tę etykietę z %d zdjęć?</item>
@@ -2640,7 +2641,7 @@
     <string name="compression_unavailable_fallback">%1$s nie jest dostępny na tym telefonie, więc filmy używają %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Etykiety zdjęć</string>
-    <string name="whats_new_260_labels_body">Otwórz zdjęcie, dotknij „Szczegóły” i dodaj do pięciu etykiet w polu „Etykiety”, albo zaznacz kilka zdjęć i wybierz „Dodaj etykiety”. Wyszukiwanie znajduje zdjęcia po etykietach. Etykiety można zmieniać, scalać i usuwać oraz zapisywać w kopii na Drive lub przywracać w „Ustawienia > Więcej ustawień > Etykiety”.</string>
+    <string name="whats_new_260_labels_body">Otwórz zdjęcie, dotknij „Szczegóły” i dodaj do pięciu etykiet w polu „Etykiety”, albo zaznacz kilka zdjęć i wybierz „Dodaj etykiety”. Wyszukiwanie znajduje zdjęcia po etykietach. Etykiety można zmieniać, scalać i usuwać w „Ustawienia > Więcej ustawień > Etykiety”.</string>
     <string name="whats_new_260_compress_title">Kompresja wideo</string>
     <string name="whats_new_260_compress_body">Włącz „Kompresuj filmy” w „Ustawienia > Kopia zapasowa i pamięć > Ustawienia kopii zapasowej > Jakość i rozmiar”, a potem wybierz kodek i jakość. Domyślny jest H.264, który odtwarza się wszędzie. Wysyłanie pokazuje postęp i zaoszczędzone miejsce, a zdjęcia są wysyłane dalej, gdy wideo jest kompresowane.</string>
     <string name="whats_new_260_vault_title">Ukryte zdjęcia przy wylogowaniu</string>
@@ -2664,9 +2665,9 @@
     <string name="whats_new_260_frame_title">Narzędzie Ramka</string>
     <string name="whats_new_260_frame_body">W edytorze zdjęć umieść zdjęcie na płótnie o innym kształcie, takim jak 1:1, 9:16 lub Polaroid, wypełnionym kolorem lub miękkim rozmyciem. Narzędzie jest wciąż rozwijane i pojawią się kolejne usprawnienia.</string>
     <string name="whats_new_260_drive_title">Dane twarzy i wyszukiwania na Drive</string>
-    <string name="whats_new_260_drive_body">Zapisz nazwy twarzy i dane wyszukiwania na Drive i przywróć je na innym telefonie, wybierając, co wróci, w „Ustawienia > Więcej ustawień > Uczenie maszynowe”.</string>
-    <string name="whats_new_260_autosave_title">Automatyczny zapis na Drive</string>
-    <string name="whats_new_260_autosave_body">Włącz „Zapisuj automatycznie” przy kopii na Drive danych twarzy i wyszukiwania albo etykiet, a kopia będzie aktualizowana w tle: po zmianach, codziennie lub co tydzień. Znajdziesz je w „Ustawienia > Więcej ustawień”, w sekcjach „Uczenie maszynowe” i „Etykiety”.</string>
+    <string name="whats_new_260_drive_body">Zapisz nazwy twarzy, dane wyszukiwania, etykiety i ukryte elementy na Drive i przywróć je na innym telefonie przyciskiem „Wczytaj z Drive”, w „Ustawienia > Więcej ustawień > Kopia na Proton Drive”.</string>
+    <string name="whats_new_260_autosave_title">Automatyczna kopia</string>
+    <string name="whats_new_260_autosave_body">Włącz „Automatyczna kopia”, a kopia na Drive będzie aktualizowana w tle, kilka minut po każdej zmianie, i taka sama na Twoich innych urządzeniach. „Utwórz kopię teraz” zapisuje od razu.</string>
     <string name="whats_new_260_worldmap_title">Bogatsza mapa świata</string>
     <string name="whats_new_260_worldmap_body">Mapa świata rysuje teraz granice państw i prowincji, zabarwia prowincję, w której robiono zdjęcia, nazywa miejsca przy powiększaniu i pokazuje te same pinezki co klasyczna mapa. Otwiera się nad Europą, a przy przesuwaniu i szczypaniu punkt pod palcami pozostaje na miejscu.</string>
     <string name="whats_new_260_time_title">Format czasu</string>

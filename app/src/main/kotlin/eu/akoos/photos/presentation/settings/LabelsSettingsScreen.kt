@@ -317,7 +317,11 @@ fun LabelsSettingsScreen(
 
     deleting?.let { usage ->
         ConfirmDialog(
-            title = pluralStringResource(R.plurals.label_delete_confirm_title, usage.count, usage.count),
+            title = if (usage.count == 0) {
+                stringResource(R.string.label_delete_unused_title)
+            } else {
+                pluralStringResource(R.plurals.label_delete_confirm_title, usage.count, usage.count)
+            },
             message = null,
             confirmLabel = stringResource(R.string.label_delete_confirm),
             dismissLabel = stringResource(R.string.cancel),
