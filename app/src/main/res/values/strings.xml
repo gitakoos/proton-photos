@@ -1147,7 +1147,7 @@
     <string name="map_style_modern_summary">A modern globe you can spin to your places.</string>
     <string name="settings_amoled_black">Pure black (AMOLED)</string>
     <string name="settings_liquid_glass">Liquid glass</string>
-    <string name="settings_liquid_glass_desc">Menus, page headers, drawers and the photo viewer\'s controls blur what is under them</string>
+    <string name="settings_liquid_glass_desc">Menus, page headers, drawers and the photo viewer\'s controls blur what is under them. Still in progress, not on every screen yet</string>
     <string name="settings_tint_cloud">Accent-tinted cloud badges</string>
 
     <!-- Language -->

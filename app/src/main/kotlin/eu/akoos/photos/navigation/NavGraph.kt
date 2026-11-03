@@ -80,6 +80,7 @@ import eu.akoos.photos.data.preferences.setContinueWithoutAccount
 import eu.akoos.photos.data.repository.drive.ThumbnailDecryptScheduler
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
 import eu.akoos.photos.presentation.common.LocalViewerReturnKey
+import eu.akoos.photos.presentation.common.ViewerReturnTarget
 import eu.akoos.photos.presentation.common.resolve
 import eu.akoos.photos.presentation.common.MapStyleChooserDialog
 import eu.akoos.photos.presentation.gallery.LocalCoverThumbnailRequester
@@ -449,7 +450,7 @@ fun NavGraph(
     // The return leg of the line above: the photo the viewer closed on, for the grid underneath to
     // land on. Held as the State itself rather than a delegate because it is handed down through
     // [LocalViewerReturnKey], which every photo grid reads and clears once it has acted.
-    val viewerReturnKey = remember { mutableStateOf<String?>(null) }
+    val viewerReturnKey = remember { mutableStateOf<ViewerReturnTarget?>(null) }
     // Cloud linkIds whose local-side photo is in the Hidden vault — captured from the
     // gallery state at viewer-open time so the viewer can blur + label them too. Without
     // this, opening a hidden cloud counterpart from the photos page showed the un-blurred
@@ -1167,7 +1168,9 @@ fun NavGraph(
                     viewerTrashMode = false
                     // The same resets on this entry's own copy, which is what the leaving viewer reads.
                     inputsHolder.close()
-                    viewerReturnKey.value = settledKey
+                    viewerReturnKey.value = settledKey?.let {
+                        ViewerReturnTarget(it, navController.previousBackStackEntry?.id)
+                    }
                     leaveOverlayScreen()
                 },
                 sourceAlbumLinkId = sourceAlbumLinkId,

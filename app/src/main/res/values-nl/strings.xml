@@ -592,7 +592,7 @@
     <string name="map_style_modern_summary">Een moderne globe die je naar je plekken kunt draaien.</string>
     <string name="settings_amoled_black">Puur zwart (AMOLED)</string>
     <string name="settings_liquid_glass">Vloeibaar glas</string>
-    <string name="settings_liquid_glass_desc">Menu\'s, paginakoppen, panelen en de knoppen van de fotoviewer vervagen wat eronder ligt</string>
+    <string name="settings_liquid_glass_desc">Menu\'s, paginakoppen, panelen en de knoppen van de fotoviewer vervagen wat eronder ligt. Nog in ontwikkeling, nog niet op elk scherm</string>
     <string name="settings_tint_cloud">Cloudbadges in accentkleur</string>
     <string name="settings_gif_autoplay_grid">Gifs afspelen in rasters</string>
     <string name="settings_gif_autoplay_covers">Gif-albumhoezen afspelen</string>

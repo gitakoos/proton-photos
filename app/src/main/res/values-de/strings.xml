@@ -543,7 +543,7 @@
     <string name="map_style_modern_summary">Ein moderner Globus, den du zu deinen Orten drehen kannst.</string>
     <string name="settings_amoled_black">Reines Schwarz (AMOLED)</string>
     <string name="settings_liquid_glass">Liquid Glass</string>
-    <string name="settings_liquid_glass_desc">Menüs, Seitenköpfe, Leisten und die Bedienelemente der Fotoansicht zeichnen den Inhalt darunter weich</string>
+    <string name="settings_liquid_glass_desc">Menüs, Seitenköpfe, Leisten und die Bedienelemente der Fotoansicht zeichnen den Inhalt darunter weich. Noch in Arbeit, noch nicht auf jedem Bildschirm</string>
     <string name="settings_tint_cloud">Cloud-Symbole in Akzentfarbe</string>
     <string name="settings_gif_autoplay_grid">GIFs in Rastern abspielen</string>
     <string name="settings_gif_autoplay_covers">GIF-Albumcover abspielen</string>

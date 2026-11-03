@@ -29,6 +29,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.navigation.NavBackStackEntry
+
+/** The photo the fullscreen viewer closed on, and the back-stack entry of the page that opened it. */
+data class ViewerReturnTarget(val photoKey: String, val openerEntryId: String?)
 
 /**
  * The photo the fullscreen viewer was showing when it closed, published for the grid underneath to
@@ -36,10 +41,18 @@ import androidx.compose.runtime.mutableStateOf
  *
  * Set only when the user actually paged somewhere: a viewer closed on the photo it opened leaves
  * the grid where it already restored itself, and moving it would drag that row to the top for
- * nothing. Cleared by the first grid that acts on it, so a later visit does not reposition someone
- * who has since scrolled away.
+ * nothing. Only the page that opened the viewer acts on it, and clears it once it has, so a later
+ * visit does not reposition someone who has since scrolled away. A page that lists the photo but
+ * did not open the viewer, the timeline under a memory or a person, stays where it was.
  */
-val LocalViewerReturnKey = compositionLocalOf { mutableStateOf<String?>(null) }
+val LocalViewerReturnKey = compositionLocalOf { mutableStateOf<ViewerReturnTarget?>(null) }
+
+/**
+ * Whether the page in [hereEntryId] is the one the viewer returns to. An unknown entry on either side
+ * counts as a match, so a grid shown outside the navigation graph still lands.
+ */
+internal fun returnsHere(openerEntryId: String?, hereEntryId: String?): Boolean =
+    openerEntryId == null || hereEntryId == null || openerEntryId == hereEntryId
 
 /**
  * Position of the photo [key] identifies among a lazy grid's own items, or -1 when this grid does
@@ -116,14 +129,17 @@ fun <T> ReturnToViewerPhoto(
 
 @Composable
 private fun <T> ReturnToViewerPhoto(
-    pending: MutableState<String?>,
+    pending: MutableState<ViewerReturnTarget?>,
     groups: List<List<T>>,
     headerPerGroup: Boolean,
     leadingSlots: Int,
     keyOf: (T) -> String,
     scrollToSlot: suspend (Int) -> Unit,
 ) {
-    val key = pending.value ?: return
+    val target = pending.value ?: return
+    val hereEntryId = (LocalViewModelStoreOwner.current as? NavBackStackEntry)?.id
+    if (!returnsHere(target.openerEntryId, hereEntryId)) return
+    val key = target.photoKey
     val photoCount = groups.sumOf { it.size }
     // Keyed on the count as well as the request: navigating back re-runs the screen's load, so the
     // photos can arrive a frame or two late and the first attempt would search an empty grid.
