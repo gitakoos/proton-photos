@@ -41,8 +41,8 @@ import org.robolectric.annotation.Config
 
 /**
  * The viewer's on-demand face search must never re-detect a photo whose faces the user already curated:
- * a removed face or one left ungrouped hides from the "people in this photo" bar, yet the photo holds face
- * rows, so a forced scan would overwrite them. Only a photo with no face row at all may be searched.
+ * a removed face hides from the "people in this photo" bar and one left ungrouped shows there as a face of
+ * its own, and either way the photo holds face rows, so a forced scan would overwrite them. Only a photo with no face row at all may be searched.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -72,15 +72,17 @@ class ViewerFaceSearchGuardDbTest {
     fun `a removed face blocks the search`() = runTest {
         db.faceDao().upsert(face(USER, PHOTO, personId = null, rejected = true))
 
-        assertTrue(db.faceDao().groupedFacesForPhoto(USER, PHOTO).isEmpty())
+        assertTrue(db.faceDao().keptFacesForPhoto(USER, PHOTO).isEmpty())
         assertFalse(viewerMayDetectFaces(db.faceDao(), USER, PHOTO))
     }
 
     @Test
-    fun `an ungrouped face blocks the search`() = runTest {
+    fun `an ungrouped face blocks the search and still shows`() = runTest {
         db.faceDao().upsert(face(USER, PHOTO, personId = null))
 
-        assertTrue(db.faceDao().groupedFacesForPhoto(USER, PHOTO).isEmpty())
+        // A face just taken off a person is ungrouped, and the bar lists it so it can be named again.
+        assertTrue(db.faceDao().keptFacesForPhoto(USER, PHOTO).single().personId == null)
+        assertTrue(isLoneFace(personId = null, otherId = 9L))
         assertFalse(viewerMayDetectFaces(db.faceDao(), USER, PHOTO))
     }
 
@@ -112,6 +114,13 @@ class ViewerFaceSearchGuardDbTest {
         db.faceDao().upsert(face(GUEST, PHOTO, personId = null, rejected = true))
 
         assertFalse(viewerMayDetectFaces(db.faceDao(), GUEST, PHOTO))
+    }
+
+    @Test
+    fun `a grouped face is a person chip, an Unsorted or unplaced one a lone face`() {
+        assertFalse(isLoneFace(personId = 3L, otherId = 9L))
+        assertTrue(isLoneFace(personId = 9L, otherId = 9L))
+        assertTrue(isLoneFace(personId = null, otherId = null))
     }
 
     private companion object {

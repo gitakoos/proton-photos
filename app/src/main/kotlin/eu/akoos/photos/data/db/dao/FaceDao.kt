@@ -245,13 +245,14 @@ interface FaceDao {
     @Query("SELECT * FROM face WHERE id = :id LIMIT 1")
     suspend fun faceById(id: String): FaceEntity?
 
-    /** The grouped faces on one photo (assigned to a person, not removed), clearest first, for the
-     *  viewer's "people in this photo" bar. */
+    /** The kept faces on one photo (not removed), grouped or not, clearest first, for the viewer's
+     *  "people in this photo" bar. A face just taken off a person is ungrouped until the next grouping and
+     *  still has to show, so it can be named again. */
     @Query(
         "SELECT * FROM face WHERE userId = :userId AND photoKey = :photoKey " +
-            "AND rejected = 0 AND personId IS NOT NULL ORDER BY score DESC",
+            "AND rejected = 0 ORDER BY score DESC",
     )
-    suspend fun groupedFacesForPhoto(userId: String, photoKey: String): List<FaceEntity>
+    suspend fun keptFacesForPhoto(userId: String, photoKey: String): List<FaceEntity>
 
     /** Every kept face on the given photos, grouped or not (an ungrouped face has a null personId), so
      *  adding photos to a person can offer the faces clustering has not placed yet. Clearest first within

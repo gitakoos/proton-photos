@@ -215,6 +215,15 @@ internal suspend fun viewerMayDetectFaces(
     photoKey: String,
 ): Boolean = faceDao.facePhotoKeysIn(account, listOf(photoKey)).isEmpty()
 
+/**
+ * Whether a face with [personId] is shown as a chip of its own, named on its own: one in the Unsorted bucket
+ * ([otherId]), or one no grouping has placed yet, such as a face just taken off a person.
+ */
+internal fun isLoneFace(personId: Long?, otherId: Long?): Boolean = personId == null || personId == otherId
+
+/** The person id a lone face's chip carries when there is no Unsorted bucket yet; never looked up. */
+private const val NO_PERSON = -1L
+
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -803,7 +812,7 @@ class PhotoViewerViewModel @Inject constructor(
     ): List<ViewerPerson> {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val photoKey = item.stableId
-        var faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
+        var faces = runCatching { faceDao.keptFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         if (faces.isEmpty() && detectIfEmpty) {
             val scanned = try {
                 viewerMayDetectFaces(faceDao, account, photoKey) &&
@@ -813,14 +822,14 @@ class PhotoViewerViewModel @Inject constructor(
             } catch (e: Throwable) {
                 false
             }
-            if (scanned) faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
+            if (scanned) faces = runCatching { faceDao.keptFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         }
         val otherId = personDao.otherPersonId(account)
         val result = ArrayList<ViewerPerson>()
         val seenPerson = HashSet<Long>()
         for (f in faces) {
-            val pid = f.personId ?: continue
-            val isOther = pid == otherId
+            val isOther = isLoneFace(f.personId, otherId)
+            val pid = f.personId ?: otherId ?: NO_PERSON
             // One chip per named or unnamed-cluster person, but one chip PER FACE for the Unsorted bucket,
             // so every leftover face on the photo can be named on its own instead of all collapsing into the
             // single grab-bag bucket (which is what left them unnameable from here).
