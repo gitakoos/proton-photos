@@ -181,6 +181,8 @@ fun DeviceFolderDetailScreen(
     if (fromVault) SecureScreenEffect()
 
     val items by viewModel.items.collectAsStateWithLifecycle()
+    // The name shown follows a rename made on this screen; the one opened with until the folder loads.
+    val folderName = viewModel.folderName.collectAsStateWithLifecycle().value.ifEmpty { bucketName }
     val selectedUris by viewModel.selectedUris.collectAsStateWithLifecycle()
     // The folder's vaulted photos. They sit in the grid with the rest, but nothing that needs a device
     // file is offered on them — they are revealed instead.
@@ -527,7 +529,7 @@ fun DeviceFolderDetailScreen(
                 Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
                 eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
                     coverModel = coverModel,
-                    title = bucketName,
+                    title = folderName,
                     photoCountText = countLabel,
                     titleActions = {
                         // One control at rest, like the cloud album's. Backing up, mirroring as an
@@ -725,7 +727,7 @@ fun DeviceFolderDetailScreen(
         StickyAlbumHeader(
             backdrop = glass,
             visible = stickyShown,
-            title = bucketName,
+            title = folderName,
             onBack = { if (folderVault != null) viewModel.cancelFolderVault() else onBack() },
             modifier = Modifier.align(Alignment.TopCenter),
             trailing = {
@@ -1285,10 +1287,10 @@ fun DeviceFolderDetailScreen(
         EditFieldSheet(
             title = stringResource(R.string.folder_rename),
             hint = stringResource(R.string.albums_create_album_hint),
-            initialValue = bucketName,
+            initialValue = folderName,
             singleLine = true,
             confirmLabel = stringResource(R.string.album_rename_confirm),
-            canConfirm = { AlbumRenameInput.isAcceptable(it, bucketName) },
+            canConfirm = { AlbumRenameInput.isAcceptable(it, folderName) },
             onDismiss = { showRenameSheet = false },
             onSave = { entered ->
                 showRenameSheet = false

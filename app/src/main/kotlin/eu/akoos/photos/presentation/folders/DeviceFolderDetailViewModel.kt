@@ -239,6 +239,9 @@ class DeviceFolderDetailViewModel @Inject constructor(
     /** The folder this screen is showing, as a flow so the per-folder preference states can key on it. */
     private val bucketName = MutableStateFlow("")
 
+    /** The folder's name as it is now: the one it was opened with until a rename moves it. */
+    val folderName: StateFlow<String> = bucketName.asStateFlow()
+
     /**
      * True where this screen was opened from the vault's card for the folder rather than from the
      * Albums grid's, which is what decides everything the two sides disagree on: the photo list, and
