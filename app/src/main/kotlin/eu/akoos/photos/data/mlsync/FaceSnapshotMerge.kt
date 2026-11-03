@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.mlsync
 
+import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
@@ -172,6 +173,30 @@ internal fun mergeFaceCuration(local: LocalFaceCuration, snapshot: SnapshotFaceC
  * every install, and a name given here after it (often a new person under a freed name) stays.
  */
 internal fun nameChangeApplies(heldNamedAt: Long, changedAt: Long): Boolean = changedAt > heldNamedAt
+
+/**
+ * The name the person once called [from] goes by here, following the renames kept here ([changes], oldest first)
+ * made before [before], or [from] itself while [held] says someone holds it; null when the trail ends at no one.
+ * Two installs that each renamed one person away from the same name leave [from] held nowhere, and the later
+ * rename has to find the person under the name the earlier one gave it.
+ */
+internal fun nameHeldNow(
+    from: String,
+    before: Long,
+    changes: List<PersonNameChangeEntity>,
+    held: (String) -> Boolean,
+): String? {
+    var current = from
+    repeat(MAX_NAME_HOPS) {
+        if (held(current)) return current
+        val next = changes.lastOrNull { it.fromName == current && it.toName.isNotEmpty() && it.changedAt < before }
+            ?: return null
+        current = next.toName
+    }
+    return null
+}
+
+private const val MAX_NAME_HOPS = 20
 
 /**
  * Whether a setting or removal of one piece of curation stamped [changedAt] (an attached photo, a "not this person"

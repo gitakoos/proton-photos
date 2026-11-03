@@ -33,6 +33,7 @@ import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
 import eu.akoos.photos.data.db.entity.PersonNameStateEntity
 import eu.akoos.photos.data.face.FaceReattachData
+import eu.akoos.photos.data.face.PersonNameLog
 import eu.akoos.photos.data.face.ReattachBox
 import eu.akoos.photos.domain.usecase.ReattachFace
 import eu.akoos.photos.domain.usecase.ReattachLabel
@@ -288,9 +289,12 @@ internal class FaceSnapshotApplier(
         val to = snapshotName(change.toName) ?: return
         if (from == to) return
         val at = change.changedAtMillis
-        val fromId = personIdByName[from]
-        if (merge && fromId != null && nameChangeApplies(namedAt[from] ?: 0L, at)) renameHere(fromId, from, to)
-        nameDao.addChange(PersonNameChangeEntity(account, from, to, at))
+        val heldFrom = heldName(from, at)
+        val fromId = heldFrom?.let { personIdByName[it] }
+        if (merge && fromId != null && heldFrom != to && nameChangeApplies(namedAt[heldFrom] ?: 0L, at)) {
+            renameHere(fromId, heldFrom, to)
+        }
+        addChange(PersonNameChangeEntity(account, from, to, at))
         if ((namedAt[from] ?: 0L) <= at && from !in personIdByName) {
             namedAt.remove(from)
             nameDao.deleteState(account, from)
@@ -304,19 +308,39 @@ internal class FaceSnapshotApplier(
     /** Takes the name [from] off the person holding it here, as a name taken off here does, when that came later
      *  than the name was given here; the person stays, unnamed. */
     private suspend fun onNameRemoved(from: String, at: Long) {
-        val fromId = personIdByName[from]
-        if (merge && fromId != null && nameChangeApplies(namedAt[from] ?: 0L, at)) {
+        val heldFrom = heldName(from, at)
+        val fromId = heldFrom?.let { personIdByName[it] }
+        if (merge && fromId != null && nameChangeApplies(namedAt[heldFrom] ?: 0L, at)) {
             val faceIds = faceDao.faceIdsForPerson(account, fromId)
             personDao.updateName(fromId, null)
             if (faceIds.isNotEmpty()) faceDao.clearManualNameByIds(faceIds)
-            personIdByName.remove(from)
+            personIdByName.remove(heldFrom)
             nameByPersonId.remove(fromId)
             touchedPeople += fromId
         }
-        nameDao.addChange(PersonNameChangeEntity(account, from, "", at))
+        addChange(PersonNameChangeEntity(account, from, "", at))
         if ((namedAt[from] ?: 0L) <= at && from !in personIdByName) {
             namedAt.remove(from)
             nameDao.deleteState(account, from)
+        }
+    }
+
+    /** The renames and merges kept here, oldest first, with the ones this copy brought in added as they come. */
+    private var keptChanges: MutableList<PersonNameChangeEntity>? = null
+
+    private suspend fun keptChanges(): MutableList<PersonNameChangeEntity> =
+        keptChanges ?: nameDao.recentChanges(account, PersonNameLog.MAX_CHANGES).toMutableList().also { keptChanges = it }
+
+    /** The name the person called [from] goes by here ([nameHeldNow]), the renames made here before [at] followed. */
+    private suspend fun heldName(from: String, at: Long): String? =
+        if (from in personIdByName) from else nameHeldNow(from, at, keptChanges()) { it in personIdByName }
+
+    private suspend fun addChange(change: PersonNameChangeEntity) {
+        nameDao.addChange(change)
+        val kept = keptChanges()
+        if (change !in kept) {
+            kept += change
+            kept.sortBy { it.changedAt }
         }
     }
 
