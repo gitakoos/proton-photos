@@ -233,7 +233,7 @@
     <string name="editor_tool_redact">Redact</string>
     <string name="editor_tool_draw">Draw</string>
     <string name="editor_draw_width">Width</string>
-    <string name="editor_tool_color">Color</string>
+    <string name="editor_tool_color">Colour</string>
     <string name="editor_color_curves">Curves</string>
     <string name="editor_color_hsl">HSL</string>
     <string name="editor_hsl_hue">Hue</string>
@@ -2395,7 +2395,7 @@
     <string name="whats_new_bgdownloads_title">Downloads keep running</string>
     <string name="whats_new_bgdownloads_body">AI model downloads continue in the background with a progress notification, so leaving Settings no longer stops them.</string>
     <string name="whats_new_videoeditor_title">Multi-clip video editor</string>
-    <string name="whats_new_videoeditor_body">The video editor is now a timeline. Add clips, trim, reorder and delete them, layer music, tune color and light, and export it all as one video.</string>
+    <string name="whats_new_videoeditor_body">The video editor is now a timeline. Add clips, trim, reorder and delete them, layer music, tune colour and light, and export it all as one video.</string>
     <string name="whats_new_movetoalbum_title">Move to album</string>
     <string name="whats_new_movetoalbum_body">Move selected photos from one album straight into another.</string>
     <string name="whats_new_indexsettle_title">Indexing no longer looks stuck</string>
@@ -2462,7 +2462,7 @@
     <string name="collage_discard">Discard collage?</string>
     <string name="collage_discard_msg">Your collage won\'t be saved.</string>
     <string name="collage_discard_confirm">Discard</string>
-    <string name="collage_bg_color">Color</string>
+    <string name="collage_bg_color">Colour</string>
     <string name="collage_bg_blur">Blur</string>
     <string name="collage_drop_remove">Release to remove from the collage</string>
     <string name="collage_trim_for_grid">Remove %1$d to switch to a grid layout</string>
