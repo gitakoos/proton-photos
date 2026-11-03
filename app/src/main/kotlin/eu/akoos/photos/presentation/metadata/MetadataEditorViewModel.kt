@@ -248,6 +248,37 @@ internal fun staleLocationIds(items: List<GalleryItem>, savedUris: Set<String>):
     }.distinct()
 
 /**
+ * The date edits in [captureMsByUri] whose file keeps the date only in a capture-date override: a device-only
+ * photo among [items] whose container cannot hold it ([WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn]),
+ * and not vaulted ([isHidden]), since a vaulted photo keeps its date in its file name. Pure.
+ */
+internal fun columnOnlyDateEdits(
+    items: List<GalleryItem>,
+    captureMsByUri: Map<String, Long>,
+    isHidden: (String) -> Boolean,
+): Map<String, Long> {
+    val columnOnlyUris = items.filterIsInstance<GalleryItem.LocalOnly>()
+        .filter { WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn(it.local.mimeType) }
+        .mapTo(HashSet()) { it.local.uri }
+    return captureMsByUri.filterKeys { it in columnOnlyUris && !isHidden(it) }
+}
+
+/**
+ * The capture-date overrides after a date edit: the [columnOnly] files get an entry carrying their
+ * [modifiedByUri] time even when they had none, the rest of [captureMsByUri] only move an entry they already
+ * have. Pure.
+ */
+internal fun dateOverridesAfterEdit(
+    current: Set<String>,
+    captureMsByUri: Map<String, Long>,
+    columnOnly: Map<String, Long>,
+    modifiedByUri: Map<String, Long?>,
+): Set<String> {
+    val next = CaptureDateOverride.retarget(current, captureMsByUri - columnOnly.keys) ?: current
+    return CaptureDateOverride.upsert(next, columnOnly, modifiedByUri) ?: next
+}
+
+/**
  * Backs the metadata editor for one photo or a whole multi-select: it exposes the capture date and
  * place on the same basis the timeline shows, plus the descriptive text tags read from the file. Device
  * photos take edits in place through [WriteLocalPhotoMetadataUseCase]; a cloud-only IMAGE takes a date
@@ -1047,16 +1078,12 @@ class MetadataEditorViewModel @Inject constructor(
         if (captureMsByUri.isEmpty()) return
         // A file whose container cannot hold the date keeps it only in the override, so it gets an entry
         // even when it had none; the rest only move an entry they already have.
-        val columnOnlyUris = boundItems.filterIsInstance<GalleryItem.LocalOnly>()
-            .filter { WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn(it.local.mimeType) }
-            .mapTo(HashSet()) { it.local.uri }
-        val columnOnly = captureMsByUri.filterKeys { it in columnOnlyUris && !hiddenStorage.isHiddenUri(it) }
+        val columnOnly = columnOnlyDateEdits(boundItems, captureMsByUri) { hiddenStorage.isHiddenUri(it) }
         val modifiedByUri = columnOnly.keys.associateWith { localMediaRepository.queryByUri(it)?.dateModified }
         runCatching {
             context.settingsDataStore.edit { prefs ->
                 val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
-                var next = CaptureDateOverride.retarget(current, captureMsByUri - columnOnly.keys) ?: current
-                next = CaptureDateOverride.upsert(next, columnOnly, modifiedByUri) ?: next
+                val next = dateOverridesAfterEdit(current, captureMsByUri, columnOnly, modifiedByUri)
                 if (next != current) prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = next
             }
         }

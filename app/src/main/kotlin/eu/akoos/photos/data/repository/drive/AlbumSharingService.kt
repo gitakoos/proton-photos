@@ -2041,26 +2041,17 @@ class AlbumSharingService @Inject constructor(
         if (ids.isEmpty()) return@withContext SaveSharedPhotosResult(0, 0, 0)
         val prep = prepareOwnLibraryCopy(userId, sharingShareId, sourceAlbumLinkId)
         val details = linkDetailHelpers.batchFetchLinkDetailsViaShare(userId, sharingShareId, ids)
-        val held = runCatching {
-            val hashes = ids.mapNotNull { linkId ->
-                val d = details[linkId]
-                d?.photo?.contentHash ?: d?.link?.fileProperties?.activeRevision?.photo?.contentHash
-            }
-            if (hashes.isEmpty()) emptySet() else hashes
-                .chunked(500)
-                .flatMap { photoListingDao.findExistingContentHashes(userId.id, it) }
-                .toSet()
-        }.getOrElse { e ->
-            Log.w(TAG, "saveSharedPhotosToOwnLibrary: duplicate lookup failed (${e.message}), copying everything")
-            emptySet()
+        val contentHashOf = { linkId: String ->
+            val d = details[linkId]
+            d?.photo?.contentHash ?: d?.link?.fileProperties?.activeRevision?.photo?.contentHash
         }
+        val held = sharedPhotosAlreadyHeld(ids, contentHashOf) { photoListingDao.findExistingContentHashes(userId.id, it) }
         var copied = 0
         var failed = 0
         var skipped = 0
         for (linkId in ids) {
             val d = details[linkId]
-            val hash = d?.photo?.contentHash ?: d?.link?.fileProperties?.activeRevision?.photo?.contentHash
-            if (hash != null && hash in held) {
+            if (linkId in held) {
                 skipped++
                 continue
             }
@@ -2276,6 +2267,30 @@ class AlbumSharingService @Inject constructor(
         // server via [GeneratedAlbumShare.nameKeyPacketBase64].
         private const val SHARE_DISPLAY_NAME = "New Share"
     }
+}
+
+/**
+ * The photos among [ids] this library already holds, so saving them from a shared album skips them rather
+ * than copying them twice: the ones whose content hash ([contentHashOf], null when the listing carries none)
+ * [findExistingHashes] finds in the library, asked 500 hashes at a time. A failed lookup holds none, so
+ * everything is copied rather than nothing.
+ */
+internal suspend fun sharedPhotosAlreadyHeld(
+    ids: List<String>,
+    contentHashOf: (String) -> String?,
+    findExistingHashes: suspend (List<String>) -> List<String>,
+): Set<String> {
+    val held = runCatching {
+        val hashes = ids.mapNotNull(contentHashOf)
+        if (hashes.isEmpty()) emptySet() else hashes
+            .chunked(500)
+            .flatMap { findExistingHashes(it) }
+            .toSet()
+    }.getOrElse { e ->
+        Log.w(TAG, "saveSharedPhotosToOwnLibrary: duplicate lookup failed (${e.message}), copying everything")
+        emptySet()
+    }
+    return ids.filterTo(HashSet()) { id -> contentHashOf(id)?.let { it in held } == true }
 }
 
 /**

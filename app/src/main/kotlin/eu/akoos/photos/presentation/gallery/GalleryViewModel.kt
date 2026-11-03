@@ -188,6 +188,49 @@ internal fun syncedCloudIdsOnDevice(sync: SyncStateSnapshot.Rows): Set<String> =
             .toSet()
     }
 
+/**
+ * Runs [wake] only when [userId] has an upload queued: the worker shows its "Checking for new photos"
+ * notification the moment it starts, so waking it with nothing to upload flashed that notification every
+ * time the gallery was entered again (for instance on leaving the search). Returns whether it woke it.
+ */
+internal suspend fun wakeSyncIfUploadQueued(
+    syncStateRepo: SyncStateRepository,
+    userId: me.proton.core.domain.entity.UserId,
+    wake: suspend () -> Unit,
+): Boolean {
+    if (syncStateRepo.countPendingUploads(userId).first() <= 0) return false
+    wake()
+    return true
+}
+
+/**
+ * Holds a back-up's end back for [holdMs]. Between two photos the pipeline reports Done and then the next one
+ * starting, which flipped the back-up pill off and on again for every photo (it vanished and slid back in with
+ * a new count each time). A start reaches [apply] at once and drops a pending end; the end reaches it only
+ * once nothing has started for [holdMs].
+ */
+internal class UploadEndHold(
+    private val scope: kotlinx.coroutines.CoroutineScope,
+    private val holdMs: Long,
+    private val apply: (syncing: Boolean, evt: eu.akoos.photos.domain.usecase.UploadProgress) -> Unit,
+) {
+    private var endJob: Job? = null
+
+    fun onProgress(syncing: Boolean, evt: eu.akoos.photos.domain.usecase.UploadProgress) {
+        if (syncing) {
+            endJob?.cancel()
+            endJob = null
+            apply(true, evt)
+        } else if (endJob == null) {
+            endJob = scope.launch {
+                delay(holdMs)
+                endJob = null
+                apply(false, evt)
+            }
+        }
+    }
+}
+
 @HiltViewModel
 class GalleryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -360,6 +403,9 @@ class GalleryViewModel @Inject constructor(
      *  pass the `if (isSyncing) return` gate before either has set it to true. */
     private val syncInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /** Applies the back-up's progress, its end once no new photo has started for [UPLOAD_END_HOLD_MS]. */
+    private val uploadEndHold = UploadEndHold(viewModelScope, UPLOAD_END_HOLD_MS, ::applyUploadProgress)
+
     init {
         watchRemoteHides()
         // A change of the range regroups the carousel from the library already on screen.
@@ -485,9 +531,6 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** A pending end of the back-up, applied once no new photo has started for [UPLOAD_END_HOLD_MS]. */
-    private var uploadEndJob: Job? = null
-
     private fun observeBackgroundUploadProgress() {
         viewModelScope.launch {
             upload.progress.collect { evt ->
@@ -511,17 +554,7 @@ class GalleryViewModel @Inject constructor(
                 // Between two photos the pipeline reports Done and then the next one starting, which flipped this
                 // off and on again for every photo (the back-up pill vanished and slid back in with a new
                 // count each time). The end is applied only once nothing has started for a moment.
-                if (syncing) {
-                    uploadEndJob?.cancel()
-                    uploadEndJob = null
-                    applyUploadProgress(true, evt)
-                } else if (uploadEndJob == null) {
-                    uploadEndJob = viewModelScope.launch {
-                        delay(UPLOAD_END_HOLD_MS)
-                        uploadEndJob = null
-                        applyUploadProgress(false, evt)
-                    }
-                }
+                uploadEndHold.onProgress(syncing, evt)
             }
         }
     }
@@ -1380,7 +1413,7 @@ class GalleryViewModel @Inject constructor(
                 // when something is queued: the worker shows its "Checking for new photos" notification
                 // the moment it starts, so waking it with nothing to upload flashed that notification
                 // every time the gallery was entered again (for instance on leaving the search).
-                if (syncStateRepo.countPendingUploads(userId).first() > 0) {
+                wakeSyncIfUploadQueued(syncStateRepo, userId) {
                     val wifiOnly = context.settingsDataStore.data
                         .map { it[SettingsKeys.SYNC_WIFI_ONLY] != false }.first()
                     SyncWorker.runNow(context, wifiOnly)
@@ -2889,4 +2922,4 @@ class GalleryViewModel @Inject constructor(
 }
 
 /** How long a back-up that reported its end waits for the next photo before the app treats it as over. */
-private const val UPLOAD_END_HOLD_MS = 2_500L
+internal const val UPLOAD_END_HOLD_MS = 2_500L

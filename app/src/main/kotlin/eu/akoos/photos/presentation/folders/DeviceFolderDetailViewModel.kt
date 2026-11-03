@@ -500,17 +500,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** The pending clearing of [_backupTarget]: armed when a back-up is asked for, replaced once the pipeline idles. */
-    private var targetEndJob: Job? = null
-
-    /** Clears the target after [afterMs] unless a photo starting cancels it first. */
-    private fun armBackupTargetEnd(afterMs: Long) {
-        targetEndJob?.cancel()
-        targetEndJob = viewModelScope.launch {
-            delay(afterMs)
-            targetEndJob = null
-            _backupTarget.value = emptySet()
-        }
-    }
+    private val backupTargetEnd = BackupTargetEnd(viewModelScope, _backupTarget)
 
     init {
         // The back-up can end without every queued photo reaching Synced (stopped from the notification or the
@@ -519,19 +509,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         // left a longer while for the worker to start: the progress replays the idle event of the last run to a
         // screen that has only just opened, and that must not count against a back-up asked for after it.
         viewModelScope.launch {
-            upload.progress.collect { evt ->
-                when (evt.status) {
-                    UploadStatus.Queued, UploadStatus.Compressing, UploadStatus.Encrypting,
-                    UploadStatus.Uploading, UploadStatus.PreparingBackup -> {
-                        targetEndJob?.cancel()
-                        targetEndJob = null
-                    }
-                    UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi -> {
-                        if (targetEndJob == null && _backupTarget.value.isNotEmpty()) armBackupTargetEnd(BACKUP_TARGET_HOLD_MS)
-                    }
-                    UploadStatus.Done -> Unit
-                }
-            }
+            upload.progress.collect { evt -> backupTargetEnd.onStatus(evt.status) }
         }
         viewModelScope.launch { accountManager.getPrimaryUserId().collect { primaryUserId = it } }
         // Drop the progress bar once every queued photo has uploaded.
@@ -781,7 +759,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
             if (toUpload.isNotEmpty()) {
                 _backupTarget.value = toUpload.toSet()
-                armBackupTargetEnd(BACKUP_TARGET_START_MS)
+                backupTargetEnd.arm(BACKUP_TARGET_START_MS)
             }
             val queued = if (toUpload.isNotEmpty()) {
                 forceUploadLocalUris.forceUpload(userId, toUpload)
@@ -866,7 +844,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
             val alreadyBackedUp = allLocal.size - toUpload.size
             if (toUpload.isNotEmpty()) {
                 _backupTarget.value = toUpload.toSet()
-                armBackupTargetEnd(BACKUP_TARGET_START_MS)
+                backupTargetEnd.arm(BACKUP_TARGET_START_MS)
             }
             val queued = if (toUpload.isNotEmpty()) forceUploadLocalUris.forceUpload(userId, toUpload) else 0
             onResult(UploadOutcome(queued = queued, alreadyBackedUp = alreadyBackedUp))
@@ -1489,7 +1467,45 @@ class DeviceFolderDetailViewModel @Inject constructor(
 }
 
 /** How long the pipeline must stay idle before a folder's back-up target is dropped. */
-private const val BACKUP_TARGET_HOLD_MS = 12_000L
+internal const val BACKUP_TARGET_HOLD_MS = 12_000L
 
 /** How long a back-up just asked for may take to show its first photo before its target is dropped. */
-private const val BACKUP_TARGET_START_MS = 90_000L
+internal const val BACKUP_TARGET_START_MS = 90_000L
+
+/**
+ * Clears a folder page's back-up [target] once the back-up is over. The back-up can end without every queued
+ * photo reaching Synced (stopped from the notification or the Activity screen, a failed photo, a full Drive, no
+ * Wi-Fi), so the target is also cleared once the pipeline has been idle for [BACKUP_TARGET_HOLD_MS]; a photo
+ * starting in between keeps it. A target set just now is [arm]ed for longer, and an idle report does not cut
+ * that short: the progress replays the idle event of the last run to a screen that has only just opened.
+ */
+internal class BackupTargetEnd(
+    private val scope: kotlinx.coroutines.CoroutineScope,
+    private val target: MutableStateFlow<Set<String>>,
+) {
+    private var job: Job? = null
+
+    /** Clears the target after [afterMs] unless a photo starting cancels it first. */
+    fun arm(afterMs: Long) {
+        job?.cancel()
+        job = scope.launch {
+            delay(afterMs)
+            job = null
+            target.value = emptySet()
+        }
+    }
+
+    fun onStatus(status: UploadStatus) {
+        when (status) {
+            UploadStatus.Queued, UploadStatus.Compressing, UploadStatus.Encrypting,
+            UploadStatus.Uploading, UploadStatus.PreparingBackup -> {
+                job?.cancel()
+                job = null
+            }
+            UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi -> {
+                if (job == null && target.value.isNotEmpty()) arm(BACKUP_TARGET_HOLD_MS)
+            }
+            UploadStatus.Done -> Unit
+        }
+    }
+}

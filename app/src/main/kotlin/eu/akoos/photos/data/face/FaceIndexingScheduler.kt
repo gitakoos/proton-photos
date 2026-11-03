@@ -2874,18 +2874,12 @@ class FaceIndexingScheduler @Inject constructor(
                 // The counts an older build left wrong, set once from the faces now held. The batches keep every
                 // count right from here on (a new person starts with its photos, a person that gains faces moves
                 // on by the photos it gains), so the read of every face this takes is not repeated at each pass end.
-                val recountDone = account in context.settingsDataStore.data.first()[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty()
-                if (!recountDone) {
-                    val recounted = guardedGroupingStep("recounting the people's photos") {
+                val recounted = recountFaceCountsOnce(context.settingsDataStore, account, { writeFence.allows(fenceToken) }) {
+                    guardedGroupingStep("recounting the people's photos") {
                         clusterFacesUseCase.recountPhotoCounts(userId) { writeFence.allows(fenceToken) }
                     }
-                    if (recounted == null) closingFailed = true
-                    else if (writeFence.allows(fenceToken)) {
-                        context.settingsDataStore.edit {
-                            it[SettingsKeys.FACE_COUNTS_RECOUNTED] = it[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty() + account
-                        }
-                    }
                 }
+                if (!recounted) closingFailed = true
                 val moved = guardedGroupingStep("filling the Unsorted bucket") {
                     clusterFacesUseCase.moveLeftoverToUnsorted(userId) { writeFence.allows(fenceToken) }
                 }
@@ -3592,6 +3586,25 @@ internal fun shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly: Boolean, nowWifiOnly
  *  resumes on reconnect rather than staying idle, without kicking on the initial replayed state. */
 internal fun shouldResumeFaceScanOnUnmetered(wasUnmetered: Boolean, nowUnmetered: Boolean): Boolean =
     !wasUnmetered && nowUnmetered
+
+/**
+ * Runs [recount] of the people's photo counts for [account] once: not again once [store] records it done, and
+ * recorded done only after a recount that finished ([recount] gave a count) while [writeAllowed] still holds, so
+ * one that failed or was fenced off runs again at the next run that ends a walk. Returns false when it failed.
+ */
+internal suspend fun recountFaceCountsOnce(
+    store: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>,
+    account: String,
+    writeAllowed: () -> Boolean,
+    recount: suspend () -> Int?,
+): Boolean {
+    if (account in store.data.first()[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty()) return true
+    recount() ?: return false
+    if (writeAllowed()) {
+        store.edit { it[SettingsKeys.FACE_COUNTS_RECOUNTED] = it[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty() + account }
+    }
+    return true
+}
 
 /**
  * Waits until the device may run machine learning work ([verdict], charging when the user asked for it, battery,
