@@ -22,7 +22,12 @@
 
 package eu.akoos.photos.presentation.common
 
+import android.content.Context
 import android.content.IntentSender
+import androidx.datastore.preferences.core.edit
+import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.usecase.MoveToFolderUseCase
 import eu.akoos.photos.domain.usecase.PendingMove
@@ -54,6 +59,7 @@ import javax.inject.Inject
  * [pendingMoveIntent]. Only device MediaStore rows move, never cloud content.
  */
 class MoveToFolderController @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val moveToFolder: MoveToFolderUseCase,
     private val localMediaRepo: LocalMediaRepository,
 ) {
@@ -110,7 +116,22 @@ class MoveToFolderController @Inject constructor(
         scope.launch {
             val uris = localMediaRepo.queryByBucket(bucketName).map { it.uri }
             if (uris.isEmpty() || newName.isBlank()) return@launch
-            handleMoveResult(moveToFolder(uris, newName), newName) { onRenamed(it) }
+            handleMoveResult(moveToFolder(uris, newName), newName) { landed ->
+                scope.launch { carryFolderChoices(bucketName, landed) }
+                onRenamed(landed)
+            }
+        }
+    }
+
+    /** The back-up's folder choices follow a renamed folder: picked for back-up, or left out, it stays so under
+     *  its new name. They are kept by folder name, so without this the renamed folder silently dropped out. */
+    private suspend fun carryFolderChoices(from: String, to: String) {
+        val fromStillUsed = localMediaRepo.queryByBucket(from).isNotEmpty()
+        context.settingsDataStore.edit { prefs ->
+            for (key in listOf(SettingsKeys.SYNC_FOLDER_NAMES, SettingsKeys.EXCLUDED_FOLDER_NAMES)) {
+                val next = renamedFolderSet(prefs[key], from, to, fromStillUsed) ?: continue
+                prefs[key] = next
+            }
         }
     }
 
@@ -155,4 +176,14 @@ class MoveToFolderController @Inject constructor(
             }
         }
     }
+}
+
+/**
+ * A set of folder names after [from] was renamed to [to]: [to] takes the place of [from], and [from] stays as well
+ * while it still holds photos (some could not be moved). A set without [from], or no set at all, is unchanged and
+ * answered as null. Pure.
+ */
+internal fun renamedFolderSet(names: Set<String>?, from: String, to: String, fromStillUsed: Boolean): Set<String>? {
+    if (names == null || from !in names || from == to) return null
+    return if (fromStillUsed) names + to else names - from + to
 }

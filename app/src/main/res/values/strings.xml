@@ -123,7 +123,6 @@
         <item quantity="other">Edit %d photos</item>
     </plurals>
     <string name="metadata_editor_done">Done</string>
-    <string name="metadata_editor_change">Change</string>
     <string name="metadata_editor_saved">Saved</string>
     <string name="metadata_editor_write_failed">Couldn\'t save the change</string>
     <string name="metadata_editor_saved_partial">Saved %1$d, %2$d couldn\'t be saved</string>
@@ -132,7 +131,6 @@
     <string name="metadata_editor_source_device">From this device</string>
     <string name="metadata_editor_source_cloud">From Proton Drive</string>
     <string name="metadata_editor_next">Next</string>
-    <string name="metadata_editor_set">Set</string>
     <string name="metadata_editor_place_label">Place</string>
     <string name="metadata_editor_place_none">No location</string>
     <string name="metadata_editor_place_search">Search a country or city</string>
@@ -144,7 +142,6 @@
     <string name="metadata_editor_note_place_format">Location can only be added to JPEG, PNG and WebP photos.</string>
     <string name="metadata_editor_note_date_format">The date can\'t be changed for photos in this format.</string>
     <string name="metadata_editor_bulk_date_label">Set a date for these photos</string>
-    <string name="metadata_editor_bulk_place_label">Set a place for these photos</string>
     <string name="metadata_editor_bulk_apply_hint">Applies to every selected photo</string>
     <string name="metadata_editor_bulk_summary">Editing %1$d photos</string>
     <string name="metadata_editor_bulk_summary_skipped">Editing %1$d, %2$d skipped</string>
@@ -160,8 +157,6 @@
     <string name="metadata_editor_shift_label">Shift these photos in time</string>
     <string name="metadata_editor_shift_hint">Pick when the oldest photo was really taken. Every other photo moves by the same amount, so the gaps between them stay.</string>
     <string name="metadata_editor_shift_picker_title">When was the oldest photo taken?</string>
-    <string name="metadata_editor_shift_range_current">Now: %1$s to %2$s</string>
-    <string name="metadata_editor_shift_range_after">After the shift: %1$s to %2$s</string>
     <string name="metadata_editor_shift_too_late">That would put the newest photo in the future. Pick an earlier date or time.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d photo has no date of its own, so a shift leaves it where it is. Setting the same date for all still reaches it.</item>
@@ -256,7 +251,6 @@
     <string name="editor_tool_frame">Frame</string>
     <string name="editor_frame_none">None</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Border</string>
     <string name="editor_tab_transform">Crop and rotate</string>
     <string name="editor_tab_more">More</string>
     <string name="editor_transform_ratio">Aspect ratio</string>
@@ -2023,7 +2017,6 @@
     <string name="viewer_meta_flash_none">No flash</string>
     <string name="viewer_meta_wb_auto">Auto</string>
     <string name="viewer_meta_wb_manual">Manual</string>
-    <string name="viewer_meta_orientation_normal">Normal</string>
     <string name="viewer_meta_orientation_180">Rotated 180°</string>
     <string name="viewer_meta_orientation_90_cw">Rotated 90° CW</string>
     <string name="viewer_meta_orientation_90_ccw">Rotated 90° CCW</string>
@@ -2031,7 +2024,6 @@
     <string name="viewer_meta_source_backed_up">Proton Drive and device</string>
     <string name="viewer_meta_source_cloud">Proton Drive only</string>
     <string name="viewer_meta_strip">Strip</string>
-    <string name="viewer_meta_strip_all">Strip all private metadata</string>
     <string name="viewer_meta_all_details">All details</string>
     <string name="details_adjust">Adjust</string>
     <string name="details_edit">Edit</string>
@@ -2067,10 +2059,8 @@
         <item quantity="one">Remove %d item</item>
         <item quantity="other">Remove %d items</item>
     </plurals>
-    <string name="viewer_meta_strip_all_desc">Removes GPS, camera info, software, artist and copyright fields from this file</string>
     <string name="label_section_title">Labels</string>
     <string name="label_add_hint">Add a label</string>
-    <string name="label_add_chip">Add label</string>
     <string name="label_remove_cd">Remove label %1$s</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d of %2$d label</item>
@@ -2145,12 +2135,6 @@
     </plurals>
     <string name="label_delete_confirm">Remove</string>
     <string name="viewer_meta_strip_confirm_title">Strip metadata?</string>
-    <string name="viewer_meta_strip_confirm_message">This will permanently remove %1$s from the file on your device. This cannot be undone.</string>
-    <string name="viewer_meta_strip_what_gps">GPS location</string>
-    <string name="viewer_meta_strip_what_camera">camera info</string>
-    <string name="viewer_meta_strip_what_timestamps">timestamps</string>
-    <string name="viewer_meta_strip_what_software">software info</string>
-    <string name="viewer_meta_strip_what_authorship">artist and copyright</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Delete photo?</string>
@@ -2573,7 +2557,7 @@
     <string name="whats_new_260_details_title">People and map in details</string>
     <string name="whats_new_260_details_body">A photo\'s “Details” now show the people in it and a map of where it was taken. Tap a person to open their page, or the map to open it full screen. Tap an unnamed face to name it or add it to someone.</string>
     <string name="whats_new_260_frame_title">Frame tool</string>
-    <string name="whats_new_260_frame_body">In the photo editor, place a photo on a canvas of another shape, such as 1:1, 9:16 or Polaroid, filled with a colour or a soft blur. The tool is still in progress, and more improvements are on the way.</string>
+    <string name="whats_new_260_frame_body">In the photo editor, place a photo on a canvas of another shape, such as 1:1, 9:16 or Polaroid, filled with a colour or a soft blur.</string>
     <string name="whats_new_260_drive_title">Face and search data in Drive</string>
     <string name="whats_new_260_drive_body">Save your face names, search data, labels and hidden items to Drive and bring them back on another phone with “Load from Drive”, under “Settings > More settings > Backup to Proton Drive”.</string>
     <string name="whats_new_260_autosave_title">Automatic backup</string>
@@ -2589,13 +2573,13 @@
     <string name="whats_new_260_intro_title">Includes earlier test builds</string>
     <string name="whats_new_260_intro_body">This build also contains everything from test builds 1 to 5. The cards that follow show only what is new since then.</string>
     <string name="whats_new_260_sdk_title">Proton Drive SDK switches</string>
-    <string name="whats_new_260_sdk_body">Settings, More settings, Proton Drive SDK has a switch each for favourites and categories, the trash, full quality downloads and uploads. All are off. Turn one on to run that action through Proton\'s own Drive SDK; if it fails, the app does it the usual way.</string>
+    <string name="whats_new_260_sdk_body">Settings, More settings, Proton Drive SDK has a switch each for favourites and categories, the trash, full quality downloads, uploads, albums, the change feed and albums shared with you. All are off. Turn one on to run that action through Proton\'s own Drive SDK; if it fails, the app does it the usual way.</string>
     <string name="whats_new_260_setas_title">Set as, and pick for other apps</string>
     <string name="whats_new_260_setas_body">The viewer\'s menu hands a photo to the phone\'s wallpaper or contact photo setter. Turn on photo picking in Privacy and security and other apps can choose photos from here; hidden photos never leave.</string>
     <string name="whats_new_260_folderimport_title">Import from a folder</string>
     <string name="whats_new_260_folderimport_body">Import an Ente or Google Takeout export, or plain photos, from a folder as well as from a zip. A Live Photo comes in as one photo with its video, and every photo gets a real date.</string>
     <string name="whats_new_260_mlsetup_title">Smart features in the setup</string>
-    <string name="whats_new_260_mlsetup_body">The first-launch setup offers face recognition, photo search and Copy text, each with its download size. Pick what you want and it downloads in the background.</string>
+    <string name="whats_new_260_mlsetup_body">The first-launch setup offers face recognition, photo search and Copy text, each with its download size. Pick what you want and it downloads in the background. You can also turn them on later under “Settings > More settings > Machine learning”.</string>
     <string name="whats_new_260_longpress_title">Long press, your way</string>
     <string name="whats_new_260_longpress_body">Choose in Settings, Appearance whether a long press in the viewer selects text or opens the menu. The menu has Recognize text and no longer repeats the buttons.</string>
     <string name="whats_new_260_nothumb_title">Drive photos open again</string>

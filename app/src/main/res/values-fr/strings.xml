@@ -1260,7 +1260,6 @@
     <string name="viewer_meta_flash_none">Pas de flash</string>
     <string name="viewer_meta_wb_auto">Automatique</string>
     <string name="viewer_meta_wb_manual">Manuel</string>
-    <string name="viewer_meta_orientation_normal">Normale</string>
     <string name="viewer_meta_orientation_180">Pivotée de 180°</string>
     <string name="viewer_meta_orientation_90_cw">Pivotée de 90° dans le sens horaire</string>
     <string name="viewer_meta_orientation_90_ccw">Pivotée de 90° dans le sens antihoraire</string>
@@ -1268,7 +1267,6 @@
     <string name="viewer_meta_source_backed_up">Proton Drive et appareil</string>
     <string name="viewer_meta_source_cloud">Proton Drive uniquement</string>
     <string name="viewer_meta_strip">Supprimer</string>
-    <string name="viewer_meta_strip_all">Supprimer toutes les métadonnées privées</string>
     <string name="viewer_meta_all_details">Tous les détails</string>
     <string name="details_adjust">Ajuster</string>
     <string name="details_edit">Modifier</string>
@@ -1304,14 +1302,7 @@
         <item quantity="one">Supprimer %d élément</item>
         <item quantity="other">Supprimer %d éléments</item>
     </plurals>
-    <string name="viewer_meta_strip_all_desc">Supprime le GPS, les infos de l\'appareil photo et les champs logiciel, auteur et droits d\'auteur de ce fichier</string>
     <string name="viewer_meta_strip_confirm_title">Supprimer les métadonnées ?</string>
-    <string name="viewer_meta_strip_confirm_message">Cela supprimera définitivement %1$s du fichier sur votre appareil. Cette action est irréversible.</string>
-    <string name="viewer_meta_strip_what_gps">la position GPS</string>
-    <string name="viewer_meta_strip_what_camera">les infos de l\'appareil photo</string>
-    <string name="viewer_meta_strip_what_timestamps">les horodatages</string>
-    <string name="viewer_meta_strip_what_software">les infos logicielles</string>
-    <string name="viewer_meta_strip_what_authorship">l\'auteur et les droits d\'auteur</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Supprimer la photo ?</string>
@@ -1770,7 +1761,6 @@
         <item quantity="other">Modifier %d photos</item>
     </plurals>
     <string name="metadata_editor_done">Terminé</string>
-    <string name="metadata_editor_change">Modifier</string>
     <string name="metadata_editor_saved">Enregistré</string>
     <string name="metadata_editor_write_failed">Impossible d\'enregistrer la modification</string>
     <string name="metadata_editor_saved_partial">%1$d enregistrée(s), %2$d n\'ont pas pu l\'être</string>
@@ -1779,7 +1769,6 @@
     <string name="metadata_editor_source_device">Depuis cet appareil</string>
     <string name="metadata_editor_source_cloud">Depuis Proton Drive</string>
     <string name="metadata_editor_next">Suivant</string>
-    <string name="metadata_editor_set">Définir</string>
     <string name="metadata_editor_place_label">Lieu</string>
     <string name="metadata_editor_place_none">Aucun lieu</string>
     <string name="metadata_editor_place_search">Rechercher un pays ou une ville</string>
@@ -1791,7 +1780,6 @@
     <string name="metadata_editor_note_place_format">Le lieu ne peut être enregistré que dans les photos JPEG, PNG et WebP.</string>
     <string name="metadata_editor_note_date_format">La date ne peut pas être modifiée pour les photos dans ce format.</string>
     <string name="metadata_editor_bulk_date_label">Définir une date pour ces photos</string>
-    <string name="metadata_editor_bulk_place_label">Définir un lieu pour ces photos</string>
     <string name="metadata_editor_bulk_apply_hint">S\'applique à chaque photo sélectionnée</string>
     <string name="metadata_editor_bulk_summary">Modification de %1$d photos</string>
     <string name="metadata_editor_bulk_summary_skipped">Modification de %1$d, %2$d ignorées</string>
@@ -1807,8 +1795,6 @@
     <string name="metadata_editor_shift_label">Décaler ces photos dans le temps</string>
     <string name="metadata_editor_shift_hint">Choisir le moment où la photo la plus ancienne a vraiment été prise. Toutes les autres se décalent d\'autant, les écarts entre elles restent donc intacts.</string>
     <string name="metadata_editor_shift_picker_title">Quand la photo la plus ancienne a-t-elle été prise ?</string>
-    <string name="metadata_editor_shift_range_current">Actuellement : de %1$s à %2$s</string>
-    <string name="metadata_editor_shift_range_after">Après le décalage : de %1$s à %2$s</string>
     <string name="metadata_editor_shift_too_late">La photo la plus récente se retrouverait dans le futur. Choisir une date ou une heure antérieure.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d photo n\'a pas de date propre, un décalage la laisse donc où elle est. La même date pour toutes l\'atteint quand même.</item>
@@ -2212,7 +2198,6 @@
     <string name="editor_tool_frame">Cadre</string>
     <string name="editor_frame_none">Aucun</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Bordure</string>
     <string name="editor_tab_transform">Recadrer et pivoter</string>
     <string name="editor_tab_more">Plus</string>
     <string name="editor_transform_ratio">Format</string>
@@ -2404,7 +2389,6 @@
 
     <string name="label_section_title">Étiquettes</string>
     <string name="label_add_hint">Ajouter une étiquette</string>
-    <string name="label_add_chip">Ajouter une étiquette</string>
     <string name="label_remove_cd">Retirer l\'étiquette %1$s</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d sur %2$d étiquette</item>
@@ -2535,7 +2519,7 @@
     <string name="whats_new_260_details_title">Personnes et carte dans les détails</string>
     <string name="whats_new_260_details_body">Les « Détails » d\'une photo montrent maintenant les personnes présentes et une carte du lieu de prise de vue. Touchez une personne pour ouvrir sa page, ou la carte pour l\'afficher en plein écran. Touchez un visage sans nom pour le nommer ou l\'ajouter à quelqu\'un.</string>
     <string name="whats_new_260_frame_title">Outil Cadre</string>
-    <string name="whats_new_260_frame_body">Dans l\'éditeur de photos, placez une photo sur un canevas d\'une autre forme, comme 1:1, 9:16 ou Polaroid, rempli d\'une couleur ou d\'un flou doux. L\'outil est encore en cours de développement et d\'autres améliorations arrivent.</string>
+    <string name="whats_new_260_frame_body">Dans l\'éditeur de photos, placez une photo sur un canevas d\'une autre forme, comme 1:1, 9:16 ou Polaroid, rempli d\'une couleur ou d\'un flou doux.</string>
     <string name="whats_new_260_drive_title">Données de visages et de recherche sur Drive</string>
     <string name="whats_new_260_drive_body">Sauvegardez les noms des visages, les données de recherche, les étiquettes et les éléments masqués sur Drive et récupérez-les sur un autre téléphone avec « Charger depuis Drive », dans « Paramètres > Autres réglages > Sauvegarde sur Proton Drive ».</string>
     <string name="whats_new_260_autosave_title">Sauvegarde automatique</string>
@@ -2551,13 +2535,13 @@
     <string name="whats_new_260_intro_title">Inclut les versions de test précédentes</string>
     <string name="whats_new_260_intro_body">Cette version contient aussi tout ce qu\'apportaient les versions de test 1 à 5. Les cartes suivantes ne montrent que les nouveautés depuis.</string>
     <string name="whats_new_260_sdk_title">Interrupteurs du SDK Proton Drive</string>
-    <string name="whats_new_260_sdk_body">Réglages, Autres réglages, Proton Drive SDK propose un interrupteur pour les favoris et catégories, la corbeille, les téléchargements en pleine qualité et les envois. Tous sont désactivés. Activez-en un pour que cette action passe par le SDK Drive de Proton ; s\'il échoue, l\'app la fait comme d\'habitude.</string>
+    <string name="whats_new_260_sdk_body">Réglages, Autres réglages, Proton Drive SDK propose un interrupteur pour les favoris et catégories, la corbeille, les téléchargements en pleine qualité, les envois, les albums, le flux des modifications et les albums partagés avec vous. Tous sont désactivés. Activez-en un pour que cette action passe par le SDK Drive de Proton ; s\'il échoue, l\'app la fait comme d\'habitude.</string>
     <string name="whats_new_260_setas_title">Définir comme, et photos pour d\'autres apps</string>
     <string name="whats_new_260_setas_body">Le menu de la visionneuse confie une photo au réglage de fond d\'écran ou de photo de contact du téléphone. Activez le choix de photos dans Confidentialité et sécurité et d\'autres apps pourront choisir des photos ici ; les photos masquées ne sortent jamais.</string>
     <string name="whats_new_260_folderimport_title">Importer depuis un dossier</string>
     <string name="whats_new_260_folderimport_body">Importez un export Ente ou Google Takeout, ou de simples photos, depuis un dossier aussi bien que depuis un zip. Une Live Photo arrive comme une seule photo avec sa vidéo, et chaque photo reçoit une vraie date.</string>
     <string name="whats_new_260_mlsetup_title">Fonctions intelligentes dès la configuration</string>
-    <string name="whats_new_260_mlsetup_body">La configuration au premier lancement propose la reconnaissance des visages, la recherche de photos et Copier le texte, chacune avec sa taille de téléchargement. Choisissez ce que vous voulez et le téléchargement se fait en arrière-plan.</string>
+    <string name="whats_new_260_mlsetup_body">La configuration au premier lancement propose la reconnaissance des visages, la recherche de photos et Copier le texte, chacune avec sa taille de téléchargement. Choisissez ce que vous voulez et le téléchargement se fait en arrière-plan. Vous pouvez aussi les activer plus tard dans « Paramètres > Autres réglages > Apprentissage automatique ».</string>
     <string name="whats_new_260_longpress_title">L\'appui long, à votre façon</string>
     <string name="whats_new_260_longpress_body">Choisissez dans Réglages, Apparence si un appui long dans la visionneuse sélectionne le texte ou ouvre le menu. Le menu propose Reconnaître le texte et ne répète plus les boutons.</string>
     <string name="whats_new_260_nothumb_title">Les photos Drive s\'ouvrent à nouveau</string>

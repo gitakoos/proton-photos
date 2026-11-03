@@ -1497,7 +1497,6 @@
     <string name="viewer_meta_flash_none">Bez blesku</string>
     <string name="viewer_meta_wb_auto">Automaticky</string>
     <string name="viewer_meta_wb_manual">Ručně</string>
-    <string name="viewer_meta_orientation_normal">Normální</string>
     <string name="viewer_meta_orientation_180">Otočeno o 180°</string>
     <string name="viewer_meta_orientation_90_cw">Otočeno o 90° po směru hodinových ručiček</string>
     <string name="viewer_meta_orientation_90_ccw">Otočeno o 90° proti směru hodinových ručiček</string>
@@ -1505,7 +1504,6 @@
     <string name="viewer_meta_source_backed_up">Proton Drive a zařízení</string>
     <string name="viewer_meta_source_cloud">Jen Proton Drive</string>
     <string name="viewer_meta_strip">Odstranit</string>
-    <string name="viewer_meta_strip_all">Odstranit všechna soukromá metadata</string>
     <string name="viewer_meta_all_details">Všechny podrobnosti</string>
     <string name="details_adjust">Změnit</string>
     <string name="details_edit">Upravit</string>
@@ -1547,14 +1545,7 @@
         <item quantity="many">Odebrat %d položky</item>
         <item quantity="other">Odebrat %d položek</item>
     </plurals>
-    <string name="viewer_meta_strip_all_desc">Odstraní z tohoto souboru GPS, informace o fotoaparátu, pole softwaru, autora a autorská práva</string>
     <string name="viewer_meta_strip_confirm_title">Odstranit metadata?</string>
-    <string name="viewer_meta_strip_confirm_message">Tímto se ze souboru ve vašem zařízení trvale odstraní %1$s. Tuto akci nelze vrátit zpět.</string>
-    <string name="viewer_meta_strip_what_gps">poloha GPS</string>
-    <string name="viewer_meta_strip_what_camera">informace o fotoaparátu</string>
-    <string name="viewer_meta_strip_what_timestamps">časová razítka</string>
-    <string name="viewer_meta_strip_what_software">informace o softwaru</string>
-    <string name="viewer_meta_strip_what_authorship">autor a autorská práva</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Smazat fotku?</string>
@@ -1866,7 +1857,6 @@
         <item quantity="other">Upravit %d fotky</item>
     </plurals>
     <string name="metadata_editor_done">Hotovo</string>
-    <string name="metadata_editor_change">Změnit</string>
     <string name="metadata_editor_saved">Uloženo</string>
     <string name="metadata_editor_write_failed">Změnu se nepodařilo uložit</string>
     <string name="metadata_editor_saved_partial">Uloženo %1$d, %2$d nešlo uložit</string>
@@ -1875,7 +1865,6 @@
     <string name="metadata_editor_source_device">Z tohoto zařízení</string>
     <string name="metadata_editor_source_cloud">Z Proton Drive</string>
     <string name="metadata_editor_next">Další</string>
-    <string name="metadata_editor_set">Nastavit</string>
     <string name="metadata_editor_place_label">Místo</string>
     <string name="metadata_editor_place_none">Bez polohy</string>
     <string name="metadata_editor_place_search">Hledat zemi nebo město</string>
@@ -1887,7 +1876,6 @@
     <string name="metadata_editor_note_place_format">Polohu lze uložit jen do fotek JPEG, PNG a WebP.</string>
     <string name="metadata_editor_note_date_format">U fotek v tomto formátu nelze datum změnit.</string>
     <string name="metadata_editor_bulk_date_label">Nastavit datum pro tyto fotky</string>
-    <string name="metadata_editor_bulk_place_label">Nastavit místo pro tyto fotky</string>
     <string name="metadata_editor_bulk_apply_hint">Použije se na každou vybranou fotku</string>
     <string name="metadata_editor_bulk_summary">Úprava %1$d fotek</string>
     <string name="metadata_editor_bulk_summary_skipped">Úprava %1$d, %2$d přeskočeno</string>
@@ -1903,8 +1891,6 @@
     <string name="metadata_editor_shift_label">Posunout tyto fotky v čase</string>
     <string name="metadata_editor_shift_hint">Vyberte, kdy byla nejstarší fotka doopravdy pořízena. Všechny ostatní se posunou o stejnou dobu, takže rozestupy mezi nimi zůstanou.</string>
     <string name="metadata_editor_shift_picker_title">Kdy byla nejstarší fotka pořízena?</string>
-    <string name="metadata_editor_shift_range_current">Nyní: %1$s až %2$s</string>
-    <string name="metadata_editor_shift_range_after">Po posunu: %1$s až %2$s</string>
     <string name="metadata_editor_shift_too_late">Nejnovější fotka by se tím dostala do budoucnosti. Vyberte dřívější datum nebo čas.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d fotka nemá vlastní datum, posun ji proto nechá být. Nastavení stejného data pro všechny se k ní ale dostane.</item>
@@ -2329,7 +2315,6 @@
     <string name="editor_tool_frame">Rámeček</string>
     <string name="editor_frame_none">Žádný</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Okraj</string>
     <string name="editor_tab_transform">Oříznutí a otočení</string>
     <string name="editor_tab_more">Více</string>
     <string name="editor_transform_ratio">Poměr stran</string>
@@ -2524,7 +2509,6 @@
 
     <string name="label_section_title">Štítky</string>
     <string name="label_add_hint">Přidat štítek</string>
-    <string name="label_add_chip">Přidat štítek</string>
     <string name="label_remove_cd">Odebrat štítek %1$s</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d z %2$d štítku</item>
@@ -2669,7 +2653,7 @@
     <string name="whats_new_260_details_title">Lidé a mapa v detailech</string>
     <string name="whats_new_260_details_body">Panel „Podrobnosti“ u fotky teď ukazuje lidi na ní a mapu místa, kde vznikla. Klepnutím na osobu otevřete její stránku, klepnutím na mapu ji otevřete na celou obrazovku. Klepnutím na nepojmenovanou tvář ji pojmenujete nebo přiřadíte někomu.</string>
     <string name="whats_new_260_frame_title">Nástroj Rám</string>
-    <string name="whats_new_260_frame_body">V editoru fotek umístěte fotku na plátno jiného tvaru, třeba 1:1, 9:16 nebo Polaroid, vyplněné barvou nebo měkkým rozostřením. Nástroj je stále ve vývoji a další vylepšení přijdou.</string>
+    <string name="whats_new_260_frame_body">V editoru fotek umístěte fotku na plátno jiného tvaru, třeba 1:1, 9:16 nebo Polaroid, vyplněné barvou nebo měkkým rozostřením.</string>
     <string name="whats_new_260_drive_title">Data obličejů a hledání na Drive</string>
     <string name="whats_new_260_drive_body">Uložte jména tváří, data hledání, štítky a skryté položky na Drive a v jiném telefonu je vraťte pomocí „Načíst z Drive“, v „Nastavení > Další nastavení > Záloha na Proton Drive“.</string>
     <string name="whats_new_260_autosave_title">Automatická záloha</string>
@@ -2685,13 +2669,13 @@
     <string name="whats_new_260_intro_title">Obsahuje dřívější testovací verze</string>
     <string name="whats_new_260_intro_body">Tato verze obsahuje i vše z testovacích verzí 1 až 5. Následující karty ukazují jen to, co je od té doby nové.</string>
     <string name="whats_new_260_sdk_title">Přepínače Proton Drive SDK</string>
-    <string name="whats_new_260_sdk_body">Nastavení, Další nastavení, Proton Drive SDK má zvlášť přepínač pro oblíbené a kategorie, koš, stahování v plné kvalitě a nahrávání. Všechny jsou vypnuté. Zapněte jeden a ta akce poběží přes vlastní Drive SDK od Protonu; když selže, aplikace ji provede jako obvykle.</string>
+    <string name="whats_new_260_sdk_body">Nastavení, Další nastavení, Proton Drive SDK má zvlášť přepínač pro oblíbené a kategorie, koš, stahování v plné kvalitě, nahrávání, alba, kanál změn a alba sdílená s vámi. Všechny jsou vypnuté. Zapněte jeden a ta akce poběží přes vlastní Drive SDK od Protonu; když selže, aplikace ji provede jako obvykle.</string>
     <string name="whats_new_260_setas_title">Nastavit jako, a fotky pro jiné aplikace</string>
     <string name="whats_new_260_setas_body">Nabídka prohlížeče předá fotku nastavení tapety nebo fotky kontaktu v telefonu. Zapněte výběr fotek v Soukromí a zabezpečení a jiné aplikace si odsud budou moci vybírat fotky; skryté fotky nikdy neodejdou.</string>
     <string name="whats_new_260_folderimport_title">Import ze složky</string>
     <string name="whats_new_260_folderimport_body">Importujte export z Ente nebo Google Takeout, nebo obyčejné fotky, ze složky i ze zipu. Live Photo dorazí jako jedna fotka se svým videem a každá fotka dostane skutečné datum.</string>
     <string name="whats_new_260_mlsetup_title">Chytré funkce v nastavení</string>
-    <string name="whats_new_260_mlsetup_body">Nastavení při prvním spuštění nabízí rozpoznávání obličejů, hledání fotek a Kopírovat text, každé s velikostí stahování. Vyberte, co chcete, a stáhne se to na pozadí.</string>
+    <string name="whats_new_260_mlsetup_body">Nastavení při prvním spuštění nabízí rozpoznávání obličejů, hledání fotek a Kopírovat text, každé s velikostí stahování. Vyberte, co chcete, a stáhne se to na pozadí. Zapnout je můžete i později v „Nastavení > Další nastavení > Strojové učení“.</string>
     <string name="whats_new_260_longpress_title">Dlouhé podržení po vašem</string>
     <string name="whats_new_260_longpress_body">V Nastavení, Vzhled vyberte, zda dlouhé podržení v prohlížeči označí text, nebo otevře nabídku. Nabídka má Rozpoznat text a už neopakuje tlačítka.</string>
     <string name="whats_new_260_nothumb_title">Fotky z Drive se zase otevírají</string>

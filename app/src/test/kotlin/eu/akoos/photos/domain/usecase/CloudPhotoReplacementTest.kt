@@ -301,4 +301,10 @@ class CloudPhotoReplacementTest {
 
         assertEquals(listOf("orig", "vid"), compressibleLinkIds(listOf(cloudPhoto, cloudVideo, cloudDoc, onPhone, cloudPhoto)))
     }
+    @Test
+    fun `compress on Drive waits for Wi-Fi unless the switch was turned off`() {
+        assertTrue(wifiOnlySetting(null))
+        assertTrue(wifiOnlySetting(true))
+        assertFalse(wifiOnlySetting(false))
+    }
 }

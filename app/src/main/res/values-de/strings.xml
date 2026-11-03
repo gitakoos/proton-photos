@@ -1258,7 +1258,6 @@
     <string name="viewer_meta_flash_none">Kein Blitz</string>
     <string name="viewer_meta_wb_auto">Automatisch</string>
     <string name="viewer_meta_wb_manual">Manuell</string>
-    <string name="viewer_meta_orientation_normal">Normal</string>
     <string name="viewer_meta_orientation_180">Um 180° gedreht</string>
     <string name="viewer_meta_orientation_90_cw">Um 90° im Uhrzeigersinn gedreht</string>
     <string name="viewer_meta_orientation_90_ccw">Um 90° gegen den Uhrzeigersinn gedreht</string>
@@ -1266,7 +1265,6 @@
     <string name="viewer_meta_source_backed_up">Proton Drive und Gerät</string>
     <string name="viewer_meta_source_cloud">Nur Proton Drive</string>
     <string name="viewer_meta_strip">Entfernen</string>
-    <string name="viewer_meta_strip_all">Alle privaten Metadaten entfernen</string>
     <string name="viewer_meta_all_details">Alle Details</string>
     <string name="details_adjust">Anpassen</string>
     <string name="details_edit">Bearbeiten</string>
@@ -1302,14 +1300,7 @@
         <item quantity="one">%d Eintrag entfernen</item>
         <item quantity="other">%d Einträge entfernen</item>
     </plurals>
-    <string name="viewer_meta_strip_all_desc">Entfernt GPS-, Kamera-, Software-, Urheber- und Copyright-Informationen aus dieser Datei</string>
     <string name="viewer_meta_strip_confirm_title">Metadaten entfernen?</string>
-    <string name="viewer_meta_strip_confirm_message">Dadurch werden %1$s dauerhaft aus der Datei auf deinem Gerät entfernt. Dies kann nicht rückgängig gemacht werden.</string>
-    <string name="viewer_meta_strip_what_gps">GPS-Standort</string>
-    <string name="viewer_meta_strip_what_camera">Kamerainformationen</string>
-    <string name="viewer_meta_strip_what_timestamps">Zeitstempel</string>
-    <string name="viewer_meta_strip_what_software">Softwareinformationen</string>
-    <string name="viewer_meta_strip_what_authorship">Urheber- und Copyright-Angaben</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Foto löschen?</string>
@@ -1766,7 +1757,6 @@
         <item quantity="other">%d Fotos bearbeiten</item>
     </plurals>
     <string name="metadata_editor_done">Fertig</string>
-    <string name="metadata_editor_change">Ändern</string>
     <string name="metadata_editor_saved">Gespeichert</string>
     <string name="metadata_editor_write_failed">Änderung konnte nicht gespeichert werden</string>
     <string name="metadata_editor_saved_partial">%1$d gespeichert, %2$d konnten nicht gespeichert werden</string>
@@ -1775,7 +1765,6 @@
     <string name="metadata_editor_source_device">Von diesem Gerät</string>
     <string name="metadata_editor_source_cloud">Von Proton Drive</string>
     <string name="metadata_editor_next">Weiter</string>
-    <string name="metadata_editor_set">Festlegen</string>
     <string name="metadata_editor_place_label">Ort</string>
     <string name="metadata_editor_place_none">Kein Standort</string>
     <string name="metadata_editor_place_search">Land oder Stadt suchen</string>
@@ -1787,7 +1776,6 @@
     <string name="metadata_editor_note_place_format">Der Standort lässt sich nur in JPEG-, PNG- und WebP-Fotos speichern.</string>
     <string name="metadata_editor_note_date_format">Das Datum kann bei Fotos in diesem Format nicht geändert werden.</string>
     <string name="metadata_editor_bulk_date_label">Datum für diese Fotos festlegen</string>
-    <string name="metadata_editor_bulk_place_label">Ort für diese Fotos festlegen</string>
     <string name="metadata_editor_bulk_apply_hint">Gilt für jedes ausgewählte Foto</string>
     <string name="metadata_editor_bulk_summary">%1$d Fotos werden bearbeitet</string>
     <string name="metadata_editor_bulk_summary_skipped">%1$d werden bearbeitet, %2$d übersprungen</string>
@@ -1803,8 +1791,6 @@
     <string name="metadata_editor_shift_label">Diese Fotos zeitlich verschieben</string>
     <string name="metadata_editor_shift_hint">Das älteste Foto bekommt den gewählten Zeitpunkt. Alle anderen verschieben sich um denselben Betrag, sodass die Abstände dazwischen erhalten bleiben.</string>
     <string name="metadata_editor_shift_picker_title">Wann wurde das älteste Foto aufgenommen?</string>
-    <string name="metadata_editor_shift_range_current">Jetzt: %1$s bis %2$s</string>
-    <string name="metadata_editor_shift_range_after">Nach der Verschiebung: %1$s bis %2$s</string>
     <string name="metadata_editor_shift_too_late">Damit läge das neueste Foto in der Zukunft. Ein früheres Datum oder eine frühere Uhrzeit wählen.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d Foto hat kein eigenes Datum und bleibt beim Verschieben, wo es ist. Das gleiche Datum für alle erreicht es weiterhin.</item>
@@ -2207,7 +2193,6 @@
     <string name="editor_tool_frame">Rahmen</string>
     <string name="editor_frame_none">Ohne</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Rand</string>
     <string name="editor_tab_transform">Zuschneiden und drehen</string>
     <string name="editor_tab_more">Mehr</string>
     <string name="editor_transform_ratio">Seitenverhältnis</string>
@@ -2402,7 +2387,6 @@
 
     <string name="label_section_title">Labels</string>
     <string name="label_add_hint">Label hinzufügen</string>
-    <string name="label_add_chip">Label hinzufügen</string>
     <string name="label_remove_cd">Label %1$s entfernen</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d von %2$d Label</item>
@@ -2533,7 +2517,7 @@
     <string name="whats_new_260_details_title">Personen und Karte in den Details</string>
     <string name="whats_new_260_details_body">Die „Details“ eines Fotos zeigen jetzt die Personen darauf und eine Karte, wo es aufgenommen wurde. Tippe auf eine Person, um ihre Seite zu öffnen, oder auf die Karte für die Vollbildansicht. Tippe auf ein unbenanntes Gesicht, um es zu benennen oder jemandem zuzuordnen.</string>
     <string name="whats_new_260_frame_title">Rahmen-Werkzeug</string>
-    <string name="whats_new_260_frame_body">Setze im Foto-Editor ein Foto auf eine Leinwand anderer Form, etwa 1:1, 9:16 oder Polaroid, gefüllt mit einer Farbe oder einer weichen Unschärfe. Das Werkzeug ist noch in Arbeit, weitere Verbesserungen folgen.</string>
+    <string name="whats_new_260_frame_body">Setze im Foto-Editor ein Foto auf eine Leinwand anderer Form, etwa 1:1, 9:16 oder Polaroid, gefüllt mit einer Farbe oder einer weichen Unschärfe.</string>
     <string name="whats_new_260_drive_title">Gesichts- und Suchdaten in Drive</string>
     <string name="whats_new_260_drive_body">Sichere Gesichtsnamen, Suchdaten, Labels und ausgeblendete Elemente in Drive und hole sie auf einem anderen Telefon mit „Von Drive laden“ zurück, unter „Einstellungen > Weitere Einstellungen > Sicherung auf Proton Drive“.</string>
     <string name="whats_new_260_autosave_title">Automatische Sicherung</string>
@@ -2549,13 +2533,13 @@
     <string name="whats_new_260_intro_title">Enthält frühere Testversionen</string>
     <string name="whats_new_260_intro_body">Dieser Build enthält auch alles aus den Testversionen 1 bis 5. Die folgenden Karten zeigen nur, was seitdem neu ist.</string>
     <string name="whats_new_260_sdk_title">Schalter für das Proton Drive SDK</string>
-    <string name="whats_new_260_sdk_body">Unter Einstellungen, Weitere Einstellungen, Proton Drive SDK gibt es je einen Schalter für Favoriten und Kategorien, den Papierkorb, Downloads in voller Qualität und Uploads. Alle sind aus. Ist einer an, läuft diese Aktion über Protons eigenes Drive SDK; schlägt es fehl, erledigt die App sie wie gewohnt.</string>
+    <string name="whats_new_260_sdk_body">Unter Einstellungen, Weitere Einstellungen, Proton Drive SDK gibt es je einen Schalter für Favoriten und Kategorien, den Papierkorb, Downloads in voller Qualität, Uploads, Alben, den Änderungs-Feed und mit dir geteilte Alben. Alle sind aus. Ist einer an, läuft diese Aktion über Protons eigenes Drive SDK; schlägt es fehl, erledigt die App sie wie gewohnt.</string>
     <string name="whats_new_260_setas_title">Festlegen als, und Fotos für andere Apps</string>
     <string name="whats_new_260_setas_body">Das Menü der Ansicht gibt ein Foto an die Hintergrund- oder Kontaktfoto-Einstellung des Telefons weiter. Ist die Fotoauswahl unter Datenschutz und Sicherheit an, können andere Apps hier Fotos auswählen; versteckte Fotos verlassen die App nie.</string>
     <string name="whats_new_260_folderimport_title">Import aus einem Ordner</string>
     <string name="whats_new_260_folderimport_body">Importiere einen Ente- oder Google-Takeout-Export oder einfache Fotos auch aus einem Ordner statt nur aus einer ZIP-Datei. Ein Live Photo kommt als ein Foto mit seinem Video an, und jedes Foto erhält ein echtes Datum.</string>
     <string name="whats_new_260_mlsetup_title">Intelligente Funktionen in der Einrichtung</string>
-    <string name="whats_new_260_mlsetup_body">Die Einrichtung beim ersten Start bietet Gesichtserkennung, Fotosuche und Text kopieren an, jeweils mit der Downloadgröße. Wähle aus, was du möchtest, und es wird im Hintergrund geladen.</string>
+    <string name="whats_new_260_mlsetup_body">Die Einrichtung beim ersten Start bietet Gesichtserkennung, Fotosuche und Text kopieren an, jeweils mit der Downloadgröße. Wähle aus, was du möchtest, und es wird im Hintergrund geladen. Du kannst sie auch später unter „Einstellungen > Weitere Einstellungen > Maschinelles Lernen“ einschalten.</string>
     <string name="whats_new_260_longpress_title">Langes Drücken nach deiner Wahl</string>
     <string name="whats_new_260_longpress_body">Lege unter Einstellungen, Darstellung fest, ob langes Drücken in der Ansicht Text markiert oder das Menü öffnet. Das Menü bietet Text erkennen und wiederholt die Schaltflächen nicht mehr.</string>
     <string name="whats_new_260_nothumb_title">Drive-Fotos öffnen sich wieder</string>

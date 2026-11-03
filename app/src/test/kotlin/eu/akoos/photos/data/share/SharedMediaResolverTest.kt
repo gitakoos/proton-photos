@@ -26,7 +26,9 @@ import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -91,5 +93,28 @@ class SharedMediaResolverTest {
     fun `any other action carries nothing`() {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("content://media/external/images/media/1"))
         assertEquals(emptyList<Uri>(), sharedUrisOf(intent))
+    }
+    @Test
+    fun `only another app's content uri is read`() {
+        val own = "eu.akoos.photos"
+        assertTrue(readableShare("content", "media", own))
+        assertTrue(readableShare("content", "com.whatsapp.provider.media", own))
+        assertFalse(readableShare("file", null, own))
+        assertFalse(readableShare("file", "", own))
+        assertFalse(readableShare("content", own, own))
+        assertFalse(readableShare("content", "$own.share.fileprovider", own))
+        assertFalse(readableShare("content", "$own.debug.updater.fileprovider", own))
+        assertFalse(readableShare("content", null, own))
+        assertFalse(readableShare("http", "example.com", own))
+    }
+
+    @Test
+    fun `a file uri to this app's own database is refused without being opened`() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val resolved = SharedMediaResolver(context.contentResolver, context.packageName)
+            .resolve(listOf(Uri.parse("file:///data/data/${context.packageName}/databases/app.db")), "image/jpeg")
+        assertEquals(emptyList<String>(), resolved.uris)
+        assertEquals(1, resolved.unreadable)
+        assertEquals(0, resolved.saved)
     }
 }

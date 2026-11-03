@@ -46,6 +46,7 @@ import eu.akoos.photos.data.mlsync.DriveDataFolder
 import eu.akoos.photos.data.mlsync.HiddenDriveNaming
 import eu.akoos.photos.data.mlsync.LabelDriveNaming
 import eu.akoos.photos.data.mlsync.MlDriveFile
+import eu.akoos.photos.data.mlsync.MlSyncPartStatus
 import eu.akoos.photos.data.mlsync.MlDriveFileKind
 import eu.akoos.photos.data.mlsync.MlDriveNaming
 import eu.akoos.photos.data.mlsync.MlDriveResult
@@ -196,7 +197,14 @@ class SharedBackupRunner @Inject constructor(
         val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.LABELS)
         val copies = newerCopies(listing.labels, LabelDriveNaming::parse, ownDeviceId, applied)
         if (copies.isEmpty()) return true
-        val read = copies.map { copy -> copy to (readLabels(userId, copy) ?: return false) }
+        val read = ArrayList<Pair<SharedBackupCopy, LabelSnapshot>>()
+        for (copy in copies) {
+            when (val got = readLabels(userId, copy)) {
+                is CopyRead.Read -> read += copy to got.value
+                CopyRead.PassOver -> markApplied(userId, SharedBackupKind.LABELS, copy.deviceId, copy.madeAtMs)
+                CopyRead.Retry -> return false
+            }
+        }
         store.rememberDeviceNames(read.associate { (copy, snapshot) -> copy.deviceId to snapshot.deviceLabel }.filterValues { it.isNotBlank() })
         val before = labels.loadSyncState(userId)
         val after = before.deepCopy()
@@ -219,7 +227,14 @@ class SharedBackupRunner @Inject constructor(
         val applied = if (retake) emptyMap() else applied(userId, SharedBackupKind.HIDDEN)
         val copies = newerCopies(listing.hidden, HiddenDriveNaming::parse, ownDeviceId, applied)
         if (copies.isEmpty()) return true
-        val read = copies.map { copy -> copy to (readHidden(userId, copy) ?: return false) }
+        val read = ArrayList<Pair<SharedBackupCopy, HiddenSnapshot>>()
+        for (copy in copies) {
+            when (val got = readHidden(userId, copy)) {
+                is CopyRead.Read -> read += copy to got.value
+                CopyRead.PassOver -> markApplied(userId, SharedBackupKind.HIDDEN, copy.deviceId, copy.madeAtMs)
+                CopyRead.Retry -> return false
+            }
+        }
         store.rememberDeviceNames(read.associate { (copy, snapshot) -> copy.deviceId to snapshot.deviceLabel }.filterValues { it.isNotBlank() })
         val state = hidden.load()
         var changes = HiddenCopyMerge.Changes()
@@ -268,9 +283,9 @@ class SharedBackupRunner @Inject constructor(
         for (entry in copiesByDevice(listing, known)) {
             if (entry.name != null) continue
             val label = listing.labels.firstOrNull { LabelDriveNaming.parse(it.name) == entry.deviceId }
-                ?.let { readLabels(userId, SharedBackupCopy(entry.deviceId, it))?.deviceLabel }
+                ?.let { (readLabels(userId, SharedBackupCopy(entry.deviceId, it)) as? CopyRead.Read)?.value?.deviceLabel }
             val name = label ?: listing.hidden.firstOrNull { HiddenDriveNaming.parse(it.name) == entry.deviceId }
-                ?.let { readHidden(userId, SharedBackupCopy(entry.deviceId, it))?.deviceLabel }
+                ?.let { (readHidden(userId, SharedBackupCopy(entry.deviceId, it)) as? CopyRead.Read)?.value?.deviceLabel }
             if (!name.isNullOrBlank()) learned[entry.deviceId] = name
         }
         store.rememberDeviceNames(learned)
@@ -302,7 +317,7 @@ class SharedBackupRunner @Inject constructor(
             else -> false
         }
 
-    private suspend fun readLabels(userId: UserId, copy: SharedBackupCopy): LabelSnapshot? {
+    private suspend fun readLabels(userId: UserId, copy: SharedBackupCopy): CopyRead<LabelSnapshot> {
         val snapshot = readOpened(userId, copy) { input, refresh ->
             envelopeCrypto.openKeys(userId, refresh).use { keys ->
                 when (val opened = LabelSnapshotSealing.open(input, envelopeCrypto, keys)) {
@@ -312,10 +327,10 @@ class SharedBackupRunner @Inject constructor(
                 }
             }
         }
-        return snapshot?.takeIf { it.deviceId == copy.deviceId }
+        return snapshot.ownedBy(copy.deviceId) { it.deviceId }
     }
 
-    private suspend fun readHidden(userId: UserId, copy: SharedBackupCopy): HiddenSnapshot? {
+    private suspend fun readHidden(userId: UserId, copy: SharedBackupCopy): CopyRead<HiddenSnapshot> {
         val snapshot = readOpened(userId, copy) { input, refresh ->
             envelopeCrypto.openKeys(userId, refresh).use { keys ->
                 when (val opened = HiddenSnapshotSealing.open(input, envelopeCrypto, keys)) {
@@ -325,7 +340,7 @@ class SharedBackupRunner @Inject constructor(
                 }
             }
         }
-        return snapshot?.takeIf { it.deviceId == copy.deviceId }
+        return snapshot.ownedBy(copy.deviceId) { it.deviceId }
     }
 
     private sealed interface Opened<out T> {
@@ -336,39 +351,43 @@ class SharedBackupRunner @Inject constructor(
 
     /**
      * Downloads [copy] and opens it with [open], once more with the account's addresses refetched when no cached key
-     * opened it. Null when it could not be downloaded or read.
+     * opened it: passed over when no key of this account opens it, it is damaged or too large, tried again later
+     * when it could not be fetched now.
      */
     private suspend fun <T> readOpened(
         userId: UserId,
         copy: SharedBackupCopy,
         open: suspend (FileInputStream, Boolean) -> Opened<T>,
-    ): T? {
-        if (copy.file.sizeBytes > MAX_COPY_BYTES) return null
-        val scratch = scratchFile("read-") ?: return null
+    ): CopyRead<T> {
+        if (copy.file.sizeBytes > MAX_COPY_BYTES) {
+            SyncDiagnostics.log("shared backup: a copy is too large to read, passed over")
+            return CopyRead.PassOver
+        }
+        val scratch = scratchFile("read-") ?: return CopyRead.Retry
         try {
             val downloaded = driveStore.download(userId, copy.file.activeRevisionUid, scratch)
             if (downloaded !is MlDriveResult.Ok) {
                 SyncDiagnostics.log("shared backup: a copy could not be downloaded: ${causeOf(downloaded)}")
-                return null
+                return CopyRead.Retry
             }
             for (refresh in listOf(false, true)) {
                 val opened = withContext(Dispatchers.IO) { FileInputStream(scratch).use { open(it, refresh) } }
                 when (opened) {
-                    is Opened.Value -> return opened.value
+                    is Opened.Value -> return CopyRead.Read(opened.value)
                     Opened.WrongKey -> continue
                     Opened.Unreadable -> {
-                        SyncDiagnostics.log("shared backup: a copy could not be read")
-                        return null
+                        SyncDiagnostics.log("shared backup: a copy could not be read, passed over")
+                        return CopyRead.PassOver
                     }
                 }
             }
-            SyncDiagnostics.log("shared backup: a copy is sealed to a key this account does not hold")
-            return null
+            SyncDiagnostics.log("shared backup: a copy is sealed to a key this account does not hold, passed over")
+            return CopyRead.PassOver
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             SyncDiagnostics.log("shared backup: a copy could not be read: ${e.javaClass.simpleName}")
-            return null
+            return CopyRead.Retry
         } finally {
             scratch.delete()
         }
@@ -439,3 +458,23 @@ class SharedBackupRunner @Inject constructor(
         const val MAX_COPY_BYTES = 64L * 1024 * 1024
     }
 }
+
+/**
+ * What reading one other device's copy came to. A copy no key of this account opens, or one damaged or too large,
+ * is passed over: it never becomes readable here, and holding the round on it would stop this device saving its
+ * own data for good. That device's next copy is read again. One that could not be fetched now is tried again later.
+ */
+internal sealed interface CopyRead<out T> {
+    data class Read<T>(val value: T) : CopyRead<T>
+    data object PassOver : CopyRead<Nothing>
+    data object Retry : CopyRead<Nothing>
+}
+
+/** A read copy whose snapshot names a device other than the one its file name does is passed over. */
+internal fun <T> CopyRead<T>.ownedBy(deviceId: String, deviceOf: (T) -> String): CopyRead<T> =
+    if (this is CopyRead.Read && deviceOf(value) != deviceId) CopyRead.PassOver else this
+
+/** Whether a face or search copy that ended in [status] is passed over for good rather than read again next round:
+ *  no key of this account opens it, or it is damaged. Pure. */
+internal fun mlCopyPassedOver(status: MlSyncPartStatus?): Boolean =
+    status == MlSyncPartStatus.WRONG_ACCOUNT || status == MlSyncPartStatus.DAMAGED

@@ -47,6 +47,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import eu.akoos.photos.data.mlsync.MlSyncPartStatus
 import org.junit.Test
 
 /** The shared backup's own rules: which copies a round reads, the round request, the files' names and the status line. */
@@ -240,5 +241,22 @@ class SharedBackupRulesTest {
         assertEquals(SharedBackupLine.NEVER, sharedBackupLine(running = false, status = never))
         assertEquals(SharedBackupLine.FAILED, sharedBackupLine(false, never.copy(lastAtMs = 5L, lastFailed = true)))
         assertEquals(SharedBackupLine.LAST, sharedBackupLine(false, never.copy(lastAtMs = 5L)))
+    }
+    @Test
+    fun `a copy no key opens, or a damaged one, is passed over for good, a newer version's read again`() {
+        assertTrue(mlCopyPassedOver(MlSyncPartStatus.WRONG_ACCOUNT))
+        assertTrue(mlCopyPassedOver(MlSyncPartStatus.DAMAGED))
+        assertFalse(mlCopyPassedOver(MlSyncPartStatus.TOO_NEW))
+        assertFalse(mlCopyPassedOver(MlSyncPartStatus.FAILED))
+        assertFalse(mlCopyPassedOver(MlSyncPartStatus.NO_SPACE))
+        assertFalse(mlCopyPassedOver(null))
+    }
+
+    @Test
+    fun `a label or hidden copy naming another device than its file is passed over`() {
+        val read: CopyRead<String> = CopyRead.Read("phone-b")
+        assertEquals(CopyRead.PassOver, read.ownedBy("phone-a") { it })
+        assertEquals(read, read.ownedBy("phone-b") { it })
+        assertEquals(CopyRead.Retry, (CopyRead.Retry as CopyRead<String>).ownedBy("phone-a") { it })
     }
 }

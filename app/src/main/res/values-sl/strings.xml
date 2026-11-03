@@ -1498,7 +1498,6 @@
     <string name="viewer_meta_flash_none">Brez bliskavice</string>
     <string name="viewer_meta_wb_auto">Samodejno</string>
     <string name="viewer_meta_wb_manual">Ročno</string>
-    <string name="viewer_meta_orientation_normal">Običajno</string>
     <string name="viewer_meta_orientation_180">Zasukano za 180°</string>
     <string name="viewer_meta_orientation_90_cw">Zasukano za 90° v smeri urinega kazalca</string>
     <string name="viewer_meta_orientation_90_ccw">Zasukano za 90° v nasprotni smeri urinega kazalca</string>
@@ -1506,7 +1505,6 @@
     <string name="viewer_meta_source_backed_up">Proton Drive in naprava</string>
     <string name="viewer_meta_source_cloud">Samo Proton Drive</string>
     <string name="viewer_meta_strip">Odstrani</string>
-    <string name="viewer_meta_strip_all">Odstrani vse zasebne metapodatke</string>
     <string name="viewer_meta_all_details">Vse podrobnosti</string>
     <string name="details_adjust">Prilagodi</string>
     <string name="details_edit">Uredi</string>
@@ -1548,14 +1546,7 @@
         <item quantity="few">Odstrani %d elemente</item>
         <item quantity="other">Odstrani %d elementov</item>
     </plurals>
-    <string name="viewer_meta_strip_all_desc">Odstrani polja GPS, podatke o fotoaparatu in programski opremi ter avtorja in avtorske pravice iz te datoteke</string>
     <string name="viewer_meta_strip_confirm_title">Odstraniti metapodatke?</string>
-    <string name="viewer_meta_strip_confirm_message">S tem se %1$s trajno odstrani iz datoteke v vaši napravi. Tega ni mogoče razveljaviti.</string>
-    <string name="viewer_meta_strip_what_gps">lokacija GPS</string>
-    <string name="viewer_meta_strip_what_camera">podatki o fotoaparatu</string>
-    <string name="viewer_meta_strip_what_timestamps">časovni žigi</string>
-    <string name="viewer_meta_strip_what_software">podatki o programski opremi</string>
-    <string name="viewer_meta_strip_what_authorship">avtor in avtorske pravice</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Izbrisati fotografijo?</string>
@@ -1865,7 +1856,6 @@
         <item quantity="other">Uredi %d fotografij</item>
     </plurals>
     <string name="metadata_editor_done">Končano</string>
-    <string name="metadata_editor_change">Spremeni</string>
     <string name="metadata_editor_saved">Shranjeno</string>
     <string name="metadata_editor_write_failed">Spremembe ni bilo mogoče shraniti</string>
     <string name="metadata_editor_saved_partial">Shranjeno %1$d, %2$d ni bilo mogoče shraniti</string>
@@ -1874,7 +1864,6 @@
     <string name="metadata_editor_source_device">Iz te naprave</string>
     <string name="metadata_editor_source_cloud">Iz Proton Drive</string>
     <string name="metadata_editor_next">Naprej</string>
-    <string name="metadata_editor_set">Nastavi</string>
     <string name="metadata_editor_place_label">Kraj</string>
     <string name="metadata_editor_place_none">Brez lokacije</string>
     <string name="metadata_editor_place_search">Poišči državo ali mesto</string>
@@ -1886,7 +1875,6 @@
     <string name="metadata_editor_note_place_format">Lokacijo je mogoče shraniti le v fotografije JPEG, PNG in WebP.</string>
     <string name="metadata_editor_note_date_format">Pri fotografijah v tej obliki datuma ni mogoče spremeniti.</string>
     <string name="metadata_editor_bulk_date_label">Nastavi datum za te fotografije</string>
-    <string name="metadata_editor_bulk_place_label">Nastavi kraj za te fotografije</string>
     <string name="metadata_editor_bulk_apply_hint">Velja za vsako izbrano fotografijo</string>
     <string name="metadata_editor_bulk_summary">Urejanje %1$d fotografij</string>
     <string name="metadata_editor_bulk_summary_skipped">Urejanje %1$d, %2$d preskočenih</string>
@@ -1902,8 +1890,6 @@
     <string name="metadata_editor_shift_label">Premakni te fotografije v času</string>
     <string name="metadata_editor_shift_hint">Izberite, kdaj je bila najstarejša fotografija res posneta. Vse druge se premaknejo za enako dolgo, tako da razmiki med njimi ostanejo.</string>
     <string name="metadata_editor_shift_picker_title">Kdaj je bila najstarejša fotografija posneta?</string>
-    <string name="metadata_editor_shift_range_current">Zdaj: %1$s do %2$s</string>
-    <string name="metadata_editor_shift_range_after">Po premiku: %1$s do %2$s</string>
     <string name="metadata_editor_shift_too_late">Najnovejša fotografija bi tako pristala v prihodnosti. Izberite zgodnejši datum ali uro.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d fotografija nima svojega datuma, zato jo premik pusti pri miru. Isti datum za vse jo vseeno doseže.</item>
@@ -2324,7 +2310,6 @@
     <string name="editor_tool_frame">Okvir</string>
     <string name="editor_frame_none">Brez</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Rob</string>
     <string name="editor_tab_transform">Obreži in zavrti</string>
     <string name="editor_tab_more">Več</string>
     <string name="editor_transform_ratio">Razmerje</string>
@@ -2518,7 +2503,6 @@
 
     <string name="label_section_title">Oznake</string>
     <string name="label_add_hint">Dodaj oznako</string>
-    <string name="label_add_chip">Dodaj oznako</string>
     <string name="label_remove_cd">Odstrani oznako %1$s</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d od %2$d oznake</item>
@@ -2663,7 +2647,7 @@
     <string name="whats_new_260_details_title">Osebe in zemljevid v podrobnostih</string>
     <string name="whats_new_260_details_body">„Podrobnosti“ fotografije zdaj prikazujejo osebe na njej in zemljevid, kje je nastala. Tapnite osebo, da odprete njeno stran, ali zemljevid za celozaslonski prikaz. Tapnite obraz brez imena, da ga poimenujete ali dodelite komu.</string>
     <string name="whats_new_260_frame_title">Orodje Okvir</string>
-    <string name="whats_new_260_frame_body">V urejevalniku fotografij postavite fotografijo na platno druge oblike, na primer 1:1, 9:16 ali Polaroid, zapolnjeno z barvo ali mehkim zameglenjem. Orodje je še v nastajanju in prihajajo nove izboljšave.</string>
+    <string name="whats_new_260_frame_body">V urejevalniku fotografij postavite fotografijo na platno druge oblike, na primer 1:1, 9:16 ali Polaroid, zapolnjeno z barvo ali mehkim zameglenjem.</string>
     <string name="whats_new_260_drive_title">Podatki o obrazih in iskanju v Drive</string>
     <string name="whats_new_260_drive_body">Imena obrazov, podatke iskanja, oznake in skrite elemente shranite v Drive in jih na drugem telefonu vrnite z „Naloži z Drive“, v „Nastavitve > Več nastavitev > Varnostna kopija na Proton Drive“.</string>
     <string name="whats_new_260_autosave_title">Samodejna varnostna kopija</string>
@@ -2679,13 +2663,13 @@
     <string name="whats_new_260_intro_title">Vključuje prejšnje testne različice</string>
     <string name="whats_new_260_intro_body">Ta različica vsebuje tudi vse iz preizkusnih različic od 1 do 5. Naslednje kartice kažejo le novosti od takrat.</string>
     <string name="whats_new_260_sdk_title">Stikala za Proton Drive SDK</string>
-    <string name="whats_new_260_sdk_body">Nastavitve, Več nastavitev, Proton Drive SDK ima ločeno stikalo za priljubljene in kategorije, koš, prenose v polni kakovosti in nalaganja. Vsa so izklopljena. Vklopite eno in to dejanje bo teklo prek Protonovega lastnega Drive SDK; če ne uspe, ga aplikacija opravi kot običajno.</string>
+    <string name="whats_new_260_sdk_body">Nastavitve, Več nastavitev, Proton Drive SDK ima ločeno stikalo za priljubljene in kategorije, koš, prenose v polni kakovosti, nalaganja, albume, vir sprememb in albume, deljene z vami. Vsa so izklopljena. Vklopite eno in to dejanje bo teklo prek Protonovega lastnega Drive SDK; če ne uspe, ga aplikacija opravi kot običajno.</string>
     <string name="whats_new_260_setas_title">Nastavi kot, in fotografije za druge aplikacije</string>
     <string name="whats_new_260_setas_body">Meni pregledovalnika preda fotografijo telefonovi nastavitvi ozadja ali fotografije stika. Vklopite izbiro fotografij v Zasebnosti in varnosti in druge aplikacije bodo lahko izbirale fotografije od tu; skrite fotografije nikoli ne odidejo.</string>
     <string name="whats_new_260_folderimport_title">Uvoz iz mape</string>
     <string name="whats_new_260_folderimport_body">Uvozite izvoz iz Ente ali Google Takeout ali navadne fotografije iz mape, ne le iz datoteke zip. Live Photo pride kot ena fotografija s svojim videom in vsaka fotografija dobi pravi datum.</string>
     <string name="whats_new_260_mlsetup_title">Pametne funkcije v nastavitvi</string>
-    <string name="whats_new_260_mlsetup_body">Nastavitev ob prvem zagonu ponudi prepoznavanje obrazov, iskanje fotografij in Kopiranje besedila, vsako z velikostjo prenosa. Izberite, kar želite, in prenese se v ozadju.</string>
+    <string name="whats_new_260_mlsetup_body">Nastavitev ob prvem zagonu ponudi prepoznavanje obrazov, iskanje fotografij in Kopiranje besedila, vsako z velikostjo prenosa. Izberite, kar želite, in prenese se v ozadju. Vklopite jih lahko tudi pozneje v „Nastavitve > Več nastavitev > Strojno učenje“.</string>
     <string name="whats_new_260_longpress_title">Dolg pritisk po vaše</string>
     <string name="whats_new_260_longpress_body">V Nastavitvah, Videz izberite, ali dolg pritisk v pregledovalniku izbere besedilo ali odpre meni. Meni ima Prepoznaj besedilo in ne ponavlja več gumbov.</string>
     <string name="whats_new_260_nothumb_title">Fotografije iz Drive se spet odpirajo</string>

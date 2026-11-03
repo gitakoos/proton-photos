@@ -1274,7 +1274,6 @@
     <string name="viewer_meta_flash_none">Geen flits</string>
     <string name="viewer_meta_wb_auto">Automatisch</string>
     <string name="viewer_meta_wb_manual">Handmatig</string>
-    <string name="viewer_meta_orientation_normal">Normaal</string>
     <string name="viewer_meta_orientation_180">180° gedraaid</string>
     <string name="viewer_meta_orientation_90_cw">90° met de klok mee gedraaid</string>
     <string name="viewer_meta_orientation_90_ccw">90° tegen de klok in gedraaid</string>
@@ -1282,7 +1281,6 @@
     <string name="viewer_meta_source_backed_up">Proton Drive en apparaat</string>
     <string name="viewer_meta_source_cloud">Alleen Proton Drive</string>
     <string name="viewer_meta_strip">Verwijderen</string>
-    <string name="viewer_meta_strip_all">Alle privémetadata verwijderen</string>
     <string name="viewer_meta_all_details">Alle details</string>
     <string name="details_adjust">Aanpassen</string>
     <string name="details_edit">Bewerken</string>
@@ -1318,14 +1316,7 @@
         <item quantity="one">%d item verwijderen</item>
         <item quantity="other">%d items verwijderen</item>
     </plurals>
-    <string name="viewer_meta_strip_all_desc">Verwijdert GPS, camera-informatie en software-, maker- en copyrightvelden uit dit bestand</string>
     <string name="viewer_meta_strip_confirm_title">Metadata verwijderen?</string>
-    <string name="viewer_meta_strip_confirm_message">Hiermee wordt %1$s permanent uit het bestand op je apparaat verwijderd. Dit kan niet ongedaan worden gemaakt.</string>
-    <string name="viewer_meta_strip_what_gps">GPS-locatie</string>
-    <string name="viewer_meta_strip_what_camera">camera-informatie</string>
-    <string name="viewer_meta_strip_what_timestamps">tijdstempels</string>
-    <string name="viewer_meta_strip_what_software">software-informatie</string>
-    <string name="viewer_meta_strip_what_authorship">maker en copyright</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Foto verwijderen?</string>
@@ -1793,7 +1784,6 @@
         <item quantity="other">%d foto\'s bewerken</item>
     </plurals>
     <string name="metadata_editor_done">Klaar</string>
-    <string name="metadata_editor_change">Wijzigen</string>
     <string name="metadata_editor_saved">Opgeslagen</string>
     <string name="metadata_editor_write_failed">Kon de wijziging niet opslaan</string>
     <string name="metadata_editor_saved_partial">%1$d opgeslagen, %2$d konden niet worden opgeslagen</string>
@@ -1802,7 +1792,6 @@
     <string name="metadata_editor_source_device">Van dit apparaat</string>
     <string name="metadata_editor_source_cloud">Van Proton Drive</string>
     <string name="metadata_editor_next">Volgende</string>
-    <string name="metadata_editor_set">Instellen</string>
     <string name="metadata_editor_place_label">Plaats</string>
     <string name="metadata_editor_place_none">Geen locatie</string>
     <string name="metadata_editor_place_search">Zoek een land of stad</string>
@@ -1814,7 +1803,6 @@
     <string name="metadata_editor_note_place_format">De locatie kan alleen in JPEG-, PNG- en WebP-foto\'s worden opgeslagen.</string>
     <string name="metadata_editor_note_date_format">De datum kan niet worden gewijzigd voor foto\'s in dit formaat.</string>
     <string name="metadata_editor_bulk_date_label">Een datum voor deze foto\'s instellen</string>
-    <string name="metadata_editor_bulk_place_label">Een plaats voor deze foto\'s instellen</string>
     <string name="metadata_editor_bulk_apply_hint">Geldt voor elke geselecteerde foto</string>
     <string name="metadata_editor_bulk_summary">%1$d foto\'s bewerken</string>
     <string name="metadata_editor_bulk_summary_skipped">%1$d bewerken, %2$d overgeslagen</string>
@@ -1830,8 +1818,6 @@
     <string name="metadata_editor_shift_label">Deze foto\'s in de tijd verschuiven</string>
     <string name="metadata_editor_shift_hint">Kies wanneer de oudste foto echt is gemaakt. Alle andere schuiven evenveel op, zodat de afstanden ertussen blijven bestaan.</string>
     <string name="metadata_editor_shift_picker_title">Wanneer is de oudste foto gemaakt?</string>
-    <string name="metadata_editor_shift_range_current">Nu: %1$s tot %2$s</string>
-    <string name="metadata_editor_shift_range_after">Na het verschuiven: %1$s tot %2$s</string>
     <string name="metadata_editor_shift_too_late">Daarmee zou de nieuwste foto in de toekomst liggen. Kies een eerdere datum of tijd.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d foto heeft geen eigen datum, dus verschuiven laat hem staan. Dezelfde datum voor alle bereikt hem wel.</item>
@@ -2234,7 +2220,6 @@
     <string name="editor_tool_frame">Kader</string>
     <string name="editor_frame_none">Geen</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Rand</string>
     <string name="editor_tab_transform">Bijsnijden en draaien</string>
     <string name="editor_tab_more">Meer</string>
     <string name="editor_transform_ratio">Beeldverhouding</string>
@@ -2429,7 +2414,6 @@
 
     <string name="label_section_title">Labels</string>
     <string name="label_add_hint">Label toevoegen</string>
-    <string name="label_add_chip">Label toevoegen</string>
     <string name="label_remove_cd">Label %1$s verwijderen</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d van %2$d label</item>
@@ -2560,7 +2544,7 @@
     <string name="whats_new_260_details_title">Personen en kaart in de details</string>
     <string name="whats_new_260_details_body">De “Details” van een foto tonen nu de mensen erop en een kaart van waar hij is genomen. Tik op een persoon om diens pagina te openen, of op de kaart voor beeldvullend. Tik op een gezicht zonder naam om het een naam te geven of aan iemand toe te voegen.</string>
     <string name="whats_new_260_frame_title">Kadergereedschap</string>
-    <string name="whats_new_260_frame_body">Plaats in de foto-editor een foto op een canvas met een andere vorm, zoals 1:1, 9:16 of Polaroid, gevuld met een kleur of een zachte vervaging. Het gereedschap is nog in ontwikkeling en er komen meer verbeteringen.</string>
+    <string name="whats_new_260_frame_body">Plaats in de foto-editor een foto op een canvas met een andere vorm, zoals 1:1, 9:16 of Polaroid, gevuld met een kleur of een zachte vervaging.</string>
     <string name="whats_new_260_drive_title">Gezichts- en zoekgegevens in Drive</string>
     <string name="whats_new_260_drive_body">Bewaar gezichtsnamen, zoekgegevens, labels en verborgen items in Drive en haal ze op een andere telefoon terug met “Laden van Drive”, onder “Instellingen > Meer instellingen > Back-up naar Proton Drive”.</string>
     <string name="whats_new_260_autosave_title">Automatische back-up</string>
@@ -2576,13 +2560,13 @@
     <string name="whats_new_260_intro_title">Bevat eerdere testversies</string>
     <string name="whats_new_260_intro_body">Deze versie bevat ook alles uit testversies 1 tot en met 5. De volgende kaarten tonen alleen wat sindsdien nieuw is.</string>
     <string name="whats_new_260_sdk_title">Schakelaars voor de Proton Drive SDK</string>
-    <string name="whats_new_260_sdk_body">Instellingen, Meer instellingen, Proton Drive SDK heeft een schakelaar voor favorieten en categorieën, de prullenbak, downloads in volle kwaliteit en uploads. Ze staan allemaal uit. Zet er een aan om die actie via Protons eigen Drive SDK te laten lopen; lukt dat niet, dan doet de app het zoals altijd.</string>
+    <string name="whats_new_260_sdk_body">Instellingen, Meer instellingen, Proton Drive SDK heeft een schakelaar voor favorieten en categorieën, de prullenbak, downloads in volle kwaliteit, uploads, albums, de wijzigingsfeed en albums die met je zijn gedeeld. Ze staan allemaal uit. Zet er een aan om die actie via Protons eigen Drive SDK te laten lopen; lukt dat niet, dan doet de app het zoals altijd.</string>
     <string name="whats_new_260_setas_title">Instellen als, en foto\'s voor andere apps</string>
     <string name="whats_new_260_setas_body">Het menu van de viewer geeft een foto door aan de achtergrond- of contactfoto-instelling van de telefoon. Zet fotokeuze aan bij Privacy en beveiliging en andere apps kunnen hier foto\'s kiezen; verborgen foto\'s gaan er nooit uit.</string>
     <string name="whats_new_260_folderimport_title">Importeren uit een map</string>
     <string name="whats_new_260_folderimport_body">Importeer een Ente- of Google Takeout-export, of gewone foto\'s, ook uit een map in plaats van alleen uit een zip. Een Live Photo komt binnen als één foto met zijn video, en elke foto krijgt een echte datum.</string>
     <string name="whats_new_260_mlsetup_title">Slimme functies bij het instellen</string>
-    <string name="whats_new_260_mlsetup_body">Het instellen bij de eerste start biedt gezichtsherkenning, foto\'s zoeken en Tekst kopiëren aan, elk met de downloadgrootte. Kies wat je wilt en het downloadt op de achtergrond.</string>
+    <string name="whats_new_260_mlsetup_body">Het instellen bij de eerste start biedt gezichtsherkenning, foto\'s zoeken en Tekst kopiëren aan, elk met de downloadgrootte. Kies wat je wilt en het downloadt op de achtergrond. Je kunt ze ook later aanzetten onder “Instellingen > Meer instellingen > Machine learning”.</string>
     <string name="whats_new_260_longpress_title">Lang drukken zoals jij wilt</string>
     <string name="whats_new_260_longpress_body">Kies bij Instellingen, Weergave of lang drukken in de viewer tekst selecteert of het menu opent. Het menu heeft Tekst herkennen en herhaalt de knoppen niet meer.</string>
     <string name="whats_new_260_nothumb_title">Drive-foto\'s openen weer</string>

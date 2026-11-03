@@ -42,7 +42,7 @@ import eu.akoos.photos.util.ProtonPhotosStorage
  * by its file name and size. A photo or video the phone does not hold yet is saved into the camera
  * folder first, so sharing it again finds that copy instead of making another.
  */
-class SharedMediaResolver(private val resolver: ContentResolver) {
+class SharedMediaResolver(private val resolver: ContentResolver, private val ownPackage: String) {
 
     /**
      * The MediaStore uri of each shared item, in order and without repeats, how many were saved to the
@@ -54,6 +54,10 @@ class SharedMediaResolver(private val resolver: ContentResolver) {
         var saved = 0
         var unreadable = 0
         for (uri in shared) {
+            if (!readableShare(uri.scheme, uri.authority, ownPackage)) {
+                unreadable++
+                continue
+            }
             val match = runCatching { direct(uri) ?: byNameAndSize(uri) }.getOrNull()
             val copy = if (match == null) runCatching { saveToPhone(uri, typeHint) }.getOrNull() else null
             when {
@@ -137,6 +141,17 @@ class SharedMediaResolver(private val resolver: ContentResolver) {
  * The name a shared file is saved under: its own name with an extension that fits [mime], or a
  * dated one when the sending app gives none. MediaStore numbers a clash itself.
  */
+/**
+ * Whether a shared uri may be read here: only a content uri of another app. What is read is opened with this
+ * app's own rights, so a file uri, or one of this app's own providers, would hand any sender this app's private
+ * files (its database, its cached photos, the vault) to copy into the public gallery and up to Drive.
+ */
+internal fun readableShare(scheme: String?, authority: String?, ownPackage: String): Boolean =
+    scheme == ContentResolver.SCHEME_CONTENT &&
+        !authority.isNullOrBlank() &&
+        authority != ownPackage &&
+        !authority.startsWith("$ownPackage.")
+
 internal fun sharedFileName(name: String?, mime: String, nowMs: Long): String {
     val ext = COMMON_EXTENSIONS[mime] ?: MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
         ?: if (mime.startsWith("video/")) "mp4" else "jpg"

@@ -116,7 +116,6 @@
         <item quantity="other">%d fotoğrafı düzenle</item>
     </plurals>
     <string name="metadata_editor_done">Bitti</string>
-    <string name="metadata_editor_change">Değiştir</string>
     <string name="metadata_editor_saved">Kaydedildi</string>
     <string name="metadata_editor_write_failed">Değişiklik kaydedilemedi</string>
     <string name="metadata_editor_saved_partial">%1$d kaydedildi, %2$d kaydedilemedi</string>
@@ -125,7 +124,6 @@
     <string name="metadata_editor_source_device">Bu cihazdan</string>
     <string name="metadata_editor_source_cloud">Proton Drive\'dan</string>
     <string name="metadata_editor_next">İleri</string>
-    <string name="metadata_editor_set">Ayarla</string>
     <string name="metadata_editor_place_label">Konum</string>
     <string name="metadata_editor_place_none">Konum yok</string>
     <string name="metadata_editor_place_search">Ülke veya şehir ara</string>
@@ -137,7 +135,6 @@
     <string name="metadata_editor_note_place_format">Konum yalnızca JPEG, PNG ve WebP fotoğraflara eklenebilir.</string>
     <string name="metadata_editor_note_date_format">Bu biçimdeki fotoğrafların tarihi değiştirilemez.</string>
     <string name="metadata_editor_bulk_date_label">Bu fotoğraflar için tarih ayarla</string>
-    <string name="metadata_editor_bulk_place_label">Bu fotoğraflar için konum ayarla</string>
     <string name="metadata_editor_bulk_apply_hint">Seçili tüm fotoğraflara uygulanır</string>
     <string name="metadata_editor_bulk_summary">%1$d fotoğraf düzenleniyor</string>
     <string name="metadata_editor_bulk_summary_skipped">%1$d düzenleniyor, %2$d atlandı</string>
@@ -153,8 +150,6 @@
     <string name="metadata_editor_shift_label">Bu fotoğrafları zamanda kaydır</string>
     <string name="metadata_editor_shift_hint">En eski fotoğrafın gerçekte ne zaman çekildiğini seç. Diğer tüm fotoğraflar aynı miktarda kayar, böylece aralarındaki farklar korunur.</string>
     <string name="metadata_editor_shift_picker_title">En eski fotoğraf ne zaman çekildi?</string>
-    <string name="metadata_editor_shift_range_current">Şu an: %1$s ile %2$s arası</string>
-    <string name="metadata_editor_shift_range_after">Kaydırmadan sonra: %1$s ile %2$s arası</string>
     <string name="metadata_editor_shift_too_late">Bu, en yeni fotoğrafı geleceğe taşır. Daha erken bir tarih veya saat seç.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d fotoğrafın kendi tarihi yok, bu yüzden kaydırma onu olduğu yerde bırakır. Hepsi için aynı tarih seçeneği yine de onu kapsar.</item>
@@ -241,7 +236,6 @@
     <string name="editor_tool_frame">Çerçeve</string>
     <string name="editor_frame_none">Yok</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Kenarlık</string>
     <string name="editor_tab_transform">Kırp ve döndür</string>
     <string name="editor_tab_more">Daha fazla</string>
     <string name="editor_transform_ratio">En boy oranı</string>
@@ -1918,7 +1912,6 @@
     <string name="viewer_meta_flash_none">Flaş yok</string>
     <string name="viewer_meta_wb_auto">Otomatik</string>
     <string name="viewer_meta_wb_manual">Manuel</string>
-    <string name="viewer_meta_orientation_normal">Normal</string>
     <string name="viewer_meta_orientation_180">180° döndürülmüş</string>
     <string name="viewer_meta_orientation_90_cw">Saat yönünde 90° döndürülmüş</string>
     <string name="viewer_meta_orientation_90_ccw">Saat yönünün tersine 90° döndürülmüş</string>
@@ -1926,7 +1919,6 @@
     <string name="viewer_meta_source_backed_up">Proton Drive ve cihaz</string>
     <string name="viewer_meta_source_cloud">Yalnızca Proton Drive</string>
     <string name="viewer_meta_strip">Temizle</string>
-    <string name="viewer_meta_strip_all">Tüm özel meta verileri temizle</string>
     <string name="viewer_meta_all_details">Tüm ayrıntılar</string>
     <string name="details_adjust">Ayarla</string>
     <string name="details_edit">Düzenle</string>
@@ -1962,10 +1954,8 @@
         <item quantity="one">%d öğeyi kaldır</item>
         <item quantity="other">%d öğeyi kaldır</item>
     </plurals>
-    <string name="viewer_meta_strip_all_desc">Bu dosyadan GPS, kamera bilgisi, yazılım, sanatçı ve telif hakkı alanlarını kaldırır</string>
     <string name="label_section_title">Etiketler</string>
     <string name="label_add_hint">Etiket ekle</string>
-    <string name="label_add_chip">Etiket ekle</string>
     <string name="label_remove_cd">Etiketi kaldır: %1$s</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d / %2$d etiket</item>
@@ -2040,12 +2030,6 @@
     </plurals>
     <string name="label_delete_confirm">Kaldır</string>
     <string name="viewer_meta_strip_confirm_title">Meta veriler temizlensin mi?</string>
-    <string name="viewer_meta_strip_confirm_message">Bu işlem, cihazındaki dosyadan şunları kalıcı olarak kaldırır: %1$s. Bu geri alınamaz.</string>
-    <string name="viewer_meta_strip_what_gps">GPS konumu</string>
-    <string name="viewer_meta_strip_what_camera">kamera bilgisi</string>
-    <string name="viewer_meta_strip_what_timestamps">zaman damgaları</string>
-    <string name="viewer_meta_strip_what_software">yazılım bilgisi</string>
-    <string name="viewer_meta_strip_what_authorship">sanatçı ve telif hakkı</string>
 
     <string name="viewer_delete_title_local">Fotoğraf silinsin mi?</string>
     <string name="viewer_delete_title_synced">Fotoğraf kaldırılsın mı?</string>
@@ -2450,7 +2434,7 @@
     <string name="whats_new_260_details_title">Ayrıntılarda kişiler ve harita</string>
     <string name="whats_new_260_details_body">Bir fotoğrafın “Ayrıntılar” bölümü artık içindeki kişileri ve çekildiği yerin haritasını gösterir. Sayfasını açmak için bir kişiye, tam ekran görmek için haritaya dokunun. Adsız bir yüze dokunarak ona ad verin veya birine ekleyin.</string>
     <string name="whats_new_260_frame_title">Çerçeve aracı</string>
-    <string name="whats_new_260_frame_body">Fotoğraf düzenleyicide bir fotoğrafı 1:1, 9:16 veya Polaroid gibi başka şekilli bir tuvale, bir renkle veya yumuşak bir bulanıklıkla doldurarak yerleştirin. Araç hâlâ geliştiriliyor ve yeni iyileştirmeler gelecek.</string>
+    <string name="whats_new_260_frame_body">Fotoğraf düzenleyicide bir fotoğrafı 1:1, 9:16 veya Polaroid gibi başka şekilli bir tuvale, bir renkle veya yumuşak bir bulanıklıkla doldurarak yerleştirin.</string>
     <string name="whats_new_260_drive_title">Drive\'da yüz ve arama verileri</string>
     <string name="whats_new_260_drive_body">Yüz adlarını, arama verilerini, etiketleri ve gizli öğeleri Drive\'a kaydedin ve başka bir telefonda “Drive\'dan yükle” ile geri getirin: “Ayarlar > Diğer ayarlar > Proton Drive\'a yedekle”.</string>
     <string name="whats_new_260_autosave_title">Otomatik yedekleme</string>
@@ -2466,13 +2450,13 @@
     <string name="whats_new_260_intro_title">Önceki test sürümleri dahil</string>
     <string name="whats_new_260_intro_body">Bu sürüm 1\'den 5\'e kadar test sürümlerindeki her şeyi de içerir. Sonraki kartlar yalnızca o zamandan beri yeni olanı gösterir.</string>
     <string name="whats_new_260_sdk_title">Proton Drive SDK anahtarları</string>
-    <string name="whats_new_260_sdk_body">Ayarlar, Diğer ayarlar, Proton Drive SDK altında favoriler ve kategoriler, çöp kutusu, tam kalitede indirme ve yükleme için ayrı birer anahtar var. Hepsi kapalı. Birini açtığında o işlem Proton\'un kendi Drive SDK\'sı üzerinden yürür; başarısız olursa uygulama işi her zamanki gibi yapar.</string>
+    <string name="whats_new_260_sdk_body">Ayarlar, Diğer ayarlar, Proton Drive SDK altında favoriler ve kategoriler, çöp kutusu, tam kalitede indirme, yükleme, albümler, değişiklik akışı ve sizinle paylaşılan albümler için ayrı birer anahtar var. Hepsi kapalı. Birini açtığında o işlem Proton\'un kendi Drive SDK\'sı üzerinden yürür; başarısız olursa uygulama işi her zamanki gibi yapar.</string>
     <string name="whats_new_260_setas_title">Farklı ayarla ve diğer uygulamalara fotoğraf</string>
     <string name="whats_new_260_setas_body">Görüntüleyicinin menüsü fotoğrafı telefonun duvar kağıdı veya kişi fotoğrafı ayarına iletir. Gizlilik ve güvenlik altında fotoğraf seçmeyi açarsan diğer uygulamalar buradan fotoğraf seçebilir; gizli fotoğraflar asla dışarı çıkmaz.</string>
     <string name="whats_new_260_folderimport_title">Klasörden içe aktarma</string>
     <string name="whats_new_260_folderimport_body">Ente veya Google Takeout dışa aktarımını ya da düz fotoğrafları zip\'in yanında bir klasörden de içe aktar. Live Photo videosuyla birlikte tek fotoğraf olarak gelir ve her fotoğraf gerçek bir tarih alır.</string>
     <string name="whats_new_260_mlsetup_title">Kurulumda akıllı özellikler</string>
-    <string name="whats_new_260_mlsetup_body">İlk açılış kurulumu yüz tanıma, fotoğraf arama ve Metni kopyala özelliklerini, her birinin indirme boyutuyla sunar. İstediğini seç, arka planda iner.</string>
+    <string name="whats_new_260_mlsetup_body">İlk açılış kurulumu yüz tanıma, fotoğraf arama ve Metni kopyala özelliklerini, her birinin indirme boyutuyla sunar. İstediğini seç, arka planda iner. Bunları daha sonra “Ayarlar > Diğer ayarlar > Makine öğrenimi” altında da açabilirsin.</string>
     <string name="whats_new_260_longpress_title">Uzun basma, senin istediğin gibi</string>
     <string name="whats_new_260_longpress_body">Ayarlar, Görünüm altında görüntüleyicide uzun basmanın metni mi seçeceğini yoksa menüyü mü açacağını seç. Menüde Metni tanı var ve artık düğmeleri tekrarlamıyor.</string>
     <string name="whats_new_260_nothumb_title">Drive fotoğrafları yeniden açılıyor</string>

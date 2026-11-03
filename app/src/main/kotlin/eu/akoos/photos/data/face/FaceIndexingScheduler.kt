@@ -106,6 +106,7 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.service.FaceIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.FaceDiagnostics
+import eu.akoos.photos.util.HealthVerdict
 import eu.akoos.photos.util.FaceDiagnostics.RegroupTrigger
 import eu.akoos.photos.util.GuardedSessionHolder
 import eu.akoos.photos.util.MlAbandonCap
@@ -884,6 +885,14 @@ class FaceIndexingScheduler @Inject constructor(
             // embeddings with no re-embed; release keeps the new-faces-only guard.
             if (total == 0) {
                 retryBook.clear()
+                // Grouping is the heaviest step of all, so it waits for the same go-ahead as the scan: the
+                // charger when the user asked for it, battery and heat.
+                if (!awaitMlGoAhead(deviceHealth::mlVerdict, { deviceHealth.awaitMlWorkAllowed() }, FaceDiagnostics::recordPark) {
+                        active() && writeFence.allows(passToken)
+                    }
+                ) {
+                    return
+                }
                 // "Fully scanned" holds only for the library as this pass read it. An import since then may
                 // have brought or replaced faces, so the reattach and the grouping wait for the walk the
                 // import's caller starts next rather than acting on a stale view.
@@ -2770,6 +2779,14 @@ class FaceIndexingScheduler @Inject constructor(
                 progressTotal = examinedBeforeSweep + sweepBacklog
                 while (true) {
                     coroutineContext.ensureActive()
+                    // Each batch waits for the scan's go-ahead (charger when asked, battery, heat), so a long
+                    // grouping hosted in the foreground stops when the phone comes off the charger.
+                    if (!awaitMlGoAhead(deviceHealth::mlVerdict, { deviceHealth.awaitMlWorkAllowed() }, FaceDiagnostics::recordPark) {
+                            writeFence.allows(fenceToken)
+                        }
+                    ) {
+                        return false
+                    }
                     batch.scanned = 0
                     val createdBefore = batch.created
                     val handled = clusterFacesUseCase.assignNewFaces(userId, batch, onTick = { beat() }) {
@@ -3575,3 +3592,23 @@ internal fun shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly: Boolean, nowWifiOnly
  *  resumes on reconnect rather than staying idle, without kicking on the initial replayed state. */
 internal fun shouldResumeFaceScanOnUnmetered(wasUnmetered: Boolean, nowUnmetered: Boolean): Boolean =
     !wasUnmetered && nowUnmetered
+
+/**
+ * Waits until the device may run machine learning work ([verdict], charging when the user asked for it, battery,
+ * heat), noting each park with [onPark], as long as [live]; answers whether the work may go on. Pure but for the
+ * waiting it is handed.
+ */
+internal suspend fun awaitMlGoAhead(
+    verdict: () -> HealthVerdict,
+    await: suspend () -> Unit,
+    onPark: (String) -> Unit,
+    live: () -> Boolean,
+): Boolean {
+    var now = verdict()
+    while (live() && !now.backgroundWorkAllowed) {
+        onPark(now.reason)
+        await()
+        now = verdict()
+    }
+    return live()
+}

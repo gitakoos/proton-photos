@@ -91,6 +91,7 @@ import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.sharedbackup.DriveJobLock
 import eu.akoos.photos.data.sharedbackup.SharedBackupKind
 import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
+import eu.akoos.photos.data.sharedbackup.mlCopyPassedOver
 import eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
 import eu.akoos.photos.data.sharedbackup.SharedBackupStore
 import eu.akoos.photos.data.notification.NotificationIds
@@ -672,11 +673,13 @@ class MlSyncWorker @AssistedInject constructor(
                     var status: MlSyncPartStatus? = null
                     val ends = restoreStep(userId, step, index, plan.size, tally, walks, scratch) { status = it }
                     val kind = step.file.kind
-                    if (status?.finished == true) {
-                        val recorded = if (kind == MlDriveFileKind.FACES) SharedBackupKind.FACES else SharedBackupKind.SEARCH
-                        sharedBackupRunner.markApplied(userId, recorded, step.file.deviceId, step.file.serverModifiedAtMs)
-                    } else {
-                        unread += kind
+                    val recorded = if (kind == MlDriveFileKind.FACES) SharedBackupKind.FACES else SharedBackupKind.SEARCH
+                    when {
+                        status?.finished == true || mlCopyPassedOver(status) ->
+                            sharedBackupRunner.markApplied(userId, recorded, step.file.deviceId, step.file.serverModifiedAtMs)
+                        // Written by a newer version: read again next round, without holding this device's own save.
+                        status == MlSyncPartStatus.TOO_NEW -> Unit
+                        else -> unread += kind
                     }
                     if (ends != null) return endRound(tally.outcome(ends), failed = true)
                 }

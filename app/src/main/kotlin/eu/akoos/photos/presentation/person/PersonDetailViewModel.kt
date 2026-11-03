@@ -167,10 +167,11 @@ class PersonDetailViewModel @Inject constructor(
     // same here, with the delete permission handshake in one place.
     val sel = selectionFactory.create(viewModelScope)
 
-    /** Whether a Proton account is signed in: the cloud actions (add to album) need one. */
+    /** Whether a Proton account is signed in: the cloud actions (add to album) need one. Starts false, so a guest
+     *  never sees them before the account is known. */
     val isSignedIn: StateFlow<Boolean> = accountManager.getPrimaryUserId()
         .map { it != null }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val selectedItems: StateFlow<Set<GalleryItem>> get() = sel.selectedItems
     val albums get() = sel.albums

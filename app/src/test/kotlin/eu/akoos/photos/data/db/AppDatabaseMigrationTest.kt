@@ -29,6 +29,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -1581,6 +1582,96 @@ class AppDatabaseMigrationTest {
             assertEquals("raw-1", cur.getString(0))
             assertEquals("user-1", cur.getString(1))
             assertEquals(1, cur.getInt(2))
+        }
+    }
+
+    @Test
+    fun migrate_v48_to_v49_backfillsLabelTimesFromTheLabels_andCreatesTheEmptyTables() {
+        Migrations.MIGRATION_41_42.migrate(db)
+        db.execSQL("INSERT INTO photo_label (userId, photoKey, label, labelKey, updatedAt) VALUES ('u', 'p1', 'Sea', 'sea', 10)")
+        db.execSQL("INSERT INTO photo_label (userId, photoKey, label, labelKey, updatedAt) VALUES ('u', 'p1', 'Trip', 'trip', 30)")
+        db.execSQL("INSERT INTO photo_label (userId, photoKey, label, labelKey, updatedAt) VALUES ('u', 'p2', 'Sea', 'sea', 20)")
+
+        Migrations.MIGRATION_48_49.migrate(db)
+        Migrations.MIGRATION_48_49.migrate(db)
+
+        db.query("SELECT photoKey, changedAt FROM photo_label_state WHERE userId = 'u' ORDER BY photoKey").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("p1", cur.getString(0))
+            assertEquals("a photo's time is its newest label's", 30L, cur.getLong(1))
+            assertTrue(cur.moveToNext())
+            assertEquals("p2", cur.getString(0))
+            assertEquals(20L, cur.getLong(1))
+            assertFalse("re-running adds no rows", cur.moveToNext())
+        }
+        for (table in listOf("photo_label_deleted", "drive_copy_applied")) {
+            db.query("SELECT COUNT(*) FROM $table").use { cur ->
+                assertTrue(cur.moveToFirst())
+                assertEquals(0, cur.getInt(0))
+            }
+        }
+        db.execSQL("INSERT INTO drive_copy_applied (userId, kind, deviceId, createdAt) VALUES ('u', 'LABELS', 'd1', 5)")
+        db.execSQL("INSERT OR REPLACE INTO drive_copy_applied (userId, kind, deviceId, createdAt) VALUES ('u', 'LABELS', 'd1', 9)")
+        db.query("SELECT COUNT(*), MAX(createdAt) FROM drive_copy_applied").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("one row per account, kind and device", 1, cur.getInt(0))
+            assertEquals(9L, cur.getLong(1))
+        }
+    }
+
+    @Test
+    fun migrate_v49_to_v51_createsTheNameAndCurationTimeTables_withTheirKeys() {
+        Migrations.MIGRATION_49_50.migrate(db)
+        Migrations.MIGRATION_50_51.migrate(db)
+        Migrations.MIGRATION_49_50.migrate(db)
+        Migrations.MIGRATION_50_51.migrate(db)
+
+        db.execSQL("INSERT INTO person_name_state (userId, name, namedAt) VALUES ('u', 'Anna', 1)")
+        db.execSQL("INSERT OR REPLACE INTO person_name_state (userId, name, namedAt) VALUES ('u', 'Anna', 2)")
+        db.execSQL("INSERT INTO person_name_change (userId, fromName, toName, changedAt) VALUES ('u', 'Anna', 'Ann', 3)")
+        db.execSQL("INSERT OR IGNORE INTO person_name_change (userId, fromName, toName, changedAt) VALUES ('u', 'Anna', 'Ann', 3)")
+        db.execSQL(
+            "INSERT INTO face_curation_time (userId, kind, personName, ref, removed, changedAt) VALUES ('u', 1, 'Ann', 'p1', 0, 4)"
+        )
+        db.query("SELECT (SELECT COUNT(*) FROM person_name_state), (SELECT namedAt FROM person_name_state), " +
+            "(SELECT COUNT(*) FROM person_name_change), (SELECT COUNT(*) FROM face_curation_time)").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(1, cur.getInt(0))
+            assertEquals(2L, cur.getLong(1))
+            assertEquals("the same change is kept once", 1, cur.getInt(2))
+            assertEquals(1, cur.getInt(3))
+        }
+    }
+
+    @Test
+    fun migrate_v51_to_v54_buildsTheCompressQueue_andAddsItsCountersWithZeroDefaults() {
+        Migrations.MIGRATION_51_52.migrate(db)
+        db.execSQL("INSERT INTO pending_cloud_compress (linkId, userId, enqueuedAt) VALUES ('l1', 'u', 7)")
+
+        Migrations.MIGRATION_52_53.migrate(db)
+        Migrations.MIGRATION_53_54.migrate(db)
+
+        db.query("SELECT linkId, enqueuedAt, newLinkId, attemptRun, attempts, carriedOver FROM pending_cloud_compress").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("l1", cur.getString(0))
+            assertEquals(7L, cur.getLong(1))
+            assertTrue(cur.isNull(2))
+            assertTrue(cur.isNull(3))
+            assertEquals("a queued photo has no failed tries yet", 0, cur.getInt(4))
+            assertEquals("nor carried anything over", 0, cur.getInt(5))
+        }
+        db.query(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'index_pending_cloud_compress_enqueuedAt'"
+        ).use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals(1, cur.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrations_registerEveryStepUpToV54() {
+        for (from in 48..53) {
+            assertTrue("$from -> ${from + 1}", Migrations.ALL.any { it.startVersion == from && it.endVersion == from + 1 })
         }
     }
 

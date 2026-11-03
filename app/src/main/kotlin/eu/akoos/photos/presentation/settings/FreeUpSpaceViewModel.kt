@@ -178,7 +178,7 @@ class FreeUpSpaceViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         running = false, verifying = false, pendingIntent = null,
-                        message = doneMessage(result.skipped), messageIsError = false,
+                        message = doneMessage(result.skipped), messageIsError = freeUpLeftCopies(result.skipped),
                     )
                 }
                 load()
@@ -255,3 +255,7 @@ class FreeUpSpaceViewModel @Inject constructor(
             context.getString(R.string.settings_free_up_none)
         }
 }
+
+/** A finished Free up shows a warning rather than the check when some device copies stayed: [skipped] could not
+ *  be removed here. Pure. */
+internal fun freeUpLeftCopies(skipped: Int): Boolean = skipped > 0

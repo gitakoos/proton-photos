@@ -57,7 +57,7 @@ class CloudCompressQueue @Inject constructor(
     /** True when a start right now would wait: the back-up is set to Wi-Fi only and the phone is not on
      *  an unmetered network. */
     suspend fun waitsForWifi(): Boolean =
-        (context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] ?: false) && !network.isUnmetered.value
+        wifiOnlySetting(context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY]) && !network.isUnmetered.value
 
     /** How many photos are waiting or being compressed. */
     val pending: Flow<Int> = dao.observeCount()
@@ -106,7 +106,7 @@ class CloudCompressQueue @Inject constructor(
     }
 
     private suspend fun start() {
-        val wifiOnly = context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY] ?: false
+        val wifiOnly = wifiOnlySetting(context.settingsDataStore.data.first()[SettingsKeys.SYNC_WIFI_ONLY])
         CloudCompressWorker.enqueue(context, wifiOnly)
     }
 
@@ -114,6 +114,9 @@ class CloudCompressQueue @Inject constructor(
         const val CHUNK = 500
     }
 }
+
+/** The back-up's Wi-Fi only switch as stored: on until the user turns it off, as Settings shows it. Pure. */
+internal fun wifiOnlySetting(stored: Boolean?): Boolean = stored != false
 
 /** The link of every photo or video in [items] that lives only on Drive: the ones compression in place
  *  applies to. Pure. */

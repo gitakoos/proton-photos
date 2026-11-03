@@ -122,11 +122,14 @@ class AssignFacesToPersonUseCase @Inject constructor(
         var emptied = false
         for (sourceId in sourceIds) {
             val source = personDao.personById(sourceId)?.takeIf { it.userId == account } ?: continue
-            if (faceDao.faceCountForPerson(account, sourceId) == 0) {
+            val sourceName = source.displayName?.takeIf { it.isNotBlank() }
+            // A person whose last face moved away still stands while photos were added to them by hand.
+            val keptByHand = sourceName != null && personManualPhotoDao.photoKeysForNameList(account, sourceName).isNotEmpty()
+            if (faceDao.faceCountForPerson(account, sourceId) == 0 && !keptByHand) {
                 personDao.updateCoverAndCount(sourceId, null, 0)
                 emptied = true
             } else {
-                refresh(account, sourceId, source.displayName?.takeIf { it.isNotBlank() })
+                refresh(account, sourceId, sourceName)
             }
             clusterSummaryDao.deleteByPerson(sourceId)
         }

@@ -154,7 +154,7 @@ class GetGalleryItemsUseCase @Inject constructor(
                 val cloud = cloudRepo.observeCloudPhotos(userId).first()
                 val sync = syncStateSnapshot.observe(userId).first()
                 val hidden = cloudRepo.observeHiddenAlbumMemberLinkIds().first()
-                withContext(Dispatchers.Default) { merge(newest, cloud, sync, hidden) }
+                withContext(Dispatchers.Default) { merge(newest, cloudForQuickStart(cloud, newest, sync), sync, hidden) }
             } else {
                 withContext(Dispatchers.Default) { merge(newest, emptyList(), emptyList()) }
             }
@@ -439,4 +439,21 @@ class GetGalleryItemsUseCase @Inject constructor(
         }
         return linkId != null && linkId in hiddenLinkIds
     }
+}
+
+/**
+ * The Drive photos the timeline's quick first list may show. One paired to a device file that list does not hold
+ * (an older photo, outside the newest few thousand) is left out until the whole scan arrives: shown before then it
+ * would read as on Drive only, and an action picked on it would act on the Drive copy alone. Pure.
+ */
+internal fun cloudForQuickStart(
+    cloud: List<CloudPhoto>,
+    newest: List<LocalMediaItem>,
+    sync: SyncStateSnapshot.Rows,
+): List<CloudPhoto> {
+    val held = newest.mapTo(HashSet()) { it.uri }
+    val pairedElsewhere = sync.rows.asSequence()
+        .filter { it.status == SyncStatus.SYNCED && it.localUri !in held }
+        .mapNotNullTo(HashSet()) { it.cloudFileId }
+    return if (pairedElsewhere.isEmpty()) cloud else cloud.filterNot { it.linkId in pairedElsewhere }
 }

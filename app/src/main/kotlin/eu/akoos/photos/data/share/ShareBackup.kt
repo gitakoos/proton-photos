@@ -48,7 +48,7 @@ suspend fun backUpSharedMedia(
     forceUpload: ForceUploadLocalUrisUseCase,
     appScope: CoroutineScope,
 ): String {
-    val resolved = withContext(Dispatchers.IO) { SharedMediaResolver(context.contentResolver).resolve(shared, typeHint) }
+    val resolved = withContext(Dispatchers.IO) { SharedMediaResolver(context.contentResolver, context.packageName).resolve(shared, typeHint) }
     val onDrive = if (resolved.uris.isEmpty()) 0 else withContext(Dispatchers.IO) {
         resolved.uris.chunked(500).sumOf { slice -> syncStateRepo.getByUris(slice).count { it.cloudFileId != null } }
     }

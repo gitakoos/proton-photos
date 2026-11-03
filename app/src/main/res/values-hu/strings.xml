@@ -1281,7 +1281,6 @@
     <string name="viewer_meta_flash_none">Nincs vaku</string>
     <string name="viewer_meta_wb_auto">Automatikus</string>
     <string name="viewer_meta_wb_manual">Kézi</string>
-    <string name="viewer_meta_orientation_normal">Normál</string>
     <string name="viewer_meta_orientation_180">Elforgatva 180°</string>
     <string name="viewer_meta_orientation_90_cw">Elforgatva 90° jobbra</string>
     <string name="viewer_meta_orientation_90_ccw">Elforgatva 90° balra</string>
@@ -1289,7 +1288,6 @@
     <string name="viewer_meta_source_backed_up">Proton Drive és eszköz</string>
     <string name="viewer_meta_source_cloud">Csak a Proton Drive-on</string>
     <string name="viewer_meta_strip">Eltávolítás</string>
-    <string name="viewer_meta_strip_all">Minden privát metaadat eltávolítása</string>
     <string name="viewer_meta_all_details">Összes részlet</string>
     <string name="details_adjust">Módosítás</string>
     <string name="details_edit">Szerkesztés</string>
@@ -1325,14 +1323,7 @@
         <item quantity="one">%d elem eltávolítása</item>
         <item quantity="other">%d elem eltávolítása</item>
     </plurals>
-    <string name="viewer_meta_strip_all_desc">Eltávolítja a GPS-, kamera- és szoftveradatokat, valamint a szerzőt és a szerzői jogot ebből a fájlból</string>
     <string name="viewer_meta_strip_confirm_title">Metaadat eltávolítása?</string>
-    <string name="viewer_meta_strip_confirm_message">Ez véglegesen eltávolítja a következőt az eszközön lévő fájlból: %1$s. Ez nem vonható vissza.</string>
-    <string name="viewer_meta_strip_what_gps">GPS-helyadat</string>
-    <string name="viewer_meta_strip_what_camera">kameraadatok</string>
-    <string name="viewer_meta_strip_what_timestamps">időbélyegek</string>
-    <string name="viewer_meta_strip_what_software">szoftveradatok</string>
-    <string name="viewer_meta_strip_what_authorship">szerző és szerzői jog</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Törlöd a fotót?</string>
@@ -1765,7 +1756,6 @@
         <item quantity="other">%d fotó szerkesztése</item>
     </plurals>
     <string name="metadata_editor_done">Kész</string>
-    <string name="metadata_editor_change">Módosítás</string>
     <string name="metadata_editor_saved">Mentve</string>
     <string name="metadata_editor_write_failed">A módosítást nem sikerült menteni</string>
     <string name="metadata_editor_saved_partial">%1$d mentve, %2$d nem sikerült</string>
@@ -1774,7 +1764,6 @@
     <string name="metadata_editor_source_device">Erről az eszközről</string>
     <string name="metadata_editor_source_cloud">A Proton Drive-ról</string>
     <string name="metadata_editor_next">Tovább</string>
-    <string name="metadata_editor_set">Beállítás</string>
     <string name="metadata_editor_place_label">Hely</string>
     <string name="metadata_editor_place_none">Nincs helyadat</string>
     <string name="metadata_editor_place_search">Ország vagy város keresése</string>
@@ -1786,7 +1775,6 @@
     <string name="metadata_editor_note_place_format">A helyadat csak JPEG, PNG és WebP fotókban tárolható.</string>
     <string name="metadata_editor_note_date_format">Ebben a formátumban a dátum nem módosítható.</string>
     <string name="metadata_editor_bulk_date_label">Dátum beállítása ezekhez a fotókhoz</string>
-    <string name="metadata_editor_bulk_place_label">Hely beállítása ezekhez a fotókhoz</string>
     <string name="metadata_editor_bulk_apply_hint">Minden kijelölt fotóra érvényes</string>
     <string name="metadata_editor_bulk_summary">%1$d fotó szerkesztése</string>
     <string name="metadata_editor_bulk_summary_skipped">%1$d szerkesztése, %2$d kihagyva</string>
@@ -1802,8 +1790,6 @@
     <string name="metadata_editor_shift_label">Fotók eltolása az időben</string>
     <string name="metadata_editor_shift_hint">Válaszd ki, mikor készült valójában a legrégebbi fotó. A többi ugyanannyival mozdul, így a köztük lévő időkülönbségek megmaradnak.</string>
     <string name="metadata_editor_shift_picker_title">Mikor készült a legrégebbi fotó?</string>
-    <string name="metadata_editor_shift_range_current">Most: %1$s és %2$s között</string>
-    <string name="metadata_editor_shift_range_after">Eltolás után: %1$s és %2$s között</string>
     <string name="metadata_editor_shift_too_late">Így a legújabb fotó a jövőbe kerülne. Válassz korábbi dátumot vagy időt.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d fotónak nincs saját dátuma, ezért az eltolás nem mozdítja meg. Az azonos dátum beállítása viszont eléri.</item>
@@ -2206,7 +2192,6 @@
     <string name="editor_tool_frame">Keret</string>
     <string name="editor_frame_none">Nincs</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Szegély</string>
     <string name="editor_tab_transform">Vágás és forgatás</string>
     <string name="editor_tab_more">Továbbiak</string>
     <string name="editor_transform_ratio">Képarány</string>
@@ -2401,7 +2386,6 @@
 
     <string name="label_section_title">Címkék</string>
     <string name="label_add_hint">Címke hozzáadása</string>
-    <string name="label_add_chip">Címke hozzáadása</string>
     <string name="label_remove_cd">%1$s címke eltávolítása</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d / %2$d címke</item>
@@ -2532,7 +2516,7 @@
     <string name="whats_new_260_details_title">Emberek és térkép a részletekben</string>
     <string name="whats_new_260_details_body">A fotó „Részletek” most megmutatja a rajta lévő embereket és egy térképet arról, hol készült. Egy személyre koppintva megnyílik az oldala, a térképre koppintva teljes képernyőn látod. Egy név nélküli arcra koppintva elnevezheted, vagy valakihez adhatod.</string>
     <string name="whats_new_260_frame_title">Keret eszköz</string>
-    <string name="whats_new_260_frame_body">A fotószerkesztőben helyezz egy fotót más alakú vászonra, például 1:1, 9:16 vagy Polaroid, színnel vagy lágy elmosással kitöltve. Az eszköz még fejlesztés alatt áll, további fejlesztések érkeznek.</string>
+    <string name="whats_new_260_frame_body">A fotószerkesztőben helyezz egy fotót más alakú vászonra, például 1:1, 9:16 vagy Polaroid, színnel vagy lágy elmosással kitöltve.</string>
     <string name="whats_new_260_drive_title">Arc- és keresési adatok a Drive-on</string>
     <string name="whats_new_260_drive_body">Mentsd az arcneveket, a keresési adatokat, a címkéket és a rejtett elemeket a Drive-ra, és egy másik telefonon hozd vissza őket a(z) „Betöltés a Drive-ról” gombbal, itt: „Beállítások > További beállítások > Mentés a Proton Drive-ra”.</string>
     <string name="whats_new_260_autosave_title">Automatikus mentés</string>
@@ -2548,13 +2532,13 @@
     <string name="whats_new_260_intro_title">A korábbi tesztverziók is benne vannak</string>
     <string name="whats_new_260_intro_body">Ez a verzió az 1., 2., 3., 4. és 5. tesztverzió összes újdonságát is tartalmazza. A következő kártyák csak az azóta újat mutatják.</string>
     <string name="whats_new_260_sdk_title">Proton Drive SDK kapcsolók</string>
-    <string name="whats_new_260_sdk_body">A Beállítások, További beállítások, Proton Drive SDK oldalon külön kapcsoló van a kedvencekhez és kategóriákhoz, a kukához, a teljes felbontású letöltéshez és a feltöltéshez. Mind ki van kapcsolva. Ha bekapcsolsz egyet, az a művelet a Proton saját Drive SDK-ján fut, és ha az nem sikerül, az app a megszokott módon végzi el.</string>
+    <string name="whats_new_260_sdk_body">A Beállítások, További beállítások, Proton Drive SDK oldalon külön kapcsoló van a kedvencekhez és kategóriákhoz, a kukához, a teljes felbontású letöltéshez, a feltöltéshez, az albumokhoz, a változások követéséhez és a veled megosztott albumokhoz. Mind ki van kapcsolva. Ha bekapcsolsz egyet, az a művelet a Proton saját Drive SDK-ján fut, és ha az nem sikerül, az app a megszokott módon végzi el.</string>
     <string name="whats_new_260_setas_title">Beállítás mint, és fotók más appoknak</string>
     <string name="whats_new_260_setas_body">A néző menüjéből a fotó a telefon háttérkép- vagy névjegyfotó-beállítójához kerül. Az Adatvédelem és biztonság alatt bekapcsolva más appok innen választhatnak fotót; a rejtett fotók sosem kerülnek ki.</string>
     <string name="whats_new_260_folderimport_title">Importálás mappából</string>
     <string name="whats_new_260_folderimport_body">Ente vagy Google Takeout exportot, vagy sima fotókat zip mellett mappából is importálhatsz. A Live Photo egy fotóként érkezik a videójával, és minden fotó valódi dátumot kap.</string>
     <string name="whats_new_260_mlsetup_title">Okos funkciók a beállításban</string>
-    <string name="whats_new_260_mlsetup_body">Az első indításkori beállítás felajánlja az arcfelismerést, a fotókeresést és a szövegmásolást, mindegyiket a letöltési méretével. Válaszd ki, amit szeretnél, és a háttérben letöltődik.</string>
+    <string name="whats_new_260_mlsetup_body">Az első indításkori beállítás felajánlja az arcfelismerést, a fotókeresést és a szövegmásolást, mindegyiket a letöltési méretével. Válaszd ki, amit szeretnél, és a háttérben letöltődik. Később is bekapcsolhatod őket itt: „Beállítások > További beállítások > Gépi tanulás”.</string>
     <string name="whats_new_260_longpress_title">Hosszú nyomás, ahogy szeretnéd</string>
     <string name="whats_new_260_longpress_body">A Beállítások, Megjelenés alatt választhatod ki, hogy a nézőben a hosszú nyomás szöveget jelöl ki vagy a menüt nyitja meg. A menüben ott a Szöveg felismerése, és már nem ismétli a gombokat.</string>
     <string name="whats_new_260_nothumb_title">A Drive-os fotók újra megnyílnak</string>
