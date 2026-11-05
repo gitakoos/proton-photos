@@ -260,6 +260,10 @@ class ReconcileSyncStateUseCase @Inject constructor(
         val syncedStates = existingByUri.values
             .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
         val goneCandidates = ArrayList<SyncState>()
+        // Rows this pass marked removed from Drive. The match above already counted them as unmatched
+        // in-scope locals up for the folder backup; the stamp below must leave them out, or it would
+        // overwrite the mark and upload the photo straight back.
+        val removedFromDrive = HashSet<String>()
         for (state in syncedStates) {
             when {
                 // Cloud counterpart absent from the local cloud listing. A photo just uploaded is
@@ -277,7 +281,10 @@ class ReconcileSyncStateUseCase @Inject constructor(
                         // prior upload intent: without it the folder backup (a null or AUTO_FOLDER source)
                         // or the stranded-intent recovery below (a MANUAL one) would upload the photo
                         // straight back on the next pass, a deleted photo coming back.
-                        if (demoted > 0) syncStateRepo.markRemovedFromDrive(state.localUri)
+                        if (demoted > 0) {
+                            syncStateRepo.markRemovedFromDrive(state.localUri)
+                            removedFromDrive += state.localUri
+                        }
                     }
                 // Local file removed from MediaStore → demote to CLOUD_ONLY so we stop telling the
                 // user the photo is "on this device" when it actually isn't. Only on a scan that saw
@@ -319,7 +326,7 @@ class ReconcileSyncStateUseCase @Inject constructor(
         // queued, so this stamp is what makes a folder-selected backup upload.
         val autoFolderNow = System.currentTimeMillis()
         syncStateRepo.markQueuedAll(
-            freshAutoFolderUris.filter { it !in skippedDemotionUris },
+            freshAutoFolderUris.filter { it !in skippedDemotionUris && it !in removedFromDrive },
             eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER,
             autoFolderNow,
         )

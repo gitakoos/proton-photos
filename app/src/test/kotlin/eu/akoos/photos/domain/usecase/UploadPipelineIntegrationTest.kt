@@ -325,6 +325,36 @@ class UploadPipelineIntegrationTest {
         }
     }
 
+    @Test
+    fun `a photo whose Drive copy went elsewhere is not uploaded again from a folder in the backup`() = runTest {
+        // The folder IS selected this time: the folder backup itself would queue the photo again in the
+        // same pass that finds its Drive copy gone, unless that pass leaves a photo it marked removed out.
+        seedBulkUploadGates(folder = "Camera")
+        val uri = "content://media/folder-removed"
+        local.add(localItem(uri, bucket = "Camera"))
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        uploadUseCase(userId)
+
+        val cloudId = cloud.photos.value.single().linkId
+        assertEquals(SyncStatus.SYNCED, row(uri)!!.status)
+
+        cloud.removeByLinkId(cloudId)
+        syncRepo.upsert(row(uri)!!.copy(lastSyncSuccessMs = System.currentTimeMillis() - (16 * 60 * 1000L)), userId)
+
+        reconcileUseCase(userId).collectToEnd()
+        row(uri)!!.let {
+            assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+            assertEquals("a photo removed from Drive must not be queued again", false, it.queued)
+            assertEquals(eu.akoos.photos.domain.entity.QueueSource.REMOVED_FROM_DRIVE, it.queueSource)
+        }
+
+        // A later pass leaves it alone too: its folder is still selected, the mark is what keeps it off.
+        reconcileUseCase(userId).collectToEnd()
+        uploadUseCase(userId)
+        assertTrue("a photo removed from Drive must not upload again", cloud.photos.value.isEmpty())
+        assertEquals(false, row(uri)!!.queued)
+    }
+
     // ── Scenario 3: cancel ──────────────────────────────────────────────────────────
 
     @Test
