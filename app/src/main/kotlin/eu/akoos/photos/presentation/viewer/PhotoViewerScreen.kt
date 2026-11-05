@@ -1322,8 +1322,8 @@ fun PhotoViewerScreen(
     )
     // The label of a double tap that seeked a video, shown on the side it went to.
     var seekFlash by remember { mutableStateOf<VideoSeekFlash?>(null) }
-    // True while a held side of a video plays it faster.
-    var holdingFast by remember { mutableStateOf(false) }
+    // The speed a held side of a video plays it at, null while nothing is held.
+    var holdSpeed by remember { mutableStateOf<Float?>(null) }
     // The top-right menu's open state, held here so a long press opens the same menu the button does. The
     // bars' bounds tell a press on a control from one on the photo, and are zero while a bar is not shown.
     var menuExpanded by remember { mutableStateOf(false) }
@@ -1426,23 +1426,25 @@ fun PhotoViewerScreen(
                         ViewerTapOutcome.HeldLong -> {
                             val player = rootPlayer?.takeIf { rootIsVideo }
                             if (player != null && videoHoldPlaysFaster(down.position.x, containerSize.width.toFloat(), rootScale)) {
-                                // A held side plays the video faster until the finger lifts, then it goes
+                                // A held side plays the video faster (as fast as this phone decodes it smoothly)
+                                // until the finger lifts, then it goes
                                 // back to its own speed, and to a pause if it was paused. The events are
                                 // taken first so the pager does not turn the page under a moving finger.
                                 val wasPlaying = player.isPlaying
                                 val speed = player.playbackParameters.speed
-                                runCatching { player.setPlaybackSpeed(VIDEO_HOLD_SPEED); player.play() }
+                                val fast = runCatching { videoHoldSpeedOf(player) }.getOrDefault(VIDEO_HOLD_SPEEDS.first())
+                                runCatching { player.setPlaybackSpeed(fast); player.play() }
                                 textHaptics.performHapticFeedback(
                                     androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress,
                                 )
-                                holdingFast = true
+                                holdSpeed = fast
                                 try {
                                     do {
                                         val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
                                         event.changes.forEach { it.consume() }
                                     } while (event.changes.any { it.pressed })
                                 } finally {
-                                    holdingFast = false
+                                    holdSpeed = null
                                     runCatching {
                                         player.setPlaybackSpeed(speed)
                                         if (!wasPlaying) player.pause()
@@ -2230,7 +2232,7 @@ fun PhotoViewerScreen(
         }
 
         VideoSeekFlashLabel(flash = seekFlash, onDone = { seekFlash = null })
-        VideoHoldSpeedLabel(visible = holdingFast)
+        VideoHoldSpeedLabel(speed = holdSpeed)
 
         // ── Top bar (fades with overlays) ─────────────────────────────────────
         CompositionLocalProvider(LocalGlassBackdrop provides glass) {

@@ -848,7 +848,7 @@
 
     <string name="viewer_play_slideshow">Diavetítés indítása</string>
     <string name="viewer_video_seek_seconds">%1$d mp</string>
-    <string name="viewer_video_hold_speed">2×</string>
+    <string name="viewer_video_hold_speed">%1$s×</string>
     <string name="viewer_pause_slideshow">Diavetítés szüneteltetése</string>
 
     <!-- Widget -->

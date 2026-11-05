@@ -77,4 +77,27 @@ class VideoDoubleTapTest {
         assertEquals(false, videoHoldPlaysFaster(x = 450f, width = 900f, scale = 1f))
         assertEquals(false, videoHoldPlaysFaster(x = 50f, width = 900f, scale = 2.5f))
     }
+
+    @Test
+    fun `a held video plays as fast as the decoder keeps up with`() {
+        // Measured on a test phone: 4K at least 102 frames a second, 1080p at least 240.
+        assertEquals(1.5f, videoHoldSpeedFor(fps = 60f, decodableFps = 102.0))
+        assertEquals(2f, videoHoldSpeedFor(fps = 30f, decodableFps = 102.0))
+        assertEquals(2f, videoHoldSpeedFor(fps = 60f, decodableFps = 240.0))
+        assertEquals(1.75f, videoHoldSpeedFor(fps = 60f, decodableFps = 105.0))
+    }
+
+    @Test
+    fun `a decoder too slow for every speed gets the slowest, an unknown one the full speed`() {
+        assertEquals(1.25f, videoHoldSpeedFor(fps = 120f, decodableFps = 100.0))
+        assertEquals(2f, videoHoldSpeedFor(fps = 60f, decodableFps = null))
+        assertEquals(2f, videoHoldSpeedFor(fps = -1f, decodableFps = 102.0))
+    }
+
+    @Test
+    fun `the held speed is written with the locale's decimal mark`() {
+        assertEquals("2", videoHoldSpeedText(2f, java.util.Locale.ENGLISH))
+        assertEquals("1.75", videoHoldSpeedText(1.75f, java.util.Locale.ENGLISH))
+        assertEquals("1,5", videoHoldSpeedText(1.5f, java.util.Locale.forLanguageTag("hu")))
+    }
 }

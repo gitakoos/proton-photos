@@ -668,18 +668,65 @@ internal fun videoSeekTarget(positionMs: Long, deltaMs: Long, durationMs: Long):
     return if (durationMs > 0) target.coerceAtMost(durationMs) else target
 }
 
-/** How fast a video plays while one of its sides is held down. */
-internal const val VIDEO_HOLD_SPEED = 2f
+/** The speeds a held side can play a video at, fastest first. */
+internal val VIDEO_HOLD_SPEEDS = listOf(2f, 1.75f, 1.5f, 1.25f)
+
+/**
+ * The fastest hold speed at which a video of [fps] frames a second stays inside [decodableFps], the frame rate this
+ * device's decoder is measured to keep up for its size; the full speed when either is not known. Switching speed
+ * while held stalls the picture, so it is chosen once: a 4K 60 fps clip plays at 1.5x where it would stall at 2x.
+ */
+internal fun videoHoldSpeedFor(fps: Float, decodableFps: Double?): Float =
+    if (fps <= 0f || decodableFps == null || decodableFps <= 0.0) {
+        VIDEO_HOLD_SPEEDS.first()
+    } else {
+        VIDEO_HOLD_SPEEDS.firstOrNull { fps * it <= decodableFps } ?: VIDEO_HOLD_SPEEDS.last()
+    }
+
+/** The lowest frame rate this device's decoders are measured to reach for a [width] x [height] [mime] video, or null. */
+internal fun decodableFrameRate(mime: String?, width: Int, height: Int): Double? {
+    if (mime == null || width <= 0 || height <= 0) return null
+    val key = "$mime $width x $height"
+    decodableFrameRates[key]?.let { return it.takeIf { r -> r > 0.0 } }
+    val found = runCatching {
+        android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { !it.isEncoder && it.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) } }
+            .sortedByDescending { android.os.Build.VERSION.SDK_INT >= 29 && it.isHardwareAccelerated }
+            .firstNotNullOfOrNull { info ->
+                runCatching { info.getCapabilitiesForType(mime).videoCapabilities?.getAchievableFrameRatesFor(width, height)?.lower }
+                    .getOrNull()
+            }
+    }.getOrNull()
+    decodableFrameRates[key] = found ?: 0.0
+    return found
+}
+
+/** What [decodableFrameRate] found per type and size; the codec list is slow to read on every hold. */
+private val decodableFrameRates = java.util.concurrent.ConcurrentHashMap<String, Double>()
+
+/** The speed a held side plays [player]'s current video at, by its size, frame rate and this device's decoder. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+internal fun videoHoldSpeedOf(player: ExoPlayer): Float {
+    val format = player.videoFormat ?: return VIDEO_HOLD_SPEEDS.first()
+    return videoHoldSpeedFor(format.frameRate, decodableFrameRate(format.sampleMimeType, format.width, format.height))
+}
+
+/** A held speed as the label writes it: 2, 1.75, 1.5 with the locale's decimal mark. */
+internal fun videoHoldSpeedText(speed: Float, locale: java.util.Locale): String =
+    java.text.DecimalFormat("0.##", java.text.DecimalFormatSymbols.getInstance(locale)).format(speed)
 
 /** Whether holding a press at [x] on a video plays it faster: the outer thirds do, the middle keeps its long press. */
 internal fun videoHoldPlaysFaster(x: Float, width: Float, scale: Float): Boolean =
     videoDoubleTap(x, width, scale) != VideoDoubleTap.Zoom
 
-/** The "2x" label at the top while a held side plays the video faster. */
+/** The "2x" label at the top while a held side plays the video faster, with the speed it plays at. */
 @Composable
-internal fun VideoHoldSpeedLabel(visible: Boolean, modifier: Modifier = Modifier) {
+internal fun VideoHoldSpeedLabel(speed: Float?, modifier: Modifier = Modifier) {
+    var last by remember { mutableStateOf(speed ?: VIDEO_HOLD_SPEEDS.first()) }
+    if (speed != null) last = speed
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
     Box(modifier = modifier.fillMaxSize().padding(top = 120.dp), contentAlignment = Alignment.TopCenter) {
-        AnimatedVisibility(visible = visible, enter = fadeIn(tween(120)), exit = fadeOut(tween(200))) {
+        AnimatedVisibility(visible = speed != null, enter = fadeIn(tween(120)), exit = fadeOut(tween(200))) {
             Row(
                 modifier = Modifier
                     .pillSurface(PillBg, infoPillShape, border = PillBorder)
@@ -688,7 +735,7 @@ internal fun VideoHoldSpeedLabel(visible: Boolean, modifier: Modifier = Modifier
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    stringResource(R.string.viewer_video_hold_speed),
+                    stringResource(R.string.viewer_video_hold_speed, videoHoldSpeedText(last, locale)),
                     color = FgPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
