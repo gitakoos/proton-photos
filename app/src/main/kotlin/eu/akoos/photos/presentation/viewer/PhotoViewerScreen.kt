@@ -1425,7 +1425,13 @@ fun PhotoViewerScreen(
                     when (val first = awaitViewerTapOutcome(down.id, down.position, slop, longPressMs)) {
                         ViewerTapOutcome.HeldLong -> {
                             val player = rootPlayer?.takeIf { rootIsVideo }
-                            if (player != null && videoHoldPlaysFaster(down.position.x, containerSize.width.toFloat(), rootScale)) {
+                            // A press on the controls (the video's scrubber, the bars) belongs to them, as it does
+                            // for the long press: holding there never speeds the video up.
+                            val onControls = rootTopBar.translate(-rootOrigin).contains(down.position) ||
+                                rootBottomBar.translate(-rootOrigin).contains(down.position)
+                            if (player != null && !onControls &&
+                                videoHoldPlaysFaster(down.position.x, containerSize.width.toFloat(), rootScale)
+                            ) {
                                 // A held side plays the video faster (as fast as this phone decodes it smoothly)
                                 // until the finger lifts, then it goes
                                 // back to its own speed, and to a pause if it was paused. The events are
