@@ -668,6 +668,37 @@ internal fun videoSeekTarget(positionMs: Long, deltaMs: Long, durationMs: Long):
     return if (durationMs > 0) target.coerceAtMost(durationMs) else target
 }
 
+/** How fast a video plays while one of its sides is held down. */
+internal const val VIDEO_HOLD_SPEED = 2f
+
+/** Whether holding a press at [x] on a video plays it faster: the outer thirds do, the middle keeps its long press. */
+internal fun videoHoldPlaysFaster(x: Float, width: Float, scale: Float): Boolean =
+    videoDoubleTap(x, width, scale) != VideoDoubleTap.Zoom
+
+/** The "2x" label at the top while a held side plays the video faster. */
+@Composable
+internal fun VideoHoldSpeedLabel(visible: Boolean, modifier: Modifier = Modifier) {
+    Box(modifier = modifier.fillMaxSize().padding(top = 120.dp), contentAlignment = Alignment.TopCenter) {
+        AnimatedVisibility(visible = visible, enter = fadeIn(tween(120)), exit = fadeOut(tween(200))) {
+            Row(
+                modifier = Modifier
+                    .pillSurface(PillBg, infoPillShape, border = PillBorder)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    stringResource(R.string.viewer_video_hold_speed),
+                    color = FgPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Icon(Icons.Default.FastForward, null, tint = FgPrimary, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
 /** The seek label of a run of double taps on one side; [tick] restarts its timer on every tap. */
 internal data class VideoSeekFlash(val forward: Boolean, val seconds: Int, val tick: Long)
 

@@ -830,6 +830,7 @@
 
     <string name="viewer_play_slideshow">Iniciar pase de diapositivas</string>
     <string name="viewer_video_seek_seconds">%1$d s</string>
+    <string name="viewer_video_hold_speed">2×</string>
     <string name="viewer_pause_slideshow">Pausar pase de diapositivas</string>
 
     <!-- Widget -->

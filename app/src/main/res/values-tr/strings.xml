@@ -1496,6 +1496,7 @@
 
     <string name="viewer_play_slideshow">Slayt gösterisini oynat</string>
     <string name="viewer_video_seek_seconds">%1$d sn</string>
+    <string name="viewer_video_hold_speed">2×</string>
     <string name="viewer_pause_slideshow">Slayt gösterisini duraklat</string>
 
     <string name="widget_description">Photos for Proton, fotoğraflarını ana ekranda gösterir</string>

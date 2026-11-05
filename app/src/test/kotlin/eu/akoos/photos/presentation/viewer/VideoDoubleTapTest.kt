@@ -69,4 +69,12 @@ class VideoDoubleTapTest {
         assertEquals(10, back.seconds)
         assertEquals(false, back.forward)
     }
+
+    @Test
+    fun `holding a side plays faster, holding the middle or a zoomed video does not`() {
+        assertEquals(true, videoHoldPlaysFaster(x = 50f, width = 900f, scale = 1f))
+        assertEquals(true, videoHoldPlaysFaster(x = 850f, width = 900f, scale = 1f))
+        assertEquals(false, videoHoldPlaysFaster(x = 450f, width = 900f, scale = 1f))
+        assertEquals(false, videoHoldPlaysFaster(x = 50f, width = 900f, scale = 2.5f))
+    }
 }
