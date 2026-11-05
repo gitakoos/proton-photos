@@ -211,6 +211,27 @@ internal val WhatsNew260FifthPreview = WhatsNewRelease(
 )
 
 /**
+ * What the sixth 2.6.0 preview added to the fifth. The head entry of the list below lists only the cards added
+ * since, so a preview reader does not meet the same cards twice; the 2.6.0 release follows the fifth preview's
+ * cards with these, then the later previews' cards.
+ */
+internal val WhatsNew260SixthPreview = WhatsNewRelease(
+    version = "2.6.0",
+    hero = null,
+    features = listOf(
+        WhatsNewFeature(Icons.Default.Settings, R.string.whats_new_260_sdk_title, R.string.whats_new_260_sdk_body),
+        WhatsNewFeature(Icons.Default.PhoneAndroid, R.string.whats_new_260_setas_title, R.string.whats_new_260_setas_body),
+        WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_260_folderimport_title, R.string.whats_new_260_folderimport_body),
+        WhatsNewFeature(Icons.Default.AutoAwesome, R.string.whats_new_260_mlsetup_title, R.string.whats_new_260_mlsetup_body),
+        WhatsNewFeature(Icons.Default.TextFields, R.string.whats_new_260_longpress_title, R.string.whats_new_260_longpress_body),
+        WhatsNewFeature(Icons.Default.Visibility, R.string.whats_new_260_nothumb_title, R.string.whats_new_260_nothumb_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_260_external_title, R.string.whats_new_260_external_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Place, R.string.whats_new_260_nullisland_title, R.string.whats_new_260_nullisland_body, WhatsNewCategory.Improved),
+        WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_likeness_title, R.string.whats_new_260_likeness_body, WhatsNewCategory.Improved),
+    ),
+)
+
+/**
  * What each release announced, newest first. The head of this list is what the post-update screen
  * shows, and the whole list is what Settings offers to browse.
  *
@@ -230,15 +251,21 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
         hero = null,
         features = listOf(
             WhatsNewFeature(Icons.Default.Update, R.string.whats_new_260_intro_title, R.string.whats_new_260_intro_body),
-            WhatsNewFeature(Icons.Default.Settings, R.string.whats_new_260_sdk_title, R.string.whats_new_260_sdk_body),
-            WhatsNewFeature(Icons.Default.PhoneAndroid, R.string.whats_new_260_setas_title, R.string.whats_new_260_setas_body),
-            WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_260_folderimport_title, R.string.whats_new_260_folderimport_body),
-            WhatsNewFeature(Icons.Default.AutoAwesome, R.string.whats_new_260_mlsetup_title, R.string.whats_new_260_mlsetup_body),
-            WhatsNewFeature(Icons.Default.TextFields, R.string.whats_new_260_longpress_title, R.string.whats_new_260_longpress_body),
-            WhatsNewFeature(Icons.Default.Visibility, R.string.whats_new_260_nothumb_title, R.string.whats_new_260_nothumb_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.NoAccounts, R.string.whats_new_260_external_title, R.string.whats_new_260_external_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Place, R.string.whats_new_260_nullisland_title, R.string.whats_new_260_nullisland_body, WhatsNewCategory.Improved),
-            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_likeness_title, R.string.whats_new_260_likeness_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.PlayCircle, R.string.whats_new_260_videoseek_title, R.string.whats_new_260_videoseek_body),
+            WhatsNewFeature(Icons.Default.Compress, R.string.whats_new_260_cloudcompress_title, R.string.whats_new_260_cloudcompress_body),
+            WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_260_sharebackup_title, R.string.whats_new_260_sharebackup_body),
+            WhatsNewFeature(Icons.Default.SwapVert, R.string.whats_new_260_foldermove_title, R.string.whats_new_260_foldermove_body),
+            WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_260_drivecopies_title, R.string.whats_new_260_drivecopies_body),
+            WhatsNewFeature(Icons.Default.Palette, R.string.whats_new_260_glass_title, R.string.whats_new_260_glass_body),
+            WhatsNewFeature(Icons.Default.Edit, R.string.whats_new_260_detailsheet_title, R.string.whats_new_260_detailsheet_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Today, R.string.whats_new_260_multiedit_title, R.string.whats_new_260_multiedit_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_personmonths_title, R.string.whats_new_260_personmonths_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.GridView, R.string.whats_new_260_timelinestay_title, R.string.whats_new_260_timelinestay_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Checklist, R.string.whats_new_260_setup_title, R.string.whats_new_260_setup_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.PhotoAlbum, R.string.whats_new_260_folderbackfill_title, R.string.whats_new_260_folderbackfill_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.CleaningServices, R.string.whats_new_260_freeupcheck_title, R.string.whats_new_260_freeupcheck_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.CloudOff, R.string.whats_new_260_removedstays_title, R.string.whats_new_260_removedstays_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_peoplepics_title, R.string.whats_new_260_peoplepics_body, WhatsNewCategory.Improved),
         ),
     ),
     // 2.5.0 STABLE: the whole release since 2.4.0, consolidated to its main features so someone
