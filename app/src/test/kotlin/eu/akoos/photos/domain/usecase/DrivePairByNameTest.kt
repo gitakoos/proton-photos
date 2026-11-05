@@ -67,4 +67,19 @@ class DrivePairByNameTest {
             pairByUniqueName(mapOf("u1" to "a.jpg", "u2" to "b.jpg"), listOf(LinkIdName("L1", "a.jpg"))),
         )
     }
+
+    @Test
+    fun `a name the Drive photo shares but not its day pairs with nothing`() {
+        val taken = 1_700_000_000_000L
+        val drive = listOf(LinkIdName("L1", "IMG_0001.JPG", captureTime = taken / 1000))
+        assertEquals(mapOf("u1" to "L1"), pairByUniqueName(mapOf("u1" to "IMG_0001.JPG"), drive, mapOf("u1" to taken + 3_600_000L)))
+        assertEquals(emptyMap<String, String>(), pairByUniqueName(mapOf("u1" to "IMG_0001.JPG"), drive, mapOf("u1" to taken + 3 * 86_400_000L)))
+    }
+
+    @Test
+    fun `a date either side does not know leaves the name to decide`() {
+        val drive = listOf(LinkIdName("L1", "a.png", captureTime = 0L))
+        assertEquals(mapOf("u1" to "L1"), pairByUniqueName(mapOf("u1" to "a.png"), drive, mapOf("u1" to 1_700_000_000_000L)))
+        assertEquals(mapOf("u1" to "L1"), pairByUniqueName(mapOf("u1" to "a.png"), listOf(LinkIdName("L1", "a.png", 1_700_000_000L))))
+    }
 }

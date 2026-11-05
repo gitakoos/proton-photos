@@ -301,7 +301,7 @@ interface PhotoListingDao {
     /** The own-stream photos of this user named, case aside, one of [lowerNames] (already lower-cased).
      *  Callers chunk the input at 500, under SQLite's bind-variable limit. */
     @Query(
-        "SELECT linkId, displayName FROM photo_listing WHERE userId = :userId AND isChildOfAlbum = 0 " +
+        "SELECT linkId, displayName, captureTime FROM photo_listing WHERE userId = :userId AND isChildOfAlbum = 0 " +
             "AND lower(displayName) IN (:lowerNames)",
     )
     suspend fun ownStreamByLowerNames(userId: String, lowerNames: List<String>): List<LinkIdName>

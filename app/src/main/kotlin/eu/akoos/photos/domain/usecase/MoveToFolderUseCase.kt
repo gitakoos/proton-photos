@@ -120,7 +120,7 @@ class MoveToFolderUseCase @Inject constructor(
                 val before = bucketAndNameOf(uri)
                 if (context.contentResolver.update(uri, values, null, null) > 0) {
                     moved++
-                    movedPhotos += MovedPhoto(uriString, before?.first, before?.second)
+                    movedPhotos += MovedPhoto(uriString, before?.bucket, before?.name, before?.takenMs)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -152,12 +152,20 @@ class MoveToFolderUseCase @Inject constructor(
     }
 
     /** The device folder (MediaStore bucket name) [uri] is in now and its file name, or null when unreadable. */
-    private fun bucketAndNameOf(uri: Uri): Pair<String?, String?>? = runCatching {
+    private data class Before(val bucket: String?, val name: String?, val takenMs: Long?)
+
+    private fun bucketAndNameOf(uri: Uri): Before? = runCatching {
         context.contentResolver.query(
             uri,
-            arrayOf(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME, MediaStore.MediaColumns.DISPLAY_NAME),
+            arrayOf(
+                MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.DATE_TAKEN,
+            ),
             null, null, null,
-        )?.use { c -> if (c.moveToFirst()) c.getString(0) to c.getString(1) else null }
+        )?.use { c ->
+            if (c.moveToFirst()) Before(c.getString(0), c.getString(1), if (c.isNull(2)) null else c.getLong(2)) else null
+        }
     }.getOrNull()
 
     /**

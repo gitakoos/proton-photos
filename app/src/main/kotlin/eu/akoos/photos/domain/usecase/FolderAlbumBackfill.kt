@@ -50,9 +50,11 @@ class FolderAlbumBackfill @Inject constructor(
         appScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             runCatching {
+                val items = localRepo.queryByBucket(bucketName)
                 val onDrive = drivePairs.pairs(
                     userId,
-                    localRepo.queryByBucket(bucketName).associate { it.uri to it.displayName },
+                    items.associate { it.uri to it.displayName },
+                    items.associate { it.uri to it.dateTaken },
                 )
                 upload.backfillFolderAlbum(userId, bucketName, onDrive)
             }

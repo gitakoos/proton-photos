@@ -124,7 +124,9 @@ class MoveToFolderController @Inject constructor(
     }
 
     /** The back-up's folder choices follow a renamed folder: picked for back-up, or left out, it stays so under
-     *  its new name. They are kept by folder name, so without this the renamed folder silently dropped out. */
+     *  its new name. They are kept by folder name, so without this the renamed folder silently dropped out. The
+     *  folder's Drive album tick follows in [eu.akoos.photos.domain.usecase.UploadPendingUseCase.followFolderMove],
+     *  which has to read it as it was before the rename. */
     private suspend fun carryFolderChoices(from: String, to: String) {
         val fromStillUsed = localMediaRepo.queryByBucket(from).isNotEmpty()
         context.settingsDataStore.edit { prefs ->

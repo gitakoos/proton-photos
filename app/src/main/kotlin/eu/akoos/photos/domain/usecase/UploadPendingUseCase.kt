@@ -214,17 +214,49 @@ class UploadPendingUseCase @Inject constructor(
         sourceBucketByUri: Map<String, String?>,
         onDrive: Map<String, String>,
         targetBucket: String,
+        emptiedSources: Set<String> = emptySet(),
     ): FolderMoveAlbumPlan? = mutex.withLock {
         val rule = context.settingsDataStore.data.first().albumMirrorFolders()
-        val plan = folderMoveAlbumPlan(rule, sourceBucketByUri, onDrive, targetBucket) ?: return@withLock null
+        // The album tick follows a folder renamed, or moved whole into a new one, also when none of its photos is on
+        // Drive yet. Read and carried here, after the plan below reads the rule as it was before the move.
+        val tickFrom = albumTickToCarry(rule, sourceBucketByUri, emptiedSources, targetBucket)
+        val carryTick: suspend () -> Unit = {
+            if (tickFrom != null) {
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs.albumMirrorFolders()
+                    prefs.putAlbumMirrorFolders(
+                        current.copy(optedIn = current.optedIn - tickFrom + targetBucket, optedOut = current.optedOut - targetBucket),
+                    )
+                }
+            }
+        }
+        val plan = folderMoveAlbumPlan(rule, sourceBucketByUri, onDrive, targetBucket)
+        if (plan == null) {
+            carryTick()
+            return@withLock null
+        }
         if (plan.removals.isNotEmpty()) {
             val albumsByName = cloudRepo.loadAlbums(userId).associate { it.name.lowercase() to it.linkId }
+            // A folder renamed, or moved whole into a new one: its album is renamed along and keeps everything.
+            val renamed = folderAlbumToRename(plan, sourceBucketByUri, emptiedSources, albumsByName.keys, targetBucket)
+            if (renamed != null) {
+                cloudRepo.renameAlbum(userId, albumsByName.getValue(renamed.lowercase()), targetBucket)
+                carryTick()
+                context.settingsDataStore.edit { prefs ->
+                    val current = prefs.albumMirrorFolders()
+                    if (targetBucket !in current) prefs.putAlbumMirrorFolders(current.flipped(targetBucket))
+                }
+                albumListEvents.notifyChanged()
+                eu.akoos.photos.util.SyncDiagnostics.log("folder move albums: the folder's album was renamed along")
+                return@withLock plan
+            }
             for ((bucket, pairs) in plan.removals) {
                 val albumLinkId = albumsByName[bucket.lowercase()] ?: continue
                 pairs.keys.forEach { uploadAlbumTargetDao.deleteTarget(it, albumLinkId) }
                 cloudRepo.removePhotosFromAlbum(userId, albumLinkId, pairs.values.distinct())
             }
         }
+        carryTick()
         if (plan.optInTarget) {
             context.settingsDataStore.edit { prefs ->
                 val current = prefs.albumMirrorFolders()

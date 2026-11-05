@@ -132,11 +132,12 @@ internal class ListingValueInterner(private val maxEntries: Int = LISTING_INTERN
 private fun parseTagsCsv(csv: String): Set<Int> =
     if (csv.isEmpty()) emptySet() else csv.split(',').mapNotNull { it.toIntOrNull() }.toSet()
 
-/** Two-column projection for [eu.akoos.photos.data.db.dao.PhotoListingDao.ownStreamByLowerNames]: a photo's
- *  link and its file name. */
+/** Projection for [eu.akoos.photos.data.db.dao.PhotoListingDao.ownStreamByLowerNames]: a photo's link, its file
+ *  name and its capture time (epoch seconds, 0 when unknown). */
 data class LinkIdName(
     val linkId: String,
     val displayName: String,
+    val captureTime: Long = 0L,
 )
 
 /** Two-column projection for [eu.akoos.photos.data.db.dao.PhotoListingDao.getThumbnailUrlSeed]: the

@@ -215,7 +215,15 @@ class CloudCompressWorker @AssistedInject constructor(
                 // A date or place edit of the same photo replaces it too: this one waits while that edit is
                 // queued or running, so the two never both upload a copy.
                 if (metadataEdits.has(row.linkId) || !CloudPhotoReplacement.Claims.tryClaim(row.linkId)) {
-                    keep(row, failedTry = false)
+                    // Held for a day already: each later run counts against the photo, so an edit that never
+                    // finishes cannot keep it waiting, and this worker retrying, for good.
+                    val stale = heldTooLong(row.enqueuedAt, System.currentTimeMillis())
+                    if (stale && row.attempts + 1 >= MAX_PHOTO_ATTEMPTS) {
+                        failed.incrementAndGet()
+                        dao.delete(row.linkId)
+                    } else {
+                        keep(row, failedTry = stale)
+                    }
                     advance()
                     return
                 }
@@ -390,6 +398,12 @@ class CloudCompressWorker @AssistedInject constructor(
 
 /** Failed tries of one photo before it is given up. */
 internal const val MAX_PHOTO_ATTEMPTS = 5
+
+/** How long a date or place edit of the same photo may hold a compression before the waits count as tries. */
+internal const val HELD_LIMIT_MS = 24 * 60 * 60 * 1000L
+
+/** Whether a compression queued at [enqueuedAt] has waited on another replacement of its photo for too long. */
+internal fun heldTooLong(enqueuedAt: Long, now: Long): Boolean = now - enqueuedAt > HELD_LIMIT_MS
 
 /** What the drain does with a photo whose compression failed. */
 internal enum class CompressFailureAction { KEEP, ROLL_BACK_AND_DROP, DROP }

@@ -46,4 +46,11 @@ class CompressFailureActionTest {
     fun `a failure before any upload is dropped with nothing to take back`() {
         assertEquals(CompressFailureAction.DROP, compressFailureAction(false, 0, null, false))
     }
+
+    @Test
+    fun `a compression held by another edit counts against the photo only after a day`() {
+        val day = 24 * 60 * 60 * 1000L
+        assertEquals(false, heldTooLong(enqueuedAt = 1_000L, now = 1_000L + day - 1))
+        assertEquals(true, heldTooLong(enqueuedAt = 1_000L, now = 1_000L + day + 1))
+    }
 }

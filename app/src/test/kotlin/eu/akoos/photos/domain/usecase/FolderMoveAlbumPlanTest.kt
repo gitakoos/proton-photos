@@ -124,4 +124,39 @@ class FolderMoveAlbumPlanTest {
             ),
         )
     }
+
+    private fun renamePlan() = folderMoveAlbumPlan(
+        rule = cameraMirrored,
+        sourceBucketByUri = mapOf("u1" to "Camera", "u2" to "Camera"),
+        onDrive = mapOf("u1" to "L1", "u2" to "L2"),
+        targetBucket = "Holiday",
+    )!!
+
+    @Test
+    fun `a folder moved whole into a new name takes its album along`() {
+        assertEquals(
+            "Camera",
+            folderAlbumToRename(renamePlan(), mapOf("u1" to "Camera", "u2" to "Camera"), setOf("Camera"), setOf("camera"), "Holiday"),
+        )
+    }
+
+    @Test
+    fun `the album follows photo by photo when the folder kept photos, the name has an album, or the photos came from several folders`() {
+        val sources = mapOf("u1" to "Camera", "u2" to "Camera")
+        assertNull(folderAlbumToRename(renamePlan(), sources, emptySet(), setOf("camera"), "Holiday"))
+        assertNull(folderAlbumToRename(renamePlan(), sources, setOf("Camera"), setOf("camera", "holiday"), "Holiday"))
+        assertNull(folderAlbumToRename(renamePlan(), sources, setOf("Camera"), emptySet(), "Holiday"))
+        assertNull(folderAlbumToRename(renamePlan(), mapOf("u1" to "Camera", "u2" to "WhatsApp"), setOf("Camera", "WhatsApp"), setOf("camera"), "Holiday"))
+        assertNull(folderAlbumToRename(renamePlan(), mapOf("u1" to "Camera", "u2" to null), setOf("Camera"), setOf("camera"), "Holiday"))
+    }
+
+    @Test
+    fun `the album tick follows a folder renamed or moved whole, read from the rule before the move`() {
+        val sources = mapOf("u1" to "Camera", "u2" to "Camera")
+        assertEquals("Camera", albumTickToCarry(cameraMirrored, sources, setOf("Camera"), "Holiday"))
+        assertNull(albumTickToCarry(cameraMirrored, sources, emptySet(), "Holiday"))
+        assertNull(albumTickToCarry(AlbumMirrorFolders(), sources, setOf("Camera"), "Holiday"))
+        assertNull(albumTickToCarry(AlbumMirrorFolders(optedIn = setOf("Camera", "Holiday")), sources, setOf("Camera"), "Holiday"))
+        assertNull(albumTickToCarry(cameraMirrored, mapOf("u1" to "Camera", "u2" to "Downloads"), setOf("Camera", "Downloads"), "Holiday"))
+    }
 }
