@@ -1062,6 +1062,7 @@
 
     <!-- Photo viewer slideshow controls -->
     <string name="viewer_play_slideshow">Spustit prezentaci</string>
+    <string name="viewer_video_seek_seconds">%1$d s</string>
     <string name="viewer_pause_slideshow">Pozastavit prezentaci</string>
 
     <!-- Widget -->

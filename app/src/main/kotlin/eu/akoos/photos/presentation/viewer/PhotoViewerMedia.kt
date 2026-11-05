@@ -28,6 +28,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -35,6 +36,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -67,6 +70,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -91,6 +96,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -641,3 +647,76 @@ private fun PanoramaHintArrow(
         )
     }
 }
+
+/** What a double tap on a video does: the outer thirds seek, the middle zooms as it does on a photo. */
+internal enum class VideoDoubleTap { Back, Zoom, Forward }
+
+/** How far one double tap on a video's side seeks. */
+internal const val VIDEO_SEEK_STEP_MS = 10_000L
+
+/** What a double tap at [x] across a viewer [width] px wide does on a video shown at [scale]: zoomed in, it zooms back out. */
+internal fun videoDoubleTap(x: Float, width: Float, scale: Float): VideoDoubleTap = when {
+    scale > 1f || width <= 0f -> VideoDoubleTap.Zoom
+    x < width / 3f -> VideoDoubleTap.Back
+    x > width * 2f / 3f -> VideoDoubleTap.Forward
+    else -> VideoDoubleTap.Zoom
+}
+
+/** Where a seek of [deltaMs] from [positionMs] lands, inside the clip; [durationMs] is zero or less while not known. */
+internal fun videoSeekTarget(positionMs: Long, deltaMs: Long, durationMs: Long): Long {
+    val target = (positionMs + deltaMs).coerceAtLeast(0L)
+    return if (durationMs > 0) target.coerceAtMost(durationMs) else target
+}
+
+/** The seek label of a run of double taps on one side; [tick] restarts its timer on every tap. */
+internal data class VideoSeekFlash(val forward: Boolean, val seconds: Int, val tick: Long)
+
+/** The label after a double tap: a tap on the side whose label still shows adds a step, the other side starts over. */
+internal fun nextVideoSeekFlash(shown: VideoSeekFlash?, forward: Boolean): VideoSeekFlash {
+    val step = (VIDEO_SEEK_STEP_MS / 1000).toInt()
+    val seconds = if (shown != null && shown.forward == forward) shown.seconds + step else step
+    return VideoSeekFlash(forward, seconds, (shown?.tick ?: 0L) + 1)
+}
+
+/** The "10 s" label on the side a double tap seeked to, gone shortly after the last tap. */
+@Composable
+internal fun VideoSeekFlashLabel(flash: VideoSeekFlash?, onDone: () -> Unit, modifier: Modifier = Modifier) {
+    LaunchedEffect(flash?.tick) {
+        if (flash != null) {
+            delay(VIDEO_SEEK_FLASH_MS)
+            onDone()
+        }
+    }
+    var last by remember { mutableStateOf(flash) }
+    if (flash != null) last = flash
+    val shown = last ?: return
+    Box(
+        modifier = modifier.fillMaxSize().padding(horizontal = 32.dp),
+        contentAlignment = if (shown.forward) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        AnimatedVisibility(visible = flash != null, enter = fadeIn(tween(120)), exit = fadeOut(tween(250))) {
+            Row(
+                modifier = Modifier
+                    .pillSurface(PillBg, infoPillShape, border = PillBorder)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (!shown.forward) {
+                    Icon(Icons.Default.FastRewind, null, tint = FgPrimary, modifier = Modifier.size(20.dp))
+                }
+                Text(
+                    stringResource(R.string.viewer_video_seek_seconds, shown.seconds),
+                    color = FgPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (shown.forward) {
+                    Icon(Icons.Default.FastForward, null, tint = FgPrimary, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+}
+
+private const val VIDEO_SEEK_FLASH_MS = 700L

@@ -824,6 +824,7 @@
     <string name="search_ago_years">vor # Jahren|vor # Jahr|vor einem Jahr</string>
 
     <string name="viewer_play_slideshow">Diashow starten</string>
+    <string name="viewer_video_seek_seconds">%1$d s</string>
     <string name="viewer_pause_slideshow">Diashow pausieren</string>
 
     <!-- Widget -->

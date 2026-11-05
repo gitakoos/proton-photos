@@ -1311,6 +1311,17 @@ fun PhotoViewerScreen(
     val rootMetaShown  by rememberUpdatedState(showMetadata)
     val rootScale      by rememberUpdatedState(scale)
     val rootSlideshow  by rememberUpdatedState(isPlaying)
+    val rootPlayer     by rememberUpdatedState(currentPlayer)
+    val rootIsVideo    by rememberUpdatedState(
+        when (val item = items.getOrNull(pagerState.settledPage)) {
+            is GalleryItem.LocalOnly -> item.local.mimeType.startsWith("video/")
+            is GalleryItem.Synced    -> item.local.mimeType.startsWith("video/")
+            is GalleryItem.CloudOnly -> item.cloud.mimeType.startsWith("video/")
+            null -> false
+        },
+    )
+    // The label of a double tap that seeked a video, shown on the side it went to.
+    var seekFlash by remember { mutableStateOf<VideoSeekFlash?>(null) }
     // The top-right menu's open state, held here so a long press opens the same menu the button does. The
     // bars' bounds tell a press on a control from one on the photo, and are zero while a bar is not shown.
     var menuExpanded by remember { mutableStateOf(false) }
@@ -1395,6 +1406,20 @@ fun PhotoViewerScreen(
                             )
                         }
                     }
+                    // On a video the outer thirds seek back or forward instead; the middle still zooms.
+                    val doubleTapAt = { p: Offset ->
+                        val player = rootPlayer?.takeIf { rootIsVideo }
+                        val tap = if (player == null) VideoDoubleTap.Zoom else videoDoubleTap(p.x, containerSize.width.toFloat(), rootScale)
+                        when (tap) {
+                            VideoDoubleTap.Zoom -> zoomToward(p)
+                            VideoDoubleTap.Back, VideoDoubleTap.Forward -> {
+                                val forward = tap == VideoDoubleTap.Forward
+                                val delta = if (forward) VIDEO_SEEK_STEP_MS else -VIDEO_SEEK_STEP_MS
+                                runCatching { player!!.seekTo(videoSeekTarget(player.currentPosition, delta, player.duration)) }
+                                seekFlash = nextVideoSeekFlash(seekFlash, forward)
+                            }
+                        }
+                    }
                     when (val first = awaitViewerTapOutcome(down.id, down.position, slop, longPressMs)) {
                         ViewerTapOutcome.HeldLong -> longPress(down.position)
                         ViewerTapOutcome.Cancelled -> Unit
@@ -1407,7 +1432,7 @@ fun PhotoViewerScreen(
                             if (second == null) {
                                 toggleChrome()
                             } else when (awaitViewerTapOutcome(second.id, second.position, slop, longPressMs)) {
-                                is ViewerTapOutcome.Lifted -> zoomToward(second.position)
+                                is ViewerTapOutcome.Lifted -> doubleTapAt(second.position)
                                 ViewerTapOutcome.HeldLong -> { toggleChrome(); longPress(second.position) }
                                 ViewerTapOutcome.Cancelled -> toggleChrome()
                             }
@@ -2173,6 +2198,8 @@ fun PhotoViewerScreen(
                 }
             }
         }
+
+        VideoSeekFlashLabel(flash = seekFlash, onDone = { seekFlash = null })
 
         // ── Top bar (fades with overlays) ─────────────────────────────────────
         CompositionLocalProvider(LocalGlassBackdrop provides glass) {

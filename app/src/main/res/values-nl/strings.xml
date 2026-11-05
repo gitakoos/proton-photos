@@ -879,6 +879,7 @@
 
     <!-- Photo viewer slideshow controls -->
     <string name="viewer_play_slideshow">Diavoorstelling afspelen</string>
+    <string name="viewer_video_seek_seconds">%1$d s</string>
     <string name="viewer_pause_slideshow">Diavoorstelling pauzeren</string>
 
     <!-- Widget -->

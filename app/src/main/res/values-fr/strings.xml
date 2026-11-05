@@ -825,6 +825,7 @@
     <string name="search_ago_years">il y a # ans|il y a # an|il y a un an</string>
 
     <string name="viewer_play_slideshow">Lancer le diaporama</string>
+    <string name="viewer_video_seek_seconds">%1$d s</string>
     <string name="viewer_pause_slideshow">Mettre le diaporama en pause</string>
 
     <!-- Widget -->

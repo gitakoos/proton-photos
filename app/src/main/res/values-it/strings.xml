@@ -829,6 +829,7 @@
     <string name="search_ago_years"># anni fa|# anno fa|un anno fa</string>
 
     <string name="viewer_play_slideshow">Avvia presentazione</string>
+    <string name="viewer_video_seek_seconds">%1$d s</string>
     <string name="viewer_pause_slideshow">Sospendi presentazione</string>
 
     <!-- Widget -->
