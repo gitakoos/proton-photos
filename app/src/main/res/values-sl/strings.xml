@@ -2473,6 +2473,9 @@
     <string name="person_unsorted_hint">Obrazi, ki jih ni bilo mogoče zanesljivo povezati z osebo. Izberi fotografije, da izločiš pravo osebo, ali preostale označi kot »ni oseba«.</string>
     <string name="person_unsorted_caption">Preostali obrazi, ki jih ni bilo mogoče povezati. Odprite za razvrščanje.</string>
     <string name="person_rename_title">Preimenuj</string>
+    <string name="person_remove_name">Odstrani ime</string>
+    <string name="person_remove_name_confirm_title">Odstranim ime?</string>
+    <string name="person_remove_name_confirm_body">Fotografije ostanejo. Skupina se vrne med obraze za pregled in izgine iz Oseb, če ima samo eno fotografijo.</string>
     <string name="person_rename_hint">Ime</string>
     <string name="permissions_default_gallery_title">Nastavi kot privzeto galerijo</string>
     <string name="permissions_default_gallery_why">Odprite sistemske nastavitve in nastavite to aplikacijo kot privzeto za odpiranje fotografij in videoposnetkov.</string>

@@ -2357,6 +2357,9 @@
     <string name="person_unsorted_hint">Arcok, amelyeket nem sikerült biztosan senkihez kötni. Jelölj ki képeket, hogy kihúzz egy valódi embert, a többit pedig jelöld meg mint nem személy.</string>
     <string name="person_unsorted_caption">Megmaradt arcok, amelyeket nem sikerült hozzárendelni. Nyisd meg a rendezésükhöz.</string>
     <string name="person_rename_title">Átnevezés</string>
+    <string name="person_remove_name">Név eltávolítása</string>
+    <string name="person_remove_name_confirm_title">Eltávolítod a nevet?</string>
+    <string name="person_remove_name_confirm_body">A fotók megmaradnak. A csoport visszakerül az átnézendő arcok közé, és ha csak egy fotója van, kikerül az Emberek közül.</string>
     <string name="person_rename_hint">Név</string>
     <string name="permissions_default_gallery_title">Beállítás alapértelmezett galériaként</string>
     <string name="permissions_default_gallery_why">Nyisd meg a rendszerbeállításokat, hogy ez az alkalmazás legyen az alapértelmezett a fotók és videók megnyitásához.</string>

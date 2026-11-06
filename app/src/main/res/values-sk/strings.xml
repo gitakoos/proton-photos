@@ -2480,6 +2480,9 @@
     <string name="person_unsorted_hint">Tváre, ktoré sa nepodarilo s istotou priradiť k osobe. Vyber fotky a presuň skutočnú osobu von, alebo zvyšok označ ako „nie je osoba“.</string>
     <string name="person_unsorted_caption">Zvyšné tváre, ktoré sa nepodarilo priradiť. Otvorte ich a roztrieďte.</string>
     <string name="person_rename_title">Premenovať</string>
+    <string name="person_remove_name">Odstrániť meno</string>
+    <string name="person_remove_name_confirm_title">Odstrániť meno?</string>
+    <string name="person_remove_name_confirm_body">Fotky zostanú. Skupina sa vráti medzi tváre na kontrolu a ak má iba jednu fotku, zmizne z Ľudí.</string>
     <string name="person_rename_hint">Meno</string>
     <string name="permissions_default_gallery_title">Nastaviť ako predvolenú galériu</string>
     <string name="permissions_default_gallery_why">Otvorte systémové nastavenia a nastavte túto aplikáciu ako predvolenú na otváranie fotiek a videí.</string>

@@ -2397,6 +2397,9 @@
     <string name="person_unsorted_hint">Volti che non è stato possibile associare con certezza a una persona. Seleziona le foto per estrarre una persona reale o segna il resto come «non è una persona».</string>
     <string name="person_unsorted_caption">Volti rimanenti che non è stato possibile associare. Apri per ordinarli.</string>
     <string name="person_rename_title">Rinomina</string>
+    <string name="person_remove_name">Rimuovi nome</string>
+    <string name="person_remove_name_confirm_title">Rimuovere il nome?</string>
+    <string name="person_remove_name_confirm_body">Le foto restano. Il gruppo torna tra i volti da rivedere ed esce da Persone se contiene una sola foto.</string>
     <string name="person_rename_hint">Nome</string>
     <string name="permissions_default_gallery_title">Imposta come galleria predefinita</string>
     <string name="permissions_default_gallery_why">Apri le impostazioni di sistema per impostare questa app come predefinita per aprire foto e video.</string>

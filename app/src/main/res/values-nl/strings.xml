@@ -2382,6 +2382,9 @@
     <string name="person_unsorted_hint">Gezichten zonder zekere overeenkomst met een persoon. Selecteer afbeeldingen om een echte persoon eruit te halen, of markeer de rest als geen persoon.</string>
     <string name="person_unsorted_caption">Overgebleven gezichten die niet konden worden gekoppeld. Open om ze te sorteren.</string>
     <string name="person_rename_title">Naam wijzigen</string>
+    <string name="person_remove_name">Naam verwijderen</string>
+    <string name="person_remove_name_confirm_title">Naam verwijderen?</string>
+    <string name="person_remove_name_confirm_body">De foto\'s blijven. De groep gaat terug naar de gezichten om na te kijken en verdwijnt uit Personen als er maar één foto in zit.</string>
     <string name="person_rename_hint">Naam</string>
     <string name="permissions_default_gallery_title">Instellen als standaardgalerij</string>
     <string name="permissions_default_gallery_why">Open de systeeminstellingen om deze app in te stellen als standaard voor foto- en videobestanden.</string>

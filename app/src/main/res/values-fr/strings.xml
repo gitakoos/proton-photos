@@ -2360,6 +2360,9 @@
     <string name="person_unsorted_hint">Des visages sans correspondance certaine avec une personne. Sélectionne des photos pour en sortir une vraie personne, ou marque le reste comme « pas une personne ».</string>
     <string name="person_unsorted_caption">Visages restants qui n\'ont pas pu être associés. Ouvrez pour les trier.</string>
     <string name="person_rename_title">Renommer</string>
+    <string name="person_remove_name">Retirer le nom</string>
+    <string name="person_remove_name_confirm_title">Retirer le nom ?</string>
+    <string name="person_remove_name_confirm_body">Les photos restent. Le groupe revient dans les visages à vérifier et quitte Personnes s\'il ne compte qu\'une photo.</string>
     <string name="person_rename_hint">Nom</string>
     <string name="permissions_default_gallery_title">Définir comme galerie par défaut</string>
     <string name="permissions_default_gallery_why">Ouvre les paramètres système pour définir cette application par défaut pour ouvrir les photos et les vidéos.</string>

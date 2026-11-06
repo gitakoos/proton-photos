@@ -2395,6 +2395,9 @@
     <string name="person_unsorted_hint">Caras que no se pudieron asociar con seguridad a una persona. Selecciona fotos para separar a una persona real o marca el resto como «no es una persona».</string>
     <string name="person_unsorted_caption">Rostros sobrantes que no se pudieron asociar. Ábrelo para ordenarlos.</string>
     <string name="person_rename_title">Cambiar nombre</string>
+    <string name="person_remove_name">Quitar nombre</string>
+    <string name="person_remove_name_confirm_title">¿Quitar el nombre?</string>
+    <string name="person_remove_name_confirm_body">Las fotos se mantienen. El grupo vuelve a las caras por revisar y sale de Personas si solo tiene una foto.</string>
     <string name="person_rename_hint">Nombre</string>
     <string name="permissions_default_gallery_title">Establecer como galería predeterminada</string>
     <string name="permissions_default_gallery_why">Abre los ajustes del sistema para establecer esta app como predeterminada para abrir fotos y vídeos.</string>

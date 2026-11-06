@@ -2358,6 +2358,9 @@
     <string name="person_unsorted_hint">Gesichter, die keiner Person eindeutig zugeordnet werden konnten. Wähle Fotos aus, um eine echte Person herauszunehmen, oder markiere den Rest als „keine Person“.</string>
     <string name="person_unsorted_caption">Übrige Gesichter, die nicht zugeordnet werden konnten. Zum Sortieren öffnen.</string>
     <string name="person_rename_title">Umbenennen</string>
+    <string name="person_remove_name">Namen entfernen</string>
+    <string name="person_remove_name_confirm_title">Namen entfernen?</string>
+    <string name="person_remove_name_confirm_body">Die Fotos bleiben. Die Gruppe kommt zurück zu den zu prüfenden Gesichtern und verschwindet aus Personen, wenn sie nur ein Foto enthält.</string>
     <string name="person_rename_hint">Name</string>
     <string name="permissions_default_gallery_title">Als Standardgalerie festlegen</string>
     <string name="permissions_default_gallery_why">Öffne die Systemeinstellungen, um diese App als Standard zum Öffnen von Fotos und Videos festzulegen.</string>

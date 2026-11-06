@@ -1497,6 +1497,9 @@
     <string name="person_unsorted_hint">Faces that could not be confidently matched to a person. Select photos to move a real person out, or mark the rest as not a person.</string>
     <string name="person_unsorted_caption">Leftover faces that could not be matched. Open to sort them.</string>
     <string name="person_rename_title">Rename</string>
+    <string name="person_remove_name">Remove name</string>
+    <string name="person_remove_name_confirm_title">Remove the name?</string>
+    <string name="person_remove_name_confirm_body">The photos stay. The group goes back to the faces to review, and leaves People if it holds a single photo.</string>
     <string name="person_add_name">Add a name</string>
     <string name="person_rename_hint">Name</string>
     <string name="person_add_photos">Add photos</string>

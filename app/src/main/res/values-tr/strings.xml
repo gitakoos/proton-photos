@@ -1415,6 +1415,9 @@
     <string name="person_unsorted_hint">Bir kişiyle kesin olarak eşleştirilemeyen yüzler. Gerçek bir kişiyi buradan taşımak için fotoğrafları seç veya kalanları kişi değil olarak işaretle.</string>
     <string name="person_unsorted_caption">Eşleştirilemeyen artan yüzler. Sınıflandırmak için aç.</string>
     <string name="person_rename_title">Yeniden adlandır</string>
+    <string name="person_remove_name">Adı kaldır</string>
+    <string name="person_remove_name_confirm_title">Ad kaldırılsın mı?</string>
+    <string name="person_remove_name_confirm_body">Fotoğraflar kalır. Grup incelenecek yüzlere geri döner ve tek fotoğrafı varsa Kişiler\'den çıkar.</string>
     <string name="person_add_name">Ad ekle</string>
     <string name="person_rename_hint">Ad</string>
     <string name="person_add_photos">Fotoğraf ekle</string>

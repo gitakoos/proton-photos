@@ -2473,6 +2473,9 @@
     <string name="person_unsorted_hint">Twarze, których nie udało się pewnie dopasować do osoby. Zaznacz zdjęcia, aby wydzielić prawdziwą osobę, lub oznacz resztę jako „to nie osoba“.</string>
     <string name="person_unsorted_caption">Pozostałe twarze, których nie udało się dopasować. Otwórz, aby je uporządkować.</string>
     <string name="person_rename_title">Zmień nazwę</string>
+    <string name="person_remove_name">Usuń imię</string>
+    <string name="person_remove_name_confirm_title">Usunąć imię?</string>
+    <string name="person_remove_name_confirm_body">Zdjęcia zostają. Grupa wraca do twarzy do przejrzenia, a jeśli ma tylko jedno zdjęcie, znika z Osób.</string>
     <string name="person_rename_hint">Imię</string>
     <string name="permissions_default_gallery_title">Ustaw jako domyślną galerię</string>
     <string name="permissions_default_gallery_why">Otwórz ustawienia systemowe, aby ustawić tę aplikację jako domyślną do otwierania zdjęć i filmów.</string>

@@ -2479,6 +2479,9 @@
     <string name="person_unsorted_hint">Tváře, které nebylo možné s jistotou přiřadit k osobě. Vyber fotky a přesuň skutečnou osobu ven, nebo zbytek označ jako „není osoba“.</string>
     <string name="person_unsorted_caption">Zbývající obličeje, které nešlo přiřadit. Otevřete je a roztřiďte.</string>
     <string name="person_rename_title">Přejmenovat</string>
+    <string name="person_remove_name">Odebrat jméno</string>
+    <string name="person_remove_name_confirm_title">Odebrat jméno?</string>
+    <string name="person_remove_name_confirm_body">Fotky zůstanou. Skupina se vrátí mezi tváře ke kontrole a pokud má jen jednu fotku, zmizí z Lidí.</string>
     <string name="person_rename_hint">Jméno</string>
     <string name="permissions_default_gallery_title">Nastavit jako výchozí galerii</string>
     <string name="permissions_default_gallery_why">Otevřete systémová nastavení a nastavte tuto aplikaci jako výchozí pro otevírání fotek a videí.</string>

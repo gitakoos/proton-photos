@@ -54,6 +54,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallMerge
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonAdd
@@ -179,6 +180,7 @@ fun PersonDetailScreen(
         }
     }
     var showRename by remember { mutableStateOf(false) }
+    var showUnnameConfirm by remember { mutableStateOf(false) }
     var showRemoveConfirm by remember { mutableStateOf(false) }
     var showIgnoreConfirm by remember { mutableStateOf(false) }
     var showNotPersonConfirm by remember { mutableStateOf(false) }
@@ -600,6 +602,20 @@ fun PersonDetailScreen(
                                         }
                                     },
                                 )
+                                // Takes a named person's name away, as saving an empty Rename does, said out
+                                // loud: the photos stay and the group goes back to the faces to review.
+                                if (state.personName != null) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.person_remove_name), color = appColors.fgPrimary) },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Clear, contentDescription = null, tint = appColors.fgDim)
+                                        },
+                                        onClick = {
+                                            menuOpen = false
+                                            showUnnameConfirm = true
+                                        },
+                                    )
+                                }
                                 // Add photos: named only, since a manual add is stored against the name so
                                 // it survives a rescan.
                                 if (state.personName != null) {
@@ -883,6 +899,20 @@ fun PersonDetailScreen(
                 clearSelection()
             },
             onDismiss = { showMoveSelectionPicker = false },
+        )
+    }
+
+    if (showUnnameConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.person_remove_name_confirm_title),
+            message = stringResource(R.string.person_remove_name_confirm_body),
+            confirmLabel = stringResource(R.string.person_remove_name),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                showUnnameConfirm = false
+                onRename("")
+            },
+            onDismiss = { showUnnameConfirm = false },
         )
     }
 
