@@ -2780,4 +2780,7 @@
     <string name="onboarding_ml_subtitle">Nájdite ľudí a veci na svojich fotkách a kopírujte z nich text. Všetko beží na tomto telefóne a nič ho neopúšťa.</string>
     <string name="onboarding_ml_size">Stiahnutie %1$s</string>
     <string name="onboarding_ml_note">Modely sa sťahujú raz, po nastavení, na pozadí. Odporúča sa Wi-Fi, pretože bez Wi-Fi sťahovanie spotrebuje mobilné dáta.</string>
+    <string name="viewer_not_person_title">Nie je to %1$s?</string>
+    <string name="viewer_not_person_body">Tvár prestane patriť osobe %1$s. Fotka zostane a tvár môže byť navrhnutá niekomu inému.</string>
+    <string name="viewer_not_person_confirm">Nie je to %1$s</string>
 </resources>

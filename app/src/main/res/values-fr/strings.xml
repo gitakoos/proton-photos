@@ -2644,4 +2644,7 @@
     <string name="onboarding_ml_subtitle">Trouvez des personnes et des objets dans vos photos et copiez-en le texte. Tout fonctionne sur ce téléphone et rien n\'en sort.</string>
     <string name="onboarding_ml_size">Téléchargement de %1$s</string>
     <string name="onboarding_ml_note">Les modèles se téléchargent une seule fois, après la configuration, en arrière-plan. Le Wi-Fi est recommandé, car sans Wi-Fi le téléchargement utilise les données mobiles.</string>
+    <string name="viewer_not_person_title">Ce n\'est pas %1$s ?</string>
+    <string name="viewer_not_person_body">Le visage quitte %1$s. La photo reste, et le visage peut être suggéré à quelqu\'un d\'autre.</string>
+    <string name="viewer_not_person_confirm">Pas %1$s</string>
 </resources>

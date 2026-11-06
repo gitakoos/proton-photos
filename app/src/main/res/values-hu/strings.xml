@@ -2641,4 +2641,7 @@
     <string name="onboarding_ml_subtitle">Embereket és tárgyakat találhatsz a fotóidon, és szöveget másolhatsz ki belőlük. Minden ezen a telefonon fut, és semmi nem hagyja el.</string>
     <string name="onboarding_ml_size">%1$s letöltés</string>
     <string name="onboarding_ml_note">A modellek egyszer töltődnek le, a beállítás után, a háttérben. A Wi-Fi ajánlott, mert Wi-Fi nélkül a letöltés mobiladatot használ.</string>
+    <string name="viewer_not_person_title">Nem %1$s?</string>
+    <string name="viewer_not_person_body">Az arc kikerül %1$s alól. A fotó megmarad, és az arcot más személynek is javasolhatja az app.</string>
+    <string name="viewer_not_person_confirm">Nem %1$s</string>
 </resources>

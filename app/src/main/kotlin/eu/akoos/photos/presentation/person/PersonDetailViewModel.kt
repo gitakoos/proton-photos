@@ -126,6 +126,7 @@ class PersonDetailViewModel @Inject constructor(
     private val personNameDao: PersonNameDao,
     private val faceCurationTimeDao: FaceCurationTimeDao,
     private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
+    private val notThisPerson: eu.akoos.photos.domain.usecase.NotThisPersonUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val assignPersonName: eu.akoos.photos.domain.usecase.AssignPersonNameUseCase,
@@ -554,31 +555,8 @@ class PersonDetailViewModel @Inject constructor(
         if (photoKeys.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-            val name = personDao.personById(personId)?.displayName
-            // "Not this person", not "delete": record the exact faces as rejected for this name (so they
-            // never rejoin), then unassign them WITHOUT rejecting, so they recluster and can be
-            // suggested for the right person on the next rebuild rather than vanishing from People.
             val faceIds = faceDao.faceIdsForPersonInPhotos(account, personId, photoKeys)
-            val now = System.currentTimeMillis()
-            if (!name.isNullOrBlank() && faceIds.isNotEmpty()) {
-                notPersonDao.add(faceIds.map { NotPersonEntity(account, name, it) })
-                FaceCurationLog.notPerson(faceCurationTimeDao, account, name, faceIds, removed = false, now)
-            }
-            faceDao.unassignFaces(faceIds)
-            if (!name.isNullOrBlank()) {
-                val attached = personManualPhotoDao.photoKeysForNameList(account, name).toHashSet()
-                personManualPhotoDao.remove(account, name, photoKeys)
-                FaceCurationLog.manualPhotos(faceCurationTimeDao, account, name, photoKeys.filter { it in attached }, removed = true, now)
-            }
-            val manual = if (name.isNullOrBlank()) emptyList()
-                else personManualPhotoDao.photoKeysForNameList(account, name)
-            val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
-            val cover = resolveCover(account, personId, name)
-            personDao.updateCoverAndCount(personId, cover, count)
-            // The unassigned faces changed the cluster, so its stored summary is stale; drop it and
-            // recluster so the freed faces regroup and the count stays honest.
-            clusterSummaryDao.deleteByPerson(personId)
-            faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
+            notThisPerson(account, personId, faceIds, photoKeys)
             _message.value = R.string.person_msg_removed
         }
     }

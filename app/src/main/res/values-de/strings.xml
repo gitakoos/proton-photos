@@ -2642,4 +2642,7 @@
     <string name="onboarding_ml_subtitle">Finde Personen und Dinge auf deinen Fotos und kopiere Text daraus. Alles läuft auf diesem Telefon, nichts verlässt es.</string>
     <string name="onboarding_ml_size">%1$s Download</string>
     <string name="onboarding_ml_note">Die Modelle werden einmal nach der Einrichtung im Hintergrund geladen. WLAN wird empfohlen, denn ohne WLAN verbraucht der Download mobile Daten.</string>
+    <string name="viewer_not_person_title">Das ist nicht %1$s?</string>
+    <string name="viewer_not_person_body">Das Gesicht wird von %1$s entfernt. Das Foto bleibt erhalten, und das Gesicht kann jemand anderem vorgeschlagen werden.</string>
+    <string name="viewer_not_person_confirm">Nicht %1$s</string>
 </resources>

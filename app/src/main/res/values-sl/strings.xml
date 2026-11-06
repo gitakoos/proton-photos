@@ -2773,4 +2773,7 @@
     <string name="onboarding_ml_subtitle">Poiščite ljudi in stvari na fotografijah in kopirajte besedilo z njih. Vse teče na tem telefonu in nič ga ne zapusti.</string>
     <string name="onboarding_ml_size">Prenos %1$s</string>
     <string name="onboarding_ml_note">Modeli se prenesejo enkrat, po nastavitvi, v ozadju. Priporočljiv je Wi-Fi, saj brez Wi-Fi prenos porabi mobilne podatke.</string>
+    <string name="viewer_not_person_title">Ni to %1$s?</string>
+    <string name="viewer_not_person_body">Obraz ne pripada več osebi %1$s. Fotografija ostane, obraz pa se lahko predlaga nekomu drugemu.</string>
+    <string name="viewer_not_person_confirm">Ni %1$s</string>
 </resources>

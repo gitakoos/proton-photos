@@ -2666,4 +2666,7 @@
     <string name="onboarding_ml_subtitle">Vind mensen en dingen in je foto\'s en kopieer er tekst uit. Alles draait op deze telefoon en niets verlaat hem.</string>
     <string name="onboarding_ml_size">%1$s download</string>
     <string name="onboarding_ml_note">De modellen worden eenmalig gedownload, na de installatie, op de achtergrond. Wifi wordt aanbevolen, want zonder wifi gebruikt de download mobiele data.</string>
+    <string name="viewer_not_person_title">Is dit niet %1$s?</string>
+    <string name="viewer_not_person_body">Het gezicht wordt van %1$s losgekoppeld. De foto blijft staan en het gezicht kan aan iemand anders worden voorgesteld.</string>
+    <string name="viewer_not_person_confirm">Niet %1$s</string>
 </resources>

@@ -523,6 +523,7 @@ fun PhotoViewerScreen(
     // The nameless face or group a face tag or a People pill was tapped for, or null while the naming
     // sheet is closed.
     var nameOrMergeSubject by remember { mutableStateOf<NameOrMergeSubject?>(null) }
+    var notPersonFace by remember { mutableStateOf<PhotoViewerViewModel.ViewerPerson?>(null) }
     // The settled photo's decoded pixel size, shared by the tags and the long-press face hit-test.
     var settledImageSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     // Once any settled photo decodes to HDR, hold the window in HDR colour mode for the rest of the
@@ -1892,6 +1893,7 @@ fun PhotoViewerScreen(
                                     onOpenPerson(person.personId)
                                 }
                             },
+                            onFaceLongClick = { person -> notPersonFace = person },
                         )
                     }
 
@@ -3469,6 +3471,22 @@ fun PhotoViewerScreen(
                 )
             }
         }
+    }
+
+    notPersonFace?.let { face ->
+        val faceName = face.name.orEmpty()
+        ConfirmDialog(
+            title = stringResource(R.string.viewer_not_person_title, faceName),
+            message = stringResource(R.string.viewer_not_person_body, faceName),
+            confirmLabel = stringResource(R.string.viewer_not_person_confirm, faceName),
+            dismissLabel = stringResource(R.string.cancel),
+            destructive = true,
+            onConfirm = {
+                items.getOrNull(pagerState.settledPage)?.let { viewModel.markFaceNotThisPerson(it, face) }
+                notPersonFace = null
+            },
+            onDismiss = { notPersonFace = null },
+        )
     }
 
     // ── Name a nameless face tapped in the tags overlay or the People box ──────

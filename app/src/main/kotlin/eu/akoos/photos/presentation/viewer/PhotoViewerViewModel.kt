@@ -249,6 +249,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
     private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
+    private val notThisPerson: eu.akoos.photos.domain.usecase.NotThisPersonUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
     private val undoController: UndoController,
@@ -783,6 +784,20 @@ class PhotoViewerViewModel @Inject constructor(
             // cancelled by the next photo's is stopped here before it can publish.
             ensureActive()
             publishPeople(photoKey, people)
+        }
+    }
+
+    /**
+     * "This isn't them" for the one face [person] stands for on [item]: the face leaves the person (the
+     * same bookkeeping as removing the photo from them on the person page), then the photo's people are
+     * read again so the tag goes. Guest-safe, the account resolving to the local sentinel.
+     */
+    fun markFaceNotThisPerson(item: GalleryItem, person: ViewerPerson) {
+        if (person.name.isNullOrBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+            runCatching { notThisPerson(account, person.personId, listOf(person.faceId), listOf(item.stableId)) }
+            withContext(Dispatchers.Main) { loadPeopleInPhoto(item) }
         }
     }
 

@@ -2773,4 +2773,7 @@
     <string name="onboarding_ml_subtitle">Znajduj osoby i rzeczy na zdjęciach i kopiuj z nich tekst. Wszystko działa na tym telefonie i nic go nie opuszcza.</string>
     <string name="onboarding_ml_size">Pobieranie %1$s</string>
     <string name="onboarding_ml_note">Modele pobierają się jednorazowo, po konfiguracji, w tle. Zalecane jest Wi-Fi, ponieważ bez Wi-Fi pobieranie zużywa dane mobilne.</string>
+    <string name="viewer_not_person_title">To nie %1$s?</string>
+    <string name="viewer_not_person_body">Twarz przestaje należeć do osoby %1$s. Zdjęcie zostaje, a twarz może zostać zaproponowana komuś innemu.</string>
+    <string name="viewer_not_person_confirm">To nie %1$s</string>
 </resources>

@@ -2679,4 +2679,7 @@
     <string name="onboarding_ml_subtitle">Encuentra personas y cosas en tus fotos y copia texto de ellas. Todo funciona en este teléfono y nada sale de él.</string>
     <string name="onboarding_ml_size">Descarga de %1$s</string>
     <string name="onboarding_ml_note">Los modelos se descargan una sola vez, después de la configuración, en segundo plano. Se recomienda wifi, porque sin wifi la descarga usa datos móviles.</string>
+    <string name="viewer_not_person_title">¿Esta no es %1$s?</string>
+    <string name="viewer_not_person_body">La cara deja de pertenecer a %1$s. La foto se queda, y la cara puede sugerirse a otra persona.</string>
+    <string name="viewer_not_person_confirm">No es %1$s</string>
 </resources>
