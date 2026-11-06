@@ -2361,7 +2361,18 @@ fun PhotoViewerScreen(
                             // People in this photo: detect the faces on this photo (if not already) and
                             // pin their name tags, or take them down. The reliable path when a long
                             // press is awkward, and the only one on a photo not yet scanned.
-                            if (aiFeaturesEnabled && faceEnabled && !isReadOnlyAlbum) {
+                            if (viewerOffersPeopleInPhoto(
+                                    faceFeaturesOn = aiFeaturesEnabled && faceEnabled,
+                                    readOnlyAlbum = isReadOnlyAlbum,
+                                    secure = secure,
+                                    vaulted = isVaultedItem,
+                                    hidden = isHidden || when (val s = settledItem) {
+                                        is GalleryItem.CloudOnly -> s.cloud.linkId in hiddenCloudLinkIds
+                                        is GalleryItem.Synced -> s.cloud.linkId in hiddenCloudLinkIds
+                                        else -> false
+                                    },
+                                )
+                            ) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.viewer_people_in_photo),
                                         color = FgPrimary) },

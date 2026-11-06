@@ -38,6 +38,21 @@ interface FaceCurationTimeDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun set(rows: List<FaceCurationTimeEntity>)
 
+    /** The account's times about one photo: those of its manual adds ([ref] the photo key) and of the marks on
+     *  its faces ([ref] a face id, `photoKey#index`), so a backup re-key can move them with the photo. */
+    @Query(
+        "SELECT * FROM face_curation_time WHERE userId = :userId AND (ref = :photoKey OR " +
+            "(substr(ref, 1, length(:photoKey)) = :photoKey AND substr(ref, length(:photoKey) + 1, 1) = '#'))",
+    )
+    suspend fun rowsOnPhoto(userId: String, photoKey: String): List<FaceCurationTimeEntity>
+
+    /** Drops the account's times about one photo, once a backup re-key has written them under the new key. */
+    @Query(
+        "DELETE FROM face_curation_time WHERE userId = :userId AND (ref = :photoKey OR " +
+            "(substr(ref, 1, length(:photoKey)) = :photoKey AND substr(ref, length(:photoKey) + 1, 1) = '#'))",
+    )
+    suspend fun deleteOnPhoto(userId: String, photoKey: String)
+
     /** Follows a rename, so the times stay with the person under the new name. */
     @Query("UPDATE OR REPLACE face_curation_time SET personName = :newName WHERE userId = :userId AND personName = :oldName")
     suspend fun rename(userId: String, oldName: String, newName: String)

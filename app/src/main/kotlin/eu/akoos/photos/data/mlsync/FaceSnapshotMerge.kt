@@ -135,6 +135,10 @@ internal sealed interface FaceMergeChange {
     /** Confirm the local face as [name]. */
     data class Confirm(val name: String) : FaceMergeChange
 
+    /** Put the local face with the person named [name] without confirming it: another device's automatic
+     *  grouping, which a later regroup may still correct. */
+    data class Group(val name: String) : FaceMergeChange
+
     /** Remove the local face from People. */
     data object Remove : FaceMergeChange
 
@@ -159,7 +163,7 @@ internal fun mergeFaceCuration(local: LocalFaceCuration, snapshot: SnapshotFaceC
     }
     val grouped = snapshot.personName ?: return FaceMergeChange.Keep
     return if (local.groupedName == null && grouped !in local.blockedNames) {
-        FaceMergeChange.Confirm(grouped)
+        FaceMergeChange.Group(grouped)
     } else {
         FaceMergeChange.Keep
     }

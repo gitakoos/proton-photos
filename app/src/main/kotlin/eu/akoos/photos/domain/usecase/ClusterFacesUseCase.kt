@@ -46,6 +46,7 @@ import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.isConfidentFace
 import eu.akoos.photos.data.face.sidewaysFromEncoded
 import javax.inject.Inject
@@ -59,11 +60,12 @@ internal fun clusterLogLine(size: Int, named: Boolean): String =
 
 /**
  * What one full rebuild of the people did. [committed] is false when its write check refused the rewrite,
- * so nothing was written. Otherwise [leftUngrouped] is how many of the faces it read (removed ones aside)
- * it left without a person: those kept out of a named person they were marked as not being, and those
- * whose stored vector could not be read.
+ * so nothing was written; [editedMeanwhile] then says the refusal was a user edit made after the rebuild
+ * read the faces, which a fresh rebuild honours. Otherwise [leftUngrouped] is how many of the faces it read
+ * (removed ones aside) it left without a person: those kept out of a named person they were marked as not
+ * being, and those whose stored vector could not be read.
  */
-data class FaceRegroupOutcome(val committed: Boolean, val leftUngrouped: Int)
+data class FaceRegroupOutcome(val committed: Boolean, val leftUngrouped: Int, val editedMeanwhile: Boolean = false)
 
 /**
  * The cursor of a batched incremental placement: each [ClusterFacesUseCase.assignNewFaces] call reads at
@@ -137,6 +139,7 @@ internal class PlacementCentroids(
  * Both writing passes take a `writeAllowed` check, asked inside their transaction before anything is
  * written: the caller's fence against an import (or a sign-out) that began after the pass read the faces,
  * so a grouping of the faces as they were never lands over what came after. A refused pass writes nothing.
+ * The full rebuild is also refused when the user edited people or faces after it read them ([faceEdits]).
  */
 class ClusterFacesUseCase @Inject constructor(
     private val faceDao: FaceDao,
@@ -146,12 +149,16 @@ class ClusterFacesUseCase @Inject constructor(
     private val personCoverDao: PersonCoverDao,
     private val clusterSummaryDao: ClusterSummaryDao,
     private val appDatabase: AppDatabase,
+    private val faceEdits: FaceEditCounter = FaceEditCounter(),
 ) {
     suspend operator fun invoke(
         userId: UserId?,
         writeAllowed: () -> Boolean = { true },
     ): FaceRegroupOutcome = withContext(Dispatchers.Default) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        // Taken before anything below is read: an edit since then makes this rebuild's view of the names,
+        // marks and groups stale, so its rewrite is refused and the caller regroups again.
+        val editMark = faceEdits.mark()
 
         // Faces marked NOT a given person ("Is this X? No"): never confirmed for, nor pulled into, that
         // person, no matter how the clustering churns.
@@ -232,6 +239,7 @@ class ClusterFacesUseCase @Inject constructor(
         var otherBucketSize = 0
         var placedFaces = 0
         var committed = false
+        var editedMeanwhile = false
 
         // A face id to its embedding, so each final person's centroid summary can be built from its
         // members without a re-read. The values are the same arrays already held in samples, so this
@@ -250,6 +258,10 @@ class ClusterFacesUseCase @Inject constructor(
             // Asked here, inside the transaction, so nothing the caller fences against can commit between
             // the check and the rewrite.
             if (!writeAllowed()) return@withTransaction
+            if (!faceEdits.unchangedSince(editMark)) {
+                editedMeanwhile = true
+                return@withTransaction
+            }
             committed = true
             // Drop the old grouping first: unlink every face and remove the people, so the pass builds
             // a fresh set rather than growing onto stale clusters. The centroid cache is cleared with
@@ -351,7 +363,9 @@ class ClusterFacesUseCase @Inject constructor(
             // indexed face against them without re-reading every embedding.
             clusterSummaryDao.upsertAll(summaryRows)
         }
-        if (!committed) return@withContext FaceRegroupOutcome(committed = false, leftUngrouped = 0)
+        if (!committed) {
+            return@withContext FaceRegroupOutcome(committed = false, leftUngrouped = 0, editedMeanwhile = editedMeanwhile)
+        }
 
         // The faces this rebuild read but left without a person: those kept out of a named person they
         // were marked as not being, and those whose vector could not be read. They stay ungrouped by

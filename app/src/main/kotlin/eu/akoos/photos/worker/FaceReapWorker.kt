@@ -34,9 +34,9 @@ import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import eu.akoos.photos.data.db.dao.FaceDao
-import eu.akoos.photos.data.db.dao.FaceScanDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FacePhotoRemoval
 import eu.akoos.photos.data.face.FaceReaper
 import eu.akoos.photos.data.repository.drive.CloudTrashService
 import eu.akoos.photos.domain.repository.LocalMediaRepository
@@ -49,9 +49,11 @@ import java.util.concurrent.TimeUnit
  * Periodic maintenance that reaps stored face rows + scan markers whose photo has left the library
  * for good, so the on-device biometric tables cannot grow without bound (faces were otherwise
  * cleared only on sign-out or a model swap). The decision is [FaceReaper.facesToReap]: trust-gated,
- * and it KEEPS a photo's faces while it is still live or still restorable from a trash. The
- * immediate prune at a permanent cloud delete lives in the delete path; this worker is the net for
- * photos removed on the device, as a guest, or on another device.
+ * and it KEEPS a photo's faces while it is still live or still restorable from a trash. A device
+ * photo whose Drive copy is still there (freed up to save space) moves its faces onto that copy
+ * instead ([FacePhotoRemoval.reap]). The immediate prune at a permanent cloud delete lives in the
+ * delete path; this worker is the net for photos removed on the device, as a guest, or on another
+ * device.
  */
 @HiltWorker
 class FaceReapWorker @AssistedInject constructor(
@@ -60,7 +62,7 @@ class FaceReapWorker @AssistedInject constructor(
     private val deviceHealth: DeviceHealthPolicy,
     private val accountManager: AccountManager,
     private val faceDao: FaceDao,
-    private val faceScanDao: FaceScanDao,
+    private val facePhotoRemoval: FacePhotoRemoval,
     private val photoListingDao: PhotoListingDao,
     private val cloudTrashService: CloudTrashService,
     private val localMediaRepo: LocalMediaRepository,
@@ -120,10 +122,11 @@ class FaceReapWorker @AssistedInject constructor(
         )
         if (reap.isNotEmpty()) {
             runCatching {
-                faceDao.deleteByPhotoKeys(userKey, reap)
-                faceScanDao.deleteByPhotoKeys(userKey, reap)
-                Log.d(TAG, "reaped ${reap.size} orphaned face key(s)")
-            }.onFailure { Log.w(TAG, "face reap delete failed: ${it.message}") }
+                val outcome = facePhotoRemoval.reap(userKey, reap) { linkId ->
+                    cloudTrustworthy && linkId !in liveCloudLinkIds && linkId !in cloudTrashLinkIds
+                }
+                Log.d(TAG, "reaped ${outcome.dropped} orphaned face key(s), moved ${outcome.moved} onto their Drive copy")
+            }.onFailure { Log.w(TAG, "face reap failed: ${it.message}") }
         }
         return Result.success()
     }

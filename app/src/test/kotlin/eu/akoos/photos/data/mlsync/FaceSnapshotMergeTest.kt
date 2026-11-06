@@ -156,7 +156,8 @@ class FaceSnapshotMergeTest {
 
     @Test
     fun `the snapshot's grouping fills only a face this device has not grouped under a named person`() {
-        assertEquals(FaceMergeChange.Confirm("Ann"), mergeFaceCuration(LocalFaceCuration(), snapshot(personName = "Ann")))
+        // Grouped, not confirmed: another device's automatic grouping must stay correctable by a regroup.
+        assertEquals(FaceMergeChange.Group("Ann"), mergeFaceCuration(LocalFaceCuration(), snapshot(personName = "Ann")))
         assertEquals(
             FaceMergeChange.Keep,
             mergeFaceCuration(LocalFaceCuration(groupedName = "Bob"), snapshot(personName = "Ann")),

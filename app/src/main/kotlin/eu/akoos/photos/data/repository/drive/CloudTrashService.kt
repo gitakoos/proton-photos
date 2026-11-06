@@ -169,8 +169,7 @@ class CloudTrashService @Inject constructor(
     private val photoStreamService: PhotoStreamService,
     private val cryptoHelper: eu.akoos.photos.data.crypto.DriveCryptoHelper,
     private val cryptoContext: me.proton.core.crypto.common.context.CryptoContext,
-    private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
-    private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
+    private val facePhotoRemoval: eu.akoos.photos.data.face.FacePhotoRemoval,
     private val perceptualHashDao: eu.akoos.photos.data.db.dao.PerceptualHashDao,
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
     private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
@@ -596,14 +595,13 @@ class CloudTrashService @Inject constructor(
                 if (deleted.isNotEmpty()) _trashCountChanges.tryEmit(-deleted.size)
                 Log.d(TAG, "deleteFromCloudForever: permanently deleted ${deleted.size}/${linkIds.size} items (${failed.size} failed)")
                 // A permanently deleted photo can never come back, so drop its on-device per-photo
-                // side rows now (all keyed by the linkId): face rows + scan markers, its perceptual
-                // hash, and its cached location. The periodic reaper is the net for photos removed
+                // side rows now (all keyed by the linkId): face rows + scan markers (with the people
+                // they were in recounted), its perceptual hash, and its cached location. The periodic reaper is the net for photos removed
                 // elsewhere. Best-effort, so a failure here never fails the server-applied delete.
                 if (deleted.isNotEmpty()) {
                     val deletedList = deleted.toList()
                     runCatching {
-                        faceDao.deleteByPhotoKeys(userId.id, deleted)
-                        faceScanDao.deleteByPhotoKeys(userId.id, deleted)
+                        facePhotoRemoval.dropPhotos(userId.id, deleted)
                         perceptualHashDao.deleteByKeys(deletedList)
                         photoLocationDao.deleteByIds(userId.id, deletedList)
                     }.onFailure { Log.w(TAG, "deleteFromCloudForever: per-photo data prune failed: ${it.message}") }

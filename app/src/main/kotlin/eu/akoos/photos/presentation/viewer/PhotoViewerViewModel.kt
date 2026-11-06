@@ -216,6 +216,20 @@ internal suspend fun viewerMayDetectFaces(
 ): Boolean = faceDao.facePhotoKeysIn(account, listOf(photoKey)).isEmpty()
 
 /**
+ * Whether the viewer's menu offers "People in this photo", which scans the photo on screen when it holds no
+ * face yet: only with face recognition on ([faceFeaturesOn]), never in a shared album the user cannot edit,
+ * and never on a photo put away (the secure viewer, a vaulted photo, a hidden one), so nothing about a hidden
+ * photo is scanned or tagged.
+ */
+internal fun viewerOffersPeopleInPhoto(
+    faceFeaturesOn: Boolean,
+    readOnlyAlbum: Boolean,
+    secure: Boolean,
+    vaulted: Boolean,
+    hidden: Boolean,
+): Boolean = faceFeaturesOn && !readOnlyAlbum && !secure && !vaulted && !hidden
+
+/**
  * Whether a face with [personId] is shown as a chip of its own, named on its own: one in the Unsorted bucket
  * ([otherId]), or one no grouping has placed yet, such as a face just taken off a person.
  */

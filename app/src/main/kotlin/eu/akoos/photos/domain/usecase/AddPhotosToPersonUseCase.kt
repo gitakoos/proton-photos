@@ -24,6 +24,7 @@ package eu.akoos.photos.domain.usecase
 
 import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
 import eu.akoos.photos.data.face.FaceCurationLog
+import eu.akoos.photos.data.face.FaceEditCounter
 import kotlinx.coroutines.flow.first
 import me.proton.core.accountmanager.domain.AccountManager
 import eu.akoos.photos.data.db.dao.FaceDao
@@ -45,6 +46,7 @@ class AddPhotosToPersonUseCase @Inject constructor(
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val faceDao: FaceDao,
     private val faceCurationTimeDao: FaceCurationTimeDao,
+    private val faceEdits: FaceEditCounter,
 ) {
     suspend operator fun invoke(personId: Long, photoKeys: Collection<String>) {
         if (photoKeys.isEmpty()) return
@@ -54,8 +56,10 @@ class AddPhotosToPersonUseCase @Inject constructor(
         val person = personDao.personById(personId) ?: return
         val name = person.displayName
         if (name.isNullOrBlank()) return
-        personManualPhotoDao.add(photoKeys.map { PersonManualPhotoEntity(account, name, it) })
-        FaceCurationLog.manualPhotos(faceCurationTimeDao, account, name, photoKeys, removed = false, System.currentTimeMillis())
+        faceEdits.edit {
+            personManualPhotoDao.add(photoKeys.map { PersonManualPhotoEntity(account, name, it) })
+            FaceCurationLog.manualPhotos(faceCurationTimeDao, account, name, photoKeys, removed = false, System.currentTimeMillis())
+        }
         // Display-only, by design: a manual add is stored against the name so the photo shows and
         // survives a rebuild, but its detected face is deliberately NOT auto-labelled. When the
         // person's own face is too small or distant to detect, the only face the detector found in the

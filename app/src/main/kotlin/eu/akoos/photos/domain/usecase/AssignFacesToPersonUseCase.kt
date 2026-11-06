@@ -34,6 +34,7 @@ import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceCurationLog
+import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -66,6 +67,7 @@ class AssignFacesToPersonUseCase @Inject constructor(
     private val clusterSummaryDao: ClusterSummaryDao,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val appDatabase: AppDatabase,
+    private val faceEdits: FaceEditCounter = FaceEditCounter(),
 ) {
     /** The person the faces go to. */
     sealed interface Target {
@@ -84,7 +86,7 @@ class AssignFacesToPersonUseCase @Inject constructor(
     ): Long = withContext(Dispatchers.IO) {
         if (faceIds.isEmpty()) return@withContext -1L
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val personId = appDatabase.withTransaction { assign(account, faceIds, target) }
+        val personId = faceEdits.edit { appDatabase.withTransaction { assign(account, faceIds, target) } }
         if (recluster && personId >= 0) faceIndexingScheduler.requestRecluster(userId)
         personId
     }

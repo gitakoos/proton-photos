@@ -36,13 +36,17 @@ import javax.inject.Singleton
 import kotlin.coroutines.coroutineContext
 import kotlin.math.sqrt
 
+/** Centroid cosine an unnamed cluster must clear to be folded into a named person with no question asked: the
+ *  join floor, so an automatic fold never takes in what the grouping itself would keep apart. The looser
+ *  [FACE_SUGGEST_THRESHOLD] only offers a match for the user to confirm. */
+internal const val AUTO_MERGE_THRESHOLD = FACE_CLUSTER_THRESHOLD
+
 /** One auto-merge fold: the unnamed cluster [fromClusterId] is folded into the named person [toPersonId]. */
 internal data class AutoMergePair(val fromClusterId: Long, val toPersonId: Long)
 
 /**
  * Chooses the auto-merge folds for one pass. For every NAMED person it takes its single closest UNNAMED
- * candidate cluster whose centroid cosine clears [threshold] (the same gate the manual "this may be the
- * same person" card uses), skipping the Unsorted bucket [otherId] and any (named, candidate) pair the user
+ * candidate cluster whose centroid cosine clears [threshold], skipping the Unsorted bucket [otherId] and any (named, candidate) pair the user
  * already rejected as "not this person". A candidate that is closest to two named people is given to the
  * nearer one, and only unnamed candidates fold, so two names the user kept apart are never silently
  * combined and no fold chains within a pass. Pure: no database, no Android, so the selection is unit-tested.
@@ -73,10 +77,11 @@ internal fun pickAutoMergePairs(
 }
 
 /**
- * Applies, automatically, the same merges the manual "this may be the same person" card would offer: each
- * named person absorbs its closest look-alike unnamed cluster. Opt-in (the scheduler only calls this when
- * the user turned auto-merge on), and it reuses the ordinary [AssignPersonNameUseCase] fold, so an
- * auto-merge is durable and identical to a manual one. Runs one pass (closest single candidate per person,
+ * Applies, automatically, the closest of the merges the manual "this may be the same person" card would
+ * offer: each named person absorbs its closest look-alike unnamed cluster at or past the join floor
+ * ([AUTO_MERGE_THRESHOLD]). Opt-in (the scheduler only calls this when the user turned auto-merge on), and
+ * it reuses the ordinary [AssignPersonNameUseCase] fold without confirming the folded faces, so a rebuild
+ * can still take apart a fold the user never looked at. Runs one pass (closest single candidate per person,
  * no chaining); a later indexing pass catches any further matches. Guest-safe: [account] is the user id or
  * the local partition, exactly as clustering keys it.
  */
@@ -106,14 +111,15 @@ class AutoMergePeopleUseCase @Inject constructor(
         if (input.centroids.isEmpty()) return@withContext 0
         val otherId = personDao.otherPersonId(account) ?: -1L
 
-        val pairs = pickAutoMergePairs(input.centroids, namedIds, otherId, input.rejectedPairs, FACE_SUGGEST_THRESHOLD)
+        val pairs = pickAutoMergePairs(input.centroids, namedIds, otherId, input.rejectedPairs, AUTO_MERGE_THRESHOLD)
         if (pairs.isEmpty()) return@withContext 0
         appDatabase.withTransaction {
             if (!writeAllowed()) return@withTransaction 0
             for (pair in pairs) {
                 val name = nameById[pair.toPersonId] ?: continue
                 // Fold the candidate into the named person (by name); the surviving side is the named person.
-                assignPersonName(account, pair.fromClusterId, name)
+                // Its faces are not confirmed: the app chose this fold, so a later rebuild may still undo it.
+                assignPersonName(account, pair.fromClusterId, name, confirm = false)
             }
             pairs.size
         }

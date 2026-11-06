@@ -122,4 +122,13 @@ class PersonPageRulesTest {
     fun `a held suggestion whose group still exists stays until the next lookup`() {
         assertFalse(dropsHeldSuggestion(candidateRow = PersonEntity(id = 5L, userId = "account")))
     }
+
+    @Test
+    fun `auto-merge takes a suggestion on its own only past the join floor`() {
+        assertTrue(autoAcceptsSuggestion(0.9f))
+        assertTrue(autoAcceptsSuggestion(0.59f))
+        assertFalse("a looser match is a card for the user", autoAcceptsSuggestion(0.5f))
+        assertFalse(autoAcceptsSuggestion(0.58f))
+        assertFalse("an unranked candidate never folds", autoAcceptsSuggestion(-1f))
+    }
 }

@@ -30,6 +30,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceSweepEvent
 import eu.akoos.photos.data.face.SweepStop
@@ -122,6 +123,7 @@ class FindMorePhotosStopDbTest {
             personManualPhotoDao = db.personManualPhotoDao(),
             faceIndexingScheduler = scheduler,
             getGalleryItems = gallery,
+            faceEdits = FaceEditCounter(),
             context = context,
         )
     }

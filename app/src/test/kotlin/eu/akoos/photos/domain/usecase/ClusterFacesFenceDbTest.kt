@@ -30,6 +30,7 @@ import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.face.FaceEditCounter
 import kotlinx.coroutines.test.runTest
 import me.proton.core.domain.entity.UserId
 import org.junit.After
@@ -59,6 +60,7 @@ class ClusterFacesFenceDbTest {
     private val user = UserId(acct)
     private lateinit var db: AppDatabase
     private lateinit var cluster: ClusterFacesUseCase
+    private val edits = FaceEditCounter()
 
     @Before
     fun setUp() {
@@ -69,7 +71,7 @@ class ClusterFacesFenceDbTest {
             .build()
         cluster = ClusterFacesUseCase(
             db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.notPersonDao(),
-            db.personCoverDao(), db.clusterSummaryDao(), db,
+            db.personCoverDao(), db.clusterSummaryDao(), db, edits,
         )
     }
 
@@ -117,6 +119,39 @@ class ClusterFacesFenceDbTest {
         assertEquals("Anna", db.personDao().personById(1L)!!.displayName)
         for (i in 1..3) assertEquals(1L, db.faceDao().faceById("p$i#0")!!.personId)
         assertNull("nothing was placed either", db.faceDao().faceById("p4#0")!!.personId)
+    }
+
+    @Test
+    fun `a rebuild a user edit lands under writes nothing and says so`() = runTest {
+        person(1L, "Anna", faceCount = 3)
+        for (i in 1..3) face("p$i#0", 1L, manualName = "Anna", embedding = embedding(axis = i))
+        face("p4#0", null, embedding = embedding(axis = 4))
+
+        // The edit lands after the rebuild read the faces and before its write.
+        val outcome = cluster(user) {
+            edits.edit { }
+            true
+        }
+
+        assertFalse(outcome.committed)
+        assertTrue(outcome.editedMeanwhile)
+        assertEquals("Anna", db.personDao().personById(1L)!!.displayName)
+        for (i in 1..3) assertEquals(1L, db.faceDao().faceById("p$i#0")!!.personId)
+        assertNull("nothing was placed either", db.faceDao().faceById("p4#0")!!.personId)
+
+        val again = cluster(user)
+        assertTrue("the next rebuild, with no edit under it, writes", again.committed)
+        assertFalse(again.editedMeanwhile)
+        assertEquals(1L, db.faceDao().faceById("p4#0")!!.personId)
+    }
+
+    @Test
+    fun `an edit made before the rebuild started does not hold it back`() = runTest {
+        person(1L, "Anna", faceCount = 3)
+        for (i in 1..3) face("p$i#0", 1L, manualName = "Anna", embedding = embedding(axis = i))
+        edits.edit { }
+
+        assertTrue(cluster(user).committed)
     }
 
     @Test

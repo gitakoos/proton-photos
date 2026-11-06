@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.domain.usecase
 
+import androidx.room.withTransaction
+import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.ClusterSummaryDao
 import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
 import eu.akoos.photos.data.db.dao.FaceDao
@@ -31,6 +33,7 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.face.FaceCurationLog
+import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.presentation.person.personPhotoCount
 import me.proton.core.accountmanager.domain.AccountManager
@@ -41,7 +44,8 @@ import javax.inject.Inject
  * "This isn't them" for the given faces of a person. The exact faces are recorded as rejected for the
  * person's name (so they never rejoin), then unassigned WITHOUT rejecting, so they recluster and can be
  * suggested for the right person rather than vanishing from People. Any manual membership of
- * [photoKeys] is detached, the cached cover and count are refreshed, and a regroup is requested.
+ * [photoKeys] is detached, the cached cover and count are refreshed, all in one transaction counted as one
+ * edit, and a regroup is requested.
  *
  * Shared by the person page's "Remove from person" and the viewer's face tag, so both keep the same
  * bookkeeping. A nameless person records no rejection, as the mark is keyed by name.
@@ -56,8 +60,17 @@ class NotThisPersonUseCase @Inject constructor(
     private val faceCurationTimeDao: FaceCurationTimeDao,
     private val clusterSummaryDao: ClusterSummaryDao,
     private val faceIndexingScheduler: FaceIndexingScheduler,
+    private val appDatabase: AppDatabase,
+    private val faceEdits: FaceEditCounter,
 ) {
     suspend operator fun invoke(account: String, personId: Long, faceIds: List<String>, photoKeys: Collection<String>) {
+        faceEdits.edit {
+            appDatabase.withTransaction { record(account, personId, faceIds, photoKeys) }
+        }
+        faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
+    }
+
+    private suspend fun record(account: String, personId: Long, faceIds: List<String>, photoKeys: Collection<String>) {
         val name = personDao.personById(personId)?.displayName
         val now = System.currentTimeMillis()
         if (!name.isNullOrBlank() && faceIds.isNotEmpty()) {
@@ -75,10 +88,9 @@ class NotThisPersonUseCase @Inject constructor(
         val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
         val cover = resolveCover(account, personId, name)
         personDao.updateCoverAndCount(personId, cover, count)
-        // The unassigned faces changed the cluster, so its stored summary is stale; drop it and
-        // recluster so the freed faces regroup and the count stays honest.
+        // The unassigned faces changed the cluster, so its stored summary is stale; drop it, and the caller
+        // reclusters so the freed faces regroup and the count stays honest.
         clusterSummaryDao.deleteByPerson(personId)
-        faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
     }
 
     private suspend fun resolveCover(account: String, personId: Long, name: String?): String? {

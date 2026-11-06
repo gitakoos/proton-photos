@@ -62,6 +62,7 @@ import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_THRESHOLD
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
+import eu.akoos.photos.domain.usecase.FaceRegroupOutcome
 import eu.akoos.photos.domain.usecase.IncrementalBatch
 import eu.akoos.photos.domain.usecase.clusterFaces
 import eu.akoos.photos.domain.usecase.cosineSimilarity
@@ -77,6 +78,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import eu.akoos.photos.util.flatMapSqlChunks
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.accountmanager.domain.AccountManager
@@ -371,6 +373,15 @@ internal suspend fun <T> fencedGroupingStep(
 }
 
 /**
+ * Whether a full regroup that wrote nothing ([outcome]) asks for another: only when a user edit made while it
+ * ran turned it away, and no forced regroup is already waiting for the grouping lock ([queuedRegroups]), so
+ * edits made during one long regroup add a single regroup after it rather than one each. Pure so it is
+ * unit-tested without Android.
+ */
+internal fun regroupAgainAfterEdit(outcome: FaceRegroupOutcome, queuedRegroups: Int): Boolean =
+    !outcome.committed && outcome.editedMeanwhile && queuedRegroups == 0
+
+/**
  * Whether the pass-end grouping follows its incremental placement with a full regroup: when the
  * incremental path could not handle the pass (no usable cache, a large backlog, a failure), or when a
  * [settled] walk (about to stop rather than continue) still holds faces the incremental path left
@@ -662,6 +673,10 @@ class FaceIndexingScheduler @Inject constructor(
      *  an incremental placement never interleaves with a full rewrite. Never held across a scan. */
     private val groupingLock = Mutex()
 
+    /** Forced regroups requested and not yet holding [groupingLock], so a regroup an edit turned away asks for
+     *  another only when none is already queued behind it ([regroupAgainAfterEdit]). */
+    private val queuedRegroups = AtomicInteger(0)
+
     /** Live mirror of the two gates, kept current by [watchSettings] so the per-photo check is a
      *  volatile read rather than a DataStore round trip per item. */
     @Volatile private var aiEnabled = false
@@ -764,6 +779,21 @@ class FaceIndexingScheduler @Inject constructor(
      * model is not on the device yet (a later trigger retries once it is). Safe to call repeatedly;
      * overlapping calls collapse to one walk.
      */
+    /** Moves the faces of every device photo that has a Drive copy onto that copy's key, as the walk does for
+     *  the photos it lists, but from the sync state alone. */
+    private suspend fun rekeyBackedUpFromSyncState(account: String) {
+        val deviceKeys = faceDao.devicePhotoKeys(account)
+        if (deviceKeys.isEmpty()) return
+        val fence = writeFence.token()
+        val pairs = syncStateRekeyPairs(account, deviceKeys.flatMapSqlChunks { appDatabase.syncStateDao().getByUris(it) })
+        if (pairs.isEmpty()) return
+        groupingLock.withLock {
+            for ((deviceKey, cloudKey) in pairs) {
+                rekeyPhotoFaces.invoke(account, deviceKey, cloudKey) { writeFence.allows(fence) }
+            }
+        }
+    }
+
     suspend fun indexAll(userId: UserId?) {
         restart.lastUserId = userId
         val prefs = context.settingsDataStore.data.first()
@@ -773,6 +803,13 @@ class FaceIndexingScheduler @Inject constructor(
         autoMerge = prefs[SettingsKeys.FACE_AUTO_MERGE] == true
         // Dark when off: no model prep, no enumeration, no walk.
         if (!aiEnabled) { setIdle(); return }
+        // A photo backed up while no walk ran keeps its faces on its device key: it counts twice in its people,
+        // and only the walk below would move them. Moved here from the database alone, cheap, so a paused or
+        // stopped walk leaves no photo on its device key.
+        userId?.let { acct ->
+            runCatching { rekeyBackedUpFromSyncState(acct.id) }
+                .onFailure { Log.w(TAG, "face rekey of backed-up photos failed: ${it.message}") }
+        }
         if (paused) { _progress.value = FaceIndexingProgress(FaceIndexingState.Paused, 0, 0); return }
         // A walk is already running: instead of dropping this request, ask the active walk to re-kick
         // when it finishes, so a start requested during a winding-down pass is never lost (which is
@@ -1390,7 +1427,8 @@ class FaceIndexingScheduler @Inject constructor(
      *  not while names wait to be reattached, short of their grace ([regroupAllowed]). Never a final run
      *  ([groupingRunEndsWalk]). */
     fun requestRecluster(userId: UserId?) {
-        scope.launch { runCatching { cluster(userId, RegroupTrigger.REQUEST, force = true) } }
+        queuedRegroups.incrementAndGet()
+        scope.launch { runCatching { cluster(userId, RegroupTrigger.REQUEST, force = true, queued = true) } }
     }
 
     /**
@@ -1399,8 +1437,10 @@ class FaceIndexingScheduler @Inject constructor(
      * Returns whether a regroup completed, so false while names wait to be reattached, short of their grace
      * ([regroupAllowed]).
      */
-    suspend fun regroupNow(userId: UserId?): Boolean =
-        cluster(userId, RegroupTrigger.REQUEST, force = true)
+    suspend fun regroupNow(userId: UserId?): Boolean {
+        queuedRegroups.incrementAndGet()
+        return cluster(userId, RegroupTrigger.REQUEST, force = true, queued = true)
+    }
 
     /**
      * Scan just the photo now on screen, so the viewer can offer a face to tag before the background
@@ -2959,19 +2999,33 @@ class FaceIndexingScheduler @Inject constructor(
      * Group every stored face into people while the walk is still permitted to run (a forced call runs
      * regardless), queued behind any grouping already running ([groupingLock]), and not while names wait
      * to be reattached, a forced call short of their grace ([regroupAllowed]); see [regroupLocked]. Whether it
-     * is a final run follows from [trigger] ([groupingRunEndsWalk]).
+     * is a final run follows from [trigger] ([groupingRunEndsWalk]). A [queued] call was counted in
+     * [queuedRegroups] by its requester and leaves that count once it holds the lock or gives up.
      */
     private suspend fun cluster(
         userId: UserId?,
         trigger: RegroupTrigger,
         force: Boolean = false,
+        queued: Boolean = false,
     ): Boolean {
-        if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) return false
-        return groupingLock.withLock {
-            // Checked again once the lock is held: the walk may have been paused, or names staged by an
-            // import or a rescan, while this waited.
-            if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) false
-            else regroupLocked(userId, trigger, groupingRunEndsWalk(trigger))
+        var waiting = queued
+        val stopWaiting = {
+            if (waiting) {
+                waiting = false
+                queuedRegroups.decrementAndGet()
+            }
+        }
+        try {
+            if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) return false
+            return groupingLock.withLock {
+                stopWaiting()
+                // Checked again once the lock is held: the walk may have been paused, or names staged by an
+                // import or a rescan, while this waited.
+                if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) false
+                else regroupLocked(userId, trigger, groupingRunEndsWalk(trigger))
+            }
+        } finally {
+            stopWaiting()
         }
     }
 
@@ -3080,8 +3134,15 @@ class FaceIndexingScheduler @Inject constructor(
                     false
                 }
                 // Turned away by the fence: an import or a sign-out replaced the faces it read, so it wrote
-                // nothing. Not a failure, so no backoff; whoever moved the fence groups afterwards.
-                !outcome.committed -> false
+                // nothing. Not a failure, so no backoff; whoever moved the fence groups afterwards. Turned
+                // away by a user edit made while it ran, it asks for one more regroup unless one is queued.
+                !outcome.committed -> {
+                    if (regroupAgainAfterEdit(outcome, queuedRegroups.get())) {
+                        Log.d(TAG, "regroup turned away by an edit, queued another")
+                        requestRecluster(userId)
+                    }
+                    false
+                }
                 else -> {
                     val endMs = SystemClock.elapsedRealtime()
                     lastRegroupDurationMs = endMs - startMs
@@ -3625,3 +3686,14 @@ internal suspend fun awaitMlGoAhead(
     }
     return live()
 }
+
+/**
+ * Device photo to its Drive key, from [account]'s sync state rows: every backed-up photo but a hidden one
+ * (the vault keeps its faces off People), and only where the Drive key differs.
+ */
+internal fun syncStateRekeyPairs(
+    account: String,
+    rows: List<eu.akoos.photos.data.db.entity.SyncStateEntity>,
+): List<Pair<String, String>> =
+    rows.filter { it.userId == account && it.status != eu.akoos.photos.domain.entity.SyncStatus.HIDDEN }
+        .mapNotNull { row -> row.cloudFileId?.takeIf { it.isNotBlank() && it != row.localUri }?.let { row.localUri to it } }

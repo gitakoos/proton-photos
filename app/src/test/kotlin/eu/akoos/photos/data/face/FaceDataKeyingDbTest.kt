@@ -81,6 +81,47 @@ class FaceDataKeyingDbTest {
     @After
     fun tearDown() = db.close()
 
+    @Test
+    fun `the device photos holding faces are listed for the backed-up re-key`() = runTest {
+        for (key in listOf("content://media/1", "content://media/2", "linkA")) {
+            db.faceDao().upsert(
+                FaceEntity(
+                    id = "$key#0", userId = "acct", photoKey = key,
+                    left = 0f, top = 0f, right = 1f, bottom = 1f, landmarks = "",
+                    embedding = ByteArray(0), personId = null, score = 0.9f,
+                ),
+            )
+        }
+        db.faceDao().upsert(
+            FaceEntity(
+                id = "content://media/9#0", userId = "other", photoKey = "content://media/9",
+                left = 0f, top = 0f, right = 1f, bottom = 1f, landmarks = "",
+                embedding = ByteArray(0), personId = null, score = 0.9f,
+            ),
+        )
+
+        assertEquals(setOf("content://media/1", "content://media/2"), db.faceDao().devicePhotoKeys("acct").toSet())
+    }
+
+    @Test
+    fun `a backed-up device photo pairs with its Drive key, a hidden or unsent one does not`() {
+        fun row(uri: String, user: String, cloud: String?, status: eu.akoos.photos.domain.entity.SyncStatus) =
+            eu.akoos.photos.data.db.entity.SyncStateEntity(
+                localUri = uri, userId = user, cloudFileId = cloud, localHash = "", cloudHash = null, status = status,
+                lastSyncAttemptMs = 0, lastSyncSuccessMs = null, backedUpAtMs = null, sizeBytes = 0,
+            )
+        val synced = eu.akoos.photos.domain.entity.SyncStatus.SYNCED
+        val rows = listOf(
+            row("content://media/1", "acct", "linkA", synced),
+            row("content://media/2", "acct", null, eu.akoos.photos.domain.entity.SyncStatus.LOCAL_ONLY),
+            row("content://media/3", "acct", "linkC", eu.akoos.photos.domain.entity.SyncStatus.HIDDEN),
+            row("content://media/4", "other", "linkD", synced),
+            row("content://media/5", "acct", "", synced),
+        )
+
+        assertEquals(listOf("content://media/1" to "linkA"), syncStateRekeyPairs("acct", rows))
+    }
+
     private suspend fun seedPerson(user: String, id: Long, name: String, photoKey: String) {
         db.personDao().upsert(PersonEntity(id = id, userId = user, displayName = name, faceCount = 1))
         db.faceDao().upsert(

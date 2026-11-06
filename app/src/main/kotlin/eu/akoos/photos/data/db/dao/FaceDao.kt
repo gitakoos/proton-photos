@@ -180,6 +180,10 @@ class RegroupFaceRow(
     val embedding: ByteArray,
 )
 
+/** One kept face reduced to what the look-alike sweep reads: its vector, the person it is grouped under and
+ *  the name confirmed for it. Not a data class: nothing compares these, and the blob has no content equality. */
+class SweepFace(val id: String, val embedding: ByteArray, val personId: Long?, val manualName: String?)
+
 /** One face's id and recognition vector, the read a single person's centroid is summed from. */
 class FaceVector(val id: String, val embedding: ByteArray)
 
@@ -328,6 +332,10 @@ interface FaceDao {
     /** Live count of a person's kept faces, so removing photos can refresh the cached person count. */
     @Query("SELECT COUNT(*) FROM face WHERE userId = :userId AND personId = :personId AND rejected = 0")
     suspend fun faceCountForPerson(userId: String, personId: Long): Int
+
+    /** The device photos (content uris) that hold faces, which move to their Drive key once backed up. */
+    @Query("SELECT DISTINCT photoKey FROM face WHERE userId = :userId AND photoKey LIKE 'content://%'")
+    suspend fun devicePhotoKeys(userId: String): List<String>
 
     /** The distinct photos a person's kept faces appear in, so the displayed count can union these with
      *  the manually attached photos rather than counting faces (a photo can hold several faces). */
@@ -538,11 +546,14 @@ interface FaceDao {
     )
     suspend fun topUnclusteredFace(userId: String): String?
 
-    /** For each grouped person, every confirmed name its kept faces carry and how many carry it: a small
-     *  result (one row per person and name), read without any vector. */
+    /** For each grouped person, every confirmed name its kept faces carry and how many carry it, leaving out
+     *  a face marked as not being that name: a small result (one row per person and name), read without any
+     *  vector. */
     @Query(
         "SELECT personId, manualName AS name, COUNT(*) AS faces FROM face WHERE userId = :userId " +
             "AND personId IS NOT NULL AND rejected = 0 AND manualName IS NOT NULL AND TRIM(manualName) != '' " +
+            "AND NOT EXISTS (SELECT 1 FROM not_person n WHERE n.userId = face.userId " +
+            "AND n.personName = face.manualName AND n.faceId = face.id) " +
             "GROUP BY personId, manualName",
     )
     suspend fun confirmedNamesByPerson(userId: String): List<PersonConfirmedName>
@@ -688,14 +699,15 @@ interface FaceDao {
     @Query("SELECT COUNT(*) FROM face WHERE +userId = :userId AND personId IS NULL AND rejected = 0 AND rowid > :minRow")
     suspend fun unclusteredCountSince(userId: String, minRow: Long): Int
 
-    /** One page of the account's KEPT faces (not removed), id + embedding, for the hide-similar sweep so
-     *  dismissing a junk cluster can also reject its look-alikes that landed in other clusters, without
-     *  loading every stored embedding at once. Ordered by id so paging stays stable. */
+    /** The account's next [limit] kept faces after [afterId] in id order, reduced to [SweepFace], the
+     *  look-alike sweep's paged read: a walk along the primary key like [facesAfter], so dismissing a junk
+     *  cluster can reject its look-alikes elsewhere without loading every stored embedding at once. Start
+     *  from an empty [afterId]. */
     @Query(
-        "SELECT id, embedding, score, blur, landmarks FROM face WHERE userId = :userId AND rejected = 0 " +
-            "ORDER BY id LIMIT :limit OFFSET :offset",
+        "SELECT id, embedding, personId, manualName FROM face WHERE +userId = :userId AND rejected = 0 " +
+            "AND id > :afterId ORDER BY id LIMIT :limit",
     )
-    suspend fun keptFacesPaged(userId: String, limit: Int, offset: Int): List<UnclusteredFace>
+    suspend fun sweepFacesAfter(userId: String, afterId: String, limit: Int): List<SweepFace>
 
     /**
      * Drops every face belonging to [photoKeys], the invalidation a removed or re-indexed photo
@@ -706,6 +718,19 @@ interface FaceDao {
 
     @Query("DELETE FROM face WHERE photoKey IN (:photoKeys) AND +userId = :userId")
     suspend fun deleteByPhotoKeysChunk(userId: String, photoKeys: List<String>)
+
+    /** The people the account's faces on [photoKeys] are grouped under, so the photos' faces can be dropped
+     *  and those people brought up to date. Chunked for the host-variable limit. */
+    suspend fun personIdsOnPhotos(userId: String, photoKeys: Collection<String>): Set<Long> =
+        photoKeys.toList().flatMapSqlChunks { personIdsOnPhotosChunk(userId, it) }.toSet()
+
+    @Query("SELECT DISTINCT personId FROM face WHERE photoKey IN (:photoKeys) AND +userId = :userId AND personId IS NOT NULL")
+    suspend fun personIdsOnPhotosChunk(userId: String, photoKeys: List<String>): List<Long>
+
+    /** Takes the confirmation [name] off every face of the account that carries it, wherever it is grouped,
+     *  so a name the user removed cannot pull faces back together on a rebuild. */
+    @Query("UPDATE face SET manualName = NULL WHERE userId = :userId AND manualName = :name")
+    suspend fun clearConfirmedName(userId: String, name: String)
 
     /** Removes every face for the account, for the sign-out wipe. */
     @Query("DELETE FROM face WHERE userId = :userId")

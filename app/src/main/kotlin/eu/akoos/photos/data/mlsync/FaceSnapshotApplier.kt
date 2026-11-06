@@ -524,6 +524,7 @@ internal class FaceSnapshotApplier(
             local = local.map { ReattachFace(it.id, it.photoKey, it.boxLeft, it.boxTop, it.boxRight, it.boxBottom) },
         )
         val confirm = HashMap<String, MutableList<String>>()
+        val group = HashMap<Long, MutableList<String>>()
         val remove = ArrayList<String>()
         for (face in held) {
             val localId = pairs[face.box.faceId] ?: continue
@@ -536,6 +537,7 @@ internal class FaceSnapshotApplier(
             val change = mergeFaceCuration(state, face.curation)
             when (change) {
                 is FaceMergeChange.Confirm -> confirm.getOrPut(change.name) { ArrayList() }.add(localId)
+                is FaceMergeChange.Group -> group.getOrPut(personIdFor(change.name)) { ArrayList() }.add(localId)
                 FaceMergeChange.Remove -> remove += localId
                 FaceMergeChange.Keep -> Unit
             }
@@ -545,8 +547,9 @@ internal class FaceSnapshotApplier(
             }
         }
         for ((name, ids) in confirm) faceDao.labelFacesByIds(ids, name)
+        for ((personId, ids) in group) faceDao.reassignFacesToPerson(ids, personId)
         if (remove.isNotEmpty()) faceDao.rejectByIds(remove)
-        facesUpdated += remove.size + confirm.values.sumOf { it.size }
+        facesUpdated += remove.size + confirm.values.sumOf { it.size } + group.values.sumOf { it.size }
     }
 
     private suspend fun onManualPhoto(record: MlSnapshotRecord.ManualPhoto) {

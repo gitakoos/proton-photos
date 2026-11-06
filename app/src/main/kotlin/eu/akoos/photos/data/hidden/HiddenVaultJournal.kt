@@ -35,6 +35,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FacePhotoRemoval
 import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -75,6 +77,7 @@ class HiddenVaultJournal @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
     private val accountManager: AccountManager,
     private val photoLabels: PhotoLabelRepository,
+    private val facePhotoRemoval: FacePhotoRemoval,
 ) {
 
     /**
@@ -265,17 +268,30 @@ class HiddenVaultJournal @Inject constructor(
     }
 
     /**
-     * Drops the labels of the photos just published as hidden, under both the device uri each was
-     * hidden from and the Drive linkId it was paired with, so nothing about a hidden photo stays
-     * searchable. A failure is logged and never fails the hide.
+     * Drops the labels and the faces of the photos just published as hidden, under both the device uri
+     * each was hidden from and the Drive linkId it was paired with, so nothing about a hidden photo stays
+     * searchable or counted under a person. A failure is logged and never fails the hide.
      */
     private suspend fun dropLabelsOf(vaultUris: Collection<String>, sourceByVaultUri: Map<String, String>) {
+        val entries = try {
+            context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.w(TAG, "reading the pairings of ${vaultUris.size} hidden photo(s) failed: ${e.message}")
+            return
+        }
         try {
-            val entries = context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
             photoLabels.deleteForPhotos(HiddenVaultDecisions.labelKeysOfHidden(vaultUris, sourceByVaultUri, entries))
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.w(TAG, "dropping labels of ${vaultUris.size} hidden photo(s) failed: ${e.message}")
+        }
+        try {
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+            facePhotoRemoval.dropPhotos(account, HiddenVaultDecisions.faceKeysOfHidden(vaultUris, sourceByVaultUri, entries))
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.w(TAG, "dropping faces of ${vaultUris.size} hidden photo(s) failed: ${e.message}")
         }
     }
 

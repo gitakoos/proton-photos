@@ -118,6 +118,19 @@ class FaceRekeyMergePlanTest {
     }
 
     @Test
+    fun `an automatic grouping on the device side groups the cloud face without confirming it`() {
+        val result = plan(
+            device = listOf(face(d(0), boxA2, personId = 2L)),
+            cloud = listOf(face(c(0), boxA)),
+            namedPeople = mapOf(2L to "Bea"),
+        )
+
+        assertEquals(emptyMap<String, List<String>>(), result.confirm)
+        assertEquals(mapOf(2L to listOf(c(0))), result.group)
+        assertTrue(2L in result.people)
+    }
+
+    @Test
     fun `the device side only fills the gaps`() {
         val named = mapOf(1L to "Ann", 2L to "Bea", 3L to "Cid")
         val result = plan(

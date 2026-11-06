@@ -128,6 +128,16 @@ interface PersonDao {
     @Query("SELECT * FROM person WHERE userId = :userId AND coverFaceId IN (:faceIds)")
     suspend fun peopleCoveredByChunk(userId: String, faceIds: List<String>): List<PersonEntity>
 
+    /** Follows each of the account's covers that is a face on [oldKey] (a face id is `photoKey#index`) to the
+     *  same face under [newKey], when a backup re-key moves the photo's faces. The substr prefix match avoids
+     *  LIKE wildcards a content uri could contain. */
+    @Query(
+        "UPDATE person SET coverFaceId = :newKey || substr(coverFaceId, length(:oldKey) + 1) " +
+            "WHERE userId = :userId AND substr(coverFaceId, 1, length(:oldKey)) = :oldKey " +
+            "AND substr(coverFaceId, length(:oldKey) + 1, 1) = '#'",
+    )
+    suspend fun rekeyCoverPhoto(userId: String, oldKey: String, newKey: String)
+
     /** Drops people that ended up with no faces, so an emptied cluster leaves no tile behind. */
     @Query("DELETE FROM person WHERE userId = :userId AND faceCount = 0")
     suspend fun deleteEmpty(userId: String)

@@ -32,6 +32,7 @@ import eu.akoos.photos.data.db.entity.PersonEntity
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -48,7 +49,9 @@ import kotlin.random.Random
  * vectors, "not this person" marks, the Unsorted bucket, a blank-named person, another account's rows),
  * the centroids match bit for bit and in the same map order, the rejected pairs match, the chosen folds
  * match, and a full pass leaves two identical databases identical. The reference below is the whole-table
- * pass as it ran before the sliced one, kept here verbatim.
+ * pass as it ran before the sliced one, with the fold rule the pass applies now (the join floor, folded faces
+ * left unconfirmed). A fold past the suggestion bar but short of the join floor is not made, and no fold
+ * confirms a face.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -243,10 +246,10 @@ class AutoMergePagedLoadDbTest {
         if (old.centroids.isEmpty() || named.isEmpty()) return 0
         val otherId = db.personDao().otherPersonId(acct) ?: -1L
         val pairs = pickAutoMergePairs(
-            old.centroids, named.mapTo(HashSet()) { it.id }, otherId, old.rejectedPairs, FACE_SUGGEST_THRESHOLD,
+            old.centroids, named.mapTo(HashSet()) { it.id }, otherId, old.rejectedPairs, AUTO_MERGE_THRESHOLD,
         )
         val assign = assignPersonName(db)
-        for (pair in pairs) assign(acct, pair.fromClusterId, nameById[pair.toPersonId] ?: continue)
+        for (pair in pairs) assign(acct, pair.fromClusterId, nameById[pair.toPersonId] ?: continue, confirm = false)
         return pairs.size
     }
 
@@ -322,6 +325,46 @@ class AutoMergePagedLoadDbTest {
             untouched.personDao().allForUser(acct).sortedBy { it.id },
             refused.personDao().allForUser(acct).sortedBy { it.id },
         )
+    }
+
+    /** A unit vector at cosine [similarity] to the first axis, leaning towards axis [towards]. */
+    private fun at(similarity: Float, towards: Int): ByteArray {
+        val v = FloatArray(FACE_EMBEDDING_DIM)
+        v[0] = similarity
+        v[towards] = sqrt(1f - similarity * similarity)
+        return pack(v)
+    }
+
+    @Test
+    fun `only a look-alike past the join floor folds, and its faces stay unconfirmed`() = runTest {
+        val db = newDb()
+        db.personDao().insert(PersonEntity(id = 1, userId = acct, displayName = "Anna"))
+        db.personDao().insert(PersonEntity(id = 10, userId = acct))
+        db.personDao().insert(PersonEntity(id = 11, userId = acct))
+        val rows = ArrayList<FaceEntity>()
+        fun add(personId: Long, embedding: ByteArray, photo: String, confirmed: String? = null) {
+            rows += FaceEntity(
+                id = "$photo#0", userId = acct, photoKey = photo, left = 0f, top = 0f, right = 1f, bottom = 1f,
+                landmarks = "", embedding = embedding, personId = personId, score = 0.9f, manualName = confirmed,
+            )
+        }
+        add(1L, at(1f, 1), "a1", confirmed = "Anna")
+        add(1L, at(1f, 1), "a2", confirmed = "Anna")
+        // Past the suggestion bar, short of the join floor: a card to confirm, never an automatic fold.
+        add(10L, at(0.5f, 2), "m1")
+        add(10L, at(0.5f, 2), "m2")
+        add(11L, at(0.9f, 3), "c1")
+        add(11L, at(0.9f, 3), "c2")
+        db.faceDao().upsert(rows)
+
+        assertEquals(1, useCase(db)(acct))
+
+        assertEquals(1L, db.faceDao().faceById("c1#0")!!.personId)
+        assertEquals(1L, db.faceDao().faceById("c2#0")!!.personId)
+        assertNull("a fold the app made confirms nothing", db.faceDao().faceById("c1#0")!!.manualName)
+        assertNull(db.faceDao().faceById("c2#0")!!.manualName)
+        assertEquals(10L, db.faceDao().faceById("m1#0")!!.personId)
+        assertEquals(4, db.personDao().personById(1L)!!.faceCount)
     }
 
     @Test

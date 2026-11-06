@@ -85,4 +85,22 @@ class FaceReaperTest {
     @Test fun `empty input reaps nothing`() {
         assertTrue(reap(emptyList()).isEmpty())
     }
+
+    @Test fun `a gone device photo with a Drive copy moves onto it instead of being dropped`() {
+        val plan = FaceReaper.planReap(setOf(deviceGone, cloudGone), mapOf(deviceGone to cloudLive)) { false }
+        assertEquals(mapOf(deviceGone to cloudLive), plan.moves)
+        assertEquals(setOf(cloudGone), plan.drops)
+    }
+
+    @Test fun `a device photo whose Drive copy is gone too is dropped`() {
+        val plan = FaceReaper.planReap(setOf(deviceGone), mapOf(deviceGone to cloudGone)) { it == cloudGone }
+        assertTrue(plan.moves.isEmpty())
+        assertEquals(setOf(deviceGone), plan.drops)
+    }
+
+    @Test fun `a device photo with no Drive copy is dropped`() {
+        val plan = FaceReaper.planReap(setOf(deviceGone), mapOf(deviceGone to "")) { false }
+        assertTrue(plan.moves.isEmpty())
+        assertEquals(setOf(deviceGone), plan.drops)
+    }
 }

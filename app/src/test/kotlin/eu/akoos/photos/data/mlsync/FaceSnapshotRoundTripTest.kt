@@ -32,6 +32,7 @@ import eu.akoos.photos.data.crypto.AddressSigningKey
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import eu.akoos.photos.data.crypto.VerifiedBytes
 import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.FaceScanEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
@@ -39,6 +40,7 @@ import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PersonNameStateEntity
+import eu.akoos.photos.data.db.entity.SyncStateEntity
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachData
 import eu.akoos.photos.data.face.FaceCurationLog
@@ -48,6 +50,7 @@ import eu.akoos.photos.data.face.ReattachBox
 import eu.akoos.photos.data.face.ReattachManual
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_INDEX_VERSION_V3
@@ -364,7 +367,10 @@ class FaceSnapshotRoundTripTest {
         // Only the photo this device had not scanned brought rows.
         assertEquals(setOf("linkA#0", "linkB#3", "linkC#1", "linkG#0"), merged.keys)
         assertEquals("Ally", merged.getValue("linkA#0").manualName)
-        assertEquals("Alice", merged.getValue("linkB#3").manualName)
+        // The source only grouped linkB#0 under Alice: the local twin joins Alice, unconfirmed, so a regroup can
+        // still correct an automatic grouping.
+        assertNull(merged.getValue("linkB#3").manualName)
+        assertEquals(namedPeople().getValue("Alice"), merged.getValue("linkB#3").personId)
         assertNull(merged.getValue("linkC#1").manualName)
         assertSameFace(faces(source).getValue("linkG#0"), merged.getValue("linkG#0"))
         val carol = target.personDao().allForUser(ACCOUNT).single { it.displayName == "Carol" }
@@ -753,6 +759,46 @@ class FaceSnapshotRoundTripTest {
         assertEquals(setOf("linkV#0", "$hiddenHere#0"), faces().keys)
         assertEquals("Mine", faces().getValue("$hiddenHere#0").manualName)
         assertEquals(setOf("linkV" to false, hiddenHere to false), markers())
+        assertTrue(manualPhotos().isEmpty())
+        assertTrue(notPersons().isEmpty())
+        assertTrue(covers().isEmpty())
+    }
+
+    @Test
+    fun `a cloud photo put away here never travels, however it was hidden`() = runTest {
+        source.faceDao().upsert(
+            listOf(
+                face("linkV#0", "linkV", 0.1f, 0.1f, 0.3f, 0.3f, seed = 1, manualName = "Vera"),
+                face("linkH#0", "linkH", 0.1f, 0.1f, 0.3f, 0.3f, seed = 2, manualName = "Vera"),
+                face("linkS#0", "linkS", 0.1f, 0.1f, 0.3f, 0.3f, seed = 3, manualName = "Vera"),
+                face("linkM#0", "linkM", 0.1f, 0.1f, 0.3f, 0.3f, seed = 4, manualName = "Vera"),
+                face("linkR#0", "linkR", 0.1f, 0.1f, 0.3f, 0.3f, seed = 5, manualName = "Vera"),
+            ),
+        )
+        source.faceScanDao().upsert(listOf("linkV", "linkH", "linkS", "linkM", "linkR").map { FaceScanEntity(ACCOUNT, it) })
+        source.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(ACCOUNT, "Vera", "linkH")))
+        source.notPersonDao().add(listOf(NotPersonEntity(ACCOUNT, "Bob", "linkS#0")))
+        source.personCoverDao().set(PersonCoverEntity(ACCOUNT, "Vera", "linkM"))
+        // Hidden one by one, a member of a hidden album, paired with a vaulted device photo, and the Drive
+        // copy on a vaulted photo's sync row.
+        context.settingsDataStore.edit {
+            it[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = setOf("linkH")
+            it[SettingsKeys.HIDDEN_ALBUM_IDS] = setOf("albumX")
+            it[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = setOf("file:///v/1|linkM")
+        }
+        source.albumPhotoMembershipDao().upsertAll(listOf(AlbumPhotoMembershipEntity("albumX", "linkS")))
+        source.syncStateDao().insertIgnore(
+            SyncStateEntity(
+                localUri = "file:///v/2", userId = ACCOUNT, cloudFileId = "linkR", localHash = "", cloudHash = null,
+                status = SyncStatus.HIDDEN, lastSyncAttemptMs = 0L, lastSyncSuccessMs = null, backedUpAtMs = null,
+                sizeBytes = 0L,
+            ),
+        )
+
+        import(export(), FaceSnapshotMode.Replace)
+
+        assertEquals(setOf("linkV#0"), faces().keys)
+        assertEquals(setOf("linkV" to false), markers())
         assertTrue(manualPhotos().isEmpty())
         assertTrue(notPersons().isEmpty())
         assertTrue(covers().isEmpty())
