@@ -176,8 +176,13 @@ internal class BucketAlbumMirror(
         val landed = runCatching { cloudRepo.addPhotosToAlbum(userId, albumLinkId, cloudIdsByUri.values.distinct()) }
             .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
             .getOrNull()?.succeededLinkIds.orEmpty().toSet()
+        // A photo the album already holds is refused as a duplicate: the upload pass that ran while the album was
+        // turned on mirrored it a moment ago. It counts as joined, or its pair would wait for the next pass.
+        val held = if (cloudIdsByUri.values.all { it in landed }) emptySet() else runCatching {
+            cloudRepo.loadAlbumChildren(userId, albumLinkId).mapTo(HashSet()) { it.linkId }
+        }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrDefault(emptySet())
         for ((uri, cloudId) in cloudIdsByUri) {
-            if (cloudId in landed) targets.deleteTarget(uri, albumLinkId)
+            if (cloudId in landed || cloudId in held) targets.deleteTarget(uri, albumLinkId)
         }
         return cloudIdsByUri.size
     }

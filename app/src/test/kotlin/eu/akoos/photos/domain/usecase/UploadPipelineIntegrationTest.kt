@@ -529,6 +529,26 @@ class UploadPipelineIntegrationTest {
     }
 
     @Test
+    fun `a folder album turned on while the folder backs up takes in the photos of that pass`() = runTest {
+        val uris = listOf("content://media/fa1", "content://media/fa2")
+        uris.forEach { local.add(localItem(it, bucket = "PfpTest")) }
+        forceUploadUseCase.forceUpload(userId, uris)
+        // The album is ticked once the pass is already uploading, while this photo's upload is in flight.
+        var inFlight: String? = null
+        cloud.onUploadStarted = { item ->
+            cloud.onUploadStarted = null
+            inFlight = item.displayName
+            context.settingsDataStore.edit { it[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = setOf("PfpTest") }
+        }
+
+        uploadUseCase(userId)
+
+        // A photo that finishes after the tick joins the folder's album, made for it on the spot.
+        val landedAfterTick = cloud.photos.value.single { it.displayName == inFlight }.linkId
+        assertTrue(cloud.callLog.toString(), landedAfterTick in cloud.albumMembers("album-PfpTest"))
+    }
+
+    @Test
     fun `an album-add for a photo another save is uploading never uploads it again and joins once it lands`() = runTest {
         val uri = "content://media/a6"
         val albumLinkId = "album-held-upload"

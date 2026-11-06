@@ -33,6 +33,7 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
+import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
 import javax.inject.Inject
 
@@ -59,12 +60,14 @@ class DeletePhotoUseCase internal constructor(
     private val syncStateRepo: SyncStateRepository,
     private val cloudRepo: DrivePhotoRepository,
     private val device: DeviceMediaDeletes,
+    private val localRepo: LocalMediaRepository? = null,
 ) {
     @Inject constructor(
         @ApplicationContext context: Context,
         syncStateRepo: SyncStateRepository,
         cloudRepo: DrivePhotoRepository,
-    ) : this(syncStateRepo, cloudRepo, MediaStoreDeletes(context))
+        localRepo: LocalMediaRepository,
+    ) : this(syncStateRepo, cloudRepo, MediaStoreDeletes(context), localRepo)
 
     sealed interface Result {
         /**
@@ -170,6 +173,7 @@ class DeletePhotoUseCase internal constructor(
         }
         val outcome = Result.Success(kept)
         val settled = outcome.landed(items)
+        localRepo?.forgetRemoved(gone)
         updateSyncStateAfterLocalDelete(settled, freeUpSpace, hide)
         val settledLinks =
             if (kept.isEmpty()) cloudLinkIds
@@ -189,6 +193,8 @@ class DeletePhotoUseCase internal constructor(
         freeUpSpace: Boolean,
         hide: Boolean = false,
     ): Result {
+        // The system dialog was confirmed, so the device files are gone whatever the Drive half does next.
+        localRepo?.forgetRemoved(computeDeleteTargets(items, freeUpSpace, deleteFromCloud = false).localUriStrings)
         if (cloudLinkIds.isNotEmpty() && !trashInCloud(userId, cloudLinkIds)) return Result.CloudDeleteFailed
         updateSyncStateAfterLocalDelete(items, freeUpSpace, hide)
         return Result.Success()

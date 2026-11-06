@@ -597,15 +597,17 @@ fun SettingsScreen(
                             ShimmerTextLine(widthFraction = 1f, height = 14.dp, modifier = Modifier.width(72.dp))
                         } else {
                             // Split photos vs videos so the user can spot at a glance that the
-                            // backed-up total isn't pure-photos. Reuses the same selection_* strings
-                            // as the gallery/album selection counter, already translated to 6 locales.
+                            // backed-up total isn't pure-photos, in the album header's plural counts.
+                            val photosLabel = pluralStringResource(
+                                R.plurals.count_photos_plural, state.syncedPhotoCount, state.syncedPhotoCount,
+                            )
+                            val videosLabel = pluralStringResource(
+                                R.plurals.count_videos_plural, state.syncedVideoCount, state.syncedVideoCount,
+                            )
                             val backedUpLabel = when {
-                                state.syncedPhotoCount > 0 && state.syncedVideoCount > 0 ->
-                                    stringResource(R.string.selection_mixed, state.syncedPhotoCount, state.syncedVideoCount)
-                                state.syncedVideoCount > 0 ->
-                                    stringResource(R.string.selection_videos_only, state.syncedVideoCount)
-                                state.syncedPhotoCount > 0 ->
-                                    stringResource(R.string.selection_photos_only, state.syncedPhotoCount)
+                                state.syncedPhotoCount > 0 && state.syncedVideoCount > 0 -> "$photosLabel, $videosLabel"
+                                state.syncedVideoCount > 0 -> videosLabel
+                                state.syncedPhotoCount > 0 -> photosLabel
                                 // A running sync with zero rows yet is the fresh-login first-sync
                                 // window: the DB-backed count is genuinely 0 because the listing is
                                 // still being page-fetched. Show progress copy instead of a bald

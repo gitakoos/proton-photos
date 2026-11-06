@@ -657,8 +657,13 @@ fun AlbumDetailScreen(
                         if (gridState.firstVisibleItemIndex == 0)
                             gridState.firstVisibleItemScrollOffset.toFloat() else 0f
                     },
-                    metaLeading = {
-                        // Sharer avatar (shared-with-me) or members + pending invitees (own album).
+                    // Sharer avatar (shared-with-me) or members + pending invitees (own album); none for an
+                    // own album nobody shares, so its count does not follow a lone separator.
+                    metaLeading = if (
+                        (state.isSharedWithMe && state.sharedByEmail != null) ||
+                        state.members.isNotEmpty() || state.invitations.isNotEmpty() || state.isLoadingInvitations
+                    ) {
+                        {
                         val sharerEmail = state.sharedByEmail
                         if (state.isSharedWithMe && sharerEmail != null) {
                             // Periwinkle is the dark-mode pick; light mode falls back to accent.
@@ -681,7 +686,8 @@ fun AlbumDetailScreen(
                                 }
                             }
                         }
-                    },
+                        }
+                    } else null,
                     titleActions = {
                         // One control at rest. Adding, sharing, downloading, renaming, the
                         // slideshow, the sort order and leaving all live in the drawer it opens, so

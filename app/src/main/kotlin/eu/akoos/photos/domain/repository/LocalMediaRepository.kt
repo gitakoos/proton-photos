@@ -131,4 +131,11 @@ interface LocalMediaRepository {
      * starts from a new query anyway.
      */
     fun notifyMediaChanged()
+
+    /**
+     * Drops [uris], device files the app just removed, from the shared [observeLocalMedia] list at once,
+     * ahead of the re-scan that would drop them anyway: on a big library that re-scan takes seconds, and
+     * until it lands a photo just removed from the phone still reads as on the phone.
+     */
+    fun forgetRemoved(uris: Collection<String>) {}
 }

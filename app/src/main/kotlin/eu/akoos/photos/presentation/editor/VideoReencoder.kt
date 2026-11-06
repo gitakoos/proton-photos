@@ -606,13 +606,16 @@ internal class VideoReencoder(private val context: Context) {
             muxer.start()
 
             // ── Stream-copy video samples in the trim window ──
+            // The copy starts at the keyframe at or before the in-point: starting later drops that keyframe,
+            // and the muxer then skips every frame up to the next one. The audio follows the same start.
             videoExtractor.seekTo(trimStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            val copyStartUs = keyframeStartUs(trimStartUs, videoExtractor.sampleTime)
             val maxBuf = if (videoFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE))
                 videoFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE).coerceAtLeast(1 shl 20)
             else 4 * 1024 * 1024
             val buf = ByteBuffer.allocate(maxBuf)
             val info = MediaCodec.BufferInfo()
-            val totalUs = (trimEndUs - trimStartUs).coerceAtLeast(1L)
+            val totalUs = (trimEndUs - copyStartUs).coerceAtLeast(1L)
             var lastReported = -1f
             while (true) {
                 if (!isActive()) throw CancellationException("Video stream-copy cancelled")
@@ -621,14 +624,14 @@ internal class VideoReencoder(private val context: Context) {
                 if (read < 0) break
                 val pts = videoExtractor.sampleTime
                 if (pts > trimEndUs) break
-                if (pts >= trimStartUs) {
+                if (pts >= copyStartUs) {
                     info.offset = 0
                     info.size = read
-                    info.presentationTimeUs = (pts - trimStartUs).coerceAtLeast(0L)
+                    info.presentationTimeUs = (pts - copyStartUs).coerceAtLeast(0L)
                     info.flags = extractorFlagsToBufferFlagsLocal(videoExtractor.sampleFlags)
                     muxer.writeSampleData(videoMuxerTrack, buf, info)
                     // Copy is fast but still report progress (capped every 2%) so the bar advances.
-                    val p = ((pts - trimStartUs).toFloat() / totalUs.toFloat()) * 0.6f
+                    val p = ((pts - copyStartUs).toFloat() / totalUs.toFloat()) * 0.6f
                     if (p - lastReported >= 0.02f) {
                         lastReported = p
                         onProgress(p.coerceIn(0f, 0.6f))
@@ -640,15 +643,15 @@ internal class VideoReencoder(private val context: Context) {
             // ── Audio (stream-copy or mix-encode) ──
             // A stream-copied music overlay is cut at the video window so a slice longer than the trim
             // cannot leave an audio-only tail past the last frame.
-            val overlayCopyEndUs = min(audioTrimEndUs, audioTrimStartUs + (trimEndUs - trimStartUs))
+            val overlayCopyEndUs = min(audioTrimEndUs, audioTrimStartUs + (trimEndUs - copyStartUs))
             if (audioMuxerTrack >= 0 && streamCopyAudioExtractor != null) {
                 copyAudioSamples(
                     extractor = streamCopyAudioExtractor,
                     muxer = muxer,
                     muxerTrackIdx = audioMuxerTrack,
-                    startUs = if (streamCopyOvl) audioTrimStartUs else trimStartUs,
+                    startUs = if (streamCopyOvl) audioTrimStartUs else copyStartUs,
                     endUs = if (streamCopyOvl) overlayCopyEndUs else trimEndUs,
-                    timeOriginUs = if (streamCopyOvl) audioTrimStartUs else trimStartUs,
+                    timeOriginUs = if (streamCopyOvl) audioTrimStartUs else copyStartUs,
                     isActive = isActive,
                 )
             } else if (audioMuxerTrack >= 0 && needsAudioEncode && mixTargetFormat != null) {
@@ -657,7 +660,7 @@ internal class VideoReencoder(private val context: Context) {
                     context = context,
                     sourceUri = sourceUri,
                     overlayUri = audioOverlayUri,
-                    sourceTrimStartUs = trimStartUs,
+                    sourceTrimStartUs = copyStartUs,
                     sourceTrimEndUs = trimEndUs,
                     overlayTrimStartUs = audioTrimStartUs,
                     overlayTrimEndUs = audioTrimEndUs,
@@ -818,3 +821,11 @@ internal fun audioNeedsReencode(
     (useOverlayAudio && !overlayIsAac) ||
     overlayHasGaps ||
     overlayDelayed
+
+/**
+ * Where a stream copy asked to start at [inPointUs] really begins: [keyframeUs], the sync sample a
+ * SEEK_TO_PREVIOUS_SYNC landed on, when it is a real sample at or before the in-point; the in-point itself
+ * when the seek found none (an extractor at the end reports -1) or one past it.
+ */
+internal fun keyframeStartUs(inPointUs: Long, keyframeUs: Long): Long =
+    if (keyframeUs in 0L..inPointUs) keyframeUs else inPointUs

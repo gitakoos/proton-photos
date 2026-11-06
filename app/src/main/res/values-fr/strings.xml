@@ -457,9 +457,6 @@
     <string name="cd_select_day">Sélectionner ce jour</string>
     <string name="cd_select_month">Sélectionner ce mois</string>
     <string name="cd_select_year">Sélectionner cette année</string>
-    <string name="selection_photos_only">%d photos</string>
-    <string name="selection_videos_only">%d vidéos</string>
-    <string name="selection_mixed">%1$d photos, %2$d vidéos</string>
     <string name="editor_error_load_local">Impossible de charger l\'image</string>
     <string name="editor_saved_as_copy">Une copie a été enregistrée dans Photos for Proton</string>
     <string name="editor_external_load_error">Impossible d\'ouvrir ce fichier</string>
@@ -925,6 +922,8 @@
     <string name="cd_motion_photo">Photo animée</string>
     <string name="cd_panorama">Panorama</string>
     <string name="cd_play_motion_photo">Lire la photo animée</string>
+    <string name="cd_video_play">Lire</string>
+    <string name="cd_video_pause">Pause</string>
     <string name="cd_stop_motion_photo">Arrêter la photo animée</string>
     <string name="cd_exit_panorama">Quitter le panorama</string>
     <string name="viewer_view_panorama">Voir le panorama</string>

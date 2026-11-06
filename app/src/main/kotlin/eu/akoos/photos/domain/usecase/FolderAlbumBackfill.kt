@@ -50,13 +50,16 @@ class FolderAlbumBackfill @Inject constructor(
         appScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             runCatching {
-                val items = localRepo.queryByBucket(bucketName)
-                val onDrive = drivePairs.pairs(
-                    userId,
-                    items.associate { it.uri to it.displayName },
-                    items.associate { it.uri to it.dateTaken },
-                )
-                upload.backfillFolderAlbum(userId, bucketName, onDrive)
+                // Read once the upload lock is held: mid-backup, the photos this pass is still uploading
+                // are not on Drive yet when the switch flips.
+                upload.backfillFolderAlbum(userId, bucketName) {
+                    val items = localRepo.queryByBucket(bucketName)
+                    drivePairs.pairs(
+                        userId,
+                        items.associate { it.uri to it.displayName },
+                        items.associate { it.uri to it.dateTaken },
+                    )
+                }
             }
                 .onSuccess { eu.akoos.photos.util.SyncDiagnostics.log("folder album backfill: $it photo(s) queued") }
                 .onFailure { e ->

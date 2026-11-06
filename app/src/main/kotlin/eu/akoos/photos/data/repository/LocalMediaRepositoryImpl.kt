@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -92,6 +93,9 @@ private const val RECENT_SCAN_MAX_AGE_MS = 90_000L
 
 /** Longest a steady stream of changes (an import landing file by file) holds the re-scan back. */
 private const val CHANGE_MAX_WAIT_MS = 2_000L
+
+/** How long a file the app removed stays out of the device list while scans still list it. */
+private const val REMOVED_HOLD_MS = 60_000L
 
 /** How long the shared list outlives its last collector, so moving between screens reuses it
  *  instead of re-scanning. After that it is dropped. The gallery feed keeps the same window. */
@@ -426,9 +430,27 @@ class LocalMediaRepositoryImpl @Inject constructor(
         deviceMedia.requestRefresh()
     }
 
-    // A re-scan that found the same files is not handed on again, whether or not it saw all of them.
+    /** Device files the app removed, by uri, with when, until a scan no longer lists them; see [forgetRemoved]. */
+    private val removedUris = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Long>>(emptyMap())
+
+    override fun forgetRemoved(uris: Collection<String>) {
+        if (uris.isEmpty()) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        removedUris.update { it + uris.associateWith { now } }
+    }
+
+    // A re-scan that found the same files is not handed on again, whether or not it saw all of them. A file the
+    // app just removed is left out until a scan stops listing it (a scan that began before the removal still
+    // does), or for [REMOVED_HOLD_MS] at most, so a file put back from the system's trash shows again.
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> =
-        deviceMedia.shared.map { it.items }.distinctUntilChanged()
+        kotlinx.coroutines.flow.combine(deviceMedia.shared, removedUris) { scan, removed ->
+            if (removed.isEmpty()) return@combine scan.items
+            val now = android.os.SystemClock.elapsedRealtime()
+            val listed = removed.keys.filterTo(HashSet()) { uri -> scan.items.any { it.uri == uri } }
+            val held = removed.filter { (uri, at) -> uri in listed && now - at < REMOVED_HOLD_MS }
+            if (held.size != removed.size) removedUris.update { current -> current.filterKeys { it in held } }
+            if (held.isEmpty()) scan.items else scan.items.filterNot { it.uri in held }
+        }.distinctUntilChanged()
 
     // A scan that saw the whole device, finished within [RECENT_SCAN_MAX_AGE_MS] with no change signalled since
     // it began, answers a one-shot reader as a new one would: every reconcile, backfill walk and upload pass

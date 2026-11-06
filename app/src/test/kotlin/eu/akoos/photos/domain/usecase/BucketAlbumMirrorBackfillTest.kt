@@ -140,6 +140,23 @@ class BucketAlbumMirrorBackfillTest {
     }
 
     @Test
+    fun `photos the album already holds count as joined, so their pairs do not wait for the next pass`() = runTest {
+        coEvery { cloud.loadAlbums(userId) } returns listOf(album("a1", "Trip"))
+        // The upload pass mirrored c1 and c2 a moment ago, so the server refuses them as duplicates.
+        coEvery { cloud.addPhotosToAlbum(userId, "a1", any()) } throws RuntimeException("already in album")
+        coEvery { cloud.loadAlbumChildren(userId, "a1") } returns listOf(
+            eu.akoos.photos.domain.entity.AlbumChild(linkId = "c1", captureTime = null, addedTime = null),
+            eu.akoos.photos.domain.entity.AlbumChild(linkId = "c2", captureTime = null, addedTime = null),
+        )
+
+        mirror.backfill(userId, "Trip", mapOf("u1" to "c1", "u2" to "c2", "u3" to "c3"), targets)
+
+        coVerify(exactly = 1) { targets.deleteTarget("u1", "a1") }
+        coVerify(exactly = 1) { targets.deleteTarget("u2", "a1") }
+        coVerify(exactly = 0) { targets.deleteTarget("u3", any()) }
+    }
+
+    @Test
     fun `an add that fails keeps every pair for the next upload pass`() = runTest {
         coEvery { cloud.loadAlbums(userId) } returns listOf(album("a1", "Trip"))
         coEvery { cloud.addPhotosToAlbum(userId, "a1", any()) } throws RuntimeException("503")

@@ -192,10 +192,16 @@ class UploadPendingUseCase @Inject constructor(
      * Joins the photos [bucketName] already backed up ([onDrive], device uri to Drive link, see
      * [DrivePairLookup]) to the folder's Drive album, for when its album mirror is turned on (see
      * [BucketAlbumMirror.backfill]). Runs under the batch lock, so this and an upload pass can never both
-     * create the folder's album. Returns how many photos were queued.
+     * create the folder's album, and [onDrive] is read only once the lock is held: an album turned on while
+     * the folder's first backup runs waits for that pass and then sees what it uploaded. Returns how many
+     * photos were queued.
      */
-    suspend fun backfillFolderAlbum(userId: UserId, bucketName: String, onDrive: Map<String, String>): Int = mutex.withLock {
-        val queued = bucketAlbumMirror.backfill(userId, bucketName, onDrive, uploadAlbumTargetDao)
+    suspend fun backfillFolderAlbum(
+        userId: UserId,
+        bucketName: String,
+        onDrive: suspend () -> Map<String, String>,
+    ): Int = mutex.withLock {
+        val queued = bucketAlbumMirror.backfill(userId, bucketName, onDrive(), uploadAlbumTargetDao)
         if (queued > 0) albumListEvents.notifyChanged()
         queued
     }
@@ -349,11 +355,6 @@ class UploadPendingUseCase @Inject constructor(
         // LOCAL_ONLY rows, or during an in-flight upload batch. Without the filter we'd
         // ship the excluded bucket's photos to Drive on the way out.
         val excludedFolders: Set<String> = prefs[SettingsKeys.EXCLUDED_FOLDER_NAMES] ?: emptySet()
-        // Per-folder cloud-album mirror opt-in. Photos always upload to the photostream
-        // regardless; this set decides whether the upload path also adds the photo to
-        // an auto-named album matching its source bucket (Camera, Screenshots, …).
-        val albumOptInFolders = prefs.albumMirrorFolders()
-
         val stripOnUpload = prefs[SettingsKeys.STRIP_ON_UPLOAD] ?: false
         // #108: the video path re-encodes at its own tier, seeded from the shared value on upgrade.
         val compression = CompressionPreferences.settings(prefs)
@@ -634,7 +635,6 @@ class UploadPendingUseCase @Inject constructor(
                     totalCount = totalCount,
                     manualRun = manualRun,
                     albumTargetUris = albumTargetUris,
-                    albumOptInFolders = albumOptInFolders,
                     stripOnUpload = stripOnUpload,
                     compression = compression,
                     mirrorStripToLocal = mirrorStripToLocal,
@@ -710,7 +710,6 @@ class UploadPendingUseCase @Inject constructor(
         /** This batch was asked for by the user, so the live auto-backup re-check does not apply. */
         manualRun: Boolean,
         albumTargetUris: Set<String>,
-        albumOptInFolders: eu.akoos.photos.data.preferences.AlbumMirrorFolders,
         stripOnUpload: Boolean,
         compression: CompressionSettings,
         mirrorStripToLocal: Boolean,
@@ -1134,6 +1133,9 @@ class UploadPendingUseCase @Inject constructor(
                 )
             )
 
+            // Per-folder album mirror opt-in, read per photo rather than once per pass, so an album ticked
+            // while the folder's backup runs takes in the photos that upload after the tick.
+            val albumOptInFolders = context.settingsDataStore.data.first().albumMirrorFolders()
             bucketAlbumMirror.mirror(userId, albumBatch, localItem.bucketName, albumOptInFolders, cloudId)
 
             // User-queued album-adds for this freshly-uploaded photo, read from the target table (the

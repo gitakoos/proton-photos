@@ -583,6 +583,11 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 // rather than of the whole vault.
                 Triple(ordered, vaultedUris, vaultedUris intersect vault.pairedUris)
             }.collect { (ordered, vaultedUris, pairedUris) ->
+                // Right after a rename the device list still files the moved photos under the old name for a
+                // few seconds; the photos already shown stay until the new folder lists them.
+                val renaming = android.os.SystemClock.elapsedRealtime() < renameHoldUntil
+                if (ordered.isEmpty() && renaming && _items.value.isNotEmpty()) return@collect
+                if (ordered.isNotEmpty()) renameHoldUntil = 0L
                 _vaultedUris.value = vaultedUris
                 _pairedVaultUris.value = pairedUris
                 _items.value = ordered
@@ -910,6 +915,9 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     fun clearPendingMove() = moveController.clearPending()
 
+    /** Until when (elapsed realtime) an empty listing right after a rename keeps the photos already shown. */
+    @Volatile private var renameHoldUntil = 0L
+
     /** One-shot confirmation for a completed folder rename, carrying the new name for the snackbar. */
     private val _folderRenameConfirmation = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val folderRenameConfirmation: SharedFlow<String> = _folderRenameConfirmation.asSharedFlow()
@@ -918,6 +926,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  keeps the screen on the same photos as they follow into the renamed folder, with no nav-pop. */
     fun renameFolder(newName: String) {
         moveController.rename(viewModelScope, bucketName.value, newName) { renamed ->
+            renameHoldUntil = android.os.SystemClock.elapsedRealtime() + RENAME_HOLD_MS
             bucketName.value = renamed
             _folderRenameConfirmation.tryEmit(renamed)
         }
@@ -1509,3 +1518,6 @@ internal class BackupTargetEnd(
         }
     }
 }
+
+/** How long the folder screen holds its photos after a rename while the device list catches up. */
+private const val RENAME_HOLD_MS = 10_000L

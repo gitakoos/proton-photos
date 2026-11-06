@@ -97,6 +97,7 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Contrast
+import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.ContentCut
@@ -1959,7 +1960,7 @@ private enum class VideoAdjustment(
     val set: (VideoEditorViewModel, Int) -> Unit,
 ) {
     Brightness(R.string.editor_adj_brightness, Icons.Default.BrightnessMedium, { it.adjBrightness }, { vm, v -> vm.setAdjBrightness(v) }),
-    Exposure(R.string.editor_adj_exposure, Icons.Default.AutoFixHigh, { it.adjExposure }, { vm, v -> vm.setAdjExposure(v) }),
+    Exposure(R.string.editor_adj_exposure, Icons.Default.Exposure, { it.adjExposure }, { vm, v -> vm.setAdjExposure(v) }),
     Contrast(R.string.editor_adj_contrast, Icons.Default.Contrast, { it.adjContrast }, { vm, v -> vm.setAdjContrast(v) }),
     Highlights(R.string.editor_adj_highlights, Icons.Default.Tune, { it.adjHighlights }, { vm, v -> vm.setAdjHighlights(v) }),
     Shadows(R.string.editor_adj_shadows, Icons.Default.Block, { it.adjShadows }, { vm, v -> vm.setAdjShadows(v) }),

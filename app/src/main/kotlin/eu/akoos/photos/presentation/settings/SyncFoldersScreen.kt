@@ -358,7 +358,8 @@ private fun FolderRow(
                 color      = FgPrimary,
                 fontSize   = 14.sp,
                 fontWeight = FontWeight.Medium,
-                maxLines = 2,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
             Text(
                 pluralStringResource(R.plurals.count_photos_plural, folder.itemCount, folder.itemCount),

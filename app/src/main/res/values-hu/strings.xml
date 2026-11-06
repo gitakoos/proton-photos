@@ -480,9 +480,6 @@
     <string name="cd_select_day">Nap kijelölése</string>
     <string name="cd_select_month">Hónap kijelölése</string>
     <string name="cd_select_year">Év kijelölése</string>
-    <string name="selection_photos_only">%d kép</string>
-    <string name="selection_videos_only">%d videó</string>
-    <string name="selection_mixed">%1$d kép, %2$d videó</string>
     <string name="editor_error_load_local">Nem sikerült betölteni a képet</string>
     <string name="editor_saved_as_copy">Egy másolat elmentve a Photos for Proton mappába</string>
     <string name="editor_external_load_error">A fájl megnyitása sikertelen</string>
@@ -947,6 +944,8 @@
     <string name="cd_motion_photo">Mozgó fénykép</string>
     <string name="cd_panorama">Panoráma</string>
     <string name="cd_play_motion_photo">Mozgó fénykép lejátszása</string>
+    <string name="cd_video_play">Lejátszás</string>
+    <string name="cd_video_pause">Szünet</string>
     <string name="cd_stop_motion_photo">Mozgó fénykép leállítása</string>
     <string name="cd_exit_panorama">Kilépés a panorámából</string>
     <string name="viewer_view_panorama">Panoráma megtekintése</string>

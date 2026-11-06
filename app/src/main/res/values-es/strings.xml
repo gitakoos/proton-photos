@@ -461,9 +461,6 @@
     <string name="cd_select_day">Seleccionar este día</string>
     <string name="cd_select_month">Seleccionar este mes</string>
     <string name="cd_select_year">Seleccionar este año</string>
-    <string name="selection_photos_only">%d fotos</string>
-    <string name="selection_videos_only">%d vídeos</string>
-    <string name="selection_mixed">%1$d fotos, %2$d vídeos</string>
     <string name="editor_error_load_local">No se pudo cargar la imagen</string>
     <string name="editor_saved_as_copy">Se guardó una copia en Photos for Proton</string>
     <string name="editor_external_load_error">No se pudo abrir ese archivo</string>
@@ -938,6 +935,8 @@
     <string name="cd_motion_photo">Foto en movimiento</string>
     <string name="cd_panorama">Panorámica</string>
     <string name="cd_play_motion_photo">Reproducir foto en movimiento</string>
+    <string name="cd_video_play">Reproducir</string>
+    <string name="cd_video_pause">Pausar</string>
     <string name="cd_stop_motion_photo">Detener foto en movimiento</string>
     <string name="cd_exit_panorama">Salir de la panorámica</string>
     <string name="viewer_view_panorama">Ver panorámica</string>

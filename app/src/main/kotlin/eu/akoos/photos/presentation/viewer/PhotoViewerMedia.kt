@@ -320,7 +320,8 @@ internal fun VideoControlPill(
             Icon(
                 if (videoStarted && isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 // FgPrimary (not white): the pill goes near-white in light mode.
-                null, tint = FgPrimary, modifier = Modifier.size(20.dp),
+                stringResource(if (videoStarted && isPlaying) R.string.cd_video_pause else R.string.cd_video_play),
+                tint = FgPrimary, modifier = Modifier.size(20.dp),
             )
         }
 
@@ -397,7 +398,8 @@ internal fun VideoControlPill(
         ) {
             Icon(
                 if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                null, tint = FgPrimary.copy(alpha = if (videoStarted) 1f else 0.4f),
+                stringResource(if (isMuted) R.string.video_editor_unmute else R.string.video_editor_mute),
+                tint = FgPrimary.copy(alpha = if (videoStarted) 1f else 0.4f),
                 modifier = Modifier.size(18.dp),
             )
         }

@@ -90,12 +90,6 @@
     <string name="gallery_tab_photos">Fotografije</string>
     <string name="gallery_tab_albums">Albumi</string>
     <string name="gallery_tab_shared">V skupni rabi</string>
-    <!-- Selection counter variants split by media type. The toolbar uses these instead of
-         gallery_selected_count when the selection contains a non-trivial mix, so the user
-         sees at a glance how many photos vs videos they're about to act on. -->
-    <string name="selection_photos_only">%d fotografij</string>
-    <string name="selection_videos_only">%d videoposnetkov</string>
-    <string name="selection_mixed">%1$d fotografij, %2$d videoposnetkov</string>
 
     <!-- Photo editor error strings, previously hardcoded Hungarian in PhotoEditorViewModel.
          Surfaced via state.errorMessage on the editor screen. -->
@@ -1183,6 +1177,8 @@
     <string name="cd_motion_photo">Gibljiva fotografija</string>
     <string name="cd_panorama">Panorama</string>
     <string name="cd_play_motion_photo">Predvajaj gibljivo fotografijo</string>
+    <string name="cd_video_play">Predvajaj</string>
+    <string name="cd_video_pause">Premor</string>
     <string name="cd_stop_motion_photo">Ustavi gibljivo fotografijo</string>
     <string name="cd_exit_panorama">Zapri panoramo</string>
     <string name="viewer_view_panorama">Oglej si panoramo</string>

@@ -130,6 +130,7 @@ import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material.icons.filled.Vignette
 import androidx.compose.material.icons.filled.Contrast
+import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Flip
@@ -735,10 +736,18 @@ fun PhotoEditorScreen(
                 .fillMaxWidth()
                 // Keep the system back / edge-swipe gesture out of the control area: dragging an adjustment
                 // slider or a crop handle that starts near the screen edge must not turn into a back nav.
-                // The Frame tool keeps only its tool row out (below): the system honours 200dp of these per
-                // screen edge, lowest first, and this whole area would leave none for a drag on the framed
-                // photo. Its own panel is chips and swatches, with no slider to guard.
-                .then(if (activeTool == Tool.Frame) Modifier else Modifier.systemGestureExclusion())
+                // The Frame and Crop tools keep only their tool row out (below): the system honours 200dp of
+                // these per screen edge, lowest first, and this whole area would leave none for a drag on the
+                // framed photo or for the crop handles at the screen's sides. Their own panels are chips and
+                // swatches, with no slider to guard; Straighten's ruler is one, and it shows no handles, so it
+                // keeps the exclusion.
+                .then(
+                    if (activeTool == Tool.Frame || (activeTool == Tool.Crop && toolOption != ToolOption.Straighten)) {
+                        Modifier
+                    } else {
+                        Modifier.systemGestureExclusion()
+                    },
+                )
                 .navigationBarsPadding()
                 .padding(bottom = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1940,7 +1949,7 @@ private fun AdjustPanel(
     // (adjustment, label, icon, current value); a non-zero value lights the round's "modified" dot.
     val chips = listOf(
         AdjChip(Adjustment.Brightness, R.string.editor_adj_brightness, Icons.Default.BrightnessMedium, adjustments.brightness),
-        AdjChip(Adjustment.Exposure, R.string.editor_adj_exposure, Icons.Default.AutoFixHigh, adjustments.exposure),
+        AdjChip(Adjustment.Exposure, R.string.editor_adj_exposure, Icons.Default.Exposure, adjustments.exposure),
         AdjChip(Adjustment.Contrast, R.string.editor_adj_contrast, Icons.Default.Contrast, adjustments.contrast),
         AdjChip(Adjustment.Highlights, R.string.editor_adj_highlights, Icons.Default.Tune, adjustments.highlights),
         AdjChip(Adjustment.Shadows, R.string.editor_adj_shadows, Icons.Default.Block, adjustments.shadows),

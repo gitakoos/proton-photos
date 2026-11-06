@@ -301,6 +301,17 @@ fun WhatsNewScreen(
                             // than the screen (a long card, or a large font scale) reads as scrollable
                             // instead of looking cut off. It disappears once the bottom is reached.
                             if (pageScroll.canScrollForward) {
+                                Box(
+                                    Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .background(
+                                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                                listOf(colors.pageBg.copy(alpha = 0f), colors.pageBg),
+                                            ),
+                                        ),
+                                )
                                 WhatsNewScrollHint(Modifier.align(Alignment.BottomCenter))
                             }
                         }

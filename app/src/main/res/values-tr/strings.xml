@@ -106,9 +106,6 @@
     <string name="gallery_tab_photos">Fotoğraflar</string>
     <string name="gallery_tab_albums">Albümler</string>
     <string name="gallery_tab_shared">Paylaşılanlar</string>
-    <string name="selection_photos_only">%d fotoğraf</string>
-    <string name="selection_videos_only">%d video</string>
-    <string name="selection_mixed">%1$d fotoğraf, %2$d video</string>
 
     <string name="metadata_editor_title">Meta verileri düzenle</string>
     <plurals name="metadata_editor_bulk_title">
@@ -1592,6 +1589,8 @@
     <string name="cd_motion_photo">Hareketli fotoğraf</string>
     <string name="cd_panorama">Panorama</string>
     <string name="cd_play_motion_photo">Hareketli fotoğrafı oynat</string>
+    <string name="cd_video_play">Oynat</string>
+    <string name="cd_video_pause">Duraklat</string>
     <string name="cd_stop_motion_photo">Hareketli fotoğrafı durdur</string>
     <string name="cd_exit_panorama">Panoramadan çık</string>
     <string name="viewer_view_panorama">Panoramayı görüntüle</string>
