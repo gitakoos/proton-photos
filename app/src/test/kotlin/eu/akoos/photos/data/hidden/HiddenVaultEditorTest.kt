@@ -60,7 +60,9 @@ import org.robolectric.annotation.Config
  * are the real ones, since what they hold afterwards is half of what is under test.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+// A plain Application: the app's own onCreate starts background work on the same settings store this
+// test seeds and reads (the shared backup's watch and round, the migrations), which raced the records.
+@Config(sdk = [34], application = android.app.Application::class)
 class HiddenVaultEditorTest {
 
     private lateinit var context: Context
