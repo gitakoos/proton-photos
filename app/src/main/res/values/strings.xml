@@ -1597,7 +1597,10 @@
     <string name="widget_mode_cloud">Cloud photos</string>
     <string name="widget_mode_cloud_desc">Show photos from your encrypted cloud cache without exposing them to other apps</string>
     <string name="widget_section_choose_cloud_photos">Choose cloud photos</string>
-    <string name="widget_cloud_photos_selected">%d cloud photos selected</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d cloud photo selected</item>
+        <item quantity="other">%d cloud photos selected</item>
+    </plurals>
     <string name="widget_no_cloud_photos">No cloud photos yet</string>
     <string name="widget_no_cloud_albums">No cloud albums yet. Open the app to sync your albums.</string>
     <string name="widget_interval_section">Change photo every</string>
@@ -1607,7 +1610,10 @@
     <string name="widget_interval_8hr">8 hours</string>
     <string name="widget_interval_1day">1 day</string>
     <string name="widget_add_button">Add Widget</string>
-    <string name="widget_photos_selected">%d photos selected</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d photo selected</item>
+        <item quantity="other">%d photos selected</item>
+    </plurals>
     <string name="widget_no_photos">No photos found</string>
 
     <plurals name="delete_title_plural">

@@ -736,8 +736,9 @@ fun GalleryScreen(
         val idx = state.items.indexOfFirst { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> item.local.uri == uri
-                is GalleryItem.Synced    -> item.local.uri == uri
-                is GalleryItem.CloudOnly -> false
+                // A cloud-photos widget hands the Drive link id: such a photo has no device uri.
+                is GalleryItem.Synced    -> item.local.uri == uri || item.cloud.linkId == uri
+                is GalleryItem.CloudOnly -> item.cloud.linkId == uri
             }
         }
         if (idx >= 0) {

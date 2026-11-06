@@ -895,7 +895,10 @@
     <string name="widget_mode_cloud">Cloudfoto\'s</string>
     <string name="widget_mode_cloud_desc">Toon foto\'s uit je versleutelde cloudcache zonder ze aan andere apps bloot te stellen</string>
     <string name="widget_section_choose_cloud_photos">Cloudfoto\'s kiezen</string>
-    <string name="widget_cloud_photos_selected">%d cloudfoto\'s geselecteerd</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d cloudfoto geselecteerd</item>
+        <item quantity="other">%d cloudfoto\'s geselecteerd</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Nog geen cloudfoto\'s</string>
     <string name="widget_no_cloud_albums">Nog geen cloudalbums. Open de app om je albums te synchroniseren.</string>
     <string name="widget_interval_section">Foto wisselen elke</string>
@@ -905,7 +908,10 @@
     <string name="widget_interval_8hr">8 uur</string>
     <string name="widget_interval_1day">1 dag</string>
     <string name="widget_add_button">Widget toevoegen</string>
-    <string name="widget_photos_selected">%d foto\'s geselecteerd</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d foto geselecteerd</item>
+        <item quantity="other">%d foto\'s geselecteerd</item>
+    </plurals>
     <string name="widget_no_photos">Geen foto\'s gevonden</string>
 
     <plurals name="delete_title_plural">

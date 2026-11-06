@@ -866,7 +866,10 @@
     <string name="widget_mode_cloud">Felhős fotók</string>
     <string name="widget_mode_cloud_desc">Fotók megjelenítése a titkosított felhő gyorsítótárból anélkül, hogy más alkalmazások hozzáférnének</string>
     <string name="widget_section_choose_cloud_photos">Felhős fotók kiválasztása</string>
-    <string name="widget_cloud_photos_selected">%d felhős fotó kiválasztva</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d felhős fotó kiválasztva</item>
+        <item quantity="other">%d felhős fotó kiválasztva</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Még nincs felhős fotó</string>
     <string name="widget_no_cloud_albums">Még nincs felhős album. Nyisd meg az alkalmazást az albumok szinkronizálásához.</string>
     <string name="widget_interval_section">Fotó cseréje</string>
@@ -876,7 +879,10 @@
     <string name="widget_interval_8hr">8 óra</string>
     <string name="widget_interval_1day">1 nap</string>
     <string name="widget_add_button">Widget hozzáadása</string>
-    <string name="widget_photos_selected">%d fotó kiválasztva</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d fotó kiválasztva</item>
+        <item quantity="other">%d fotó kiválasztva</item>
+    </plurals>
     <string name="widget_no_photos">Nincs fotó</string>
 
     <plurals name="delete_title_plural">

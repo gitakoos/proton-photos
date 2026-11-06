@@ -1078,7 +1078,12 @@
     <string name="widget_mode_cloud">Cloudové fotky</string>
     <string name="widget_mode_cloud_desc">Zobraziť fotky z vašej šifrovanej cloudovej vyrovnávacej pamäte bez ich sprístupnenia iným aplikáciám</string>
     <string name="widget_section_choose_cloud_photos">Vybrať cloudové fotky</string>
-    <string name="widget_cloud_photos_selected">Vybraných cloudových fotiek: %d</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">Vybraných cloudových fotiek: %d</item>
+        <item quantity="few">Vybraných cloudových fotiek: %d</item>
+        <item quantity="many">Vybraných cloudových fotiek: %d</item>
+        <item quantity="other">Vybraných cloudových fotiek: %d</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Zatiaľ žiadne cloudové fotky</string>
     <string name="widget_no_cloud_albums">Zatiaľ žiadne cloudové albumy. Otvorte aplikáciu na synchronizáciu albumov.</string>
     <string name="widget_interval_section">Meniť fotku každých</string>
@@ -1088,7 +1093,12 @@
     <string name="widget_interval_8hr">8 hodín</string>
     <string name="widget_interval_1day">1 deň</string>
     <string name="widget_add_button">Pridať widget</string>
-    <string name="widget_photos_selected">Vybraných fotiek: %d</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">Vybraných fotiek: %d</item>
+        <item quantity="few">Vybraných fotiek: %d</item>
+        <item quantity="many">Vybraných fotiek: %d</item>
+        <item quantity="other">Vybraných fotiek: %d</item>
+    </plurals>
     <string name="widget_no_photos">Nenašli sa žiadne fotky</string>
 
     <plurals name="delete_title_plural">

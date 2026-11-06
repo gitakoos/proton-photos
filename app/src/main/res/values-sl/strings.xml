@@ -1079,7 +1079,12 @@
     <string name="widget_mode_cloud">Fotografije iz oblaka</string>
     <string name="widget_mode_cloud_desc">Prikaži fotografije iz šifriranega predpomnilnika oblaka, ne da bi jih izpostavil drugim aplikacijam</string>
     <string name="widget_section_choose_cloud_photos">Izberi fotografije iz oblaka</string>
-    <string name="widget_cloud_photos_selected">%d izbranih fotografij iz oblaka</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d izbrana fotografija iz oblaka</item>
+        <item quantity="two">%d izbrani fotografiji iz oblaka</item>
+        <item quantity="few">%d izbrane fotografije iz oblaka</item>
+        <item quantity="other">%d izbranih fotografij iz oblaka</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Še ni fotografij iz oblaka</string>
     <string name="widget_no_cloud_albums">Še ni albumov iz oblaka. Odpri aplikacijo za sinhronizacijo albumov.</string>
     <string name="widget_interval_section">Zamenjaj fotografijo vsakih</string>
@@ -1089,7 +1094,12 @@
     <string name="widget_interval_8hr">8 ur</string>
     <string name="widget_interval_1day">1 dan</string>
     <string name="widget_add_button">Dodaj pripomoček</string>
-    <string name="widget_photos_selected">%d izbranih fotografij</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d izbrana fotografija</item>
+        <item quantity="two">%d izbrani fotografiji</item>
+        <item quantity="few">%d izbrane fotografije</item>
+        <item quantity="other">%d izbranih fotografij</item>
+    </plurals>
     <string name="widget_no_photos">Ni najdenih fotografij</string>
 
     <plurals name="delete_title_plural">

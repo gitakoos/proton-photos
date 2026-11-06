@@ -844,7 +844,10 @@
     <string name="widget_mode_cloud">Photos du cloud</string>
     <string name="widget_mode_cloud_desc">Afficher les photos de votre cache cloud chiffré sans les exposer à d\'autres applications</string>
     <string name="widget_section_choose_cloud_photos">Choisir des photos du cloud</string>
-    <string name="widget_cloud_photos_selected">%d photos du cloud sélectionnées</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d photo du cloud sélectionnée</item>
+        <item quantity="other">%d photos du cloud sélectionnées</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Pas encore de photos dans le cloud</string>
     <string name="widget_no_cloud_albums">Pas encore d\'albums dans le cloud. Ouvrez l\'application pour synchroniser vos albums.</string>
     <string name="widget_interval_section">Changer la photo toutes les</string>
@@ -854,7 +857,10 @@
     <string name="widget_interval_8hr">8 heures</string>
     <string name="widget_interval_1day">1 jour</string>
     <string name="widget_add_button">Ajouter le widget</string>
-    <string name="widget_photos_selected">%d photos sélectionnées</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d photo sélectionnée</item>
+        <item quantity="other">%d photos sélectionnées</item>
+    </plurals>
     <string name="widget_no_photos">Aucune photo trouvée</string>
 
     <plurals name="delete_title_plural">

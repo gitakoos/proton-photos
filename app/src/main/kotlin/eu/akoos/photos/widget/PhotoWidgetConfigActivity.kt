@@ -79,6 +79,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -362,12 +363,6 @@ private fun WidgetConfigScreen(
                         WidgetMode.CLOUD_SELECTED -> {
                             Spacer(Modifier.height(4.dp))
                             SectionLabel(stringResource(R.string.widget_section_choose_cloud_photos))
-                            if (state.selectedLinkIds.isNotEmpty()) {
-                                Text(
-                                    stringResource(R.string.widget_cloud_photos_selected, state.selectedLinkIds.size),
-                                    color = colors.fgDim, fontSize = 13.sp,
-                                )
-                            }
                         }
                         WidgetMode.ALBUM, WidgetMode.CLOUD_ALBUM -> {
                             Spacer(Modifier.height(4.dp))
@@ -376,12 +371,6 @@ private fun WidgetConfigScreen(
                         WidgetMode.SELECTED -> {
                             Spacer(Modifier.height(4.dp))
                             SectionLabel(stringResource(R.string.widget_mode_selected))
-                            if (state.selectedUris.isNotEmpty()) {
-                                Text(
-                                    stringResource(R.string.widget_photos_selected, state.selectedUris.size),
-                                    color = colors.fgDim, fontSize = 13.sp,
-                                )
-                            }
                         }
                         WidgetMode.ALL_PHOTOS -> {
                             Spacer(Modifier.height(4.dp))
@@ -479,7 +468,7 @@ private fun WidgetConfigScreen(
                                         }
                                     }
                                     SelectedTray(
-                                        headerText = stringResource(R.string.widget_cloud_photos_selected, state.selectedLinkIds.size),
+                                        headerText = pluralStringResource(R.plurals.widget_cloud_photos_selected, state.selectedLinkIds.size, state.selectedLinkIds.size),
                                         models = selectedModels,
                                         onRemove = { linkId -> onCloudSelection(state.selectedLinkIds - linkId) },
                                     )
@@ -564,7 +553,7 @@ private fun WidgetConfigScreen(
                                         state.selectedUris.map { uri -> uri to (Uri.parse(uri) as Any?) }
                                     }
                                     SelectedTray(
-                                        headerText = stringResource(R.string.widget_photos_selected, state.selectedUris.size),
+                                        headerText = pluralStringResource(R.plurals.widget_photos_selected, state.selectedUris.size, state.selectedUris.size),
                                         models = selectedModels,
                                         onRemove = { uri -> onUris(state.selectedUris - uri) },
                                     )
@@ -783,7 +772,7 @@ private fun SelectedTray(
     models: List<Pair<String, Any?>>,
     onRemove: (String) -> Unit,
 ) {
-    if (models.isEmpty()) return
+    // Shown empty too, so the grid below never jumps down when the first photo is picked.
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -791,7 +780,7 @@ private fun SelectedTray(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         SectionLabel(headerText)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(64.dp)) {
             items(models, key = { it.first }) { (id, model) ->
                 SelectedTrayThumb(model = model, onRemove = { onRemove(id) })
             }

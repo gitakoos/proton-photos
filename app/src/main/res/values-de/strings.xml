@@ -843,7 +843,10 @@
     <string name="widget_mode_cloud">Cloud-Fotos</string>
     <string name="widget_mode_cloud_desc">Fotos aus deinem verschlüsselten Cloud-Cache anzeigen, ohne sie anderen Apps zugänglich zu machen</string>
     <string name="widget_section_choose_cloud_photos">Cloud-Fotos auswählen</string>
-    <string name="widget_cloud_photos_selected">%d Cloud-Fotos ausgewählt</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d Cloud-Foto ausgewählt</item>
+        <item quantity="other">%d Cloud-Fotos ausgewählt</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Noch keine Cloud-Fotos</string>
     <string name="widget_no_cloud_albums">Noch keine Cloud-Alben. Öffne die App, um deine Alben zu synchronisieren.</string>
     <string name="widget_interval_section">Foto wechseln alle</string>
@@ -853,7 +856,10 @@
     <string name="widget_interval_8hr">8 Stunden</string>
     <string name="widget_interval_1day">1 Tag</string>
     <string name="widget_add_button">Widget hinzufügen</string>
-    <string name="widget_photos_selected">%d Fotos ausgewählt</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d Foto ausgewählt</item>
+        <item quantity="other">%d Fotos ausgewählt</item>
+    </plurals>
     <string name="widget_no_photos">Keine Fotos gefunden</string>
 
     <plurals name="delete_title_plural">

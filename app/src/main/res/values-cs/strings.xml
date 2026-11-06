@@ -1078,7 +1078,12 @@
     <string name="widget_mode_cloud">Cloudové fotky</string>
     <string name="widget_mode_cloud_desc">Zobrazit fotky ze šifrované cloudové mezipaměti bez jejich zpřístupnění jiným aplikacím</string>
     <string name="widget_section_choose_cloud_photos">Vybrat cloudové fotky</string>
-    <string name="widget_cloud_photos_selected">Vybráno %d cloudových fotek</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">Vybrána %d cloudová fotka</item>
+        <item quantity="few">Vybrány %d cloudové fotky</item>
+        <item quantity="many">Vybráno %d cloudové fotky</item>
+        <item quantity="other">Vybráno %d cloudových fotek</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Zatím žádné cloudové fotky</string>
     <string name="widget_no_cloud_albums">Zatím žádná cloudová alba. Otevřete aplikaci pro synchronizaci alb.</string>
     <string name="widget_interval_section">Měnit fotku každých</string>
@@ -1088,7 +1093,12 @@
     <string name="widget_interval_8hr">8 hodin</string>
     <string name="widget_interval_1day">1 den</string>
     <string name="widget_add_button">Přidat widget</string>
-    <string name="widget_photos_selected">Vybráno %d fotek</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">Vybrána %d fotka</item>
+        <item quantity="few">Vybrány %d fotky</item>
+        <item quantity="many">Vybráno %d fotky</item>
+        <item quantity="other">Vybráno %d fotek</item>
+    </plurals>
     <string name="widget_no_photos">Nebyly nalezeny žádné fotky</string>
 
     <plurals name="delete_title_plural">

@@ -1513,7 +1513,10 @@
     <string name="widget_mode_cloud">Bulut fotoğrafları</string>
     <string name="widget_mode_cloud_desc">Fotoğrafları diğer uygulamalara açmadan şifreli bulut önbelleğinden göster</string>
     <string name="widget_section_choose_cloud_photos">Bulut fotoğraflarını seç</string>
-    <string name="widget_cloud_photos_selected">%d bulut fotoğrafı seçildi</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d bulut fotoğrafı seçildi</item>
+        <item quantity="other">%d bulut fotoğrafı seçildi</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Henüz bulut fotoğrafı yok</string>
     <string name="widget_no_cloud_albums">Henüz bulut albümü yok. Albümlerini eşitlemek için uygulamayı aç.</string>
     <string name="widget_interval_section">Fotoğraf değiştirme sıklığı</string>
@@ -1523,7 +1526,10 @@
     <string name="widget_interval_8hr">8 saat</string>
     <string name="widget_interval_1day">1 gün</string>
     <string name="widget_add_button">Widget ekle</string>
-    <string name="widget_photos_selected">%d fotoğraf seçildi</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d fotoğraf seçildi</item>
+        <item quantity="other">%d fotoğraf seçildi</item>
+    </plurals>
     <string name="widget_no_photos">Fotoğraf bulunamadı</string>
 
     <plurals name="delete_title_plural">

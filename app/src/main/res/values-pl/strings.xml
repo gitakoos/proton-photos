@@ -1078,7 +1078,12 @@
     <string name="widget_mode_cloud">Zdjęcia z chmury</string>
     <string name="widget_mode_cloud_desc">Pokazuj zdjęcia z zaszyfrowanej pamięci podręcznej chmury, nie udostępniając ich innym aplikacjom</string>
     <string name="widget_section_choose_cloud_photos">Wybierz zdjęcia z chmury</string>
-    <string name="widget_cloud_photos_selected">Wybrano %d zdjęć z chmury</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">Wybrano %d zdjęcie z chmury</item>
+        <item quantity="few">Wybrano %d zdjęcia z chmury</item>
+        <item quantity="many">Wybrano %d zdjęć z chmury</item>
+        <item quantity="other">Wybrano %d zdjęcia z chmury</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Brak zdjęć z chmury</string>
     <string name="widget_no_cloud_albums">Brak albumów z chmury. Otwórz aplikację, aby zsynchronizować swoje albumy.</string>
     <string name="widget_interval_section">Zmieniaj zdjęcie co</string>
@@ -1088,7 +1093,12 @@
     <string name="widget_interval_8hr">8 godzin</string>
     <string name="widget_interval_1day">1 dzień</string>
     <string name="widget_add_button">Dodaj widżet</string>
-    <string name="widget_photos_selected">Wybrano %d zdjęć</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">Wybrano %d zdjęcie</item>
+        <item quantity="few">Wybrano %d zdjęcia</item>
+        <item quantity="many">Wybrano %d zdjęć</item>
+        <item quantity="other">Wybrano %d zdjęcia</item>
+    </plurals>
     <string name="widget_no_photos">Nie znaleziono zdjęć</string>
 
     <plurals name="delete_title_plural">
