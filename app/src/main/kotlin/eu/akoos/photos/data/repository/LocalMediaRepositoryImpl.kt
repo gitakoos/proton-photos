@@ -56,7 +56,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.entity.LocalTagEntity
@@ -93,6 +95,18 @@ private const val RECENT_SCAN_MAX_AGE_MS = 90_000L
 
 /** Longest a steady stream of changes (an import landing file by file) holds the re-scan back. */
 private const val CHANGE_MAX_WAIT_MS = 2_000L
+
+/** The file the last complete device scan is kept in for the next cold start, in the no-backup files dir. */
+private const val SNAPSHOT_FILE = "device_media_snapshot.bin"
+
+/** How long after a complete scan its snapshot is written, so a burst of re-scans writes once. */
+private const val SNAPSHOT_WRITE_DELAY_MS = 3_000L
+
+/** A heap at least this large shows a kept snapshot of any size at a cold start. */
+private const val SNAPSHOT_FULL_HEAP_BYTES = 400L * 1024 * 1024
+
+/** Below [SNAPSHOT_FULL_HEAP_BYTES], a snapshot of more items than this is not read (the newest photos are). */
+private const val SNAPSHOT_SMALL_HEAP_ITEMS = 40_000
 
 /** How long a file the app removed stays out of the device list while scans still list it. */
 private const val REMOVED_HOLD_MS = 60_000L
@@ -397,6 +411,75 @@ class LocalMediaRepositoryImpl @Inject constructor(
         }
     }
 
+    private val snapshotFile by lazy { java.io.File(context.noBackupFilesDir, SNAPSHOT_FILE) }
+
+    private val snapshotLock = kotlinx.coroutines.sync.Mutex()
+
+    /** What [snapshotFile] holds as written or read by this process (item count and list hash), so an unchanged
+     *  re-scan writes nothing; a fingerprint rather than the list, which would keep a whole library alive. */
+    @Volatile private var snapshotPrint: Pair<Int, Int>? = null
+
+    private val snapshotJobLock = Any()
+
+    private var snapshotJob: kotlinx.coroutines.Job? = null
+
+    private val snapshotScope = appScope
+
+    /** The environment a snapshot is kept under: the scan's grants and volumes, plus the build that wrote it. */
+    private fun snapshotEnvironment(environment: String) = environment + "|" + eu.akoos.photos.BuildConfig.VERSION_CODE
+
+    /**
+     * Keeps a complete scan for the next cold start ([lastKnownMedia]). Written a moment after the scan, so a
+     * burst of changes writes once, and only when the list differs from what the file already holds.
+     */
+    private fun keepSnapshot(environment: String, items: List<LocalMediaItem>) {
+        synchronized(snapshotJobLock) {
+            snapshotJob?.cancel()
+            snapshotJob = snapshotScope.launch(Dispatchers.IO) {
+                delay(SNAPSHOT_WRITE_DELAY_MS)
+                val print = items.size to items.hashCode()
+                snapshotLock.withLock {
+                    if (snapshotPrint == print) return@withLock
+                    runCatching { DeviceMediaSnapshot.writeFile(snapshotFile, snapshotEnvironment(environment), items) }
+                        .onSuccess { snapshotPrint = print }
+                        .onFailure { Log.w(TAG, "device list snapshot not written: ${it.message}") }
+                }
+            }
+        }
+    }
+
+    /** Drops the kept snapshot: files the app just removed (a delete, a hide into the vault) must not come back
+     *  in a first picture, not even for another account whose hidden list does not name them. */
+    private fun dropSnapshot() {
+        synchronized(snapshotJobLock) {
+            snapshotJob?.cancel()
+            snapshotJob = snapshotScope.launch(Dispatchers.IO) {
+                snapshotLock.withLock {
+                    snapshotPrint = null
+                    snapshotFile.delete()
+                }
+            }
+        }
+    }
+
+    override suspend fun lastKnownMedia(): List<LocalMediaItem>? = withContext(Dispatchers.IO) {
+        if (!checkMediaPermission()) return@withContext null
+        // A library this large needs a heap that can hold a second copy of it while the scan runs.
+        val maxItems = if (Runtime.getRuntime().maxMemory() >= SNAPSHOT_FULL_HEAP_BYTES) Int.MAX_VALUE else SNAPSHOT_SMALL_HEAP_ITEMS
+        val job = coroutineContext[kotlinx.coroutines.Job]
+        snapshotLock.withLock {
+            DeviceMediaSnapshot.readFile(snapshotFile, snapshotEnvironment(mediaEnvironment()), maxItems) {
+                job?.isActive != false
+            }
+        }
+    }
+
+    /** Asks for a new scan when the access or volumes the last one ran under have changed since. */
+    override fun refreshIfAccessChanged() {
+        val last = lastScanEnvironment
+        if (last != null && last != mediaEnvironment()) deviceMedia.requestRefresh()
+    }
+
     /** The grants and mounted volumes the latest device scan ran under; see [mediaEnvironment]. */
     @Volatile private var lastScanEnvironment: String? = null
 
@@ -419,9 +502,11 @@ class LocalMediaRepositoryImpl @Inject constructor(
         onReadFailure = { Log.w(TAG, "device media scan failed: ${it.message}") },
         onEvent = { eu.akoos.photos.util.PerfDiagnostics.count("devicescan-$it") },
     ) {
-        lastScanEnvironment = mediaEnvironment()
-        queryAllMedia()
+        val environment = mediaEnvironment()
+        lastScanEnvironment = environment
+        queryAllMedia().also { if (it.complete) keepSnapshot(environment, it.items) }
     }
+
 
     // A permission grant fires no MediaStore notification, so without this the gallery would stay
     // empty after the first grant until the app restarts. A change to a side store the scan reads
@@ -437,6 +522,7 @@ class LocalMediaRepositoryImpl @Inject constructor(
         if (uris.isEmpty()) return
         val now = android.os.SystemClock.elapsedRealtime()
         removedUris.update { it + uris.associateWith { now } }
+        dropSnapshot()
     }
 
     // A re-scan that found the same files is not handed on again, whether or not it saw all of them. A file the

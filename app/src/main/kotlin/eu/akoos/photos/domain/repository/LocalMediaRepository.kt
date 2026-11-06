@@ -138,4 +138,15 @@ interface LocalMediaRepository {
      * until it lands a photo just removed from the phone still reads as on the phone.
      */
     fun forgetRemoved(uris: Collection<String>) {}
+
+    /**
+     * The device list as the last complete scan of an earlier run found it, or null when there is none for
+     * the access the app has now. For a first picture of the library while the scan runs, never for acting on
+     * what is or is not on the device: a file removed while the app was closed is still in it.
+     */
+    suspend fun lastKnownMedia(): List<LocalMediaItem>? = null
+
+    /** Asks for a new scan only when the media access or the mounted volumes changed since the last one, as
+     *  after a grant given in the system settings while the app kept running. */
+    fun refreshIfAccessChanged() {}
 }

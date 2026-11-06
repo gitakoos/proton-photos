@@ -65,6 +65,9 @@ private const val RECOMPUTE_THROTTLE_MS = 280L
 /** How many of the newest device photos the timeline's first list is built from; see [GetGalleryItemsUseCase.withQuickStart]. */
 private const val QUICK_START_COUNT = 2_000
 
+/** How many of the newest device photos are read live on top of a kept snapshot at a cold start. */
+private const val QUICK_START_LIVE_COUNT = 200
+
 @Singleton
 class GetGalleryItemsUseCase @Inject constructor(
     private val localRepo: LocalMediaRepository,
@@ -148,13 +151,18 @@ class GetGalleryItemsUseCase @Inject constructor(
         val order = Mutex()
         var fullSeen = false
         val quick = launch {
-            val newest = localRepo.newestMedia(QUICK_START_COUNT)
+            // The whole list the last complete scan of an earlier run found, with the newest photos read live on
+            // top (what was shot while the app was closed), else the newest photos alone.
+            val kept = localRepo.lastKnownMedia()?.takeIf { it.isNotEmpty() }
+            val newest = if (kept != null) withLiveNewest(kept, localRepo.newestMedia(QUICK_START_LIVE_COUNT)) else localRepo.newestMedia(QUICK_START_COUNT)
             if (newest.isEmpty()) return@launch
             val items = if (userId != null) {
                 val cloud = cloudRepo.observeCloudPhotos(userId).first()
                 val sync = syncStateSnapshot.observe(userId).first()
                 val hidden = cloudRepo.observeHiddenAlbumMemberLinkIds().first()
-                withContext(Dispatchers.Default) { merge(newest, cloudForQuickStart(cloud, newest, sync), sync, hidden) }
+                // A whole kept list holds every device file a cloud photo can pair with, so none is held back.
+                val shownCloud = if (kept != null) cloud else cloudForQuickStart(cloud, newest, sync)
+                withContext(Dispatchers.Default) { merge(newest, shownCloud, sync, hidden) }
             } else {
                 withContext(Dispatchers.Default) { merge(newest, emptyList(), emptyList()) }
             }
@@ -446,6 +454,13 @@ class GetGalleryItemsUseCase @Inject constructor(
  * (an older photo, outside the newest few thousand) is left out until the whole scan arrives: shown before then it
  * would read as on Drive only, and an action picked on it would act on the Drive copy alone. Pure.
  */
+/** [kept] with [live] laid over it: a uri in both is taken from [live], which is read now. */
+internal fun withLiveNewest(kept: List<LocalMediaItem>, live: List<LocalMediaItem>): List<LocalMediaItem> {
+    if (live.isEmpty()) return kept
+    val liveUris = live.mapTo(HashSet(live.size * 2)) { it.uri }
+    return live + kept.filter { it.uri !in liveUris }
+}
+
 internal fun cloudForQuickStart(
     cloud: List<CloudPhoto>,
     newest: List<LocalMediaItem>,

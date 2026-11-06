@@ -632,6 +632,9 @@ fun GalleryScreen(
     }
 
     val mediaPermissions = MediaPermissions.requestSet(Build.VERSION.SDK_INT)
+    // Whether the request going out now asks for access the app already held: its instant answer then
+    // changes nothing the device list was read under, so it must not start another whole-library scan.
+    val askedWhileGranted = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -640,7 +643,7 @@ fun GalleryScreen(
         val granted = readResults.values.any { it }
         val permanentlyDenied = !granted && context is android.app.Activity &&
             readResults.keys.none { ActivityCompat.shouldShowRequestPermissionRationale(context, it) }
-        viewModel.onPermissionResult(granted, permanentlyDenied)
+        viewModel.onPermissionResult(granted, permanentlyDenied, alreadyHeld = askedWhileGranted.getAndSet(false) && granted)
     }
 
     // Separate launcher from media so a notification denial doesn't taint the media verdict.
@@ -706,6 +709,7 @@ fun GalleryScreen(
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         }
         if (mediaGranted) {
+            askedWhileGranted.set(true)
             permissionLauncher.launch(mediaPermissions)
         } else {
             appLock.runWhenOpen { permissionLauncher.launch(mediaPermissions) }

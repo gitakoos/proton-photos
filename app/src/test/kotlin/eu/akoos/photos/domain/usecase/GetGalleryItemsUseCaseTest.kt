@@ -450,9 +450,13 @@ class GetGalleryItemsUseCaseTest {
 
     // ─── quick start ──────────────────────────────────────────────────────────
 
-    private fun quickStartUseCase(newest: suspend () -> List<LocalMediaItem>): GetGalleryItemsUseCase {
+    private fun quickStartUseCase(
+        lastKnown: List<LocalMediaItem>? = null,
+        newest: suspend () -> List<LocalMediaItem>,
+    ): GetGalleryItemsUseCase {
         val localRepo = mockk<LocalMediaRepository>()
         coEvery { localRepo.newestMedia(any()) } coAnswers { newest() }
+        coEvery { localRepo.lastKnownMedia() } returns lastKnown
         return GetGalleryItemsUseCase(
             localRepo,
             mockk<DrivePhotoRepository>(),
@@ -478,6 +482,47 @@ class GetGalleryItemsUseCaseTest {
         assertEquals(2, emitted.size)
         assertEquals(listOf("uri://new"), emitted[0].filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri })
         assertEquals(fullList, emitted[1])
+    }
+
+    @Test
+    fun `quick start shows the whole list the last scan kept, not just the newest photos`() = runBlocking {
+        val kept = listOf(localItem("uri://new", dateTaken = 9_000L), localItem("uri://old", dateTaken = 1_000L))
+        val fullList = kept.map { GalleryItem.LocalOnly(it) }
+        val full = flow {
+            delay(300)
+            emit(fullList)
+        }
+
+        // A photo shot while the app was closed is read live and joins the kept list.
+        val emitted = quickStartUseCase(lastKnown = kept) {
+            listOf(localItem("uri://fresh", dateTaken = 10_000L), localItem("uri://new", dateTaken = 9_000L))
+        }.withQuickStart(null, full).toList()
+
+        assertEquals(2, emitted.size)
+        assertEquals(
+            listOf("uri://fresh", "uri://new", "uri://old"),
+            emitted[0].filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri },
+        )
+    }
+
+    @Test
+    fun `live newest photos replace their kept copies`() {
+        val kept = listOf(localItem("uri://a", dateTaken = 1L), localItem("uri://b", dateTaken = 2L))
+        val live = listOf(localItem("uri://b", dateTaken = 5L))
+        assertEquals(listOf(live[0], kept[0]), withLiveNewest(kept, live))
+        assertEquals(kept, withLiveNewest(kept, emptyList()))
+    }
+
+    @Test
+    fun `an empty snapshot falls back to the newest photos`() = runBlocking {
+        val full = flow {
+            delay(300)
+            emit(emptyList<GalleryItem>())
+        }
+        val emitted = quickStartUseCase(lastKnown = emptyList()) { listOf(localItem("uri://new", dateTaken = 9_000L)) }
+            .withQuickStart(null, full).toList()
+
+        assertEquals(listOf("uri://new"), emitted[0].filterIsInstance<GalleryItem.LocalOnly>().map { it.local.uri })
     }
 
     @Test

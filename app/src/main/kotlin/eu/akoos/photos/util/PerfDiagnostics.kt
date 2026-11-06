@@ -222,6 +222,7 @@ object PerfDiagnostics {
         val label = phaseLabel(event)
         if (label !in counters && counters.size >= MAX_PHASES * 2) return
         counters[label] = (counters[label] ?: 0) + 1
+        tee("count $label")
     }
 
     /** The newest [max] phase lines, oldest first. The buffer dies with the process, so an OOM crash

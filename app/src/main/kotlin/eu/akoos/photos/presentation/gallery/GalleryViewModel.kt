@@ -1279,7 +1279,9 @@ class GalleryViewModel @Inject constructor(
         recomputeMonthGroups(filtered)
     }
 
-    fun onPermissionResult(granted: Boolean, permanentlyDenied: Boolean) {
+    /** [alreadyHeld]: the access was granted before this request went out, so the device list was already
+     *  read with it and needs no new scan. */
+    fun onPermissionResult(granted: Boolean, permanentlyDenied: Boolean, alreadyHeld: Boolean = false) {
         _uiState.update {
             it.copy(
                 permissionState = when {
@@ -1292,7 +1294,7 @@ class GalleryViewModel @Inject constructor(
         // MediaStore ContentObserver does NOT fire on a permission grant; explicitly trigger a
         // re-query so the gallery populates immediately without requiring an app restart.
         if (granted) {
-            localRepo.notifyMediaChanged()
+            if (alreadyHeld) localRepo.refreshIfAccessChanged() else localRepo.notifyMediaChanged()
             // Also kick off the first sync, which couldn't read local media before the grant.
             viewModelScope.launch {
                 val userId = accountManager.getPrimaryUserId().first() ?: return@launch
