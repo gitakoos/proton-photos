@@ -1362,6 +1362,10 @@ class GalleryViewModel @Inject constructor(
             // to observeBackgroundUploadProgress so it only spins during real uploads, not the
             // long full cloud listing this refresh kicks off.
             _uiState.update { it.copy(isRefreshing = true) }
+            // The change feed first: it lands what changed elsewhere (a new photo, a favourite) in seconds,
+            // where the whole listing below takes minutes on a big library.
+            runCatching { cloudRepo.refreshCloudPhotosIncremental(userId) }
+                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
             runCatching {
                 cloudRepo.refreshCloudPhotos(userId, force = force)
                 // Battery gate covers ONLY the whole-library walks below: they run on

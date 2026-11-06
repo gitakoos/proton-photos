@@ -1648,6 +1648,50 @@ class PhotoStreamService @Inject constructor(
         }
     }
 
+    /** When the favourites last matched the volume's favourite listing; see [syncFavoriteTags]. */
+    private val lastFavoriteSyncMs = java.util.concurrent.atomic.AtomicLong(0L)
+
+    /**
+     * Brings the stored favourites in step with the volume's favourite-filtered listing ([favoriteTagWrites]):
+     * Drive's change feed sends nothing when another device (un)favourites an existing photo. One small paged
+     * request, at most once a minute; a failure only waits for the next pass.
+     */
+    private suspend fun syncFavoriteTags(userId: UserId, volumeId: String) {
+        val now = System.currentTimeMillis()
+        val prev = lastFavoriteSyncMs.get()
+        if (prev > 0L && now - prev < FAVORITE_SYNC_MIN_GAP_MS) return
+        if (!lastFavoriteSyncMs.compareAndSet(prev, now)) return
+        try {
+            val manager = apiProvider.get<DriveApiService>(userId)
+            val favorites = LinkedHashSet<String>()
+            var anchor: String? = null
+            for (page in 0 until FAVORITE_SYNC_MAX_PAGES) {
+                val links = semaphore.withPermit {
+                    manager.invoke { getPhotoLinks(volumeId, anchor, tag = FAVORITE_TAG) }.valueOrThrow
+                }.links
+                if (links.isEmpty()) break
+                val before = favorites.size
+                links.forEach { favorites += it.linkId }
+                // A page that adds nothing new would only repeat: stop rather than loop.
+                if (favorites.size == before) break
+                anchor = links.last().linkId
+                if (page == FAVORITE_SYNC_MAX_PAGES - 1) return
+            }
+            val listedRows = favorites.toList().flatMapSqlChunks { photoListingDao.getTags(it) }
+            val rowsWithTag = photoListingDao.getListedRowsWithTag(userId.id, volumeId, FAVORITE_TAG)
+            val writes = favoriteTagWrites(favorites, listedRows, rowsWithTag)
+            for ((linkId, csv) in writes) photoListingDao.setTagsCsv(linkId, csv)
+            Log.d(TAG, "incremental: favourite sync, ${favorites.size} listed, ${writes.size} changed")
+            if (writes.isNotEmpty()) {
+                eu.akoos.photos.util.SyncDiagnostics.log("incremental: ${writes.size} favourite(s) changed elsewhere")
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            lastFavoriteSyncMs.set(0L)
+            Log.w(TAG, "incremental: favourite sync failed: ${e.message}")
+        }
+    }
+
     suspend fun refreshCloudPhotosIncremental(userId: UserId): Unit = withContext(Dispatchers.IO) {
         refreshIncrementalMutex.withLock { doRefreshCloudPhotosIncremental(userId) }
     }
@@ -1924,11 +1968,17 @@ class PhotoStreamService @Inject constructor(
                     .associateBy { it.linkId }
                 val entitiesToSave = entities.map { entity ->
                     val existing = existingByLinkId[entity.linkId]
-                    val carried = if (entity.thumbnailUrl == null) {
+                    val withThumb = if (entity.thumbnailUrl == null) {
                         val carry = existing?.thumbnailUrl
                             ?.takeIf { thumbnailHelpers.isCachedValid(it) }
                         entity.copy(thumbnailUrl = carry)
                     } else entity
+                    // The link details an event is rebuilt from mostly carry no tags, so an event (a favourite
+                    // given elsewhere, a rename) would wipe the stored ones; they stay, and the favourite
+                    // listing below settles the favourite itself.
+                    val carried = if (withThumb.tagsCsv.isEmpty() && !existing?.tagsCsv.isNullOrEmpty()) {
+                        withThumb.copy(tagsCsv = existing!!.tagsCsv)
+                    } else withThumb
                     // A guard against an unproven path, not a fix for anything observed. A photo
                     // inside an album another user shared has its parent and album flag pinned when
                     // the album loads, because the server reports no parent for such a row and the
@@ -1970,6 +2020,7 @@ class PhotoStreamService @Inject constructor(
 
             context.settingsDataStore.edit { it[anchorKey] = currentAnchor }
             Log.d(TAG, "incremental: anchor updated to $currentAnchor")
+            syncFavoriteTags(userId, volumeId)
         } catch (e: DriveNotFoundException) {
             Log.w(TAG, "refreshCloudPhotosIncremental: DriveNotFoundException: ${e.message}")
         } catch (e: Exception) {
@@ -1996,3 +2047,9 @@ class PhotoStreamService @Inject constructor(
         }
     }
 }
+
+/** The least time between two favourite syncs in [PhotoStreamService.syncFavoriteTags]. */
+private const val FAVORITE_SYNC_MIN_GAP_MS = 20_000L
+
+/** A favourite listing longer than this many pages is left to the full listing. */
+private const val FAVORITE_SYNC_MAX_PAGES = 50
