@@ -127,6 +127,8 @@ class UploadPipelineIntegrationTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        // The force-upload path hands the run to the sync job, so WorkManager has to be there.
+        eu.akoos.photos.util.WorkManagerTestSetup.initialize(context)
 
         // WorkManager is initialised so ForceUploadLocalUrisUseCase.run()'s trailing
         // SyncWorker.runNow(context) can enqueue without throwing. A synchronous executor keeps it

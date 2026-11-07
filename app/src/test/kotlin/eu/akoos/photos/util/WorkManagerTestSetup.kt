@@ -29,7 +29,8 @@ import androidx.work.Configuration
 import androidx.work.WorkManager
 
 /**
- * Initialises WorkManager for a Robolectric test with synchronous executors.
+ * Initialises WorkManager for a Robolectric test the way the app does, with its default executors: synchronous
+ * ones run WorkManager's own database work on the test's main thread, which Room refuses, so the set-up failed.
  *
  * WorkManager reads the battery state from the sticky battery broadcast when work that requires a battery
  * that is not low is enqueued, and Robolectric has no such broadcast: the read comes back null and the
@@ -47,11 +48,7 @@ object WorkManagerTestSetup {
                 .putExtra(BatteryManager.EXTRA_LEVEL, 100)
                 .putExtra(BatteryManager.EXTRA_SCALE, 100),
         )
-        runCatching {
-            WorkManager.initialize(
-                context,
-                Configuration.Builder().setExecutor { it.run() }.setTaskExecutor { it.run() }.build(),
-            )
-        }
+        // Initialised once per test JVM; a later call finds it already set up, which is not a failure.
+        runCatching { WorkManager.initialize(context, Configuration.Builder().build()) }
     }
 }
