@@ -126,7 +126,7 @@ class NamedPeopleStreamDbTest {
     @Test
     fun `the named summaries are the full summaries filtered by name`() = runBlocking {
         val feed = seed()
-        val people = ObservePeopleUseCase(db.personDao(), db.faceDao())
+        val people = ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())
 
         val full = people(user, flowOf(feed)).first().filter { !it.displayName.isNullOrBlank() }
         val named = people(user, flowOf(feed), namedOnly = true).first().filter { !it.displayName.isNullOrBlank() }

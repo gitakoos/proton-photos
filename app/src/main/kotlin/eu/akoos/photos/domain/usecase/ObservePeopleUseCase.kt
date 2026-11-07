@@ -34,6 +34,7 @@ import me.proton.core.domain.entity.UserId
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.FaceOnPhoto
 import eu.akoos.photos.data.db.dao.PersonDao
+import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
@@ -74,6 +75,7 @@ private const val FACE_SOURCE_MAX_EDGE = 1600
 class ObservePeopleUseCase @Inject constructor(
     private val personDao: PersonDao,
     private val faceDao: FaceDao,
+    private val personManualPhotoDao: PersonManualPhotoDao,
 ) {
 
     /**
@@ -88,6 +90,7 @@ class ObservePeopleUseCase @Inject constructor(
     ): Flow<List<PersonSummary>> {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val keysMemo = AtomicReference<Pair<List<GalleryItem>, Set<String>>?>(null)
+        val idsMemo = AtomicReference<Pair<List<GalleryItem>, Set<String>>?>(null)
         val rows = if (namedOnly) personDao.observeNamedPeopleForUser(account) else personDao.observePeopleForUser(account)
         return combine(rows.retryOnDbTear(TEAR_TAG, onRetry = { FaceDiagnostics.recordDbTear(TEAR_TAG, it) }), items) { people, feed ->
             people to feed
@@ -95,7 +98,7 @@ class ObservePeopleUseCase @Inject constructor(
             .mapCompleting { (people, feed) ->
                 if (!namedOnly) FaceDiagnostics.recordPeopleBuildStarted()
                 val startNs = System.nanoTime()
-                val build = buildSummaries(account, people, feed, keysMemo)
+                val build = buildSummaries(account, people, feed, keysMemo, idsMemo)
                 if (!namedOnly) {
                     FaceDiagnostics.recordPeopleBuildCompleted(
                         durationMs = (System.nanoTime() - startNs) / NANOS_PER_MS,
@@ -118,6 +121,7 @@ class ObservePeopleUseCase @Inject constructor(
         people: List<PersonEntity>,
         items: List<GalleryItem>,
         keysMemo: AtomicReference<Pair<List<GalleryItem>, Set<String>>?>,
+        idsMemo: AtomicReference<Pair<List<GalleryItem>, Set<String>>?> = AtomicReference(null),
     ): PeopleBuild {
         if (people.isEmpty()) return PeopleBuild(emptyList())
         val feedEmpty = items.isEmpty()
@@ -157,6 +161,24 @@ class ObservePeopleUseCase @Inject constructor(
             }
         }
         if (covers.isEmpty()) return PeopleBuild(emptyList(), fallbacks, storedReadNs, fallbackNs)
+        // A named person's tile counts what its page shows: the photos of its faces and the ones added by
+        // hand that are in the library now, by the same item match the page uses, so a photo in the trash,
+        // hidden or vaulted is not counted. While the feed is still loading the stored count stands.
+        val liveCounts: Map<Long, Int> = if (feedEmpty || covers.none { !it.first.displayName.isNullOrBlank() }) {
+            emptyMap()
+        } else {
+            val feedIds: Set<String> = idsMemo.get()?.takeIf { it.first === items }?.second
+                ?: withContext(Dispatchers.Default) { items.mapTo(HashSet(items.size)) { it.stableId } }
+                    .also { idsMemo.set(items to it) }
+            covers.mapNotNull { (person, _) ->
+                val name = person.displayName?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val keys = runCatching {
+                    faceDao.distinctPhotoKeysForPerson(account, person.id) +
+                        personManualPhotoDao.photoKeysForNameList(account, name)
+                }.getOrNull() ?: return@mapNotNull null
+                person.id to livePhotoCount(keys, feedIds)
+            }.toMap()
+        }
         // One light pass for the chosen covers' dimensions (early-continue on every other item), only when a
         // cover holds an older pixel box: a fraction box needs none. A backed-up photo answers to its uri too.
         val neededKeys = covers.filter { !isFractionBox(it.second) }.mapTo(HashSet()) { it.second.photoKey }
@@ -184,7 +206,7 @@ class ObservePeopleUseCase @Inject constructor(
                 displayName = person.displayName,
                 coverPhotoKey = face.photoKey,
                 faceBox = normalizedFaceBox(face.boxLeft, face.boxTop, face.boxRight, face.boxBottom, coverDims[face.photoKey]),
-                faceCount = person.faceCount,
+                faceCount = liveCounts[person.id] ?: person.faceCount,
                 isOther = person.isOther,
             )
         }
@@ -316,3 +338,8 @@ internal suspend fun chooseLiveCoverFace(
     feedEmpty: Boolean,
     fallback: suspend () -> FaceEntity?,
 ): FaceEntity? = chooseLiveCoverFace(stored, feedKeys, feedEmpty, { it.photoKey }, fallback)
+
+/** The photos of [keys] (a person's face and hand-added photo keys) that are items of the library now,
+ *  each once: the count a person's page shows. */
+internal fun livePhotoCount(keys: Collection<String>, feedIds: Set<String>): Int =
+    keys.filterTo(HashSet()) { it in feedIds }.size
