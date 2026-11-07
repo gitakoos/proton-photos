@@ -65,7 +65,14 @@ internal fun clusterLogLine(size: Int, named: Boolean): String =
  * (removed ones aside) it left without a person: those kept out of a named person they were marked as not
  * being, and those whose stored vector could not be read.
  */
-data class FaceRegroupOutcome(val committed: Boolean, val leftUngrouped: Int, val editedMeanwhile: Boolean = false)
+data class FaceRegroupOutcome(
+    val committed: Boolean,
+    val leftUngrouped: Int,
+    val editedMeanwhile: Boolean = false,
+    /** True when the rebuild formed more groups than its own merge step handles ([MERGE_MAX_CLUSTERS]), so
+     *  groups that are one person were left apart for [ClusterFacesUseCase.mergeSimilarGroups] to fold. */
+    val mergeSkipped: Boolean = false,
+)
 
 /**
  * The cursor of a batched incremental placement: each [ClusterFacesUseCase.assignNewFaces] call reads at
@@ -381,7 +388,11 @@ class ClusterFacesUseCase @Inject constructor(
         createdClusters.sortedByDescending { it.first }.take(15).forEach { (size, named) ->
             SyncDiagnostics.log(clusterLogLine(size, named))
         }
-        FaceRegroupOutcome(committed = true, leftUngrouped = leftUngrouped)
+        FaceRegroupOutcome(
+            committed = true,
+            leftUngrouped = leftUngrouped,
+            mergeSkipped = mergeWasSkipped(assignment),
+        )
     }
 
     /**

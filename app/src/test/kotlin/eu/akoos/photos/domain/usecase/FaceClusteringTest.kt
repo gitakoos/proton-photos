@@ -570,4 +570,22 @@ class FaceClusteringTest {
         val oldModelBlob = ByteArray(128 * Float.SIZE_BYTES)
         assertTrue(unpackEmbedding(oldModelBlob).isEmpty())
     }
+
+    @Test
+    fun merge_counts_as_skipped_only_above_the_merge_cap() {
+        val atCap = IntArray(MERGE_MAX_CLUSTERS * 2) { if (it % 2 == 0) it / 2 else -1 }
+        assertFalse(mergeWasSkipped(atCap))
+        val overCap = IntArray(MERGE_MAX_CLUSTERS + 1) { it }
+        assertTrue(mergeWasSkipped(overCap))
+        assertFalse(mergeWasSkipped(null))
+    }
+
+    @Test
+    fun clustering_more_people_than_the_merge_cap_reports_its_merge_skipped() {
+        val dim = MERGE_MAX_CLUSTERS + 1
+        // Every face points its own way, so each is its own group and the merge is left out.
+        val samples = List(dim) { i -> FaceSample(FloatArray(dim).also { it[i] = 1f }, score = 0.99f) }
+        assertTrue(mergeWasSkipped(clusterFaces(samples)))
+        assertFalse(mergeWasSkipped(clusterFaces(samples.take(10))))
+    }
 }

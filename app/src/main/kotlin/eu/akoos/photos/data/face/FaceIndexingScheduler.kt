@@ -452,6 +452,13 @@ internal fun lowerRegroupBaseline(baseline: Int?, ungrouped: Int): Int? =
  * ([finalPass]), when an earlier run left its closing steps owed ([finalizeOwed]) however few faces wait.
  * Pure so it is unit-tested without Android.
  */
+/**
+ * The accounts whose names a face model wipe keeps, in capture order: the guest's first, then [account]'s, so
+ * where both name the same face the signed-in account's name wins (each capture merges over the last).
+ */
+internal fun accountsKeptBeforeModelWipe(account: String): List<String> =
+    listOf(PhotoLocationEntity.LOCAL_USER, account).distinct()
+
 internal fun batchedRunDue(ungrouped: Int, baseline: Int?, finalizeOwed: Boolean, finalPass: Boolean): Boolean =
     exceedsRegroupBaseline(ungrouped, baseline) || (finalPass && finalizeOwed)
 
@@ -1820,7 +1827,10 @@ class FaceIndexingScheduler @Inject constructor(
             return
         }
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val faceTableEmpty = faceDao.facePhotoKeysForUser(account).isEmpty()
+        // The wipe clears every account's faces, and runs before a guest's faces are adopted, so the guest's
+        // names are kept along with the account's.
+        val keptAccounts = accountsKeptBeforeModelWipe(account)
+        val faceTableEmpty = keptAccounts.all { faceDao.facePhotoKeysForUser(it).isEmpty() }
         // A leftover whose content cannot be read has nothing to resume: taken for a pending snapshot, it
         // would let the wipe below run with no name kept, so it goes and the live faces, if any, are
         // captured instead.
@@ -1830,7 +1840,7 @@ class FaceIndexingScheduler @Inject constructor(
             // Faces still present: snapshot the names and exclusions the wipe is about to orphan, so the
             // re-detected library can carry them again once it is rebuilt.
             ReattachMigrationStep.Capture ->
-                runCatching { captureReattachSnapshot(account) }
+                runCatching { for (kept in keptAccounts) captureReattachSnapshot(kept) }
                     .onFailure { Log.w(TAG, "reattach snapshot failed: ${it.message}") }
             // A snapshot still on disk holds curation an earlier migration has not reattached yet. Keep it
             // and let the drained walk resume the reattach; capturing over it now would lose those names.
@@ -3149,6 +3159,14 @@ class FaceIndexingScheduler @Inject constructor(
                     lastRegroupEndMs = endMs
                     regroupBaseline = RegroupBaseline(accountOf(userId), outcome.leftUngrouped, fenceToken, finalizeOwed = false)
                     FaceDiagnostics.recordRegroupCompleted(durationMs = endMs - startMs, endMs = endMs)
+                    if (outcome.mergeSkipped) {
+                        // Too many groups for the rebuild's own merge: fold the ones that are one person on the
+                        // cached centroids, the step a batched run ends with, which keeps names and marks apart.
+                        val folded = guardedGroupingStep("merging the rebuilt groups") {
+                            clusterFacesUseCase.mergeSimilarGroups(userId, { writeFence.allows(fenceToken) }, onTick = { beat() })
+                        }
+                        SyncDiagnostics.log("faces: rebuild left its merge to the groups step, folded ${folded ?: 0}")
+                    }
                     if (BuildConfig.DEBUG) {
                         // The debug threshold sweep reads per-account samples through the non-null
                         // diagnostic path; a guest still clusters above, it just skips this
