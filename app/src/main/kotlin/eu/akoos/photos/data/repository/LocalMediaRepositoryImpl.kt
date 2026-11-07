@@ -269,10 +269,10 @@ internal fun Cursor.readMediaRow(
     // missing or wrong (a downloaded PNG whose DATE_TAKEN write MediaStore refuses, or a file whose
     // column disagrees with its own EXIF), so it is the better value wherever it is present. The
     // column comes next, and the file's added time is the last resort.
-    val dateTaken    = CaptureDateOverride.resolveDateTaken(
-        rawDateTaken, dateOverrides[uri]?.captureMs, dateAdded,
-    )
     val dateModified = longOrZero(columns.dateModified)
+    val dateTaken    = CaptureDateOverride.resolveDateTaken(
+        rawDateTaken, dateOverrides[uri]?.captureMs, dateAdded, dateModified,
+    )
     val sizeBytes    = longOrZero(columns.size)
 
     val displayName  = stringOrNull(columns.displayName) ?: ""

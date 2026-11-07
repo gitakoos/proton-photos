@@ -177,6 +177,41 @@ class CaptureDateOverrideTest {
         assertEquals(downloadSeconds * 1000L, CaptureDateOverride.resolveDateTaken(rawDateTaken = 0L, overrideMs = null, dateAddedSeconds = downloadSeconds))
     }
 
+    @Test
+    fun `without a taken date, a copied file keeps its earlier modified time`() {
+        // Copied or restored onto the device: added on the day of the copy, modified long before.
+        val modifiedSeconds = downloadSeconds - 400L * 24 * 60 * 60
+        assertEquals(
+            modifiedSeconds * 1000L,
+            CaptureDateOverride.resolveDateTaken(0L, overrideMs = null, dateAddedSeconds = downloadSeconds, dateModifiedSeconds = modifiedSeconds),
+        )
+    }
+
+    @Test
+    fun `a later modified time or an epoch default does not move the date`() {
+        // Edited after it was added: the added time stays the best guess.
+        assertEquals(
+            downloadSeconds * 1000L,
+            CaptureDateOverride.resolveDateTaken(0L, null, dateAddedSeconds = downloadSeconds, dateModifiedSeconds = downloadSeconds + 60),
+        )
+        // The 1980 FAT/ZIP epoch and the 1970 epoch are no real dates.
+        assertEquals(
+            downloadSeconds * 1000L,
+            CaptureDateOverride.resolveDateTaken(0L, null, dateAddedSeconds = downloadSeconds, dateModifiedSeconds = 315_532_800L),
+        )
+        assertEquals(
+            downloadSeconds * 1000L,
+            CaptureDateOverride.resolveDateTaken(0L, null, dateAddedSeconds = downloadSeconds, dateModifiedSeconds = 1L),
+        )
+    }
+
+    @Test
+    fun `a taken date or an override still outranks the modified time`() {
+        val modifiedSeconds = downloadSeconds - 400L * 24 * 60 * 60
+        assertEquals(captureMs, CaptureDateOverride.resolveDateTaken(captureMs, null, downloadSeconds, modifiedSeconds))
+        assertEquals(captureMs, CaptureDateOverride.resolveDateTaken(0L, captureMs, downloadSeconds, modifiedSeconds))
+    }
+
     // ── encode / parse round-trip + robustness ───────────────────────────────────────────────────
 
     @Test
