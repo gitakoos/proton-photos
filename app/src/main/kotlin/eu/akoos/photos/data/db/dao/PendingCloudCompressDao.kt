@@ -37,10 +37,11 @@ interface PendingCloudCompressDao {
     suspend fun insertAll(rows: List<PendingCloudCompressEntity>)
 
     /** The next [limit] rows in queue order that the run [runId] has not tried yet. Read a slice at a time,
-     *  so a queue of tens of thousands never sits in memory at once. */
+     *  so a queue of tens of thousands never sits in memory at once. Rows queued at the same time keep the
+     *  order they were inserted in, which is the selection's. */
     @Query(
         "SELECT * FROM pending_cloud_compress WHERE attemptRun IS NULL OR attemptRun != :runId " +
-            "ORDER BY enqueuedAt ASC, linkId ASC LIMIT :limit"
+            "ORDER BY enqueuedAt ASC, rowid ASC LIMIT :limit"
     )
     suspend fun nextSlice(runId: String, limit: Int): List<PendingCloudCompressEntity>
 

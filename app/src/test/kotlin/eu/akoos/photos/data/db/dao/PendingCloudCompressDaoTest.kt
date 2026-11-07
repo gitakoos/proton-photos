@@ -59,7 +59,8 @@ class PendingCloudCompressDaoTest {
 
     @Test
     fun `ten thousand queued photos are read a slice at a time in queue order`() = runTest {
-        val ids = (0 until 10_000).map { "link-%05d".format(it) }
+        // Link ids carry no order of their own: the queue must keep the selection's.
+        val ids = (0 until 10_000).map { "link-%05d".format(it) }.shuffled(kotlin.random.Random(7))
         ids.chunked(500).forEachIndexed { slice, chunk -> dao.insertAll(chunk.map { row(it, at = 1_000L + slice) }) }
         assertEquals(10_000, dao.count())
 
@@ -112,6 +113,14 @@ class PendingCloudCompressDaoTest {
     }
 
     @Test
+    fun `photos queued together are served in the order of the selection, not of their links`() = runTest {
+        dao.insertAll(listOf(row("zeta"), row("alpha"), row("mu")))
+        dao.insertAll(listOf(row("beta", at = 2L), row("aaa", at = 2L)))
+
+        assertEquals(listOf("zeta", "alpha", "mu", "beta", "aaa"), dao.nextSlice("run", 20).map { it.linkId })
+    }
+
+    @Test
     fun `the move of labels and faces to the copy is remembered across runs`() = runTest {
         dao.insertAll(listOf(row("a")))
         dao.setCarriedOver("a")
@@ -128,6 +137,6 @@ class PendingCloudCompressDaoTest {
 
         dao.clearNotStarted(enqueuedUpTo = 10L, running = listOf("running"))
 
-        assertEquals(listOf("running", "started", "later"), dao.nextSlice("run", 20).map { it.linkId })
+        assertEquals(listOf("started", "running", "later"), dao.nextSlice("run", 20).map { it.linkId })
     }
 }

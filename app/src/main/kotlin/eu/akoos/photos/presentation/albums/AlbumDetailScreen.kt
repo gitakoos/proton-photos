@@ -98,6 +98,7 @@ import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
+import eu.akoos.photos.presentation.common.rememberCloudCompressAction
 import eu.akoos.photos.presentation.common.CloudMetadataSaveDrawer
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -992,6 +993,11 @@ fun AlbumDetailScreen(
                 viewModel.clearSelection()
             },
         )
+        // The photos of a shared-with-me album are the owner's to replace, so it offers no compression.
+        val compressAction = rememberCloudCompressAction(
+            items = if (state.isSharedWithMe) emptyList() else selectedAlbumItems,
+            isSignedIn = true,
+        )
         val albumSelectionActions = buildList {
             add(
                 SelectionAction(
@@ -1019,6 +1025,9 @@ fun AlbumDetailScreen(
                     )
                 )
             }
+            // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
+            // smaller copy is up.
+            compressAction?.let(::add)
             // Add-to-person runs on-device and can name a new person, so it follows face recognition
             // alone, the same gate the timeline and Search use.
             if (faceEnabled) {

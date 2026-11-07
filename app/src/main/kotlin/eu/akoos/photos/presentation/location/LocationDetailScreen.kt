@@ -98,6 +98,7 @@ import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
+import eu.akoos.photos.presentation.common.rememberCloudCompressAction
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.albums.components.StickyAlbumHeader
 import eu.akoos.photos.presentation.albums.components.rememberHeroScrolledAway
@@ -554,6 +555,7 @@ fun LocationPhotosContent(
                 viewModel.clearSelection()
             },
         )
+        val compressAction = rememberCloudCompressAction(selectedItems, isSignedIn)
         val locationSelectionActions = buildList {
             // Rings while cloud originals download for the chooser and takes no second tap meanwhile.
             add(
@@ -660,6 +662,9 @@ fun LocationPhotosContent(
                     )
                 )
             }
+            // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
+            // smaller copy is up.
+            compressAction?.let(::add)
             // The strip stays behind an all-device-only selection: a Synced photo keeps its Drive
             // copy's EXIF, so stripping just the local file is a misleading half-strip.
             if (allLocalOnly(selectedItems)) {
