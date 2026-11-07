@@ -1039,7 +1039,7 @@ fun SearchScreen(
         // the accent while a filter the sheet holds is on, and steps aside for the selection drawer.
         val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All || filter.mediaType != MediaType.All ||
             filter.year != null || filter.dateFrom != null || selectedCategory != GalleryFilter.All
-        if (pick == null && !isSelectionMode) {
+        if (pick == null && !isSelectionMode) CompositionLocalProvider(LocalGlassBackdrop provides glass) {
             IconBubble(
                 icon = Icons.Filled.FilterList,
                 contentDescription = stringResource(R.string.filter_title),

@@ -84,7 +84,7 @@ val LocalOnGlassSheet = staticCompositionLocalOf { false }
 fun cardFill(solid: Color): Color = if (LocalOnGlassSheet.current) solid.copy(alpha = solid.alpha * GLASS_CARD_ALPHA) else solid
 
 /** How much of a card's fill stays inside a glass sheet: enough to group its rows, little enough to show the glass. */
-private const val GLASS_CARD_ALPHA = 0.7f
+private const val GLASS_CARD_ALPHA = 0.45f
 
 /** The backdrop the pills above a screen's content frost, or null where they draw their plain fill. */
 val LocalGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
@@ -152,10 +152,8 @@ fun Modifier.pillSurface(shape: Shape, border: Color? = null, color: () -> Color
  * [pillSurface] for a larger panel over [backdrop] (a [GlassBackdrop.freeze]d one, for a menu's own window), frosted
  * harder so rows of text stay readable over a busy picture; plain with none.
  */
-fun Modifier.glassPanel(backdrop: GlassBackdrop?, color: Color, shape: Shape): Modifier {
-    val fill = if (backdrop != null && color.red == 0f && color.green == 0f && color.blue == 0f) PANEL_BLACK_LIFT else color
-    return this then PillSurfaceElement(shape, null, useLocal = false, explicit = backdrop, panel = true) { fill }
-}
+fun Modifier.glassPanel(backdrop: GlassBackdrop?, color: Color, shape: Shape): Modifier =
+    this then PillSurfaceElement(shape, null, useLocal = false, explicit = backdrop, panel = true) { color }
 
 /**
  * The veil behind a floating header as glass: the content under it softened, darkened (or, on a light theme,
@@ -427,7 +425,6 @@ private class PillSurfaceNode(
         val tintAlpha = if (still) tint.alpha else min(tint.alpha, if (panel) PANEL_TINT else LENS_TINT)
         shader.setFloatUniform("tint", tint.red, tint.green, tint.blue, tintAlpha)
         shader.setFloatUniform("lightLabels", if (lightLabels) 1f else 0f)
-        shader.setFloatUniform("vivid", if (panel) PANEL_VIVID else LENS_VIVID)
         val lensOnly = android.graphics.RenderEffect.createRuntimeShaderEffect(shader, "content")
         val blur = when {
             presoftened && panel -> (BLUR_PANEL - FROST_BLUR).toPx()
@@ -475,22 +472,13 @@ private val BEVEL = 16.dp
 private val REFRACTION = 9.dp
 private val BLUR_LENS = 7.dp
 private val BLUR_PLAIN = 20.dp
-private val BLUR_PANEL = 44.dp
+private val BLUR_PANEL = 18.dp
 
 /** The most of a pill's own fill laid over the lens; the lens already keeps the labels legible. */
 private const val LENS_TINT = 0.28f
 
 /** The most of a panel's own fill laid over the lens. */
-private const val PANEL_TINT = 0.75f
-
-/** How much more vivid a pill makes what is behind it; a panel takes colour out instead, so a large area
- *  of photos behind it reads as a soft glow rather than as patches of colour. */
-private const val LENS_VIVID = 1.18f
-private const val PANEL_VIVID = 0.7f
-
-/** A panel's fill where the sheet colour is pure black (AMOLED): black glass shows only stains of what is
- *  behind it, a lifted grey shows a soft glow. */
-private val PANEL_BLACK_LIFT = Color(0xFF1C1C1E)
+private const val PANEL_TINT = 0.45f
 
 /** The most of a pill's own fill laid over the plain blur. */
 private const val PLAIN_TINT = 0.55f
@@ -515,7 +503,6 @@ uniform float bevel;
 uniform float refraction;
 uniform float4 tint;
 uniform float lightLabels;
-uniform float vivid;
 
 float roundBox(float2 p, float2 halfSize, float r) {
     float2 q = abs(p) - halfSize + float2(r);
@@ -540,12 +527,11 @@ half4 main(float2 coord) {
         float(content.eval(coord + bend * 1.24).b));
 
     float l = dot(col, float3(0.2126, 0.7152, 0.0722));
-    col = clamp(mix(float3(l), col, vivid), 0.0, 1.0);
+    col = clamp(mix(float3(l), col, 1.18), 0.0, 1.0);
     l = dot(col, float3(0.2126, 0.7152, 0.0722));
     if (lightLabels > 0.5) {
         float held = l <= 0.15 ? l : 0.15 + (l - 0.15) * 0.2;
-        float k = l > 0.0001 ? held / l : 1.0;
-        col = mix(float3(held), col * k, k);
+        col *= l > 0.0001 ? held / l : 1.0;
     } else {
         float lifted = l >= 0.78 ? l : 0.78 - (0.78 - l) * 0.25;
         col = min(col + float3(lifted - l), float3(1.0));

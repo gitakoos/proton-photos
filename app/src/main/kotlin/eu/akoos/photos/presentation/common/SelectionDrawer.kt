@@ -458,9 +458,8 @@ fun SelectionDrawer(
         exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(200)),
     ) {
         if (shownItems.isEmpty() && shownActions.isEmpty()) return@AnimatedVisibility
-        // The drawer is the glass; its own buttons take one plain fill, so each does not pick up the colour
-        // of whatever photo sits under it.
-        CompositionLocalProvider(LocalGlassBackdrop provides null) {
+        // The drawer's own buttons frost the same photos as its sheet, so they read as glass on glass.
+        CompositionLocalProvider(LocalGlassBackdrop provides backdrop) {
         SelectionDrawerBody(
             items = shownItems,
             actions = shownActions,
