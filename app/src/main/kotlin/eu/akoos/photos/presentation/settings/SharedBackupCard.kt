@@ -206,6 +206,8 @@ internal fun SharedBackupCard(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    // Turning it on first says which versions the other devices need, so an older one is not taken for broken.
+    var askTurnOn by rememberSaveable { mutableStateOf(false) }
     Spacer(Modifier.height(20.dp))
     SectionLabel(stringResource(R.string.drive_backup_section))
     Spacer(Modifier.height(8.dp))
@@ -214,7 +216,7 @@ internal fun SharedBackupCard(
             label = stringResource(R.string.drive_backup_auto),
             description = stringResource(R.string.drive_backup_auto_desc),
             checked = state.status.enabled,
-            onCheckedChange = viewModel::setEnabled,
+            onCheckedChange = { on -> if (on) askTurnOn = true else viewModel.setEnabled(false) },
         )
         RowDivider()
         run {
@@ -282,6 +284,19 @@ internal fun SharedBackupCard(
             .clickable(enabled = !state.running && !importing) { explainFileImport = true }
             .padding(horizontal = 4.dp, vertical = 6.dp),
     )
+    if (askTurnOn && !LocalAppLock.current.isLocked) {
+        ConfirmDialog(
+            title = stringResource(R.string.drive_backup_turn_on_title),
+            message = stringResource(R.string.drive_backup_turn_on_msg),
+            confirmLabel = stringResource(R.string.drive_backup_turn_on),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                askTurnOn = false
+                viewModel.setEnabled(true)
+            },
+            onDismiss = { askTurnOn = false },
+        )
+    }
     if (explainFileImport && !LocalAppLock.current.isLocked) {
         ConfirmDialog(
             title = stringResource(R.string.settings_face_file_title),

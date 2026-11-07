@@ -1436,6 +1436,9 @@
     <string name="drive_backup_section">Varnostna kopija na Proton Drive</string>
     <string name="drive_backup_auto">Samodejna varnostna kopija</string>
     <string name="drive_backup_auto_desc">Shrani obraze, iskalni indeks, oznake in skrite elemente ter jih ohranja enake na tvojih drugih napravah</string>
+    <string name="drive_backup_turn_on_title">Vklopim samodejno varnostno kopijo?</string>
+    <string name="drive_backup_turn_on_msg">Na drugem telefonu je za to potreben Photos for Proton 2.6.0 ali novejši, na računalniku pa Photos for Proton for Windows 1.3.0 ali novejši. Starejša različica pusti pri miru, kar shrani ta telefon, in svoje podatke obdrži takšne, kot so.</string>
+    <string name="drive_backup_turn_on">Vklopi</string>
     <string name="drive_backup_save_now">Varnostno kopiraj zdaj</string>
     <string name="drive_backup_load">Naloži z Drive</string>
     <string name="drive_backup_load_desc">Prenese, kar so shranile tvoje druge naprave</string>

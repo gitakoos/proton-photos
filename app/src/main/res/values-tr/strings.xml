@@ -1853,6 +1853,9 @@
     <string name="drive_backup_section">Proton Drive\'a yedekle</string>
     <string name="drive_backup_auto">Otomatik yedekleme</string>
     <string name="drive_backup_auto_desc">Yüzleri, arama dizinini, etiketleri ve gizli öğeleri kaydeder ve diğer cihazlarında aynı tutar</string>
+    <string name="drive_backup_turn_on_title">Otomatik yedekleme açılsın mı?</string>
+    <string name="drive_backup_turn_on_msg">Başka bir telefonda bunun için Photos for Proton 2.6.0 veya daha yenisi, bir bilgisayarda ise Photos for Proton for Windows 1.3.0 veya daha yenisi gerekir. Eski bir sürüm bu telefonun kaydettiklerine dokunmaz ve kendi verilerini olduğu gibi tutar.</string>
+    <string name="drive_backup_turn_on">Aç</string>
     <string name="drive_backup_save_now">Şimdi yedekle</string>
     <string name="drive_backup_load">Drive\'dan yükle</string>
     <string name="drive_backup_load_desc">Diğer cihazlarının kaydettiklerini getirir</string>

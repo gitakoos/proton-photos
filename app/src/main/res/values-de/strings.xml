@@ -1195,6 +1195,9 @@
     <string name="drive_backup_section">Sicherung auf Proton Drive</string>
     <string name="drive_backup_auto">Automatische Sicherung</string>
     <string name="drive_backup_auto_desc">Sichert Gesichter, Suchindex, Labels und ausgeblendete Elemente und hält sie auf deinen anderen Geräten gleich</string>
+    <string name="drive_backup_turn_on_title">Automatische Sicherung einschalten?</string>
+    <string name="drive_backup_turn_on_msg">Auf einem anderen Telefon braucht das Photos for Proton 2.6.0 oder neuer und auf einem Computer Photos for Proton for Windows 1.3.0 oder neuer. Eine ältere Version lässt in Ruhe, was dieses Telefon sichert, und behält ihre eigenen Daten, wie sie sind.</string>
+    <string name="drive_backup_turn_on">Einschalten</string>
     <string name="drive_backup_save_now">Jetzt sichern</string>
     <string name="drive_backup_load">Von Drive laden</string>
     <string name="drive_backup_load_desc">Holt, was deine anderen Geräte gesichert haben</string>

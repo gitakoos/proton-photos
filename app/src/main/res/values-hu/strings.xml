@@ -1218,6 +1218,9 @@
     <string name="drive_backup_section">Mentés a Proton Drive-ra</string>
     <string name="drive_backup_auto">Automatikus mentés</string>
     <string name="drive_backup_auto_desc">Menti az arcokat, a keresési indexet, a címkéket és a rejtett elemeket, és a többi eszközödön is ugyanazok maradnak</string>
+    <string name="drive_backup_turn_on_title">Bekapcsolod az automatikus mentést?</string>
+    <string name="drive_backup_turn_on_msg">Egy másik telefonon ehhez Photos for Proton 2.6.0 vagy újabb kell, a gépen pedig Photos for Proton for Windows 1.3.0 vagy újabb. Egy régebbi verzió békén hagyja, amit ez a telefon ment, és a saját adatait úgy tartja meg, ahogy vannak.</string>
+    <string name="drive_backup_turn_on">Bekapcsolás</string>
     <string name="drive_backup_save_now">Mentés most</string>
     <string name="drive_backup_load">Betöltés a Drive-ról</string>
     <string name="drive_backup_load_desc">Betölti, amit a többi eszközöd mentett</string>

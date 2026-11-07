@@ -1208,6 +1208,9 @@
     <string name="drive_backup_section">Back-up naar Proton Drive</string>
     <string name="drive_backup_auto">Automatische back-up</string>
     <string name="drive_backup_auto_desc">Bewaart gezichten, de zoekindex, labels en verborgen items en houdt ze gelijk op je andere apparaten</string>
+    <string name="drive_backup_turn_on_title">Automatische back-up aanzetten?</string>
+    <string name="drive_backup_turn_on_msg">Op een andere telefoon is hiervoor Photos for Proton 2.6.0 of nieuwer nodig, en op een computer Photos for Proton for Windows 1.3.0 of nieuwer. Een oudere versie laat met rust wat deze telefoon opslaat en houdt zijn eigen gegevens zoals ze zijn.</string>
+    <string name="drive_backup_turn_on">Aanzetten</string>
     <string name="drive_backup_save_now">Nu back-uppen</string>
     <string name="drive_backup_load">Laden van Drive</string>
     <string name="drive_backup_load_desc">Haalt op wat je andere apparaten hebben bewaard</string>

@@ -1435,6 +1435,9 @@
     <string name="drive_backup_section">Záloha na Proton Drive</string>
     <string name="drive_backup_auto">Automatická záloha</string>
     <string name="drive_backup_auto_desc">Ukladá tváre, index vyhľadávania, štítky a skryté položky a udržiava ich rovnaké na tvojich ďalších zariadeniach</string>
+    <string name="drive_backup_turn_on_title">Zapnúť automatickú zálohu?</string>
+    <string name="drive_backup_turn_on_msg">Na inom telefóne to potrebuje Photos for Proton 2.6.0 alebo novší a na počítači Photos for Proton for Windows 1.3.0 alebo novší. Staršia verzia nechá tak, čo ukladá tento telefón, a svoje údaje ponechá, ako sú.</string>
+    <string name="drive_backup_turn_on">Zapnúť</string>
     <string name="drive_backup_save_now">Zálohovať teraz</string>
     <string name="drive_backup_load">Načítať z Drive</string>
     <string name="drive_backup_load_desc">Prenesie, čo uložili tvoje ďalšie zariadenia</string>

@@ -1210,6 +1210,9 @@
     <string name="drive_backup_section">Copia en Proton Drive</string>
     <string name="drive_backup_auto">Copia automática</string>
     <string name="drive_backup_auto_desc">Guarda las caras, el índice de búsqueda, las etiquetas y los elementos ocultos, y los mantiene iguales en tus otros dispositivos</string>
+    <string name="drive_backup_turn_on_title">¿Activar la copia automática?</string>
+    <string name="drive_backup_turn_on_msg">En otro teléfono necesita Photos for Proton 2.6.0 o posterior, y en un ordenador Photos for Proton for Windows 1.3.0 o posterior. Una versión anterior deja en paz lo que guarda este teléfono y mantiene sus propios datos como están.</string>
+    <string name="drive_backup_turn_on">Activar</string>
     <string name="drive_backup_save_now">Copiar ahora</string>
     <string name="drive_backup_load">Cargar desde Drive</string>
     <string name="drive_backup_load_desc">Trae lo que guardaron tus otros dispositivos</string>

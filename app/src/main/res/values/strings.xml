@@ -1954,6 +1954,9 @@
     <string name="drive_backup_section">Backup to Proton Drive</string>
     <string name="drive_backup_auto">Automatic backup</string>
     <string name="drive_backup_auto_desc">Saves faces, the search index, labels and hidden items, and keeps them the same on your other devices</string>
+    <string name="drive_backup_turn_on_title">Turn on Automatic backup?</string>
+    <string name="drive_backup_turn_on_msg">On another phone this needs Photos for Proton 2.6.0 or newer, and on a computer Photos for Proton for Windows 1.3.0 or newer. An older version leaves what this phone saves alone and keeps its own data as it is.</string>
+    <string name="drive_backup_turn_on">Turn on</string>
     <string name="drive_backup_save_now">Back up now</string>
     <string name="drive_backup_load">Load from Drive</string>
     <string name="drive_backup_load_desc">Brings in what your other devices saved</string>

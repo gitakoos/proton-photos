@@ -1210,6 +1210,9 @@
     <string name="drive_backup_section">Backup su Proton Drive</string>
     <string name="drive_backup_auto">Backup automatico</string>
     <string name="drive_backup_auto_desc">Salva volti, indice di ricerca, etichette ed elementi nascosti e li mantiene uguali sugli altri tuoi dispositivi</string>
+    <string name="drive_backup_turn_on_title">Attivare il backup automatico?</string>
+    <string name="drive_backup_turn_on_msg">Su un altro telefono serve Photos for Proton 2.6.0 o successivo, e su un computer Photos for Proton for Windows 1.3.0 o successivo. Una versione precedente lascia stare ciò che salva questo telefono e mantiene i propri dati come sono.</string>
+    <string name="drive_backup_turn_on">Attiva</string>
     <string name="drive_backup_save_now">Esegui backup ora</string>
     <string name="drive_backup_load">Carica da Drive</string>
     <string name="drive_backup_load_desc">Recupera ciò che hanno salvato gli altri tuoi dispositivi</string>
