@@ -110,6 +110,7 @@ class CloudCompressWorker @AssistedInject constructor(
     private suspend fun drain(): Result {
         if (dao.count() == 0) return Result.success()
         val runId = UUID.randomUUID().toString()
+        val startedAt = System.currentTimeMillis()
         val done = AtomicInteger(0)
         val compressed = AtomicInteger(0)
         val skipped = AtomicInteger(0)
@@ -271,7 +272,10 @@ class CloudCompressWorker @AssistedInject constructor(
                     }.awaitAll()
                 }
             }
-            postSummary(compressed.get(), skipped.get(), failed.get(), saved.get())
+            // A Cancel during this run leaves every photo not finished as it was, and the summary says so.
+            val stoppedHere = stopRequestedAt.value >= startedAt
+            val left = leftAsTheyWere(total, compressed.get(), skipped.get(), failed.get(), stoppedHere)
+            postSummary(compressed.get(), left, saved.get())
             if (kept.get()) Result.retry() else Result.success()
         } catch (e: CancellationException) {
             throw e
@@ -315,14 +319,14 @@ class CloudCompressWorker @AssistedInject constructor(
     }
 
     /** What the run did, left in the shade once the progress post is gone. */
-    private fun postSummary(compressed: Int, skipped: Int, failed: Int, savedBytes: Long) {
-        if (compressed + skipped + failed == 0) return
+    private fun postSummary(compressed: Int, left: Int, savedBytes: Long) {
+        if (compressed + left == 0) return
         ensureChannel(context)
         val text = context.getString(
             R.string.cloud_compress_done,
             compressed,
             Formatter.formatShortFileSize(context, savedBytes),
-        ) + if (skipped + failed > 0) " " + context.getString(R.string.cloud_compress_done_left, skipped + failed) else ""
+        ) + if (left > 0) " " + context.getString(R.string.cloud_compress_done_left, left) else ""
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_upload_done)
             .setContentTitle(context.getString(R.string.cloud_compress_title))
@@ -395,6 +399,13 @@ class CloudCompressWorker @AssistedInject constructor(
         }
     }
 }
+
+/**
+ * How many photos of a run are left as they were: the skipped and failed ones, and after a Cancel during the
+ * run also every photo it did not finish. Pure.
+ */
+internal fun leftAsTheyWere(total: Int, compressed: Int, skipped: Int, failed: Int, stopped: Boolean): Int =
+    if (stopped) (total - compressed).coerceAtLeast(skipped + failed) else skipped + failed
 
 /** Failed tries of one photo before it is given up. */
 internal const val MAX_PHOTO_ATTEMPTS = 5

@@ -53,4 +53,14 @@ class CompressFailureActionTest {
         assertEquals(false, heldTooLong(enqueuedAt = 1_000L, now = 1_000L + day - 1))
         assertEquals(true, heldTooLong(enqueuedAt = 1_000L, now = 1_000L + day + 1))
     }
+
+    @Test
+    fun `the summary counts the photos a cancel left as they were`() {
+        // 20 queued, cancelled after 10 were compressed: the other 10 are left, none failed.
+        assertEquals(10, leftAsTheyWere(total = 20, compressed = 10, skipped = 0, failed = 0, stopped = true))
+        // No cancel: only the skipped and failed ones.
+        assertEquals(3, leftAsTheyWere(total = 20, compressed = 17, skipped = 2, failed = 1, stopped = false))
+        // A cancel never reports fewer than were skipped or failed.
+        assertEquals(4, leftAsTheyWere(total = 5, compressed = 5, skipped = 3, failed = 1, stopped = true))
+    }
 }

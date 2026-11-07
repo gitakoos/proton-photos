@@ -301,6 +301,16 @@ class CloudPhotoReplacementTest {
 
         assertEquals(listOf("orig", "vid"), compressibleLinkIds(listOf(cloudPhoto, cloudVideo, cloudDoc, onPhone, cloudPhoto)))
     }
+
+    @Test
+    fun `photos are queued for compression newest first, whatever order the selection holds`() {
+        fun at(id: String, seconds: Long) = GalleryItem.CloudOnly(photo.copy(linkId = id, captureTime = seconds))
+
+        assertEquals(
+            listOf("new", "mid", "old"),
+            compressibleLinkIds(listOf(at("old", 1_000L), at("new", 3_000L), at("mid", 2_000L))),
+        )
+    }
     @Test
     fun `compress on Drive waits for Wi-Fi unless the switch was turned off`() {
         assertTrue(wifiOnlySetting(null))

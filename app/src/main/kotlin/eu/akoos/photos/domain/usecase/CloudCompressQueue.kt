@@ -71,7 +71,7 @@ class CloudCompressQueue @Inject constructor(
             val userId = accountManager.getPrimaryUserId().first()?.id ?: return@launch
             val now = System.currentTimeMillis()
             linkIds.chunked(CHUNK).forEachIndexed { slice, ids ->
-                // One enqueue time per slice, rising, so the queue keeps the selection's order. A photo
+                // One enqueue time per slice, rising, so the queue keeps this order. A photo
                 // still queued from before is asked for again, so an earlier Cancel does not drop it.
                 dao.requeue(ids, now + slice)
                 dao.insertAll(ids.map { PendingCloudCompressEntity(linkId = it, userId = userId, enqueuedAt = now + slice) })
@@ -119,9 +119,10 @@ class CloudCompressQueue @Inject constructor(
 internal fun wifiOnlySetting(stored: Boolean?): Boolean = stored != false
 
 /** The link of every photo or video in [items] that lives only on Drive: the ones compression in place
- *  applies to. Pure. */
-internal fun compressibleLinkIds(items: List<GalleryItem>): List<String> = items.mapNotNull { item ->
-    val cloud = (item as? GalleryItem.CloudOnly)?.cloud ?: return@mapNotNull null
-    val mime = cloud.mimeType.lowercase()
-    cloud.linkId.takeIf { mime.startsWith("image/") || mime.startsWith("video/") }
-}.distinct()
+ *  applies to, newest first as the timeline shows them, whatever order the screen's selection holds. Pure. */
+internal fun compressibleLinkIds(items: List<GalleryItem>): List<String> = items
+    .filterIsInstance<GalleryItem.CloudOnly>()
+    .filter { val mime = it.cloud.mimeType.lowercase(); mime.startsWith("image/") || mime.startsWith("video/") }
+    .sortedByDescending { it.captureTimeMs }
+    .map { it.cloud.linkId }
+    .distinct()
