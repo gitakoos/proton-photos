@@ -70,9 +70,14 @@ class AssignPersonNameUseCase @Inject constructor(
             }
         }
 
-    private suspend fun fold(account: String, fromPersonId: Long, name: String, confirm: Boolean): Long {
-        val target = personDao.namedPeopleForUser(account)
-            .firstOrNull { it.displayName == name && it.id != fromPersonId }?.id ?: fromPersonId
+    private suspend fun fold(account: String, fromPersonId: Long, typed: String, confirm: Boolean): Long {
+        // Another person already of this name, spelt as typed or differing only in case, takes the faces in and
+        // keeps its own spelling.
+        val namesake = personDao.namedPeopleForUser(account)
+            .filter { it.id != fromPersonId && samePersonName(it.displayName, typed) }
+            .let { same -> same.firstOrNull { it.displayName?.trim() == typed } ?: same.maxByOrNull { it.faceCount } }
+        val target = namesake?.id ?: fromPersonId
+        val name = namesake?.displayName?.trim() ?: typed
         val faceIds = faceDao.faceIdsForPerson(account, fromPersonId)
         if (target != fromPersonId && faceIds.isNotEmpty()) faceDao.reassignFacesToPerson(faceIds, target)
         if (confirm && faceIds.isNotEmpty()) faceDao.labelFacesByIds(faceIds, name)

@@ -109,7 +109,7 @@ class AssignFacesToPersonUseCase @Inject constructor(
         faceDao.reassignFacesToPerson(ids, person.id)
         if (name != null) {
             faceDao.labelFacesByIds(ids, name)
-            val marked = notPersonDao.allForUser(account).filter { it.personName == name && it.faceId in ids }.map { it.faceId }
+            val marked = notPersonDao.allForUser(account).filter { samePersonName(it.personName, name) && it.faceId in ids }.map { it.faceId }
             for (id in marked) notPersonDao.deleteMark(account, name, id)
             FaceCurationLog.notPerson(appDatabase.faceCurationTimeDao(), account, name, marked, removed = true, System.currentTimeMillis())
         } else {
@@ -142,12 +142,12 @@ class AssignFacesToPersonUseCase @Inject constructor(
         return person.id
     }
 
-    /** The account's person called [name]: an exact match first, else one whose name differs only in
-     *  case (the one with the most photos when several do). */
+    /** The account's person called [name]: an exact match first, else one of the same name by
+     *  [samePersonName] (the one with the most photos when several do). */
     private suspend fun findByName(account: String, name: String): PersonEntity? {
         val named = personDao.namedPeopleForUser(account).filter { !it.displayName.isNullOrBlank() }
         return named.firstOrNull { it.displayName == name }
-            ?: named.filter { it.displayName.equals(name, ignoreCase = true) }.maxByOrNull { it.faceCount }
+            ?: named.filter { samePersonName(it.displayName, name) }.maxByOrNull { it.faceCount }
     }
 
     /** A new person for [name], inserted already carrying its photo count and its clearest face as the

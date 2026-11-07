@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.person
 
+import eu.akoos.photos.domain.usecase.samePersonName
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -732,7 +733,7 @@ fun PersonDetailScreen(
                 // Renaming onto a name another person holds is a merge (same name = same person), so it
                 // confirms first instead of silently folding two people together. A new name just renames.
                 val trimmed = entered.trim()
-                if (trimmed.isNotEmpty() && mergeCandidates.any { it.displayName == trimmed }) {
+                if (trimmed.isNotEmpty() && mergeCandidates.any { samePersonName(it.displayName, trimmed) }) {
                     pendingRenameMerge = trimmed
                 } else {
                     onRename(entered)

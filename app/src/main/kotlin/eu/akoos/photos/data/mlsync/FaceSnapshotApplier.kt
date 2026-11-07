@@ -22,6 +22,8 @@
 
 package eu.akoos.photos.data.mlsync
 
+import eu.akoos.photos.domain.usecase.PersonNameSpelling
+import eu.akoos.photos.domain.usecase.personNameKey
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
@@ -148,6 +150,7 @@ internal class FaceSnapshotApplier(
     private val full = fit == FaceSnapshotFit.Full
 
     private val personIdByName = HashMap<String, Long>()
+    private val spelling = PersonNameSpelling()
     private val nameByPersonId = HashMap<Long, String>()
     private val localCoverNames = HashSet<String>()
     private val localBlockedNames = HashMap<String, MutableSet<String>>()
@@ -181,7 +184,10 @@ internal class FaceSnapshotApplier(
     /** Streams [reader]'s records into the database; see the class comment for what each one does. */
     suspend fun run(reader: MlSnapshotReader): FaceSnapshotApplied {
         prepare()
-        for (record in reader) {
+        for (read in reader) {
+            val record = spelled(read)
+            // A rename that only changed the case of a name is the same name here.
+            if (record is MlSnapshotRecord.NameChange && record.toName.isNotEmpty() && record.fromName == record.toName) continue
             enter(sectionOf(record))
             when (record) {
                 is MlSnapshotRecord.PhotoKey -> onKey(record.photoKey)
@@ -208,7 +214,35 @@ internal class FaceSnapshotApplier(
         )
     }
 
+    /**
+     * [record] with its names written the way this device writes them ([PersonNameSpelling]): a name that
+     * differs from one held here only by [personNameKey] takes the spelling held here, so the other device's
+     * "adam" lands on this device's "Adam" instead of opening a second person.
+     */
+    private fun spelled(record: MlSnapshotRecord): MlSnapshotRecord = when (record) {
+        is MlSnapshotRecord.Person -> record.copy(name = spelling.of(record.name))
+        is MlSnapshotRecord.NameChange -> record.copy(
+            fromName = spelling.of(record.fromName),
+            toName = if (record.toName.isEmpty()) "" else spelling.of(record.toName),
+        )
+        is MlSnapshotRecord.Removal -> record.copy(personName = spelling.of(record.personName))
+        is MlSnapshotRecord.ManualPhoto -> record.copy(personName = spelling.of(record.personName))
+        is MlSnapshotRecord.NotPerson -> record.copy(personName = spelling.of(record.personName))
+        is MlSnapshotRecord.Cover -> record.copy(personName = spelling.of(record.personName))
+        is MlSnapshotRecord.Face -> {
+            val grouped = spelling.ofOrNull(record.personName)
+            val confirmed = spelling.ofOrNull(record.confirmedName)
+            if (grouped == record.personName && confirmed == record.confirmedName) record
+            else MlSnapshotRecord.Face(
+                record.photoKey, record.faceIndex, record.left, record.top, record.right, record.bottom,
+                record.landmarks, record.score, record.blur, record.rejected, grouped, confirmed, record.embedding,
+            )
+        }
+        else -> record
+    }
+
     private suspend fun prepare() {
+        for (person in personDao.namedPeopleForUser(account)) person.displayName?.takeIf { it.isNotBlank() }?.let(spelling::hold)
         if (full && !merge) clearCloudFaceData()
         nameDao.statesForUser(account).associateTo(namedAt) { it.name to it.namedAt }
         for (row in curationDao.allForUser(account)) curation[CurationKey(row.kind, row.personName, row.ref)] = row

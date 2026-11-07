@@ -113,4 +113,27 @@ class AssignPersonNameTransactionDbTest {
         assertNull(db.faceDao().faceById("c#0")!!.manualName)
         assertEquals(setOf(1L, 2L), db.clusterSummaryDao().getAllForUser(acct).map { it.personId }.toSet())
     }
+
+    @Test
+    fun `a name typed in another case joins the person of that name under its spelling`() = runBlocking {
+        person(1, listOf("a", "b"), name = "Anna")
+        person(2, listOf("c"))
+
+        assertEquals(1L, assign()(acct, 2L, "anna"))
+
+        assertEquals(listOf(1L), db.personDao().allForUser(acct).map { it.id })
+        assertEquals("Anna", db.personDao().personById(1)!!.displayName)
+        assertEquals("Anna", db.faceDao().faceById("c#0")!!.manualName)
+    }
+
+    @Test
+    fun `a name with other accents stays its own person`() = runBlocking {
+        person(1, listOf("a"), name = "Adam")
+        person(2, listOf("c"))
+
+        assertEquals(2L, assign()(acct, 2L, "Ádám"))
+
+        assertEquals(setOf(1L, 2L), db.personDao().allForUser(acct).map { it.id }.toSet())
+        assertEquals("Ádám", db.personDao().personById(2)!!.displayName)
+    }
 }

@@ -94,12 +94,13 @@ class PersonPickerSearchTest {
     }
 
     @Test
-    fun `accents do not matter either way`() {
-        assertEquals(1L, named("akos"))
-        assertEquals(1L, named("AKOS"))
-        assertEquals(3L, named("jose"))
+    fun `accents matter, as on the desktop`() {
+        assertEquals(1L, named("ákos"))
+        assertEquals(1L, named("ÁKOS"))
+        assertNull(named("akos"))
+        assertNull(named("jose"))
         val plain = listOf(person(5, "Jose"))
-        assertEquals(5L, named("José", plain))
+        assertNull(named("José", plain))
     }
 
     @Test
@@ -107,7 +108,7 @@ class PersonPickerSearchTest {
         assertEquals(2L, named("  Anna  "))
         val padded = listOf(person(6, " Béla "))
         assertEquals(6L, named("Béla", padded))
-        assertEquals(6L, named("bela", padded))
+        assertEquals(6L, named("béla", padded))
     }
 
     @Test
@@ -140,16 +141,16 @@ class PersonPickerSearchTest {
     }
 
     @Test
-    fun `the exact spelling wins over a name that only matches without accents`() {
+    fun `names with other accents are other people`() {
         val list = listOf(person(20, "Ákos", photos = 90), person(21, "Akos", photos = 2))
         assertEquals(21L, named("Akos", list))
         assertEquals(20L, named("Ákos", list))
     }
 
     @Test
-    fun `among names that match only without case and accents the most photographed wins`() {
+    fun `among names that match only without case the most photographed wins`() {
         val list = listOf(person(30, "Ákos", photos = 5), person(31, "ÁKOS", photos = 12))
-        assertEquals(31L, named("akos", list))
+        assertEquals(31L, named("ákos", list))
     }
 
     @Test

@@ -68,6 +68,7 @@ import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
+import eu.akoos.photos.domain.usecase.samePersonName
 import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.theme.AppColors
 
@@ -220,8 +221,8 @@ internal object PersonPickerSearch {
 
     /**
      * The person [typed] is the name of, so committing it picks them rather than creating a second person
-     * of that name: the exact spelling first, else the name that matches once case and accents are set
-     * aside, the most photographed when several do. Null for blank text or a name nobody has. The whole
+     * of that name: the exact spelling first, else the same name by [samePersonName] (case aside, accents
+     * kept), the most photographed when several do. Null for blank text or a name nobody has. The whole
      * name has to match, and unnamed people and the Unsorted bucket never do.
      */
     fun personNamed(people: List<PersonUi>, typed: String): PersonUi? {
@@ -229,8 +230,6 @@ internal object PersonPickerSearch {
         if (name.isEmpty()) return null
         val named = people.filter { !it.isOther && !it.displayName.isNullOrBlank() }
         named.filter { it.displayName?.trim() == name }.maxByOrNull { it.faceCount }?.let { return it }
-        val folded = SearchFilter.fold(name)
-        return named.filter { SearchFilter.fold(it.displayName.orEmpty().trim()) == folded }
-            .maxByOrNull { it.faceCount }
+        return named.filter { samePersonName(it.displayName, name) }.maxByOrNull { it.faceCount }
     }
 }

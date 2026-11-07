@@ -84,7 +84,7 @@ class IgnorePeopleUseCase @Inject constructor(
         val coverDao = appDatabase.personCoverDao()
         val curationDao = appDatabase.faceCurationTimeDao()
         val attached = manualDao.photoKeysForNameList(account, name)
-        val marks = notPersonDao.allForUser(account).filter { it.personName == name }.map { it.faceId }
+        val marks = notPersonDao.allForUser(account).filter { samePersonName(it.personName, name) }.map { it.faceId }
         val hadCover = coverDao.photoKeyForName(account, name) != null
         manualDao.clearForName(account, name)
         notPersonDao.clearForName(account, name)

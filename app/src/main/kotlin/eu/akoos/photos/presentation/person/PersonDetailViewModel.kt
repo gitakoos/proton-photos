@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.person
 
+import eu.akoos.photos.domain.usecase.samePersonName
 import android.content.Context
 import android.util.Log
 import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
@@ -407,7 +408,7 @@ class PersonDetailViewModel @Inject constructor(
             val centroids = personCentroids.load(account, exactFor = personId) { it != otherId }
             val target = centroids[personId] ?: return@withContext -1L
             val rejectedFaceIds = notPersonDao.allForUser(account)
-                .filter { it.personName == name }.mapTo(HashSet()) { it.faceId }
+                .filter { samePersonName(it.personName, name) }.mapTo(HashSet()) { it.faceId }
             val ranked = rankSuggestionCandidates(
                 target, centroids, skip = setOfNotNull(personId, otherId), threshold = FACE_SUGGEST_THRESHOLD,
             )
@@ -508,7 +509,7 @@ class PersonDetailViewModel @Inject constructor(
             // person into that one (same name = same person) so a rebuild cannot silently collapse two
             // same-named rows and lose the smaller. The caller navigates away, since this person is gone.
             if (trimmed != null && personDao.namedPeopleForUser(account)
-                    .any { it.displayName == trimmed && it.id != personId }
+                    .any { samePersonName(it.displayName, trimmed) && it.id != personId }
             ) {
                 foldPersonInto(account, personId, trimmed)
                 // The fresh name attracts more of that person's faces than the fold moved; re-cluster now

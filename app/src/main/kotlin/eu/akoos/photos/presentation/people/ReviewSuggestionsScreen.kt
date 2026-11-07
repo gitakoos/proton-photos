@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.people
 
+import eu.akoos.photos.domain.usecase.samePersonName
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
@@ -274,7 +275,7 @@ fun ReviewSuggestionsScreen(
                 // Typing a name another person already holds is a merge, not a new person, so route it
                 // through the same confirm the list-pick uses; a genuinely new name commits at once.
                 val trimmed = name.trim()
-                if (trimmed.isNotEmpty() && namedPeople.any { it.displayName == trimmed }) {
+                if (trimmed.isNotEmpty() && namedPeople.any { samePersonName(it.displayName, trimmed) }) {
                     pendingBulkMerge = sel to trimmed
                 } else {
                     viewModel.bulkMerge(sel, name)

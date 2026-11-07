@@ -24,6 +24,7 @@
 
 package eu.akoos.photos.presentation.people
 
+import eu.akoos.photos.domain.usecase.samePersonName
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -134,12 +135,15 @@ class ReviewSuggestionsViewModel @Inject constructor(
      * clusters are removed.
      */
     fun bulkMerge(clusterIds: Set<Long>, rawName: String) {
-        val name = rawName.trim()
-        if (clusterIds.isEmpty() || name.isEmpty()) return
+        val typed = rawName.trim()
+        if (clusterIds.isEmpty() || typed.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-                val existing = personDao.namedPeopleForUser(account).firstOrNull { it.displayName == name }
+                // A person already of this name, also one differing only in case, takes them in under its spelling.
+                val existing = personDao.namedPeopleForUser(account).filter { samePersonName(it.displayName, typed) }
+                    .let { same -> same.firstOrNull { it.displayName?.trim() == typed } ?: same.maxByOrNull { it.faceCount } }
+                val name = existing?.displayName?.trim() ?: typed
                 val target = existing?.id
                     ?: clusterIds.maxByOrNull { faceDao.faceCountForPerson(account, it) }
                     ?: return@launch

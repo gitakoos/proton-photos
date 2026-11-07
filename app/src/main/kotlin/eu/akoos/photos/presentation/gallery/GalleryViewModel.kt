@@ -234,6 +234,7 @@ internal class UploadEndHold(
 @HiltViewModel
 class GalleryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val sameNamedPeopleMerge: eu.akoos.photos.domain.usecase.SameNamedPeopleMerge,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val cloudRepo: DrivePhotoRepository,
     private val photoStreamService: PhotoStreamService,
@@ -1167,6 +1168,8 @@ class GalleryViewModel @Inject constructor(
                     facePrefs[SettingsKeys.FACE_ENABLED] != true
                 ) return@launch
                 val userId = accountManager.getPrimaryUserId().first()
+                runCatching { sameNamedPeopleMerge.runOnce(userId?.id ?: eu.akoos.photos.data.db.entity.PhotoLocationEntity.LOCAL_USER) }
+                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
                 // Guest (no account) rescans the local partition with no battery gate; the signed-in
                 // walk reuses the refresh path's gate so a low battery defers it.
                 if (userId != null && context.isBatteryLow()) return@launch

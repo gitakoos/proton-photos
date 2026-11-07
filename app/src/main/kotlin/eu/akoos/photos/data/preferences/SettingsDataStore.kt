@@ -979,6 +979,9 @@ object SettingsKeys {
     /** The accounts whose people have had their photo counts recounted once from their faces; see FaceIndexingScheduler. */
     val FACE_COUNTS_RECOUNTED = stringSetPreferencesKey("face_counts_recounted")
 
+    /** The accounts whose people differing only in the case of their name were folded into one, once. */
+    val SAME_NAMED_PEOPLE_MERGED = stringSetPreferencesKey("same_named_people_merged")
+
     /**
      * When true, the face and photo-search scans run only while the phone is on external power. Absent
      * (the default) reads as OFF, so the scans run on battery as before, under the usual battery,
