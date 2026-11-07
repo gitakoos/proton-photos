@@ -2592,7 +2592,7 @@
     <string name="whats_new_260_freeupcheck_title">Libérer de l\'espace, vérifié deux fois</string>
     <string name="whats_new_260_freeupcheck_body">Libérer vérifie les copies de l\'appareil auprès de Drive par petits groupes juste avant de les supprimer, et demande dans plusieurs fenêtres du système quand plus de 2 000 photos en ont besoin.</string>
     <string name="whats_new_260_removedstays_title">Les photos retirées le restent</string>
-    <string name="whats_new_260_removedstays_body">Une photo dont vous avez mis la copie Drive à la corbeille, ici, sur un autre appareil ou sur le web, n\'est plus envoyée à nouveau depuis ce téléphone.</string>
+    <string name="whats_new_260_removedstays_body">Une photo dont vous avez mis la copie Drive à la corbeille, ici, sur un autre appareil ou sur le web, n\'est plus renvoyée par la sauvegarde automatique.</string>
     <string name="whats_new_260_peoplepics_title">Images et affichage des personnes</string>
     <string name="whats_new_260_peoplepics_body">Les images des visages sur la page Personnes et dans « Qui est-ce ? » ne restent plus sombres sur les grandes bibliothèques, et la page Personnes peut suivre l\'affichage de l\'onglet Albums ou garder sa propre grille ou liste.</string>
     <string name="whats_new_260_desktopsync_title">Avec l\'app de bureau</string>

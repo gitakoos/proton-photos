@@ -2614,7 +2614,7 @@
     <string name="whats_new_260_freeupcheck_title">Ruimte vrijmaken, dubbel gecontroleerd</string>
     <string name="whats_new_260_freeupcheck_body">Vrijmaken controleert apparaatkopieën in kleine groepjes vlak voor het wissen bij Drive, en vraagt in meerdere systeemvensters om toestemming als het om meer dan 2.000 foto\'s gaat.</string>
     <string name="whats_new_260_removedstays_title">Verwijderde foto\'s blijven weg</string>
-    <string name="whats_new_260_removedstays_body">Een foto waarvan je de Drive-kopie naar de prullenbak verplaatst, hier, op een ander apparaat of op het web, wordt niet meer opnieuw geüpload vanaf deze telefoon.</string>
+    <string name="whats_new_260_removedstays_body">Een foto waarvan je de Drive-kopie naar de prullenbak verplaatst, hier, op een ander apparaat of op het web, wordt niet meer opnieuw geüpload door de automatische back-up.</string>
     <string name="whats_new_260_peoplepics_title">Gezichten en weergave van personen</string>
     <string name="whats_new_260_peoplepics_body">Gezichtsfoto\'s op de pagina Personen en in “Wie is dit?” blijven bij grote bibliotheken niet meer donker, en de pagina Personen kan de weergave van het tabblad Albums volgen of een eigen raster of lijst hebben.</string>
     <string name="whats_new_260_desktopsync_title">Werkt met de desktop-app</string>

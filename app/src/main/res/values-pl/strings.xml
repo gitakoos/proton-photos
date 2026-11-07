@@ -2721,7 +2721,7 @@
     <string name="whats_new_260_freeupcheck_title">Zwalnianie miejsca z podwójnym sprawdzeniem</string>
     <string name="whats_new_260_freeupcheck_body">Zwalnianie sprawdza kopie na urządzeniu z Drive małymi grupami tuż przed ich usunięciem i prosi w kilku oknach systemowych, gdy zgody potrzebuje ponad 2000 zdjęć.</string>
     <string name="whats_new_260_removedstays_title">Usunięte zdjęcia nie wracają</string>
-    <string name="whats_new_260_removedstays_body">Zdjęcie, którego kopię na Dysku przeniesiesz do kosza, tutaj, na innym urządzeniu lub w przeglądarce, nie jest już ponownie przesyłane z tego telefonu.</string>
+    <string name="whats_new_260_removedstays_body">Zdjęcie, którego kopię na Dysku przeniesiesz do kosza, tutaj, na innym urządzeniu lub w przeglądarce, nie jest już ponownie przesyłane przez automatyczną kopię.</string>
     <string name="whats_new_260_peoplepics_title">Zdjęcia i widok osób</string>
     <string name="whats_new_260_peoplepics_body">Zdjęcia twarzy na stronie Osoby i w „Kto to jest?” nie zostają już ciemne w dużych bibliotekach, a strona Osoby może przejąć widok karty Albumy albo mieć własną siatkę lub listę.</string>
     <string name="whats_new_260_desktopsync_title">Razem z aplikacją na komputer</string>

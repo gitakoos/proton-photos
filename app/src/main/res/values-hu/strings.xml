@@ -2589,7 +2589,7 @@
     <string name="whats_new_260_freeupcheck_title">Helyfelszabadítás dupla ellenőrzéssel</string>
     <string name="whats_new_260_freeupcheck_body">A helyfelszabadítás kis csoportokban, közvetlenül a törlés előtt ellenőrzi a Drive-on az eszközön lévő másolatokat, és ha több mint 2000 fotóhoz kell rendszerengedély, több ablakban kéri.</string>
     <string name="whats_new_260_removedstays_title">A törölt fotók nem jönnek vissza</string>
-    <string name="whats_new_260_removedstays_body">Ha egy fotó Drive-os példányát a kukába teszed, itt, egy másik eszközön vagy a weben, a telefon már nem tölti fel újra.</string>
+    <string name="whats_new_260_removedstays_body">Ha egy fotó Drive-os példányát a kukába teszed, itt, egy másik eszközön vagy a weben, az automatikus mentés már nem tölti fel újra.</string>
     <string name="whats_new_260_peoplepics_title">Arcképek és elrendezés</string>
     <string name="whats_new_260_peoplepics_body">Az Emberek oldalon és a „Ki ez?” ablakban az arcképek nagy könyvtáraknál már nem maradnak sötétek, és az Emberek oldal követheti az Albumok lap nézetét, vagy saját rácsot vagy listát kaphat.</string>
     <string name="whats_new_260_desktopsync_title">Együtt a gépes appal</string>

@@ -2721,7 +2721,7 @@
     <string name="whats_new_260_freeupcheck_title">Sproščanje prostora z dvojnim preverjanjem</string>
     <string name="whats_new_260_freeupcheck_body">Sproščanje preveri kopije v napravi z Drive v majhnih skupinah tik pred brisanjem in vpraša v več sistemskih oknih, kadar dovoljenje potrebuje več kot 2000 fotografij.</string>
     <string name="whats_new_260_removedstays_title">Odstranjene fotografije ostanejo odstranjene</string>
-    <string name="whats_new_260_removedstays_body">Fotografija, katere kopijo na Drive premaknete v koš, tukaj, na drugi napravi ali na spletu, se iz tega telefona ne naloži več znova.</string>
+    <string name="whats_new_260_removedstays_body">Fotografija, katere kopijo na Drive premaknete v koš, tukaj, na drugi napravi ali na spletu, samodejna varnostna kopija ne naloži več znova.</string>
     <string name="whats_new_260_peoplepics_title">Slike in postavitev oseb</string>
     <string name="whats_new_260_peoplepics_body">Slike obrazov na strani Osebe in v „Kdo je to?“ pri velikih knjižnicah ne ostanejo več temne, stran Osebe pa lahko sledi pogledu zavihka Albumi ali ima svojo mrežo ali seznam.</string>
     <string name="whats_new_260_desktopsync_title">Deluje z namizno aplikacijo</string>

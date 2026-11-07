@@ -2627,7 +2627,7 @@
     <string name="whats_new_260_freeupcheck_title">Liberar espacio, con doble comprobación</string>
     <string name="whats_new_260_freeupcheck_body">Liberar comprueba las copias del dispositivo con Drive en pequeños grupos justo antes de borrarlas, y pide permiso en varios diálogos del sistema cuando hay más de 2000 fotos.</string>
     <string name="whats_new_260_removedstays_title">Las fotos quitadas no vuelven</string>
-    <string name="whats_new_260_removedstays_body">Una foto cuya copia de Drive mueves a la papelera, aquí, en otro dispositivo o en la web, ya no se vuelve a subir desde este teléfono.</string>
+    <string name="whats_new_260_removedstays_body">Una foto cuya copia de Drive mueves a la papelera, aquí, en otro dispositivo o en la web, la copia automática ya no la vuelve a subir.</string>
     <string name="whats_new_260_peoplepics_title">Caras y vista de Personas</string>
     <string name="whats_new_260_peoplepics_body">Las fotos de caras en la página Personas y en “¿Quién es?” ya no se quedan oscuras en bibliotecas grandes, y la página Personas puede seguir la vista de la pestaña Álbumes o tener su propia cuadrícula o lista.</string>
     <string name="whats_new_260_desktopsync_title">Funciona con la app de escritorio</string>

@@ -2728,7 +2728,7 @@
     <string name="whats_new_260_freeupcheck_title">Uvoľnenie miesta s dvojitou kontrolou</string>
     <string name="whats_new_260_freeupcheck_body">Uvoľnenie miesta overuje kópie v zariadení voči Drive po malých skupinách tesne pred vymazaním, a ak systémové potvrdenie potrebuje viac ako 2 000 fotiek, opýta sa v niekoľkých dialógoch.</string>
     <string name="whats_new_260_removedstays_title">Odstránené fotky zostanú odstránené</string>
-    <string name="whats_new_260_removedstays_body">Fotka, ktorej kópiu na Disku presuniete do koša, tu, na inom zariadení alebo na webe, sa už z tohto telefónu znova nenahrá.</string>
+    <string name="whats_new_260_removedstays_body">Fotka, ktorej kópiu na Disku presuniete do koša, tu, na inom zariadení alebo na webe, automatická záloha už znova nenahrá.</string>
     <string name="whats_new_260_peoplepics_title">Obrázky a rozloženie ľudí</string>
     <string name="whats_new_260_peoplepics_body">Obrázky tvárí na stránke Ľudia a v „Kto je to?“ už pri veľkých knižniciach nezostávajú tmavé a stránka Ľudia sa môže riadiť zobrazením karty Albumy, alebo mať vlastnú mriežku či zoznam.</string>
     <string name="whats_new_260_desktopsync_title">Spolupráca s aplikáciou pre počítač</string>

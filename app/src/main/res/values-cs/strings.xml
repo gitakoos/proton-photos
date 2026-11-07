@@ -2727,7 +2727,7 @@
     <string name="whats_new_260_freeupcheck_title">Uvolnění místa s dvojí kontrolou</string>
     <string name="whats_new_260_freeupcheck_body">Uvolnění místa ověřuje kopie v zařízení proti Drive po malých skupinách těsně před smazáním, a pokud systémové potvrzení potřebuje víc než 2 000 fotek, zeptá se v několika dialozích.</string>
     <string name="whats_new_260_removedstays_title">Smazané fotky zůstanou smazané</string>
-    <string name="whats_new_260_removedstays_body">Fotka, jejíž kopii na Disku jste přesunuli do koše, zde, na jiném zařízení nebo na webu, se z tohoto telefonu znovu nenahraje.</string>
+    <string name="whats_new_260_removedstays_body">Fotka, jejíž kopii na Disku jste přesunuli do koše, zde, na jiném zařízení nebo na webu, automatická záloha už znovu nenahraje.</string>
     <string name="whats_new_260_peoplepics_title">Obrázky a rozložení lidí</string>
     <string name="whats_new_260_peoplepics_body">Obrázky obličejů na stránce Lidé a v „Kdo to je?“ už u velkých knihoven nezůstávají tmavé a stránka Lidé se může řídit zobrazením karty Alba, nebo mít vlastní mřížku či seznam.</string>
     <string name="whats_new_260_desktopsync_title">Spolupráce s aplikací pro počítač</string>

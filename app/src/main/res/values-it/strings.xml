@@ -2629,7 +2629,7 @@
     <string name="whats_new_260_freeupcheck_title">Liberare spazio, con doppio controllo</string>
     <string name="whats_new_260_freeupcheck_body">Libera controlla le copie sul dispositivo con Drive a piccoli gruppi subito prima di eliminarle, e chiede in più finestre di sistema quando le foto sono più di 2.000.</string>
     <string name="whats_new_260_removedstays_title">Le foto rimosse restano rimosse</string>
-    <string name="whats_new_260_removedstays_body">Una foto la cui copia su Drive sposti nel cestino, qui, su un altro dispositivo o sul web, non viene più caricata di nuovo da questo telefono.</string>
+    <string name="whats_new_260_removedstays_body">Una foto la cui copia su Drive sposti nel cestino, qui, su un altro dispositivo o sul web, non viene più ricaricata dal backup automatico.</string>
     <string name="whats_new_260_peoplepics_title">Immagini e vista delle persone</string>
     <string name="whats_new_260_peoplepics_body">Le immagini dei volti nella pagina Persone e in “Chi è?” non restano più scure nelle librerie grandi, e la pagina Persone può seguire la vista della scheda Album o avere una griglia o un elenco tutti suoi.</string>
     <string name="whats_new_260_desktopsync_title">Insieme all\'app desktop</string>

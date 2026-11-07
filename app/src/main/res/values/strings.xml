@@ -2627,7 +2627,7 @@
     <string name="whats_new_260_freeupcheck_title">Freeing up space, double-checked</string>
     <string name="whats_new_260_freeupcheck_body">Free up checks device copies against Drive a few at a time right before deleting them, and asks in several system dialogs when more than 2,000 photos need one.</string>
     <string name="whats_new_260_removedstays_title">Removed photos stay removed</string>
-    <string name="whats_new_260_removedstays_body">A photo whose Drive copy you moved to the trash, here, on another device or on the web, is no longer uploaded again from this phone.</string>
+    <string name="whats_new_260_removedstays_body">A photo whose Drive copy you moved to the trash, here, on another device or on the web, is no longer uploaded again by the automatic backup.</string>
     <string name="whats_new_260_peoplepics_title">People pictures and layout</string>
     <string name="whats_new_260_peoplepics_body">Face pictures on the People page and in “Who is this?” no longer stay dark on big libraries, and the People page can follow the Albums tab\'s layout or keep its own grid or list.</string>
     <string name="whats_new_260_desktopsync_title">Works with the desktop app</string>

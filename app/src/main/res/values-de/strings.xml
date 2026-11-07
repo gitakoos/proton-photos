@@ -2590,7 +2590,7 @@
     <string name="whats_new_260_freeupcheck_title">Speicher freigeben, doppelt geprüft</string>
     <string name="whats_new_260_freeupcheck_body">Freigeben prüft Gerätekopien in kleinen Gruppen direkt vor dem Löschen gegen Drive und fragt bei mehr als 2.000 Fotos in mehreren Systemdialogen nach.</string>
     <string name="whats_new_260_removedstays_title">Entfernte Fotos bleiben entfernt</string>
-    <string name="whats_new_260_removedstays_body">Ein Foto, dessen Drive-Kopie du hier, auf einem anderen Gerät oder im Web in den Papierkorb verschoben hast, wird von diesem Telefon nicht erneut hochgeladen.</string>
+    <string name="whats_new_260_removedstays_body">Ein Foto, dessen Drive-Kopie du hier, auf einem anderen Gerät oder im Web in den Papierkorb verschoben hast, wird von der automatischen Sicherung nicht erneut hochgeladen.</string>
     <string name="whats_new_260_peoplepics_title">Personenbilder und Ansicht</string>
     <string name="whats_new_260_peoplepics_body">Gesichtsbilder auf der Seite „Personen“ und in „Wer ist das?“ bleiben bei großen Bibliotheken nicht mehr dunkel, und die Seite „Personen“ kann der Ansicht des Alben-Tabs folgen oder ein eigenes Raster oder eine Liste haben.</string>
     <string name="whats_new_260_desktopsync_title">Zusammen mit der Desktop-App</string>

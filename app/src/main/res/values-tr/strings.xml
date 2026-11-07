@@ -2507,7 +2507,7 @@
     <string name="whats_new_260_freeupcheck_title">Yer açma, iki kez kontrol</string>
     <string name="whats_new_260_freeupcheck_body">Yer aç, cihazdaki kopyaları silmeden hemen önce küçük gruplar halinde Drive\'a karşı kontrol eder ve 2.000\'den fazla fotoğraf izin gerektirdiğinde birkaç sistem penceresinde sorar.</string>
     <string name="whats_new_260_removedstays_title">Kaldırılan fotoğraflar geri gelmez</string>
-    <string name="whats_new_260_removedstays_body">Drive kopyasını burada, başka bir cihazda veya web\'de çöp kutusuna taşıdığınız bir fotoğraf artık bu telefondan yeniden yüklenmez.</string>
+    <string name="whats_new_260_removedstays_body">Drive kopyasını burada, başka bir cihazda veya web\'de çöp kutusuna taşıdığınız bir fotoğraf artık otomatik yedekleme tarafından yeniden yüklenmez.</string>
     <string name="whats_new_260_peoplepics_title">Kişi resimleri ve düzen</string>
     <string name="whats_new_260_peoplepics_body">Kişiler sayfasındaki ve “Bu kim?” penceresindeki yüz resimleri büyük kitaplıklarda artık karanlık kalmaz ve Kişiler sayfası Albümler sekmesinin görünümünü izleyebilir ya da kendi ızgarasını veya listesini kullanabilir.</string>
     <string name="whats_new_260_desktopsync_title">Masaüstü uygulamasıyla birlikte</string>
