@@ -96,6 +96,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.Text
 import eu.akoos.photos.presentation.common.AppModalSheet
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
 import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.PersonTile
@@ -665,7 +666,7 @@ fun SearchScreen(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.glassSource(glass).fillMaxSize(),
                     contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = pickBottom),
                 ) {
                     if (people.isNotEmpty()) {
@@ -706,6 +707,7 @@ fun SearchScreen(
             LazyColumn(
                 state = idleListState,
                 modifier = Modifier
+                    .glassSource(glass)
                     .fillMaxSize()
                     .navigationBarsPadding(),
                 contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = 24.dp),
@@ -930,6 +932,8 @@ fun SearchScreen(
       // The whole thing slides away on a downward scroll and returns on scroll up / stop, like the
       // timeline chrome. Its measured height feeds `headerPad` above so the first row clears it; the
       // height sticks while hidden, so the content padding does not jump as the header slides.
+      // The header's pills frost whatever list is under them: the idle page, the picker's or the results.
+      CompositionLocalProvider(LocalGlassBackdrop provides glass) {
       AnimatedVisibility(
         // While the field is focused the header stays mounted, so a results-driven scroll does not
         // dispose the text field mid-typing and drop the keyboard; hide-on-scroll still applies otherwise.
@@ -1028,6 +1032,7 @@ fun SearchScreen(
             // tucking right under it, and the scrim keeps a soft tail.
             Spacer(modifier = Modifier.height(10.dp))
         }
+      }
       }
 
         // The filter button floats at the bottom right, so the field above can run the full width. It takes
