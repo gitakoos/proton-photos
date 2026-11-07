@@ -438,6 +438,29 @@ class GalleryViewModel @Inject constructor(
         observePeople()
         resumeFaceIndexingOnLaunch()
         resumeSemanticIndexingOnLaunch()
+        scanNewPhotosAsTheyArrive()
+    }
+
+    /**
+     * Starts the face and photo-search scans when photos arrive while the app is running (taken, saved,
+     * or come in from another device), once the library has stayed as it is for a moment, so a new photo
+     * joins People and search without a restart or a pull. Same switches and battery gate as at start-up;
+     * a scan already running takes them in on its own.
+     */
+    private fun scanNewPhotosAsTheyArrive() {
+        viewModelScope.launch(Dispatchers.Default) {
+            var seen: LibraryMark? = null
+            var owed = false
+            _uiState.map { libraryMarkOf(it.items) }.distinctUntilChanged().collectLatest { mark ->
+                if (libraryGained(seen, mark)) owed = true
+                seen = mark
+                if (!owed) return@collectLatest
+                delay(NEW_PHOTOS_SCAN_DELAY_MS)
+                owed = false
+                resumeFaceIndexingOnLaunch()
+                resumeSemanticIndexingOnLaunch()
+            }
+        }
     }
 
     /**
