@@ -23,6 +23,13 @@
 package eu.akoos.photos.presentation.whatsnew
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Checklist
@@ -256,7 +263,9 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
             WhatsNewFeature(Icons.Default.SaveAlt, R.string.whats_new_260_sharebackup_title, R.string.whats_new_260_sharebackup_body),
             WhatsNewFeature(Icons.Default.SwapVert, R.string.whats_new_260_foldermove_title, R.string.whats_new_260_foldermove_body),
             WhatsNewFeature(Icons.Default.CloudDownload, R.string.whats_new_260_drivecopies_title, R.string.whats_new_260_drivecopies_body),
+            WhatsNewFeature(Icons.Default.Computer, R.string.whats_new_260_desktopsync_title, R.string.whats_new_260_desktopsync_body),
             WhatsNewFeature(Icons.Default.Palette, R.string.whats_new_260_glass_title, R.string.whats_new_260_glass_body),
+            WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_facefix_title, R.string.whats_new_260_facefix_body),
             WhatsNewFeature(Icons.Default.Edit, R.string.whats_new_260_detailsheet_title, R.string.whats_new_260_detailsheet_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Today, R.string.whats_new_260_multiedit_title, R.string.whats_new_260_multiedit_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_personmonths_title, R.string.whats_new_260_personmonths_body, WhatsNewCategory.Improved),
@@ -266,6 +275,14 @@ internal val WhatsNewReleases: List<WhatsNewRelease> = listOf(
             WhatsNewFeature(Icons.Default.CleaningServices, R.string.whats_new_260_freeupcheck_title, R.string.whats_new_260_freeupcheck_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.CloudOff, R.string.whats_new_260_removedstays_title, R.string.whats_new_260_removedstays_body, WhatsNewCategory.Improved),
             WhatsNewFeature(Icons.Default.Face, R.string.whats_new_260_peoplepics_title, R.string.whats_new_260_peoplepics_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Speed, R.string.whats_new_260_coldstart_title, R.string.whats_new_260_coldstart_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.AddAPhoto, R.string.whats_new_260_newphotos_title, R.string.whats_new_260_newphotos_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Shield, R.string.whats_new_260_namessafe_title, R.string.whats_new_260_namessafe_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Badge, R.string.whats_new_260_namecase_title, R.string.whats_new_260_namecase_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Favorite, R.string.whats_new_260_favsync_title, R.string.whats_new_260_favsync_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Today, R.string.whats_new_260_copydate_title, R.string.whats_new_260_copydate_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Widgets, R.string.whats_new_260_widgetopen_title, R.string.whats_new_260_widgetopen_body, WhatsNewCategory.Improved),
+            WhatsNewFeature(Icons.Default.Build, R.string.whats_new_260_smallfixes_title, R.string.whats_new_260_smallfixes_body, WhatsNewCategory.Improved),
         ),
     ),
     // 2.5.0 STABLE: the whole release since 2.4.0, consolidated to its main features so someone
