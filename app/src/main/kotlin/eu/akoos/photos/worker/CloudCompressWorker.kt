@@ -118,20 +118,32 @@ class CloudCompressWorker @AssistedInject constructor(
         val saved = AtomicLong(0)
         val kept = AtomicBoolean(false)
         var total = dao.count()
+        // Started in the background (the system brought the job back after the app was stopped), the
+        // run may not go to the foreground: its progress and Cancel are then posted as a plain
+        // notification, so it is never left running out of sight.
+        var plainNotification = false
         runCatching { setForeground(foregroundInfo(0, total, null)) }
-            .onFailure { Log.w(TAG, "setForeground failed: ${it.message}") }
+            .onFailure {
+                Log.w(TAG, "setForeground failed: ${it.message}")
+                plainNotification = true
+            }
         // Listed on the Activity screen beside the uploads, where Cancel does what the notification's does.
         val transferId = transferCenter.start(
             TransferCenter.Kind.UPLOAD,
             total = total,
             name = context.getString(R.string.cloud_compress_title),
             onCancel = { queue.cancel() },
+            // A Cancel lets the photos being compressed finish, so the row shows them to the end.
+            cancelFinishesRunning = true,
         )
 
         fun publish(fraction: Float?) {
-            runCatching { setForegroundAsync(foregroundInfo(done.get(), total, fraction)) }
+            val info = foregroundInfo(done.get(), total, fraction)
+            runCatching { setForegroundAsync(info) }
+            if (plainNotification) postPlain(info)
             runCatching { transferCenter.progress(transferId, done.get()) }
         }
+        if (plainNotification) postPlain(foregroundInfo(0, total, null))
 
         suspend fun advance() {
             done.incrementAndGet()
@@ -316,6 +328,14 @@ class CloudCompressWorker @AssistedInject constructor(
         } else {
             ForegroundInfo(NotificationIds.CLOUD_COMPRESS, notification)
         }
+    }
+
+    /** The progress notification posted on its own, where the run could not go to the foreground. */
+    private fun postPlain(info: ForegroundInfo) {
+        val allowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (!allowed) return
+        runCatching { NotificationManagerCompat.from(context).notify(info.notificationId, info.notification) }
     }
 
     /** What the run did, left in the shade once the progress post is gone. */
