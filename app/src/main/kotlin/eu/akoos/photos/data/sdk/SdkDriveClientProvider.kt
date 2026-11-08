@@ -29,13 +29,16 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import java.util.Collections
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,6 +79,12 @@ class SdkClientClosedException : IllegalStateException("Drive client closed")
  * never frees a native client under a call: [close] refuses the account from then on, and [remove] waits
  * for the calls still running before it closes each client, or leaves the close to the last of them.
  *
+ * They also hold the calling coroutine for the length of the call ([waitingCallers]). The SDK's native side
+ * keeps a pending request only as a weak reference, and the request and the coroutine waiting on it point
+ * only at each other, so a caller nothing else holds (a background worker) could be collected mid-request,
+ * leaving the response with no request to land on. Held here, the request stays reachable through the
+ * caller's job until the call returns.
+ *
  * The SDK's native library loads the first time [ProtonDriveSdk] is touched, which happens only in
  * [create] and only once [SdkGate] has cleared the device. Injecting this provider never loads it.
  */
@@ -92,6 +101,9 @@ class SdkDriveClientProvider @Inject constructor(
 ) {
     private val mutex = Mutex()
     private val clients = mutableMapOf<Pair<UserId, ClientKind>, HeldClient>()
+
+    /** The jobs of the calls running right now, one entry per call, so their pending requests stay reachable. */
+    private val waitingCallers: MutableList<Job> = Collections.synchronizedList(mutableListOf())
 
     /** The accounts whose client is closed, each with the session it was closed under, null when it had none. */
     private val closed = mutableMapOf<UserId, String?>()
@@ -111,9 +123,12 @@ class SdkDriveClientProvider @Inject constructor(
     private suspend fun <T> withHeld(userId: UserId, kind: ClientKind, block: suspend (ProtonSdkClient) -> T): T? {
         if (!sdkGate.isCapable) return null
         val held = getOrCreate(userId, kind)
+        val caller = currentCoroutineContext()[Job]
+        caller?.let { waitingCallers.add(it) }
         try {
             return block(held.client)
         } finally {
+            caller?.let { waitingCallers.remove(it) }
             withContext(NonCancellable) { release(held) }
         }
     }
@@ -238,6 +253,22 @@ class SdkDriveClientProvider @Inject constructor(
     } catch (e: Exception) {
         Log.w(TAG, "session unreadable: ${e.javaClass.simpleName}")
         null
+    }
+
+    /**
+     * Drops [userId]'s clients without closing the account, so the next call makes fresh ones. For a client that
+     * keeps failing with no answer from the network at all: one made in the moment right after a sign-in, before the
+     * session was whole, stays that way until it is replaced. Calls still running keep their client, which the last
+     * of them closes.
+     */
+    suspend fun recycle(userId: UserId) {
+        val retired = mutex.withLock {
+            ClientKind.entries.mapNotNull { kind ->
+                val held = clients.remove(userId to kind) ?: return@mapNotNull null
+                held to held.lease.retire()
+            }
+        }
+        for ((held, closeNow) in retired) if (closeNow) shutDown(held)
     }
 
     /**

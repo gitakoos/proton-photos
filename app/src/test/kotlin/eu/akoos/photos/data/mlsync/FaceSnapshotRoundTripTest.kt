@@ -32,19 +32,25 @@ import eu.akoos.photos.data.crypto.AddressSigningKey
 import eu.akoos.photos.data.crypto.DriveCryptoHelper
 import eu.akoos.photos.data.crypto.VerifiedBytes
 import eu.akoos.photos.data.db.AppDatabase
+import eu.akoos.photos.data.db.entity.AlbumPhotoMembershipEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.FaceScanEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
+import eu.akoos.photos.data.db.entity.PersonNameStateEntity
+import eu.akoos.photos.data.db.entity.SyncStateEntity
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachData
+import eu.akoos.photos.data.face.FaceCurationLog
 import eu.akoos.photos.data.face.FaceReattachSnapshot
+import eu.akoos.photos.data.face.PersonNameLog
 import eu.akoos.photos.data.face.ReattachBox
 import eu.akoos.photos.data.face.ReattachManual
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_INDEX_VERSION_V3
@@ -361,7 +367,10 @@ class FaceSnapshotRoundTripTest {
         // Only the photo this device had not scanned brought rows.
         assertEquals(setOf("linkA#0", "linkB#3", "linkC#1", "linkG#0"), merged.keys)
         assertEquals("Ally", merged.getValue("linkA#0").manualName)
-        assertEquals("Alice", merged.getValue("linkB#3").manualName)
+        // The source only grouped linkB#0 under Alice: the local twin joins Alice, unconfirmed, so a regroup can
+        // still correct an automatic grouping.
+        assertNull(merged.getValue("linkB#3").manualName)
+        assertEquals(namedPeople().getValue("Alice"), merged.getValue("linkB#3").personId)
         assertNull(merged.getValue("linkC#1").manualName)
         assertSameFace(faces(source).getValue("linkG#0"), merged.getValue("linkG#0"))
         val carol = target.personDao().allForUser(ACCOUNT).single { it.displayName == "Carol" }
@@ -377,6 +386,183 @@ class FaceSnapshotRoundTripTest {
         )
         assertEquals(setOf("Alice" to "linkX"), covers())
         assertEquals(setOf("Alice" to "linkE"), manualPhotos())
+    }
+
+    /** The target holding "Ally" with its first face confirmed under that name, named at [allyNamedAt]. */
+    private suspend fun seedAllyOnTarget(allyNamedAt: Long) {
+        target.personDao().upsert(PersonEntity(id = 10, userId = ACCOUNT, displayName = "Ally", faceCount = 1))
+        target.faceDao().upsert(
+            listOf(face("linkA#0", "linkA", 0.10f, 0.10f, 0.30f, 0.40f, seed = 21, personId = 10, manualName = "Ally")),
+        )
+        target.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkA")))
+        target.personCoverDao().set(PersonCoverEntity(ACCOUNT, "Ally", "linkA"))
+        target.personNameDao().setState(PersonNameStateEntity(ACCOUNT, "Ally", allyNamedAt))
+    }
+
+    private suspend fun namedPeople(db: AppDatabase = target): Map<String, Long> =
+        db.personDao().namedPeopleForUser(ACCOUNT).associate { it.displayName!! to it.id }
+
+    @Test
+    fun `a rename made on the other device after this one named the person reaches it, curation following`() = runTest {
+        seedSource()
+        PersonNameLog.renamed(source.personNameDao(), ACCOUNT, "Ally", "Alice", 200L)
+        seedAllyOnTarget(allyNamedAt = 100L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        val people = namedPeople()
+        assertEquals(setOf("Alice", "Carol"), people.keys)
+        // The person kept here is renamed, not replaced, and the faces the source adds join it.
+        assertEquals(10L, people.getValue("Alice"))
+        val merged = faces()
+        assertEquals("Alice", merged.getValue("linkA#0").manualName)
+        assertEquals(10L, merged.getValue("linkB#0").personId)
+        // The cover chosen here follows the rename and outranks the one the copy brings.
+        assertEquals(setOf("Alice" to "linkA"), covers())
+        // Kept here as well, so this device's next copy hands the rename on.
+        assertEquals(200L, target.personNameDao().namedAt(ACCOUNT, "Alice"))
+        assertNull(target.personNameDao().namedAt(ACCOUNT, "Ally"))
+        assertEquals(
+            listOf(Triple("Ally", "Alice", 200L)),
+            target.personNameDao().recentChanges(ACCOUNT, 10).map { Triple(it.fromName, it.toName, it.changedAt) },
+        )
+    }
+
+    @Test
+    fun `a name given here after the other device's rename stays`() = runTest {
+        seedSource()
+        PersonNameLog.renamed(source.personNameDao(), ACCOUNT, "Ally", "Alice", 200L)
+        seedAllyOnTarget(allyNamedAt = 300L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertEquals(10L, namedPeople().getValue("Ally"))
+        assertEquals("Ally", faces().getValue("linkA#0").manualName)
+        assertEquals(300L, target.personNameDao().namedAt(ACCOUNT, "Ally"))
+    }
+
+    @Test
+    fun `a merge made on the other device folds the person into the one already holding the name`() = runTest {
+        seedSource()
+        PersonNameLog.renamed(source.personNameDao(), ACCOUNT, "Ally", "Alice", 200L)
+        seedAllyOnTarget(allyNamedAt = 100L)
+        target.personDao().upsert(PersonEntity(id = 12, userId = ACCOUNT, displayName = "Alice", faceCount = 1))
+        target.faceDao().upsert(
+            listOf(face("linkC#1", "linkC", 0.20f, 0.20f, 0.40f, 0.50f, seed = 23, personId = 12, manualName = "Alice")),
+        )
+        target.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkC")))
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        val people = namedPeople()
+        assertFalse("Ally" in people)
+        assertEquals(12L, people.getValue("Alice"))
+        val merged = faces()
+        assertEquals(12L, merged.getValue("linkA#0").personId)
+        assertEquals("Alice", merged.getValue("linkA#0").manualName)
+    }
+
+    @Test
+    fun `a rename or merge made here is written into this device's copy for the others`() = runTest {
+        seedSource()
+        PersonNameLog.named(source.personNameDao(), ACCOUNT, "Carol", 50L)
+        PersonNameLog.renamed(source.personNameDao(), ACCOUNT, "Ally", "Alice", 200L)
+        val out = ByteArrayOutputStream()
+        FaceSnapshotExporter(context, source, sealing()).writePlaintext(user, out, FaceSnapshotOrigin(
+            device = FaceSnapshotDevice(DEVICE_ID, "Test phone"),
+            createdAtMillis = 1L,
+            faceModelVersion = FACE_MODEL_VERSION,
+            faceModelSha256 = FaceModelAssets.EMBED_MODEL.sha256,
+            clusterParamsVersion = FACE_CLUSTER_PARAMS_VERSION,
+        ))
+        val records = MlSnapshotReader(ByteArrayInputStream(out.toByteArray())).asSequence().toList()
+
+        val people = records.filterIsInstance<MlSnapshotRecord.Person>().associate { it.name to it.namedAtMillis }
+        assertEquals(200L, people["Alice"])
+        assertEquals(50L, people["Carol"])
+        assertEquals(
+            listOf(MlSnapshotRecord.NameChange("Ally", "Alice", 200L)),
+            records.filterIsInstance<MlSnapshotRecord.NameChange>(),
+        )
+    }
+
+    @Test
+    fun `a name taken off on the other device after it was given here is taken off here too`() = runTest {
+        seedSource()
+        PersonNameLog.unnamed(source.personNameDao(), ACCOUNT, "Ally", 200L)
+        seedAllyOnTarget(allyNamedAt = 100L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertFalse("Ally" in namedPeople())
+        // The face loses the name taken off; the copy, which names it Alice, then fills the gap.
+        assertEquals("Alice", faces().getValue("linkA#0").manualName)
+        assertNull(target.personNameDao().namedAt(ACCOUNT, "Ally"))
+    }
+
+    @Test
+    fun `the later cover wins, here or there`() = runTest {
+        seedSource()
+        FaceCurationLog.cover(source.faceCurationTimeDao(), ACCOUNT, "Alice", removed = false, 200L)
+        target.personCoverDao().set(PersonCoverEntity(ACCOUNT, "Alice", "linkX"))
+        FaceCurationLog.cover(target.faceCurationTimeDao(), ACCOUNT, "Alice", removed = false, 100L)
+
+        import(export(), FaceSnapshotMode.Merge)
+        assertEquals(setOf("Alice" to "linkB"), covers())
+
+        // A cover picked here after the one the copy brings stays.
+        target.personCoverDao().set(PersonCoverEntity(ACCOUNT, "Alice", "linkX"))
+        FaceCurationLog.cover(target.faceCurationTimeDao(), ACCOUNT, "Alice", removed = false, 300L)
+        import(export(), FaceSnapshotMode.Merge)
+        assertEquals(setOf("Alice" to "linkX"), covers())
+    }
+
+    @Test
+    fun `a photo taken off a person or a mark taken back on the other device goes here too`() = runTest {
+        seedSource()
+        target.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(ACCOUNT, "Alice", "linkE")))
+        FaceCurationLog.manualPhotos(target.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkE"), removed = false, 100L)
+        target.notPersonDao().add(listOf(NotPersonEntity(ACCOUNT, "Bob", "linkA#0")))
+        FaceCurationLog.notPerson(target.faceCurationTimeDao(), ACCOUNT, "Bob", listOf("linkA#0"), removed = false, 100L)
+        source.personManualPhotoDao().remove(ACCOUNT, "Alice", listOf("linkE"))
+        FaceCurationLog.manualPhotos(source.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkE"), removed = true, 200L)
+        source.notPersonDao().deleteMark(ACCOUNT, "Bob", "linkA#0")
+        FaceCurationLog.notPerson(source.faceCurationTimeDao(), ACCOUNT, "Bob", listOf("linkA#0"), removed = true, 200L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertFalse("Alice" to "linkE" in manualPhotos())
+        assertFalse("Bob" to "linkA#0" in notPersons())
+    }
+
+    @Test
+    fun `a photo taken off a named person on the other device leaves them here, though this device confirmed it`() = runTest {
+        seedSource()
+        source.notPersonDao().add(listOf(NotPersonEntity(ACCOUNT, "Alice", "linkA#0")))
+        FaceCurationLog.notPerson(source.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkA#0"), removed = false, 200L)
+        target.personDao().upsert(PersonEntity(id = 10, userId = ACCOUNT, displayName = "Alice", faceCount = 1))
+        target.faceDao().upsert(
+            listOf(face("linkA#0", "linkA", 0.10f, 0.10f, 0.30f, 0.40f, seed = 21, personId = 10, manualName = "Alice")),
+        )
+        target.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkA")))
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertTrue("Alice" to "linkA#0" in notPersons())
+        val face = faces().getValue("linkA#0")
+        assertNull(face.manualName)
+        assertNull(face.personId)
+    }
+
+    @Test
+    fun `what the other device set before a removal made here is not brought back`() = runTest {
+        seedSource()
+        FaceCurationLog.manualPhotos(source.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkE"), removed = false, 200L)
+        FaceCurationLog.manualPhotos(target.faceCurationTimeDao(), ACCOUNT, "Alice", listOf("linkE"), removed = true, 300L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertFalse("Alice" to "linkE" in manualPhotos())
     }
 
     @Test
@@ -579,6 +765,46 @@ class FaceSnapshotRoundTripTest {
     }
 
     @Test
+    fun `a cloud photo put away here never travels, however it was hidden`() = runTest {
+        source.faceDao().upsert(
+            listOf(
+                face("linkV#0", "linkV", 0.1f, 0.1f, 0.3f, 0.3f, seed = 1, manualName = "Vera"),
+                face("linkH#0", "linkH", 0.1f, 0.1f, 0.3f, 0.3f, seed = 2, manualName = "Vera"),
+                face("linkS#0", "linkS", 0.1f, 0.1f, 0.3f, 0.3f, seed = 3, manualName = "Vera"),
+                face("linkM#0", "linkM", 0.1f, 0.1f, 0.3f, 0.3f, seed = 4, manualName = "Vera"),
+                face("linkR#0", "linkR", 0.1f, 0.1f, 0.3f, 0.3f, seed = 5, manualName = "Vera"),
+            ),
+        )
+        source.faceScanDao().upsert(listOf("linkV", "linkH", "linkS", "linkM", "linkR").map { FaceScanEntity(ACCOUNT, it) })
+        source.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(ACCOUNT, "Vera", "linkH")))
+        source.notPersonDao().add(listOf(NotPersonEntity(ACCOUNT, "Bob", "linkS#0")))
+        source.personCoverDao().set(PersonCoverEntity(ACCOUNT, "Vera", "linkM"))
+        // Hidden one by one, a member of a hidden album, paired with a vaulted device photo, and the Drive
+        // copy on a vaulted photo's sync row.
+        context.settingsDataStore.edit {
+            it[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = setOf("linkH")
+            it[SettingsKeys.HIDDEN_ALBUM_IDS] = setOf("albumX")
+            it[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] = setOf("file:///v/1|linkM")
+        }
+        source.albumPhotoMembershipDao().upsertAll(listOf(AlbumPhotoMembershipEntity("albumX", "linkS")))
+        source.syncStateDao().insertIgnore(
+            SyncStateEntity(
+                localUri = "file:///v/2", userId = ACCOUNT, cloudFileId = "linkR", localHash = "", cloudHash = null,
+                status = SyncStatus.HIDDEN, lastSyncAttemptMs = 0L, lastSyncSuccessMs = null, backedUpAtMs = null,
+                sizeBytes = 0L,
+            ),
+        )
+
+        import(export(), FaceSnapshotMode.Replace)
+
+        assertEquals(setOf("linkV#0"), faces().keys)
+        assertEquals(setOf("linkV" to false), markers())
+        assertTrue(manualPhotos().isEmpty())
+        assertTrue(notPersons().isEmpty())
+        assertTrue(covers().isEmpty())
+    }
+
+    @Test
     fun `a restore asks Merge or Replace unless this device is fresh`() = runTest {
         val importer = FaceSnapshotImporter(context, target, sealing())
         assertFalse(importer.needsModeChoice(user))
@@ -622,6 +848,63 @@ class FaceSnapshotRoundTripTest {
         assertNull(settings()[SettingsKeys.FACE_MODEL_VERSION_KEY])
         val taken = importer.import(user, ByteArrayInputStream(sealed), FaceSnapshotMode.Replace, expectedDeviceId = DEVICE_ID)
         assertTrue(taken is FaceSnapshotImportResult.Imported)
+    }
+
+    private suspend fun seedTargetOnlyFace() {
+        target.personDao().upsert(PersonEntity(id = 50, userId = ACCOUNT, displayName = "Zed", faceCount = 1))
+        target.faceDao().upsert(listOf(face("linkQ#0", "linkQ", 0.1f, 0.1f, 0.3f, 0.3f, seed = 40, personId = 50, manualName = "Zed")))
+        target.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkQ")))
+    }
+
+    private suspend fun exportWiped(atMs: Long): ByteArray {
+        context.settingsDataStore.edit { it[SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT] = atMs }
+        return export().also { context.settingsDataStore.edit { it.remove(SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT) } }
+    }
+
+    private suspend fun importKnowingWipe(sealed: ByteArray, knownWipeAtMillis: Long?): FaceSnapshotImportResult =
+        FaceSnapshotImporter(context, target, sealing())
+            .import(user, ByteArrayInputStream(sealed), FaceSnapshotMode.Merge, knownWipeAtMillis = knownWipeAtMillis)
+
+    @Test
+    fun `a copy written before a delete everywhere is turned away and changes nothing`() = runTest {
+        seedSource()
+        seedTargetOnlyFace()
+
+        val result = importKnowingWipe(export(), knownWipeAtMillis = 100L)
+
+        assertEquals(FaceSnapshotImportResult.BeforeWipe, result)
+        assertEquals(setOf("linkQ#0"), faces().keys)
+        assertEquals(mapOf("Zed" to 50L), namedPeople())
+    }
+
+    @Test
+    fun `a copy carrying a newer delete everywhere deletes this device's face data before it is taken in`() = runTest {
+        seedSource()
+        seedTargetOnlyFace()
+
+        val result = importKnowingWipe(exportWiped(200L), knownWipeAtMillis = 100L)
+
+        assertTrue(result is FaceSnapshotImportResult.Imported)
+        assertEquals(200L, (result as FaceSnapshotImportResult.Imported).newerWipeAtMillis)
+        assertFalse("linkQ#0" in faces())
+        assertFalse("Zed" in namedPeople())
+        assertTrue(faces().keys.containsAll(listOf("linkA#0", "linkB#0")))
+        assertTrue(target.faceScanDao().scannedKeysForUser(ACCOUNT).none { it == "linkQ" })
+    }
+
+    @Test
+    fun `a copy carrying the delete already known, or one the user picked, is taken in with nothing deleted`() = runTest {
+        seedSource()
+        seedTargetOnlyFace()
+        val sealed = exportWiped(200L)
+
+        val known = importKnowingWipe(sealed, knownWipeAtMillis = 200L)
+        assertEquals(0L, (known as FaceSnapshotImportResult.Imported).newerWipeAtMillis)
+        assertTrue("linkQ#0" in faces())
+
+        val picked = importKnowingWipe(sealed, knownWipeAtMillis = null)
+        assertEquals(0L, (picked as FaceSnapshotImportResult.Imported).newerWipeAtMillis)
+        assertTrue("linkQ#0" in faces())
     }
 
     @Test

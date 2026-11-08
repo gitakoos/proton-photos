@@ -35,6 +35,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.dao.UploadAlbumTargetDao
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FacePhotoRemoval
 import eu.akoos.photos.data.label.PhotoLabelRepository
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -75,6 +77,7 @@ class HiddenVaultJournal @Inject constructor(
     private val syncStateRepo: SyncStateRepository,
     private val accountManager: AccountManager,
     private val photoLabels: PhotoLabelRepository,
+    private val facePhotoRemoval: FacePhotoRemoval,
 ) {
 
     /**
@@ -236,6 +239,7 @@ class HiddenVaultJournal @Inject constructor(
             val settled = if (publish.isEmpty()) SettledRows() else settleVaultedSyncRows(publish)
             if (publish.isNotEmpty()) {
                 context.settingsDataStore.edit { prefs ->
+                    recordVaultHides(prefs, publish.toSet())
                     prefs[SettingsKeys.HIDDEN_PHOTO_URIS] =
                         (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) + publish
                     prefs[SettingsKeys.HIDDEN_PENDING_HIDES] =
@@ -264,17 +268,30 @@ class HiddenVaultJournal @Inject constructor(
     }
 
     /**
-     * Drops the labels of the photos just published as hidden, under both the device uri each was
-     * hidden from and the Drive linkId it was paired with, so nothing about a hidden photo stays
-     * searchable. A failure is logged and never fails the hide.
+     * Drops the labels and the faces of the photos just published as hidden, under both the device uri
+     * each was hidden from and the Drive linkId it was paired with, so nothing about a hidden photo stays
+     * searchable or counted under a person. A failure is logged and never fails the hide.
      */
     private suspend fun dropLabelsOf(vaultUris: Collection<String>, sourceByVaultUri: Map<String, String>) {
+        val entries = try {
+            context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.w(TAG, "reading the pairings of ${vaultUris.size} hidden photo(s) failed: ${e.message}")
+            return
+        }
         try {
-            val entries = context.settingsDataStore.data.first()[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()
             photoLabels.deleteForPhotos(HiddenVaultDecisions.labelKeysOfHidden(vaultUris, sourceByVaultUri, entries))
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.w(TAG, "dropping labels of ${vaultUris.size} hidden photo(s) failed: ${e.message}")
+        }
+        try {
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+            facePhotoRemoval.dropPhotos(account, HiddenVaultDecisions.faceKeysOfHidden(vaultUris, sourceByVaultUri, entries))
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            Log.w(TAG, "dropping faces of ${vaultUris.size} hidden photo(s) failed: ${e.message}")
         }
     }
 
@@ -690,7 +707,7 @@ class HiddenVaultJournal @Inject constructor(
      * landed still has an entry here, and leaving it would let the next reconciliation act on a photo
      * that is already back on the device.
      */
-    suspend fun forget(privateUris: List<String>) {
+    suspend fun forget(privateUris: List<String>, shownAt: Long? = null) {
         val keys = privateUris.toSet()
         try {
             context.settingsDataStore.edit { prefs ->
@@ -698,12 +715,33 @@ class HiddenVaultJournal @Inject constructor(
                     (prefs[SettingsKeys.HIDDEN_PENDING_HIDES] ?: emptySet())
                         .filterNot { it.substringBefore('|') in keys }
                         .toSet()
+                val revealedLinks = cloudLinksOf(prefs, keys)
+                HiddenSyncTimes.photosShown(prefs, revealedLinks, shownAt ?: System.currentTimeMillis())
                 pruneMaps(prefs, keys)
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             Log.w(TAG, "forget: failed for ${privateUris.size} entr(ies): ${e.message}")
         }
+    }
+
+    /** The Drive link ids the vault recorded for the photos of [vaultUris]. */
+    private fun cloudLinksOf(prefs: MutablePreferences, vaultUris: Set<String>): List<String> =
+        (prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()).mapNotNull { entry ->
+            entry.substringAfter('|', "").takeIf { entry.substringBefore('|') in vaultUris && it.isNotBlank() }
+        }
+
+    /**
+     * Records the Drive copies of the photos just moved into the vault as hidden: as of now, or, for a photo another
+     * device hid and this one only carried out, as of that device's hide, which then leaves the waiting queue.
+     */
+    private fun recordVaultHides(prefs: MutablePreferences, vaultUris: Set<String>) {
+        val links = cloudLinksOf(prefs, vaultUris)
+        if (links.isEmpty()) return
+        val queue = HiddenSyncTimes.remoteHideQueue(prefs).toMutableMap()
+        val now = System.currentTimeMillis()
+        for (link in links) HiddenSyncTimes.photosHidden(prefs, listOf(link), queue.remove(link) ?: now)
+        HiddenSyncTimes.setRemoteHideQueue(prefs, queue)
     }
 
     /** Drops every `"uri|value"` entry keyed by one of [keys] from the four per-uri maps. */

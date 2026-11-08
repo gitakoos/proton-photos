@@ -218,12 +218,14 @@ fun AccountScreen(
             // A hidden photo with no Drive copy exists nowhere else, so its fate is the user's to pick.
             val deviceOnlyVault = (state.vaultedPhotoCount - state.vaultedCloudBackedCount).coerceAtLeast(0)
             val items = buildList {
-                if (state.faceEnabled) add(faceItem)
+                // With the automatic Drive backup on, the faces and names come back from Drive at the next sign-in.
+                if (state.faceEnabled && !state.sharedBackupOn) add(faceItem)
                 add(dayNotesItem)
                 if (state.vaultedPhotoCount > 0 && deviceOnlyVault == 0) add(vaultItem)
             }
+            val driveKept = if (state.sharedBackupOn) "\n\n" + stringResource(R.string.sign_out_dialog_drive_kept) else ""
             val signOutMessage = stringResource(R.string.sign_out_dialog_message) +
-                items.joinToString(separator = "\n", prefix = "\n") { "· " + it }
+                items.joinToString(separator = "\n", prefix = "\n") { "· " + it } + driveKept
             if (deviceOnlyVault > 0) {
                 SignOutVaultSheet(
                     message = signOutMessage,

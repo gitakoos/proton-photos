@@ -43,7 +43,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -60,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.EditFieldSheet
 import eu.akoos.photos.presentation.theme.AppColors
 
@@ -78,7 +78,7 @@ fun MoveToFolderSheet(
     onDismiss: () -> Unit,
 ) {
     val colors = AppColors.current
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = colors.sheetBg,

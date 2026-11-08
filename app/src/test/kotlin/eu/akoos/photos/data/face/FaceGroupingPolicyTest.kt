@@ -412,4 +412,10 @@ class FaceGroupingPolicyTest {
         const val DUTY = 9L
         const val GRACE = 86_400_000L
     }
+
+    @Test
+    fun a_model_wipe_keeps_the_guest_names_first_then_the_account_ones() {
+        assertEquals(listOf("local", "acct"), accountsKeptBeforeModelWipe("acct"))
+        assertEquals(listOf("local"), accountsKeptBeforeModelWipe("local"))
+    }
 }

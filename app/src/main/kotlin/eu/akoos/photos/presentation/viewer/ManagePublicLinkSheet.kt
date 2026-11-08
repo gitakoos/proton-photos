@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.viewer
 
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.DestructiveButton
 import eu.akoos.photos.presentation.common.PrimaryButton
 
@@ -53,7 +54,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
@@ -110,7 +110,7 @@ internal fun ManagePublicLinkSheet(
     needsUpload: Boolean = false,
     onUploadAndCreate: () -> Unit = {},
 ) {
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = SheetBg,

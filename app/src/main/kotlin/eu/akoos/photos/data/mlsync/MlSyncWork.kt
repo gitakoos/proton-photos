@@ -42,6 +42,13 @@ enum class MlSyncOperation {
 
     /** Downloads the snapshots the user picked from the Drive listing and imports them here. */
     RESTORE,
+
+    /**
+     * The shared backup's round: takes in what the other installs saved that is newer than the copy of each taken in
+     * last (the faces and search filling gaps only, the labels and the hidden list merged by time), then writes this
+     * install's own copies that changed. Nothing is written when the read failed.
+     */
+    ROUND,
 }
 
 /** The step a running ML sync is on. */
@@ -78,6 +85,9 @@ enum class MlSyncPartStatus {
      *  those photos itself. */
     MODEL_MISMATCH,
 
+    /** Round: the copy was written before the face data was deleted everywhere, so nothing of it was taken. */
+    BEFORE_WIPE,
+
     /** Restore: no key of this account opens the snapshot. */
     WRONG_ACCOUNT,
 
@@ -99,7 +109,7 @@ enum class MlSyncPartStatus {
 
     /** Finished as asked: a names-only or model-mismatched restore took what it could and nothing broke. */
     val finished: Boolean
-        get() = this == DONE || this == NAMES_ONLY || this == MODEL_MISMATCH
+        get() = this == DONE || this == NAMES_ONLY || this == MODEL_MISMATCH || this == BEFORE_WIPE
 
     /** Something went wrong with this file. [EMPTY] is neither finished nor failed. */
     val failed: Boolean
@@ -150,6 +160,15 @@ data class MlRestoreFile(
 )
 
 /**
+ * How a shared-backup round was asked for. [AUTO] is the switch's own round, which does nothing while the switch is
+ * off. [SAVE_NOW] is the user's "Back up now": it runs whether the switch is on or not, reads what the other devices
+ * saved first and then writes every copy of this device's, the face and search copies too, however recently they
+ * went. [LOAD_NOW] is the user's "Load from Drive": it runs either way, takes in every other device's newest copy of
+ * each kind again, even one taken in before, and writes nothing.
+ */
+enum class RoundMode { AUTO, SAVE_NOW, LOAD_NOW }
+
+/**
  * What a run is asked to do, as the worker's input data carries it. [userId] is the account the user
  * started the run for: a run that finds another account signed in does nothing.
  */
@@ -164,6 +183,12 @@ sealed interface MlSyncRequest {
     ) : MlSyncRequest {
         override val operation: MlSyncOperation
             get() = MlSyncOperation.SAVE
+    }
+
+    /** One shared-backup round for the account, run as [mode] asks. */
+    data class Round(override val userId: String, val mode: RoundMode = RoundMode.AUTO) : MlSyncRequest {
+        override val operation: MlSyncOperation
+            get() = MlSyncOperation.ROUND
     }
 
     /**
@@ -305,6 +330,7 @@ object MlSyncWorkData {
     internal const val KEY_SEARCH_KEPT = "searchKept"
     internal const val KEY_FILES_DONE = "filesDone"
     internal const val KEY_FILES_TOTAL = "filesTotal"
+    internal const val KEY_ROUND_MODE = "roundMode"
 
     private const val OPERATION_TAG_PREFIX = "ml_sync_op_"
 
@@ -313,6 +339,11 @@ object MlSyncWorkData {
 
     /** The worker's input data for [request]. */
     fun input(request: MlSyncRequest): Data = when (request) {
+        is MlSyncRequest.Round -> workDataOf(
+            KEY_OPERATION to request.operation.name,
+            KEY_USER_ID to request.userId,
+            KEY_ROUND_MODE to request.mode.name,
+        )
         is MlSyncRequest.Save -> workDataOf(
             KEY_OPERATION to request.operation.name,
             KEY_USER_ID to request.userId,
@@ -341,6 +372,10 @@ object MlSyncWorkData {
         val userId = data.getString(KEY_USER_ID)?.takeIf { it.isNotBlank() } ?: return null
         return when (operation(data)) {
             MlSyncOperation.SAVE -> MlSyncRequest.Save(userId, data.getBoolean(KEY_CREATE_FOLDER, false))
+            MlSyncOperation.ROUND -> MlSyncRequest.Round(
+                userId,
+                enumOrNull<RoundMode>(data.getString(KEY_ROUND_MODE)) ?: RoundMode.AUTO,
+            )
             MlSyncOperation.RESTORE -> MlSyncRequest.Restore(
                 userId = userId,
                 files = restoreFiles(data) ?: return null,

@@ -38,7 +38,6 @@ import eu.akoos.photos.data.api.dto.FavoriteRequest
 import eu.akoos.photos.data.api.dto.LinkCoreDto
 import eu.akoos.photos.data.api.dto.RenameLinkRequest
 import eu.akoos.photos.data.api.dto.TagRequest
-import eu.akoos.photos.data.api.dto.ThumbnailBatchRequest
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.sdk.SdkRoute
 import eu.akoos.photos.domain.entity.CloudPhoto
@@ -170,8 +169,7 @@ class CloudTrashService @Inject constructor(
     private val photoStreamService: PhotoStreamService,
     private val cryptoHelper: eu.akoos.photos.data.crypto.DriveCryptoHelper,
     private val cryptoContext: me.proton.core.crypto.common.context.CryptoContext,
-    private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
-    private val faceScanDao: eu.akoos.photos.data.db.dao.FaceScanDao,
+    private val facePhotoRemoval: eu.akoos.photos.data.face.FacePhotoRemoval,
     private val perceptualHashDao: eu.akoos.photos.data.db.dao.PerceptualHashDao,
     private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
     private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
@@ -435,19 +433,17 @@ class CloudTrashService @Inject constructor(
                     ?: link.activeRevision?.thumbnails?.firstOrNull()?.thumbnailId
             }
 
-            // Batch-fetch thumbnail download URLs (same mechanism as gallery).
+            // Thumbnail download URLs through the gallery's own lookup, which asks in batches of the size the
+            // endpoint accepts: one request naming more than 30 thumbnails is refused outright, which left a
+            // larger trash with no thumbnails at all.
             val thumbMap = mutableMapOf<String, Pair<String, String?>>() // thumbnailId → (bareUrl, token)
             if (thumbnailIds.isNotEmpty()) {
-                runCatching {
-                    val resp = shareService.networkSemaphore.withPermit {
-                        manager.invoke {
-                            getThumbnailUrls(volumeId, ThumbnailBatchRequest(thumbnailIds))
-                        }.valueOrThrow
+                runCatching { linkDetailHelpers.batchFetchThumbnailUrls(userId, volumeId, thumbnailIds) }
+                    .onSuccess { urls -> urls.forEach { (id, info) -> thumbMap[id] = info.bareUrl to info.token } }
+                    .onFailure { e ->
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        Log.w(TAG, "getCloudTrash: thumbnail batch failed — ${e.message}")
                     }
-                    resp.thumbnails.forEach { t ->
-                        if (t.bareUrl != null) thumbMap[t.thumbnailId] = t.bareUrl to t.token
-                    }
-                }.onFailure { e -> Log.w(TAG, "getCloudTrash: thumbnail batch failed — ${e.message}") }
             }
 
             // Photos are flat under the photos root, so its link key decrypts their names; fetch it
@@ -599,14 +595,13 @@ class CloudTrashService @Inject constructor(
                 if (deleted.isNotEmpty()) _trashCountChanges.tryEmit(-deleted.size)
                 Log.d(TAG, "deleteFromCloudForever: permanently deleted ${deleted.size}/${linkIds.size} items (${failed.size} failed)")
                 // A permanently deleted photo can never come back, so drop its on-device per-photo
-                // side rows now (all keyed by the linkId): face rows + scan markers, its perceptual
-                // hash, and its cached location. The periodic reaper is the net for photos removed
+                // side rows now (all keyed by the linkId): face rows + scan markers (with the people
+                // they were in recounted), its perceptual hash, and its cached location. The periodic reaper is the net for photos removed
                 // elsewhere. Best-effort, so a failure here never fails the server-applied delete.
                 if (deleted.isNotEmpty()) {
                     val deletedList = deleted.toList()
                     runCatching {
-                        faceDao.deleteByPhotoKeys(userId.id, deleted)
-                        faceScanDao.deleteByPhotoKeys(userId.id, deleted)
+                        facePhotoRemoval.dropPhotos(userId.id, deleted)
                         perceptualHashDao.deleteByKeys(deletedList)
                         photoLocationDao.deleteByIds(userId.id, deletedList)
                     }.onFailure { Log.w(TAG, "deleteFromCloudForever: per-photo data prune failed: ${it.message}") }

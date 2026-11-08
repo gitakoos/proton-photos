@@ -96,6 +96,18 @@ object SettingsKeys {
      *  account, like [ALBUMS_SHOW_COLLECTION]: it holds in a guest session and survives a sign-out. */
     val ALBUMS_VIEW_MODE = intPreferencesKey("albums_view_mode")
 
+    /** When true, the People page lays its people out as the Albums tab lays out its albums, by
+     *  [ALBUMS_VIEW_MODE] and [ALBUM_GRID_COLUMNS]; when false, by [PEOPLE_VIEW_MODE] and
+     *  [PEOPLE_GRID_COLUMNS]. Absent = true. A view preference of the phone, like the Albums ones. */
+    val PEOPLE_FOLLOW_ALBUMS = booleanPreferencesKey("people_follow_albums")
+
+    /** The People page's own layout while [PEOPLE_FOLLOW_ALBUMS] is off, an AlbumsViewMode ordinal.
+     *  Absent = Grid. */
+    val PEOPLE_VIEW_MODE = intPreferencesKey("people_view_mode")
+
+    /** The People page's own cards per row (2, 3 or 4) while [PEOPLE_FOLLOW_ALBUMS] is off. Absent = 2. */
+    val PEOPLE_GRID_COLUMNS = intPreferencesKey("people_grid_columns")
+
     /** Direction the photos inside an album are listed in, an AlbumPhotoSortMode ordinal
      *  (0 = NewestFirst, 1 = OldestFirst). Absent = NewestFirst, the order albums have always
      *  opened on. One global choice every album shares: a per-album key would grow with the
@@ -200,6 +212,10 @@ object SettingsKeys {
      * base surfaces. Default false so existing installs keep the near-black dark theme.
      */
     val AMOLED_BLACK = booleanPreferencesKey("amoled_black")
+
+    /** Frosted pills: the menu, the top bar's pills and the photo viewer's blur what is under them. Off by
+     *  default, and only offered on Android 12 and newer. */
+    val LIQUID_GLASS = booleanPreferencesKey("liquid_glass")
 
     /** When true, the green "backed up" cloud badges are tinted with the palette accent colour instead of
      *  the fixed green. Off by default, so the badges stay green unless the user turns it on. */
@@ -797,6 +813,76 @@ object SettingsKeys {
      *  deleted or modified on Drive, so it reappears on unhide. */
     val HIDDEN_CLOUD_PHOTO_IDS = stringSetPreferencesKey("hidden_cloud_photo_ids")
 
+    /** When each hidden photo was hidden, as `"linkId|millis"`: a cloud-only photo of [HIDDEN_CLOUD_PHOTO_IDS], or the
+     *  Drive copy of a photo moved into the vault. The shared backup merges by it, the later change winning. */
+    val HIDDEN_PHOTO_HIDE_TIMES = stringSetPreferencesKey("hidden_photo_hide_times")
+
+    /** When each photo was shown again, as `"linkId|millis"`, kept so an unhide reaches the other devices. A photo is
+     *  in this set or in [HIDDEN_PHOTO_HIDE_TIMES], never in both. */
+    val HIDDEN_PHOTO_SHOW_TIMES = stringSetPreferencesKey("hidden_photo_show_times")
+
+    /** [HIDDEN_PHOTO_HIDE_TIMES] for the albums of [HIDDEN_ALBUM_IDS]. */
+    val HIDDEN_ALBUM_HIDE_TIMES = stringSetPreferencesKey("hidden_album_hide_times")
+
+    /** [HIDDEN_PHOTO_SHOW_TIMES] for albums. */
+    val HIDDEN_ALBUM_SHOW_TIMES = stringSetPreferencesKey("hidden_album_show_times")
+
+    /** Photos another device hid, as `"linkId|millis"`, waiting for the timeline to run the ordinary hide on each: by its
+     *  link id for a cloud-only photo, into the vault behind the system's delete prompt for one this phone also holds as
+     *  a device file. The time is the other device's, so the hide is not sent back as a new one. */
+    val HIDDEN_REMOTE_HIDE_QUEUE = stringSetPreferencesKey("hidden_remote_hide_queue")
+
+    /** Whether the shared backup on Proton Drive is on: each round reads the other devices' copies of the faces,
+     *  the search index, the labels and the hidden items, merges them, and saves this device's own. Absent = off. */
+    val SHARED_BACKUP_ENABLED = booleanPreferencesKey("shared_backup_enabled")
+
+    /** When the last shared-backup round finished, epoch millis, and whether it failed. */
+    val SHARED_BACKUP_LAST_AT = longPreferencesKey("shared_backup_last_at")
+    val SHARED_BACKUP_LAST_FAILED = booleanPreferencesKey("shared_backup_last_failed")
+
+    /** What each kind's own copy on Drive held when this device last wrote it, as `"kind|sha256"` over the copy with
+     *  its time left out, so an unchanged copy is not written again. */
+    val SHARED_BACKUP_SAVED = stringSetPreferencesKey("shared_backup_saved")
+
+    /** When the data behind the shared backup last changed here, epoch millis, so a round runs a few minutes after. */
+    val SHARED_BACKUP_CHANGED_AT = longPreferencesKey("shared_backup_changed_at")
+
+    /** When this device's faces, and its search index, last changed, and when a round last began saving each, so
+     *  a round writes a machine-learning copy only when something changed since it was last written. */
+    val SHARED_BACKUP_FACES_CHANGED_AT = longPreferencesKey("shared_backup_faces_changed_at")
+    val SHARED_BACKUP_SEARCH_CHANGED_AT = longPreferencesKey("shared_backup_search_changed_at")
+    val SHARED_BACKUP_FACES_SAVED_AT = longPreferencesKey("shared_backup_faces_saved_at")
+    val SHARED_BACKUP_SEARCH_SAVED_AT = longPreferencesKey("shared_backup_search_saved_at")
+
+    /** When the user last changed the faces here (a name, a merge, a cover), epoch millis, so a round writes the
+     *  faces copy at once instead of waiting out the hour a scan's changes wait. */
+    val SHARED_BACKUP_FACES_USER_CHANGED_AT = longPreferencesKey("shared_backup_faces_user_changed_at")
+
+    /** The accounts that had the automatic Drive backup on, as SHA-256 hex of their user id. Not tied to an account,
+     *  so it outlives a sign-out: the same account signing back in finds its backup on again, another does not. */
+    val SHARED_BACKUP_ACCOUNTS = stringSetPreferencesKey("shared_backup_accounts")
+
+    /** The names of the devices whose copies on Drive this one has read, as `"deviceId=name"`, for the list of the
+     *  backups on Drive: a file's name carries only the install id, the name is inside the copy. */
+    val SHARED_BACKUP_DEVICE_NAMES = stringSetPreferencesKey("shared_backup_device_names")
+
+    /** Set once a round took this install's own copies on Drive in, after a fresh install or a sign-out. Until then
+     *  a round reads the copies named after this install too: they were written by an earlier install on this phone
+     *  (the install id lasts across a reinstall) or before the sign-out wiped the data they hold. */
+    val SHARED_BACKUP_OWN_COPY_TAKEN = booleanPreferencesKey("shared_backup_own_copy_taken")
+
+    /** When the account's face data was last deleted on every device, by this one or another one whose copy on
+     *  Drive carried it, epoch milliseconds. This device's face copy carries it on, and a copy that carries an
+     *  older one holds face data from before the delete, so it is not taken in. */
+    val SHARED_BACKUP_FACES_WIPED_AT = longPreferencesKey("shared_backup_faces_wiped_at")
+
+    /** Set by a delete of the face data everywhere made here, until a round has moved the other devices' face
+     *  copies on Drive to the trash. */
+    val SHARED_BACKUP_FACES_TRASH_PENDING = booleanPreferencesKey("shared_backup_faces_trash_pending")
+
+    /** Set once the older per-kind automatic saves were folded into the automatic Drive backup. */
+    val SHARED_BACKUP_AUTOSAVE_FOLDED = booleanPreferencesKey("shared_backup_autosave_folded")
+
     // Favorites — stores URIs (local) or linkIds (cloud) of favorited photos
     val FAVORITE_IDS = stringSetPreferencesKey("favorite_ids")
 
@@ -893,6 +979,9 @@ object SettingsKeys {
     /** The accounts whose people have had their photo counts recounted once from their faces; see FaceIndexingScheduler. */
     val FACE_COUNTS_RECOUNTED = stringSetPreferencesKey("face_counts_recounted")
 
+    /** The accounts whose people differing only in the case of their name were folded into one, once. */
+    val SAME_NAMED_PEOPLE_MERGED = stringSetPreferencesKey("same_named_people_merged")
+
     /**
      * When true, the face and photo-search scans run only while the phone is on external power. Absent
      * (the default) reads as OFF, so the scans run on battery as before, under the usual battery,
@@ -968,6 +1057,15 @@ object SettingsKeys {
 
     /** Back up and upload photos through the Drive SDK; see [SDK_ROUTE_TAGS]. */
     val SDK_ROUTE_UPLOAD = booleanPreferencesKey("sdk_route_upload")
+
+    /** Create, change and delete albums and add or remove their photos through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_ALBUMS = booleanPreferencesKey("sdk_route_albums")
+
+    /** Follow the photo volume's change feed through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_EVENTS = booleanPreferencesKey("sdk_route_events")
+
+    /** List, leave and add to albums shared with this user, and download their photos, through the Drive SDK; see [SDK_ROUTE_TAGS]. */
+    val SDK_ROUTE_SHARED = booleanPreferencesKey("sdk_route_shared")
 
     /**
      * DEBUG-only large-library simulator size. N synthetic photo_listing rows are generated

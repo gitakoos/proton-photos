@@ -30,14 +30,30 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/** One photo's labels in a Drive snapshot, under the photo's gallery key. */
+/**
+ * One photo's labels in a Drive snapshot, under the photo's gallery key, with [changedAtMillis], when that photo's
+ * list last changed on the writing install. An empty [labels] is a photo whose labels were all taken off, kept so
+ * the removal reaches the other devices. A copy written without a time reads it as 0, older than any edit.
+ */
 @Serializable
 data class LabelSnapshotPhoto(
     @SerialName("k") val key: String,
     @SerialName("l") val labels: List<String>,
+    @SerialName("t") val changedAtMillis: Long = 0L,
 )
 
-/** What one install saves of its labels: who wrote it, when, every labelled photo, and the labels with no photo. */
+/** A label deleted on the writing install, and when. */
+@Serializable
+data class LabelSnapshotDeleted(
+    @SerialName("n") val name: String,
+    @SerialName("t") val deletedAtMillis: Long? = null,
+)
+
+/**
+ * What one install saves of its labels: who wrote it, when, every labelled photo, and the labels with no photo.
+ * [nameTimes] holds when each of [names] was made, and [deleted] the labels deleted with their times; an older
+ * build reads past both.
+ */
 @Serializable
 data class LabelSnapshot(
     @SerialName("v") val version: Int = VERSION,
@@ -47,6 +63,8 @@ data class LabelSnapshot(
     @SerialName("p") val photos: List<LabelSnapshotPhoto>,
     /** Labels created without a photo and not on one since. */
     @SerialName("m") val names: List<String> = emptyList(),
+    @SerialName("mt") val nameTimes: Map<String, Long> = emptyMap(),
+    @SerialName("x") val deleted: List<LabelSnapshotDeleted> = emptyList(),
 ) {
     companion object {
         const val VERSION = 1

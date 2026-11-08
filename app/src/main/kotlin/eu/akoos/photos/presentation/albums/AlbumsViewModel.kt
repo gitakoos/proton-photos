@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.albumMirrorFolders
@@ -161,6 +162,7 @@ class AlbumsViewModel @Inject constructor(
     private val networkObserver: eu.akoos.photos.util.NetworkObserver,
     private val albumListEvents: eu.akoos.photos.util.AlbumListEventBus,
     private val resolveCoverGifUseCase: ResolveCoverGifUseCase,
+    private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AlbumsUiState())
@@ -419,9 +421,10 @@ class AlbumsViewModel @Inject constructor(
     fun toggleFolderMirrorAsAlbum(folderName: String) {
         if (folderName.isEmpty()) return
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
+            val updated = context.settingsDataStore.edit { prefs ->
                 prefs.putAlbumMirrorFolders(prefs.albumMirrorFolders().flipped(folderName))
             }
+            if (folderName in updated.albumMirrorFolders()) folderAlbumBackfill.onAlbumTurnedOn(folderName)
         }
     }
 
@@ -652,10 +655,7 @@ class AlbumsViewModel @Inject constructor(
      */
     fun hideAlbum(albumLinkId: String) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_ALBUM_IDS] = current + albumLinkId
-            }
+            HiddenCloudPhotos.hideAlbums(context, listOf(albumLinkId))
         }
     }
 
@@ -680,9 +680,9 @@ class AlbumsViewModel @Inject constructor(
 
     // ── Rename a device folder ────────────────────────────────────────────────
     // Android has no folder-rename under scoped storage, so a folder rename physically relocates every
-    // photo in the bucket into DCIM/<newName>/ via [MoveToFolderUseCase]. Offered only in a logged-out
-    // session, the local counterpart of [renameCloudAlbum]; a foreign file needs one-shot write consent,
-    // handled exactly like the timeline's move.
+    // photo in the bucket into DCIM/<newName>/ via [MoveToFolderUseCase], which also brings the Drive album
+    // of a mirrored folder along; a foreign file needs one-shot write consent, handled exactly like the
+    // timeline's move.
 
     /** Rename the device folder [bucketName] by moving its photos into [newName] under DCIM/. A blank
      *  or unchanged name is a no-op, as is a folder with no readable device file. */

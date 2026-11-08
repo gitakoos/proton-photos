@@ -92,10 +92,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
+import eu.akoos.photos.presentation.common.rememberCloudCompressAction
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.albums.components.StickyAlbumHeader
 import eu.akoos.photos.presentation.albums.components.rememberHeroScrolledAway
@@ -215,7 +218,7 @@ fun LocationPhotosContent(
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
             appLock.runWhenOpen {
-                runCatching { context.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle)) }
+                runCatching { context.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(context, intent, shareChooserTitle)) }
             }
         }
     }
@@ -342,6 +345,8 @@ fun LocationPhotosContent(
 
     // The host modifier shapes the surface (a tall sheet band or a full-screen page); the grid fills
     // and scrolls inside, with the selection bar and action dock within these bounds.
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(backgroundColor)
     Box(
         modifier = modifier.background(backgroundColor),
     ) {
@@ -386,7 +391,7 @@ fun LocationPhotosContent(
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            modifier = Modifier.fillMaxSize().then(dragSelectModifier),
+            modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier),
         ) {
             // Hero header - cover, place name and count, plus the "Save as album" action.
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -550,6 +555,7 @@ fun LocationPhotosContent(
                 viewModel.clearSelection()
             },
         )
+        val compressAction = rememberCloudCompressAction(selectedItems, isSignedIn)
         val locationSelectionActions = buildList {
             // Rings while cloud originals download for the chooser and takes no second tap meanwhile.
             add(
@@ -574,9 +580,8 @@ fun LocationPhotosContent(
                     )
                 )
             }
-            // Move the device selection into another folder, the logged-out counterpart to
-            // Add-to-album, offered only without an account and on the Android 10+ MediaStore floor.
-            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Move the device selection into another folder, on the Android 10+ MediaStore floor.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(
                     SelectionAction(
                         icon = Icons.AutoMirrored.Filled.DriveFileMove,
@@ -657,6 +662,9 @@ fun LocationPhotosContent(
                     )
                 )
             }
+            // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
+            // smaller copy is up.
+            compressAction?.let(::add)
             // The strip stays behind an all-device-only selection: a Synced photo keeps its Drive
             // copy's EXIF, so stripping just the local file is a misleading half-strip.
             if (allLocalOnly(selectedItems)) {
@@ -695,6 +703,7 @@ fun LocationPhotosContent(
             )
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = isSelectionMode,
             items = remember(selectedItems) { selectedItems.toList() },
             actions = locationSelectionActions,
@@ -723,6 +732,7 @@ fun LocationPhotosContent(
                 .padding(bottom = 24.dp),
         ) {
             IconBubble(
+                backdrop = glass,
                 icon = Icons.Default.KeyboardArrowUp,
                 contentDescription = stringResource(R.string.cd_scroll_to_top),
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
@@ -755,6 +765,7 @@ fun LocationPhotosContent(
                     .padding(start = 12.dp, top = 8.dp),
             ) {
                 IconBubble(
+                    backdrop = glass,
                     icon = Icons.AutoMirrored.Filled.ArrowBack,
                     contentDescription = if (isSelectionMode)
                         stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
@@ -767,6 +778,7 @@ fun LocationPhotosContent(
                 )
             }
             StickyAlbumHeader(
+                backdrop = glass,
                 visible = stickyShown,
                 title = placeTitle,
                 onBack = onBack,
@@ -891,7 +903,7 @@ fun LocationPhotosContent(
     }
 
     // Move-to-folder host: the picker, the new-folder name dialog, its own write-consent launcher and
-    // the completion snackbar, all logged-out and device-only. The selection is snapshotted in the
+    // the completion snackbar, device files only. The selection is snapshotted in the
     // ViewModel, so the host carries only the picked name.
     MoveToFolderHost(
         targetFolders = moveTargetFolders,
@@ -907,10 +919,10 @@ fun LocationPhotosContent(
     )
 }
 
-/** A month header over the place grid's photos, styled like the device-folder and album pages'. The
- *  label keeps clear of the screen edge in seamless mode, where the tiles below bleed to 0. */
+/** A month header over a grid of photos (a place's, a person's), styled like the device-folder and album
+ *  pages'. The label keeps clear of the screen edge in seamless mode, where the tiles below bleed to 0. */
 @Composable
-private fun LocationMonthHeader(label: String, seamless: Boolean) {
+internal fun LocationMonthHeader(label: String, seamless: Boolean) {
     Text(
         label,
         color = FgPrimary,

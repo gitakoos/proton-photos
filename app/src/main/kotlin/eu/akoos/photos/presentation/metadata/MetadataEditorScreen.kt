@@ -24,28 +24,50 @@ package eu.akoos.photos.presentation.metadata
 
 import android.app.Activity
 import android.net.Uri
+import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
@@ -53,10 +75,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -65,23 +84,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.LocationOff
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDefaults
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
-import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -93,42 +103,46 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.usecase.ExifAsciiText
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import androidx.activity.compose.BackHandler
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.ThemedSnackbarHost
+import eu.akoos.photos.presentation.common.cardFill
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
-import eu.akoos.photos.presentation.gallery.FilterChip
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
-import eu.akoos.photos.presentation.search.SearchFilter
 import eu.akoos.photos.presentation.theme.AppColors
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.util.LocalIs24Hour
 import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.presentation.util.formatDateTimeMinute
-import eu.akoos.photos.util.OfflineGeocoder
+import eu.akoos.photos.presentation.viewer.DetailsDangerButton
+import eu.akoos.photos.presentation.viewer.DetailsPageFrame
+import eu.akoos.photos.presentation.viewer.DetailsPageHeader
 import eu.akoos.photos.util.cityCountryLabel
 import eu.akoos.photos.util.countryName
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
+import kotlinx.coroutines.flow.first
 
 private val cardShape = RoundedCornerShape(14.dp)
 
@@ -198,98 +212,63 @@ fun MetadataEditorScreen(
     }
     BackHandler { handleBack() }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
         val contentTopPad = floatingHeaderContentTopPadding()
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                // The text fields sit at the bottom of a single scrolling column, so the keyboard has
-                // to shrink the scroll viewport rather than cover it. Insetting before the scroll
-                // modifier is what lets a focused field scroll clear of the keyboard.
-                .imePadding()
-                .verticalScroll(rememberScrollState()),
-        ) {
-            Spacer(Modifier.height(contentTopPad))
-            // A single photo highlights its thumbnail; a bulk set highlights none (the edit is for all).
-            MetadataThumbnailStrip(items = items, selectedIndex = if (items.size == 1) 0 else -1)
-            Spacer(Modifier.height(22.dp))
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
             Column(
-                modifier = Modifier.padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    // The text fields sit at the bottom of a single scrolling column, so the keyboard has
+                    // to shrink the scroll viewport rather than cover it. Insetting before the scroll
+                    // modifier is what lets a focused field scroll clear of the keyboard.
+                    .imePadding()
+                    .verticalScroll(rememberScrollState()),
             ) {
-                // A multi-select (or any list carrying read-only members) gets a count line, so the
-                // user sees how many photos the edit lands on and how many are skipped.
-                if (state.bulk || (state.editableCount > 0 && state.skippedCount > 0)) {
-                    val summary = if (state.skippedCount > 0) {
-                        stringResource(
-                            R.string.metadata_editor_bulk_summary_skipped,
-                            state.editableCount, state.skippedCount,
-                        )
-                    } else {
-                        stringResource(R.string.metadata_editor_bulk_summary, state.editableCount)
-                    }
-                    Text(summary, color = colors.fgMute, fontSize = 13.sp)
-                }
-                // A cloud edit waits for the Done checkmark, so a staged change is called out here:
-                // leaving by the back arrow instead would drop it.
-                if (state.stagedCloudCount > 0) {
-                    Text(
-                        stringResource(R.string.metadata_editor_cloud_staged_hint),
-                        color = colors.accent,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
+                Spacer(Modifier.height(contentTopPad))
+                EditedPhotos(items = items, state = state)
+                Spacer(Modifier.height(20.dp))
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    DateCard(
+                        state = state,
+                        onPickDate = viewModel::setDate,
+                        onShiftDates = viewModel::shiftDatesTo,
+                        onFixDatesFromName = viewModel::fixDatesFromName,
                     )
+                    PlaceAndTextCard(
+                        state = state,
+                        onPickPoint = viewModel::pickPoint,
+                        onRemoveLocation = viewModel::removeLocation,
+                        onText = viewModel::setText,
+                    )
+                    // A cloud edit waits for the checkmark, so a staged change is called out: leaving by the
+                    // back arrow instead would drop it.
+                    if (state.stagedCloudCount > 0) {
+                        Text(
+                            stringResource(R.string.metadata_editor_cloud_staged_hint),
+                            color = colors.accent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
-                DateField(
-                    state = state,
-                    onPickDate = viewModel::setDate,
-                    onShiftDates = viewModel::shiftDatesTo,
-                    onFixDatesFromName = viewModel::fixDatesFromName,
-                )
-                PlaceField(
-                    state = state,
-                    onPickPoint = viewModel::pickPoint,
-                    onRemoveLocation = viewModel::removeLocation,
-                )
-                // The tag labels are the ones the viewer's details sheet shows, so the same EXIF tag
-                // reads the same wherever it appears.
-                TextTagField(
-                    label = stringResource(R.string.viewer_meta_row_description),
-                    field = state.description,
-                    bulk = state.bulk,
-                    isSaving = state.isSaving,
-                    // A caption is a sentence, so it wraps instead of scrolling out of sight sideways.
-                    maxLines = 3,
-                    onValueChange = { viewModel.setText(MetadataTextTag.DESCRIPTION, it) },
-                )
-                TextTagField(
-                    label = stringResource(
-                        if (state.bulk) R.string.metadata_editor_bulk_artist_label
-                        else R.string.viewer_meta_row_artist,
-                    ),
-                    field = state.artist,
-                    bulk = state.bulk,
-                    isSaving = state.isSaving,
-                    onValueChange = { viewModel.setText(MetadataTextTag.ARTIST, it) },
-                )
-                TextTagField(
-                    label = stringResource(
-                        if (state.bulk) R.string.metadata_editor_bulk_copyright_label
-                        else R.string.viewer_meta_row_copyright,
-                    ),
-                    field = state.copyright,
-                    bulk = state.bulk,
-                    isSaving = state.isSaving,
-                    onValueChange = { viewModel.setText(MetadataTextTag.COPYRIGHT, it) },
-                )
+                Spacer(Modifier.height(32.dp + navBottom))
             }
-            Spacer(Modifier.height(32.dp + navBottom))
         }
 
         FloatingHeader(
-            title = stringResource(R.string.metadata_editor_title),
+            backdrop = glass,
+            title = if (state.bulk) {
+                pluralStringResource(R.plurals.metadata_editor_bulk_title, state.editableCount, state.editableCount)
+            } else {
+                stringResource(R.string.metadata_editor_title)
+            },
             onBack = { handleBack() },
             trailing = {
                 if (state.isSaving) {
@@ -358,518 +337,592 @@ fun MetadataEditorScreen(
     }
 }
 
-// ── Thumbnail strip ──────────────────────────────────────────────────────────
+// ── The photos being edited ──────────────────────────────────────────────────
 
-/** A horizontally scrollable strip of the edited photos' thumbnails, the current one outlined. Coil
- *  resolves each from the thumbnail URI (device file or decrypted cloud thumbnail), never full-res:
- *  the gallery has documented OOM limits on large libraries. */
+/** The photos as a small stack (up to four, overlapping), how many the edit lands on, and the dates they
+ *  span. Coil reads each from its thumbnail, never full-res: the gallery has documented OOM limits. */
 @Composable
-private fun MetadataThumbnailStrip(items: List<GalleryItem>, selectedIndex: Int) {
+private fun EditedPhotos(items: List<GalleryItem>, state: MetadataEditorUiState) {
     val colors = AppColors.current
     val thumbUrls = LocalThumbnailUrls.current.value
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        itemsIndexed(items) { index, listItem ->
-            val selected = index == selectedIndex
-            val model: Any? = when (listItem) {
-                is GalleryItem.LocalOnly -> Uri.parse(listItem.local.uri)
-                is GalleryItem.Synced -> Uri.parse(listItem.local.uri)
-                is GalleryItem.CloudOnly ->
-                    thumbUrls[listItem.cloud.linkId] ?: listItem.cloud.thumbnailUrl
-            }
-            Box(
-                modifier = Modifier
-                    .size(76.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(colors.cardBg, RoundedCornerShape(12.dp))
-                    .border(
-                        width = if (selected) 2.dp else 0.5.dp,
-                        color = if (selected) colors.accent else colors.line2,
-                        shape = RoundedCornerShape(12.dp),
-                    ),
-            ) {
-                if (model != null) {
-                    AsyncImage(
-                        model = model,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
-                    )
+    val shown = items.take(4)
+    Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(modifier = Modifier.size(width = 52.dp + 30.dp * (shown.size - 1).coerceAtLeast(0), height = 52.dp)) {
+            shown.forEachIndexed { index, listItem ->
+                val model: Any? = when (listItem) {
+                    is GalleryItem.LocalOnly -> Uri.parse(listItem.local.uri)
+                    is GalleryItem.Synced -> Uri.parse(listItem.local.uri)
+                    is GalleryItem.CloudOnly -> thumbUrls[listItem.cloud.linkId] ?: listItem.cloud.thumbnailUrl
                 }
+                Box(
+                    modifier = Modifier
+                        .offset(x = 30.dp * index)
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colors.cardBg)
+                        .border(2.dp, colors.pageBg, RoundedCornerShape(12.dp)),
+                ) {
+                    if (model != null) {
+                        AsyncImage(
+                            model = model,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            // The title already counts the photos, so a selection reads the days it spans; a single photo
+            // its name and its moment.
+            val context = LocalContext.current
+            val is24Hour = LocalIs24Hour.current
+            val headline = when {
+                !state.bulk -> items.firstOrNull()?.let { fileNameOf(it) }.orEmpty()
+                state.dateShiftAvailable -> remember(state.dateShiftEarliestMs, state.dateShiftLatestMs) {
+                    dateRangeText(context, state.dateShiftEarliestMs, state.dateShiftLatestMs, withTime = false, is24Hour)
+                }
+                else -> stringResource(R.string.metadata_editor_bulk_summary, state.editableCount)
+            }
+            Text(
+                headline,
+                color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+            )
+            val second = when {
+                state.skippedCount > 0 -> stringResource(
+                    R.string.metadata_editor_bulk_summary_skipped, state.editableCount, state.skippedCount,
+                )
+                !state.bulk && state.loaded -> remember(state.captureDateMs) { formatDateTime(state.captureDateMs) }
+                else -> null
+            }
+            second?.let {
+                Text(it, color = colors.fgMute, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
 }
 
-// ── Date field ───────────────────────────────────────────────────────────────
+/** The span from [startMs] to [endMs] the platform's own way for the locale, short enough for one line:
+ *  "Oct 20 - 26, 2026", or with the times. */
+private fun dateRangeText(context: android.content.Context, startMs: Long, endMs: Long, withTime: Boolean, is24Hour: Boolean): String {
+    var flags = DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_YEAR or DateUtils.FORMAT_ABBREV_MONTH
+    if (withTime) flags = flags or DateUtils.FORMAT_SHOW_TIME or (if (is24Hour) DateUtils.FORMAT_24HOUR else DateUtils.FORMAT_12HOUR)
+    return DateUtils.formatDateRange(context, startMs, endMs, flags)
+}
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+private fun fileNameOf(item: GalleryItem): String = when (item) {
+    is GalleryItem.LocalOnly -> item.local.displayName
+    is GalleryItem.Synced -> item.local.displayName
+    is GalleryItem.CloudOnly -> item.cloud.displayName
+}
+
+// ── Date card ────────────────────────────────────────────────────────────────
+
+/** The date's three ways for a selection: one moment for all, a shift that keeps the gaps, the date each
+ *  file's own name records. A selection neither of the last two can say anything about shows none. */
+private enum class DateMode { SAME, SHIFT, FILENAME }
+
 @Composable
-private fun DateField(
+private fun DateCard(
     state: MetadataEditorUiState,
     onPickDate: (Long) -> Unit,
     onShiftDates: (Long) -> Unit,
     onFixDatesFromName: () -> Unit,
 ) {
-    val context = LocalContext.current
     val colors = AppColors.current
-    var showDatePicker by remember { mutableStateOf(false) }
-    var showTimePicker by remember { mutableStateOf(false) }
-    // The day chosen in the first step, carried into the time step before the combined value is written.
-    var pickedDateUtcMs by remember { mutableStateOf<Long?>(null) }
-    // Which bulk date mode is active. A selection neither a shift nor a filename read can say anything
-    // about never offers the switch, so there the absolute date stays the only mode and the card keeps
-    // its usual chrome. The two extra modes are mutually exclusive: picking one clears the other.
-    var shiftSelected by remember { mutableStateOf(false) }
-    var filenameSelected by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(DateMode.SAME) }
+    var picking by remember { mutableStateOf(false) }
     val shiftOffered = state.bulk && state.dateShiftAvailable
-    val shiftMode = shiftOffered && shiftSelected
     val filenameOffered = state.bulk && state.filenameDateCount > 0
-    val filenameMode = filenameOffered && filenameSelected
+    if (mode == DateMode.SHIFT && !shiftOffered || mode == DateMode.FILENAME && !filenameOffered) mode = DateMode.SAME
     val shiftSpan = state.dateShiftSpan
-    // The instant the user named for the OLDEST photo, dropped as soon as a write moves the span: the
-    // range line then reads the photos' own dates again, so a batch that only partly landed shows where
-    // the files really are rather than where the pick aimed them.
-    var pickedShiftMs by remember(state.dateShiftEarliestMs, state.dateShiftLatestMs) {
-        mutableStateOf<Long?>(null)
-    }
-    // True once a pick crossed the ceiling the state carries, which the calendar alone cannot refuse.
+    // The instant the user named for the OLDEST photo, dropped once a write moves the span, so the preview
+    // then reads where the files really are.
+    var pickedShiftMs by remember(state.dateShiftEarliestMs, state.dateShiftLatestMs) { mutableStateOf<Long?>(null) }
     var shiftTooLate by remember { mutableStateOf(false) }
+    val editable = state.dateLock == null && !state.isSaving
 
-    FieldCard {
-        FieldHeaderRow(
-            label = stringResource(
-                when {
-                    shiftMode -> R.string.metadata_editor_shift_label
-                    state.bulk -> R.string.metadata_editor_bulk_date_label
-                    else -> R.string.metadata_editor_date_label
-                },
-            ),
-            // In filename mode each file's date comes from its own name, so there is no picker to open;
-            // the Apply button below is the whole action.
-            editable = state.dateLock == null && !state.isSaving && !filenameMode,
-            onEdit = { showDatePicker = true },
-        )
-        // The bulk date modes: one instant written over every photo, one delta added to each photo's
-        // own date so the spacing between the shots survives, or the date each file's own name records.
+    EditorCard {
+        val labelRes = when {
+            mode == DateMode.SHIFT -> R.string.metadata_editor_shift_label
+            state.bulk -> R.string.metadata_editor_bulk_date_label
+            else -> R.string.metadata_editor_date_label
+        }
+        AnimatedContent(targetState = labelRes, transitionSpec = { textSwap() }, label = "dateLabel") { res ->
+            EditorCardLabel(stringResource(res))
+        }
         if (shiftOffered || filenameOffered) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    label = stringResource(R.string.metadata_editor_date_mode_same),
-                    selected = !shiftMode && !filenameMode,
-                    onClick = { shiftSelected = false; filenameSelected = false; shiftTooLate = false },
+            val modes = listOfNotNull(
+                DateMode.SAME to stringResource(R.string.metadata_editor_date_mode_same),
+                if (shiftOffered) DateMode.SHIFT to stringResource(R.string.metadata_editor_date_mode_shift) else null,
+                if (filenameOffered) DateMode.FILENAME to stringResource(R.string.metadata_editor_date_mode_filename) else null,
+            )
+            Segmented(options = modes, selected = mode, onSelect = { mode = it; shiftTooLate = false })
+        }
+        AnimatedContent(
+            targetState = mode,
+            transitionSpec = { textSwap().using(SizeTransform(clip = false) { _, _ -> spring(stiffness = Spring.StiffnessMediumLow) }) },
+            label = "dateMode",
+        ) { shownMode ->
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        when (shownMode) {
+            DateMode.FILENAME -> {
+                Text(stringResource(R.string.metadata_editor_filename_hint), color = colors.fgMute, fontSize = 13.sp)
+                Text(
+                    pluralStringResource(
+                        R.plurals.metadata_editor_filename_count,
+                        state.filenameDateCount, state.filenameDateCount, state.editableCount,
+                    ),
+                    color = colors.fgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium,
                 )
-                if (shiftOffered) {
-                    FilterChip(
-                        label = stringResource(R.string.metadata_editor_date_mode_shift),
-                        selected = shiftMode,
-                        onClick = { shiftSelected = true; filenameSelected = false; shiftTooLate = false },
+                PrimaryButton(
+                    label = stringResource(R.string.metadata_editor_filename_apply),
+                    onClick = onFixDatesFromName,
+                    enabled = !state.isSaving,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            DateMode.SHIFT -> if (shiftSpan != null) {
+                Text(stringResource(R.string.metadata_editor_shift_hint), color = colors.fgMute, fontSize = 13.sp)
+                val preview = remember(shiftSpan, pickedShiftMs) {
+                    val picked = pickedShiftMs
+                    if (picked == null) shiftSpan else DateShift.shifted(shiftSpan, DateShift.deltaFor(shiftSpan, picked))
+                }
+                // Where the oldest and the newest photo stand: now, or once a pick moved them (in the accent).
+                val context = LocalContext.current
+                val is24Hour = LocalIs24Hour.current
+                ValueRow(
+                    text = remember(preview, is24Hour) {
+                        dateRangeText(context, preview.earliestMs, preview.latestMs, withTime = true, is24Hour)
+                    },
+                    accent = pickedShiftMs != null,
+                    enabled = editable,
+                    onClick = { picking = true },
+                )
+                if (state.dateShiftSkippedCount > 0) {
+                    Text(
+                        pluralStringResource(R.plurals.metadata_editor_shift_skipped, state.dateShiftSkippedCount, state.dateShiftSkippedCount),
+                        color = colors.fgMute, fontSize = 12.sp,
                     )
                 }
-                if (filenameOffered) {
-                    FilterChip(
-                        label = stringResource(R.string.metadata_editor_date_mode_filename),
-                        selected = filenameMode,
-                        onClick = { filenameSelected = true; shiftSelected = false; shiftTooLate = false },
+                if (shiftTooLate) {
+                    Text(stringResource(R.string.metadata_editor_shift_too_late), color = colors.errorColor, fontSize = 12.sp)
+                }
+            }
+            DateMode.SAME -> {
+                val notChosen = state.bulk && !state.dateChosen
+                ValueRow(
+                    text = if (notChosen) stringResource(R.string.metadata_editor_bulk_apply_hint)
+                    else remember(state.captureDateMs) { formatDateTime(state.captureDateMs) },
+                    muted = notChosen,
+                    enabled = editable,
+                    onClick = { picking = true },
+                )
+                if (!state.bulk) {
+                    Text(
+                        stringResource(
+                            if (state.dateSource == DateSource.CLOUD) R.string.metadata_editor_source_cloud
+                            else R.string.metadata_editor_source_device,
+                        ),
+                        color = colors.fgMute, fontSize = 12.sp,
                     )
                 }
             }
         }
-        if (filenameMode) {
-            Text(
-                text = stringResource(R.string.metadata_editor_filename_hint),
-                color = colors.fgMute,
-                fontSize = 13.sp,
-            )
-            // How many of the editable photos actually carry a name date; the rest keep their date.
-            Text(
-                text = pluralStringResource(
-                    R.plurals.metadata_editor_filename_count,
-                    state.filenameDateCount,
-                    state.filenameDateCount,
-                    state.editableCount,
-                ),
-                color = colors.fgPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(Modifier.height(4.dp))
-            PrimaryButton(
-                label = stringResource(R.string.metadata_editor_filename_apply),
-                onClick = onFixDatesFromName,
-                enabled = !state.isSaving,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        } else if (shiftMode && shiftSpan != null) {
-            Text(
-                text = stringResource(R.string.metadata_editor_shift_hint),
-                color = colors.fgMute,
-                fontSize = 13.sp,
-            )
-            // Where the photos end up: a held pick carried through DateShift, and the dates they carry
-            // right now before one is made. Every value comes from the state, so the line invents none.
-            val preview = remember(shiftSpan, pickedShiftMs) {
-                val picked = pickedShiftMs
-                if (picked == null) shiftSpan
-                else DateShift.shifted(shiftSpan, DateShift.deltaFor(shiftSpan, picked))
-            }
-            Text(
-                text = stringResource(
-                    if (pickedShiftMs != null) R.string.metadata_editor_shift_range_after
-                    else R.string.metadata_editor_shift_range_current,
-                    remember(preview.earliestMs) { formatDateTime(preview.earliestMs) },
-                    remember(preview.latestMs) { formatDateTime(preview.latestMs) },
-                ),
-                color = colors.fgPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-            )
-            if (state.dateShiftSkippedCount > 0) {
-                Text(
-                    text = pluralStringResource(
-                        R.plurals.metadata_editor_shift_skipped,
-                        state.dateShiftSkippedCount,
-                        state.dateShiftSkippedCount,
-                    ),
-                    color = colors.fgMute,
-                    fontSize = 12.sp,
-                )
-            }
-            if (shiftTooLate) {
-                Text(
-                    text = stringResource(R.string.metadata_editor_shift_too_late),
-                    color = colors.errorColor,
-                    fontSize = 12.sp,
-                )
-            }
-        } else if (state.bulk && !state.dateChosen) {
-            Text(
-                text = stringResource(R.string.metadata_editor_bulk_apply_hint),
-                color = AppColors.current.fgMute,
-                fontSize = 13.sp,
-            )
-        } else {
-            Text(
-                text = remember(state.captureDateMs) { formatDateTime(state.captureDateMs) },
-                color = AppColors.current.fgPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-            )
-            // The source line only makes sense for a single photo; a bulk set is always device files.
-            if (!state.bulk) {
-                Text(
-                    text = stringResource(
-                        if (state.dateSource == DateSource.CLOUD) R.string.metadata_editor_source_cloud
-                        else R.string.metadata_editor_source_device,
-                    ),
-                    color = AppColors.current.fgMute,
-                    fontSize = 12.sp,
-                )
-            }
+        }
         }
         state.dateLock?.let { LockNote(it) }
-        // A single editable cloud photo takes a date edit by being re-uploaded, so the field is open
-        // but the note is honest about what applying it does.
         if (!state.bulk && state.dateSource == DateSource.CLOUD && state.dateLock == null) {
-            Text(
-                stringResource(R.string.metadata_editor_cloud_replace_note),
-                color = colors.fgMute,
-                fontSize = 12.sp,
-            )
+            Text(stringResource(R.string.metadata_editor_cloud_replace_note), color = colors.fgMute, fontSize = 12.sp)
         }
-        // A single photo whose own file name records a different day than the one it now carries: offer
-        // that day in one tap. A screenshot or download often has no date but the one in its name, and a
-        // single photo has no use for the bulk "same date for all" chips. Applying runs the same path as
-        // picking the date by hand, so the field then shows the new day and this suggestion hides itself.
+        // A single photo whose own file name records another day: that day in one tap.
         val nameDateMs = state.filenameDateSingleMs
-        if (!state.bulk && nameDateMs != null && nameDateMs != state.captureDateMs &&
-            state.dateLock == null && !state.isSaving
-        ) {
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = stringResource(
-                    R.string.metadata_editor_filename_single,
-                    remember(nameDateMs) { formatDateTime(nameDateMs) },
-                ),
-                color = colors.fgMute,
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.height(8.dp))
-            PrimaryButton(
-                label = stringResource(R.string.metadata_editor_filename_use),
-                onClick = { onPickDate(nameDateMs) },
-                enabled = !state.isSaving,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-
-    // What the pickers open on: in shift mode the OLDEST photo's own instant, which is the one the user
-    // is naming; otherwise the single date the whole selection receives.
-    val seedMs = if (shiftMode) state.dateShiftEarliestMs else state.captureDateMs
-
-    if (showDatePicker) {
-        val seedDay = remember(seedMs) { toUtcMidnight(seedMs) }
-        // A shift may not land the newest photo in the future, so the calendar refuses every day past
-        // the one the state's ceiling falls on. The time inside that last day is guarded on confirm.
-        val selectableDates = remember(shiftMode, state.dateShiftMaxEarliestMs) {
-            if (shiftMode) daysUpTo(state.dateShiftMaxEarliestMs) else DatePickerDefaults.AllDates
-        }
-        val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = seedDay,
-            selectableDates = selectableDates,
-        )
-        DatePickerDialog(
-            onDismissRequest = { showDatePicker = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    pickedDateUtcMs = datePickerState.selectedDateMillis
-                    showDatePicker = false
-                    if (pickedDateUtcMs != null) showTimePicker = true
-                }) { Text(stringResource(R.string.metadata_editor_next)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDatePicker = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            },
-        ) {
-            // A shift asks for one photo's real capture time, not a date for the whole set, so the
-            // calendar carries a title of its own saying which photo that is.
-            if (shiftMode) {
-                DatePicker(
-                    state = datePickerState,
-                    title = {
-                        Text(
-                            text = stringResource(R.string.metadata_editor_shift_picker_title),
-                            modifier = Modifier.padding(start = 24.dp, end = 12.dp, top = 16.dp),
-                        )
-                    },
-                )
-            } else {
-                DatePicker(state = datePickerState)
-            }
-        }
-    }
-
-    if (showTimePicker) {
-        val zoned = remember(seedMs) {
-            Instant.ofEpochMilli(seedMs).atZone(ZoneId.systemDefault())
-        }
-        val timePickerState = rememberTimePickerState(
-            initialHour = zoned.hour,
-            initialMinute = zoned.minute,
-            is24Hour = LocalIs24Hour.current,
-        )
-        Dialog(onDismissRequest = { showTimePicker = false }) {
-            Surface(shape = RoundedCornerShape(24.dp), color = colors.bg2) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    if (shiftMode) {
-                        Text(
-                            text = stringResource(R.string.metadata_editor_shift_picker_title),
-                            color = colors.fgMute,
-                            fontSize = 13.sp,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                    }
-                    TimePicker(state = timePickerState)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        TextButton(onClick = { showTimePicker = false }) {
-                            Text(stringResource(R.string.cancel))
-                        }
-                        TextButton(onClick = {
-                            val day = pickedDateUtcMs
-                            if (day != null) {
-                                val chosenMs =
-                                    combineDateTime(day, timePickerState.hour, timePickerState.minute)
-                                when {
-                                    !shiftMode -> onPickDate(chosenMs)
-                                    // The calendar refuses a whole day, never an hour inside one, so a
-                                    // time that crosses the ceiling is explained here instead of written.
-                                    chosenMs > state.dateShiftMaxEarliestMs -> shiftTooLate = true
-                                    else -> {
-                                        shiftTooLate = false
-                                        pickedShiftMs = chosenMs
-                                        onShiftDates(chosenMs)
-                                    }
-                                }
-                            }
-                            showTimePicker = false
-                        }) { Text(stringResource(R.string.metadata_editor_set)) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ── Place field ──────────────────────────────────────────────────────────────
-
-@Composable
-private fun PlaceField(
-    state: MetadataEditorUiState,
-    onPickPoint: (Double, Double) -> Unit,
-    onRemoveLocation: () -> Unit,
-) {
-    val colors = AppColors.current
-    var picking by remember { mutableStateOf(false) }
-    // "City, Country" with the country named in the app language, like the labels around it.
-    val locale = appLocale()
-    val placeName = remember(state.place, locale) {
-        state.place?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
-    }
-    val editable = state.placeLock == null && !state.isSaving
-
-    FieldCard {
-        FieldHeaderRow(
-            label = stringResource(
-                if (state.bulk) R.string.metadata_editor_bulk_place_label
-                else R.string.metadata_editor_place_label,
-            ),
-            editable = editable,
-            onEdit = { picking = true },
-        )
-        val placeText = if (state.bulk && !state.placeChosen) {
-            stringResource(R.string.metadata_editor_bulk_apply_hint)
-        } else {
-            placeName ?: stringResource(R.string.metadata_editor_place_none)
-        }
-        Text(
-            text = placeText,
-            color = if (state.hasLocation) colors.fgPrimary else colors.fgMute,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Medium,
-        )
-        state.placeLock?.let { LockNote(it) }
-        // Same honest note as the date field: a lone cloud photo is editable here through a re-upload.
-        if (!state.bulk && state.dateSource == DateSource.CLOUD && state.placeLock == null) {
-            Text(
-                stringResource(R.string.metadata_editor_cloud_replace_note),
-                color = colors.fgMute,
-                fontSize = 12.sp,
-            )
-        }
-        // Bulk photos may each carry a different location, so offer "remove" even before a place is
-        // picked: it clears the location across every editable image.
-        if (state.placeLock == null && (state.bulk || state.hasLocation)) {
+        if (!state.bulk && nameDateMs != null && nameDateMs != state.captureDateMs && editable) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(enabled = editable) { onRemoveLocation() }
-                    .padding(vertical = 6.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(
-                    Icons.Default.LocationOff,
-                    contentDescription = null,
-                    tint = colors.errorColor,
-                    modifier = Modifier.size(18.dp),
+                Text(
+                    stringResource(R.string.metadata_editor_filename_single, remember(nameDateMs) { formatDateTime(nameDateMs) }),
+                    color = colors.fgPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
                 Text(
-                    stringResource(R.string.metadata_editor_place_remove),
-                    color = colors.errorColor,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
+                    stringResource(R.string.metadata_editor_filename_use),
+                    color = colors.accent, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onPickDate(nameDateMs) }
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
                 )
             }
         }
     }
 
     if (picking) {
-        LocationPickerDialog(
-            initialLatitude = state.latitude.takeIf { state.hasLocation },
-            initialLongitude = state.longitude.takeIf { state.hasLocation },
-            onConfirm = { latitude, longitude ->
-                picking = false
-                onPickPoint(latitude, longitude)
-            },
+        val shifting = mode == DateMode.SHIFT
+        DateTimeSheet(
+            title = stringResource(if (shifting) R.string.metadata_editor_shift_picker_title else R.string.viewer_meta_section_datetime),
+            seedMs = if (shifting) state.dateShiftEarliestMs else state.captureDateMs,
+            latestMs = if (shifting) state.dateShiftMaxEarliestMs else null,
             onDismiss = { picking = false },
+            onDone = { chosenMs ->
+                picking = false
+                when {
+                    !shifting -> onPickDate(chosenMs)
+                    // The calendar refuses a whole day, never an hour in one, so a time past the ceiling is
+                    // explained here instead of written.
+                    chosenMs > state.dateShiftMaxEarliestMs -> shiftTooLate = true
+                    else -> {
+                        shiftTooLate = false
+                        pickedShiftMs = chosenMs
+                        onShiftDates(chosenMs)
+                    }
+                }
+            },
         )
     }
 }
 
-// ── Descriptive text fields ──────────────────────────────────────────────────
-
-/**
- * One descriptive EXIF text field (description, artist, copyright), opened by the same pencil the
- * place field uses. The typed value lives in the ViewModel and is committed by the Done checkmark with
- * the date and place, so the box carries no Save of its own and the keyboard closing never drops it.
- */
+/** The calendar and time in a sheet over the editor, Done handing the picked moment back. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TextTagField(
-    label: String,
-    field: MetadataTextFieldState,
-    bulk: Boolean,
-    isSaving: Boolean,
-    onValueChange: (String) -> Unit,
-    maxLines: Int = 1,
+private fun DateTimeSheet(
+    title: String,
+    seedMs: Long,
+    latestMs: Long?,
+    onDismiss: () -> Unit,
+    onDone: (Long) -> Unit,
+) {
+    var chosen by remember { mutableStateOf(seedMs) }
+    AppModalSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = SheetBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        DetailsPageFrame {
+            DetailsPageHeader(
+                title = title,
+                action = stringResource(R.string.metadata_editor_done),
+                onAction = { onDone(chosen) },
+            )
+            DateTimeFields(seedMs = seedMs, latestMs = latestMs, onChange = { chosen = it })
+        }
+    }
+}
+
+// ── Place and text rows ──────────────────────────────────────────────────────
+
+/** The place and the three text tags as rows; each opens a sheet of its own. What a lock keeps from being
+ *  changed is said under the card, once per reason. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlaceAndTextCard(
+    state: MetadataEditorUiState,
+    onPickPoint: (Double, Double) -> Unit,
+    onRemoveLocation: () -> Unit,
+    onText: (MetadataTextTag, String) -> Unit,
 ) {
     val colors = AppColors.current
-    val focusManager = LocalFocusManager.current
-    var expanded by remember { mutableStateOf(false) }
+    val locale = appLocale()
+    val placeName = remember(state.place, locale) {
+        state.place?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
+    }
+    var placing by remember { mutableStateOf(false) }
+    var typing by remember { mutableStateOf<MetadataTextTag?>(null) }
+    val none = stringResource(R.string.metadata_editor_text_none)
 
-    FieldCard {
-        FieldHeaderRow(
-            label = label,
-            editable = field.lock == null && !isSaving,
-            onEdit = { expanded = !expanded },
+    EditorCard(padded = false) {
+        EditorRow(
+            label = stringResource(R.string.metadata_editor_place_label),
+            value = when {
+                state.bulk && !state.placeChosen -> ""
+                else -> placeName ?: stringResource(R.string.metadata_editor_place_none)
+            },
+            enabled = state.placeLock == null && !state.isSaving,
+            onClick = { placing = true },
         )
-        // A locked field with nothing read has no value to state, so the note below carries the whole
-        // message rather than a placeholder that would claim the tag is empty.
-        val body = when {
-            field.lock == null && bulk && !field.chosen ->
-                stringResource(R.string.metadata_editor_bulk_apply_hint)
-            field.stored.isNotEmpty() -> field.stored
-            field.lock == null -> stringResource(R.string.metadata_editor_text_none)
-            else -> null
-        }
-        body?.let {
-            Text(
-                text = it,
-                color = if (field.stored.isNotEmpty()) colors.fgPrimary else colors.fgMute,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        }
-        field.lock?.let { LockNote(it) }
-
-        if (field.lock == null && expanded) {
-            Spacer(Modifier.height(4.dp))
-            // No per-field Save: the typed value is held here and committed by the final checkmark along
-            // with the date and place, in one pass. The ASCII transliteration below previews what that
-            // write stores, and it happens automatically on the write, so nothing has to be pre-saved.
-            OutlinedTextField(
-                value = field.value,
-                onValueChange = onValueChange,
-                shape = RoundedCornerShape(14.dp),
-                enabled = !isSaving,
-                singleLine = maxLines == 1,
-                maxLines = maxLines,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = colors.fgPrimary,
-                    unfocusedTextColor = colors.fgPrimary,
-                    focusedBorderColor = colors.accent,
-                    unfocusedBorderColor = colors.line2,
-                    cursorColor = colors.accent,
+        MetadataTextTag.entries.forEach { tag ->
+            val field = state.textField(tag)
+            EditorDivider()
+            EditorRow(
+                label = stringResource(
+                    when (tag) {
+                        MetadataTextTag.DESCRIPTION -> R.string.viewer_meta_row_description
+                        MetadataTextTag.ARTIST -> R.string.viewer_meta_row_artist
+                        MetadataTextTag.COPYRIGHT -> R.string.viewer_meta_row_copyright
+                    },
                 ),
-                modifier = Modifier.fillMaxWidth(),
+                value = when {
+                    field.dirty -> field.value
+                    field.stored.isNotEmpty() -> field.stored
+                    state.bulk && !field.chosen -> ""
+                    else -> none
+                },
+                pending = field.dirty,
+                enabled = field.lock == null && !state.isSaving,
+                onClick = { typing = tag },
             )
-            AsciiPreview(typed = field.value)
+        }
+    }
+    val locks = (listOfNotNull(state.placeLock) + MetadataTextTag.entries.mapNotNull { state.textField(it).lock }).distinct()
+    locks.forEach { LockNote(it) }
+    if (!state.bulk && state.dateSource == DateSource.CLOUD && state.placeLock == null) {
+        Text(stringResource(R.string.metadata_editor_cloud_replace_note), color = colors.fgMute, fontSize = 12.sp)
+    }
+
+    if (placing) {
+        val center = remember { PickerCenter() }
+        AppModalSheet(
+            onDismissRequest = { placing = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = SheetBg,
+            scrimColor = Color.Black.copy(alpha = 0.5f),
+        ) {
+            DetailsPageFrame(scroll = false) {
+                DetailsPageHeader(
+                    title = stringResource(R.string.viewer_meta_section_location),
+                    action = stringResource(R.string.metadata_editor_done),
+                    onAction = {
+                        center.center()?.let { (lat, lon) -> onPickPoint(lat, lon) }
+                        placing = false
+                    },
+                )
+                InlineLocationPicker(
+                    initialLatitude = state.latitude.takeIf { state.hasLocation },
+                    initialLongitude = state.longitude.takeIf { state.hasLocation },
+                    center = center,
+                    hint = stringResource(R.string.details_place_hint),
+                )
+                // A selection may each carry a different place, so removing is offered before one is picked.
+                if (state.bulk || state.hasLocation) {
+                    DetailsDangerButton(
+                        label = stringResource(R.string.metadata_editor_place_remove),
+                        enabled = !state.isSaving,
+                        onClick = {
+                            onRemoveLocation()
+                            placing = false
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    typing?.let { tag ->
+        val field = state.textField(tag)
+        val focus = remember { FocusRequester() }
+        val textSheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val label = stringResource(
+            when (tag) {
+                MetadataTextTag.DESCRIPTION -> R.string.viewer_meta_row_description
+                MetadataTextTag.ARTIST -> if (state.bulk) R.string.metadata_editor_bulk_artist_label else R.string.viewer_meta_row_artist
+                MetadataTextTag.COPYRIGHT -> if (state.bulk) R.string.metadata_editor_bulk_copyright_label else R.string.viewer_meta_row_copyright
+            },
+        )
+        AppModalSheet(
+            onDismissRequest = { typing = null },
+            sheetState = textSheet,
+            containerColor = SheetBg,
+            scrimColor = Color.Black.copy(alpha = 0.5f),
+        ) {
+            DetailsPageFrame {
+                // The typed text is held and written with everything else by the editor's checkmark, so
+                // Done here only closes the sheet.
+                DetailsPageHeader(
+                    title = label,
+                    action = stringResource(R.string.metadata_editor_done),
+                    onAction = { typing = null },
+                )
+                OutlinedTextField(
+                    value = field.value,
+                    onValueChange = { onText(tag, it) },
+                    shape = RoundedCornerShape(14.dp),
+                    singleLine = tag != MetadataTextTag.DESCRIPTION,
+                    maxLines = if (tag == MetadataTextTag.DESCRIPTION) 3 else 1,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { typing = null }),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = colors.fgPrimary,
+                        unfocusedTextColor = colors.fgPrimary,
+                        focusedBorderColor = colors.accent,
+                        unfocusedBorderColor = colors.line2,
+                        cursorColor = colors.accent,
+                    ),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                )
+                AsciiPreview(typed = field.value)
+            }
+        }
+        // The keyboard is asked for once the sheet has arrived: asked for while the sheet still slides in, it
+        // covers the sheet, which then jumps above it only when its own slide ends.
+        LaunchedEffect(tag) {
+            snapshotFlow { textSheet.currentValue == SheetValue.Expanded && textSheet.targetValue == SheetValue.Expanded }
+                .first { it }
+            runCatching { focus.requestFocus() }
         }
     }
 }
+
+// ── Shared chrome ────────────────────────────────────────────────────────────
+
+@Composable
+private fun EditorCard(padded: Boolean = true, content: @Composable () -> Unit) {
+    val colors = AppColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(cardFill(colors.cardBg), cardShape)
+            .border(0.5.dp, colors.cardBorder, cardShape)
+            .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))
+            .then(if (padded) Modifier.padding(16.dp) else Modifier),
+        verticalArrangement = Arrangement.spacedBy(if (padded) 10.dp else 0.dp),
+    ) { content() }
+}
+
+@Composable
+private fun EditorCardLabel(label: String) {
+    Text(
+        label.uppercase(),
+        color = AppColors.current.fgMute,
+        fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+        maxLines = 2, overflow = TextOverflow.Ellipsis,
+    )
+}
+
+@Composable
+private fun EditorDivider() {
+    Box(Modifier.fillMaxWidth().height(0.5.dp).background(AppColors.current.line2))
+}
+
+/** A row of the place-and-text card: the name, what it holds now on one line, and the way into it. */
+@Composable
+private fun EditorRow(label: String, value: String, enabled: Boolean, onClick: () -> Unit, pending: Boolean = false) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = colors.fgPrimary, fontSize = 14.sp, maxLines = 1)
+        Spacer(Modifier.width(12.dp))
+        val tint by animateColorAsState(if (pending) colors.accent else colors.fgDim, label = "rowTint")
+        AnimatedContent(targetState = value, transitionSpec = { textSwap() }, modifier = Modifier.weight(1f), label = "rowValue") { shown ->
+            Text(
+                shown,
+                color = tint,
+                fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (enabled) {
+            Spacer(Modifier.width(4.dp))
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = colors.fgMute, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+/** The value the date card sets, as a field that opens the picker. */
+@Composable
+private fun ValueRow(text: String, enabled: Boolean, onClick: () -> Unit, muted: Boolean = false, accent: Boolean = false) {
+    val colors = AppColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.fgPrimary.copy(alpha = 0.06f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val tint by animateColorAsState(
+            when {
+                muted -> colors.fgMute
+                accent -> colors.accent
+                else -> colors.fgPrimary
+            },
+            label = "valueTint",
+        )
+        AnimatedContent(targetState = text, transitionSpec = { textSwap() }, modifier = Modifier.weight(1f), label = "value") { shown ->
+            Text(
+                shown,
+                color = tint,
+                fontSize = 14.sp, fontWeight = if (muted) FontWeight.Normal else FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (enabled) Icon(Icons.Default.Edit, contentDescription = null, tint = colors.accent, modifier = Modifier.size(16.dp))
+    }
+}
+
+/** A row of choices as one control. The highlight slides to the picked one on a spring and the labels'
+ *  colours follow it, so a switch reads as one movement. Labels may take two lines. */
+@Composable
+private fun <T> Segmented(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
+    val colors = AppColors.current
+    val index = options.indexOfFirst { it.first == selected }.coerceAtLeast(0)
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.fgPrimary.copy(alpha = 0.07f))
+            .padding(3.dp),
+    ) {
+        val segment = maxWidth / options.size
+        val offset by animateDpAsState(
+            targetValue = segment * index,
+            animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow),
+            label = "segment",
+        )
+        Box(
+            modifier = Modifier
+                .offset(x = offset)
+                .width(segment)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(9.dp))
+                .background(colors.accent.copy(alpha = 0.22f)),
+        )
+        Row(modifier = Modifier.fillMaxSize()) {
+            options.forEachIndexed { i, (value, label) ->
+                val on = i == index
+                val tint by animateColorAsState(if (on) colors.fgPrimary else colors.fgDim, label = "segmentTint")
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(9.dp))
+                        .clickable { onSelect(value) }
+                        .padding(horizontal = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        color = tint,
+                        fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                        lineHeight = 14.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** How a line of text gives way to the next: the old one fades out as the new one fades in, rising a little. */
+private fun <S> AnimatedContentTransitionScope<S>.textSwap(): ContentTransform =
+    (fadeIn(tween(220, delayMillis = 60)) + slideInVertically(tween(260)) { it / 4 })
+        .togetherWith(fadeOut(tween(120)))
 
 /**
  * The line that shows what an EXIF text tag will really hold. These tags are ASCII fields, so an
@@ -894,76 +947,8 @@ private fun AsciiPreview(typed: String) {
     )
 }
 
-// ── Shared field chrome ──────────────────────────────────────────────────────
-
 @Composable
-private fun FieldCard(content: @Composable () -> Unit) {
-    val colors = AppColors.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(cardShape)
-            .background(colors.cardBg, cardShape)
-            .border(0.5.dp, colors.cardBorder, cardShape)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) { content() }
-}
-
-@Composable
-private fun FieldHeaderRow(label: String, editable: Boolean, onEdit: () -> Unit) {
-    val colors = AppColors.current
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // The label takes the remaining width and wraps to at most two lines. Without the weight a
-        // long bulk label ("Set a date for these photos", longer still once translated) would eat the
-        // whole row and squeeze the Change action to a single character column, wrapping it vertically.
-        Text(
-            label.uppercase(),
-            color = colors.fgMute,
-            fontSize = 10.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            letterSpacing = 0.8.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 8.dp),
-        )
-        if (editable) {
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .clickable(onClick = onEdit)
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Icon(
-                    Icons.Default.Edit,
-                    contentDescription = stringResource(R.string.metadata_editor_change),
-                    tint = colors.accent,
-                    modifier = Modifier.size(15.dp),
-                )
-                // A fixed one-line action so it never wraps per-character when the label is long.
-                Text(
-                    stringResource(R.string.metadata_editor_change),
-                    color = colors.accent,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LockNote(lock: EditLock) {
+internal fun LockNote(lock: EditLock) {
     val res = when (lock) {
         EditLock.CLOUD -> R.string.metadata_editor_note_cloud
         EditLock.SHARED -> R.string.metadata_editor_note_shared
@@ -987,7 +972,7 @@ private fun formatDateTime(ms: Long): String = formatDateTimeMinute(ms)
 
 /** UTC midnight of the day [ms] falls on in the device zone. This is the seed a Material date picker
  *  expects, since its calendar reads the selected value in UTC. */
-private fun toUtcMidnight(ms: Long): Long {
+internal fun toUtcMidnight(ms: Long): Long {
     val localDate = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate()
     return localDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
 }
@@ -996,7 +981,7 @@ private fun toUtcMidnight(ms: Long): Long {
  *  chosen day alone can never put the newest photo of the selection in the future. A Material calendar
  *  reads its own values as UTC midnights, so the ceiling is compared on that basis. */
 @OptIn(ExperimentalMaterial3Api::class)
-private fun daysUpTo(maxEarliestMs: Long): SelectableDates {
+internal fun daysUpTo(maxEarliestMs: Long): SelectableDates {
     val lastDayUtcMs = toUtcMidnight(maxEarliestMs)
     val lastYear = Instant.ofEpochMilli(maxEarliestMs).atZone(ZoneId.systemDefault()).year
     return object : SelectableDates {
@@ -1008,7 +993,7 @@ private fun daysUpTo(maxEarliestMs: Long): SelectableDates {
 
 /** Combines a picker day (UTC midnight) with a wall-clock [hour]/[minute] in the device zone. Reading
  *  the day back in UTC keeps the calendar date the user tapped from drifting across the zone offset. */
-private fun combineDateTime(dateUtcMs: Long, hour: Int, minute: Int): Long {
+internal fun combineDateTime(dateUtcMs: Long, hour: Int, minute: Int): Long {
     val localDate = Instant.ofEpochMilli(dateUtcMs).atZone(ZoneOffset.UTC).toLocalDate()
     return localDate.atTime(hour, minute)
         .atZone(ZoneId.systemDefault())

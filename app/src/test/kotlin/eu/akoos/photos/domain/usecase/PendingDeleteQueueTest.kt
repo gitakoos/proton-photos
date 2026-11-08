@@ -23,6 +23,7 @@
 package eu.akoos.photos.domain.usecase
 
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase.Companion.pendingDeleteEntryIsStale
+import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase.Companion.pendingDeleteProbe
 import eu.akoos.photos.domain.usecase.PendingDeleteNotificationUseCase.Companion.trimPendingDeleteQueue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -137,5 +138,13 @@ class PendingDeleteQueueTest {
     @Test
     fun `a cap of zero empties the queue`() {
         assertEquals(emptyList<String>(), trimPendingDeleteQueue(listOf(uri(1), uri(2)), max = 0))
+    }
+
+    @Test
+    fun `a probe that could not ask keeps the entry and its row as they are`() {
+        assertEquals(PendingDeleteProbe.UNKNOWN, pendingDeleteProbe(queried = false, rowExists = false, isTrashed = false))
+        assertEquals(PendingDeleteProbe.STALE, pendingDeleteProbe(queried = true, rowExists = false, isTrashed = false))
+        assertEquals(PendingDeleteProbe.STALE, pendingDeleteProbe(queried = true, rowExists = true, isTrashed = true))
+        assertEquals(PendingDeleteProbe.ALIVE, pendingDeleteProbe(queried = true, rowExists = true, isTrashed = false))
     }
 }

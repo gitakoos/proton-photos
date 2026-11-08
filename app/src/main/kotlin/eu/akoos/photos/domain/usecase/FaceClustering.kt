@@ -98,6 +98,11 @@ internal const val MAX_CLUSTERS = 2000
  *  this. */
 internal const val MERGE_MAX_CLUSTERS = 400
 
+/** Whether [clusterFaces] left its merge out for [assignment]: the merge only ever lowers the group count and
+ *  runs only at or under [MERGE_MAX_CLUSTERS] groups, so more groups than that means it was skipped. */
+internal fun mergeWasSkipped(assignment: IntArray?): Boolean =
+    assignment != null && assignment.asSequence().filter { it >= 0 }.toHashSet().size > MERGE_MAX_CLUSTERS
+
 /**
  * Photos a person must appear in before showing as a browsable person. A one-off false detection, an
  * object that vaguely read as a face, lands in a cluster of one and never clears this floor, so it

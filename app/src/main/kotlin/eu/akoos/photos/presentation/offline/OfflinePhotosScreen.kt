@@ -57,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.delay
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -102,6 +104,8 @@ fun OfflinePhotosScreen(
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val contentTopPad = floatingHeaderContentTopPadding()
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(Bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -152,7 +156,7 @@ fun OfflinePhotosScreen(
             LazyVerticalGrid(
                 columns = GridCells.Fixed(cols),
                 state = gridState,
-                modifier = Modifier.fillMaxSize().then(dragMod),
+                modifier = Modifier.glassSource(glass).fillMaxSize().then(dragMod),
                 contentPadding = PaddingValues(
                     start = if (seamless) 0.dp else 8.dp,
                     top = contentTopPad,
@@ -219,6 +223,7 @@ fun OfflinePhotosScreen(
         // cannot pop the screen and drop the selection; the drawer then carries cancel and count.
         if (!inSelectionMode) {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.offline_screen_title),
                 onBack = onBack,
             )
@@ -239,6 +244,7 @@ fun OfflinePhotosScreen(
             )
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = inSelectionMode,
             items = selectedItems,
             actions = actions,

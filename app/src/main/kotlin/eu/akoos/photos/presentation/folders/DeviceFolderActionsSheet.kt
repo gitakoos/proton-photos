@@ -46,7 +46,6 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,6 +64,7 @@ import eu.akoos.photos.presentation.albums.AlbumPhotoSortMode
 import eu.akoos.photos.presentation.albums.AlbumViewOptions
 import eu.akoos.photos.presentation.common.ActionSheetRow
 import eu.akoos.photos.presentation.common.ActionSheetSectionHeading
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -155,7 +155,7 @@ internal fun DeviceFolderActionsSheet(
         }
     }
 
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = SheetBg,
@@ -245,10 +245,10 @@ internal fun DeviceFolderActionsSheet(
                 )
                 Spacer(Modifier.height(8.dp))
             }
-            // Renaming a folder relocates its photos into a new directory, the local stand-in for
-            // renaming a Drive album. It is offered only in a logged-out session, and only where the
-            // scoped-storage move it performs is supported.
-            if (!isSignedIn && onRename != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Renaming a folder relocates its photos into a new directory; the Drive album of a mirrored
+            // folder follows its backed-up photos. Offered only where the scoped-storage move it performs
+            // is supported.
+            if (onRename != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 ActionSheetRow(
                     icon = Icons.Default.Edit,
                     title = stringResource(R.string.folder_rename),

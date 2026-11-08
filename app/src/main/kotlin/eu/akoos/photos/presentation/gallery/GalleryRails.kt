@@ -25,6 +25,7 @@ package eu.akoos.photos.presentation.gallery
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.datastore.preferences.core.edit
+import eu.akoos.photos.presentation.common.pillSurface
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -154,6 +155,9 @@ import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.Accent2
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ArcTrack
+import eu.akoos.photos.presentation.albums.AlbumRowCoverSize
+import eu.akoos.photos.presentation.albums.AlbumRowGap
+import eu.akoos.photos.presentation.albums.AlbumRowPadding
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
@@ -301,7 +305,7 @@ private fun AlbumsRailPills(
                 Box(
                     modifier = Modifier
                         .size(38.dp)
-                        .background(AppColors.current.filterPillBg, pillShape)
+                        .pillSurface(AppColors.current.filterPillBg, pillShape)
                         .clickable { onNewAlbumClick() },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -317,7 +321,7 @@ private fun AlbumsRailPills(
                 Box(
                     modifier = Modifier
                         .size(38.dp)
-                        .background(AppColors.current.filterPillBg, pillShape)
+                        .pillSurface(AppColors.current.filterPillBg, pillShape)
                         .clickable { onNewLocalFolder() },
                     contentAlignment = Alignment.Center,
                 ) {
@@ -398,12 +402,12 @@ internal fun AvatarButton(
         modifier = Modifier
             .height(46.dp)
             .width(pillWidth)
+            .pillSurface(pillBgColor, pillShape)
             .drawBehind {
                 val strokePx = 2.6.dp.toPx()
                 val h = size.height
                 val radius = h / 2f
-                // Pill fill + border track around the whole rounded rectangle.
-                drawRoundRect(color = pillBgColor, cornerRadius = CornerRadius(radius, radius))
+                // Border track around the whole rounded rectangle, over the pill's surface.
                 drawRoundRect(
                     color = trackColor,
                     topLeft = androidx.compose.ui.geometry.Offset(strokePx / 2f, strokePx / 2f),
@@ -708,9 +712,7 @@ private fun rememberPillActiveAmount(active: Boolean): State<Float> =
 private fun Modifier.tintedPill(idle: Color, active: Color, amount: () -> Float): Modifier = this
     .animateContentSize(spring(dampingRatio = 0.9f, stiffness = Spring.StiffnessMediumLow))
     .height(38.dp)
-    .drawBehind {
-        drawOutline(pillShape.createOutline(size, layoutDirection, this), lerp(idle, active, amount()))
-    }
+    .pillSurface(pillShape) { lerp(idle, active, amount()) }
 
 /** A pill's label. A new [text] fades in over the old one, which fades out as it does, in the same spot,
  *  while the label's width eases to the new text's, so the words never vanish between two states. */
@@ -856,8 +858,7 @@ internal fun CategoryRail(
                     modifier = Modifier
                         .height(34.dp)
                         .clip(shape)
-                        .background(chipBg, shape)
-                        .then(if (!selected) Modifier.border(0.5.dp, PillBorder, shape) else Modifier)
+                        .pillSurface(shape, border = if (!selected) PillBorder else null) { chipBg }
                         .clickable { onFilterSelected(if (selected) GalleryFilter.All else cat) }
                         .padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -884,8 +885,7 @@ internal fun CategoryRail(
                         modifier = Modifier
                             .height(34.dp)
                             .clip(shape)
-                            .background(chipBg, shape)
-                            .then(if (!selected) Modifier.border(0.5.dp, PillBorder, shape) else Modifier)
+                            .pillSurface(shape, border = if (!selected) PillBorder else null) { chipBg }
                             .clickable { peopleRail.onToggle() }
                             .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -947,8 +947,7 @@ private fun PeopleBar(
 }
 
 /** One round face tile: the cover photo's thumbnail cropped to the face box inside a circle, with the
- *  person's name below when one is set. Reuses the timeline's linkId → decrypted-thumbnail resolution
- *  ([LocalThumbnailUrls]); a local cover falls back to its own content uri. */
+ *  person's name below when one is set. The cover resolves through [rememberFaceCoverModel]. */
 @Composable
 internal fun PersonTile(
     person: PersonUi,
@@ -956,7 +955,7 @@ internal fun PersonTile(
     onClick: () -> Unit,
 ) {
     val context = LocalContext.current
-    val model = LocalThumbnailUrls.current.value[person.coverPhotoKey] ?: person.coverPhotoKey
+    val model = rememberFaceCoverModel(person.coverPhotoKey)
     val request = remember(model, person.faceBox) {
         ImageRequest.Builder(context)
             .data(model)
@@ -991,13 +990,17 @@ internal fun PersonTile(
         val name = person.displayName?.takeIf { it.isNotBlank() }
         // Reserve the caption line whether or not the person is named, so a row that mixes named and
         // not-yet-named tiles keeps one height instead of shrinking as it scrolls onto the unnamed ones.
+        // The line is measured in sp with its own line height, so a larger system font grows the line
+        // with the text instead of the tile's clip cutting the name in half.
         Spacer(Modifier.height(4.dp))
-        Box(modifier = Modifier.height(16.dp), contentAlignment = Alignment.Center) {
+        val captionHeight = with(LocalDensity.current) { PERSON_CAPTION_LINE.toDp() }
+        Box(modifier = Modifier.height(captionHeight), contentAlignment = Alignment.Center) {
             if (name != null) {
                 Text(
                     name,
                     color = if (selected) Accent else FgDim,
                     fontSize = 11.sp,
+                    lineHeight = PERSON_CAPTION_LINE,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1007,11 +1010,14 @@ internal fun PersonTile(
     }
 }
 
+/** The line a person tile's name takes, in sp so it follows the system font size. */
+private val PERSON_CAPTION_LINE = 15.sp
+
 /**
  * Album-style People card: the person's face-cropped cover filling a rounded rectangle, captioned with
  * the name and a photo count, mirroring the memories [SeasonCard] (same aspect, corners, background and
  * caption treatment) but for a person. Fills its grid cell width. Reuses [PersonTile]'s cover resolution
- * ([LocalThumbnailUrls] keyed by coverPhotoKey) and the same [FaceCropTransformation], clipped to the
+ * ([rememberFaceCoverModel]) and the same [FaceCropTransformation], clipped to the
  * card corners instead of a circle; an unresolved cover falls back to the card's [Bg2] background.
  */
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -1023,7 +1029,7 @@ internal fun PersonCard(
     selected: Boolean = false,
 ) {
     val context = LocalContext.current
-    val model = LocalThumbnailUrls.current.value[person.coverPhotoKey] ?: person.coverPhotoKey
+    val model = rememberFaceCoverModel(person.coverPhotoKey)
     val request = remember(model, person.faceBox) {
         ImageRequest.Builder(context)
             .data(model)
@@ -1103,6 +1109,69 @@ internal fun PersonCard(
                     modifier = Modifier.size(14.dp),
                 )
             }
+        }
+    }
+}
+
+/**
+ * The list-view counterpart of [PersonCard]: the face in a circle at an album row's cover size, with the
+ * name and photo count beside it, on an album row's insets, so the People list reads like the Albums list.
+ */
+@Composable
+internal fun PersonRow(
+    person: PersonUi,
+    onClick: () -> Unit,
+) {
+    val context = LocalContext.current
+    val model = rememberFaceCoverModel(person.coverPhotoKey)
+    val request = remember(model, person.faceBox) {
+        ImageRequest.Builder(context)
+            .data(model)
+            .size(FACE_TILE_PX)
+            .crossfade(false)
+            .apply { person.faceBox?.let { transformations(FaceCropTransformation(it)) } }
+            .build()
+    }
+    val name = when {
+        person.isOther -> stringResource(R.string.person_unsorted)
+        else -> person.displayName ?: stringResource(R.string.person_detail_unnamed)
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(AlbumRowPadding),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AlbumRowGap),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(AlbumRowCoverSize)
+                .clip(CircleShape)
+                .background(Bg2),
+        ) {
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                color = FgPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = pluralStringResource(R.plurals.count_photos_plural, person.faceCount, person.faceCount),
+                color = FgMute,
+                fontSize = 12.sp,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -1313,8 +1382,7 @@ internal fun BottomDock(
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(
             modifier = Modifier
-                .background(PillBgOpaque, pillShape)
-                .border(0.5.dp, PillBorder, pillShape)
+                .pillSurface(PillBgOpaque, pillShape, border = PillBorder)
                 .padding(4.dp),
         ) {
             // The sliding fill, drawn behind the tab row and animated to the active tab's bounds.

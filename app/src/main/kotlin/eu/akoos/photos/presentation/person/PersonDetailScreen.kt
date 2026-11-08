@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.person
 
+import eu.akoos.photos.domain.usecase.samePersonName
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -54,6 +55,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CallMerge
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonAdd
@@ -88,6 +90,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.glassSource
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.EditFieldSheet
@@ -97,11 +100,15 @@ import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
 import eu.akoos.photos.presentation.common.SelectionShareState
 import eu.akoos.photos.presentation.common.addToAlbumResultText
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog
 import eu.akoos.photos.presentation.gallery.GalleryMultiDeleteDialog
 import eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog
 import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.gallery.selectionGridBottomPadding
+import eu.akoos.photos.presentation.location.LocationGridRow
+import eu.akoos.photos.presentation.location.LocationMonthHeader
+import eu.akoos.photos.presentation.location.locationGridRows
 import eu.akoos.photos.presentation.lock.LocalAppLock
 import eu.akoos.photos.presentation.lock.runWhenOpen
 import eu.akoos.photos.presentation.people.AddToPersonFaceSheet
@@ -118,6 +125,9 @@ import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgMute
+import eu.akoos.photos.presentation.util.monthYearFormat
+import java.util.Date
+import java.util.TimeZone
 
 /**
  * Full-screen detail for one clustered person: a photo grid over every item they appear in, built
@@ -171,6 +181,7 @@ fun PersonDetailScreen(
         }
     }
     var showRename by remember { mutableStateOf(false) }
+    var showUnnameConfirm by remember { mutableStateOf(false) }
     var showRemoveConfirm by remember { mutableStateOf(false) }
     var showIgnoreConfirm by remember { mutableStateOf(false) }
     var showNotPersonConfirm by remember { mutableStateOf(false) }
@@ -332,7 +343,7 @@ fun PersonDetailScreen(
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
             appLock.runWhenOpen {
-                runCatching { context.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle)) }
+                runCatching { context.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(context, intent, shareChooserTitle)) }
             }
         }
     }
@@ -358,6 +369,8 @@ fun PersonDetailScreen(
         }
     }
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(appColors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -382,6 +395,10 @@ fun PersonDetailScreen(
                 // Long-press a photo then drag to sweep a range, the way the timeline and albums select. The
                 // hint and merge rows at the top carry no photo key, so they are never part of a sweep.
                 val selectableIds = remember(state.items) { state.items.map { it.stableId } }
+                val gridRows = remember(state.items) {
+                    val fmt = monthYearFormat()
+                    locationGridRows(state.items, TimeZone.getDefault(), keyOf = { it.stableId }) { fmt.format(Date(it)) }
+                }
                 val idToIndex = remember(selectableIds) { selectableIds.withIndex().associate { (i, id) -> id to i } }
                 // Armed at the long-press anchor so the cell's release-tap does not toggle it straight back off.
                 val tapGuard = remember { mutableStateOf(false) }
@@ -408,7 +425,7 @@ fun PersonDetailScreen(
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-                    modifier = Modifier.fillMaxSize().then(dragSelectModifier),
+                    modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier),
                 ) {
                     // The Unsorted bucket explains itself at the top of its grid, so it is never mistaken
                     // for a person the app thinks it recognised.
@@ -439,7 +456,19 @@ fun PersonDetailScreen(
                             )
                         }
                     }
-                    items(items = state.items, key = { it.stableId }) { item ->
+                    // A header over each month, as on a place's page and the desktop, so a person's photos
+                    // read as a story through the years rather than one unbroken wall.
+                    items(
+                        items = gridRows,
+                        key = { row -> row.key },
+                        span = { row -> GridItemSpan(if (row is LocationGridRow.Header) maxLineSpan else 1) },
+                        contentType = { row -> row is LocationGridRow.Header },
+                    ) { row ->
+                        if (row is LocationGridRow.Header) {
+                            LocationMonthHeader(label = row.label, seamless = seamless)
+                            return@items
+                        }
+                        val item = (row as LocationGridRow.Photo).item
                         val inputs = remember(item) { photoCellInputsFor(item) }
                         PhotoCell(
                             imageData = inputs.imageData,
@@ -477,6 +506,7 @@ fun PersonDetailScreen(
         // page, with this page's own (cover, merge, remove, not a person) beside them.
         val selectAllCount = selectAllCountFor(total = state.items.size, selected = selection.size)
         SelectionDrawer(
+            backdrop = glass,
             visible = selecting,
             items = remember(selectedItems) { selectedItems.toList() },
             actions = personSelectionActions,
@@ -496,6 +526,7 @@ fun PersonDetailScreen(
         // person's own add + edit + overflow there instead. The two never show at once.
         if (selecting) {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.album_picker_selected, selection.size),
                 onBack = { clearSelection() },
             )
@@ -514,6 +545,7 @@ fun PersonDetailScreen(
                 baseTitle
             }
             FloatingHeader(
+                backdrop = glass,
                 title = headerTitle,
                 onBack = onBack,
                 trailing = {
@@ -571,6 +603,20 @@ fun PersonDetailScreen(
                                         }
                                     },
                                 )
+                                // Takes a named person's name away, as saving an empty Rename does, said out
+                                // loud: the photos stay and the group goes back to the faces to review.
+                                if (state.personName != null) {
+                                    DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.person_remove_name), color = appColors.fgPrimary) },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Clear, contentDescription = null, tint = appColors.fgDim)
+                                        },
+                                        onClick = {
+                                            menuOpen = false
+                                            showUnnameConfirm = true
+                                        },
+                                    )
+                                }
                                 // Add photos: named only, since a manual add is stored against the name so
                                 // it survives a rescan.
                                 if (state.personName != null) {
@@ -687,7 +733,7 @@ fun PersonDetailScreen(
                 // Renaming onto a name another person holds is a merge (same name = same person), so it
                 // confirms first instead of silently folding two people together. A new name just renames.
                 val trimmed = entered.trim()
-                if (trimmed.isNotEmpty() && mergeCandidates.any { it.displayName == trimmed }) {
+                if (trimmed.isNotEmpty() && mergeCandidates.any { samePersonName(it.displayName, trimmed) }) {
                     pendingRenameMerge = trimmed
                 } else {
                     onRename(entered)
@@ -854,6 +900,20 @@ fun PersonDetailScreen(
                 clearSelection()
             },
             onDismiss = { showMoveSelectionPicker = false },
+        )
+    }
+
+    if (showUnnameConfirm) {
+        ConfirmDialog(
+            title = stringResource(R.string.person_remove_name_confirm_title),
+            message = stringResource(R.string.person_remove_name_confirm_body),
+            confirmLabel = stringResource(R.string.person_remove_name),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                showUnnameConfirm = false
+                onRename("")
+            },
+            onDismiss = { showUnnameConfirm = false },
         )
     }
 

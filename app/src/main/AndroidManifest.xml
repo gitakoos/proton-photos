@@ -181,6 +181,14 @@
             native PGP call and crash the process. Not exported: only our own PendingIntent fires it.
         -->
         <receiver
+            android:name=".worker.CloudCompressCancelReceiver"
+            android:exported="false"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="eu.akoos.photos.action.CANCEL_CLOUD_COMPRESS" />
+            </intent-filter>
+        </receiver>
+        <receiver
             android:name=".worker.MetadataEditCancelReceiver"
             android:exported="false"
             android:enabled="true">
@@ -227,6 +235,31 @@
             android:theme="@style/Theme.ProtonPhotos">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            "Back up to Drive" in the share sheet, for one photo or video or many. It shows no screen:
+            the shared items join the explicit back-up queue and a toast says what happened.
+        -->
+        <activity
+            android:name=".presentation.share.ShareBackupActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:label="@string/share_backup_label"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
             </intent-filter>
         </activity>
 

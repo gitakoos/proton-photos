@@ -721,6 +721,20 @@ class HiddenVaultDecisionsTest {
     }
 
     @Test
+    fun `a hide drops the faces under the source uri, the paired link and the vault uri itself`() {
+        val keys = HiddenVaultDecisions.faceKeysOfHidden(
+            vaultUris = listOf("file:///v/1", "file:///v/2"),
+            sourceByVaultUri = mapOf("file:///v/1" to "content://media/1", "file:///v/2" to "content://media/2"),
+            cloudIdEntries = listOf("file:///v/1|link-1"),
+        )
+
+        assertEquals(
+            listOf("content://media/1", "content://media/2", "link-1", "file:///v/1", "file:///v/2"),
+            keys,
+        )
+    }
+
+    @Test
     fun `nothing to confirm splits into nothing`() {
         val split = HiddenVaultDecisions.confirmSplit(emptyList(), mapOf("v1" to "s1")) { true }
         assertTrue(split.publish.isEmpty())

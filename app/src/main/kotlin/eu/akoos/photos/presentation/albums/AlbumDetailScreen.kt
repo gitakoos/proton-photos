@@ -54,6 +54,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.ScrollDateLabel
 import eu.akoos.photos.presentation.gallery.TimelineScrubber
 import eu.akoos.photos.presentation.gallery.TimelineGrouping
@@ -96,6 +98,7 @@ import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
+import eu.akoos.photos.presentation.common.rememberCloudCompressAction
 import eu.akoos.photos.presentation.common.CloudMetadataSaveDrawer
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -300,7 +303,7 @@ fun AlbumDetailScreen(
     LaunchedEffect(Unit) {
         viewModel.shareIntent.collect { intent ->
             appLock.runWhenOpen {
-                runCatching { shareCtx.startActivity(Intent.createChooser(intent, shareChooserTitle)) }
+                runCatching { shareCtx.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(shareCtx, intent, shareChooserTitle)) }
             }
         }
     }
@@ -565,6 +568,8 @@ fun AlbumDetailScreen(
     // Yields the pill while the scrubber bubble is being dragged so the two don't overlap.
     var scrubberDragging by remember { mutableStateOf(false) }
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(appColors.bg0)
     Box(modifier = Modifier.fillMaxSize().background(appColors.bg0)) {
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = state.isLoading && state.photos.isNotEmpty(),
@@ -623,7 +628,7 @@ fun AlbumDetailScreen(
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(groupingPinch),
+            modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier).then(groupingPinch),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 val headerVideoCount = state.photos.count { it.mimeType.startsWith("video/") }
@@ -653,8 +658,13 @@ fun AlbumDetailScreen(
                         if (gridState.firstVisibleItemIndex == 0)
                             gridState.firstVisibleItemScrollOffset.toFloat() else 0f
                     },
-                    metaLeading = {
-                        // Sharer avatar (shared-with-me) or members + pending invitees (own album).
+                    // Sharer avatar (shared-with-me) or members + pending invitees (own album); none for an
+                    // own album nobody shares, so its count does not follow a lone separator.
+                    metaLeading = if (
+                        (state.isSharedWithMe && state.sharedByEmail != null) ||
+                        state.members.isNotEmpty() || state.invitations.isNotEmpty() || state.isLoadingInvitations
+                    ) {
+                        {
                         val sharerEmail = state.sharedByEmail
                         if (state.isSharedWithMe && sharerEmail != null) {
                             // Periwinkle is the dark-mode pick; light mode falls back to accent.
@@ -677,7 +687,8 @@ fun AlbumDetailScreen(
                                 }
                             }
                         }
-                    },
+                        }
+                    } else null,
                     titleActions = {
                         // One control at rest. Adding, sharing, downloading, renaming, the
                         // slideshow, the sort order and leaving all live in the drawer it opens, so
@@ -889,6 +900,7 @@ fun AlbumDetailScreen(
                 .padding(start = 12.dp, top = 8.dp),
         ) {
             IconBubble(
+                backdrop = glass,
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = if (state.isSelectionMode) stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
                 onClick = { if (state.isSelectionMode) viewModel.clearSelection() else onBack() },
@@ -900,6 +912,7 @@ fun AlbumDetailScreen(
             )
         }
         StickyAlbumHeader(
+            backdrop = glass,
             visible = stickyShown,
             title = state.albumName.ifBlank { albumName },
             onBack = onBack,
@@ -929,6 +942,7 @@ fun AlbumDetailScreen(
                 .padding(bottom = 24.dp),
         ) {
             IconBubble(
+                backdrop = glass,
                 icon = Icons.Default.KeyboardArrowUp,
                 contentDescription = stringResource(R.string.cd_scroll_to_top),
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
@@ -979,6 +993,11 @@ fun AlbumDetailScreen(
                 viewModel.clearSelection()
             },
         )
+        // The photos of a shared-with-me album are the owner's to replace, so it offers no compression.
+        val compressAction = rememberCloudCompressAction(
+            items = if (state.isSharedWithMe) emptyList() else selectedAlbumItems,
+            isSignedIn = true,
+        )
         val albumSelectionActions = buildList {
             add(
                 SelectionAction(
@@ -1006,6 +1025,9 @@ fun AlbumDetailScreen(
                     )
                 )
             }
+            // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
+            // smaller copy is up.
+            compressAction?.let(::add)
             // Add-to-person runs on-device and can name a new person, so it follows face recognition
             // alone, the same gate the timeline and Search use.
             if (faceEnabled) {
@@ -1158,6 +1180,7 @@ fun AlbumDetailScreen(
             }
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = state.isSelectionMode,
             items = selectedAlbumItems,
             actions = albumSelectionActions,

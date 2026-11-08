@@ -69,6 +69,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.ShimmerBox
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -110,6 +112,8 @@ fun MemoryCategoryScreen(
         label to { onSwitchCategory(other) }
     }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -129,14 +133,33 @@ fun MemoryCategoryScreen(
         val seasons = if (sortNewestFirst) state.seasons else state.seasons.asReversed()
         // Reversing keeps the same scroll index but the item under it changes, which reads as the
         // view "jumping" — snap back to the top whenever the sort flips so it stays put.
-        LaunchedEffect(sortNewestFirst) { gridState.scrollToItem(0) }
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            LaunchedEffect(sortNewestFirst) { gridState.scrollToItem(0) }
 
-        Crossfade(targetState = state.isLoading, label = "memoryCategoryContent", modifier = Modifier.fillMaxSize()) { loading ->
-        if (loading) {
-            // Skeleton grid matching the 2-column card layout so there is no jump when the real cards
-            // arrive.
+            Crossfade(targetState = state.isLoading, label = "memoryCategoryContent", modifier = Modifier.fillMaxSize()) { loading ->
+            if (loading) {
+                // Skeleton grid matching the 2-column card layout so there is no jump when the real cards
+                // arrive.
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(140.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 14.dp, end = 14.dp, top = contentTopPad, bottom = 24.dp,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(8) {
+                        ShimmerBox(
+                            modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
+                            cornerRadius = 16.dp,
+                        )
+                    }
+                }
+            } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(140.dp),
+                state = gridState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(
                     start = 14.dp, end = 14.dp, top = contentTopPad, bottom = 24.dp,
@@ -144,58 +167,42 @@ fun MemoryCategoryScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(8) {
-                    ShimmerBox(
-                        modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
-                        cornerRadius = 16.dp,
-                    )
-                }
-            }
-        } else {
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(140.dp),
-            state = gridState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(
-                start = 14.dp, end = 14.dp, top = contentTopPad, bottom = 24.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            when (category) {
-                MemoryCategory.ON_THIS_DAY -> {
-                    items(state.onThisDay, key = { "otd_${it.first}" }) { (year, items) ->
-                        OnThisDayCard(
-                            coverItem = items.first(),
-                            yearsAgo = (now - year).coerceAtLeast(1),
-                            count = items.size,
-                            modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
-                            onClick = { onPhotoClick(items, 0) },
-                        )
+                when (category) {
+                    MemoryCategory.ON_THIS_DAY -> {
+                        items(state.onThisDay, key = { "otd_${it.first}" }) { (year, items) ->
+                            OnThisDayCard(
+                                coverItem = items.first(),
+                                yearsAgo = (now - year).coerceAtLeast(1),
+                                count = items.size,
+                                modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
+                                onClick = { onPhotoClick(items, 0) },
+                            )
+                        }
                     }
-                }
-                MemoryCategory.SEASONS -> {
-                    // No item key: reversing the SAME items with keys makes the grid chase the
-                    // moved first-visible item (it lands at the far end), which the scroll-to-top
-                    // then yanks back — two jumps that read as a flicker. Positional items just
-                    // re-lay-out in place and the scroll-to-top below keeps it clean.
-                    items(seasons) { bucket ->
-                        SeasonCard(
-                            coverItem = bucket.cover,
-                            title = bucket.title,
-                            count = bucket.items.size,
-                            modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
-                            onClick = { onPhotoClick(bucket.items, 0) },
-                        )
+                    MemoryCategory.SEASONS -> {
+                        // No item key: reversing the SAME items with keys makes the grid chase the
+                        // moved first-visible item (it lands at the far end), which the scroll-to-top
+                        // then yanks back — two jumps that read as a flicker. Positional items just
+                        // re-lay-out in place and the scroll-to-top below keeps it clean.
+                        items(seasons) { bucket ->
+                            SeasonCard(
+                                coverItem = bucket.cover,
+                                title = bucket.title,
+                                count = bucket.items.size,
+                                modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
+                                onClick = { onPhotoClick(bucket.items, 0) },
+                            )
+                        }
                     }
                 }
             }
-        }
-        }
+            }
+            }
         }
 
         // Floating pills — back, title, and (Seasons only) the sort toggle, all in the same top row.
         FloatingHeader(
+            backdrop = glass,
             title = title,
             onBack = onBack,
             menuItems = switchMenu,

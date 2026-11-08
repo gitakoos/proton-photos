@@ -50,7 +50,7 @@ internal fun detailLevelFor(radiusPx: Double, pixels: Double = SETTLED_TOLERANCE
 
 /** How much simplification, in pixels, a still picture and a moving one put up with. */
 internal const val SETTLED_TOLERANCE_PX = 2.0
-internal const val MOVING_TOLERANCE_PX = 5.0
+internal const val MOVING_TOLERANCE_PX = 8.0
 private const val DEGREES_PER_RADIAN = 57.29578
 
 /** The map zoom (a world 256 dp wide at zoom 0) the globe's size corresponds to, which place names are keyed to. */

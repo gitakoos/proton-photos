@@ -31,6 +31,7 @@ import eu.akoos.photos.data.db.dao.NotPersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import javax.inject.Inject
 
@@ -45,6 +46,32 @@ fun backupRekeyPairs(
     scannedKeys: Set<String>,
 ): List<Pair<String, String>> =
     syncedKeyPairs.filter { (oldKey, newKey) -> oldKey != newKey && oldKey in scannedKeys }
+
+/**
+ * [moving], the curation times about a photo's old key, re-keyed for its new one: a manual add's photo key
+ * and a mark's face id each go where [newRefOf] sends them, a time with nowhere to go is dropped, and where
+ * the new key already holds a time for the same piece ([present]) or two times land on one piece, the later
+ * one is kept. Returns the rows to write. Pure so the move is unit-testable without a database.
+ */
+internal fun rekeyCurationTimes(
+    moving: List<FaceCurationTimeEntity>,
+    present: List<FaceCurationTimeEntity>,
+    newRefOf: (FaceCurationTimeEntity) -> String?,
+): List<FaceCurationTimeEntity> {
+    val held = HashMap<Triple<Int, String, String>, Long>()
+    for (row in present) held[Triple(row.kind, row.personName, row.ref)] = row.changedAt
+    val out = LinkedHashMap<Triple<Int, String, String>, FaceCurationTimeEntity>()
+    for (row in moving) {
+        val ref = newRefOf(row) ?: continue
+        val key = Triple(row.kind, row.personName, ref)
+        val presentAt = held[key]
+        if (presentAt != null && presentAt >= row.changedAt) continue
+        val earlier = out[key]
+        if (earlier != null && earlier.changedAt >= row.changedAt) continue
+        out[key] = row.copy(ref = ref)
+    }
+    return out.values.toList()
+}
 
 /**
  * Moves a single photo's face data from its device key to its cloud key when it is backed up, so the
@@ -86,6 +113,10 @@ class RekeyPhotoFacesUseCase @Inject constructor(
                     personCoverDao.rekeyPhoto(userId, oldKey, newKey)
                     personManualPhotoDao.rekeyPhoto(userId, oldKey, newKey)
                     notPersonDao.rekeyPhoto(userId, oldKey, newKey)
+                    personDao.rekeyCoverPhoto(userId, oldKey, newKey)
+                    moveCurationTimes(userId, oldKey, newKey) { faceId ->
+                        if (faceId.startsWith("$oldKey#")) newKey + faceId.substring(oldKey.length) else null
+                    }
                 }
                 true
             }
@@ -112,18 +143,41 @@ class RekeyPhotoFacesUseCase @Inject constructor(
             deviceHiRes = faceScanDao.hiResScanned(userId, oldKey) == true,
         )
         for ((name, ids) in plan.confirm) faceDao.labelFacesByIds(ids, name)
+        for ((personId, ids) in plan.group) faceDao.reassignFacesToPerson(ids, personId)
         if (plan.remove.isNotEmpty()) faceDao.rejectByIds(plan.remove)
         for ((from, to) in plan.moved) faceDao.moveFace(userId, from, to, newKey)
         // What is left on the old key is the device faces merged into a cloud face.
         faceDao.deleteByPhotoKeys(userId, listOf(oldKey))
         if (plan.marks.isNotEmpty()) notPersonDao.add(plan.marks)
         notPersonDao.deleteForPhoto(userId, oldKey)
+        val landsOn = plan.merged + plan.moved
+        moveCurationTimes(userId, oldKey, newKey) { faceId -> landsOn[faceId] }
         personManualPhotoDao.mergePhoto(userId, oldKey, newKey)
         personCoverDao.rekeyPhoto(userId, oldKey, newKey)
         for ((personId, faceId) in plan.covers) personDao.updateCover(personId, faceId)
         if (plan.raiseHiRes) faceScanDao.markHiResScanned(userId, listOf(newKey))
         faceScanDao.deleteByPhotoKeys(userId, listOf(oldKey))
         for (personId in plan.people) refreshPerson(userId, personId)
+    }
+
+    /**
+     * Moves the times of [oldKey]'s manual adds and marks onto [newKey], a mark's face id to the face
+     * [newFaceIdOf] names, inside the caller's transaction, so another install still orders this device's
+     * curation of the photo by when it was made.
+     */
+    private suspend fun moveCurationTimes(userId: String, oldKey: String, newKey: String, newFaceIdOf: (String) -> String?) {
+        val curationDao = appDatabase.faceCurationTimeDao()
+        val moving = curationDao.rowsOnPhoto(userId, oldKey)
+        if (moving.isEmpty()) return
+        val rows = rekeyCurationTimes(moving, curationDao.rowsOnPhoto(userId, newKey)) { row ->
+            when (row.kind) {
+                FaceCurationTimeEntity.KIND_MANUAL_PHOTO -> newKey.takeIf { row.ref == oldKey }
+                FaceCurationTimeEntity.KIND_NOT_PERSON -> newFaceIdOf(row.ref)
+                else -> null
+            }
+        }
+        curationDao.deleteOnPhoto(userId, oldKey)
+        if (rows.isNotEmpty()) curationDao.set(rows)
     }
 
     /**

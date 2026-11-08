@@ -27,6 +27,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
+import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.FaceScanEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
@@ -305,5 +306,63 @@ class FaceRekeyMergeDbTest {
         assertFalse(rekey.invoke(guest, dev, link))
 
         assertEquals(listOf(d(0)), db.faceDao().observeFacesForUser(guest).first().map { it.id })
+    }
+
+    private fun time(kind: Int, name: String, ref: String, at: Long, removed: Boolean = false) =
+        FaceCurationTimeEntity(acct, kind, name, ref, removed, at)
+
+    private suspend fun times(): Set<FaceCurationTimeEntity> = db.faceCurationTimeDao().allForUser(acct).toSet()
+
+    @Test
+    fun `a plain move carries the curation times and the cover onto the cloud key`() = runTest {
+        person(1L, "Anna", cover = d(0))
+        face(d(0), dev, boxA, personId = 1L, confirmed = "Anna")
+        face(d(1), dev, boxB)
+        scanned(dev)
+        db.faceCurationTimeDao().set(
+            listOf(
+                time(FaceCurationTimeEntity.KIND_MANUAL_PHOTO, "Anna", dev, at = 100L),
+                time(FaceCurationTimeEntity.KIND_NOT_PERSON, "Bob", d(1), at = 200L, removed = true),
+                time(FaceCurationTimeEntity.KIND_COVER, "Anna", "", at = 300L),
+            ),
+        )
+
+        assertTrue(rekey.invoke(acct, dev, link))
+
+        assertEquals(
+            setOf(
+                time(FaceCurationTimeEntity.KIND_MANUAL_PHOTO, "Anna", link, at = 100L),
+                time(FaceCurationTimeEntity.KIND_NOT_PERSON, "Bob", c(1), at = 200L, removed = true),
+                time(FaceCurationTimeEntity.KIND_COVER, "Anna", "", at = 300L),
+            ),
+            times(),
+        )
+        assertEquals(c(0), db.personDao().personById(1L)!!.coverFaceId)
+    }
+
+    @Test
+    fun `a merge carries a mark time onto the cloud face its device face pairs with, the later time winning`() = runTest {
+        face(c(0), link, boxA)
+        face(d(0), dev, boxA2)
+        face(d(1), dev, boxX)
+        bothScanned()
+        db.notPersonDao().add(listOf(NotPersonEntity(acct, "Bob", d(0)), NotPersonEntity(acct, "Dave", d(1))))
+        db.faceCurationTimeDao().set(
+            listOf(
+                time(FaceCurationTimeEntity.KIND_NOT_PERSON, "Bob", d(0), at = 500L),
+                time(FaceCurationTimeEntity.KIND_NOT_PERSON, "Bob", c(0), at = 400L),
+                time(FaceCurationTimeEntity.KIND_NOT_PERSON, "Dave", d(1), at = 600L),
+            ),
+        )
+
+        merge()
+
+        assertEquals(
+            setOf(
+                time(FaceCurationTimeEntity.KIND_NOT_PERSON, "Bob", c(0), at = 500L),
+                time(FaceCurationTimeEntity.KIND_NOT_PERSON, "Dave", c(1), at = 600L),
+            ),
+            times(),
+        )
     }
 }

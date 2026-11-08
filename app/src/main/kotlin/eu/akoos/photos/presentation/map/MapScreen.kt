@@ -52,6 +52,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,6 +77,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.pillSurface
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.map.vector.PinFootprint
 import eu.akoos.photos.presentation.map.vector.keptPins
 import eu.akoos.photos.R
@@ -192,6 +197,8 @@ fun MapScreen(
         }
     }
 
+    // Glass for the floating header and search bar, over the plain page rather than the moving map.
+    val glass = rememberGlassBackdrop(AppColors.current.bg0, heavy = true)
     // Build the MapView once; the lifecycle bridge below resumes/pauses/detaches it. Keeping the
     // instance in remember avoids re-inflating the heavy view on every recomposition.
     val mapView = remember {
@@ -404,54 +411,58 @@ fun MapScreen(
     ) {
         // The map bleeds to the screen edges, full-bleed like the globe; the floating header and the
         // bottom search bar draw over it with their own insets.
-        Box(
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            AndroidView(
-                factory = { mapView },
-                modifier = Modifier.fillMaxSize(),
-            )
-
-            // OpenStreetMap tile attribution — required by OSM's tile usage policy for the standard
-            // MAPNIK tiles. A fixed dark scrim + light text keeps it legible over both the light
-            // tiles and the dark-filtered tiles, regardless of theme.
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
             Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .navigationBarsPadding()
-                    .padding(4.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.map_osm_attribution),
-                    color = Color.White.copy(alpha = 0.9f),
-                    fontSize = 11.sp,
-                )
-            }
-
-            // Opaque cover over the map, held until the camera is centred on real data so the one-time
-            // re-centre lands off-screen; it fades out on [centered], revealing the already framed map
-            // rather than a visible jump from the world view.
-            AnimatedVisibility(
-                visible = !centered,
                 modifier = Modifier.fillMaxSize(),
-                exit = fadeOut(tween(240)),
             ) {
+                AndroidView(
+                    factory = { mapView },
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                // OpenStreetMap tile attribution — required by OSM's tile usage policy for the standard
+                // MAPNIK tiles. A fixed dark scrim + light text keeps it legible over both the light
+                // tiles and the dark-filtered tiles, regardless of theme.
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(colors.bg0),
-                    contentAlignment = Alignment.Center,
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
-                    CircularProgressIndicator(color = colors.accent)
+                    Text(
+                        text = stringResource(R.string.map_osm_attribution),
+                        color = Color.White.copy(alpha = 0.9f),
+                        fontSize = 11.sp,
+                    )
+                }
+
+                // Opaque cover over the map, held until the camera is centred on real data so the one-time
+                // re-centre lands off-screen; it fades out on [centered], revealing the already framed map
+                // rather than a visible jump from the world view.
+                AnimatedVisibility(
+                    visible = !centered,
+                    modifier = Modifier.fillMaxSize(),
+                    exit = fadeOut(tween(240)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(colors.bg0),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(color = colors.accent)
+                    }
                 }
             }
+
         }
 
         // An opaque search bar along the bottom raises the same drawer the Places screen uses; it hides
         // while the drawer is open, so the pressed bar reads as having risen into the drawer.
+        CompositionLocalProvider(LocalGlassBackdrop provides glass) {
         AnimatedVisibility(
             visible = chromeVisible && cities.isNotEmpty() && !showSearch,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -465,8 +476,7 @@ fun MapScreen(
                     .padding(bottom = 20.dp, start = 20.dp, end = 20.dp)
                     .fillMaxWidth()
                     .clip(pill)
-                    .background(colors.bg2, pill)
-                    .border(0.5.dp, colors.line2, pill)
+                    .pillSurface(colors.bg2, pill, border = colors.line2)
                     .clickable { showSearch = true }
                     .padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -475,6 +485,7 @@ fun MapScreen(
                 Icon(Icons.Default.Search, contentDescription = null, tint = colors.fgDim, modifier = Modifier.size(18.dp))
                 Text(stringResource(R.string.map_search_places), color = colors.fgMute, fontSize = 14.sp)
             }
+        }
         }
         if (showSearch) {
             PlaceSearchSheet(
@@ -497,6 +508,7 @@ fun MapScreen(
             exit = fadeOut(tween(160)),
         ) {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.map_title),
                 onBack = onBack,
                 showScrim = false,

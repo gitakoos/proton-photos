@@ -77,6 +77,7 @@ import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.user.domain.usecase.ObserveUser
 import eu.akoos.photos.R
 import eu.akoos.photos.data.hidden.HiddenCloudPhotos
+import eu.akoos.photos.data.hidden.HiddenSyncTimes
 import eu.akoos.photos.data.hidden.HiddenFolderProgress
 import eu.akoos.photos.data.hidden.HiddenFolderRecords
 import eu.akoos.photos.data.hidden.HiddenStorageManager
@@ -187,9 +188,53 @@ internal fun syncedCloudIdsOnDevice(sync: SyncStateSnapshot.Rows): Set<String> =
             .toSet()
     }
 
+/**
+ * Runs [wake] only when [userId] has an upload queued: the worker shows its "Checking for new photos"
+ * notification the moment it starts, so waking it with nothing to upload flashed that notification every
+ * time the gallery was entered again (for instance on leaving the search). Returns whether it woke it.
+ */
+internal suspend fun wakeSyncIfUploadQueued(
+    syncStateRepo: SyncStateRepository,
+    userId: me.proton.core.domain.entity.UserId,
+    wake: suspend () -> Unit,
+): Boolean {
+    if (syncStateRepo.countPendingUploads(userId).first() <= 0) return false
+    wake()
+    return true
+}
+
+/**
+ * Holds a back-up's end back for [holdMs]. Between two photos the pipeline reports Done and then the next one
+ * starting, which flipped the back-up pill off and on again for every photo (it vanished and slid back in with
+ * a new count each time). A start reaches [apply] at once and drops a pending end; the end reaches it only
+ * once nothing has started for [holdMs].
+ */
+internal class UploadEndHold(
+    private val scope: kotlinx.coroutines.CoroutineScope,
+    private val holdMs: Long,
+    private val apply: (syncing: Boolean, evt: eu.akoos.photos.domain.usecase.UploadProgress) -> Unit,
+) {
+    private var endJob: Job? = null
+
+    fun onProgress(syncing: Boolean, evt: eu.akoos.photos.domain.usecase.UploadProgress) {
+        if (syncing) {
+            endJob?.cancel()
+            endJob = null
+            apply(true, evt)
+        } else if (endJob == null) {
+            endJob = scope.launch {
+                delay(holdMs)
+                endJob = null
+                apply(false, evt)
+            }
+        }
+    }
+}
+
 @HiltViewModel
 class GalleryViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val sameNamedPeopleMerge: eu.akoos.photos.domain.usecase.SameNamedPeopleMerge,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val cloudRepo: DrivePhotoRepository,
     private val photoStreamService: PhotoStreamService,
@@ -359,7 +404,11 @@ class GalleryViewModel @Inject constructor(
      *  pass the `if (isSyncing) return` gate before either has set it to true. */
     private val syncInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /** Applies the back-up's progress, its end once no new photo has started for [UPLOAD_END_HOLD_MS]. */
+    private val uploadEndHold = UploadEndHold(viewModelScope, UPLOAD_END_HOLD_MS, ::applyUploadProgress)
+
     init {
+        watchRemoteHides()
         // A change of the range regroups the carousel from the library already on screen.
         viewModelScope.launch {
             onThisDayWindow.collect { days ->
@@ -390,6 +439,29 @@ class GalleryViewModel @Inject constructor(
         observePeople()
         resumeFaceIndexingOnLaunch()
         resumeSemanticIndexingOnLaunch()
+        scanNewPhotosAsTheyArrive()
+    }
+
+    /**
+     * Starts the face and photo-search scans when photos arrive while the app is running (taken, saved,
+     * or come in from another device), once the library has stayed as it is for a moment, so a new photo
+     * joins People and search without a restart or a pull. Same switches and battery gate as at start-up;
+     * a scan already running takes them in on its own.
+     */
+    private fun scanNewPhotosAsTheyArrive() {
+        viewModelScope.launch(Dispatchers.Default) {
+            var seen: LibraryMark? = null
+            var owed = false
+            _uiState.map { libraryMarkOf(it.items) }.distinctUntilChanged().collectLatest { mark ->
+                if (libraryGained(seen, mark)) owed = true
+                seen = mark
+                if (!owed) return@collectLatest
+                delay(NEW_PHOTOS_SCAN_DELAY_MS)
+                owed = false
+                resumeFaceIndexingOnLaunch()
+                resumeSemanticIndexingOnLaunch()
+            }
+        }
     }
 
     /**
@@ -483,9 +555,6 @@ class GalleryViewModel @Inject constructor(
         }
     }
 
-    /** A pending end of the back-up, applied once no new photo has started for [UPLOAD_END_HOLD_MS]. */
-    private var uploadEndJob: Job? = null
-
     private fun observeBackgroundUploadProgress() {
         viewModelScope.launch {
             upload.progress.collect { evt ->
@@ -509,17 +578,7 @@ class GalleryViewModel @Inject constructor(
                 // Between two photos the pipeline reports Done and then the next one starting, which flipped this
                 // off and on again for every photo (the back-up pill vanished and slid back in with a new
                 // count each time). The end is applied only once nothing has started for a moment.
-                if (syncing) {
-                    uploadEndJob?.cancel()
-                    uploadEndJob = null
-                    applyUploadProgress(true, evt)
-                } else if (uploadEndJob == null) {
-                    uploadEndJob = viewModelScope.launch {
-                        delay(UPLOAD_END_HOLD_MS)
-                        uploadEndJob = null
-                        applyUploadProgress(false, evt)
-                    }
-                }
+                uploadEndHold.onProgress(syncing, evt)
             }
         }
     }
@@ -1109,6 +1168,8 @@ class GalleryViewModel @Inject constructor(
                     facePrefs[SettingsKeys.FACE_ENABLED] != true
                 ) return@launch
                 val userId = accountManager.getPrimaryUserId().first()
+                runCatching { sameNamedPeopleMerge.runOnce(userId?.id ?: eu.akoos.photos.data.db.entity.PhotoLocationEntity.LOCAL_USER) }
+                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
                 // Guest (no account) rescans the local partition with no battery gate; the signed-in
                 // walk reuses the refresh path's gate so a low battery defers it.
                 if (userId != null && context.isBatteryLow()) return@launch
@@ -1244,7 +1305,9 @@ class GalleryViewModel @Inject constructor(
         recomputeMonthGroups(filtered)
     }
 
-    fun onPermissionResult(granted: Boolean, permanentlyDenied: Boolean) {
+    /** [alreadyHeld]: the access was granted before this request went out, so the device list was already
+     *  read with it and needs no new scan. */
+    fun onPermissionResult(granted: Boolean, permanentlyDenied: Boolean, alreadyHeld: Boolean = false) {
         _uiState.update {
             it.copy(
                 permissionState = when {
@@ -1257,7 +1320,7 @@ class GalleryViewModel @Inject constructor(
         // MediaStore ContentObserver does NOT fire on a permission grant; explicitly trigger a
         // re-query so the gallery populates immediately without requiring an app restart.
         if (granted) {
-            localRepo.notifyMediaChanged()
+            if (alreadyHeld) localRepo.refreshIfAccessChanged() else localRepo.notifyMediaChanged()
             // Also kick off the first sync, which couldn't read local media before the grant.
             viewModelScope.launch {
                 val userId = accountManager.getPrimaryUserId().first() ?: return@launch
@@ -1325,6 +1388,10 @@ class GalleryViewModel @Inject constructor(
             // to observeBackgroundUploadProgress so it only spins during real uploads, not the
             // long full cloud listing this refresh kicks off.
             _uiState.update { it.copy(isRefreshing = true) }
+            // The change feed first: it lands what changed elsewhere (a new photo, a favourite) in seconds,
+            // where the whole listing below takes minutes on a big library.
+            runCatching { cloudRepo.refreshCloudPhotosIncremental(userId) }
+                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
             runCatching {
                 cloudRepo.refreshCloudPhotos(userId, force = force)
                 // Battery gate covers ONLY the whole-library walks below: they run on
@@ -1378,7 +1445,7 @@ class GalleryViewModel @Inject constructor(
                 // when something is queued: the worker shows its "Checking for new photos" notification
                 // the moment it starts, so waking it with nothing to upload flashed that notification
                 // every time the gallery was entered again (for instance on leaving the search).
-                if (syncStateRepo.countPendingUploads(userId).first() > 0) {
+                wakeSyncIfUploadQueued(syncStateRepo, userId) {
                     val wifiOnly = context.settingsDataStore.data
                         .map { it[SettingsKeys.SYNC_WIFI_ONLY] != false }.first()
                     SyncWorker.runNow(context, wifiOnly)
@@ -2043,10 +2110,54 @@ class GalleryViewModel @Inject constructor(
     private fun commitPendingHide() {
         val uris = pendingHidePrivateUris
         pendingHidePrivateUris = emptyList()
+        remoteHideBatch = emptySet()
         // The hide landed, so the folder keeps the flag this run wrote.
         pendingHideFolderName = null
         if (uris.isEmpty()) return
         viewModelScope.launch { hiddenVaultJournal.confirm(uris) }
+    }
+
+    /** The photos another device hid that the hide now running moves into the vault, by link id. */
+    private var remoteHideBatch: Set<String> = emptySet()
+
+    /**
+     * Carries out the hides another device asked for of photos this phone holds as a device file
+     * ([SettingsKeys.HIDDEN_REMOTE_HIDE_QUEUE]), through the same hide a selection runs, so each moves into the
+     * vault behind the system's delete prompt, all of them under one prompt. Waits for the timeline to have its
+     * photos and for no other hide to be on its way. A waiting photo the timeline now shows as cloud-only hides by
+     * its link id with the other device's time; one the timeline does not show waits for a later opening.
+     */
+    private fun watchRemoteHides() {
+        viewModelScope.launch {
+            context.settingsDataStore.data
+                .map { HiddenSyncTimes.remoteHideQueue(it) }
+                .distinctUntilChanged()
+                .collect { queue ->
+                    if (queue.isEmpty() || remoteHideBatch.isNotEmpty()) return@collect
+                    val items = _uiState.first { it.items.isNotEmpty() }.items
+                    if (pendingPermissionResult != null || _uiState.value.multiHideState is MultiDeleteState.Working) {
+                        return@collect
+                    }
+                    val waiting = items.filter { item ->
+                        val link = when (item) {
+                            is GalleryItem.Synced -> item.cloud.linkId
+                            is GalleryItem.CloudOnly -> item.cloud.linkId
+                            is GalleryItem.LocalOnly -> null
+                        }
+                        link != null && link in queue
+                    }
+                    val cloudOnly = waiting.filterIsInstance<GalleryItem.CloudOnly>().map { it.cloud.linkId }
+                    for (link in cloudOnly) HiddenCloudPhotos.hide(context, listOf(link), queue.getValue(link))
+                    if (cloudOnly.isNotEmpty()) context.settingsDataStore.edit { prefs ->
+                        HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - cloudOnly.toSet())
+                    }
+                    val synced = waiting.filterIsInstance<GalleryItem.Synced>()
+                    if (synced.isEmpty()) return@collect
+                    remoteHideBatch = synced.mapTo(HashSet()) { it.cloud.linkId }
+                    _uiState.update { it.copy(multiHideState = MultiDeleteState.Working) }
+                    runHide(HiddenFolderRecords.hideSplit(synced), reportProgress = false)
+                }
+        }
     }
 
     /** Undo a hide that did not land: drop the private copies and everything journalled for them, and
@@ -2057,9 +2168,18 @@ class GalleryViewModel @Inject constructor(
         val uris = pendingHidePrivateUris
         val cloudIds = pendingHideCloudLinkIds
         val folderName = pendingHideFolderName
+        val declinedRemote = remoteHideBatch
         pendingHidePrivateUris = emptyList()
         pendingHideCloudLinkIds = emptyList()
         pendingHideFolderName = null
+        remoteHideBatch = emptySet()
+        // A hide another device asked for that did not land here, the system prompt declined or the copy refused,
+        // leaves the queue: asking again at every opening would be a prompt the user has already answered.
+        if (declinedRemote.isNotEmpty()) viewModelScope.launch {
+            context.settingsDataStore.edit { prefs ->
+                HiddenSyncTimes.setRemoteHideQueue(prefs, HiddenSyncTimes.remoteHideQueue(prefs) - declinedRemote)
+            }
+        }
         if (uris.isEmpty() && cloudIds.isEmpty() && folderName == null) return
         viewModelScope.launch {
             if (uris.isNotEmpty()) hiddenVaultJournal.discard(uris)
@@ -2834,4 +2954,4 @@ class GalleryViewModel @Inject constructor(
 }
 
 /** How long a back-up that reported its end waits for the next photo before the app treats it as over. */
-private const val UPLOAD_END_HOLD_MS = 2_500L
+internal const val UPLOAD_END_HOLD_MS = 2_500L

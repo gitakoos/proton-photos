@@ -52,7 +52,6 @@ import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -81,6 +80,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.gallery.FaceCropTransformation
@@ -165,7 +165,7 @@ private fun ChooseFacesSheet(
     onDismiss: () -> Unit,
 ) {
     val colors = AppColors.current
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,

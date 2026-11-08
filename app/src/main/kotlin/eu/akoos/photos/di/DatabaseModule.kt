@@ -31,6 +31,8 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.Multibinds
+import eu.akoos.photos.data.db.dao.FaceCurationTimeDao
+import eu.akoos.photos.data.db.dao.PendingCloudCompressDao
 import me.proton.core.eventmanager.domain.EventListener
 import me.proton.core.account.data.db.AccountDatabase
 import me.proton.core.auth.data.db.AuthDatabase
@@ -68,7 +70,9 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonCoverDao
 import eu.akoos.photos.data.db.dao.PendingMetadataEditDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
+import eu.akoos.photos.data.db.dao.PersonNameDao
 import eu.akoos.photos.data.db.dao.PhotoLabelDao
+import eu.akoos.photos.data.db.dao.DriveCopyAppliedDao
 import eu.akoos.photos.data.db.dao.PhotoListingDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.dao.SyncStateDao
@@ -187,6 +191,11 @@ abstract class DatabaseModule {
 
         @Provides
         @Singleton
+        fun providePendingCloudCompressDao(db: AppDatabase): PendingCloudCompressDao =
+            db.pendingCloudCompressDao()
+
+        @Provides
+        @Singleton
         fun provideImportStagedDao(db: AppDatabase): ImportStagedDao =
             db.importStagedDao()
 
@@ -236,6 +245,14 @@ abstract class DatabaseModule {
 
         @Provides
         @Singleton
+        fun providePersonNameDao(db: AppDatabase): PersonNameDao = db.personNameDao()
+
+        @Provides
+        @Singleton
+        fun provideFaceCurationTimeDao(db: AppDatabase): FaceCurationTimeDao = db.faceCurationTimeDao()
+
+        @Provides
+        @Singleton
         fun provideClusterSummaryDao(db: AppDatabase): ClusterSummaryDao = db.clusterSummaryDao()
 
         @Provides
@@ -245,5 +262,9 @@ abstract class DatabaseModule {
         @Provides
         @Singleton
         fun providePhotoLabelDao(db: AppDatabase): PhotoLabelDao = db.photoLabelDao()
+
+        @Provides
+        @Singleton
+        fun provideDriveCopyAppliedDao(db: AppDatabase): DriveCopyAppliedDao = db.driveCopyAppliedDao()
     }
 }

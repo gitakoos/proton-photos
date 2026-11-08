@@ -248,6 +248,37 @@ internal fun staleLocationIds(items: List<GalleryItem>, savedUris: Set<String>):
     }.distinct()
 
 /**
+ * The date edits in [captureMsByUri] whose file keeps the date only in a capture-date override: a device-only
+ * photo among [items] whose container cannot hold it ([WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn]),
+ * and not vaulted ([isHidden]), since a vaulted photo keeps its date in its file name. Pure.
+ */
+internal fun columnOnlyDateEdits(
+    items: List<GalleryItem>,
+    captureMsByUri: Map<String, Long>,
+    isHidden: (String) -> Boolean,
+): Map<String, Long> {
+    val columnOnlyUris = items.filterIsInstance<GalleryItem.LocalOnly>()
+        .filter { WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn(it.local.mimeType) }
+        .mapTo(HashSet()) { it.local.uri }
+    return captureMsByUri.filterKeys { it in columnOnlyUris && !isHidden(it) }
+}
+
+/**
+ * The capture-date overrides after a date edit: the [columnOnly] files get an entry carrying their
+ * [modifiedByUri] time even when they had none, the rest of [captureMsByUri] only move an entry they already
+ * have. Pure.
+ */
+internal fun dateOverridesAfterEdit(
+    current: Set<String>,
+    captureMsByUri: Map<String, Long>,
+    columnOnly: Map<String, Long>,
+    modifiedByUri: Map<String, Long?>,
+): Set<String> {
+    val next = CaptureDateOverride.retarget(current, captureMsByUri - columnOnly.keys) ?: current
+    return CaptureDateOverride.upsert(next, columnOnly, modifiedByUri) ?: next
+}
+
+/**
  * Backs the metadata editor for one photo or a whole multi-select: it exposes the capture date and
  * place on the same basis the timeline shows, plus the descriptive text tags read from the file. Device
  * photos take edits in place through [WriteLocalPhotoMetadataUseCase]; a cloud-only IMAGE takes a date
@@ -381,6 +412,9 @@ class MetadataEditorViewModel @Inject constructor(
      * all" mode. Backed-up and cloud-only items are counted as skipped, since Drive refuses an
      * in-place rewrite.
      */
+    /** True when the last device write landed on none of its files, so a details-sheet save stays open. */
+    private var lastBatchFailed = false
+
     fun load(items: List<GalleryItem>, isReadOnlyAlbum: Boolean) {
         if (_state.value.loaded || items.isEmpty()) return
 
@@ -587,13 +621,14 @@ class MetadataEditorViewModel @Inject constructor(
 
     /** Sets the capture date/time to [ms] (device wall-clock) on every editable item. No-op on a
      *  read-only target. */
-    fun setDate(ms: Long) {
-        if (_state.value.dateLock != null) return
-        performBatch(PendingAction.Date(ms), dateTargetUris)
+    fun setDate(ms: Long): Job? {
+        if (_state.value.dateLock != null) return null
+        val job = performBatch(PendingAction.Date(ms), dateTargetUris)
         val cloudTargets = cloudDateTargets + syncedDateTargets
-        if (cloudTargets.isEmpty()) return
+        if (cloudTargets.isEmpty()) return job
         stageCloudDate(cloudTargets.associateWith { ms })
         _state.update { it.copy(captureDateMs = ms, dateChosen = true) }
+        return job
     }
 
     /**
@@ -633,33 +668,63 @@ class MetadataEditorViewModel @Inject constructor(
     }
 
     /** Places every editable image at [latitude]/[longitude], labelling it with the nearest city. */
-    fun pickPoint(latitude: Double, longitude: Double) {
-        if (_state.value.placeLock != null) return
-        viewModelScope.launch {
+    fun pickPoint(latitude: Double, longitude: Double): Job? {
+        if (_state.value.placeLock != null) return null
+        return viewModelScope.launch {
             val nearest = OfflineGeocoder.reverseGeocodeDetailed(context, latitude, longitude)
             val picked = OfflineGeocoder.GeoLabel(
                 city = nearest?.city.orEmpty(),
                 countryCode = nearest?.countryCode.orEmpty(),
                 countryName = "",
             )
-            performBatch(PendingAction.Location(latitude, longitude, picked), placeTargetUris)
+            val write = performBatch(PendingAction.Location(latitude, longitude, picked), placeTargetUris)
             val cloudTargets = cloudImageTargets + syncedImageTargets
-            if (cloudTargets.isEmpty()) return@launch
+            if (cloudTargets.isEmpty()) {
+                write?.join()
+                return@launch
+            }
             stageCloudLocation(cloudTargets, LocationEdit.Set(latitude, longitude))
             _state.update {
                 it.copy(hasLocation = true, latitude = latitude, longitude = longitude, place = picked, placeChosen = true)
             }
+            write?.join()
         }
     }
 
     /** Strips the GPS location from every editable image. */
-    fun removeLocation() {
-        if (_state.value.placeLock != null) return
-        performBatch(PendingAction.ClearLocation, placeTargetUris)
+    fun removeLocation(): Job? {
+        if (_state.value.placeLock != null) return null
+        val job = performBatch(PendingAction.ClearLocation, placeTargetUris)
         val cloudTargets = cloudImageTargets + syncedImageTargets
-        if (cloudTargets.isEmpty()) return
+        if (cloudTargets.isEmpty()) return job
         stageCloudLocation(cloudTargets, LocationEdit.Clear)
         _state.update { it.copy(hasLocation = false, place = null, placeChosen = true) }
+        return job
+    }
+
+    /** The details sheet's save for one photo: writes [ms], waits for the device write to land, then sends
+     *  a staged cloud copy off at once. The sheet's page says what saving a cloud photo does, which stands
+     *  for the confirm this editor's own Done raises. */
+    fun commitDate(ms: Long) {
+        viewModelScope.launch { setDate(ms)?.join(); finishCommit() }
+    }
+
+    /** As [commitDate], for a place picked on the details sheet's map. */
+    fun commitPoint(latitude: Double, longitude: Double) {
+        viewModelScope.launch { pickPoint(latitude, longitude)?.join(); finishCommit() }
+    }
+
+    /** As [commitDate], taking the location off. */
+    fun commitRemoveLocation() {
+        viewModelScope.launch { removeLocation()?.join(); finishCommit() }
+    }
+
+    /** Ends a details-sheet save: nothing more while the OS still asks for consent or when the device write
+     *  failed (its outcome is already reported), otherwise the staged cloud copy goes and the page closes. */
+    private suspend fun finishCommit() {
+        if (_state.value.pendingWriteIntent != null || lastBatchFailed) return
+        if (pendingCloudEdits.isNotEmpty()) confirmCloudReplace()
+        _events.send(MetadataEditorEvent.Finished)
     }
 
     /** Records typing in [tag]'s box. The value is capped at the length one EXIF text tag holds, so what
@@ -801,6 +866,7 @@ class MetadataEditorViewModel @Inject constructor(
      * the screen calls [onPermissionGranted], which replays exactly the deferred URIs.
      */
     private fun performBatch(action: PendingAction, uris: List<String>): Job? {
+        lastBatchFailed = false
         if (uris.isEmpty()) return null
         return viewModelScope.launch {
             _state.update { it.copy(isSaving = true) }
@@ -836,6 +902,7 @@ class MetadataEditorViewModel @Inject constructor(
 
             pendingAction = null
             pendingUris = emptyList()
+            lastBatchFailed = succeeded.isEmpty() && failedCount > 0
             if (succeeded.isNotEmpty()) applySuccess(action, succeeded)
             metadataWriteOutcome(succeeded.size, failedCount)?.let { _events.send(it) }
         }
@@ -1011,16 +1078,12 @@ class MetadataEditorViewModel @Inject constructor(
         if (captureMsByUri.isEmpty()) return
         // A file whose container cannot hold the date keeps it only in the override, so it gets an entry
         // even when it had none; the rest only move an entry they already have.
-        val columnOnlyUris = boundItems.filterIsInstance<GalleryItem.LocalOnly>()
-            .filter { WriteLocalPhotoMetadataUseCase.dateLivesOnlyInColumn(it.local.mimeType) }
-            .mapTo(HashSet()) { it.local.uri }
-        val columnOnly = captureMsByUri.filterKeys { it in columnOnlyUris && !hiddenStorage.isHiddenUri(it) }
+        val columnOnly = columnOnlyDateEdits(boundItems, captureMsByUri) { hiddenStorage.isHiddenUri(it) }
         val modifiedByUri = columnOnly.keys.associateWith { localMediaRepository.queryByUri(it)?.dateModified }
         runCatching {
             context.settingsDataStore.edit { prefs ->
                 val current = prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] ?: emptySet()
-                var next = CaptureDateOverride.retarget(current, captureMsByUri - columnOnly.keys) ?: current
-                next = CaptureDateOverride.upsert(next, columnOnly, modifiedByUri) ?: next
+                val next = dateOverridesAfterEdit(current, captureMsByUri, columnOnly, modifiedByUri)
                 if (next != current) prefs[SettingsKeys.DOWNLOAD_DATE_OVERRIDES] = next
             }
         }

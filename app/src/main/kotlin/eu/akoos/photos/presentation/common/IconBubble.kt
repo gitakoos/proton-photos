@@ -78,12 +78,13 @@ fun IconBubble(
     borderColor: Color? = PillBorder,
     tint: Color = FgPrimary,
     enabled: Boolean = true,
+    /** The content this bubble floats over, for glass where no [LocalGlassBackdrop] is provided around it. */
+    backdrop: GlassBackdrop? = null,
 ) {
     Box(
         modifier = modifier
             .size(diameter)
-            .background(background, CircleShape)
-            .let { m -> if (borderColor != null) m.border(0.5.dp, borderColor, CircleShape) else m }
+            .pillSurface(background, CircleShape, border = borderColor, backdrop = backdrop)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {

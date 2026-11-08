@@ -107,6 +107,10 @@ class TransferCenter @Inject constructor(
      *  state stays a plain data class; the action stops the batch's coroutine when the user taps X. */
     private val cancels = java.util.concurrent.ConcurrentHashMap<Long, () -> Unit>()
 
+    /** The batches whose cancel lets the items already running finish: their row stays, without its
+     *  cancel button, until the batch itself calls [finish]. */
+    private val finishesRunning = java.util.concurrent.ConcurrentHashMap.newKeySet<Long>()
+
     /** Begin tracking a live transfer; returns its id for [progress] and [finish]. Pass [onCancel]
      *  to let the Activity screen stop the whole batch from its row. */
     fun start(
@@ -117,9 +121,12 @@ class TransferCenter @Inject constructor(
         itemKeys: List<String> = emptyList(),
         itemStatus: Map<String, String> = emptyMap(),
         onCancel: (() -> Unit)? = null,
+        /** The cancel lets the items already running finish, so the row stays until [finish]. */
+        cancelFinishesRunning: Boolean = false,
     ): Long {
         val id = ids.incrementAndGet()
         if (onCancel != null) cancels[id] = onCancel
+        if (cancelFinishesRunning) finishesRunning.add(id)
         _active.update {
             it + Active(
                 id, kind, done = 0, total = total, name = name, items = items,
@@ -150,6 +157,7 @@ class TransferCenter @Inject constructor(
     /** Drop a live transfer once it ends (success or failure). */
     fun finish(id: Long) {
         cancels.remove(id)
+        finishesRunning.remove(id)
         _active.update { list -> list.filterNot { it.id == id } }
     }
 
@@ -157,7 +165,12 @@ class TransferCenter @Inject constructor(
      *  batch's own finally still calls [finish], which is a harmless second removal. */
     fun cancel(id: Long) {
         cancels.remove(id)?.invoke()
-        _active.update { list -> list.filterNot { it.id == id } }
+        if (id in finishesRunning) {
+            // The photos still being worked on finish: the row shows them going, with nothing to cancel.
+            _active.update { list -> list.map { if (it.id == id) it.copy(cancelable = false) else it } }
+        } else {
+            _active.update { list -> list.filterNot { it.id == id } }
+        }
     }
 
     /** Newest-first view of the persisted transfer log. */

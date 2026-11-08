@@ -23,6 +23,8 @@
 package eu.akoos.photos.presentation.common
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -120,5 +122,20 @@ class ViewerReturnTest {
         assertEquals(slots.sorted(), slots)
         // Leading item + 3 headers + 6 photos = 10 slots, last photo at index 9.
         assertEquals(9, slots.last())
+    }
+
+    @Test
+    fun `only the page that opened the viewer lands on its photo`() {
+        assertTrue(returnsHere(openerEntryId = "memories", hereEntryId = "memories"))
+        // The timeline under a memory or a person page lists the photo too, but stays where it was.
+        assertFalse(returnsHere(openerEntryId = "memories", hereEntryId = "gallery"))
+        assertFalse(returnsHere(openerEntryId = "person", hereEntryId = "gallery"))
+    }
+
+    @Test
+    fun `an unknown entry on either side still lands`() {
+        assertTrue(returnsHere(openerEntryId = null, hereEntryId = "gallery"))
+        assertTrue(returnsHere(openerEntryId = "gallery", hereEntryId = null))
+        assertTrue(returnsHere(openerEntryId = null, hereEntryId = null))
     }
 }

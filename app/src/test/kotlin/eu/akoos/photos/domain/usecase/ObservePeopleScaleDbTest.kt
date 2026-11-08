@@ -103,7 +103,7 @@ class ObservePeopleScaleDbTest {
                 )
             }
         }
-        val useCase = ObservePeopleUseCase(db.personDao(), db.faceDao())
+        val useCase = ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())
 
         repeat(2) { round ->
             val startNs = System.nanoTime()

@@ -80,6 +80,10 @@ class SyncStateRepositoryImpl @Inject constructor(
         dao.updateStatus(localUri, newStatus)
     }
 
+    override suspend fun updateStatuses(localUris: Collection<String>, newStatus: SyncStatus) {
+        localUris.toList().forEachSqlChunk { chunk -> dao.updateStatusByLocalUris(chunk, newStatus) }
+    }
+
     override suspend fun getByUri(localUri: String): SyncState? =
         dao.getByUri(localUri)?.toDomain()
 
@@ -144,6 +148,8 @@ class SyncStateRepositoryImpl @Inject constructor(
     override suspend fun clearQueued(localUri: String) = dao.clearQueued(localUri)
 
     override suspend fun clearQueuedForSynced(localUri: String) = dao.clearQueuedForSynced(localUri)
+
+    override suspend fun markRemovedFromDrive(localUri: String) = dao.markRemovedFromDrive(localUri)
 
     override suspend fun clearQueuedForSyncedAll(localUris: List<String>) =
         localUris.forEachSqlChunk { chunk -> dao.clearQueuedForSyncedAll(chunk) }

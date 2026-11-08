@@ -28,6 +28,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.ViewModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
@@ -162,10 +163,7 @@ class UndoController @Inject constructor(
         var failed = 0
         if (action.cloudLinkIds.isNotEmpty()) {
             try {
-                context.settingsDataStore.edit { prefs ->
-                    val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing - action.cloudLinkIds.toSet()
-                }
+                HiddenCloudPhotos.reveal(context, action.cloudLinkIds)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.w(TAG, "undo: hidden set not cleared: ${e.message}")

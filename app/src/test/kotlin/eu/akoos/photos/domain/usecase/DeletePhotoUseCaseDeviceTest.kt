@@ -192,6 +192,31 @@ class DeletePhotoUseCaseDeviceTest {
     }
 
     @Test
+    fun `a confirmed removal leaves the device list at once, and only the files it removed`() = runTest {
+        val localRepo = mockk<eu.akoos.photos.domain.repository.LocalMediaRepository>(relaxed = true)
+        val useCase = DeletePhotoUseCase(syncRepo, cloudRepo, FakeDevice(asksConsent = true), localRepo)
+        val items = listOf(synced("content://media/1", "link-1"), GalleryItem.CloudOnly(cloud("link-2")))
+
+        val asked = useCase(userId, items, freeUpSpace = true, deleteFromCloud = false)
+            as DeletePhotoUseCase.Result.NeedsMediaWritePermission
+        coVerify(exactly = 0) { localRepo.forgetRemoved(any()) }
+        useCase.completeAfterPermissionGranted(userId, asked)
+
+        coVerify(exactly = 1) { localRepo.forgetRemoved(listOf("content://media/1")) }
+    }
+
+    @Test
+    fun `a direct delete forgets only the files that went`() = runTest {
+        val localRepo = mockk<eu.akoos.photos.domain.repository.LocalMediaRepository>(relaxed = true)
+        val device = FakeDevice(asksConsent = false, refused = setOf("content://media/2"))
+        val items = listOf(localOnly("content://media/1"), localOnly("content://media/2"))
+
+        DeletePhotoUseCase(syncRepo, cloudRepo, device, localRepo)(userId, items, freeUpSpace = true, deleteFromCloud = false)
+
+        coVerify(exactly = 1) { localRepo.forgetRemoved(setOf("content://media/1")) }
+    }
+
+    @Test
     fun `a delete that fits one request asks once`() = runTest {
         val device = FakeDevice(asksConsent = true)
         val useCase = DeletePhotoUseCase(syncRepo, cloudRepo, device)

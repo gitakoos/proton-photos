@@ -25,9 +25,11 @@ package eu.akoos.photos.data.mlsync
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.Cover
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.Face
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.ManualPhoto
+import eu.akoos.photos.data.mlsync.MlSnapshotRecord.NameChange
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.NotPerson
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.Person
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.PhotoKey
+import eu.akoos.photos.data.mlsync.MlSnapshotRecord.Removal
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.ScanMarker
 import eu.akoos.photos.data.mlsync.MlSnapshotRecord.SearchEmbedding
 import org.junit.Assert.assertEquals
@@ -84,6 +86,8 @@ class MlSnapshotFormatTest {
         embeddingDim = embeddingDim,
         keyCount = records.count { it is PhotoKey },
         personCount = records.count { it is Person },
+        nameChangeCount = records.count { it is NameChange },
+        removalCount = records.count { it is Removal },
         faceCount = records.count { it is Face },
         manualPhotoCount = records.count { it is ManualPhoto },
         notPersonCount = records.count { it is NotPerson },
@@ -184,7 +188,7 @@ class MlSnapshotFormatTest {
     // Golden FACES snapshot, embedding width 2. The four parts are kept apart so a test can find a record.
     private val goldenFacesHeader = unhex(
         "50 50 4D 4C 53 4E 41 50", // magic "PPMLSNAP"
-        "04 00 00 00", // version 4
+        "06 00 00 00", // version 6
         "01", // kind FACES
         "02 00 64 31", // device id "d1"
         "05 00 50 68 6F 6E 65", // device label "Phone"
@@ -193,8 +197,11 @@ class MlSnapshotFormatTest {
         "02 00 61 62", // face model sha "ab"
         "01 00 00 00", // clustering parameters version 1
         "02 00 00 00", // embedding width 2
+        "0B 00 00 00 00 00 00 00", // faces deleted everywhere at 11
         "02 00 00 00", // keys
         "02 00 00 00", // people
+        "01 00 00 00", // name changes
+        "01 00 00 00", // removals
         "01 00 00 00", // faces
         "01 00 00 00", // manual photos
         "01 00 00 00", // not-person marks
@@ -204,8 +211,26 @@ class MlSnapshotFormatTest {
     private val goldenFacesTables = unhex(
         "01 02 00 6B 31", // KEY 0 "k1"
         "01 02 00 6B 32", // KEY 1 "k2"
-        "02 03 00 41 6E 6E", // PERSON 0 "Ann"
-        "02 04 00 5A 6F C3 AB", // PERSON 1 "Zoë", the e-diaeresis as two UTF-8 bytes
+        "02 03 00 41 6E 6E 05 00 00 00 00 00 00 00", // PERSON 0 "Ann", named at 5
+        "02 04 00 5A 6F C3 AB 00 00 00 00 00 00 00 00", // PERSON 1 "Zoë" (e-diaeresis as two UTF-8 bytes), time unknown
+        "09 02 00 41 6C 03 00 41 6E 6E 08 00 00 00 00 00 00 00", // NAME_CHANGE "Al" to "Ann" at 8
+        "0A 01 03 00 41 6E 6E 02 00 6B 33 00 00 00 00 0A 00 00 00 00 00 00 00", // REMOVAL manual photo "Ann" "k3" at 10
+    )
+
+    // The same snapshot as version 5 wrote it: no time of a delete everywhere in the header.
+    private val goldenFacesV5Header = unhex(
+        "50 50 4D 4C 53 4E 41 50", "05 00 00 00", "01", "02 00 64 31", "05 00 50 68 6F 6E 65",
+        "08 07 06 05 04 03 02 01", "07 00 00 00", "02 00 61 62", "01 00 00 00", "02 00 00 00",
+        "02 00 00 00", "02 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00",
+        "01 00 00 00", "02 00 00 00",
+    )
+
+    // The same snapshot as version 4 wrote it: seven counts, and people without a naming time or name changes.
+    private val goldenFacesV4Bytes = unhex(
+        "50 50 4D 4C 53 4E 41 50", "04 00 00 00", "01", "02 00 64 31", "05 00 50 68 6F 6E 65",
+        "08 07 06 05 04 03 02 01", "07 00 00 00", "02 00 61 62", "01 00 00 00", "02 00 00 00",
+        "02 00 00 00", "02 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00", "01 00 00 00", "02 00 00 00",
+        "01 02 00 6B 31", "01 02 00 6B 32", "02 03 00 41 6E 6E", "02 04 00 5A 6F C3 AB",
     )
     private val goldenFace = unhex(
         "03", // FACE
@@ -222,6 +247,14 @@ class MlSnapshotFormatTest {
         "00 00 80 3F 00 00 80 BF", // embedding 1.0, -1.0
     )
     private val goldenFacesRest = unhex(
+        "04 01 00 00 00 01 00 00 00 06 00 00 00 00 00 00 00", // MANUAL_PHOTO person 1, key 1, added at 6
+        "05 00 00 00 00 00 00 00 00 01 00 00 00 07 00 00 00 00 00 00 00", // NOT_PERSON person 0, key 0, face 1, at 7
+        "06 00 00 00 00 00 00 00 00 09 00 00 00 00 00 00 00", // COVER person 0, key 0, set at 9
+        "07 00 00 00 00 00", // SCAN_MARKER key 0
+        "07 01 00 00 00 01", // SCAN_MARKER key 1, hi-res checked
+        "FF", // END
+    )
+    private val goldenFacesRestV4 = unhex(
         "04 01 00 00 00 01 00 00 00", // MANUAL_PHOTO person 1, key 1
         "05 00 00 00 00 00 00 00 00 01 00 00 00", // NOT_PERSON person 0, key 0, face index 1
         "06 00 00 00 00 00 00 00 00", // COVER person 0, key 0
@@ -230,26 +263,30 @@ class MlSnapshotFormatTest {
         "FF", // END
     )
     private val goldenFacesBytes = goldenFacesHeader + goldenFacesTables + goldenFace + goldenFacesRest
+    private val goldenFacesV4 = goldenFacesV4Bytes + goldenFace + goldenFacesRestV4
+    private val goldenFacesV5 = goldenFacesV5Header + goldenFacesTables + goldenFace + goldenFacesRest
     private val goldenFaceStart = goldenFacesHeader.size + goldenFacesTables.size
 
     private fun goldenFacesRecords(): List<MlSnapshotRecord> = listOf(
         PhotoKey("k1"),
         PhotoKey("k2"),
-        Person("Ann"),
+        Person("Ann", namedAtMillis = 5L),
         Person("Zoë"),
+        NameChange("Al", "Ann", 8L),
+        Removal(MlSnapshotFormat.REMOVAL_MANUAL_PHOTO, "Ann", "k3", 0, 10L),
         Face(
             photoKey = "k1", faceIndex = 1, left = 0.25f, top = 0.5f, right = 0.75f, bottom = 1f,
             landmarks = floatArrayOf(1f, 2f), score = 0.875f, blur = 2f, rejected = false,
             personName = "Ann", confirmedName = null, embedding = floats(1f, -1f),
         ),
-        ManualPhoto("Zoë", "k2"),
-        NotPerson("Ann", "k1", 1),
-        Cover("Ann", "k1"),
+        ManualPhoto("Zoë", "k2", addedAtMillis = 6L),
+        NotPerson("Ann", "k1", 1, addedAtMillis = 7L),
+        Cover("Ann", "k1", setAtMillis = 9L),
         ScanMarker("k1", hiResScanned = false),
         ScanMarker("k2", hiResScanned = true),
     )
 
-    private fun goldenFacesHeaderValue(records: List<MlSnapshotRecord>) = facesHeader(
+    private fun goldenFacesHeaderValue(records: List<MlSnapshotRecord>, facesWipedAtMillis: Long = 11L) = facesHeader(
         records,
         embeddingDim = 2,
         deviceId = "d1",
@@ -257,7 +294,7 @@ class MlSnapshotFormatTest {
         createdAtMillis = 0x0102030405060708L,
         faceModelVersion = 7,
         faceModelSha256 = "ab",
-    )
+    ).copy(facesWipedAtMillis = facesWipedAtMillis)
 
     @Test
     fun `a faces snapshot round-trips every record kind`() {
@@ -332,6 +369,41 @@ class MlSnapshotFormatTest {
         val (header, readRecords) = readAll(goldenFacesBytes)
         assertEquals(goldenFacesHeaderValue(records), header)
         assertEquals(records, readRecords)
+    }
+
+    @Test
+    fun `a version 4 faces snapshot still reads, as one with no naming times and no name changes`() {
+        val (header, records) = readAll(goldenFacesV4)
+
+        val expected = goldenFacesRecords().filterNot { it is NameChange || it is Removal }.map {
+            when (it) {
+                is Person -> Person(it.name)
+                is ManualPhoto -> ManualPhoto(it.personName, it.photoKey)
+                is NotPerson -> NotPerson(it.personName, it.photoKey, it.faceIndex)
+                is Cover -> Cover(it.personName, it.photoKey)
+                else -> it
+            }
+        }
+        assertEquals(goldenFacesHeaderValue(expected, facesWipedAtMillis = 0L), header)
+        assertEquals(0, (header as MlSnapshotHeader.Faces).nameChangeCount)
+        assertEquals(0, header.removalCount)
+        assertEquals(expected, records)
+    }
+
+    @Test
+    fun `a version 5 faces snapshot still reads, as one written before any delete everywhere`() {
+        val (header, records) = readAll(goldenFacesV5)
+
+        assertEquals(goldenFacesHeaderValue(goldenFacesRecords(), facesWipedAtMillis = 0L), header)
+        assertEquals(goldenFacesRecords(), records)
+    }
+
+    @Test
+    fun `a faces snapshot is written as version 6 and a search snapshot as version 4`() {
+        val faces = snapshotBytes(goldenFacesHeaderValue(goldenFacesRecords()), goldenFacesRecords())
+        assertEquals(6, faces[8].toInt())
+        val search = listOf(PhotoKey("k"), SearchEmbedding("k", floats(1f, 2f)))
+        assertEquals(4, snapshotBytes(searchHeader(search, embeddingDim = 2), search)[8].toInt())
     }
 
     @Test
@@ -459,7 +531,7 @@ class MlSnapshotFormatTest {
 
     @Test
     fun `an unknown version is refused before any record is read`() {
-        for (version in listOf(5L, 3L, 0xFFFFFFFFL)) {
+        for (version in listOf(7L, 3L, 0xFFFFFFFFL)) {
             val bytes = goldenFacesBytes.copyOf()
             for (b in 0 until 4) bytes[8 + b] = (version ushr (8 * b)).toByte()
             val error = assertThrows(UnsupportedMlSnapshotVersionException::class.java) {

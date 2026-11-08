@@ -50,7 +50,6 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -73,6 +72,7 @@ import eu.akoos.photos.domain.entity.compression.EncoderCapabilities
 import eu.akoos.photos.domain.entity.compression.VideoCodec
 import eu.akoos.photos.domain.entity.compression.VideoCodecChoice
 import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.settings.labelRes
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.SheetBg
@@ -132,7 +132,7 @@ private fun codecInfo(choice: VideoCodecChoice): String = stringResource(
 @Composable
 internal fun ChoiceSheet(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     val colors = AppColors.current
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,

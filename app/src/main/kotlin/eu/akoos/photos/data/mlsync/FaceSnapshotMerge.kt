@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.mlsync
 
+import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
@@ -134,6 +135,10 @@ internal sealed interface FaceMergeChange {
     /** Confirm the local face as [name]. */
     data class Confirm(val name: String) : FaceMergeChange
 
+    /** Put the local face with the person named [name] without confirming it: another device's automatic
+     *  grouping, which a later regroup may still correct. */
+    data class Group(val name: String) : FaceMergeChange
+
     /** Remove the local face from People. */
     data object Remove : FaceMergeChange
 
@@ -158,7 +163,7 @@ internal fun mergeFaceCuration(local: LocalFaceCuration, snapshot: SnapshotFaceC
     }
     val grouped = snapshot.personName ?: return FaceMergeChange.Keep
     return if (local.groupedName == null && grouped !in local.blockedNames) {
-        FaceMergeChange.Confirm(grouped)
+        FaceMergeChange.Group(grouped)
     } else {
         FaceMergeChange.Keep
     }
@@ -166,6 +171,52 @@ internal fun mergeFaceCuration(local: LocalFaceCuration, snapshot: SnapshotFaceC
 
 /** Whether a snapshot's "not [markName]" mark lands on the local face it overlaps, whose confirmed name
  *  once the merge is done is [localConfirmedName]: never against a face confirmed as that very name. */
+/**
+ * Whether a rename or merge another install made at [changedAt] is carried out here, where the person it names
+ * got that name at [heldNamedAt] (0 when unknown): only when it came later, so the later rename or merge wins on
+ * every install, and a name given here after it (often a new person under a freed name) stays.
+ */
+internal fun nameChangeApplies(heldNamedAt: Long, changedAt: Long): Boolean = changedAt > heldNamedAt
+
+/**
+ * The name the person once called [from] goes by here, following the renames kept here ([changes], oldest first)
+ * made before [before], or [from] itself while [held] says someone holds it; null when the trail ends at no one.
+ * Two installs that each renamed one person away from the same name leave [from] held nowhere, and the later
+ * rename has to find the person under the name the earlier one gave it.
+ */
+internal fun nameHeldNow(
+    from: String,
+    before: Long,
+    changes: List<PersonNameChangeEntity>,
+    held: (String) -> Boolean,
+): String? {
+    var current = from
+    repeat(MAX_NAME_HOPS) {
+        if (held(current)) return current
+        val next = changes.lastOrNull { it.fromName == current && it.toName.isNotEmpty() && it.changedAt < before }
+            ?: return null
+        current = next.toName
+    }
+    return null
+}
+
+private const val MAX_NAME_HOPS = 20
+
+/**
+ * Whether a setting or removal of one piece of curation stamped [changedAt] (an attached photo, a "not this person"
+ * mark, a cover) outranks what this device holds for it, set or removed at [heldAt] (0 when unknown): the later wins.
+ */
+internal fun curationChangeApplies(heldAt: Long, changedAt: Long): Boolean = changedAt > heldAt
+
+/**
+ * Whether a "not this person" mark set by hand on another install at [markAddedAt] outranks this device's own
+ * confirmation of the face under that name. A rename confirms every face of the person, so without this a photo
+ * taken off a named person elsewhere would never leave them here. Only a timed mark later than what this device
+ * holds for it ([heldAt]: its own setting or removal of the same mark, 0 when none) does.
+ */
+internal fun handMarkOverridesConfirmation(markAddedAt: Long, heldAt: Long): Boolean =
+    markAddedAt > 0L && curationChangeApplies(heldAt, markAddedAt)
+
 internal fun notPersonMarkApplies(localConfirmedName: String?, markName: String): Boolean =
     localConfirmedName != markName
 

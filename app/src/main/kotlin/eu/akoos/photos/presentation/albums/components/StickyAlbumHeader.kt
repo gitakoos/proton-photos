@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.GlassBackdrop
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 
 /**
@@ -66,8 +67,9 @@ internal fun StickyAlbumHeader(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     trailing: (@Composable RowScope.() -> Unit)? = null,
+    backdrop: GlassBackdrop? = null,
 ) {
     AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut(), modifier = modifier) {
-        FloatingHeader(title = title, onBack = onBack, trailing = trailing)
+        FloatingHeader(title = title, onBack = onBack, trailing = trailing, backdrop = backdrop)
     }
 }

@@ -26,6 +26,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Log
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.BuildConfig
@@ -114,12 +115,16 @@ class HiddenVaultRestorer @Inject constructor(
      * caller that goes away between the file landing and that clear would leave a folder holding
      * nothing yet still listed as hidden.
      */
-    suspend fun restorePhoto(uri: String, fallbackDisplayName: String? = null): Boolean = runs.detached {
+    suspend fun restorePhoto(
+        uri: String,
+        fallbackDisplayName: String? = null,
+        shownAt: Long? = null,
+    ): Boolean = runs.detached {
         val buckets = recordedBucketsOf(listOf(uri))
         val tally = RevealTally()
         HiddenVaultDiagnostics.revealStarted(1)
-        val outcome = restoreOne(uri, tally, fallbackDisplayName)
-        if (outcome.clearsRecords) journal.forget(listOf(uri))
+        val outcome = restoreOne(uri, tally, fallbackDisplayName, shownAt = shownAt)
+        if (outcome.clearsRecords) journal.forget(listOf(uri), shownAt)
         clearEmptiedFolders(buckets)
         HiddenVaultDiagnostics.revealFinished(
             revealed = if (outcome.revealed) 1 else 0,
@@ -211,7 +216,8 @@ class HiddenVaultRestorer @Inject constructor(
         tally: RevealTally,
         fallbackDisplayName: String? = null,
         folderOverride: String? = null,
-    ): HiddenRestoreOutcome = runs.forPhoto(uri) { roundTrip(uri, tally, fallbackDisplayName, folderOverride) }
+        shownAt: Long? = null,
+    ): HiddenRestoreOutcome = runs.forPhoto(uri) { roundTrip(uri, tally, fallbackDisplayName, folderOverride, shownAt) }
 
     /**
      * The round trip for one photo: the file back to the device, then the index entry and the four
@@ -235,6 +241,7 @@ class HiddenVaultRestorer @Inject constructor(
         tally: RevealTally,
         fallbackDisplayName: String? = null,
         folderOverride: String? = null,
+        shownAt: Long? = null,
     ): HiddenRestoreOutcome {
         val ref = HiddenVaultDiagnostics.ref(uri)
         val startedAt = SystemClock.elapsedRealtime()
@@ -338,16 +345,7 @@ class HiddenVaultRestorer @Inject constructor(
         if (outcome.clearsRecords) {
             tally.recordsDropped++
             context.settingsDataStore.edit { p ->
-                p[SettingsKeys.HIDDEN_PHOTO_URIS] = (p[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) - uri
-                for (key in listOf(
-                    SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP,
-                    SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
-                    SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
-                    SettingsKeys.HIDDEN_URI_CARRIED_MAP,
-                )) {
-                    val existing = p[key] ?: continue
-                    p[key] = HiddenVaultRecords.dropped(existing, setOf(uri))
-                }
+                dropRevealedRecords(p, uri, shownAt ?: System.currentTimeMillis())
             }
             // With the records gone the vault answers for this photo not at all, so its Drive copy
             // must not stay dropped by the vault's own filter. A reveal that re-paired has already
@@ -722,6 +720,28 @@ class HiddenVaultRestorer @Inject constructor(
 
     private companion object {
         const val TAG = "HiddenVaultRestorer"
+    }
+}
+
+/**
+ * Drops a revealed vault file's index entry and its four per-uri records, recording its Drive copy as shown again at
+ * [shownAt] first: the link id lives only in the record dropped here, so nothing after it can tell which Drive copy
+ * came back, and the shared backup would then take another device's older hide as the later change.
+ */
+internal fun dropRevealedRecords(prefs: MutablePreferences, uri: String, shownAt: Long) {
+    val links = (prefs[SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP] ?: emptySet()).mapNotNull { entry ->
+        entry.substringAfter('|', "").takeIf { entry.substringBefore('|') == uri && it.isNotBlank() }
+    }
+    HiddenSyncTimes.photosShown(prefs, links, shownAt)
+    prefs[SettingsKeys.HIDDEN_PHOTO_URIS] = (prefs[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet()) - uri
+    for (key in listOf(
+        SettingsKeys.HIDDEN_URI_CLOUD_ID_MAP,
+        SettingsKeys.HIDDEN_URI_SOURCE_FOLDER_MAP,
+        SettingsKeys.HIDDEN_URI_ORIGINAL_NAME_MAP,
+        SettingsKeys.HIDDEN_URI_CARRIED_MAP,
+    )) {
+        val existing = prefs[key] ?: continue
+        prefs[key] = HiddenVaultRecords.dropped(existing, setOf(uri))
     }
 }
 

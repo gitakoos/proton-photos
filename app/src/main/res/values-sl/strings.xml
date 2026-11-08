@@ -6,12 +6,11 @@
     <!-- Onboarding wizard (first-launch, post-sign-in) -->
     <string name="onboarding_back">Nazaj</string>
     <string name="onboarding_continue">Naprej</string>
-    <string name="onboarding_skip">Za zdaj preskoči</string>
+    <string name="onboarding_not_now">Ne zdaj</string>
+    <string name="onboarding_get_started">Začni</string>
     <string name="onboarding_allow">Dovoli</string>
     <string name="onboarding_open_settings">Odpri nastavitve</string>
-    <string name="onboarding_permission_granted">Dovoljeno</string>
     <string name="onboarding_finish">Odpri galerijo</string>
-    <string name="onboarding_recommended">Priporočeno</string>
 
     <string name="onboarding_welcome_title">Dobrodošli v Photos for Proton</string>
     <string name="onboarding_welcome_subtitle">Vaše fotografije in videoposnetki, šifrirani od konca do konca v Proton Drive. Nastavite nekaj možnosti, da bo aplikacija ustrezala vašim potrebam.</string>
@@ -19,9 +18,9 @@
     <string name="onboarding_backup_title">Izberite, kaj naj se varnostno kopira</string>
     <string name="onboarding_backup_subtitle">To lahko kadar koli spremenite v nastavitvah.</string>
     <string name="onboarding_backup_everything">Varnostno kopiraj vse</string>
-    <string name="onboarding_backup_everything_desc">Vse fotografije in videoposnetke v napravi, razen map, ki jih pozneje izključite.</string>
+    <string name="onboarding_backup_everything_desc">Vse fotografije in videoposnetki v tej napravi. Na naslednjem zaslonu lahko izpustite mape.</string>
     <string name="onboarding_backup_folders">Izberi določene mape</string>
-    <string name="onboarding_backup_folders_desc">V nastavitvah izberite, katere mape naj se varnostno kopirajo. Do takrat se nič ne naloži.</string>
+    <string name="onboarding_backup_folders_desc">Samo mape, ki jih izberete na naslednjem zaslonu.</string>
     <string name="onboarding_backup_nothing">Za zdaj nič</string>
     <string name="onboarding_backup_nothing_desc">Brskajte po obstoječih fotografijah na Proton Drive, ne da bi varnostno kopirali nove.</string>
 
@@ -41,7 +40,7 @@
     <string name="onboarding_photos_subtitle">Dostop za branje vaših fotografij in videoposnetkov je potreben za njihovo šifriranje in varnostno kopiranje v Drive.</string>
 
     <string name="onboarding_manage_media_title">Upravljanje predstavnosti</string>
-    <string name="onboarding_manage_media_subtitle">Močno priporočeno. Aplikaciji omogoča urejanje, brisanje in preimenovanje fotografij in videoposnetkov v napravi brez sistemskega potrditvenega okna vsakič znova. Uporablja se za urejanje v aplikaciji, shranjevanje nazaj v napravo, postopek koša in brisanje po varnostnem kopiranju. Tapnite, da odprete sistemske nastavitve.</string>
+    <string name="onboarding_manage_media_subtitle">Zelo priporočeno. Aplikacija lahko ureja, briše in preimenuje fotografije v tej napravi, ne da bi vsakič zahtevala potrditev.</string>
     <string name="onboarding_folders_include_title">Mape za varnostno kopiranje</string>
     <string name="onboarding_folders_include_subtitle">Izberite, katere mape naj se naložijo v Drive. Vsebina drugih map ostane samo v tej napravi.</string>
     <string name="onboarding_folders_exclude_title">Mape, ki naj se preskočijo</string>
@@ -54,7 +53,6 @@
 
     <string name="onboarding_about_title">Neodvisni odjemalec tretje osebe</string>
     <string name="onboarding_about_subtitle">Izdelal en sam razvijalec. Ni povezan s Proton AG. Izvorna koda je na voljo, licencirana po GPL, brez lastne telemetrije.</string>
-    <string name="onboarding_about_author_subtitle">Osebna stran razvijalca.</string>
     <string name="onboarding_about_github_subtitle">Celotna izvorna koda na GitHubu.</string>
 
     <string name="onboarding_appearance_title">Prilagodite po svoje</string>
@@ -67,7 +65,17 @@
     <string name="onboarding_lock_timeout_label">Znova zakleni po</string>
 
     <string name="onboarding_done_title">Vse je pripravljeno</string>
-    <string name="onboarding_done_subtitle">Vaše nastavitve so shranjene. Vse to lahko pozneje prilagodite na strani z nastavitvami.</string>
+    <string name="onboarding_done_subtitle">To bo nastavljeno. Karkoli lahko pozneje spremenite v nastavitvah.</string>
+    <string name="onboarding_done_backup_everything">Varnostna kopija: vse fotografije in videoposnetki</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Varnostna kopija: %d mapa</item>
+        <item quantity="two">Varnostna kopija: %d mapi</item>
+        <item quantity="few">Varnostna kopija: %d mape</item>
+        <item quantity="other">Varnostna kopija: %d map</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Varnostna kopija: zaenkrat izklopljena</string>
+    <string name="onboarding_done_ml">Prenos po nastavitvi: %s</string>
+    <string name="onboarding_done_lock">Zaklep aplikacije: vklopljen</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Zasebno varnostno kopiranje fotografij, šifrirano od konca do konca.</string>
@@ -82,12 +90,6 @@
     <string name="gallery_tab_photos">Fotografije</string>
     <string name="gallery_tab_albums">Albumi</string>
     <string name="gallery_tab_shared">V skupni rabi</string>
-    <!-- Selection counter variants split by media type. The toolbar uses these instead of
-         gallery_selected_count when the selection contains a non-trivial mix, so the user
-         sees at a glance how many photos vs videos they're about to act on. -->
-    <string name="selection_photos_only">%d fotografij</string>
-    <string name="selection_videos_only">%d videoposnetkov</string>
-    <string name="selection_mixed">%1$d fotografij, %2$d videoposnetkov</string>
 
     <!-- Photo editor error strings, previously hardcoded Hungarian in PhotoEditorViewModel.
          Surfaced via state.errorMessage on the editor screen. -->
@@ -418,7 +420,7 @@
     <!-- Settings -->
     <string name="settings_title">Nastavitve</string>
     <string name="settings_more_title">Več nastavitev</string>
-    <string name="settings_more_desc">UI, zasebnost, obvestila in pomoč</string>
+    <string name="settings_more_desc">Strojno učenje, zasebnost, obvestila in pomoč</string>
     <string name="settings_search_hint">Iskanje nastavitev</string>
     <string name="settings_search_no_results">Ni ujemajočih se nastavitev</string>
     <string name="settings_sync_wifi_only">Sinhroniziraj samo prek Wi‑Fi</string>
@@ -439,7 +441,7 @@
     <string name="settings_sign_out">Odjava</string>
     <string name="settings_sign_out_desc">Končaj to sejo v tej napravi.</string>
     <string name="sign_out_dialog_title">Odjava?</string>
-    <string name="sign_out_dialog_message">Z odjavo se ti podatki v tej napravi izbrišejo in se ob ponovni prijavi ne obnovijo (če jih potrebujete, jih najprej izvozite):</string>
+    <string name="sign_out_dialog_message">Z odjavo se ti podatki v tej napravi izbrišejo in se ob ponovni prijavi ne obnovijo:</string>
     <string name="sign_out_dialog_item_faces">Poimenovane osebe in podatki o obrazih</string>
     <string name="sign_out_dialog_item_day_notes">Opombe v koledarju</string>
     <string name="sign_out_dialog_item_vault">Skrite fotografije</string>
@@ -746,6 +748,8 @@
     <string name="map_style_modern">Zemljevid sveta</string>
     <string name="map_style_modern_summary">Sodoben globus, ki ga lahko zavrtite do svojih krajev.</string>
     <string name="settings_amoled_black">Čisto črna (AMOLED)</string>
+    <string name="settings_liquid_glass">Tekoče steklo</string>
+    <string name="settings_liquid_glass_desc">Meniji, glave strani, plošče in kontrolniki pregledovalnika zameglijo, kar je pod njimi. Še v razvoju, še ni na vsakem zaslonu</string>
     <string name="settings_tint_cloud">Oznake oblaka v poudarni barvi</string>
     <string name="settings_gif_autoplay_grid">Predvajaj GIF-e v mrežah</string>
     <string name="settings_gif_autoplay_covers">Predvajaj GIF ovitke albumov</string>
@@ -1053,6 +1057,8 @@
 
     <!-- Photo viewer slideshow controls -->
     <string name="viewer_play_slideshow">Predvajaj diaprojekcijo</string>
+    <string name="viewer_video_seek_seconds">%1$d s</string>
+    <string name="viewer_video_hold_speed">%1$s×</string>
     <string name="viewer_pause_slideshow">Začasno ustavi diaprojekcijo</string>
 
     <!-- Widget -->
@@ -1073,7 +1079,12 @@
     <string name="widget_mode_cloud">Fotografije iz oblaka</string>
     <string name="widget_mode_cloud_desc">Prikaži fotografije iz šifriranega predpomnilnika oblaka, ne da bi jih izpostavil drugim aplikacijam</string>
     <string name="widget_section_choose_cloud_photos">Izberi fotografije iz oblaka</string>
-    <string name="widget_cloud_photos_selected">%d izbranih fotografij iz oblaka</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d izbrana fotografija iz oblaka</item>
+        <item quantity="two">%d izbrani fotografiji iz oblaka</item>
+        <item quantity="few">%d izbrane fotografije iz oblaka</item>
+        <item quantity="other">%d izbranih fotografij iz oblaka</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Še ni fotografij iz oblaka</string>
     <string name="widget_no_cloud_albums">Še ni albumov iz oblaka. Odpri aplikacijo za sinhronizacijo albumov.</string>
     <string name="widget_interval_section">Zamenjaj fotografijo vsakih</string>
@@ -1083,7 +1094,12 @@
     <string name="widget_interval_8hr">8 ur</string>
     <string name="widget_interval_1day">1 dan</string>
     <string name="widget_add_button">Dodaj pripomoček</string>
-    <string name="widget_photos_selected">%d izbranih fotografij</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d izbrana fotografija</item>
+        <item quantity="two">%d izbrani fotografiji</item>
+        <item quantity="few">%d izbrane fotografije</item>
+        <item quantity="other">%d izbranih fotografij</item>
+    </plurals>
     <string name="widget_no_photos">Ni najdenih fotografij</string>
 
     <plurals name="delete_title_plural">
@@ -1171,6 +1187,8 @@
     <string name="cd_motion_photo">Gibljiva fotografija</string>
     <string name="cd_panorama">Panorama</string>
     <string name="cd_play_motion_photo">Predvajaj gibljivo fotografijo</string>
+    <string name="cd_video_play">Predvajaj</string>
+    <string name="cd_video_pause">Premor</string>
     <string name="cd_stop_motion_photo">Ustavi gibljivo fotografijo</string>
     <string name="cd_exit_panorama">Zapri panoramo</string>
     <string name="viewer_view_panorama">Oglej si panoramo</string>
@@ -1260,6 +1278,11 @@
     <string name="device_folders_section">Mape v tej napravi</string>
     <string name="device_folder_already_backed_up">Že varnostno kopirano v Drive</string>
     <string name="backup_started">Varnostno kopiranje v Drive</string>
+    <string name="share_backup_label">Varnostno kopiraj v Drive</string>
+    <string name="share_backup_sign_in">Prijavite se za varnostno kopiranje v Drive</string>
+    <string name="share_backup_unreadable">Iz deljenega ni bilo mogoče prebrati nobene fotografije ali videoposnetka</string>
+    <string name="share_backup_some_unreadable">Varnostno kopiranje v Drive. Preskočeno: %1$d od %2$d, ker jih ni bilo mogoče prebrati</string>
+    <string name="share_backup_saved_to_phone">Shranjeno v telefon, varnostno kopiranje v Drive</string>
     <string name="upload_confirm_title">Naložiti v Drive?</string>
     <string name="upload_confirm_message">Varnostno kopirati %1$d izbranih v vaš Proton Drive?</string>
     <string name="upload_action_short">Naloži</string>
@@ -1326,6 +1349,7 @@
         <item quantity="other">Izbrišem kopije %1$d fotografij v napravi in sprostim %2$s? Na Drive ostanejo.</item>
     </plurals>
     <string name="settings_free_up_error">Prostora ni bilo mogoče sprostiti: %1$s</string>
+    <string name="free_up_skipped_pre_r">Nekatere kopije v napravi za odstranitev potrebujejo Android 11 ali novejšega in so bile preskočene.</string>
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Nalaganje…</string>
     <string name="upload_status_encrypting">Šifriranje…</string>
@@ -1406,6 +1430,36 @@
     <string name="albums_view_heading">Pogled</string>
     <string name="albums_view_grid">Mreža</string>
     <string name="albums_view_list">Seznam</string>
+    <string name="people_display_settings">Prikaz</string>
+    <string name="people_follow_albums">Enako kot zavihek Albumi</string>
+    <string name="people_follow_albums_desc">Prikaže osebe s pogledom in velikostjo naslovnic zavihka Albumi</string>
+    <string name="drive_backup_section">Varnostna kopija na Proton Drive</string>
+    <string name="drive_backup_auto">Samodejna varnostna kopija</string>
+    <string name="drive_backup_auto_desc">Shrani obraze, iskalni indeks, oznake in skrite elemente ter jih ohranja enake na tvojih drugih napravah</string>
+    <string name="drive_backup_turn_on_title">Vklopim samodejno varnostno kopijo?</string>
+    <string name="drive_backup_turn_on_msg">Na drugem telefonu je za to potreben Photos for Proton 2.6.0 ali novejši, na računalniku pa Photos for Proton desktop 1.3.0 ali novejši. Starejša različica pusti pri miru, kar shrani ta telefon, in svoje podatke obdrži takšne, kot so.</string>
+    <string name="drive_backup_turn_on">Vklopi</string>
+    <string name="drive_backup_save_now">Varnostno kopiraj zdaj</string>
+    <string name="drive_backup_load">Naloži z Drive</string>
+    <string name="drive_backup_load_desc">Prenese, kar so shranile tvoje druge naprave</string>
+    <string name="drive_copies_row">Varnostne kopije na Drive</string>
+    <string name="drive_copies_row_desc">Katera naprava je kaj shranila in kdaj</string>
+    <string name="drive_copies_this_device">Ta telefon</string>
+    <string name="drive_copies_other_device">Druga naprava</string>
+    <string name="drive_copies_saved">Shranjeno: %s</string>
+    <string name="drive_copies_stale">Več kot 30 dni ni posodobljeno</string>
+    <string name="drive_copies_trash">V koš</string>
+    <string name="drive_copies_trash_title">Premaknem varnostno kopijo te naprave v koš?</string>
+    <string name="drive_copies_trash_msg">%s: njeni obrazi, iskalni indeks, oznake in seznam skritih na Proton Drive gredo v koš Drive, od koder jih je mogoče obnoviti. Če naprava znova naredi kopijo, shrani novo.</string>
+    <string name="drive_copies_loading">Branje varnostnih kopij na Drive…</string>
+    <string name="drive_copies_failed">Varnostnih kopij na Drive ni bilo mogoče prebrati</string>
+    <string name="drive_copies_empty">Na Drive še ni nič shranjeno</string>
+    <string name="drive_copies_trash_failed">Premik v koš ni uspel</string>
+    <string name="sign_out_dialog_drive_kept">S samodejno varnostno kopijo ostanejo obrazi, imena, oznake in skriti elementi na Proton Drive in se vrnejo ob ponovni prijavi.</string>
+    <string name="shared_backup_syncing">Sinhronizacija s Proton Drive</string>
+    <string name="shared_backup_last">Zadnja sinhronizacija: %1$s</string>
+    <string name="shared_backup_never">Še ni sinhronizirano</string>
+    <string name="shared_backup_failed">Sinhronizacija ni uspela, poskusi znova pozneje</string>
     <string name="albums_more_settings">Več nastavitev</string>
     <string name="album_options">Možnosti albuma</string>
     <string name="album_group_heading">Združi po</string>
@@ -1455,7 +1509,6 @@
     <string name="viewer_meta_flash_none">Brez bliskavice</string>
     <string name="viewer_meta_wb_auto">Samodejno</string>
     <string name="viewer_meta_wb_manual">Ročno</string>
-    <string name="viewer_meta_orientation_normal">Običajno</string>
     <string name="viewer_meta_orientation_180">Zasukano za 180°</string>
     <string name="viewer_meta_orientation_90_cw">Zasukano za 90° v smeri urinega kazalca</string>
     <string name="viewer_meta_orientation_90_ccw">Zasukano za 90° v nasprotni smeri urinega kazalca</string>
@@ -1463,15 +1516,48 @@
     <string name="viewer_meta_source_backed_up">Proton Drive in naprava</string>
     <string name="viewer_meta_source_cloud">Samo Proton Drive</string>
     <string name="viewer_meta_strip">Odstrani</string>
-    <string name="viewer_meta_strip_all">Odstrani vse zasebne metapodatke</string>
-    <string name="viewer_meta_strip_all_desc">Odstrani polja GPS, podatke o fotoaparatu in programski opremi ter avtorja in avtorske pravice iz te datoteke</string>
+    <string name="viewer_meta_all_details">Vse podrobnosti</string>
+    <string name="details_adjust">Prilagodi</string>
+    <string name="details_edit">Uredi</string>
+    <string name="details_add">Dodaj</string>
+    <string name="details_add_location">Dodaj lokacijo</string>
+    <string name="details_time">Čas</string>
+    <string name="details_remove_private">Odstrani zasebne podatke</string>
+    <string name="details_private_intro">To je zdaj v datoteki. Izberi, kaj gre ven.</string>
+    <string name="details_private_undo">Tega ni mogoče razveljaviti.</string>
+    <string name="details_private_none">Ta datoteka nima zasebnih podatkov.</string>
+    <string name="details_private_dates">Datumske oznake</string>
+    <string name="details_private_author">Avtor</string>
+    <string name="details_place_hint">Povleci zemljevid pod žebljiček</string>
+    <string name="cloud_compress_title">Stisni na Drive</string>
+    <string name="cloud_compress_confirm_title">Stisniti na Drive?</string>
+    <string name="cloud_compress_confirm">Stisni</string>
+    <string name="cloud_compress_started">Stiskanje poteka v ozadju</string>
+    <string name="cloud_compress_waiting_wifi">Čaka na Wi-Fi, ker varnostno kopiranje teče samo prek Wi-Fi</string>
+    <string name="cloud_compress_confirm_stop">Ustaviš ga lahko kadar koli v obvestilu ali na strani Dejavnost.</string>
+    <string name="cloud_compress_progress">%1$d od %2$d</string>
+    <string name="cloud_compress_done">Stisnjenih %1$d, prihranjeno %2$s.</string>
+    <string name="cloud_compress_done_left">Nespremenjenih: %1$d.</string>
+    <string name="cloud_compress_channel_desc">Napredek stiskanja fotografij, ki so že na Drive</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d fotografija ali videoposnetek na Drive se prenese, stisne z nastavitvami stiskanja ob nalaganju in znova naloži. Izvirnik gre v koš Drive, ko je manjša kopija v njegovih albumih. Kar ne bi bilo vsaj 10 %% manjše, ostane nespremenjeno.</item>
+        <item quantity="two">%1$d fotografiji ali videoposnetka na Drive se preneseta, stisneta z nastavitvami stiskanja ob nalaganju in znova naložita. Vsak izvirnik gre v koš Drive, ko je njegova manjša kopija v albumih. Kar ne bi bilo vsaj 10 %% manjše, ostane nespremenjeno.</item>
+        <item quantity="few">%1$d fotografije in videoposnetki na Drive se prenesejo, stisnejo z nastavitvami stiskanja ob nalaganju in znova naložijo. Vsak izvirnik gre v koš Drive, ko je njegova manjša kopija v albumih. Kar ne bi bilo vsaj 10 %% manjše, ostane nespremenjeno.</item>
+        <item quantity="other">%1$d fotografij in videoposnetkov na Drive se prenese, stisne z nastavitvami stiskanja ob nalaganju in znova naloži. Vsak izvirnik gre v koš Drive, ko je njegova manjša kopija v albumih. Kar ne bi bilo vsaj 10 %% manjše, ostane nespremenjeno.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">Izpuščen je %1$d element, ki je tudi na tem telefonu.</item>
+        <item quantity="two">Izpuščena sta %1$d elementa, ki sta tudi na tem telefonu.</item>
+        <item quantity="few">Izpuščeni so %1$d elementi, ki so tudi na tem telefonu.</item>
+        <item quantity="other">Izpuščenih je %1$d elementov, ki so tudi na tem telefonu.</item>
+    </plurals>
+    <plurals name="details_private_remove">
+        <item quantity="one">Odstrani %d element</item>
+        <item quantity="two">Odstrani %d elementa</item>
+        <item quantity="few">Odstrani %d elemente</item>
+        <item quantity="other">Odstrani %d elementov</item>
+    </plurals>
     <string name="viewer_meta_strip_confirm_title">Odstraniti metapodatke?</string>
-    <string name="viewer_meta_strip_confirm_message">S tem se %1$s trajno odstrani iz datoteke v vaši napravi. Tega ni mogoče razveljaviti.</string>
-    <string name="viewer_meta_strip_what_gps">lokacija GPS</string>
-    <string name="viewer_meta_strip_what_camera">podatki o fotoaparatu</string>
-    <string name="viewer_meta_strip_what_timestamps">časovni žigi</string>
-    <string name="viewer_meta_strip_what_software">podatki o programski opremi</string>
-    <string name="viewer_meta_strip_what_authorship">avtor in avtorske pravice</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Izbrisati fotografijo?</string>
@@ -1547,17 +1633,43 @@
     <!-- FAQ -->
     <string name="faq_title">Pogosta vprašanja</string>
     <string name="faq_settings_entry">Pogosta vprašanja</string>
-    <string name="faq_onboarding_intro">Nekaj hitrih odgovorov za začetek. Pozneje jih najdete v Nastavitvah.</string>
     <string name="faq_q_cloud_icons">Kaj pomenijo ikone oblaka?</string>
     <string name="faq_a_cloud_icons">Zelen oblak pomeni, da je fotografija varnostno kopirana v Proton Drive in je še vedno v tej napravi. Bel oblak pomeni, da je samo v Proton Drive, ne v tej napravi. Brez ikone pomeni, da je samo v tej napravi in še ni varnostno kopirana.</string>
     <string name="faq_q_backup">Kako deluje varnostno kopiranje?</string>
-    <string name="faq_a_backup">Nove fotografije in videoposnetki se samodejno varnostno kopirajo, ko je varnostno kopiranje vklopljeno. V Nastavitvah lahko varnostno kopiranje omejite samo na Wi-Fi, tako da se ob mobilnih podatkih zaustavi.</string>
+    <string name="faq_a_backup">Nove fotografije in videoposnetki se samodejno varnostno kopirajo, ko je kopiranje vklopljeno. Tapnite okrogli gumb zgoraj desno na zavihku „%3$s“ in odprite „%1$s“, kjer ga prilagodite, na primer z „%2$s“.</string>
     <string name="faq_q_albums">Kaj so albumi in kaj počne zrcaljenje map?</string>
-    <string name="faq_a_albums">Albumi združujejo fotografije v Proton Drive. Možnost \"Zrcali mape naprave kot albume v Drive\" poskrbi, da se mape v vašem telefonu, kot sta Camera ali Screenshots, med varnostnim kopiranjem prikažejo kot ustrezni albumi v Drive.</string>
-    <string name="faq_q_mirror_local">Kaj počne možnost \"Zrcali spremembe v lokalne datoteke\"?</string>
+    <string name="faq_a_albums">Albumi združujejo fotografije na Proton Drive. V „%1$s“ ima pod „%2$s“ vsaka mapa potrditveno polje „%3$s“. Če ga označite, mapa ob varnostnem kopiranju dobi ustrezen album na Drive.</string>
+    <string name="faq_q_mirror_local">Kaj počne možnost „%1$s“?</string>
     <string name="faq_a_mirror_local">Ko aplikacija med varnostnim kopiranjem odstrani metapodatke ali preimenuje fotografijo, iste spremembe uporabi tudi za izvirnik v vašem telefonu, tako da lokalna datoteka in varnostno kopirana kopija ostaneta enaki. To velja samo za fotografije, ki jih varnostno kopira ta aplikacija, in to v prihodnje, ter ne prenese sprememb, ki jih naredite v spletnem vmesniku Proton Drive, nazaj v vaš telefon.</string>
     <string name="faq_q_existing">Ali aplikacija spreminja moje obstoječe fotografije?</string>
     <string name="faq_a_existing">Ne. Do sprememb metapodatkov pride samo, ko aplikacija varnostno kopira fotografijo, in le, če vklopite odstranjevanje metapodatkov ali lokalno zrcaljenje. Fotografije, ki so že v vašem telefonu, ostanejo nespremenjene, razen če izberete dejanje za posamezno fotografijo.</string>
+    <string name="faq_section_backup">Varnostno kopiranje</string>
+    <string name="faq_section_albums">Albumi</string>
+    <string name="faq_section_where">Kje kaj najdete</string>
+    <string name="faq_q_folders">Kako izberem, katere mape se varnostno kopirajo?</string>
+    <string name="faq_a_folders">Tapnite okrogli gumb zgoraj desno na zavihku „%4$s“ in odprite „%1$s“. Vklopite „%2$s“ ali izberite mape posamezno pod „%3$s“.</string>
+    <string name="faq_q_free_space">Kako sprostim prostor v telefonu?</string>
+    <string name="faq_a_free_space">Fotografije, ki so že na Proton Drive, lahko zapustijo telefon. Vklopite „%1$s“ v „%2$s“ ali izberite fotografije, tapnite izbriši in izberite „%3$s“. Kopija na Drive ostane.</string>
+    <string name="faq_q_album_create">Kako ustvarim album in dodam fotografije?</string>
+    <string name="faq_a_album_create">Na zavihku „%1$s“ tapnite „%2$s“ (mapa s plusom). Fotografije dodate tako, da jih izberete na časovnici in tapnete „%3$s“, ali odprete album in v njegovem meniju izberete „%4$s“.</string>
+    <string name="faq_q_album_share">Kako delim album?</string>
+    <string name="faq_a_album_share">Odprite album, tapnite njegov meni in izberite „%1$s“. Povabite ljudi po e-pošti kot gledalce ali urejevalce. Kdor nima računa Proton, dobi povabilo po e-pošti. Albume, deljene z vami, najdete pod „%2$s“ na zavihku „%3$s“.</string>
+    <string name="faq_q_album_contribute">Ali lahko dodam fotografije v album, ki ga je nekdo delil z mano?</string>
+    <string name="faq_a_album_contribute">Da, če ga smete urejati. Fotografije dodajte enako kot v svoj album. Album dobi kopijo, ki šteje v prostor lastnika, vaš izvirnik pa ostane, kjer je.</string>
+    <string name="faq_q_folders_albums">Kakšna je razlika med mapami in albumi?</string>
+    <string name="faq_a_folders_albums">Albumi so na Proton Drive. Mape so mape v tem telefonu, na primer Camera ali Screenshots, in imajo oznako „%1$s“. Filter na zavihku „%4$s“ z „%2$s“ ali „%3$s“ pokaže samo eno vrsto.</string>
+    <string name="faq_q_album_delete">Kaj se zgodi, ko fotografije odstranim ali izbrišem?</string>
+    <string name="faq_a_album_delete">„%1$s“ fotografije samo vzame iz albuma, na časovnici ostanejo. Izbrisana fotografija gre v „%2$s“, kjer jo lahko obnovite. Ko izbrišete album, njegove fotografije ostanejo na Proton Drive.</string>
+    <string name="faq_q_where_ml">Kje vklopim obraze, iskanje in Kopiranje besedila?</string>
+    <string name="faq_a_where_ml">Tapnite okrogli gumb zgoraj desno na zavihku „%3$s“, nato „%1$s“ > „%2$s“. Vsaka funkcija ima svoje stikalo in svoj model prenese enkrat. Vse teče v tem telefonu.</string>
+    <string name="faq_q_where_lock">Kje sta zaklep aplikacije in skrite fotografije?</string>
+    <string name="faq_a_where_lock">V „%1$s“ > „%2$s“ najdete „%3$s“ in „%4$s“. Fotografije skrijete tako, da jih izberete in izberete „%5$s“.</string>
+    <string name="faq_q_where_drive">Kako obrazi, oznake in skriti elementi pridejo na moje druge naprave?</string>
+    <string name="faq_a_where_drive">Vklopite „%3$s“ v „%1$s“, pod „%2$s“. Obrazi in imena, iskalni indeks, oznake in skriti elementi se nato shranijo na Proton Drive in ostanejo enaki na vaših drugih napravah, tudi v namizni aplikaciji.</string>
+    <string name="faq_q_where_trash">Kam gredo izbrisane fotografije?</string>
+    <string name="faq_a_where_trash">V „%1$s“. Odprete ga z okroglim gumbom zgoraj desno na zavihku „%2$s“. Fotografije, izbrisane s telefona in s Proton Drive, čakajo tam in jih je mogoče obnoviti.</string>
+    <string name="faq_q_no_account">Ali lahko aplikacijo uporabljam brez računa Proton?</string>
+    <string name="faq_a_no_account">Da. Na zaslonu za prijavo izberite „%1$s“. Brskanje, urejanje, mape, skrite fotografije, obrazi in iskanje delujejo v tem telefonu. Za varnostno kopiranje na Proton Drive potrebujete račun.</string>
     <string name="settings_copy_diagnostics">Deli diagnostiko</string>
     <string name="settings_copy_diagnostics_desc">Podatki o sesutjih, sinhronizaciji in zmogljivosti. Brez fotografij, brez podatkov računa.</string>
     <string name="settings_diagnostics_copied">Diagnostični dnevnik kopiran</string>
@@ -1649,7 +1761,7 @@
     <string name="duplicates_badge_device">Naprava</string>
 
     <!-- Onboarding + Settings: all-files access, install permission -->
-    <string name="onboarding_all_files_subtitle">Priporočeno. Aplikaciji omogoča, da obnovljene skrite fotografije vrne v njihovo izvirno mapo (na primer mapo s predstavnostjo klepetalne aplikacije, ne le Slike) in spremembe zapiše neposredno v vaše lokalne datoteke. Tapnite, da odprete sistemske nastavitve.</string>
+    <string name="onboarding_all_files_subtitle">Priporočeno. Obnovljene skrite fotografije se vrnejo v svojo prvotno mapo, aplikacija pa lahko lokalne datoteke posodobi na mestu.</string>
     <string name="onboarding_all_files_title">Dostop do vseh datotek</string>
 
     <!-- Permissions screen -->
@@ -1748,8 +1860,13 @@
 
     <!-- Metadata editor (#36): edit a photo's capture date and place. -->
     <string name="metadata_editor_title">Uredi metapodatke</string>
+    <plurals name="metadata_editor_bulk_title">
+        <item quantity="one">Uredi %d fotografijo</item>
+        <item quantity="two">Uredi %d fotografiji</item>
+        <item quantity="few">Uredi %d fotografije</item>
+        <item quantity="other">Uredi %d fotografij</item>
+    </plurals>
     <string name="metadata_editor_done">Končano</string>
-    <string name="metadata_editor_change">Spremeni</string>
     <string name="metadata_editor_saved">Shranjeno</string>
     <string name="metadata_editor_write_failed">Spremembe ni bilo mogoče shraniti</string>
     <string name="metadata_editor_saved_partial">Shranjeno %1$d, %2$d ni bilo mogoče shraniti</string>
@@ -1758,7 +1875,6 @@
     <string name="metadata_editor_source_device">Iz te naprave</string>
     <string name="metadata_editor_source_cloud">Iz Proton Drive</string>
     <string name="metadata_editor_next">Naprej</string>
-    <string name="metadata_editor_set">Nastavi</string>
     <string name="metadata_editor_place_label">Kraj</string>
     <string name="metadata_editor_place_none">Brez lokacije</string>
     <string name="metadata_editor_place_search">Poišči državo ali mesto</string>
@@ -1770,7 +1886,6 @@
     <string name="metadata_editor_note_place_format">Lokacijo je mogoče shraniti le v fotografije JPEG, PNG in WebP.</string>
     <string name="metadata_editor_note_date_format">Pri fotografijah v tej obliki datuma ni mogoče spremeniti.</string>
     <string name="metadata_editor_bulk_date_label">Nastavi datum za te fotografije</string>
-    <string name="metadata_editor_bulk_place_label">Nastavi kraj za te fotografije</string>
     <string name="metadata_editor_bulk_apply_hint">Velja za vsako izbrano fotografijo</string>
     <string name="metadata_editor_bulk_summary">Urejanje %1$d fotografij</string>
     <string name="metadata_editor_bulk_summary_skipped">Urejanje %1$d, %2$d preskočenih</string>
@@ -1786,8 +1901,6 @@
     <string name="metadata_editor_shift_label">Premakni te fotografije v času</string>
     <string name="metadata_editor_shift_hint">Izberite, kdaj je bila najstarejša fotografija res posneta. Vse druge se premaknejo za enako dolgo, tako da razmiki med njimi ostanejo.</string>
     <string name="metadata_editor_shift_picker_title">Kdaj je bila najstarejša fotografija posneta?</string>
-    <string name="metadata_editor_shift_range_current">Zdaj: %1$s do %2$s</string>
-    <string name="metadata_editor_shift_range_after">Po premiku: %1$s do %2$s</string>
     <string name="metadata_editor_shift_too_late">Najnovejša fotografija bi tako pristala v prihodnosti. Izberite zgodnejši datum ali uro.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d fotografija nima svojega datuma, zato jo premik pusti pri miru. Isti datum za vse jo vseeno doseže.</item>
@@ -1797,7 +1910,7 @@
     </plurals>
     <string name="settings_section_about">O aplikaciji</string>
     <string name="settings_ai_section">Strojno učenje</string>
-    <string name="settings_ai_nav_desc">Kopiranje besedila, skrivanje obrazov in več, na napravi</string>
+    <string name="settings_ai_nav_desc">Prepoznavanje obrazov, iskanje po tem, kar je na fotografiji, in kopiranje besedila</string>
     <string name="settings_ai_enable">Vklopi strojno učenje</string>
     <string name="settings_ai_ocr">Kopiranje besedila</string>
     <string name="settings_ai_ocr_desc">Prepozna in kopira besedilo, ki ga vidite na fotografiji</string>
@@ -1810,7 +1923,7 @@
     <string name="settings_ai_ocr_remove_confirm">Odstrani</string>
     <string name="settings_ai_ocr_remove_keep">Obdrži</string>
     <string name="settings_ai_face_toggle">Prepoznavanje obrazov</string>
-    <string name="settings_ai_face_desc">Razvrsti fotografije po osebah na njih, v vaši napravi</string>
+    <string name="settings_ai_face_desc">Razvrsti fotografije po osebah na njih, v tem telefonu</string>
     <string name="settings_ai_face_downloading">Prenašanje…</string>
     <string name="settings_ai_face_download_failed">Modela obrazov ni bilo mogoče prenesti.</string>
     <string name="settings_ai_face_download_retry">Za ponovni poskus znova vklopite stikalo.</string>
@@ -1821,19 +1934,19 @@
     <string name="settings_ai_face_download_confirm">Prenesi</string>
     <string name="settings_ai_face_model_missing">Modela obrazov ni v tej napravi.</string>
     <string name="settings_ai_face_remove_title">Odstranim podatke obrazov?</string>
-    <string name="settings_ai_face_remove_message">Prepoznavanje obrazov je izklopljeno. Ali naj s te naprave odstranim model obrazov ter vse zaznane obraze in imena? Če želite obdržati kopijo, jih najprej izvozite na strani Prepoznani obrazi.</string>
+    <string name="settings_ai_face_remove_message">Prepoznavanje obrazov je izklopljeno. Ali naj s te naprave odstranim model obrazov ter vse zaznane obraze in imena?</string>
     <string name="settings_ai_face_remove_confirm">Odstrani</string>
     <string name="settings_ai_face_remove_keep">Obdrži</string>
     <string name="settings_ai_face_remove_confirm_title">Ali ste prepričani?</string>
-    <string name="settings_ai_face_remove_confirm_message">S tem trajno odstranite model obrazov ter vse prepoznane obraze in imena. Tega ni mogoče razveljaviti.</string>
-    <string name="settings_ai_semantic">Pomensko iskanje</string>
+    <string name="settings_ai_face_remove_confirm_message">S tem iz te naprave odstranite model obrazov ter vse prepoznane obraze in imena. Kopija, shranjena v Proton Drive, ostane.</string>
+    <string name="settings_ai_semantic">Iskanje po tem, kar je na fotografiji</string>
     <string name="settings_ai_semantic_desc">Poiščite fotografije z opisom tega, kaj je na njih</string>
     <string name="settings_ai_semantic_downloading">Prenašanje…</string>
     <string name="settings_ai_semantic_download_failed">Modelov za iskanje ni bilo mogoče prenesti.</string>
     <string name="settings_ai_semantic_download_retry">Za ponovni poskus znova vklopite stikalo.</string>
     <string name="settings_ai_semantic_download_title">Prenesem modele za iskanje?</string>
-    <string name="settings_ai_semantic_download_message">Pomensko iskanje potrebuje prenos modela velikosti %1$s. Deluje prek katere koli povezave, priporočljiv pa je Wi-Fi.</string>
-    <string name="settings_ai_semantic_download_message_metered">Pomensko iskanje potrebuje prenos modela velikosti %1$s. Wi-Fi ni povezan, zato bo ta prenos uporabil mobilne podatke.</string>
+    <string name="settings_ai_semantic_download_message">Iskanje fotografij potrebuje prenos modela velikosti %1$s. Deluje prek katere koli povezave, priporočljiv pa je Wi-Fi.</string>
+    <string name="settings_ai_semantic_download_message_metered">Iskanje fotografij potrebuje prenos modela velikosti %1$s. Wi-Fi ni povezan, zato bo ta prenos uporabil mobilne podatke.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Prenesi</string>
     <string name="settings_ai_semantic_remove_title">Odstranim prenesene modele?</string>
@@ -1880,6 +1993,12 @@
     <string name="sdk_route_download_desc">Odpiranje in shranjevanje fotografij iz Drive v polni ločljivosti</string>
     <string name="sdk_route_upload">Varnostna kopija in nalaganje</string>
     <string name="sdk_route_upload_desc">Pošiljanje fotografij v Drive, pri varnostnem kopiranju in vsakem drugem nalaganju</string>
+    <string name="sdk_route_albums">Albumi</string>
+    <string name="sdk_route_albums_desc">Ustvarjanje, preimenovanje in brisanje albumov v Drive ter dodajanje ali odstranjevanje njihovih fotografij</string>
+    <string name="sdk_route_events">Spremljanje sprememb</string>
+    <string name="sdk_route_events_desc">Sprotno posodabljanje časovnice s spremembami na drugih napravah in na spletu</string>
+    <string name="sdk_route_shared">Albumi, deljeni z vami</string>
+    <string name="sdk_route_shared_desc">Prikaz in zapuščanje albumov, ki so jih drugi delili z vami, dodajanje fotografij vanje in odpiranje njihovih fotografij v polni ločljivosti</string>
     <string name="sdk_route_activity">%1$s. V tej seji: %2$d prek knjižnice, %3$d na običajen način.</string>
     <string name="settings_ai_indexing_progress">%1$d od %2$d fotografij</string>
     <string name="settings_ai_grouping_progress">%1$d od %2$d obrazov</string>
@@ -1894,6 +2013,9 @@
     <string name="settings_ai_clear">Počisti podatke obrazov</string>
     <string name="settings_ai_clear_confirm_title">Počisti podatke obrazov?</string>
     <string name="settings_ai_clear_confirm_msg">To odstrani vse najdene osebe in vse podatke obrazov. Vaše fotografije ostanejo nedotaknjene. Obrazi bodo znova zaznani ob naslednjem indeksiranju.</string>
+    <string name="settings_ai_clear_where_msg">Tvoji podatki o obrazih so varnostno kopirani tudi na Proton Drive.\n\nSamo na tem telefonu: tukaj se izbrišejo in se takoj vrnejo z Drive.\n\nPovsod: izbrišejo se tukaj, na Proton Drive in na tvojih drugih napravah, prepoznavanje obrazov pa se izklopi na vsaki. Tvoje fotografije ostanejo nedotaknjene.</string>
+    <string name="settings_ai_clear_here">Samo na tem telefonu</string>
+    <string name="settings_ai_clear_everywhere">Povsod</string>
     <string name="gallery_add_to_person">Dodaj k osebi</string>
     <string name="people_search_hint">Iskanje oseb</string>
     <string name="person_set_cover">Nastavi kot naslovnico</string>
@@ -1969,11 +2091,7 @@
     <string name="settings_ai_rescan">Znova preglej fotografije</string>
     <string name="settings_ai_rescan_confirm_msg">Vsaka fotografija se znova pregleda za obraze z več podrobnostmi, kar najde manjše in bolj oddaljene obraze. Vaša imena in popravki se ohranijo in znova dodelijo, ko so obrazi znova zaznani.</string>
     <string name="settings_ai_rescan_confirm_title">Znova pregledati vse fotografije?</string>
-    <string name="settings_ml_drive_section">Podatki o obrazih in iskanju v Drive</string>
-    <string name="settings_ml_drive_save">Shrani v Drive</string>
-    <string name="settings_ml_drive_save_desc">Shrani šifrirano kopijo, ki jo lahko obnovijo vaše druge naprave</string>
     <string name="settings_ml_drive_restore">Obnovi iz Drive</string>
-    <string name="settings_ml_drive_restore_desc">Uporabi podatke, ki jih je shranila ena od vaših naprav, namesto ponovnega pregledovanja</string>
     <string name="settings_face_file_link">Naloži obraze, shranjene s starejšo različico</string>
     <string name="settings_face_file_title">Obrazi iz starejše različice</string>
     <string name="settings_face_file_msg">Različica 2.5.0 in starejše so obraze z gumbom »Izvozi indeks obrazov« shranile v datoteko z imenom photosforproton-faces.ppfi. Če imate to datoteko, jo izberite tukaj in obrazi ter imena se vrnejo. Vaši trenutni obrazi ostanejo ohranjeni. Novejše shrambe so na Drive, pod »Obnovi iz Drive«.</string>
@@ -1983,20 +2101,6 @@
     <string name="settings_ai_import_wrong_account">Ta indeks obrazov pripada drugemu računu in ga tukaj ni mogoče odpreti.</string>
     <string name="settings_ai_transfer_failed">Prenos indeksa obrazov ni uspel.</string>
     <string name="settings_ai_transfer_working">Poteka…</string>
-    <string name="settings_autosave_title">Samodejno shranjevanje</string>
-    <string name="settings_autosave_desc">Ohranja kopijo v Driveu posodobljeno v ozadju.</string>
-    <string name="settings_autosave_after_changes">Po spremembah</string>
-    <string name="settings_autosave_daily">Dnevno</string>
-    <string name="settings_autosave_weekly">Tedensko</string>
-    <string name="settings_autosave_after_changes_desc">Shrani približno 10 minut po zadnji spremembi, največ enkrat na uro.</string>
-    <string name="settings_autosave_daily_desc">Shrani vsako noč okoli 23:59, če se je kaj spremenilo.</string>
-    <string name="settings_autosave_weekly_desc">Shrani v nedeljo zvečer okoli 23:59, če se je kaj spremenilo.</string>
-    <string name="settings_autosave_last_saved">Nazadnje shranjeno %1$s</string>
-    <string name="settings_autosave_failed">Zadnje shranjevanje se ni dokončalo. Poskusilo bo znova.</string>
-    <string name="settings_autosave_confirm_title">Samodejno shraniti?</string>
-    <string name="settings_autosave_confirm_ml">Šifrirana kopija vaših podatkov o prepoznavanju obrazov in iskanju se v ozadju shranjuje v vaš Proton Drive in ostaja posodobljena. Porablja prostor v Driveu, mobilne podatke pa le, če jih smejo uporabljati varnostne kopije. Prvo shranjevanje se začne zdaj.</string>
-    <string name="settings_autosave_confirm_labels">Šifrirana kopija vaših oznak se v ozadju shranjuje v vaš Proton Drive in ostaja posodobljena. Porablja prostor v Driveu, mobilne podatke pa le, če jih smejo uporabljati varnostne kopije. Prvo shranjevanje se začne zdaj.</string>
-    <string name="settings_autosave_confirm_on">Vklopi</string>
     <string name="settings_ml_drive_step_preparing">Pripravljanje…</string>
     <string name="settings_ml_drive_step_encrypting_faces">Šifriranje podatkov o obrazih…</string>
     <string name="settings_ml_drive_step_encrypting_search">Šifriranje podatkov o iskanju…</string>
@@ -2007,12 +2111,6 @@
     <string name="settings_ml_drive_step_importing_faces">Uvažanje podatkov o obrazih…</string>
     <string name="settings_ml_drive_step_importing_search">Uvažanje podatkov o iskanju…</string>
     <string name="settings_ml_drive_step_finishing">Zaključevanje…</string>
-    <string name="settings_ml_drive_folder_title">Želite ustvariti mapo v Drive?</string>
-    <string name="settings_ml_drive_folder_message">Shranjevanje ustvari mapo »Photos for Proton/ML data« v razdelku Moje datoteke. Podatki o obrazih in iskanju v njej so šifrirani od konca do konca, tako kot vaše fotografije, in zasedajo prostor v vašem Drive.</string>
-    <string name="settings_ml_drive_folder_confirm">Ustvari in shrani</string>
-    <string name="settings_ml_drive_restore_loading">Iskanje shranjenih podatkov…</string>
-    <string name="settings_ml_drive_restore_pick">Izberite napravo, iz katere želite obnoviti podatke.</string>
-    <string name="settings_ml_drive_restore_empty">V Drive še ni ničesar shranjenega. V napravi s podatki uporabite »Shrani v Drive« in poskusite znova.</string>
     <string name="settings_ml_drive_restore_list_failed">Povezava z vašim Drive ni uspela. Poskusite znova pozneje.</string>
     <string name="settings_ml_drive_this_device">Ta naprava</string>
     <string name="settings_ml_drive_another_device">Druga naprava</string>
@@ -2021,12 +2119,6 @@
     <string name="settings_ml_drive_holds_search">Podatki o iskanju</string>
     <string name="settings_ml_drive_saved_at">Shranjeno %1$s</string>
     <string name="settings_ml_drive_restore_confirm">Obnovi</string>
-    <string name="settings_ml_drive_mode_title">Združiti ali zamenjati?</string>
-    <string name="settings_ml_drive_mode_message">Ta naprava že ima podatke o obrazih. Izberite način obnove.</string>
-    <string name="settings_ml_drive_mode_merge">Združi</string>
-    <string name="settings_ml_drive_mode_merge_desc">Ohrani imena iz te naprave in doda shranjena</string>
-    <string name="settings_ml_drive_mode_replace">Zamenjaj</string>
-    <string name="settings_ml_drive_mode_replace_desc">Za fotografije v vašem Drive uporabi shranjene obraze in imena</string>
     <string name="settings_ml_drive_saved">Shranjeno v Drive</string>
     <string name="settings_ml_drive_restored">Obnovljeno iz Drive</string>
     <string name="settings_ml_drive_saved_partly">Delno shranjeno</string>
@@ -2034,7 +2126,7 @@
     <string name="settings_ml_drive_save_failed">Shranjevanje v Drive ni uspelo</string>
     <string name="settings_ml_drive_restore_failed">Obnova iz Drive ni uspela</string>
     <string name="settings_ml_drive_nothing_title">Ni še ničesar za shranjevanje</string>
-    <string name="settings_ml_drive_nothing_message">Ta naprava še nima podatkov o obrazih ali iskanju. Najprej naj prepoznavanje obrazov ali pomensko iskanje pregleda vaše fotografije.</string>
+    <string name="settings_ml_drive_nothing_message">Ta naprava še nima podatkov o obrazih ali iskanju. Najprej naj prepoznavanje obrazov ali iskanje fotografij pregleda vaše fotografije.</string>
     <string name="settings_ml_drive_not_capable">Ni na voljo v tej napravi</string>
     <string name="settings_ml_drive_faces_not_saved">Podatkov o obrazih ni bilo mogoče shraniti.</string>
     <string name="settings_ml_drive_search_not_saved">Podatkov o iskanju ni bilo mogoče shraniti.</string>
@@ -2065,8 +2157,6 @@
         <item quantity="few">podatki o iskanju za %1$d fotografije</item>
         <item quantity="other">podatki o iskanju za %1$d fotografij</item>
     </plurals>
-    <string name="settings_ml_drive_list_two">%1$s in %2$s</string>
-    <string name="settings_ml_drive_list_three">%1$s, %2$s in %3$s</string>
     <plurals name="person_suggestions_left">
         <item quantity="one">%1$d za pregled</item>
         <item quantity="two">%1$d za pregled</item>
@@ -2231,7 +2321,6 @@
     <string name="editor_tool_frame">Okvir</string>
     <string name="editor_frame_none">Brez</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Rob</string>
     <string name="editor_tab_transform">Obreži in zavrti</string>
     <string name="editor_tab_more">Več</string>
     <string name="editor_transform_ratio">Razmerje</string>
@@ -2387,6 +2476,9 @@
     <string name="person_unsorted_hint">Obrazi, ki jih ni bilo mogoče zanesljivo povezati z osebo. Izberi fotografije, da izločiš pravo osebo, ali preostale označi kot »ni oseba«.</string>
     <string name="person_unsorted_caption">Preostali obrazi, ki jih ni bilo mogoče povezati. Odprite za razvrščanje.</string>
     <string name="person_rename_title">Preimenuj</string>
+    <string name="person_remove_name">Odstrani ime</string>
+    <string name="person_remove_name_confirm_title">Odstranim ime?</string>
+    <string name="person_remove_name_confirm_body">Fotografije ostanejo. Skupina se vrne med obraze za pregled in izgine iz Oseb, če ima samo eno fotografijo.</string>
     <string name="person_rename_hint">Ime</string>
     <string name="permissions_default_gallery_title">Nastavi kot privzeto galerijo</string>
     <string name="permissions_default_gallery_why">Odprite sistemske nastavitve in nastavite to aplikacijo kot privzeto za odpiranje fotografij in videoposnetkov.</string>
@@ -2408,7 +2500,13 @@
     <string name="face_excluded_undo">Razveljavi</string>
     <string name="albums_search_hint">Iskanje albumov</string>
     <string name="albums_search_no_results">Noben album se ne ujema z iskanjem.</string>
-    <string name="settings_ai_groups_found">%1$d skupin</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d skupina</item>
+        <item quantity="two">%1$d skupini</item>
+        <item quantity="few">%1$d skupine</item>
+        <item quantity="other">%1$d skupin</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Iskanje fotografij</string>
     <string name="settings_ai_faces_found">%1$d obrazov</string>
     <string name="person_rename_merge_confirm_title">Združiti z obstoječo osebo?</string>
     <string name="person_rename_merge_confirm_body">Oseba z imenom %1$s že obstaja. Uporaba tega imena združi obe v eno, česar ni mogoče razveljaviti. Združiti?</string>
@@ -2419,7 +2517,6 @@
 
     <string name="label_section_title">Oznake</string>
     <string name="label_add_hint">Dodaj oznako</string>
-    <string name="label_add_chip">Dodaj oznako</string>
     <string name="label_remove_cd">Odstrani oznako %1$s</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d od %2$d oznake</item>
@@ -2475,16 +2572,10 @@
     <string name="label_leave_selection_title">Želite zapustiti oznake?</string>
     <string name="label_leave_selection_message">Vaša izbira bo razveljavljena.</string>
     <string name="label_leave_selection_confirm">Zapusti</string>
-    <string name="label_backup_section">Oznake v Drive</string>
-    <string name="label_backup_save_desc">Shranite šifrirano kopijo svojih oznak v Drive</string>
-    <string name="label_backup_restore_desc">Združi oznake, ki jih je shranila ta ali druga naprava</string>
     <string name="label_backup_restore_note">Obnovi oznake, shranjene takrat, tudi tiste, ki ste jih od takrat izbrisali. Oznake, dodane od takrat, ostanejo.</string>
     <string name="label_backup_show_all">Pokaži vse (%1$d)</string>
-    <string name="label_backup_save_confirm_title">Želite shraniti oznake v Drive?</string>
-    <string name="label_backup_save_confirm_message">Kopija, ki jo je ta naprava shranila prej, bo zamenjana. Oznake so šifrirane od konca do konca, tako kot vaše fotografije.</string>
     <string name="label_backup_working_save">Shranjevanje oznak…</string>
     <string name="label_backup_working_restore">Obnavljanje oznak…</string>
-    <string name="label_backup_folder_message">Shranjevanje ustvari mapo »Photos for Proton/Labels« v razdelku Moje datoteke. Oznake v njej so šifrirane od konca do konca, tako kot vaše fotografije, in zasedajo prostor v vašem Drive.</string>
     <string name="label_backup_nothing_message">Nobena fotografija še nima oznak. Najprej dodajte oznako fotografiji.</string>
     <string name="label_backup_restore_empty">V Drive še ni shranjenih oznak. V napravi, ki jih ima, uporabite »Shrani v Drive« in poskusite znova.</string>
     <string name="label_backup_up_to_date">Vaše oznake so že posodobljene.</string>
@@ -2505,6 +2596,7 @@
     <string name="label_rename_save">Shrani</string>
     <string name="label_rename_merge">Združi</string>
     <string name="label_delete_action">Izbriši oznako</string>
+    <string name="label_delete_unused_title">Želite izbrisati to oznako?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Želite to oznako odstraniti z %d fotografije?</item>
         <item quantity="two">Želite to oznako odstraniti z %d fotografij?</item>
@@ -2547,7 +2639,7 @@
     <string name="compression_unavailable_fallback">%1$s na tem telefonu ni na voljo, zato videoposnetki uporabijo %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Oznake fotografij</string>
-    <string name="whats_new_260_labels_body">Odprite fotografijo, tapnite „Podrobnosti“ in v polju „Oznake“ dodajte do pet oznak, ali izberite več fotografij in izberite „Dodaj oznake“. Iskanje najde fotografije po oznakah. Oznake lahko preimenujete, združite in izbrišete ter jih varnostno kopirate v Drive ali obnovite v „Nastavitve > Več nastavitev > Oznake“.</string>
+    <string name="whats_new_260_labels_body">Odprite fotografijo, tapnite „Podrobnosti“ in v polju „Oznake“ dodajte do pet oznak, ali izberite več fotografij in izberite „Dodaj oznake“. Iskanje najde fotografije po oznakah. Oznake lahko preimenujete, združite in izbrišete v „Nastavitve > Več nastavitev > Oznake“.</string>
     <string name="whats_new_260_compress_title">Stiskanje videa</string>
     <string name="whats_new_260_compress_body">Vklopite „Stisni videoposnetke“ v „Nastavitve > Varnostno kopiranje in shramba > Nastavitve varnostnega kopiranja > Kakovost in velikost“, nato izberite kodek in kakovost. Privzet je H.264, ki se predvaja povsod. Nalaganje prikazuje napredek in prihranjen prostor, fotografije pa se nalagajo naprej, medtem ko se video stiska.</string>
     <string name="whats_new_260_vault_title">Skrite fotografije ob odjavi</string>
@@ -2569,11 +2661,11 @@
     <string name="whats_new_260_details_title">Osebe in zemljevid v podrobnostih</string>
     <string name="whats_new_260_details_body">„Podrobnosti“ fotografije zdaj prikazujejo osebe na njej in zemljevid, kje je nastala. Tapnite osebo, da odprete njeno stran, ali zemljevid za celozaslonski prikaz. Tapnite obraz brez imena, da ga poimenujete ali dodelite komu.</string>
     <string name="whats_new_260_frame_title">Orodje Okvir</string>
-    <string name="whats_new_260_frame_body">V urejevalniku fotografij postavite fotografijo na platno druge oblike, na primer 1:1, 9:16 ali Polaroid, zapolnjeno z barvo ali mehkim zameglenjem. Orodje je še v nastajanju in prihajajo nove izboljšave.</string>
+    <string name="whats_new_260_frame_body">V urejevalniku fotografij postavite fotografijo na platno druge oblike, na primer 1:1, 9:16 ali Polaroid, zapolnjeno z barvo ali mehkim zameglenjem.</string>
     <string name="whats_new_260_drive_title">Podatki o obrazih in iskanju v Drive</string>
-    <string name="whats_new_260_drive_body">Imena obrazov in podatke iskanja shranite v Drive in jih obnovite na drugem telefonu, pri čemer izberete, kaj se vrne, v „Nastavitve > Več nastavitev > Strojno učenje“.</string>
-    <string name="whats_new_260_autosave_title">Samodejno shranjevanje v Drive</string>
-    <string name="whats_new_260_autosave_body">Vklopite „Samodejno shranjevanje“ pri kopiji v Drive za podatke obrazov in iskanja ali za oznake, pa se kopija v ozadju ohranja posodobljena: po spremembah, dnevno ali tedensko. Najdete jih v „Nastavitve > Več nastavitev“, pod „Strojno učenje“ in „Oznake“.</string>
+    <string name="whats_new_260_drive_body">Imena obrazov, podatke iskanja, oznake in skrite elemente shranite v Drive in jih na drugem telefonu vrnite z „Naloži z Drive“, v „Nastavitve > Več nastavitev > Varnostna kopija na Proton Drive“.</string>
+    <string name="whats_new_260_autosave_title">Samodejna varnostna kopija</string>
+    <string name="whats_new_260_autosave_body">Vklopite „Samodejna varnostna kopija“ in kopija v Drive ostane v ozadju posodobljena, nekaj minut po vsaki spremembi, in enaka na vaših drugih napravah. „Varnostno kopiraj zdaj“ shrani takoj.</string>
     <string name="whats_new_260_worldmap_title">Bogatejši zemljevid sveta</string>
     <string name="whats_new_260_worldmap_body">Zemljevid sveta zdaj riše meje držav in pokrajin, obarva pokrajino, kjer ste fotografirali, ob približevanju poimenuje kraje in kaže iste žebljičke kot klasični zemljevid. Odpre se nad Evropo, pri premikanju in ščipanju pa točka pod prsti ostane na mestu.</string>
     <string name="whats_new_260_time_title">Oblika časa</string>
@@ -2583,15 +2675,15 @@
     <string name="whats_new_260_duplicates_title">Pregled dvojnikov</string>
     <string name="whats_new_260_duplicates_body">S ščipanjem, vlečenjem ali dvojnim tapom povečate kopijo do 6-krat, preden se odločite, kaj izbrisati. „Izbriši skupino“ izbere vse kopije skupine naenkrat.</string>
     <string name="whats_new_260_intro_title">Vključuje prejšnje testne različice</string>
-    <string name="whats_new_260_intro_body">Ta različica vsebuje tudi vse iz preizkusnih različic od 1 do 5. Naslednje kartice kažejo le novosti od takrat.</string>
+    <string name="whats_new_260_intro_body">Ta različica vsebuje tudi vse iz preizkusnih različic od 1 do 6. Naslednje kartice kažejo le novosti od takrat.</string>
     <string name="whats_new_260_sdk_title">Stikala za Proton Drive SDK</string>
-    <string name="whats_new_260_sdk_body">Nastavitve, Več nastavitev, Proton Drive SDK ima ločeno stikalo za priljubljene in kategorije, koš, prenose v polni kakovosti in nalaganja. Vsa so izklopljena. Vklopite eno in to dejanje bo teklo prek Protonovega lastnega Drive SDK; če ne uspe, ga aplikacija opravi kot običajno.</string>
+    <string name="whats_new_260_sdk_body">Nastavitve, Več nastavitev, Proton Drive SDK ima ločeno stikalo za priljubljene in kategorije, koš, prenose v polni kakovosti, nalaganja, albume, vir sprememb in albume, deljene z vami. Vsa so izklopljena. Vklopite eno in to dejanje bo teklo prek Protonovega lastnega Drive SDK; če ne uspe, ga aplikacija opravi kot običajno.</string>
     <string name="whats_new_260_setas_title">Nastavi kot, in fotografije za druge aplikacije</string>
     <string name="whats_new_260_setas_body">Meni pregledovalnika preda fotografijo telefonovi nastavitvi ozadja ali fotografije stika. Vklopite izbiro fotografij v Zasebnosti in varnosti in druge aplikacije bodo lahko izbirale fotografije od tu; skrite fotografije nikoli ne odidejo.</string>
     <string name="whats_new_260_folderimport_title">Uvoz iz mape</string>
     <string name="whats_new_260_folderimport_body">Uvozite izvoz iz Ente ali Google Takeout ali navadne fotografije iz mape, ne le iz datoteke zip. Live Photo pride kot ena fotografija s svojim videom in vsaka fotografija dobi pravi datum.</string>
     <string name="whats_new_260_mlsetup_title">Pametne funkcije v nastavitvi</string>
-    <string name="whats_new_260_mlsetup_body">Nastavitev ob prvem zagonu ponudi prepoznavanje obrazov, iskanje fotografij in Kopiranje besedila, vsako z velikostjo prenosa. Izberite, kar želite, in prenese se v ozadju.</string>
+    <string name="whats_new_260_mlsetup_body">Nastavitev ob prvem zagonu ponudi prepoznavanje obrazov, iskanje fotografij in Kopiranje besedila, vsako z velikostjo prenosa. Izberite, kar želite, in prenese se v ozadju. Vklopite jih lahko tudi pozneje v „Nastavitve > Več nastavitev > Strojno učenje“.</string>
     <string name="whats_new_260_longpress_title">Dolg pritisk po vaše</string>
     <string name="whats_new_260_longpress_body">V Nastavitvah, Videz izberite, ali dolg pritisk v pregledovalniku izbere besedilo ali odpre meni. Meni ima Prepoznaj besedilo in ne ponavlja več gumbov.</string>
     <string name="whats_new_260_nothumb_title">Fotografije iz Drive se spet odpirajo</string>
@@ -2602,6 +2694,56 @@
     <string name="whats_new_260_nullisland_body">Fotografija, katere fotoaparat je kot lokacijo zapisal 0,0, se na zemljevidu ne prikaže več v Takoradiju v Gani. Urejanje datuma ali kraja ohrani fotografijo med priljubljenimi, z njenimi oznakami in obrazi.</string>
     <string name="whats_new_260_likeness_title">Kdo je to? zadene bolje</string>
     <string name="whats_new_260_likeness_body">Pri poimenovanju obraza so spet na vrhu najbolj podobni ljudje. V velikih knjižnicah dana ali uvožena imena ostanejo pri svoji osebi in števec ne zamrzne več.</string>
+    <string name="whats_new_260_videoseek_title">Preskakovanje in pospeševanje videov</string>
+    <string name="whats_new_260_videoseek_body">Dvakrat tapnite levo ali desno stran videa, da skočite 10 sekund nazaj ali naprej, ali pridržite stran, da se predvaja hitreje, dokler je ne spustite.</string>
+    <string name="whats_new_260_cloudcompress_title">Stisni na Drive</string>
+    <string name="whats_new_260_cloudcompress_body">Fotografije in videe, ki so samo na Drive, lahko pomanjšate v pregledovalniku ali iz izbora, vsak izvirnik pa gre v koš na Drive, ko je njegova manjša kopija na mestu. Zaženete ga lahko tudi iz iskanja, albuma ali kraja, od najnovejših naprej.</string>
+    <string name="whats_new_260_sharebackup_title">Varnostno kopiranje iz drugih aplikacij</string>
+    <string name="whats_new_260_sharebackup_body">Pri deljenju fotografij ali videov iz druge aplikacije izberite „Varnostno kopiraj v Drive“ ali pa fotografijo, odprto iz druge aplikacije, na primer prilogo e-pošte, varnostno kopirajte kar v pregledovalniku.</string>
+    <string name="whats_new_260_foldermove_title">Premikanje map tudi po prijavi</string>
+    <string name="whats_new_260_foldermove_body">„Premakni v mapo“ in „Preimenuj mapo“ zdaj delujeta tudi po prijavi, fotografija, ki je že na Drive, pa preide v album mape, v katero je bila premaknjena.</string>
+    <string name="whats_new_260_drivecopies_title">Varnostne kopije na Drive</string>
+    <string name="whats_new_260_drivecopies_body">„Varnostne kopije na Drive“ prikažejo kopijo vsake naprave in kdaj je bila nazadnje shranjena, dokler je vklopljena „Samodejna varnostna kopija“, pa „Počisti podatke obrazov“ vpraša, ali naj izbriše samo v tem telefonu ali povsod.</string>
+    <string name="whats_new_260_glass_title">Tekoče steklo</string>
+    <string name="whats_new_260_glass_body">V Androidu 12 in novejšem vklopite „Tekoče steklo“ v „Nastavitve > Videz in jezik > Tema in paleta“, da bodo meniji, glave strani, plošče, kontrolniki pregledovalnika in iskalno polje videti kot motno steklo; še je v razvoju in še ni na vsakem zaslonu.</string>
+    <string name="whats_new_260_detailsheet_title">Nove podrobnosti fotografije</string>
+    <string name="whats_new_260_detailsheet_body">„Podrobnosti“ se odprejo s povzetkom fotografije, datum, kraj, oznake in kategorije pa se odprejo vsak kot stran v isti plošči, s koledarjem in zemljevidom.</string>
+    <string name="whats_new_260_multiedit_title">Urejanje več fotografij</string>
+    <string name="whats_new_260_multiedit_body">Spreminjanje datuma ali kraja več fotografij je zdaj videti kot podrobnosti fotografije, z možnostmi datuma v enem stikalu ter koledarjem in zemljevidom v lastnih ploščah.</string>
+    <string name="whats_new_260_personmonths_title">Meseci na strani osebe</string>
+    <string name="whats_new_260_personmonths_body">Stran osebe nad vsakim nizom fotografij prikaže glavo meseca, pregledovalnik, odprt pri poimenovani osebi, pa ponudi „Nastavi kot naslovnico“ in „Odstrani od osebe“.</string>
+    <string name="whats_new_260_timelinestay_title">Časovnica ostane na mestu</string>
+    <string name="whats_new_260_timelinestay_body">Ko odprete fotografijo iz Zbirke ali s strani osebe in podrsate na druge, se časovnica pod njimi ne premakne več.</string>
+    <string name="whats_new_260_setup_title">Preglednejša prva nastavitev</string>
+    <string name="whats_new_260_setup_body">Nastavitev ob prvem zagonu je zdaj videti kot Nastavitve, z enim glavnim gumbom na korak, „Ne zdaj“ pri dovoljenjih in zadnjim korakom, ki našteje, kaj bo vklopljeno.</string>
+    <string name="whats_new_260_folderbackfill_title">Albumi map se dopolnijo</string>
+    <string name="whats_new_260_folderbackfill_body">Ko vklopite album mape, se vanj dodajo tudi že varnostno kopirane fotografije iz te mape, album pa se po potrebi ustvari.</string>
+    <string name="whats_new_260_freeupcheck_title">Sproščanje prostora z dvojnim preverjanjem</string>
+    <string name="whats_new_260_freeupcheck_body">Sproščanje preveri kopije v napravi z Drive v majhnih skupinah tik pred brisanjem in vpraša v več sistemskih oknih, kadar dovoljenje potrebuje več kot 2000 fotografij.</string>
+    <string name="whats_new_260_removedstays_title">Odstranjene fotografije ostanejo odstranjene</string>
+    <string name="whats_new_260_removedstays_body">Fotografija, katere kopijo na Drive premaknete v koš, tukaj, na drugi napravi ali na spletu, samodejna varnostna kopija ne naloži več znova.</string>
+    <string name="whats_new_260_peoplepics_title">Slike in postavitev oseb</string>
+    <string name="whats_new_260_peoplepics_body">Slike obrazov na strani Osebe in v „Kdo je to?“ pri velikih knjižnicah ne ostanejo več temne, stran Osebe pa lahko sledi pogledu zavihka Albumi ali ima svojo mrežo ali seznam.</string>
+    <string name="whats_new_260_desktopsync_title">Deluje z namizno aplikacijo</string>
+    <string name="whats_new_260_desktopsync_body">Ko je vklopljena „Samodejna varnostna kopija“, ostanejo obrazi, imena, oznake, iskanje in skrite fotografije enaki na tem telefonu, vaših drugih telefonih in v namizni aplikaciji Photos for Proton; sprememba na eni napravi se na drugih pokaže v nekaj minutah. Ob vklopu pove, katere različice potrebujejo druge naprave.</string>
+    <string name="whats_new_260_facefix_title">Popravite obraz iz pregledovalnika</string>
+    <string name="whats_new_260_facefix_body">V pregledovalniku pridržite poimenovan obraz in označite, da to ni ta oseba; meni poimenovane osebe ima „Odstrani ime“.</string>
+    <string name="whats_new_260_coldstart_title">Hitrejši zagon pri velikih knjižnicah</string>
+    <string name="whats_new_260_coldstart_body">Ob odprtju aplikacije se takoj pokaže vsa knjižnica, ne le najnovejše fotografije, medtem ko se preostanek bere.</string>
+    <string name="whats_new_260_newphotos_title">Nove fotografije pridejo same</string>
+    <string name="whats_new_260_newphotos_body">Fotografije, ki jih posnamete ali shranite, medtem ko je aplikacija odprta, se same pregledajo za obraze in iskanje, brez ponovnega zagona ali poteg za osvežitev.</string>
+    <string name="whats_new_260_namessafe_title">Imena obrazov so varna</string>
+    <string name="whats_new_260_namessafe_body">Preimenovanje ali združitev med združevanjem obrazov se ne izgubi več, samodejne združitve ostanejo popravljive, obrazi varnostno kopirane fotografije ostanejo tudi po sprostitvi prostora, skrite fotografije pa zapustijo Osebe.</string>
+    <string name="whats_new_260_namecase_title">Eno ime, ena oseba</string>
+    <string name="whats_new_260_namecase_body">„adam“ in „Adam“ sta ena oseba, kot v namizni aplikaciji, „Ádám“ in „Adam“ pa ostaneta dve, in število fotografij osebe se ujema z njeno stranjo.</string>
+    <string name="whats_new_260_favsync_title">Priljubljene z drugih naprav</string>
+    <string name="whats_new_260_favsync_body">Priljubljena, dodana ali odstranjena na spletu ali drugi napravi, se tu pokaže v nekaj sekundah.</string>
+    <string name="whats_new_260_copydate_title">Datum kopiranih fotografij</string>
+    <string name="whats_new_260_copydate_body">Fotografija ali videoposnetek, kopiran na telefon brez lastnega datuma, pokaže dan, ko je nastal, in ne dan, ko je bil dodan.</string>
+    <string name="whats_new_260_widgetopen_title">Pripomoček odpre fotografijo</string>
+    <string name="whats_new_260_widgetopen_body">Dotik pripomočka s fotografijami iz Drive odpre to fotografijo namesto časovnice, njegov izbirnik fotografij pa ob prvi izbiri ne poskoči več.</string>
+    <string name="whats_new_260_smallfixes_title">Manjši popravki</string>
+    <string name="whats_new_260_smallfixes_body">Rezanje videa brez izgub na začetku ne izgublja več sličic, dolg pritisk na gumbe pregledovalnika ne bere več besedila fotografije, album mape, vklopljen med prvo varnostno kopijo, dobi svoje fotografije, ročaji obrezovanja ob robu zaslona pa spet delujejo.</string>
     <string name="whats_new_260_group_title">Združevanje obrazov v velikih knjižnicah</string>
     <string name="whats_new_260_group_body">Knjižnice z več kot trideset tisoč obrazi se zdaj združijo v celoti. Osebe se dodajajo že med delovanjem, dana imena ostanejo pri svojih osebah, delo pa se nadaljuje v ozadju tudi po zapustitvi aplikacije.</string>
     <string name="whats_new_260_savedrive_title">Shrani deljeno fotografijo v svoj Drive</string>
@@ -2651,7 +2793,10 @@
     <string name="viewer_save_to_drive_failed">Shranjevanje v Drive ni uspelo</string>
     <string name="viewer_remove_shared_confirm_body">Fotografija bo odstranjena iz deljenega albuma. Ostane pri lastniku albuma in tu ne bo več vidna.</string>
     <string name="onboarding_ml_title">Pametne funkcije v vaši napravi</string>
-    <string name="onboarding_ml_subtitle">Poiščite osebe in stvari na svojih fotografijah ter iz njih kopirajte besedilo. Vse deluje na tem telefonu in nič ga ne zapusti. Izberite zdaj, kaj želite, ali pa to kasneje spremenite v Nastavitvah.</string>
+    <string name="onboarding_ml_subtitle">Poiščite ljudi in stvari na fotografijah in kopirajte besedilo z njih. Vse teče na tem telefonu in nič ga ne zapusti.</string>
     <string name="onboarding_ml_size">Prenos %1$s</string>
     <string name="onboarding_ml_note">Modeli se prenesejo enkrat, po nastavitvi, v ozadju. Priporočljiv je Wi-Fi, saj brez Wi-Fi prenos porabi mobilne podatke.</string>
+    <string name="viewer_not_person_title">Ni to %1$s?</string>
+    <string name="viewer_not_person_body">Obraz ne pripada več osebi %1$s. Fotografija ostane, obraz pa se lahko predlaga nekomu drugemu.</string>
+    <string name="viewer_not_person_confirm">Ni %1$s</string>
 </resources>

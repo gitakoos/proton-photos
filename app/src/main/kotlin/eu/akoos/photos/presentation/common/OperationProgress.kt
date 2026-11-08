@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -189,7 +188,7 @@ fun BlockingOperationSheet(progress: OperationProgress?) {
         skipPartiallyExpanded = true,
         confirmValueChange = { it != SheetValue.Hidden },
     )
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = {},
         sheetState = sheetState,
         containerColor = colors.sheetBg,

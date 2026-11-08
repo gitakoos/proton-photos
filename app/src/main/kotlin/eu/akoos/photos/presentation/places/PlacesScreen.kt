@@ -68,6 +68,8 @@ import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.util.countryName
@@ -91,44 +93,49 @@ fun PlacesScreen(
     val locale = appLocale()
     var showSearch by remember { mutableStateOf(false) }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.pageBg),
     ) {
-        if (data.countries.isEmpty()) {
-            Text(
-                text = stringResource(R.string.map_search_no_places),
-                color = colors.fgMute,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 40.dp),
-            )
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(
-                    start = 14.dp,
-                    end = 14.dp,
-                    top = floatingHeaderContentTopPadding(),
-                    bottom = 24.dp,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(items = data.countries, key = { it.countryCode }) { country ->
-                    PlaceCard(
-                        coverItem = country.cover,
-                        title = countryName(country.countryCode, locale, country.countryName),
-                        count = country.count,
-                        onClick = { onCountryClick(country.countryCode) },
-                    )
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            if (data.countries.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.map_search_no_places),
+                    color = colors.fgMute,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 40.dp),
+                )
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    contentPadding = PaddingValues(
+                        start = 14.dp,
+                        end = 14.dp,
+                        top = floatingHeaderContentTopPadding(),
+                        bottom = 24.dp,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(items = data.countries, key = { it.countryCode }) { country ->
+                        PlaceCard(
+                            coverItem = country.cover,
+                            title = countryName(country.countryCode, locale, country.countryName),
+                            count = country.count,
+                            onClick = { onCountryClick(country.countryCode) },
+                        )
+                    }
                 }
             }
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.places_title),
             onBack = onBack,
             trailing = {

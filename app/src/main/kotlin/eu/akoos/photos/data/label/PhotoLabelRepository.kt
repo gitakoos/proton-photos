@@ -26,6 +26,7 @@ import android.util.Log
 import eu.akoos.photos.data.db.dao.LabelBulkResult
 import eu.akoos.photos.data.db.dao.LabelUsage
 import eu.akoos.photos.data.db.dao.PhotoLabelDao
+import eu.akoos.photos.data.db.entity.PhotoLabelDeletedEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelEntity
 import eu.akoos.photos.data.db.entity.PhotoLabelNameEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
@@ -105,7 +106,7 @@ class PhotoLabelRepository @Inject constructor(
         val user = writableUserKey()
         val key = LabelNormalizer.fold(clean)
         (dao.spellingOf(user, key) ?: dao.nameSpellingOf(user, key))?.let { return LabelCreation.Exists(it) }
-        dao.insertName(PhotoLabelNameEntity(user, key, clean, System.currentTimeMillis()))
+        dao.createName(PhotoLabelNameEntity(user, key, clean, System.currentTimeMillis()))
         return LabelCreation.Created(clean)
     }
 
@@ -182,7 +183,7 @@ class PhotoLabelRepository @Inject constructor(
     /** Removes [label] from the photo under [photoKey]. Returns true when it was there. */
     suspend fun removeLabel(photoKey: String, label: String): Boolean {
         ensureUnlocked()
-        return dao.deleteLabelOfPhoto(writableUserKey(), photoKey, LabelNormalizer.fold(label)) > 0
+        return dao.removeLabelOfPhoto(writableUserKey(), photoKey, LabelNormalizer.fold(label), System.currentTimeMillis())
     }
 
     /**
@@ -192,7 +193,9 @@ class PhotoLabelRepository @Inject constructor(
     suspend fun renameLabel(from: String, to: String): Boolean {
         ensureUnlocked()
         val clean = LabelNormalizer.clean(to) ?: return false
-        dao.renameLabel(writableUserKey(), LabelNormalizer.fold(from), LabelNormalizer.fold(clean), clean)
+        val user = writableUserKey()
+        val fromKey = LabelNormalizer.fold(from)
+        dao.renameLabelAt(user, fromKey, spellingOf(user, fromKey, from), LabelNormalizer.fold(clean), clean, System.currentTimeMillis())
         return true
     }
 
@@ -200,14 +203,15 @@ class PhotoLabelRepository @Inject constructor(
     suspend fun deleteLabels(labels: Collection<String>): Int {
         ensureUnlocked()
         val user = writableUserKey()
-        return labels.sumOf { dao.removeLabelEverywhere(user, LabelNormalizer.fold(it)) }
+        val now = System.currentTimeMillis()
+        return labels.sumOf { label ->
+            val key = LabelNormalizer.fold(label)
+            dao.deleteLabelAt(user, key, spellingOf(user, key, label), now)
+        }
     }
 
     /** Removes [label] from every photo of the account. Returns how many photos lost it. */
-    suspend fun deleteLabel(label: String): Int {
-        ensureUnlocked()
-        return dao.removeLabelEverywhere(writableUserKey(), LabelNormalizer.fold(label))
-    }
+    suspend fun deleteLabel(label: String): Int = deleteLabels(listOf(label))
 
     /** [userId]'s labelled photos as the Drive copy stores them: each photo's key and its labels in order. */
     suspend fun snapshotPhotos(userId: UserId): List<LabelSnapshotPhoto> {
@@ -245,8 +249,7 @@ class PhotoLabelRepository @Inject constructor(
                 val rows = canonical(user, restored).map {
                     PhotoLabelEntity(user, photo.key, it, LabelNormalizer.fold(it), now)
                 }
-                dao.replaceLabelsOfPhoto(user, photo.key, rows)
-                photos++
+                if (dao.setLabelsOfPhoto(user, photo.key, rows, now)) photos++
             }
         }
         var names = 0
@@ -254,10 +257,62 @@ class PhotoLabelRepository @Inject constructor(
             val clean = LabelNormalizer.clean(name) ?: continue
             val key = LabelNormalizer.fold(clean)
             if (dao.spellingOf(user, key) != null || dao.nameSpellingOf(user, key) != null) continue
-            dao.insertName(PhotoLabelNameEntity(user, key, clean, now))
+            dao.createName(PhotoLabelNameEntity(user, key, clean, now))
             names++
         }
         return LabelRestoreCounts(photos = photos, names = names)
+    }
+
+    /**
+     * [userId]'s labels whole, as the shared backup merges them: every photo with its labels and change time (a
+     * photo whose labels were all taken off as an empty list), the labels made with no photo, and the deleted
+     * labels. The copies taken in from other installs are kept elsewhere, so [LabelSyncState.applied] is empty.
+     */
+    suspend fun loadSyncState(userId: UserId): LabelSyncState {
+        val user = keyFor(userId)
+        ensureAdopted(user)
+        val state = LabelSyncState()
+        val rows = dao.allLabelsForUser(user).groupBy({ it.photoKey }, { it.label })
+        val times = dao.statesForUser(user).associate { it.photoKey to it.changedAt }
+        for (key in (rows.keys + times.keys).sorted()) {
+            state.photos[key] = LabelPhotoState(rows[key].orEmpty(), times[key] ?: 0L)
+        }
+        for (name in dao.namesForUser(user)) state.names[name.labelKey] = LabelTimedName(name.label, name.createdAt)
+        for (gone in dao.deletedForUser(user)) state.deleted[gone.labelKey] = LabelTimedName(gone.label, gone.deletedAt)
+        return state
+    }
+
+    /**
+     * Writes back what a merge changed between [before] (as [loadSyncState] gave it) and [after], in one
+     * transaction: each photo whose labels or change time differ, the names added or dropped, and the deletions
+     * added or moved. Returns how many photos changed their labels.
+     */
+    suspend fun saveSyncState(userId: UserId, before: LabelSyncState, after: LabelSyncState): Int {
+        val user = keyFor(userId)
+        val photos = LinkedHashMap<String, Pair<List<PhotoLabelEntity>, Long>>()
+        var relabelled = 0
+        for ((key, photo) in after.photos) {
+            val was = before.photos[key]
+            if (was == photo) continue
+            if (was?.labels != photo.labels) relabelled++
+            photos[key] = photo.labels.map {
+                PhotoLabelEntity(user, key, it, LabelNormalizer.fold(it), photo.changedAt)
+            } to photo.changedAt
+        }
+        val namesToAdd = after.names.filterKeys { it !in before.names }
+            .map { (fold, name) -> PhotoLabelNameEntity(user, fold, name.label, name.at) }
+        val namesToDrop = before.names.keys.filter { it !in after.names }
+        val deleted = after.deleted.filter { (fold, gone) -> before.deleted[fold] != gone }
+            .map { (fold, gone) -> PhotoLabelDeletedEntity(user, fold, gone.label, gone.at) }
+        // The change time each photo had when the merge read it, null for a photo with none, so a photo edited
+        // since keeps its edit.
+        val expected = HashMap<String, Long?>()
+        for (key in photos.keys) {
+            val was = before.photos[key]?.changedAt ?: 0L
+            expected[key] = if (was > 0L || hasState(user, key)) was else null
+        }
+        dao.writeMerged(user, photos, expected, namesToAdd, namesToDrop, deleted)
+        return relabelled
     }
 
     /** Moves the current account's labels from [oldKey] to [newKey]. */
@@ -299,8 +354,14 @@ class PhotoLabelRepository @Inject constructor(
         val now = System.currentTimeMillis()
         val rows = canonical(user, LabelNormalizer.normalize(labels).labels)
             .map { PhotoLabelEntity(user, photoKey, it, LabelNormalizer.fold(it), now) }
-        dao.replaceLabelsOfPhoto(user, photoKey, rows)
+        dao.setLabelsOfPhoto(user, photoKey, rows, now)
     }
+
+    private suspend fun hasState(user: String, photoKey: String): Boolean = dao.stateOf(user, photoKey) != null
+
+    /** The spelling the account gave [labelKey], on a photo or as a label with no photo, else [fallback]. */
+    private suspend fun spellingOf(user: String, labelKey: String, fallback: String): String =
+        dao.spellingOf(user, labelKey) ?: dao.nameSpellingOf(user, labelKey) ?: fallback
 
     /** [labels] with each one the account already uses swapped for the spelling it was first given. */
     private suspend fun canonical(user: String, labels: List<String>): List<String> =

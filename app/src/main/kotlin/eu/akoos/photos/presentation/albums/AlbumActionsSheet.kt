@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -63,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ActionSheetRow
 import eu.akoos.photos.presentation.common.ActionSheetSectionHeading
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.theme.Bg2
 import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -135,7 +135,7 @@ internal fun AlbumActionsSheet(
         }
     }
 
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = SheetBg,

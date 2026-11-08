@@ -71,7 +71,7 @@
 }
 
 # ── Room — entities + DAOs use generated subclasses ──────────────────────
--keep class * extends androidx.room.RoomDatabase
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
 -keep @androidx.room.Entity class * { *; }
 -keep @androidx.room.Dao interface * { *; }
 -keepclassmembers @androidx.room.TypeConverter class * { *; }

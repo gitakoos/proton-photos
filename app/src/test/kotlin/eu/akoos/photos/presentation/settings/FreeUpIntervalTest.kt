@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.settings
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 /**
@@ -72,5 +73,10 @@ class FreeUpIntervalTest {
         val ages = FreeUpInterval.entries.map { it.ms }
         assertEquals(ages.sorted(), ages)
         assertTrue("every interval must state a positive age", ages.all { it > 0L })
+    }
+    @Test
+    fun `a finished free up warns only when device copies stayed`() {
+        assertFalse(freeUpLeftCopies(0))
+        assertTrue(freeUpLeftCopies(3))
     }
 }

@@ -28,6 +28,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import eu.akoos.photos.data.db.entity.LinkIdName
 import kotlinx.coroutines.flow.Flow
 import eu.akoos.photos.data.db.entity.PhotoListingEntity
 import eu.akoos.photos.data.db.entity.PhotoListingLite
@@ -232,6 +233,24 @@ interface PhotoListingDao {
     @Query("SELECT tagsCsv FROM photo_listing WHERE linkId = :linkId LIMIT 1")
     fun observeTagsCsv(linkId: String): Flow<String?>
 
+    /**
+     * The volume-listed rows (stream photos of [volumeId], not album children, which the listing never names)
+     * whose tags hold [tag], with their tags: the rows a tag-filtered listing speaks for.
+     */
+    @Query(
+        "SELECT linkId, tagsCsv FROM photo_listing WHERE userId = :userId AND volumeId = :volumeId " +
+            "AND isChildOfAlbum = 0 AND (',' || tagsCsv || ',') LIKE '%,' || :tag || ',%'",
+    )
+    suspend fun getListedRowsWithTag(userId: String, volumeId: String, tag: Int): List<LinkTags>
+
+    /** The tags of the rows named in [linkIds] (chunked by the caller). */
+    @Query("SELECT linkId, tagsCsv FROM photo_listing WHERE linkId IN (:linkIds)")
+    suspend fun getTags(linkIds: List<String>): List<LinkTags>
+
+    /** Rewrites one row's tags, the column every tag write mirrors into. */
+    @Query("UPDATE photo_listing SET tagsCsv = :tagsCsv WHERE linkId = :linkId")
+    suspend fun setTagsCsv(linkId: String, tagsCsv: String)
+
     /** Returns all linkIds currently stored for a user. Used by the smart-merge refresh strategy. */
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId")
     suspend fun getAllLinkIds(userId: String): List<String>
@@ -296,6 +315,14 @@ interface PhotoListingDao {
             "AND isChildOfAlbum = 0 AND displayName IN (:names) LIMIT 1",
     )
     suspend fun linkIdByNameAndCapture(userId: String, names: List<String>, captureSec: Long): String?
+
+    /** The own-stream photos of this user named, case aside, one of [lowerNames] (already lower-cased).
+     *  Callers chunk the input at 500, under SQLite's bind-variable limit. */
+    @Query(
+        "SELECT linkId, displayName, captureTime FROM photo_listing WHERE userId = :userId AND isChildOfAlbum = 0 " +
+            "AND lower(displayName) IN (:lowerNames)",
+    )
+    suspend fun ownStreamByLowerNames(userId: String, lowerNames: List<String>): List<LinkIdName>
 
     /** Whether this user's library holds a row for [linkId]. */
     @Query("SELECT EXISTS(SELECT 1 FROM photo_listing WHERE userId = :userId AND linkId = :linkId)")
@@ -397,3 +424,6 @@ interface PhotoListingDao {
     @Query("UPDATE photo_listing SET durationMs = :durationMs WHERE linkId = :linkId")
     suspend fun updateDurationMs(linkId: String, durationMs: Long)
 }
+
+/** A photo row's link id and its stored tag CSV. */
+data class LinkTags(val linkId: String, val tagsCsv: String)

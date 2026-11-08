@@ -33,6 +33,8 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.PersonEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FaceCurationLog
+import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,6 +67,7 @@ class AssignFacesToPersonUseCase @Inject constructor(
     private val clusterSummaryDao: ClusterSummaryDao,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val appDatabase: AppDatabase,
+    private val faceEdits: FaceEditCounter = FaceEditCounter(),
 ) {
     /** The person the faces go to. */
     sealed interface Target {
@@ -83,7 +86,7 @@ class AssignFacesToPersonUseCase @Inject constructor(
     ): Long = withContext(Dispatchers.IO) {
         if (faceIds.isEmpty()) return@withContext -1L
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val personId = appDatabase.withTransaction { assign(account, faceIds, target) }
+        val personId = faceEdits.edit { appDatabase.withTransaction { assign(account, faceIds, target) } }
         if (recluster && personId >= 0) faceIndexingScheduler.requestRecluster(userId)
         personId
     }
@@ -106,7 +109,9 @@ class AssignFacesToPersonUseCase @Inject constructor(
         faceDao.reassignFacesToPerson(ids, person.id)
         if (name != null) {
             faceDao.labelFacesByIds(ids, name)
-            for (id in ids) notPersonDao.deleteMark(account, name, id)
+            val marked = notPersonDao.allForUser(account).filter { samePersonName(it.personName, name) && it.faceId in ids }.map { it.faceId }
+            for (id in marked) notPersonDao.deleteMark(account, name, id)
+            FaceCurationLog.notPerson(appDatabase.faceCurationTimeDao(), account, name, marked, removed = true, System.currentTimeMillis())
         } else {
             faceDao.clearManualNameByIds(ids)
         }
@@ -119,11 +124,14 @@ class AssignFacesToPersonUseCase @Inject constructor(
         var emptied = false
         for (sourceId in sourceIds) {
             val source = personDao.personById(sourceId)?.takeIf { it.userId == account } ?: continue
-            if (faceDao.faceCountForPerson(account, sourceId) == 0) {
+            val sourceName = source.displayName?.takeIf { it.isNotBlank() }
+            // A person whose last face moved away still stands while photos were added to them by hand.
+            val keptByHand = sourceName != null && personManualPhotoDao.photoKeysForNameList(account, sourceName).isNotEmpty()
+            if (faceDao.faceCountForPerson(account, sourceId) == 0 && !keptByHand) {
                 personDao.updateCoverAndCount(sourceId, null, 0)
                 emptied = true
             } else {
-                refresh(account, sourceId, source.displayName?.takeIf { it.isNotBlank() })
+                refresh(account, sourceId, sourceName)
             }
             clusterSummaryDao.deleteByPerson(sourceId)
         }
@@ -134,12 +142,12 @@ class AssignFacesToPersonUseCase @Inject constructor(
         return person.id
     }
 
-    /** The account's person called [name]: an exact match first, else one whose name differs only in
-     *  case (the one with the most photos when several do). */
+    /** The account's person called [name]: an exact match first, else one of the same name by
+     *  [samePersonName] (the one with the most photos when several do). */
     private suspend fun findByName(account: String, name: String): PersonEntity? {
         val named = personDao.namedPeopleForUser(account).filter { !it.displayName.isNullOrBlank() }
         return named.firstOrNull { it.displayName == name }
-            ?: named.filter { it.displayName.equals(name, ignoreCase = true) }.maxByOrNull { it.faceCount }
+            ?: named.filter { samePersonName(it.displayName, name) }.maxByOrNull { it.faceCount }
     }
 
     /** A new person for [name], inserted already carrying its photo count and its clearest face as the

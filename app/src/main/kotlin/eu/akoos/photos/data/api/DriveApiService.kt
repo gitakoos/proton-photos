@@ -238,6 +238,8 @@ interface DriveApiService : BaseRetrofitApi {
         // Matches the official Drive SDK: the photos timeline endpoint takes no Limit/PageSize.
         // It is paginated purely by PreviousPageLastLinkID and walked until it returns no photos.
         @Query("PreviousPageLastLinkID") anchorId: String? = null,
+        // Only the photos carrying this PhotoTag id (0 = favourite), as the official Drive client asks.
+        @Query("Tag") tag: Int? = null,
     ): PhotoLinksResponse
 
     // Batch fetch thumbnail download URLs by ThumbnailID.

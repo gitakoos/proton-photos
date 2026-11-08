@@ -59,6 +59,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import androidx.datastore.preferences.core.edit
 import me.proton.core.accountmanager.domain.AccountManager
+import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.R
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.currentShareStripConfig
@@ -214,6 +215,29 @@ internal suspend fun viewerMayDetectFaces(
     photoKey: String,
 ): Boolean = faceDao.facePhotoKeysIn(account, listOf(photoKey)).isEmpty()
 
+/**
+ * Whether the viewer's menu offers "People in this photo", which scans the photo on screen when it holds no
+ * face yet: only with face recognition on ([faceFeaturesOn]), never in a shared album the user cannot edit,
+ * and never on a photo put away (the secure viewer, a vaulted photo, a hidden one), so nothing about a hidden
+ * photo is scanned or tagged.
+ */
+internal fun viewerOffersPeopleInPhoto(
+    faceFeaturesOn: Boolean,
+    readOnlyAlbum: Boolean,
+    secure: Boolean,
+    vaulted: Boolean,
+    hidden: Boolean,
+): Boolean = faceFeaturesOn && !readOnlyAlbum && !secure && !vaulted && !hidden
+
+/**
+ * Whether a face with [personId] is shown as a chip of its own, named on its own: one in the Unsorted bucket
+ * ([otherId]), or one no grouping has placed yet, such as a face just taken off a person.
+ */
+internal fun isLoneFace(personId: Long?, otherId: Long?): Boolean = personId == null || personId == otherId
+
+/** The person id a lone face's chip carries when there is no Unsorted bucket yet; never looked up. */
+private const val NO_PERSON = -1L
+
 @HiltViewModel
 class PhotoViewerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -239,6 +263,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val faceDao: eu.akoos.photos.data.db.dao.FaceDao,
     private val personDao: eu.akoos.photos.data.db.dao.PersonDao,
     private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
+    private val notThisPerson: eu.akoos.photos.domain.usecase.NotThisPersonUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val invalidateStrippedLocations: InvalidateStrippedLocationsUseCase,
     private val undoController: UndoController,
@@ -247,6 +272,8 @@ class PhotoViewerViewModel @Inject constructor(
     private val moveController: MoveToFolderController,
     private val labelRepo: PhotoLabelRepository,
     private val outgoingUris: eu.akoos.photos.util.OutgoingPhotoUris,
+    private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
+    @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) : ViewModel() {
 
     private companion object {
@@ -775,6 +802,20 @@ class PhotoViewerViewModel @Inject constructor(
     }
 
     /**
+     * "This isn't them" for the one face [person] stands for on [item]: the face leaves the person (the
+     * same bookkeeping as removing the photo from them on the person page), then the photo's people are
+     * read again so the tag goes. Guest-safe, the account resolving to the local sentinel.
+     */
+    fun markFaceNotThisPerson(item: GalleryItem, person: ViewerPerson) {
+        if (person.name.isNullOrBlank()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+            runCatching { notThisPerson(account, person.personId, listOf(person.faceId), listOf(item.stableId)) }
+            withContext(Dispatchers.Main) { loadPeopleInPhoto(item) }
+        }
+    }
+
+    /**
      * Detect the faces on [item] now if it holds no face row yet, and return the people found, updating
      * the bar. Called from a long-press on a spot with no already-known face, so tagging works on a
      * photo the background walk has not reached (the way the text read runs on demand). Empty when AI is
@@ -800,7 +841,7 @@ class PhotoViewerViewModel @Inject constructor(
     ): List<ViewerPerson> {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val photoKey = item.stableId
-        var faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
+        var faces = runCatching { faceDao.keptFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         if (faces.isEmpty() && detectIfEmpty) {
             val scanned = try {
                 viewerMayDetectFaces(faceDao, account, photoKey) &&
@@ -810,14 +851,14 @@ class PhotoViewerViewModel @Inject constructor(
             } catch (e: Throwable) {
                 false
             }
-            if (scanned) faces = runCatching { faceDao.groupedFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
+            if (scanned) faces = runCatching { faceDao.keptFacesForPhoto(account, photoKey) }.getOrDefault(emptyList())
         }
         val otherId = personDao.otherPersonId(account)
         val result = ArrayList<ViewerPerson>()
         val seenPerson = HashSet<Long>()
         for (f in faces) {
-            val pid = f.personId ?: continue
-            val isOther = pid == otherId
+            val isOther = isLoneFace(f.personId, otherId)
+            val pid = f.personId ?: otherId ?: NO_PERSON
             // One chip per named or unnamed-cluster person, but one chip PER FACE for the Unsorted bucket,
             // so every leftover face on the photo can be named on its own instead of all collapsing into the
             // single grab-bag bucket (which is what left them unnameable from here).
@@ -1163,10 +1204,7 @@ class PhotoViewerViewModel @Inject constructor(
                 is GalleryItem.LocalOnly -> null
             }
             if (linkId != null && linkId in hiddenCloudIds) {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = current - linkId
-                }
+                HiddenCloudPhotos.reveal(context, listOf(linkId))
                 _isHidden.value = false
             } else {
                 val uri = when (item) {
@@ -1227,10 +1265,7 @@ class PhotoViewerViewModel @Inject constructor(
                     )
                     // No device file to vault: hide the cloud photo client-side by linkId. It drops
                     // from every listing via the HIDDEN_CLOUD_PHOTO_IDS filter, nothing on Drive changes.
-                    context.settingsDataStore.edit { prefs ->
-                        val existing = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
-                        prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = existing + item.cloud.linkId
-                    }
+                    HiddenCloudPhotos.hide(context, listOf(item.cloud.linkId))
                     buildHideUndoAction(emptyList(), listOf(item.cloud.linkId))
                         ?.let { undoController.offer(it) }
                     _isHidden.value = true
@@ -1376,11 +1411,18 @@ class PhotoViewerViewModel @Inject constructor(
      * path the gallery selection and device-folder views use. No-op for already-synced or
      * cloud-only items. The viewer's sync badge flips once the upload lands.
      */
+    /** Backs up a photo that is on the phone only. A photo another app opened here ("Open with" from a
+     *  mail or chat app) carries that app's own uri, which the back-up cannot read once this screen is
+     *  gone, so it goes through the same matching and saving a share to the app does, and the outcome
+     *  is said in a snackbar either way. */
     fun backUpItem(item: GalleryItem) {
-        val uri = (item as? GalleryItem.LocalOnly)?.local?.uri ?: return
+        val local = (item as? GalleryItem.LocalOnly)?.local ?: return
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
-            forceUploadLocalUris.forceUpload(userId, listOf(uri))
+            _transientError.value = eu.akoos.photos.data.share.backUpSharedMedia(
+                context, userId, listOf(android.net.Uri.parse(local.uri)), local.mimeType.takeIf { it.isNotBlank() },
+                syncStateRepo, forceUploadLocalUris, appScope,
+            )
         }
     }
 

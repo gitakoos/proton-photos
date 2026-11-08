@@ -66,6 +66,8 @@ import eu.akoos.photos.domain.usecase.isNameableCluster
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.PersonCard
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.people.NameOrMergeSheet
@@ -101,6 +103,8 @@ fun MemoriesScreen(
     val colors = AppColors.current
     var nameOrMerge by remember { mutableStateOf<PersonUi?>(null) }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -124,169 +128,172 @@ fun MemoriesScreen(
             isEmpty -> 1
             else -> 2
         }
-        Crossfade(targetState = phase, label = "memoriesContent", modifier = Modifier.fillMaxSize()) { p ->
-        when (p) {
-        0 -> MemoriesSkeleton(contentTopPad = contentTopPad)
-        1 -> Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = contentTopPad),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = stringResource(R.string.gallery_empty_title),
-                    color = colors.fgMute,
-                    fontSize = 14.sp,
-                )
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            Crossfade(targetState = phase, label = "memoriesContent", modifier = Modifier.fillMaxSize()) { p ->
+            when (p) {
+            0 -> MemoriesSkeleton(contentTopPad = contentTopPad)
+            1 -> Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = contentTopPad),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(R.string.gallery_empty_title),
+                        color = colors.fgMute,
+                        fontSize = 14.sp,
+                    )
+                }
+            else -> {
+                val now = remember { Calendar.getInstance().get(Calendar.YEAR) }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        start = 14.dp, end = 14.dp, top = contentTopPad, bottom = 24.dp,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (peopleShown.isNotEmpty()) {
+                        item(key = "people_section") {
+                            // Same shape as Seasons: a tappable header with a chevron opening the full
+                            // People sub-page, over a preview of the first few most-photographed people.
+                            SectionHeaderRow(
+                                title = stringResource(R.string.gallery_category_people),
+                                onClick = onSeeAllPeople,
+                            )
+                            // A single horizontally scrolling row of person cards sized to match the
+                            // Seasons cards (132x168), so People read as the same album-style tile rather
+                            // than a taller, wider grid. The header chevron opens the full People page.
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                peopleShown.take(12).forEach { person ->
+                                    Box(Modifier.width(132.dp)) {
+                                        // A named person opens their page; a group with no name opens the
+                                        // name-or-merge sheet, whose "See photos" opens the group's page.
+                                        PersonCard(
+                                            person = person,
+                                            onClick = {
+                                                when (personTapTarget(person)) {
+                                                    PersonTapTarget.Page -> onPersonClick(person.personId)
+                                                    PersonTapTarget.NameOrMerge -> { nameOrMerge = person }
+                                                }
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (state.places.isNotEmpty()) {
+                        item(key = "places_section") {
+                            // Same shape as People: a tappable header with a chevron opening the full
+                            // Places browser, over a horizontally scrolling row of the busiest cities.
+                            SectionHeaderRow(
+                                title = stringResource(R.string.places_title),
+                                onClick = onSeeAllPlaces,
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                state.places.forEach { city ->
+                                    Box(Modifier.width(132.dp)) {
+                                        PlaceCard(
+                                            coverItem = city.cover,
+                                            title = city.city,
+                                            count = city.count,
+                                            onClick = { onPlaceClick(city.latitude, city.longitude) },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (state.onThisDay.isNotEmpty()) {
+                        item(key = "otd_section") {
+                            SectionHeaderRow(
+                                title = stringResource(R.string.gallery_on_this_day),
+                                onClick = { onSeeAll(MemoryCategory.ON_THIS_DAY) },
+                            )
+                            // A horizontally scrolling row of entries (the sub-page lists every one),
+                            // keyed on the set of years (not the list instance) so the shuffle stays stable
+                            // across decrypt-driven re-emits, then resolved against the latest state each
+                            // recomposition so covers still refresh without the preview jumping.
+                            val pickedYears = remember(state.onThisDay.map { it.first }) {
+                                state.onThisDay.map { it.first }.shuffled().take(12)
+                            }
+                            val previewOnThisDay = pickedYears.mapNotNull { yr ->
+                                state.onThisDay.firstOrNull { it.first == yr }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                previewOnThisDay.forEach { (year, items) ->
+                                    Box(Modifier.width(132.dp)) {
+                                        OnThisDayCard(
+                                            coverItem = items.first(),
+                                            yearsAgo = (now - year).coerceAtLeast(1),
+                                            count = items.size,
+                                            onClick = { onPhotoClick(items, 0) },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (state.seasons.isNotEmpty()) {
+                        item(key = "seasons_section") {
+                            SectionHeaderRow(
+                                title = stringResource(R.string.memories_seasons),
+                                onClick = { onSeeAll(MemoryCategory.SEASONS) },
+                            )
+                            val pickedSeasons = remember(state.seasons.map { it.title }) {
+                                state.seasons.map { it.title }.shuffled().take(12)
+                            }
+                            val previewSeasons = pickedSeasons.mapNotNull { title ->
+                                state.seasons.firstOrNull { it.title == title }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                previewSeasons.forEach { bucket ->
+                                    Box(Modifier.width(132.dp)) {
+                                        SeasonCard(
+                                            coverItem = bucket.cover,
+                                            title = bucket.title,
+                                            count = bucket.items.size,
+                                            onClick = { onPhotoClick(bucket.items, 0) },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-        else -> {
-            val now = remember { Calendar.getInstance().get(Calendar.YEAR) }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 14.dp, end = 14.dp, top = contentTopPad, bottom = 24.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (peopleShown.isNotEmpty()) {
-                    item(key = "people_section") {
-                        // Same shape as Seasons: a tappable header with a chevron opening the full
-                        // People sub-page, over a preview of the first few most-photographed people.
-                        SectionHeaderRow(
-                            title = stringResource(R.string.gallery_category_people),
-                            onClick = onSeeAllPeople,
-                        )
-                        // A single horizontally scrolling row of person cards sized to match the
-                        // Seasons cards (132x168), so People read as the same album-style tile rather
-                        // than a taller, wider grid. The header chevron opens the full People page.
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(top = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            peopleShown.take(12).forEach { person ->
-                                Box(Modifier.width(132.dp)) {
-                                    // A named person opens their page; a group with no name opens the
-                                    // name-or-merge sheet, whose "See photos" opens the group's page.
-                                    PersonCard(
-                                        person = person,
-                                        onClick = {
-                                            when (personTapTarget(person)) {
-                                                PersonTapTarget.Page -> onPersonClick(person.personId)
-                                                PersonTapTarget.NameOrMerge -> { nameOrMerge = person }
-                                            }
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                if (state.places.isNotEmpty()) {
-                    item(key = "places_section") {
-                        // Same shape as People: a tappable header with a chevron opening the full
-                        // Places browser, over a horizontally scrolling row of the busiest cities.
-                        SectionHeaderRow(
-                            title = stringResource(R.string.places_title),
-                            onClick = onSeeAllPlaces,
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(top = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            state.places.forEach { city ->
-                                Box(Modifier.width(132.dp)) {
-                                    PlaceCard(
-                                        coverItem = city.cover,
-                                        title = city.city,
-                                        count = city.count,
-                                        onClick = { onPlaceClick(city.latitude, city.longitude) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                if (state.onThisDay.isNotEmpty()) {
-                    item(key = "otd_section") {
-                        SectionHeaderRow(
-                            title = stringResource(R.string.gallery_on_this_day),
-                            onClick = { onSeeAll(MemoryCategory.ON_THIS_DAY) },
-                        )
-                        // A horizontally scrolling row of entries (the sub-page lists every one),
-                        // keyed on the set of years (not the list instance) so the shuffle stays stable
-                        // across decrypt-driven re-emits, then resolved against the latest state each
-                        // recomposition so covers still refresh without the preview jumping.
-                        val pickedYears = remember(state.onThisDay.map { it.first }) {
-                            state.onThisDay.map { it.first }.shuffled().take(12)
-                        }
-                        val previewOnThisDay = pickedYears.mapNotNull { yr ->
-                            state.onThisDay.firstOrNull { it.first == yr }
-                        }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(top = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            previewOnThisDay.forEach { (year, items) ->
-                                Box(Modifier.width(132.dp)) {
-                                    OnThisDayCard(
-                                        coverItem = items.first(),
-                                        yearsAgo = (now - year).coerceAtLeast(1),
-                                        count = items.size,
-                                        onClick = { onPhotoClick(items, 0) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-                if (state.seasons.isNotEmpty()) {
-                    item(key = "seasons_section") {
-                        SectionHeaderRow(
-                            title = stringResource(R.string.memories_seasons),
-                            onClick = { onSeeAll(MemoryCategory.SEASONS) },
-                        )
-                        val pickedSeasons = remember(state.seasons.map { it.title }) {
-                            state.seasons.map { it.title }.shuffled().take(12)
-                        }
-                        val previewSeasons = pickedSeasons.mapNotNull { title ->
-                            state.seasons.firstOrNull { it.title == title }
-                        }
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .padding(top = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            previewSeasons.forEach { bucket ->
-                                Box(Modifier.width(132.dp)) {
-                                    SeasonCard(
-                                        coverItem = bucket.cover,
-                                        title = bucket.title,
-                                        count = bucket.items.size,
-                                        onClick = { onPhotoClick(bucket.items, 0) },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
             }
-        }
-        }
+            }
         }
 
         // Floating pills — back button + title, layered above the scroll area.
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.memories_title),
             onBack = onBack,
         )

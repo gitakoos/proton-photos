@@ -6,12 +6,11 @@
     <!-- Assistant de configuration -->
     <string name="onboarding_back">Retour</string>
     <string name="onboarding_continue">Continuer</string>
-    <string name="onboarding_skip">Passer pour l\'instant</string>
+    <string name="onboarding_not_now">Pas maintenant</string>
+    <string name="onboarding_get_started">Commencer</string>
     <string name="onboarding_allow">Autoriser</string>
     <string name="onboarding_open_settings">Ouvrir les paramètres</string>
-    <string name="onboarding_permission_granted">Accordé</string>
     <string name="onboarding_finish">Ouvrir ma galerie</string>
-    <string name="onboarding_recommended">Recommandé</string>
 
     <string name="onboarding_welcome_title">Bienvenue dans Photos for Proton</string>
     <string name="onboarding_welcome_subtitle">Vos photos et vidéos, chiffrées de bout en bout sur Proton Drive. Réglez quelques préférences pour adapter l\'app à votre usage.</string>
@@ -19,9 +18,9 @@
     <string name="onboarding_backup_title">Choisissez quoi sauvegarder</string>
     <string name="onboarding_backup_subtitle">Modifiable à tout moment dans les paramètres.</string>
     <string name="onboarding_backup_everything">Tout sauvegarder</string>
-    <string name="onboarding_backup_everything_desc">Toutes les photos et vidéos de l\'appareil, sauf les dossiers que vous exclurez plus tard.</string>
+    <string name="onboarding_backup_everything_desc">Toutes les photos et vidéos de cet appareil. À l\'écran suivant, vous pouvez exclure des dossiers.</string>
     <string name="onboarding_backup_folders">Choisir des dossiers</string>
-    <string name="onboarding_backup_folders_desc">Sélectionnez les dossiers dans les paramètres. Rien ne sera téléchargé tant que vous n\'aurez pas choisi.</string>
+    <string name="onboarding_backup_folders_desc">Seulement les dossiers choisis à l\'écran suivant.</string>
     <string name="onboarding_backup_nothing">Rien pour l\'instant</string>
     <string name="onboarding_backup_nothing_desc">Parcourez ce qui est déjà sur Proton Drive sans sauvegarder de nouvelles photos.</string>
 
@@ -41,7 +40,7 @@
     <string name="onboarding_photos_subtitle">Un accès en lecture à vos photos et vidéos est nécessaire pour les chiffrer et les sauvegarder sur Drive.</string>
 
     <string name="onboarding_manage_media_title">Gérer les médias</string>
-    <string name="onboarding_manage_media_subtitle">Fortement recommandé. Permet à l\'app de modifier, supprimer et renommer photos et vidéos sans dialogue système à chaque fois. Utilisé pour la retouche dans l\'app, l\'enregistrement sur l\'appareil, la corbeille et Retirer après sauvegarde. Touchez pour ouvrir les paramètres système.</string>
+    <string name="onboarding_manage_media_subtitle">Vivement recommandé. L\'app peut modifier, supprimer et renommer les photos de cet appareil sans demander de confirmation à chaque fois.</string>
     <string name="onboarding_folders_include_title">Dossiers à sauvegarder</string>
     <string name="onboarding_folders_include_subtitle">Choisissez quels dossiers téléverser sur Drive. Les autres restent uniquement sur cet appareil.</string>
     <string name="onboarding_folders_exclude_title">Dossiers à exclure</string>
@@ -54,7 +53,6 @@
 
     <string name="onboarding_about_title">Client tiers indépendant</string>
     <string name="onboarding_about_subtitle">Fait par un seul développeur. Sans lien avec Proton AG. Code source ouvert, sous licence GPL, aucune télémétrie propre.</string>
-    <string name="onboarding_about_author_subtitle">Site personnel du développeur.</string>
     <string name="onboarding_about_github_subtitle">Code source complet sur GitHub.</string>
 
     <string name="onboarding_appearance_title">À votre image</string>
@@ -67,7 +65,15 @@
     <string name="onboarding_lock_timeout_label">Re-verrouiller après</string>
 
     <string name="onboarding_done_title">Tout est prêt</string>
-    <string name="onboarding_done_subtitle">Vos paramètres sont enregistrés. Vous pouvez tout modifier plus tard depuis la page Paramètres.</string>
+    <string name="onboarding_done_subtitle">Voici ce qui sera configuré. Vous pourrez tout modifier plus tard dans les paramètres.</string>
+    <string name="onboarding_done_backup_everything">Sauvegarde : toutes les photos et vidéos</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Sauvegarde : %d dossier</item>
+        <item quantity="other">Sauvegarde : %d dossiers</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Sauvegarde : désactivée pour l\'instant</string>
+    <string name="onboarding_done_ml">Téléchargement après la configuration : %s</string>
+    <string name="onboarding_done_lock">Verrouillage de l\'app : activé</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Sauvegarde photo privée, chiffrée de bout en bout.</string>
@@ -200,7 +206,7 @@
     <!-- Settings -->
     <string name="settings_title">Paramètres</string>
     <string name="settings_more_title">Autres réglages</string>
-    <string name="settings_more_desc">IA, confidentialité, notifications et aide</string>
+    <string name="settings_more_desc">Apprentissage automatique, confidentialité, notifications et aide</string>
     <string name="settings_search_hint">Rechercher dans les paramètres</string>
     <string name="settings_search_no_results">Aucun paramètre correspondant</string>
     <string name="settings_sync_wifi_only">Synchroniser en Wi-Fi uniquement</string>
@@ -223,7 +229,7 @@
     <string name="settings_sign_out">Se déconnecter</string>
     <string name="settings_sign_out_desc">Terminer la session sur cet appareil.</string>
     <string name="sign_out_dialog_title">Se déconnecter ?</string>
-    <string name="sign_out_dialog_message">La déconnexion supprime ces données sur cet appareil et elles ne sont pas restaurées lors de la reconnexion (exportez-les au préalable si nécessaire) :</string>
+    <string name="sign_out_dialog_message">La déconnexion supprime ces données sur cet appareil et elles ne sont pas restaurées lors de la reconnexion :</string>
     <string name="sign_out_dialog_item_faces">Personnes nommées et données de visage</string>
     <string name="sign_out_dialog_item_day_notes">Notes du Calendrier</string>
     <string name="sign_out_dialog_item_vault">Photos masquées</string>
@@ -451,9 +457,6 @@
     <string name="cd_select_day">Sélectionner ce jour</string>
     <string name="cd_select_month">Sélectionner ce mois</string>
     <string name="cd_select_year">Sélectionner cette année</string>
-    <string name="selection_photos_only">%d photos</string>
-    <string name="selection_videos_only">%d vidéos</string>
-    <string name="selection_mixed">%1$d photos, %2$d vidéos</string>
     <string name="editor_error_load_local">Impossible de charger l\'image</string>
     <string name="editor_saved_as_copy">Une copie a été enregistrée dans Photos for Proton</string>
     <string name="editor_external_load_error">Impossible d\'ouvrir ce fichier</string>
@@ -536,6 +539,8 @@
     <string name="map_style_modern">Carte du monde</string>
     <string name="map_style_modern_summary">Un globe moderne que vous pouvez faire pivoter vers vos lieux.</string>
     <string name="settings_amoled_black">Noir pur (AMOLED)</string>
+    <string name="settings_liquid_glass">Verre liquide</string>
+    <string name="settings_liquid_glass_desc">Les menus, les en-têtes, les panneaux et les commandes de la visionneuse floutent ce qui se trouve dessous. Encore en cours, pas encore sur tous les écrans</string>
     <string name="settings_tint_cloud">Badges cloud dans la couleur d\'accent</string>
     <string name="settings_gif_autoplay_grid">Lire les GIF dans les grilles</string>
     <string name="settings_gif_autoplay_covers">Lire les couvertures d\'album GIF</string>
@@ -817,6 +822,8 @@
     <string name="search_ago_years">il y a # ans|il y a # an|il y a un an</string>
 
     <string name="viewer_play_slideshow">Lancer le diaporama</string>
+    <string name="viewer_video_seek_seconds">%1$d s</string>
+    <string name="viewer_video_hold_speed">%1$s×</string>
     <string name="viewer_pause_slideshow">Mettre le diaporama en pause</string>
 
     <!-- Widget -->
@@ -837,7 +844,10 @@
     <string name="widget_mode_cloud">Photos du cloud</string>
     <string name="widget_mode_cloud_desc">Afficher les photos de votre cache cloud chiffré sans les exposer à d\'autres applications</string>
     <string name="widget_section_choose_cloud_photos">Choisir des photos du cloud</string>
-    <string name="widget_cloud_photos_selected">%d photos du cloud sélectionnées</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d photo du cloud sélectionnée</item>
+        <item quantity="other">%d photos du cloud sélectionnées</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Pas encore de photos dans le cloud</string>
     <string name="widget_no_cloud_albums">Pas encore d\'albums dans le cloud. Ouvrez l\'application pour synchroniser vos albums.</string>
     <string name="widget_interval_section">Changer la photo toutes les</string>
@@ -847,7 +857,10 @@
     <string name="widget_interval_8hr">8 heures</string>
     <string name="widget_interval_1day">1 jour</string>
     <string name="widget_add_button">Ajouter le widget</string>
-    <string name="widget_photos_selected">%d photos sélectionnées</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d photo sélectionnée</item>
+        <item quantity="other">%d photos sélectionnées</item>
+    </plurals>
     <string name="widget_no_photos">Aucune photo trouvée</string>
 
     <plurals name="delete_title_plural">
@@ -915,6 +928,8 @@
     <string name="cd_motion_photo">Photo animée</string>
     <string name="cd_panorama">Panorama</string>
     <string name="cd_play_motion_photo">Lire la photo animée</string>
+    <string name="cd_video_play">Lire</string>
+    <string name="cd_video_pause">Pause</string>
     <string name="cd_stop_motion_photo">Arrêter la photo animée</string>
     <string name="cd_exit_panorama">Quitter le panorama</string>
     <string name="viewer_view_panorama">Voir le panorama</string>
@@ -1176,6 +1191,36 @@
     <string name="albums_view_heading">Affichage</string>
     <string name="albums_view_grid">Grille</string>
     <string name="albums_view_list">Liste</string>
+    <string name="people_display_settings">Affichage</string>
+    <string name="people_follow_albums">Comme l\'onglet Albums</string>
+    <string name="people_follow_albums_desc">Affiche les personnes avec la vue et la taille de couverture de l\'onglet Albums</string>
+    <string name="drive_backup_section">Sauvegarde sur Proton Drive</string>
+    <string name="drive_backup_auto">Sauvegarde automatique</string>
+    <string name="drive_backup_auto_desc">Sauvegarde les visages, l\'index de recherche, les étiquettes et les éléments masqués, et les garde identiques sur vos autres appareils</string>
+    <string name="drive_backup_turn_on_title">Activer la sauvegarde automatique ?</string>
+    <string name="drive_backup_turn_on_msg">Sur un autre téléphone, il faut Photos for Proton 2.6.0 ou ultérieur, et sur un ordinateur Photos for Proton desktop 1.3.0 ou ultérieur. Une version plus ancienne laisse de côté ce que ce téléphone sauvegarde et garde ses propres données telles quelles.</string>
+    <string name="drive_backup_turn_on">Activer</string>
+    <string name="drive_backup_save_now">Sauvegarder maintenant</string>
+    <string name="drive_backup_load">Charger depuis Drive</string>
+    <string name="drive_backup_load_desc">Récupère ce que vos autres appareils ont sauvegardé</string>
+    <string name="drive_copies_row">Sauvegardes sur Drive</string>
+    <string name="drive_copies_row_desc">Quel appareil a sauvegardé quoi, et quand</string>
+    <string name="drive_copies_this_device">Ce téléphone</string>
+    <string name="drive_copies_other_device">Autre appareil</string>
+    <string name="drive_copies_saved">Sauvegardé : %s</string>
+    <string name="drive_copies_stale">Pas mis à jour depuis plus de 30 jours</string>
+    <string name="drive_copies_trash">Mettre à la corbeille</string>
+    <string name="drive_copies_trash_title">Mettre la sauvegarde de cet appareil à la corbeille ?</string>
+    <string name="drive_copies_trash_msg">%s : ses visages, son index de recherche, ses étiquettes et sa liste masquée sur Proton Drive vont dans la corbeille de Drive, d\'où ils peuvent être restaurés. Si cet appareil sauvegarde à nouveau, il crée une nouvelle copie.</string>
+    <string name="drive_copies_loading">Lecture des sauvegardes sur Drive…</string>
+    <string name="drive_copies_failed">Impossible de lire les sauvegardes sur Drive</string>
+    <string name="drive_copies_empty">Rien n\'est encore sauvegardé sur Drive</string>
+    <string name="drive_copies_trash_failed">Impossible de mettre à la corbeille</string>
+    <string name="sign_out_dialog_drive_kept">Avec la sauvegarde automatique, les visages, les noms, les étiquettes et les éléments masqués restent sur Proton Drive et reviennent à la prochaine connexion.</string>
+    <string name="shared_backup_syncing">Synchronisation avec Proton Drive</string>
+    <string name="shared_backup_last">Dernière synchronisation : %1$s</string>
+    <string name="shared_backup_never">Pas encore synchronisé</string>
+    <string name="shared_backup_failed">Échec de la synchronisation, nouvel essai plus tard</string>
     <string name="albums_more_settings">Plus de paramètres</string>
     <string name="album_options">Options de l\'album</string>
     <string name="album_group_heading">Regrouper par</string>
@@ -1225,7 +1270,6 @@
     <string name="viewer_meta_flash_none">Pas de flash</string>
     <string name="viewer_meta_wb_auto">Automatique</string>
     <string name="viewer_meta_wb_manual">Manuel</string>
-    <string name="viewer_meta_orientation_normal">Normale</string>
     <string name="viewer_meta_orientation_180">Pivotée de 180°</string>
     <string name="viewer_meta_orientation_90_cw">Pivotée de 90° dans le sens horaire</string>
     <string name="viewer_meta_orientation_90_ccw">Pivotée de 90° dans le sens antihoraire</string>
@@ -1233,15 +1277,42 @@
     <string name="viewer_meta_source_backed_up">Proton Drive et appareil</string>
     <string name="viewer_meta_source_cloud">Proton Drive uniquement</string>
     <string name="viewer_meta_strip">Supprimer</string>
-    <string name="viewer_meta_strip_all">Supprimer toutes les métadonnées privées</string>
-    <string name="viewer_meta_strip_all_desc">Supprime le GPS, les infos de l\'appareil photo et les champs logiciel, auteur et droits d\'auteur de ce fichier</string>
+    <string name="viewer_meta_all_details">Tous les détails</string>
+    <string name="details_adjust">Ajuster</string>
+    <string name="details_edit">Modifier</string>
+    <string name="details_add">Ajouter</string>
+    <string name="details_add_location">Ajouter un lieu</string>
+    <string name="details_time">Heure</string>
+    <string name="details_remove_private">Supprimer les infos privées</string>
+    <string name="details_private_intro">Voici ce que contient le fichier. Choisissez ce qui part.</string>
+    <string name="details_private_undo">Action irréversible.</string>
+    <string name="details_private_none">Ce fichier ne contient aucune info privée.</string>
+    <string name="details_private_dates">Balises de date</string>
+    <string name="details_private_author">Auteur</string>
+    <string name="details_place_hint">Faites glisser la carte sous l’épingle</string>
+    <string name="cloud_compress_title">Compresser sur Drive</string>
+    <string name="cloud_compress_confirm_title">Compresser sur Drive ?</string>
+    <string name="cloud_compress_confirm">Compresser</string>
+    <string name="cloud_compress_started">Compression en arrière-plan</string>
+    <string name="cloud_compress_waiting_wifi">Attend le Wi-Fi, la sauvegarde étant réglée sur Wi-Fi uniquement</string>
+    <string name="cloud_compress_confirm_stop">Arrêtez-la à tout moment depuis la notification ou la page Activité.</string>
+    <string name="cloud_compress_progress">%1$d sur %2$d</string>
+    <string name="cloud_compress_done">%1$d compressés, %2$s économisés.</string>
+    <string name="cloud_compress_done_left">%1$d laissés tels quels.</string>
+    <string name="cloud_compress_channel_desc">Avancement de la compression des photos déjà sur Drive</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d photo ou vidéo sur Drive est téléchargée, compressée avec vos réglages de compression à l’envoi et renvoyée. L’original part dans la corbeille de Drive une fois sa copie plus légère dans ses albums. Ce qui ne deviendrait pas au moins 10 %% plus léger reste tel quel.</item>
+        <item quantity="other">%1$d photos et vidéos sur Drive sont téléchargées, compressées avec vos réglages de compression à l’envoi et renvoyées. Chaque original part dans la corbeille de Drive une fois sa copie plus légère dans ses albums. Ce qui ne deviendrait pas au moins 10 %% plus léger reste tel quel.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">%1$d élément aussi présent sur ce téléphone est laissé de côté.</item>
+        <item quantity="other">%1$d éléments aussi présents sur ce téléphone sont laissés de côté.</item>
+    </plurals>
+    <plurals name="details_private_remove">
+        <item quantity="one">Supprimer %d élément</item>
+        <item quantity="other">Supprimer %d éléments</item>
+    </plurals>
     <string name="viewer_meta_strip_confirm_title">Supprimer les métadonnées ?</string>
-    <string name="viewer_meta_strip_confirm_message">Cela supprimera définitivement %1$s du fichier sur votre appareil. Cette action est irréversible.</string>
-    <string name="viewer_meta_strip_what_gps">la position GPS</string>
-    <string name="viewer_meta_strip_what_camera">les infos de l\'appareil photo</string>
-    <string name="viewer_meta_strip_what_timestamps">les horodatages</string>
-    <string name="viewer_meta_strip_what_software">les infos logicielles</string>
-    <string name="viewer_meta_strip_what_authorship">l\'auteur et les droits d\'auteur</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Supprimer la photo ?</string>
@@ -1409,6 +1480,7 @@
         <item quantity="other">Supprimer la copie locale de %1$d photos et libérer %2$s ? Elles restent sur Drive.</item>
     </plurals>
     <string name="settings_free_up_error">Impossible de libérer de l\'espace : %1$s</string>
+    <string name="free_up_skipped_pre_r">Certaines copies sur l’appareil nécessitent Android 11 ou plus récent pour être supprimées et ont été ignorées.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Téléversement…</string>
@@ -1459,6 +1531,11 @@
     <string name="dense_grid_warning_dismiss">Ne plus afficher</string>
 
     <string name="backup_started">Téléversement vers Drive</string>
+    <string name="share_backup_label">Sauvegarder sur Drive</string>
+    <string name="share_backup_sign_in">Connectez-vous pour sauvegarder sur Drive</string>
+    <string name="share_backup_unreadable">Aucune photo ni vidéo n\'a pu être lue dans le partage</string>
+    <string name="share_backup_some_unreadable">Téléversement vers Drive. %1$d sur %2$d n\'ont pas pu être lus et ont été ignorés</string>
+    <string name="share_backup_saved_to_phone">Enregistré sur le téléphone, téléversement vers Drive</string>
     <string name="upload_confirm_title">Téléverser vers Drive ?</string>
     <string name="upload_confirm_message">Sauvegarder %1$d sélectionnés sur votre Proton Drive ?</string>
     <string name="upload_action_short">Téléverser</string>
@@ -1470,17 +1547,43 @@
     <!-- FAQ -->
     <string name="faq_title">Questions fréquentes</string>
     <string name="faq_settings_entry">Questions fréquentes</string>
-    <string name="faq_onboarding_intro">Quelques réponses rapides pour bien démarrer. Vous les retrouverez plus tard dans les Réglages.</string>
     <string name="faq_q_cloud_icons">Que signifient les icônes de nuage ?</string>
     <string name="faq_a_cloud_icons">Un nuage vert signifie que la photo est sauvegardée sur Proton Drive et qu\'elle est toujours sur cet appareil. Un nuage blanc signifie qu\'elle est uniquement sur Proton Drive, pas sur cet appareil. Aucune icône signifie qu\'elle est seulement sur cet appareil et pas encore sauvegardée.</string>
     <string name="faq_q_backup">Comment fonctionne la sauvegarde ?</string>
-    <string name="faq_a_backup">Les nouvelles photos et vidéos sont sauvegardées automatiquement une fois la sauvegarde activée. Dans les Réglages, vous pouvez limiter les sauvegardes au Wi-Fi, afin qu\'elles se mettent en pause sur les données mobiles.</string>
+    <string name="faq_a_backup">Les nouvelles photos et vidéos sont sauvegardées automatiquement une fois la sauvegarde activée. Touchez le bouton rond en haut à droite de l\'onglet « %3$s » et ouvrez « %1$s » pour la régler, par exemple avec « %2$s ».</string>
     <string name="faq_q_albums">Que sont les albums, et que fait la duplication des dossiers ?</string>
-    <string name="faq_a_albums">Les albums regroupent les photos sur Proton Drive. \"Dupliquer les dossiers de l\'appareil en albums Drive\" fait apparaître les dossiers de votre téléphone, comme Camera ou Screenshots, sous forme d\'albums correspondants sur Drive au fur et à mesure de leur sauvegarde.</string>
-    <string name="faq_q_mirror_local">Que fait \"Répercuter les modifications sur les fichiers locaux\" ?</string>
+    <string name="faq_a_albums">Les albums regroupent les photos sur Proton Drive. Dans « %1$s », sous « %2$s », chaque dossier a une case « %3$s ». Cochez-la et le dossier obtient un album correspondant sur Drive au fil de la sauvegarde.</string>
+    <string name="faq_q_mirror_local">Que fait « %1$s » ?</string>
     <string name="faq_a_mirror_local">Lorsque l\'app supprime les métadonnées ou renomme une photo en la sauvegardant, elle applique ces mêmes modifications à l\'original sur votre téléphone, afin que le fichier local et la copie sauvegardée restent identiques. Cela ne s\'applique qu\'aux photos que cette app sauvegarde, à partir de maintenant, et ne rapatrie pas sur votre téléphone les modifications faites sur le web de Proton Drive.</string>
     <string name="faq_q_existing">L\'app modifie-t-elle mes photos existantes ?</string>
     <string name="faq_a_existing">Non. Les modifications de métadonnées n\'ont lieu que lorsque l\'app sauvegarde une photo, et seulement si vous activez la suppression des métadonnées ou la duplication locale. Les photos déjà présentes sur votre téléphone sont laissées telles quelles, sauf si vous choisissez une action pour une photo précise.</string>
+    <string name="faq_section_backup">Sauvegarde</string>
+    <string name="faq_section_albums">Albums</string>
+    <string name="faq_section_where">Où trouver quoi</string>
+    <string name="faq_q_folders">Comment choisir les dossiers sauvegardés ?</string>
+    <string name="faq_a_folders">Touchez le bouton rond en haut à droite de l\'onglet « %4$s » et ouvrez « %1$s ». Activez « %2$s » ou choisissez les dossiers un par un dans « %3$s ».</string>
+    <string name="faq_q_free_space">Comment libérer de l\'espace sur mon téléphone ?</string>
+    <string name="faq_a_free_space">Les photos déjà sur Proton Drive peuvent quitter ce téléphone. Activez « %1$s » dans « %2$s », ou sélectionnez des photos, touchez supprimer et choisissez « %3$s ». La copie sur Drive reste.</string>
+    <string name="faq_q_album_create">Comment créer un album et y ajouter des photos ?</string>
+    <string name="faq_a_album_create">Dans l\'onglet « %1$s », touchez « %2$s » (le dossier avec un plus). Pour ajouter des photos, sélectionnez-les dans la chronologie et touchez « %3$s », ou ouvrez l\'album et choisissez « %4$s » dans son menu.</string>
+    <string name="faq_q_album_share">Comment partager un album ?</string>
+    <string name="faq_a_album_share">Ouvrez l\'album, touchez son menu et choisissez « %1$s ». Invitez des personnes par e-mail comme lecteurs ou éditeurs. Une personne sans compte Proton reçoit une invitation par e-mail. Les albums partagés avec vous sont dans « %2$s », sur l\'onglet « %3$s ».</string>
+    <string name="faq_q_album_contribute">Puis-je ajouter des photos à un album partagé avec moi ?</string>
+    <string name="faq_a_album_contribute">Oui, si vous avez le droit de le modifier. Ajoutez des photos comme dans votre propre album. L\'album reçoit une copie, comptée dans le stockage du propriétaire, et votre original reste où il est.</string>
+    <string name="faq_q_folders_albums">Quelle différence entre dossiers et albums ?</string>
+    <string name="faq_a_folders_albums">Les albums sont sur Proton Drive. Les dossiers sont ceux de ce téléphone, comme Camera ou Screenshots, et portent le badge « %1$s ». Le filtre de l\'onglet « %4$s » n\'en montre qu\'un type avec « %2$s » ou « %3$s ».</string>
+    <string name="faq_q_album_delete">Que se passe-t-il quand je retire ou supprime des photos ?</string>
+    <string name="faq_a_album_delete">« %1$s » retire seulement les photos de l\'album, elles restent dans votre chronologie. Une photo supprimée va dans « %2$s », où vous pouvez la restaurer. Supprimer un album garde ses photos sur Proton Drive.</string>
+    <string name="faq_q_where_ml">Où activer les visages, la recherche et Copier le texte ?</string>
+    <string name="faq_a_where_ml">Touchez le bouton rond en haut à droite de l\'onglet « %3$s », puis « %1$s » > « %2$s ». Chaque fonction a son propre interrupteur et télécharge son modèle une fois. Tout fonctionne sur ce téléphone.</string>
+    <string name="faq_q_where_lock">Où sont le verrouillage de l\'app et les photos masquées ?</string>
+    <string name="faq_a_where_lock">Dans « %1$s » > « %2$s », vous trouverez « %3$s » et « %4$s ». Pour masquer des photos, sélectionnez-les et choisissez « %5$s ».</string>
+    <string name="faq_q_where_drive">Comment les visages, les étiquettes et les éléments masqués arrivent-ils sur mes autres appareils ?</string>
+    <string name="faq_a_where_drive">Activez « %3$s » dans « %1$s », sous « %2$s ». Les visages et les noms, l\'index de recherche, les étiquettes et les éléments masqués sont alors sauvegardés sur Proton Drive et restent identiques sur vos autres appareils, application de bureau comprise.</string>
+    <string name="faq_q_where_trash">Où vont les photos supprimées ?</string>
+    <string name="faq_a_where_trash">Dans « %1$s ». Ouvrez-le avec le bouton rond en haut à droite de l\'onglet « %2$s ». Les photos supprimées de ce téléphone et de Proton Drive y attendent et peuvent être restaurées.</string>
+    <string name="faq_q_no_account">Puis-je utiliser l\'app sans compte Proton ?</string>
+    <string name="faq_a_no_account">Oui. Sur l\'écran de connexion, choisissez « %1$s ». La navigation, la retouche, les dossiers, les photos masquées, les visages et la recherche fonctionnent sur ce téléphone. La sauvegarde sur Proton Drive demande un compte.</string>
     <string name="settings_copy_diagnostics">Partager le diagnostic</string>
     <string name="settings_copy_diagnostics_desc">Infos de plantage, synchronisation et performance. Aucune photo, aucune donnée de compte.</string>
     <string name="settings_diagnostics_copied">Journal de diagnostic copié</string>
@@ -1568,7 +1671,7 @@
     <string name="duplicates_filter_match_label">Correspondance</string>
     <string name="duplicates_badge_cloud">Cloud</string>
     <string name="duplicates_badge_device">Appareil</string>
-    <string name="onboarding_all_files_subtitle">Recommandé. Permet à l\'app de remettre les photos masquées restaurées dans leur dossier d\'origine (par exemple le dossier multimédia d\'une app de messagerie, pas seulement Images) et d\'écrire les changements directement dans vos fichiers locaux. Touchez pour ouvrir les paramètres système.</string>
+    <string name="onboarding_all_files_subtitle">Recommandé. Les photos masquées restaurées retournent dans leur dossier d\'origine, et l\'app peut mettre à jour vos fichiers locaux sur place.</string>
     <string name="onboarding_all_files_title">Accès à tous les fichiers</string>
     <string name="permissions_action_allow">Autoriser</string>
     <string name="permissions_allfiles_title">Accès à tous les fichiers</string>
@@ -1663,8 +1766,11 @@
 
     <!-- Metadata editor (#36): edit a photo's capture date and place. -->
     <string name="metadata_editor_title">Modifier les métadonnées</string>
+    <plurals name="metadata_editor_bulk_title">
+        <item quantity="one">Modifier %d photo</item>
+        <item quantity="other">Modifier %d photos</item>
+    </plurals>
     <string name="metadata_editor_done">Terminé</string>
-    <string name="metadata_editor_change">Modifier</string>
     <string name="metadata_editor_saved">Enregistré</string>
     <string name="metadata_editor_write_failed">Impossible d\'enregistrer la modification</string>
     <string name="metadata_editor_saved_partial">%1$d enregistrée(s), %2$d n\'ont pas pu l\'être</string>
@@ -1673,7 +1779,6 @@
     <string name="metadata_editor_source_device">Depuis cet appareil</string>
     <string name="metadata_editor_source_cloud">Depuis Proton Drive</string>
     <string name="metadata_editor_next">Suivant</string>
-    <string name="metadata_editor_set">Définir</string>
     <string name="metadata_editor_place_label">Lieu</string>
     <string name="metadata_editor_place_none">Aucun lieu</string>
     <string name="metadata_editor_place_search">Rechercher un pays ou une ville</string>
@@ -1685,7 +1790,6 @@
     <string name="metadata_editor_note_place_format">Le lieu ne peut être enregistré que dans les photos JPEG, PNG et WebP.</string>
     <string name="metadata_editor_note_date_format">La date ne peut pas être modifiée pour les photos dans ce format.</string>
     <string name="metadata_editor_bulk_date_label">Définir une date pour ces photos</string>
-    <string name="metadata_editor_bulk_place_label">Définir un lieu pour ces photos</string>
     <string name="metadata_editor_bulk_apply_hint">S\'applique à chaque photo sélectionnée</string>
     <string name="metadata_editor_bulk_summary">Modification de %1$d photos</string>
     <string name="metadata_editor_bulk_summary_skipped">Modification de %1$d, %2$d ignorées</string>
@@ -1701,8 +1805,6 @@
     <string name="metadata_editor_shift_label">Décaler ces photos dans le temps</string>
     <string name="metadata_editor_shift_hint">Choisir le moment où la photo la plus ancienne a vraiment été prise. Toutes les autres se décalent d\'autant, les écarts entre elles restent donc intacts.</string>
     <string name="metadata_editor_shift_picker_title">Quand la photo la plus ancienne a-t-elle été prise ?</string>
-    <string name="metadata_editor_shift_range_current">Actuellement : de %1$s à %2$s</string>
-    <string name="metadata_editor_shift_range_after">Après le décalage : de %1$s à %2$s</string>
     <string name="metadata_editor_shift_too_late">La photo la plus récente se retrouverait dans le futur. Choisir une date ou une heure antérieure.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d photo n\'a pas de date propre, un décalage la laisse donc où elle est. La même date pour toutes l\'atteint quand même.</item>
@@ -1711,7 +1813,7 @@
     </plurals>
     <string name="settings_section_about">À propos</string>
     <string name="settings_ai_section">Apprentissage automatique</string>
-    <string name="settings_ai_nav_desc">Copier le texte, masquer les visages et plus, sur l\'appareil</string>
+    <string name="settings_ai_nav_desc">Reconnaissance des visages, recherche par ce que montre une photo et copie du texte</string>
     <string name="settings_ai_enable">Activer l\'apprentissage automatique</string>
     <string name="settings_ai_ocr">Copier le texte</string>
     <string name="settings_ai_ocr_desc">Reconnaît et copie le texte visible sur une photo</string>
@@ -1724,7 +1826,7 @@
     <string name="settings_ai_ocr_remove_confirm">Supprimer</string>
     <string name="settings_ai_ocr_remove_keep">Conserver</string>
     <string name="settings_ai_face_toggle">Reconnaissance faciale</string>
-    <string name="settings_ai_face_desc">Regroupe les photos selon les personnes qui y figurent, sur votre appareil</string>
+    <string name="settings_ai_face_desc">Regroupe les photos selon les personnes qui y figurent, sur ce téléphone</string>
     <string name="settings_ai_face_downloading">Téléchargement…</string>
     <string name="settings_ai_face_download_failed">Le modèle de visage n\'a pas pu être téléchargé.</string>
     <string name="settings_ai_face_download_retry">Réactivez le commutateur pour réessayer.</string>
@@ -1735,19 +1837,19 @@
     <string name="settings_ai_face_download_confirm">Télécharger</string>
     <string name="settings_ai_face_model_missing">Le modèle de visage n\'est pas sur cet appareil.</string>
     <string name="settings_ai_face_remove_title">Supprimer les données de visages ?</string>
-    <string name="settings_ai_face_remove_message">La reconnaissance faciale est désactivée. Supprimer de cet appareil le modèle de visages et tous les visages et noms détectés ? Exportez-les d\'abord depuis la page Visages reconnus si vous souhaitez en conserver une copie.</string>
+    <string name="settings_ai_face_remove_message">La reconnaissance faciale est désactivée. Supprimer de cet appareil le modèle de visages et tous les visages et noms détectés ?</string>
     <string name="settings_ai_face_remove_confirm">Supprimer</string>
     <string name="settings_ai_face_remove_keep">Conserver</string>
     <string name="settings_ai_face_remove_confirm_title">Êtes-vous sûr ?</string>
-    <string name="settings_ai_face_remove_confirm_message">Cette action supprime définitivement le modèle de visages et tous les visages et noms reconnus. Elle est irréversible.</string>
-    <string name="settings_ai_semantic">Recherche sémantique</string>
+    <string name="settings_ai_face_remove_confirm_message">Cela supprime de cet appareil le modèle de visages et tous les visages et noms reconnus. Une copie sauvegardée sur Proton Drive est conservée.</string>
+    <string name="settings_ai_semantic">Rechercher selon ce que montre une photo</string>
     <string name="settings_ai_semantic_desc">Trouvez des photos en décrivant ce qu\'elles contiennent</string>
     <string name="settings_ai_semantic_downloading">Téléchargement…</string>
     <string name="settings_ai_semantic_download_failed">Les modèles de recherche n\'ont pas pu être téléchargés.</string>
     <string name="settings_ai_semantic_download_retry">Réactivez le commutateur pour réessayer.</string>
     <string name="settings_ai_semantic_download_title">Télécharger les modèles de recherche ?</string>
-    <string name="settings_ai_semantic_download_message">La recherche sémantique nécessite le téléchargement d\'un modèle de %1$s. Cela fonctionne sur toute connexion, mais le Wi-Fi est recommandé.</string>
-    <string name="settings_ai_semantic_download_message_metered">La recherche sémantique nécessite le téléchargement d\'un modèle de %1$s. Le Wi-Fi n\'est pas connecté, ce téléchargement utilisera donc les données mobiles.</string>
+    <string name="settings_ai_semantic_download_message">La recherche de photos nécessite le téléchargement d\'un modèle de %1$s. Cela fonctionne sur toute connexion, mais le Wi-Fi est recommandé.</string>
+    <string name="settings_ai_semantic_download_message_metered">La recherche de photos nécessite le téléchargement d\'un modèle de %1$s. Le Wi-Fi n\'est pas connecté, ce téléchargement utilisera donc les données mobiles.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Télécharger</string>
     <string name="settings_ai_semantic_remove_title">Supprimer les modèles téléchargés ?</string>
@@ -1794,6 +1896,12 @@
     <string name="sdk_route_download_desc">Ouvrir et enregistrer des photos de Drive en pleine résolution</string>
     <string name="sdk_route_upload">Sauvegarde et envoi</string>
     <string name="sdk_route_upload_desc">Envoyer des photos vers Drive, pour la sauvegarde et tout autre envoi</string>
+    <string name="sdk_route_albums">Albums</string>
+    <string name="sdk_route_albums_desc">Créer, renommer et supprimer des albums dans Drive, et y ajouter ou en retirer des photos</string>
+    <string name="sdk_route_events">Suivi des modifications</string>
+    <string name="sdk_route_events_desc">Garder la chronologie à jour avec les modifications faites sur d\'autres appareils et sur le web</string>
+    <string name="sdk_route_shared">Albums partagés avec vous</string>
+    <string name="sdk_route_shared_desc">Lister et quitter les albums que d\'autres ont partagés avec vous, y ajouter des photos et ouvrir leurs photos en pleine résolution</string>
     <string name="sdk_route_activity">%1$s. Cette session : %2$d via la bibliothèque, %3$d de la manière habituelle.</string>
     <string name="settings_ai_indexing_progress">%1$d sur %2$d photos</string>
     <string name="settings_ai_grouping_progress">%1$d sur %2$d visages</string>
@@ -1806,6 +1914,9 @@
     <string name="settings_ai_clear">Effacer les données de visages</string>
     <string name="settings_ai_clear_confirm_title">Effacer les données de visages ?</string>
     <string name="settings_ai_clear_confirm_msg">Cela supprime toutes les personnes trouvées et toutes les données de visages. Vos photos ne sont pas affectées. Les visages sont de nouveau détectés au prochain indexage.</string>
+    <string name="settings_ai_clear_where_msg">Tes données de visages sont aussi sauvegardées sur Proton Drive.\n\nSur ce téléphone uniquement : elles sont supprimées ici et reviennent aussitôt depuis Drive.\n\nPartout : elles sont supprimées ici, sur Proton Drive et sur tes autres appareils, et la reconnaissance des visages se désactive sur chacun. Tes photos ne sont pas touchées.</string>
+    <string name="settings_ai_clear_here">Sur ce téléphone uniquement</string>
+    <string name="settings_ai_clear_everywhere">Partout</string>
     <string name="gallery_add_to_person">Ajouter à une personne</string>
     <string name="people_search_hint">Rechercher des personnes</string>
     <string name="person_set_cover">Définir comme couverture</string>
@@ -1881,11 +1992,7 @@
     <string name="settings_ai_rescan">Réanalyser les photos</string>
     <string name="settings_ai_rescan_confirm_msg">Chaque photo est de nouveau analysée pour les visages avec plus de détail, ce qui détecte des visages plus petits et plus éloignés. Vos noms et corrections sont conservés et réappliqués une fois les visages redétectés.</string>
     <string name="settings_ai_rescan_confirm_title">Réanalyser toutes les photos ?</string>
-    <string name="settings_ml_drive_section">Données des visages et de recherche sur Drive</string>
-    <string name="settings_ml_drive_save">Enregistrer sur Drive</string>
-    <string name="settings_ml_drive_save_desc">Enregistre une copie chiffrée que vos autres appareils peuvent restaurer</string>
     <string name="settings_ml_drive_restore">Restaurer depuis Drive</string>
-    <string name="settings_ml_drive_restore_desc">Utilise les données enregistrées par un de vos appareils au lieu de tout réanalyser</string>
     <string name="settings_face_file_link">Charger les visages enregistrés par une version précédente</string>
     <string name="settings_face_file_title">Visages d\'une version précédente</string>
     <string name="settings_face_file_msg">La version 2.5.0 et les précédentes enregistraient les visages avec « Exporter l\'index des visages » dans un fichier nommé photosforproton-faces.ppfi. Si vous avez ce fichier, choisissez-le ici pour récupérer ses visages et ses noms. Vos visages actuels sont conservés. Les sauvegardes plus récentes sont sur Drive, dans « Restaurer depuis Drive ».</string>
@@ -1895,20 +2002,6 @@
     <string name="settings_ai_import_wrong_account">Cet index des visages appartient à un autre compte et ne peut pas être ouvert ici.</string>
     <string name="settings_ai_transfer_failed">Échec du transfert de l\'index des visages.</string>
     <string name="settings_ai_transfer_working">En cours…</string>
-    <string name="settings_autosave_title">Enregistrer automatiquement</string>
-    <string name="settings_autosave_desc">Garde la copie sur Drive à jour en arrière-plan.</string>
-    <string name="settings_autosave_after_changes">Après les modifications</string>
-    <string name="settings_autosave_daily">Chaque jour</string>
-    <string name="settings_autosave_weekly">Chaque semaine</string>
-    <string name="settings_autosave_after_changes_desc">Enregistre environ 10 minutes après la dernière modification, au plus une fois par heure.</string>
-    <string name="settings_autosave_daily_desc">Enregistre chaque nuit vers 23:59 si quelque chose a changé.</string>
-    <string name="settings_autosave_weekly_desc">Enregistre le dimanche soir vers 23:59 si quelque chose a changé.</string>
-    <string name="settings_autosave_last_saved">Dernier enregistrement %1$s</string>
-    <string name="settings_autosave_failed">Le dernier enregistrement ne s\'est pas terminé. Une nouvelle tentative aura lieu.</string>
-    <string name="settings_autosave_confirm_title">Enregistrer automatiquement ?</string>
-    <string name="settings_autosave_confirm_ml">Une copie chiffrée de vos données de reconnaissance des visages et de recherche est enregistrée dans votre Proton Drive en arrière-plan et tenue à jour. Elle utilise de l\'espace sur Drive, et des données mobiles uniquement si les sauvegardes y sont autorisées. Le premier enregistrement démarre maintenant.</string>
-    <string name="settings_autosave_confirm_labels">Une copie chiffrée de vos étiquettes est enregistrée dans votre Proton Drive en arrière-plan et tenue à jour. Elle utilise de l\'espace sur Drive, et des données mobiles uniquement si les sauvegardes y sont autorisées. Le premier enregistrement démarre maintenant.</string>
-    <string name="settings_autosave_confirm_on">Activer</string>
     <string name="settings_ml_drive_step_preparing">Préparation…</string>
     <string name="settings_ml_drive_step_encrypting_faces">Chiffrement des données des visages…</string>
     <string name="settings_ml_drive_step_encrypting_search">Chiffrement des données de recherche…</string>
@@ -1919,12 +2012,6 @@
     <string name="settings_ml_drive_step_importing_faces">Importation des données des visages…</string>
     <string name="settings_ml_drive_step_importing_search">Importation des données de recherche…</string>
     <string name="settings_ml_drive_step_finishing">Finalisation…</string>
-    <string name="settings_ml_drive_folder_title">Créer un dossier dans votre Drive ?</string>
-    <string name="settings_ml_drive_folder_message">L\'enregistrement crée le dossier « Photos for Proton/ML data » dans Mes fichiers. Les données des visages et de recherche qu\'il contient sont chiffrées de bout en bout, comme vos photos, et occupent de l\'espace dans votre Drive.</string>
-    <string name="settings_ml_drive_folder_confirm">Créer et enregistrer</string>
-    <string name="settings_ml_drive_restore_loading">Recherche des données enregistrées…</string>
-    <string name="settings_ml_drive_restore_pick">Choisissez l\'appareil à partir duquel restaurer.</string>
-    <string name="settings_ml_drive_restore_empty">Rien n\'est encore enregistré sur Drive. Utilisez « Enregistrer sur Drive » sur l\'appareil qui contient les données, puis réessayez.</string>
     <string name="settings_ml_drive_restore_list_failed">Impossible d\'accéder à votre Drive. Réessayez plus tard.</string>
     <string name="settings_ml_drive_this_device">Cet appareil</string>
     <string name="settings_ml_drive_another_device">Autre appareil</string>
@@ -1933,12 +2020,6 @@
     <string name="settings_ml_drive_holds_search">Données de recherche</string>
     <string name="settings_ml_drive_saved_at">Enregistré le %1$s</string>
     <string name="settings_ml_drive_restore_confirm">Restaurer</string>
-    <string name="settings_ml_drive_mode_title">Fusionner ou remplacer ?</string>
-    <string name="settings_ml_drive_mode_message">Cet appareil contient déjà des données de visages. Choisissez comment restaurer.</string>
-    <string name="settings_ml_drive_mode_merge">Fusionner</string>
-    <string name="settings_ml_drive_mode_merge_desc">Conserve les noms de cet appareil et ajoute ceux enregistrés</string>
-    <string name="settings_ml_drive_mode_replace">Remplacer</string>
-    <string name="settings_ml_drive_mode_replace_desc">Utilise les visages et noms enregistrés pour les photos de votre Drive</string>
     <string name="settings_ml_drive_saved">Enregistré sur Drive</string>
     <string name="settings_ml_drive_restored">Restauré depuis Drive</string>
     <string name="settings_ml_drive_saved_partly">Enregistrement partiel</string>
@@ -1946,7 +2027,7 @@
     <string name="settings_ml_drive_save_failed">Impossible d\'enregistrer sur Drive</string>
     <string name="settings_ml_drive_restore_failed">Impossible de restaurer depuis Drive</string>
     <string name="settings_ml_drive_nothing_title">Rien à enregistrer pour l\'instant</string>
-    <string name="settings_ml_drive_nothing_message">Cet appareil n\'a pas encore de données des visages ni de recherche. Laissez d\'abord la reconnaissance faciale ou la recherche sémantique analyser vos photos.</string>
+    <string name="settings_ml_drive_nothing_message">Cet appareil n\'a pas encore de données des visages ni de recherche. Laissez d\'abord la reconnaissance faciale ou la recherche de photos analyser vos photos.</string>
     <string name="settings_ml_drive_not_capable">Non disponible sur cet appareil</string>
     <string name="settings_ml_drive_faces_not_saved">Les données des visages n\'ont pas pu être enregistrées.</string>
     <string name="settings_ml_drive_search_not_saved">Les données de recherche n\'ont pas pu être enregistrées.</string>
@@ -1971,8 +2052,6 @@
         <item quantity="one">les données de recherche de %1$d photo</item>
         <item quantity="other">les données de recherche de %1$d photos</item>
     </plurals>
-    <string name="settings_ml_drive_list_two">%1$s et %2$s</string>
-    <string name="settings_ml_drive_list_three">%1$s, %2$s et %3$s</string>
     <plurals name="person_suggestions_left">
         <item quantity="one">%1$d à examiner</item>
         <item quantity="other">%1$d à examiner</item>
@@ -2129,7 +2208,6 @@
     <string name="editor_tool_frame">Cadre</string>
     <string name="editor_frame_none">Aucun</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Bordure</string>
     <string name="editor_tab_transform">Recadrer et pivoter</string>
     <string name="editor_tab_more">Plus</string>
     <string name="editor_transform_ratio">Format</string>
@@ -2285,6 +2363,9 @@
     <string name="person_unsorted_hint">Des visages sans correspondance certaine avec une personne. Sélectionne des photos pour en sortir une vraie personne, ou marque le reste comme « pas une personne ».</string>
     <string name="person_unsorted_caption">Visages restants qui n\'ont pas pu être associés. Ouvrez pour les trier.</string>
     <string name="person_rename_title">Renommer</string>
+    <string name="person_remove_name">Retirer le nom</string>
+    <string name="person_remove_name_confirm_title">Retirer le nom ?</string>
+    <string name="person_remove_name_confirm_body">Les photos restent. Le groupe revient dans les visages à vérifier et quitte Personnes s\'il ne compte qu\'une photo.</string>
     <string name="person_rename_hint">Nom</string>
     <string name="permissions_default_gallery_title">Définir comme galerie par défaut</string>
     <string name="permissions_default_gallery_why">Ouvre les paramètres système pour définir cette application par défaut pour ouvrir les photos et les vidéos.</string>
@@ -2306,7 +2387,11 @@
     <string name="face_excluded_undo">Annuler</string>
     <string name="albums_search_hint">Rechercher des albums</string>
     <string name="albums_search_no_results">Aucun album ne correspond à la recherche.</string>
-    <string name="settings_ai_groups_found">%1$d groupes</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d groupe</item>
+        <item quantity="other">%1$d groupes</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Recherche de photos</string>
     <string name="settings_ai_faces_found">%1$d visages</string>
     <string name="person_rename_merge_confirm_title">Fusionner avec la personne existante ?</string>
     <string name="person_rename_merge_confirm_body">Une personne nommée %1$s existe déjà. Utiliser ce nom fusionne les deux en une seule, ce qui est irréversible. Fusionner ?</string>
@@ -2317,7 +2402,6 @@
 
     <string name="label_section_title">Étiquettes</string>
     <string name="label_add_hint">Ajouter une étiquette</string>
-    <string name="label_add_chip">Ajouter une étiquette</string>
     <string name="label_remove_cd">Retirer l\'étiquette %1$s</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d sur %2$d étiquette</item>
@@ -2365,16 +2449,10 @@
     <string name="label_leave_selection_title">Quitter les étiquettes ?</string>
     <string name="label_leave_selection_message">Votre sélection sera effacée.</string>
     <string name="label_leave_selection_confirm">Quitter</string>
-    <string name="label_backup_section">Étiquettes sur Drive</string>
-    <string name="label_backup_save_desc">Conservez une copie chiffrée de vos étiquettes dans Drive</string>
-    <string name="label_backup_restore_desc">Fusionnez les étiquettes enregistrées par cet appareil ou un autre</string>
     <string name="label_backup_restore_note">Restaure les étiquettes enregistrées à ce moment-là, y compris celles supprimées depuis. Les étiquettes ajoutées depuis sont conservées.</string>
     <string name="label_backup_show_all">Tout afficher (%1$d)</string>
-    <string name="label_backup_save_confirm_title">Enregistrer les étiquettes sur Drive ?</string>
-    <string name="label_backup_save_confirm_message">La copie enregistrée plus tôt par cet appareil est remplacée. Les étiquettes sont chiffrées de bout en bout, comme vos photos.</string>
     <string name="label_backup_working_save">Enregistrement des étiquettes…</string>
     <string name="label_backup_working_restore">Restauration des étiquettes…</string>
-    <string name="label_backup_folder_message">L\'enregistrement crée le dossier « Photos for Proton/Labels » dans Mes fichiers. Les étiquettes qu\'il contient sont chiffrées de bout en bout, comme vos photos, et occupent de l\'espace dans votre Drive.</string>
     <string name="label_backup_nothing_message">Aucune photo n\'a encore d\'étiquette. Ajoutez d\'abord une étiquette à une photo.</string>
     <string name="label_backup_restore_empty">Aucune étiquette n\'est encore enregistrée sur Drive. Sur l\'appareil qui les a, utilisez « Enregistrer sur Drive », puis réessayez.</string>
     <string name="label_backup_up_to_date">Vos étiquettes sont déjà à jour.</string>
@@ -2391,6 +2469,7 @@
     <string name="label_rename_save">Enregistrer</string>
     <string name="label_rename_merge">Fusionner</string>
     <string name="label_delete_action">Supprimer l\'étiquette</string>
+    <string name="label_delete_unused_title">Supprimer cette étiquette ?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Retirer cette étiquette de %d photo ?</item>
         <item quantity="other">Retirer cette étiquette de %d photos ?</item>
@@ -2431,7 +2510,7 @@
     <string name="compression_unavailable_fallback">%1$s n’est pas disponible sur ce téléphone, les vidéos utilisent donc %2$s.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Libellés de photos</string>
-    <string name="whats_new_260_labels_body">Ouvrez une photo, touchez « Détails » et ajoutez jusqu\'à cinq libellés dans la zone « Étiquettes », ou sélectionnez plusieurs photos et choisissez « Ajouter des étiquettes ». La recherche trouve les photos par leurs libellés. Renommez, fusionnez et supprimez les libellés, et sauvegardez-les sur Drive ou restaurez-les, dans « Paramètres > Autres réglages > Étiquettes ».</string>
+    <string name="whats_new_260_labels_body">Ouvrez une photo, touchez « Détails » et ajoutez jusqu\'à cinq libellés dans la zone « Étiquettes », ou sélectionnez plusieurs photos et choisissez « Ajouter des étiquettes ». La recherche trouve les photos par leurs libellés. Renommez, fusionnez et supprimez les libellés dans « Paramètres > Autres réglages > Étiquettes ».</string>
     <string name="whats_new_260_compress_title">Compression vidéo</string>
     <string name="whats_new_260_compress_body">Activez « Compresser les vidéos » dans « Paramètres > Sauvegarde et stockage > Paramètres de sauvegarde > Qualité et taille », puis choisissez le codec et la qualité. H.264 est le choix par défaut et se lit partout. L\'envoi affiche sa progression et l\'espace économisé, et vos photos continuent d\'être envoyées pendant qu\'une vidéo est compressée.</string>
     <string name="whats_new_260_vault_title">Photos masquées à la déconnexion</string>
@@ -2453,11 +2532,11 @@
     <string name="whats_new_260_details_title">Personnes et carte dans les détails</string>
     <string name="whats_new_260_details_body">Les « Détails » d\'une photo montrent maintenant les personnes présentes et une carte du lieu de prise de vue. Touchez une personne pour ouvrir sa page, ou la carte pour l\'afficher en plein écran. Touchez un visage sans nom pour le nommer ou l\'ajouter à quelqu\'un.</string>
     <string name="whats_new_260_frame_title">Outil Cadre</string>
-    <string name="whats_new_260_frame_body">Dans l\'éditeur de photos, placez une photo sur un canevas d\'une autre forme, comme 1:1, 9:16 ou Polaroid, rempli d\'une couleur ou d\'un flou doux. L\'outil est encore en cours de développement et d\'autres améliorations arrivent.</string>
+    <string name="whats_new_260_frame_body">Dans l\'éditeur de photos, placez une photo sur un canevas d\'une autre forme, comme 1:1, 9:16 ou Polaroid, rempli d\'une couleur ou d\'un flou doux.</string>
     <string name="whats_new_260_drive_title">Données de visages et de recherche sur Drive</string>
-    <string name="whats_new_260_drive_body">Sauvegardez les noms des visages et les données de recherche sur Drive et restaurez-les sur un autre téléphone, en choisissant ce qui revient, dans « Paramètres > Autres réglages > Apprentissage automatique ».</string>
-    <string name="whats_new_260_autosave_title">Enregistrement automatique sur Drive</string>
-    <string name="whats_new_260_autosave_body">Activez « Enregistrer automatiquement » sur la copie Drive de vos données de visages et de recherche ou de vos étiquettes : la copie reste à jour en arrière-plan, après les modifications, chaque jour ou chaque semaine. Vous les trouverez dans « Paramètres > Autres réglages », sous « Apprentissage automatique » et « Étiquettes ».</string>
+    <string name="whats_new_260_drive_body">Sauvegardez les noms des visages, les données de recherche, les étiquettes et les éléments masqués sur Drive et récupérez-les sur un autre téléphone avec « Charger depuis Drive », dans « Paramètres > Autres réglages > Sauvegarde sur Proton Drive ».</string>
+    <string name="whats_new_260_autosave_title">Sauvegarde automatique</string>
+    <string name="whats_new_260_autosave_body">Activez « Sauvegarde automatique » : la copie Drive reste à jour en arrière-plan, quelques minutes après chaque modification, et identique sur vos autres appareils. « Sauvegarder maintenant » enregistre tout de suite.</string>
     <string name="whats_new_260_worldmap_title">Une carte du monde plus riche</string>
     <string name="whats_new_260_worldmap_body">La carte du monde dessine désormais les frontières des pays et des provinces, colore la province où vous avez pris des photos, nomme les lieux quand vous zoomez et affiche les mêmes repères que la carte classique. Elle s\'ouvre sur l\'Europe, et en la déplaçant ou en pinçant, le point sous vos doigts reste en place.</string>
     <string name="whats_new_260_time_title">Format de l\'heure</string>
@@ -2467,15 +2546,15 @@
     <string name="whats_new_260_duplicates_title">Revue des doublons</string>
     <string name="whats_new_260_duplicates_body">Pincez, faites glisser ou touchez deux fois pour agrandir une copie jusqu\'à 6 fois avant de décider quoi supprimer. « Supprimer le groupe » sélectionne d\'un coup toutes les copies d\'un groupe.</string>
     <string name="whats_new_260_intro_title">Inclut les versions de test précédentes</string>
-    <string name="whats_new_260_intro_body">Cette version contient aussi tout ce qu\'apportaient les versions de test 1 à 5. Les cartes suivantes ne montrent que les nouveautés depuis.</string>
+    <string name="whats_new_260_intro_body">Cette version contient aussi tout ce qu\'apportaient les versions de test 1 à 6. Les cartes suivantes ne montrent que les nouveautés depuis.</string>
     <string name="whats_new_260_sdk_title">Interrupteurs du SDK Proton Drive</string>
-    <string name="whats_new_260_sdk_body">Réglages, Autres réglages, Proton Drive SDK propose un interrupteur pour les favoris et catégories, la corbeille, les téléchargements en pleine qualité et les envois. Tous sont désactivés. Activez-en un pour que cette action passe par le SDK Drive de Proton ; s\'il échoue, l\'app la fait comme d\'habitude.</string>
+    <string name="whats_new_260_sdk_body">Réglages, Autres réglages, Proton Drive SDK propose un interrupteur pour les favoris et catégories, la corbeille, les téléchargements en pleine qualité, les envois, les albums, le flux des modifications et les albums partagés avec vous. Tous sont désactivés. Activez-en un pour que cette action passe par le SDK Drive de Proton ; s\'il échoue, l\'app la fait comme d\'habitude.</string>
     <string name="whats_new_260_setas_title">Définir comme, et photos pour d\'autres apps</string>
     <string name="whats_new_260_setas_body">Le menu de la visionneuse confie une photo au réglage de fond d\'écran ou de photo de contact du téléphone. Activez le choix de photos dans Confidentialité et sécurité et d\'autres apps pourront choisir des photos ici ; les photos masquées ne sortent jamais.</string>
     <string name="whats_new_260_folderimport_title">Importer depuis un dossier</string>
     <string name="whats_new_260_folderimport_body">Importez un export Ente ou Google Takeout, ou de simples photos, depuis un dossier aussi bien que depuis un zip. Une Live Photo arrive comme une seule photo avec sa vidéo, et chaque photo reçoit une vraie date.</string>
     <string name="whats_new_260_mlsetup_title">Fonctions intelligentes dès la configuration</string>
-    <string name="whats_new_260_mlsetup_body">La configuration au premier lancement propose la reconnaissance des visages, la recherche de photos et Copier le texte, chacune avec sa taille de téléchargement. Choisissez ce que vous voulez et le téléchargement se fait en arrière-plan.</string>
+    <string name="whats_new_260_mlsetup_body">La configuration au premier lancement propose la reconnaissance des visages, la recherche de photos et Copier le texte, chacune avec sa taille de téléchargement. Choisissez ce que vous voulez et le téléchargement se fait en arrière-plan. Vous pouvez aussi les activer plus tard dans « Paramètres > Autres réglages > Apprentissage automatique ».</string>
     <string name="whats_new_260_longpress_title">L\'appui long, à votre façon</string>
     <string name="whats_new_260_longpress_body">Choisissez dans Réglages, Apparence si un appui long dans la visionneuse sélectionne le texte ou ouvre le menu. Le menu propose Reconnaître le texte et ne répète plus les boutons.</string>
     <string name="whats_new_260_nothumb_title">Les photos Drive s\'ouvrent à nouveau</string>
@@ -2486,6 +2565,56 @@
     <string name="whats_new_260_nullisland_body">Une photo dont l\'appareil a enregistré 0,0 comme lieu n\'apparaît plus sur la carte à Takoradi, au Ghana. Une modification de date ou de lieu garde la photo en favori, avec ses libellés et ses visages.</string>
     <string name="whats_new_260_likeness_title">Qui est-ce ? s\'améliore</string>
     <string name="whats_new_260_likeness_body">Pour nommer un visage, les personnes les plus ressemblantes sont de nouveau en tête. Sur les grandes photothèques, les noms donnés ou importés restent sur leur personne et le compteur ne se fige plus.</string>
+    <string name="whats_new_260_videoseek_title">Sauter et accélérer les vidéos</string>
+    <string name="whats_new_260_videoseek_body">Touchez deux fois le côté gauche ou droit d\'une vidéo pour reculer ou avancer de 10 secondes, ou maintenez un côté pour la lire plus vite jusqu\'à ce que vous relâchiez.</string>
+    <string name="whats_new_260_cloudcompress_title">Compresser sur Drive</string>
+    <string name="whats_new_260_cloudcompress_body">Les photos et vidéos présentes uniquement sur Drive peuvent être réduites depuis la visionneuse ou une sélection, et chaque original part dans la corbeille de Drive une fois sa copie plus légère en place. Cela marche aussi depuis la recherche, un album ou un lieu, en commençant par les plus récentes.</string>
+    <string name="whats_new_260_sharebackup_title">Sauvegarder depuis d\'autres apps</string>
+    <string name="whats_new_260_sharebackup_body">Choisissez « Sauvegarder sur Drive » en partageant des photos ou des vidéos depuis une autre app, ou sauvegardez une photo ouverte depuis une autre app, comme une pièce jointe d\'e-mail, directement depuis la visionneuse.</string>
+    <string name="whats_new_260_foldermove_title">Déplacer des dossiers une fois connecté</string>
+    <string name="whats_new_260_foldermove_body">« Déplacer vers un dossier » et « Renommer le dossier » fonctionnent désormais aussi une fois connecté, et une photo déjà sur Drive passe dans l\'album du dossier où elle a été déplacée.</string>
+    <string name="whats_new_260_drivecopies_title">Sauvegardes sur Drive</string>
+    <string name="whats_new_260_drivecopies_body">« Sauvegardes sur Drive » liste la sauvegarde de chaque appareil et la date de son dernier enregistrement, et tant que « Sauvegarde automatique » est activée, « Effacer les données de visages » demande s\'il faut supprimer seulement sur ce téléphone ou partout.</string>
+    <string name="whats_new_260_glass_title">Verre liquide</string>
+    <string name="whats_new_260_glass_body">Sur Android 12 et versions ultérieures, activez « Verre liquide » dans « Paramètres > Apparence &amp; langue > Thème et palette » pour givrer les menus, les en-têtes, les panneaux, les commandes de la visionneuse et le champ de recherche ; c\'est encore en cours et pas encore sur tous les écrans.</string>
+    <string name="whats_new_260_detailsheet_title">Un nouveau panneau de détails</string>
+    <string name="whats_new_260_detailsheet_body">« Détails » s\'ouvre sur un résumé de la photo, et sa date, son lieu, ses étiquettes et ses catégories s\'ouvrent chacun comme une page dans le panneau, avec un calendrier et une carte.</string>
+    <string name="whats_new_260_multiedit_title">Modifier plusieurs photos</string>
+    <string name="whats_new_260_multiedit_body">Changer la date ou le lieu de plusieurs photos ressemble désormais au panneau de détails, avec les choix de date dans un seul sélecteur et le calendrier et la carte qui s\'ouvrent en panneaux.</string>
+    <string name="whats_new_260_personmonths_title">Les mois sur la page d\'une personne</string>
+    <string name="whats_new_260_personmonths_body">La page d\'une personne affiche un en-tête de mois au-dessus de chaque série de photos, et la visionneuse ouverte depuis une personne nommée propose « Définir comme couverture » et « Retirer de la personne ».</string>
+    <string name="whats_new_260_timelinestay_title">Le fil reste en place</string>
+    <string name="whats_new_260_timelinestay_body">Ouvrir une photo depuis la Collection ou la page d\'une personne puis passer aux suivantes ne déplace plus le fil en dessous.</string>
+    <string name="whats_new_260_setup_title">Une première configuration plus claire</string>
+    <string name="whats_new_260_setup_body">La configuration au premier lancement ressemble désormais aux Paramètres, avec un bouton principal par étape, « Pas maintenant » sur les étapes d\'autorisation et une dernière étape qui liste ce qui sera activé.</string>
+    <string name="whats_new_260_folderbackfill_title">Les albums de dossier se remplissent</string>
+    <string name="whats_new_260_folderbackfill_body">Activer l\'album d\'un dossier y ajoute aussi les photos de ce dossier déjà sauvegardées, et crée l\'album si besoin.</string>
+    <string name="whats_new_260_freeupcheck_title">Libérer de l\'espace, vérifié deux fois</string>
+    <string name="whats_new_260_freeupcheck_body">Libérer vérifie les copies de l\'appareil auprès de Drive par petits groupes juste avant de les supprimer, et demande dans plusieurs fenêtres du système quand plus de 2 000 photos en ont besoin.</string>
+    <string name="whats_new_260_removedstays_title">Les photos retirées le restent</string>
+    <string name="whats_new_260_removedstays_body">Une photo dont vous avez mis la copie Drive à la corbeille, ici, sur un autre appareil ou sur le web, n\'est plus renvoyée par la sauvegarde automatique.</string>
+    <string name="whats_new_260_peoplepics_title">Images et affichage des personnes</string>
+    <string name="whats_new_260_peoplepics_body">Les images des visages sur la page Personnes et dans « Qui est-ce ? » ne restent plus sombres sur les grandes bibliothèques, et la page Personnes peut suivre l\'affichage de l\'onglet Albums ou garder sa propre grille ou liste.</string>
+    <string name="whats_new_260_desktopsync_title">Avec l\'app de bureau</string>
+    <string name="whats_new_260_desktopsync_body">Avec « Sauvegarde automatique » activée, les visages, les noms, les étiquettes, la recherche et les photos masquées restent les mêmes sur ce téléphone, vos autres téléphones et l\'app de bureau Photos for Proton ; un changement sur l\'un apparaît sur les autres en quelques minutes. En l\'activant, l\'app indique les versions dont les autres appareils ont besoin.</string>
+    <string name="whats_new_260_facefix_title">Corriger un visage depuis la visionneuse</string>
+    <string name="whats_new_260_facefix_body">Appuyez longuement sur un visage nommé dans la visionneuse pour indiquer que ce n\'est pas cette personne, et le menu d\'une personne nommée propose « Retirer le nom ».</string>
+    <string name="whats_new_260_coldstart_title">Démarrage plus rapide sur les grandes bibliothèques</string>
+    <string name="whats_new_260_coldstart_body">Toute la bibliothèque s\'affiche dès l\'ouverture de l\'app, au lieu des seules photos les plus récentes pendant la lecture du reste.</string>
+    <string name="whats_new_260_newphotos_title">Les nouvelles photos arrivent seules</string>
+    <string name="whats_new_260_newphotos_body">Les photos prises ou enregistrées pendant que l\'app est ouverte sont analysées pour les visages et la recherche d\'elles-mêmes, sans redémarrage ni tirer pour actualiser.</string>
+    <string name="whats_new_260_namessafe_title">Les noms des visages restent sûrs</string>
+    <string name="whats_new_260_namessafe_body">Un renommage ou une fusion faits pendant le regroupement ne sont plus annulés, les fusions automatiques restent corrigeables, les visages d\'une photo sauvegardée restent après la libération d\'espace, et les photos masquées quittent Personnes.</string>
+    <string name="whats_new_260_namecase_title">Un nom, une personne</string>
+    <string name="whats_new_260_namecase_body">« adam » et « Adam » sont une seule personne, comme dans l\'app de bureau, tandis que « Ádám » et « Adam » restent deux, et le nombre de photos d\'une personne correspond à sa page.</string>
+    <string name="whats_new_260_favsync_title">Favoris depuis d\'autres appareils</string>
+    <string name="whats_new_260_favsync_body">Un favori ajouté ou retiré sur le web ou un autre appareil apparaît ici en quelques secondes.</string>
+    <string name="whats_new_260_copydate_title">Date des photos copiées</string>
+    <string name="whats_new_260_copydate_body">Une photo ou une vidéo copiée sur le téléphone sans date propre affiche le jour où elle a été prise au lieu du jour où elle a été ajoutée.</string>
+    <string name="whats_new_260_widgetopen_title">Le widget ouvre la photo</string>
+    <string name="whats_new_260_widgetopen_body">Toucher un widget qui montre des photos de Drive ouvre cette photo au lieu du fil, et son sélecteur de photos ne saute plus au premier choix.</string>
+    <string name="whats_new_260_smallfixes_title">Petites corrections</string>
+    <string name="whats_new_260_smallfixes_body">Un découpage vidéo sans perte ne perd plus d\'images au début, un appui long sur les boutons de la visionneuse ne lit plus le texte de la photo, un album de dossier activé pendant la première sauvegarde reçoit ses photos, et les poignées du recadrage au bord de l\'écran fonctionnent à nouveau.</string>
     <string name="whats_new_260_group_title">Regroupement des visages dans les grandes bibliothèques</string>
     <string name="whats_new_260_group_body">Les bibliothèques de plus de trente mille visages terminent désormais leur regroupement. Les personnes apparaissent pendant le traitement, les noms que vous avez donnés restent sur leurs personnes, et le travail continue en arrière-plan quand vous quittez l\'appli.</string>
     <string name="whats_new_260_savedrive_title">Enregistrer une photo partagée dans votre Drive</string>
@@ -2535,7 +2664,10 @@
     <string name="viewer_save_to_drive_failed">Échec de l\'enregistrement dans Drive</string>
     <string name="viewer_remove_shared_confirm_body">La photo est retirée de l\'album partagé. Elle reste chez le propriétaire de l\'album et n\'y sera plus visible.</string>
     <string name="onboarding_ml_title">Fonctions intelligentes sur votre appareil</string>
-    <string name="onboarding_ml_subtitle">Retrouvez des personnes et des choses dans vos photos, et copiez-en le texte. Tout fonctionne sur ce téléphone et rien ne le quitte. Choisissez maintenant ce que vous voulez ou modifiez-le plus tard dans les Réglages.</string>
+    <string name="onboarding_ml_subtitle">Trouvez des personnes et des objets dans vos photos et copiez-en le texte. Tout fonctionne sur ce téléphone et rien n\'en sort.</string>
     <string name="onboarding_ml_size">Téléchargement de %1$s</string>
     <string name="onboarding_ml_note">Les modèles se téléchargent une seule fois, après la configuration, en arrière-plan. Le Wi-Fi est recommandé, car sans Wi-Fi le téléchargement utilise les données mobiles.</string>
+    <string name="viewer_not_person_title">Ce n\'est pas %1$s ?</string>
+    <string name="viewer_not_person_body">Le visage quitte %1$s. La photo reste, et le visage peut être suggéré à quelqu\'un d\'autre.</string>
+    <string name="viewer_not_person_confirm">Pas %1$s</string>
 </resources>

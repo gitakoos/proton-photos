@@ -45,6 +45,7 @@ import eu.akoos.photos.data.db.dao.PersonDao
 import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.data.face.FaceSweepEvent
 import eu.akoos.photos.data.preferences.SettingsKeys
@@ -86,6 +87,7 @@ class FindMorePhotosViewModel @Inject constructor(
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val faceIndexingScheduler: FaceIndexingScheduler,
     private val getGalleryItems: GetGalleryItemsUseCase,
+    private val faceEdits: FaceEditCounter,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -191,14 +193,16 @@ class FindMorePhotosViewModel @Inject constructor(
                     manualName = name?.takeIf { it.isNotBlank() },
                 )
             }
-            faceDao.upsert(rows)
-            // Count the person the same way every other path does: their face photos unioned with any
-            // manually attached ones, de-duplicated, so a person carrying manual adds is not under-counted.
-            val manual = if (name.isNullOrBlank()) emptyList()
-                else personManualPhotoDao.photoKeysForNameList(account, name)
-            val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
-            val cover = personDao.personById(personId)?.coverFaceId ?: faceDao.topFaceForPerson(account, personId)
-            personDao.updateCoverAndCount(personId, cover, count)
+            faceEdits.edit {
+                faceDao.upsert(rows)
+                // Count the person the same way every other path does: their face photos unioned with any
+                // manually attached ones, de-duplicated, so a person carrying manual adds is not under-counted.
+                val manual = if (name.isNullOrBlank()) emptyList()
+                    else personManualPhotoDao.photoKeysForNameList(account, name)
+                val count = personPhotoCount(faceDao.distinctPhotoKeysForPerson(account, personId), manual)
+                val cover = personDao.personById(personId)?.coverFaceId ?: faceDao.topFaceForPerson(account, personId)
+                personDao.updateCoverAndCount(personId, cover, count)
+            }
         }
     }
 

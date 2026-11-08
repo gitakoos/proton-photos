@@ -30,6 +30,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.datastore.preferences.core.edit
+import eu.akoos.photos.presentation.common.AppModalSheet
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -124,7 +128,6 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -629,6 +632,9 @@ fun GalleryScreen(
     }
 
     val mediaPermissions = MediaPermissions.requestSet(Build.VERSION.SDK_INT)
+    // Whether the request going out now asks for access the app already held: its instant answer then
+    // changes nothing the device list was read under, so it must not start another whole-library scan.
+    val askedWhileGranted = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -637,7 +643,7 @@ fun GalleryScreen(
         val granted = readResults.values.any { it }
         val permanentlyDenied = !granted && context is android.app.Activity &&
             readResults.keys.none { ActivityCompat.shouldShowRequestPermissionRationale(context, it) }
-        viewModel.onPermissionResult(granted, permanentlyDenied)
+        viewModel.onPermissionResult(granted, permanentlyDenied, alreadyHeld = askedWhileGranted.getAndSet(false) && granted)
     }
 
     // Separate launcher from media so a notification denial doesn't taint the media verdict.
@@ -703,6 +709,7 @@ fun GalleryScreen(
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         }
         if (mediaGranted) {
+            askedWhileGranted.set(true)
             permissionLauncher.launch(mediaPermissions)
         } else {
             appLock.runWhenOpen { permissionLauncher.launch(mediaPermissions) }
@@ -729,8 +736,9 @@ fun GalleryScreen(
         val idx = state.items.indexOfFirst { item ->
             when (item) {
                 is GalleryItem.LocalOnly -> item.local.uri == uri
-                is GalleryItem.Synced    -> item.local.uri == uri
-                is GalleryItem.CloudOnly -> false
+                // A cloud-photos widget hands the Drive link id: such a photo has no device uri.
+                is GalleryItem.Synced    -> item.local.uri == uri || item.cloud.linkId == uri
+                is GalleryItem.CloudOnly -> item.cloud.linkId == uri
             }
         }
         if (idx >= 0) {
@@ -986,7 +994,7 @@ fun GalleryScreen(
         viewModel.shareIntent.collect { intent ->
             appLock.runWhenOpen {
                 runCatching {
-                    context.startActivity(Intent.createChooser(intent, shareChooserTitle))
+                    context.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(context, intent, shareChooserTitle))
                 }
             }
         }
@@ -1157,6 +1165,8 @@ fun GalleryScreen(
     val newsUnread by viewModel.newsUnread.collectAsStateWithLifecycle()
     val faceEnabled by viewModel.faceEnabled.collectAsStateWithLifecycle()
 
+    // The grid as the floating header and dock frost it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(appColors.bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1172,7 +1182,7 @@ fun GalleryScreen(
         HorizontalPager(
             state = pagerState,
             userScrollEnabled = !state.isSelectionMode,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().glassSource(glass),
         ) { page ->
         when (page) {
             0 -> {
@@ -1335,7 +1345,7 @@ fun GalleryScreen(
         ) {
             Box(modifier = Modifier.animateContentSize()) {
                 Crossfade(targetState = pagerState.currentPage, label = "headerTab") { page ->
-                    CompositionLocalProvider(LocalPeopleRail provides peopleRail) {
+                    CompositionLocalProvider(LocalPeopleRail provides peopleRail, LocalGlassBackdrop provides glass) {
                     GalleryHeader(
                         selectedTab = page,
                         galleryState = state,
@@ -1423,6 +1433,7 @@ fun GalleryScreen(
             selected = state.selectedItems.size,
         )
         SelectionDrawer(
+            backdrop = glass,
             visible = state.isSelectionMode,
             items = remember(state.selectedItems) { state.selectedItems.toList() },
             actions = selectionActions,
@@ -1534,6 +1545,7 @@ fun GalleryScreen(
                 .navigationBarsPadding()
                 .padding(bottom = 24.dp),
         ) {
+            CompositionLocalProvider(LocalGlassBackdrop provides glass) {
             BottomDock(
                 // The live fractional page position drives the sliding highlight, so it follows a swipe.
                 position = pagerState.currentPage + pagerState.currentPageOffsetFraction,
@@ -1565,6 +1577,7 @@ fun GalleryScreen(
                     tabScope.launch { pagerState.animateScrollToPage(tab) }
                 },
             )
+            }
         }
 
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(
@@ -1599,7 +1612,7 @@ fun GalleryScreen(
 
     // ── Bottom sheets — extracted to GalleryDialogs.kt for JIT-blob shrink ────
     if (showFilterSheet) {
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = filterSheetState,
             containerColor = AppColors.current.sheetBg,

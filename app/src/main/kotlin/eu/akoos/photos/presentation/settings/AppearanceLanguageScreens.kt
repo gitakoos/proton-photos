@@ -93,6 +93,7 @@ fun AppearanceSettingsScreen(
     onTimeFormatClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
     onAlbumsSettingsClick: () -> Unit = {},
+    onPeopleSettingsClick: () -> Unit = {},
     onLandingTabClick: () -> Unit = {},
     onViewerClick: () -> Unit = {},
 ) {
@@ -131,6 +132,11 @@ fun AppearanceSettingsScreen(
             NavRow(
                 label = stringResource(R.string.gallery_tab_albums),
                 onClick = onAlbumsSettingsClick,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.gallery_category_people),
+                onClick = onPeopleSettingsClick,
             )
             RowDivider()
             NavRow(
@@ -240,6 +246,19 @@ fun ThemeSettingsScreen(
                 checked = state.tintCloudWithAccent,
                 onCheckedChange = { viewModel.setTintCloudWithAccent(it) },
             )
+        }
+
+        // Frosted pills blur a layer of the screen, which Android 11 and older cannot do.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            Spacer(Modifier.height(20.dp))
+            SettingsCard {
+                ToggleRow(
+                    label = stringResource(R.string.settings_liquid_glass),
+                    description = stringResource(R.string.settings_liquid_glass_desc),
+                    checked = state.liquidGlass,
+                    onCheckedChange = { viewModel.setLiquidGlass(it) },
+                )
+            }
         }
 
         // ── AMOLED pure-black toggle — only takes effect in dark mode, so it shows only when the

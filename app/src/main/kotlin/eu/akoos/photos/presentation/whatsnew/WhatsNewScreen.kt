@@ -80,6 +80,8 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.PillBg
 import kotlinx.coroutines.launch
@@ -211,6 +213,8 @@ fun WhatsNewScreen(
         onDone()
     }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -220,118 +224,132 @@ fun WhatsNewScreen(
         // Room the floating header reserves at the top: the status-bar inset + the pill-row height.
         val contentTopPad = floatingHeaderContentTopPadding()
 
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            // The usable page is the screen minus the header inset and the pinned bottom band. The
-            // band figure is a slight over-estimate of the real dots + button + nav insets, so the
-            // pager it packs against is never taller than the space the cards actually get.
-            val bottomBandHeight = 108.dp + navBottom
-            val pageHeight = (maxHeight - contentTopPad - bottomBandHeight).coerceAtLeast(160.dp)
-            val featurePages = remember(pageHeight, release) {
-                categoryFeaturePages(release, pageHeight, WhatsNewCardEstimate, 12.dp, WhatsNewSectionHeaderHeight)
-            }
-            // A headline card, where the release has one, takes page 0 on its own; the feature
-            // pages follow. A release without one starts straight at its features. On a preview
-            // build the diagnostics card takes the very first page, ahead of everything else.
-            val introPages = if (showDiagnosticsIntro) 1 else 0
-            val heroPages = if (release.hero != null) 1 else 0
-            val pageCount = introPages + heroPages + featurePages.size
-            val pagerState = rememberPagerState(pageCount = { pageCount })
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                // The usable page is the screen minus the header inset and the pinned bottom band. The
+                // band figure is a slight over-estimate of the real dots + button + nav insets, so the
+                // pager it packs against is never taller than the space the cards actually get.
+                val bottomBandHeight = 108.dp + navBottom
+                val pageHeight = (maxHeight - contentTopPad - bottomBandHeight).coerceAtLeast(160.dp)
+                val featurePages = remember(pageHeight, release) {
+                    categoryFeaturePages(release, pageHeight, WhatsNewCardEstimate, 12.dp, WhatsNewSectionHeaderHeight)
+                }
+                // A headline card, where the release has one, takes page 0 on its own; the feature
+                // pages follow. A release without one starts straight at its features. On a preview
+                // build the diagnostics card takes the very first page, ahead of everything else.
+                val introPages = if (showDiagnosticsIntro) 1 else 0
+                val heroPages = if (release.hero != null) 1 else 0
+                val pageCount = introPages + heroPages + featurePages.size
+                val pagerState = rememberPagerState(pageCount = { pageCount })
 
-            Column(modifier = Modifier.fillMaxSize()) {
-                Spacer(Modifier.height(contentTopPad))
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    verticalAlignment = Alignment.Top,
-                ) { page ->
-                    val pageScroll = rememberScrollState()
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(pageScroll)
-                                .padding(horizontal = 16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            if (introPages == 1 && page == 0) {
-                                WhatsNewDiagnosticsCard()
-                            } else {
-                                val innerPage = page - introPages
-                                if (heroPages == 1 && innerPage == 0) {
-                                    when (release.hero) {
-                                        WhatsNewHero.Hide -> WhatsNewHideCard()
-                                        WhatsNewHero.AlbumOrder -> WhatsNewAlbumOrderCard()
-                                        null -> Unit
-                                    }
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Spacer(Modifier.height(contentTopPad))
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
+                    ) { page ->
+                        val pageScroll = rememberScrollState()
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(pageScroll)
+                                    .padding(horizontal = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                if (introPages == 1 && page == 0) {
+                                    WhatsNewDiagnosticsCard()
                                 } else {
-                                    val featurePage = featurePages[innerPage - heroPages]
-                                    featurePage.headerRes?.let { headerRes ->
-                                        WhatsNewSectionHeader(stringResource(headerRes))
-                                    }
-                                    for (feature in featurePage.features) {
-                                        WhatsNewCard(
-                                            icon = feature.icon,
-                                            title = stringResource(feature.titleRes),
-                                            body = stringResource(feature.bodyRes),
-                                        )
+                                    val innerPage = page - introPages
+                                    if (heroPages == 1 && innerPage == 0) {
+                                        when (release.hero) {
+                                            WhatsNewHero.Hide -> WhatsNewHideCard()
+                                            WhatsNewHero.AlbumOrder -> WhatsNewAlbumOrderCard()
+                                            null -> Unit
+                                        }
+                                    } else {
+                                        val featurePage = featurePages[innerPage - heroPages]
+                                        featurePage.headerRes?.let { headerRes ->
+                                            WhatsNewSectionHeader(stringResource(headerRes))
+                                        }
+                                        for (feature in featurePage.features) {
+                                            WhatsNewCard(
+                                                icon = feature.icon,
+                                                title = stringResource(feature.titleRes),
+                                                body = stringResource(feature.bodyRes),
+                                            )
+                                        }
                                     }
                                 }
+                                // The closing line comes from the release being read, not from the app, so
+                                // an older release cannot advertise changes that shipped after it.
+                                val moreRes = release.moreRes
+                                if (moreRes != null && page == pageCount - 1) {
+                                    Text(
+                                        stringResource(moreRes),
+                                        color = colors.fgMute, fontSize = 13.sp,
+                                        modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp),
+                                    )
+                                }
+                                // A little breathing room so the last card clears the scroll hint.
+                                Spacer(Modifier.height(20.dp))
                             }
-                            // The closing line comes from the release being read, not from the app, so
-                            // an older release cannot advertise changes that shipped after it.
-                            val moreRes = release.moreRes
-                            if (moreRes != null && page == pageCount - 1) {
-                                Text(
-                                    stringResource(moreRes),
-                                    color = colors.fgMute, fontSize = 13.sp,
-                                    modifier = Modifier.padding(top = 4.dp, start = 4.dp, end = 4.dp),
+                            // A downward chevron while this page can still scroll down, so a page taller
+                            // than the screen (a long card, or a large font scale) reads as scrollable
+                            // instead of looking cut off. It disappears once the bottom is reached.
+                            if (pageScroll.canScrollForward) {
+                                Box(
+                                    Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .background(
+                                            androidx.compose.ui.graphics.Brush.verticalGradient(
+                                                listOf(colors.pageBg.copy(alpha = 0f), colors.pageBg),
+                                            ),
+                                        ),
                                 )
+                                WhatsNewScrollHint(Modifier.align(Alignment.BottomCenter))
                             }
-                            // A little breathing room so the last card clears the scroll hint.
-                            Spacer(Modifier.height(20.dp))
-                        }
-                        // A downward chevron while this page can still scroll down, so a page taller
-                        // than the screen (a long card, or a large font scale) reads as scrollable
-                        // instead of looking cut off. It disappears once the bottom is reached.
-                        if (pageScroll.canScrollForward) {
-                            WhatsNewScrollHint(Modifier.align(Alignment.BottomCenter))
                         }
                     }
-                }
 
-                // Pinned bottom band: page dots then the dismiss button, clear of the nav bar.
-                Spacer(Modifier.height(12.dp))
-                WhatsNewPagerDots(current = pagerState.currentPage, count = pageCount)
-                Spacer(Modifier.height(14.dp))
-                Button(
-                    onClick = {
-                        viewModel.markSeen()
-                        onDone()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.accent,
-                        contentColor = colors.activeChipText,
-                    ),
-                ) {
-                    Text(
-                        stringResource(R.string.whats_new_done),
-                        fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    )
+                    // Pinned bottom band: page dots then the dismiss button, clear of the nav bar.
+                    Spacer(Modifier.height(12.dp))
+                    WhatsNewPagerDots(current = pagerState.currentPage, count = pageCount)
+                    Spacer(Modifier.height(14.dp))
+                    Button(
+                        onClick = {
+                            viewModel.markSeen()
+                            onDone()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.accent,
+                            contentColor = colors.activeChipText,
+                        ),
+                    ) {
+                        Text(
+                            stringResource(R.string.whats_new_done),
+                            fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(navBottom + 12.dp))
                 }
-                Spacer(Modifier.height(navBottom + 12.dp))
             }
         }
 
         // Floating pill header (matches the other secondary screens): title pill + a back button
         // that dismisses exactly like Got-it. Back marks the version seen too.
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.whats_new_title),
             onBack = {
                 viewModel.markSeen()

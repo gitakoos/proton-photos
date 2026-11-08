@@ -74,6 +74,8 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgDim
@@ -90,6 +92,8 @@ fun SyncFoldersScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -98,210 +102,212 @@ fun SyncFoldersScreen(
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val contentTopPad = floatingHeaderContentTopPadding()
 
-        if (state.isLoading) {
-            // Skeleton folder rows so the layout previews itself before content arrives.
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = contentTopPad)
-                    .padding(horizontal = 20.dp)
-                    .background(colors.cardBg, cardShape)
-                    .border(0.5.dp, colors.cardBorder, cardShape),
-            ) {
-                repeat(5) { idx ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        eu.akoos.photos.presentation.common.ShimmerBox(
-                            modifier = Modifier.size(56.dp),
-                            cornerRadius = 10.dp,
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            eu.akoos.photos.presentation.common.ShimmerTextLine(widthFraction = 0.55f, height = 14.dp)
-                            Spacer(Modifier.height(6.dp))
-                            eu.akoos.photos.presentation.common.ShimmerTextLine(widthFraction = 0.3f, height = 11.dp)
-                        }
-                    }
-                    if (idx < 4) HorizontalDivider(
-                        modifier = Modifier.padding(start = 86.dp),
-                        thickness = 0.5.dp,
-                        color = colors.cardBorder,
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = contentTopPad, bottom = navBottom),
-            ) {
-                // ── Description ──────────────────────────────────────────────
-                item {
-                    Text(
-                        stringResource(R.string.sync_folders_description),
-                        color = FgMute,
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        modifier = Modifier
-                            .padding(horizontal = 20.dp)
-                            .padding(top = 4.dp, bottom = 12.dp),
-                    )
-                }
-
-                // ── Select-all control row ────────────────────────────────────
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .padding(bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            stringResource(R.string.sync_folders_count_selected, state.selectedCount, state.folders.size),
-                            color = FgDim, fontSize = 12.sp,
-                        )
-                        Text(
-                            if (state.allSelected) stringResource(R.string.gallery_deselect_all) else stringResource(R.string.select_all),
-                            color = Accent,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable {
-                                if (state.allSelected) viewModel.deselectAll()
-                                else viewModel.selectAll()
-                            },
-                        )
-                    }
-                }
-
-                // ── Folder list card ──────────────────────────────────────────
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .background(colors.cardBg, cardShape)
-                            .border(0.5.dp, colors.cardBorder, cardShape),
-                    ) {
-                        state.folders.forEachIndexed { i, folder ->
-                            FolderRow(
-                                folder   = folder,
-                                onToggle = { viewModel.toggle(folder.name) },
-                                onMirrorToggle = { viewModel.toggleMirror(folder.name) },
-                                onRemove = { viewModel.removeManualFolder(folder.name) },
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            if (state.isLoading) {
+                // Skeleton folder rows so the layout previews itself before content arrives.
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = contentTopPad)
+                        .padding(horizontal = 20.dp)
+                        .background(colors.cardBg, cardShape)
+                        .border(0.5.dp, colors.cardBorder, cardShape),
+                ) {
+                    repeat(5) { idx ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            eu.akoos.photos.presentation.common.ShimmerBox(
+                                modifier = Modifier.size(56.dp),
+                                cornerRadius = 10.dp,
                             )
-                            if (i < state.folders.lastIndex) {
-                                HorizontalDivider(
-                                    modifier  = Modifier.padding(start = 86.dp),
-                                    thickness = 0.5.dp,
-                                    color     = colors.cardBorder,
-                                )
+                            Column(modifier = Modifier.weight(1f)) {
+                                eu.akoos.photos.presentation.common.ShimmerTextLine(widthFraction = 0.55f, height = 14.dp)
+                                Spacer(Modifier.height(6.dp))
+                                eu.akoos.photos.presentation.common.ShimmerTextLine(widthFraction = 0.3f, height = 11.dp)
                             }
                         }
+                        if (idx < 4) HorizontalDivider(
+                            modifier = Modifier.padding(start = 86.dp),
+                            thickness = 0.5.dp,
+                            color = colors.cardBorder,
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = contentTopPad, bottom = navBottom),
+                ) {
+                    // ── Description ──────────────────────────────────────────────
+                    item {
+                        Text(
+                            stringResource(R.string.sync_folders_description),
+                            color = FgMute,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            modifier = Modifier
+                                .padding(horizontal = 20.dp)
+                                .padding(top = 4.dp, bottom = 12.dp),
+                        )
+                    }
 
-                        if (state.folders.isEmpty()) {
+                    // ── Select-all control row ────────────────────────────────────
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                                .padding(bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                stringResource(R.string.sync_folders_count_selected, state.selectedCount, state.folders.size),
+                                color = FgDim, fontSize = 12.sp,
+                            )
+                            Text(
+                                if (state.allSelected) stringResource(R.string.gallery_deselect_all) else stringResource(R.string.select_all),
+                                color = Accent,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.clickable {
+                                    if (state.allSelected) viewModel.deselectAll()
+                                    else viewModel.selectAll()
+                                },
+                            )
+                        }
+                    }
+
+                    // ── Folder list card ──────────────────────────────────────────
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                                .background(colors.cardBg, cardShape)
+                                .border(0.5.dp, colors.cardBorder, cardShape),
+                        ) {
+                            state.folders.forEachIndexed { i, folder ->
+                                FolderRow(
+                                    folder   = folder,
+                                    onToggle = { viewModel.toggle(folder.name) },
+                                    onMirrorToggle = { viewModel.toggleMirror(folder.name) },
+                                    onRemove = { viewModel.removeManualFolder(folder.name) },
+                                )
+                                if (i < state.folders.lastIndex) {
+                                    HorizontalDivider(
+                                        modifier  = Modifier.padding(start = 86.dp),
+                                        thickness = 0.5.dp,
+                                        color     = colors.cardBorder,
+                                    )
+                                }
+                            }
+
+                            if (state.folders.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 32.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        stringResource(R.string.settings_excluded_folders_empty),
+                                        color = FgMute, fontSize = 13.sp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Add custom folder action ──────────────────────────────────
+                    item {
+                        var showAddDialog by remember { mutableStateOf(false) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 12.dp)
+                                .clickable { showAddDialog = true },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 32.dp),
+                                    .size(36.dp)
+                                    .background(Accent.copy(alpha = 0.18f), CircleShape),
                                 contentAlignment = Alignment.Center,
                             ) {
+                                Icon(Icons.Default.Add, stringResource(R.string.sync_folders_add_action), tint = Accent, modifier = Modifier.size(20.dp))
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(R.string.sync_folders_add_row_title), color = FgPrimary, fontSize = 14.sp)
                                 Text(
-                                    stringResource(R.string.settings_excluded_folders_empty),
-                                    color = FgMute, fontSize = 13.sp,
+                                    stringResource(R.string.sync_folders_add_row_subtitle),
+                                    color = FgMute, fontSize = 11.sp,
                                 )
                             }
                         }
-                    }
-                }
-
-                // ── Add custom folder action ──────────────────────────────────
-                item {
-                    var showAddDialog by remember { mutableStateOf(false) }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 12.dp)
-                            .clickable { showAddDialog = true },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .background(Accent.copy(alpha = 0.18f), CircleShape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(Icons.Default.Add, stringResource(R.string.sync_folders_add_action), tint = Accent, modifier = Modifier.size(20.dp))
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(R.string.sync_folders_add_row_title), color = FgPrimary, fontSize = 14.sp)
-                            Text(
-                                stringResource(R.string.sync_folders_add_row_subtitle),
-                                color = FgMute, fontSize = 11.sp,
+                        if (showAddDialog) {
+                            var input by remember { mutableStateOf("") }
+                            var nameError by remember { mutableStateOf(false) }
+                            AlertDialog(
+                                onDismissRequest = { showAddDialog = false },
+                                title = { Text(stringResource(R.string.sync_folders_add_dialog_title), color = FgPrimary) },
+                                text = {
+                                    Column {
+                                        Text(
+                                            stringResource(R.string.sync_folders_add_dialog_body),
+                                            color = FgMute, fontSize = 12.sp,
+                                        )
+                                        Spacer(Modifier.height(12.dp))
+                                        OutlinedTextField(
+                                            value = input,
+                                            onValueChange = {
+                                                input = it
+                                                nameError = false
+                                            },
+                                            singleLine = true,
+                                            shape = RoundedCornerShape(14.dp),
+                                            placeholder = { Text(stringResource(R.string.sync_folders_add_dialog_name_hint)) },
+                                            isError = nameError,
+                                        )
+                                        if (nameError) {
+                                            Spacer(Modifier.height(6.dp))
+                                            Text(
+                                                stringResource(R.string.sync_folders_add_dialog_name_invalid),
+                                                color = FgMute, fontSize = 11.5.sp,
+                                            )
+                                        }
+                                    }
+                                },
+                                confirmButton = {
+                                    TextButton(
+                                        onClick = {
+                                            if (viewModel.addManualFolder(input)) showAddDialog = false
+                                            else nameError = true
+                                        },
+                                    ) { Text(stringResource(R.string.share_invite_add), color = Accent) }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showAddDialog = false }) {
+                                        Text(stringResource(R.string.cancel), color = FgDim)
+                                    }
+                                },
+                                containerColor = colors.cardBg,
                             )
                         }
                     }
-                    if (showAddDialog) {
-                        var input by remember { mutableStateOf("") }
-                        var nameError by remember { mutableStateOf(false) }
-                        AlertDialog(
-                            onDismissRequest = { showAddDialog = false },
-                            title = { Text(stringResource(R.string.sync_folders_add_dialog_title), color = FgPrimary) },
-                            text = {
-                                Column {
-                                    Text(
-                                        stringResource(R.string.sync_folders_add_dialog_body),
-                                        color = FgMute, fontSize = 12.sp,
-                                    )
-                                    Spacer(Modifier.height(12.dp))
-                                    OutlinedTextField(
-                                        value = input,
-                                        onValueChange = {
-                                            input = it
-                                            nameError = false
-                                        },
-                                        singleLine = true,
-                                        shape = RoundedCornerShape(14.dp),
-                                        placeholder = { Text(stringResource(R.string.sync_folders_add_dialog_name_hint)) },
-                                        isError = nameError,
-                                    )
-                                    if (nameError) {
-                                        Spacer(Modifier.height(6.dp))
-                                        Text(
-                                            stringResource(R.string.sync_folders_add_dialog_name_invalid),
-                                            color = FgMute, fontSize = 11.5.sp,
-                                        )
-                                    }
-                                }
-                            },
-                            confirmButton = {
-                                TextButton(
-                                    onClick = {
-                                        if (viewModel.addManualFolder(input)) showAddDialog = false
-                                        else nameError = true
-                                    },
-                                ) { Text(stringResource(R.string.share_invite_add), color = Accent) }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showAddDialog = false }) {
-                                    Text(stringResource(R.string.cancel), color = FgDim)
-                                }
-                            },
-                            containerColor = colors.cardBg,
-                        )
-                    }
-                }
 
-                item { Spacer(Modifier.height(32.dp)) }
+                    item { Spacer(Modifier.height(32.dp)) }
+                }
             }
         }
 
-        FloatingHeader(title = stringResource(R.string.sync_folders_title), onBack = onBack)
+        FloatingHeader(backdrop = glass, title = stringResource(R.string.sync_folders_title), onBack = onBack)
     }
 }
 
@@ -352,7 +358,8 @@ private fun FolderRow(
                 color      = FgPrimary,
                 fontSize   = 14.sp,
                 fontWeight = FontWeight.Medium,
-                maxLines = 2,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
             Text(
                 pluralStringResource(R.plurals.count_photos_plural, folder.itemCount, folder.itemCount),

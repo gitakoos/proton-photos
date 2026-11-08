@@ -283,7 +283,10 @@ interface SyncStateDao {
     /** A cloud photo we just trashed is gone for good, so demote its SYNCED row to LOCAL_ONLY and drop
      *  the dead cloudFileId right away (no 15-minute grace-window wait). Re-adding the on-device copy
      *  to an album then uploads it fresh instead of trying to re-link the trashed id and doing nothing. */
-    @Query("UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL WHERE cloudFileId IN (:cloudFileIds) AND status = 'SYNCED'")
+    @Query(
+        "UPDATE sync_state SET status = 'LOCAL_ONLY', cloudFileId = NULL, queued = 0, " +
+            "queueSource = 'REMOVED_FROM_DRIVE', queuedAt = NULL WHERE cloudFileId IN (:cloudFileIds) AND status = 'SYNCED'"
+    )
     suspend fun demoteSyncedByCloudIds(cloudFileIds: List<String>)
 
     /**
@@ -346,6 +349,14 @@ interface SyncStateDao {
     @Query("UPDATE sync_state SET queued = 0, queueSource = NULL, queuedAt = NULL WHERE localUri = :localUri")
     suspend fun clearQueuedForSynced(localUri: String)
 
+    /** Marks a device photo whose Drive copy is gone as removed from Drive on purpose, so the folder
+     *  backup does not upload it again (see `QueueSource.REMOVED_FROM_DRIVE`). Only a LOCAL_ONLY row. */
+    @Query(
+        "UPDATE sync_state SET queued = 0, queueSource = 'REMOVED_FROM_DRIVE', queuedAt = NULL " +
+            "WHERE localUri = :localUri AND status = 'LOCAL_ONLY'"
+    )
+    suspend fun markRemovedFromDrive(localUri: String)
+
     /** [clearQueuedForSynced] for every uri in [localUris] in one statement, writing only a row that still
      *  carries some intent. The caller keeps the list within the host-variable limit. */
     @Query(
@@ -380,6 +391,10 @@ interface SyncStateDao {
     @Transaction
     @Query("UPDATE sync_state SET status = :newStatus WHERE localUri = :localUri")
     suspend fun updateStatus(localUri: String, newStatus: SyncStatus)
+
+    /** [updateStatus] for many rows in one statement; callers pass at most `SQL_CHUNK_SIZE` URIs. */
+    @Query("UPDATE sync_state SET status = :newStatus WHERE localUri IN (:localUris)")
+    suspend fun updateStatusByLocalUris(localUris: List<String>, newStatus: SyncStatus): Int
 
     @Query("DELETE FROM sync_state WHERE localUri = :localUri")
     suspend fun delete(localUri: String)

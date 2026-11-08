@@ -35,6 +35,7 @@ import android.util.Log
 import androidx.datastore.preferences.core.edit
 import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
+import eu.akoos.photos.data.db.dao.clearForUser
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,7 @@ import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_THRESHOLD
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
+import eu.akoos.photos.domain.usecase.FaceRegroupOutcome
 import eu.akoos.photos.domain.usecase.IncrementalBatch
 import eu.akoos.photos.domain.usecase.clusterFaces
 import eu.akoos.photos.domain.usecase.cosineSimilarity
@@ -76,6 +78,7 @@ import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import eu.akoos.photos.util.flatMapSqlChunks
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import me.proton.core.accountmanager.domain.AccountManager
@@ -105,6 +108,7 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.service.FaceIndexingService
 import eu.akoos.photos.util.DeviceHealthPolicy
 import eu.akoos.photos.util.FaceDiagnostics
+import eu.akoos.photos.util.HealthVerdict
 import eu.akoos.photos.util.FaceDiagnostics.RegroupTrigger
 import eu.akoos.photos.util.GuardedSessionHolder
 import eu.akoos.photos.util.MlAbandonCap
@@ -369,6 +373,15 @@ internal suspend fun <T> fencedGroupingStep(
 }
 
 /**
+ * Whether a full regroup that wrote nothing ([outcome]) asks for another: only when a user edit made while it
+ * ran turned it away, and no forced regroup is already waiting for the grouping lock ([queuedRegroups]), so
+ * edits made during one long regroup add a single regroup after it rather than one each. Pure so it is
+ * unit-tested without Android.
+ */
+internal fun regroupAgainAfterEdit(outcome: FaceRegroupOutcome, queuedRegroups: Int): Boolean =
+    !outcome.committed && outcome.editedMeanwhile && queuedRegroups == 0
+
+/**
  * Whether the pass-end grouping follows its incremental placement with a full regroup: when the
  * incremental path could not handle the pass (no usable cache, a large backlog, a failure), or when a
  * [settled] walk (about to stop rather than continue) still holds faces the incremental path left
@@ -439,6 +452,13 @@ internal fun lowerRegroupBaseline(baseline: Int?, ungrouped: Int): Int? =
  * ([finalPass]), when an earlier run left its closing steps owed ([finalizeOwed]) however few faces wait.
  * Pure so it is unit-tested without Android.
  */
+/**
+ * The accounts whose names a face model wipe keeps, in capture order: the guest's first, then [account]'s, so
+ * where both name the same face the signed-in account's name wins (each capture merges over the last).
+ */
+internal fun accountsKeptBeforeModelWipe(account: String): List<String> =
+    listOf(PhotoLocationEntity.LOCAL_USER, account).distinct()
+
 internal fun batchedRunDue(ungrouped: Int, baseline: Int?, finalizeOwed: Boolean, finalPass: Boolean): Boolean =
     exceedsRegroupBaseline(ungrouped, baseline) || (finalPass && finalizeOwed)
 
@@ -660,6 +680,10 @@ class FaceIndexingScheduler @Inject constructor(
      *  an incremental placement never interleaves with a full rewrite. Never held across a scan. */
     private val groupingLock = Mutex()
 
+    /** Forced regroups requested and not yet holding [groupingLock], so a regroup an edit turned away asks for
+     *  another only when none is already queued behind it ([regroupAgainAfterEdit]). */
+    private val queuedRegroups = AtomicInteger(0)
+
     /** Live mirror of the two gates, kept current by [watchSettings] so the per-photo check is a
      *  volatile read rather than a DataStore round trip per item. */
     @Volatile private var aiEnabled = false
@@ -762,6 +786,21 @@ class FaceIndexingScheduler @Inject constructor(
      * model is not on the device yet (a later trigger retries once it is). Safe to call repeatedly;
      * overlapping calls collapse to one walk.
      */
+    /** Moves the faces of every device photo that has a Drive copy onto that copy's key, as the walk does for
+     *  the photos it lists, but from the sync state alone. */
+    private suspend fun rekeyBackedUpFromSyncState(account: String) {
+        val deviceKeys = faceDao.devicePhotoKeys(account)
+        if (deviceKeys.isEmpty()) return
+        val fence = writeFence.token()
+        val pairs = syncStateRekeyPairs(account, deviceKeys.flatMapSqlChunks { appDatabase.syncStateDao().getByUris(it) })
+        if (pairs.isEmpty()) return
+        groupingLock.withLock {
+            for ((deviceKey, cloudKey) in pairs) {
+                rekeyPhotoFaces.invoke(account, deviceKey, cloudKey) { writeFence.allows(fence) }
+            }
+        }
+    }
+
     suspend fun indexAll(userId: UserId?) {
         restart.lastUserId = userId
         val prefs = context.settingsDataStore.data.first()
@@ -771,6 +810,13 @@ class FaceIndexingScheduler @Inject constructor(
         autoMerge = prefs[SettingsKeys.FACE_AUTO_MERGE] == true
         // Dark when off: no model prep, no enumeration, no walk.
         if (!aiEnabled) { setIdle(); return }
+        // A photo backed up while no walk ran keeps its faces on its device key: it counts twice in its people,
+        // and only the walk below would move them. Moved here from the database alone, cheap, so a paused or
+        // stopped walk leaves no photo on its device key.
+        userId?.let { acct ->
+            runCatching { rekeyBackedUpFromSyncState(acct.id) }
+                .onFailure { Log.w(TAG, "face rekey of backed-up photos failed: ${it.message}") }
+        }
         if (paused) { _progress.value = FaceIndexingProgress(FaceIndexingState.Paused, 0, 0); return }
         // A walk is already running: instead of dropping this request, ask the active walk to re-kick
         // when it finishes, so a start requested during a winding-down pass is never lost (which is
@@ -883,6 +929,14 @@ class FaceIndexingScheduler @Inject constructor(
             // embeddings with no re-embed; release keeps the new-faces-only guard.
             if (total == 0) {
                 retryBook.clear()
+                // Grouping is the heaviest step of all, so it waits for the same go-ahead as the scan: the
+                // charger when the user asked for it, battery and heat.
+                if (!awaitMlGoAhead(deviceHealth::mlVerdict, { deviceHealth.awaitMlWorkAllowed() }, FaceDiagnostics::recordPark) {
+                        active() && writeFence.allows(passToken)
+                    }
+                ) {
+                    return
+                }
                 // "Fully scanned" holds only for the library as this pass read it. An import since then may
                 // have brought or replaced faces, so the reattach and the grouping wait for the walk the
                 // import's caller starts next rather than acting on a stale view.
@@ -1380,7 +1434,8 @@ class FaceIndexingScheduler @Inject constructor(
      *  not while names wait to be reattached, short of their grace ([regroupAllowed]). Never a final run
      *  ([groupingRunEndsWalk]). */
     fun requestRecluster(userId: UserId?) {
-        scope.launch { runCatching { cluster(userId, RegroupTrigger.REQUEST, force = true) } }
+        queuedRegroups.incrementAndGet()
+        scope.launch { runCatching { cluster(userId, RegroupTrigger.REQUEST, force = true, queued = true) } }
     }
 
     /**
@@ -1389,8 +1444,10 @@ class FaceIndexingScheduler @Inject constructor(
      * Returns whether a regroup completed, so false while names wait to be reattached, short of their grace
      * ([regroupAllowed]).
      */
-    suspend fun regroupNow(userId: UserId?): Boolean =
-        cluster(userId, RegroupTrigger.REQUEST, force = true)
+    suspend fun regroupNow(userId: UserId?): Boolean {
+        queuedRegroups.incrementAndGet()
+        return cluster(userId, RegroupTrigger.REQUEST, force = true, queued = true)
+    }
 
     /**
      * Scan just the photo now on screen, so the viewer can offer a face to tag before the background
@@ -1745,15 +1802,7 @@ class FaceIndexingScheduler @Inject constructor(
     suspend fun wipeFaceData(userId: UserId?, thenIndex: Boolean = true) = withContext(NonCancellable) {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         reset()
-        appDatabase.withTransaction {
-            faceDao.clearForUser(account)
-            personDao.clearForUser(account)
-            faceScanDao.clearForUser(account)
-            personManualPhotoDao.clearForUser(account)
-            notPersonDao.clearForUser(account)
-            appDatabase.personCoverDao().clearForUser(account)
-            appDatabase.clusterSummaryDao().clearForUser(account)
-        }
+        appDatabase.withTransaction { appDatabase.clearFaceData(account) }
         if (thenIndex) requestIndex(userId)
     }
 
@@ -1778,7 +1827,10 @@ class FaceIndexingScheduler @Inject constructor(
             return
         }
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val faceTableEmpty = faceDao.facePhotoKeysForUser(account).isEmpty()
+        // The wipe clears every account's faces, and runs before a guest's faces are adopted, so the guest's
+        // names are kept along with the account's.
+        val keptAccounts = accountsKeptBeforeModelWipe(account)
+        val faceTableEmpty = keptAccounts.all { faceDao.facePhotoKeysForUser(it).isEmpty() }
         // A leftover whose content cannot be read has nothing to resume: taken for a pending snapshot, it
         // would let the wipe below run with no name kept, so it goes and the live faces, if any, are
         // captured instead.
@@ -1788,7 +1840,7 @@ class FaceIndexingScheduler @Inject constructor(
             // Faces still present: snapshot the names and exclusions the wipe is about to orphan, so the
             // re-detected library can carry them again once it is rebuilt.
             ReattachMigrationStep.Capture ->
-                runCatching { captureReattachSnapshot(account) }
+                runCatching { for (kept in keptAccounts) captureReattachSnapshot(kept) }
                     .onFailure { Log.w(TAG, "reattach snapshot failed: ${it.message}") }
             // A snapshot still on disk holds curation an earlier migration has not reattached yet. Keep it
             // and let the drained walk resume the reattach; capturing over it now would lose those names.
@@ -2777,6 +2829,14 @@ class FaceIndexingScheduler @Inject constructor(
                 progressTotal = examinedBeforeSweep + sweepBacklog
                 while (true) {
                     coroutineContext.ensureActive()
+                    // Each batch waits for the scan's go-ahead (charger when asked, battery, heat), so a long
+                    // grouping hosted in the foreground stops when the phone comes off the charger.
+                    if (!awaitMlGoAhead(deviceHealth::mlVerdict, { deviceHealth.awaitMlWorkAllowed() }, FaceDiagnostics::recordPark) {
+                            writeFence.allows(fenceToken)
+                        }
+                    ) {
+                        return false
+                    }
                     batch.scanned = 0
                     val createdBefore = batch.created
                     val handled = clusterFacesUseCase.assignNewFaces(userId, batch, onTick = { beat() }) {
@@ -2864,18 +2924,12 @@ class FaceIndexingScheduler @Inject constructor(
                 // The counts an older build left wrong, set once from the faces now held. The batches keep every
                 // count right from here on (a new person starts with its photos, a person that gains faces moves
                 // on by the photos it gains), so the read of every face this takes is not repeated at each pass end.
-                val recountDone = account in context.settingsDataStore.data.first()[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty()
-                if (!recountDone) {
-                    val recounted = guardedGroupingStep("recounting the people's photos") {
+                val recounted = recountFaceCountsOnce(context.settingsDataStore, account, { writeFence.allows(fenceToken) }) {
+                    guardedGroupingStep("recounting the people's photos") {
                         clusterFacesUseCase.recountPhotoCounts(userId) { writeFence.allows(fenceToken) }
                     }
-                    if (recounted == null) closingFailed = true
-                    else if (writeFence.allows(fenceToken)) {
-                        context.settingsDataStore.edit {
-                            it[SettingsKeys.FACE_COUNTS_RECOUNTED] = it[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty() + account
-                        }
-                    }
                 }
+                if (!recounted) closingFailed = true
                 val moved = guardedGroupingStep("filling the Unsorted bucket") {
                     clusterFacesUseCase.moveLeftoverToUnsorted(userId) { writeFence.allows(fenceToken) }
                 }
@@ -2955,19 +3009,33 @@ class FaceIndexingScheduler @Inject constructor(
      * Group every stored face into people while the walk is still permitted to run (a forced call runs
      * regardless), queued behind any grouping already running ([groupingLock]), and not while names wait
      * to be reattached, a forced call short of their grace ([regroupAllowed]); see [regroupLocked]. Whether it
-     * is a final run follows from [trigger] ([groupingRunEndsWalk]).
+     * is a final run follows from [trigger] ([groupingRunEndsWalk]). A [queued] call was counted in
+     * [queuedRegroups] by its requester and leaves that count once it holds the lock or gives up.
      */
     private suspend fun cluster(
         userId: UserId?,
         trigger: RegroupTrigger,
         force: Boolean = false,
+        queued: Boolean = false,
     ): Boolean {
-        if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) return false
-        return groupingLock.withLock {
-            // Checked again once the lock is held: the walk may have been paused, or names staged by an
-            // import or a rescan, while this waited.
-            if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) false
-            else regroupLocked(userId, trigger, groupingRunEndsWalk(trigger))
+        var waiting = queued
+        val stopWaiting = {
+            if (waiting) {
+                waiting = false
+                queuedRegroups.decrementAndGet()
+            }
+        }
+        try {
+            if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) return false
+            return groupingLock.withLock {
+                stopWaiting()
+                // Checked again once the lock is held: the walk may have been paused, or names staged by an
+                // import or a rescan, while this waited.
+                if (!regroupAllowed(force, active(), reattachPending(), reattachOverdueNow())) false
+                else regroupLocked(userId, trigger, groupingRunEndsWalk(trigger))
+            }
+        } finally {
+            stopWaiting()
         }
     }
 
@@ -3076,14 +3144,29 @@ class FaceIndexingScheduler @Inject constructor(
                     false
                 }
                 // Turned away by the fence: an import or a sign-out replaced the faces it read, so it wrote
-                // nothing. Not a failure, so no backoff; whoever moved the fence groups afterwards.
-                !outcome.committed -> false
+                // nothing. Not a failure, so no backoff; whoever moved the fence groups afterwards. Turned
+                // away by a user edit made while it ran, it asks for one more regroup unless one is queued.
+                !outcome.committed -> {
+                    if (regroupAgainAfterEdit(outcome, queuedRegroups.get())) {
+                        Log.d(TAG, "regroup turned away by an edit, queued another")
+                        requestRecluster(userId)
+                    }
+                    false
+                }
                 else -> {
                     val endMs = SystemClock.elapsedRealtime()
                     lastRegroupDurationMs = endMs - startMs
                     lastRegroupEndMs = endMs
                     regroupBaseline = RegroupBaseline(accountOf(userId), outcome.leftUngrouped, fenceToken, finalizeOwed = false)
                     FaceDiagnostics.recordRegroupCompleted(durationMs = endMs - startMs, endMs = endMs)
+                    if (outcome.mergeSkipped) {
+                        // Too many groups for the rebuild's own merge: fold the ones that are one person on the
+                        // cached centroids, the step a batched run ends with, which keeps names and marks apart.
+                        val folded = guardedGroupingStep("merging the rebuilt groups") {
+                            clusterFacesUseCase.mergeSimilarGroups(userId, { writeFence.allows(fenceToken) }, onTick = { beat() })
+                        }
+                        SyncDiagnostics.log("faces: rebuild left its merge to the groups step, folded ${folded ?: 0}")
+                    }
                     if (BuildConfig.DEBUG) {
                         // The debug threshold sweep reads per-account samples through the non-null
                         // diagnostic path; a guest still clusters above, it just skips this
@@ -3582,3 +3665,53 @@ internal fun shouldResumeFaceScanOnWifiOnlyOff(wasWifiOnly: Boolean, nowWifiOnly
  *  resumes on reconnect rather than staying idle, without kicking on the initial replayed state. */
 internal fun shouldResumeFaceScanOnUnmetered(wasUnmetered: Boolean, nowUnmetered: Boolean): Boolean =
     !wasUnmetered && nowUnmetered
+
+/**
+ * Runs [recount] of the people's photo counts for [account] once: not again once [store] records it done, and
+ * recorded done only after a recount that finished ([recount] gave a count) while [writeAllowed] still holds, so
+ * one that failed or was fenced off runs again at the next run that ends a walk. Returns false when it failed.
+ */
+internal suspend fun recountFaceCountsOnce(
+    store: androidx.datastore.core.DataStore<androidx.datastore.preferences.core.Preferences>,
+    account: String,
+    writeAllowed: () -> Boolean,
+    recount: suspend () -> Int?,
+): Boolean {
+    if (account in store.data.first()[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty()) return true
+    recount() ?: return false
+    if (writeAllowed()) {
+        store.edit { it[SettingsKeys.FACE_COUNTS_RECOUNTED] = it[SettingsKeys.FACE_COUNTS_RECOUNTED].orEmpty() + account }
+    }
+    return true
+}
+
+/**
+ * Waits until the device may run machine learning work ([verdict], charging when the user asked for it, battery,
+ * heat), noting each park with [onPark], as long as [live]; answers whether the work may go on. Pure but for the
+ * waiting it is handed.
+ */
+internal suspend fun awaitMlGoAhead(
+    verdict: () -> HealthVerdict,
+    await: suspend () -> Unit,
+    onPark: (String) -> Unit,
+    live: () -> Boolean,
+): Boolean {
+    var now = verdict()
+    while (live() && !now.backgroundWorkAllowed) {
+        onPark(now.reason)
+        await()
+        now = verdict()
+    }
+    return live()
+}
+
+/**
+ * Device photo to its Drive key, from [account]'s sync state rows: every backed-up photo but a hidden one
+ * (the vault keeps its faces off People), and only where the Drive key differs.
+ */
+internal fun syncStateRekeyPairs(
+    account: String,
+    rows: List<eu.akoos.photos.data.db.entity.SyncStateEntity>,
+): List<Pair<String, String>> =
+    rows.filter { it.userId == account && it.status != eu.akoos.photos.domain.entity.SyncStatus.HIDDEN }
+        .mapNotNull { row -> row.cloudFileId?.takeIf { it.isNotBlank() && it != row.localUri }?.let { row.localUri to it } }

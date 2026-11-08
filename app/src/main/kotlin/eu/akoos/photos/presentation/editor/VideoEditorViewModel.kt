@@ -2642,15 +2642,14 @@ class VideoEditorViewModel @Inject constructor(
      *  2. For each track, copy its MediaFormat into a new MediaMuxer; remember the
      *     mapping from source track index → muxer track index.
      *  3. Set the orientation hint on the muxer (must happen BEFORE muxer.start()).
-     *  4. Per track, copy each kept window in order, seeking to the window's preceding sync sample
-     *     (SYNC_PREVIOUS so we don't land mid-GOP) and rebasing each sample's timestamp past the kept
-     *     duration already written, so several windows join into one continuous timeline for BOTH the
-     *     video and the audio track.
+     *  4. Per track, copy each kept window in order from the video keyframe at or before its in-point
+     *     ([keyframeStartsUs]), rebasing each sample's timestamp past the kept duration already written,
+     *     so several windows join into one continuous timeline for BOTH the video and the audio track.
      *  5. Release everything in finally (stop() before release() on the muxer or the moov atom rots).
      *
      * Cut points are keyframe-aligned: a stream copy can only begin at a sync sample, so each window's
-     * in-point snaps to the nearest earlier keyframe. Frame-exact cuts would need a re-encode, which
-     * this path deliberately avoids to keep the export lossless.
+     * in-point snaps to the nearest earlier keyframe, for the audio too so the two stay in step. Frame-exact
+     * cuts would need a re-encode, which this path deliberately avoids to keep the export lossless.
      */
     private fun muxTrimmed(
         sourceUri: Uri,
@@ -2706,6 +2705,9 @@ class VideoEditorViewModel @Inject constructor(
             // (they resolve to at least one window); fall back to copying the whole track so an
             // empty list never yields a partial file.
             val keep = windows.ifEmpty { listOf(VideoSegment(0L, Long.MAX_VALUE / 2000L)) }
+            // Where each window really starts: the video keyframe at or before its in-point. Starting the
+            // copy any later drops that keyframe, and the muxer then skips every frame up to the next one.
+            val startsUs = keyframeStartsUs(extractor, trackMap, keep.map { it.startMs * 1000L })
 
             for (srcIdx in 0 until trackCount) {
                 val muxIdx = trackMap[srcIdx]
@@ -2714,7 +2716,7 @@ class VideoEditorViewModel @Inject constructor(
                 if (keep.size == 1) {
                     // Single kept window: byte-for-byte the original trim path, so a never-split
                     // clip saves exactly as before.
-                    val startUs = keep[0].startMs * 1000L
+                    val startUs = startsUs[0]
                     val endUs = keep[0].endMs * 1000L
                     // SYNC_PREVIOUS keeps the first sample after seek a keyframe, required for
                     // video to decode correctly. For audio it lands on the closest packet, fine.
@@ -2746,17 +2748,15 @@ class VideoEditorViewModel @Inject constructor(
                         if (!extractor.advance()) break
                     }
                 } else {
-                    // Several kept windows: copy each in order, aligning every window's START (not the
-                    // keyframe before it) to the output timeline. Each window mirrors the single-window
-                    // path: skip the leading GOP (pts < winStart) so audio and video both begin at the cut
-                    // point and stay in A/V sync, offset by winStart, and keep the true intra-window PTS so
-                    // B-frame reordering survives. Because every kept pts >= winStart, each output pts is
-                    // >= writtenUs, so windows never overlap and need no monotonic clamp (which previously
-                    // rewrote B-frame timestamps and, by basing on the keyframe, drifted A/V per cut).
+                    // Several kept windows: copy each in order from its keyframe start (the same instant
+                    // for every track, so audio and video stay in step), offset by that start, keeping the
+                    // true intra-window PTS so B-frame reordering survives. Because every kept pts >=
+                    // winStart, each output pts is >= writtenUs, so windows never overlap and need no
+                    // monotonic clamp.
                     var writtenUs = 0L      // output pts where the NEXT window begins (past all written so far)
                     var lastOutUs = -1L     // greatest output pts emitted for this track
-                    for (win in keep) {
-                        val winStartUs = win.startMs * 1000L
+                    for ((winIdx, win) in keep.withIndex()) {
+                        val winStartUs = startsUs[winIdx]
                         val winEndUs = win.endMs * 1000L
                         extractor.seekTo(winStartUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                         while (true) {
@@ -2809,6 +2809,27 @@ class VideoEditorViewModel @Inject constructor(
             f = f or android.media.MediaCodec.BUFFER_FLAG_KEY_FRAME
         }
         return f
+    }
+
+    /**
+     * For each in-point in [inPointsUs], the time of the video keyframe at or before it: where a stream copy of
+     * that window has to begin. Read from the first video track [trackMap] keeps; with none (an audio-only
+     * source) the in-points stand as they are. The extractor is left with no track selected.
+     */
+    private fun keyframeStartsUs(extractor: MediaExtractor, trackMap: IntArray, inPointsUs: List<Long>): List<Long> {
+        val videoIdx = (0 until extractor.trackCount).firstOrNull { i ->
+            trackMap[i] >= 0 &&
+                extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME).orEmpty().startsWith("video/")
+        } ?: return inPointsUs
+        extractor.selectTrack(videoIdx)
+        try {
+            return inPointsUs.map { inUs ->
+                extractor.seekTo(inUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                keyframeStartUs(inUs, extractor.sampleTime)
+            }
+        } finally {
+            extractor.unselectTrack(videoIdx)
+        }
     }
 
     private fun createTempMuxFile(): File {

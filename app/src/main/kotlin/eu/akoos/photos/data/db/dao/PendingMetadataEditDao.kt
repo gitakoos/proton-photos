@@ -64,6 +64,15 @@ interface PendingMetadataEditDao {
     @Query("SELECT COUNT(*) FROM pending_metadata_edit")
     suspend fun count(): Int
 
+    /** Whether a date or place edit of [linkId] is waiting, so another replacement of it holds back. */
+    @Query("SELECT EXISTS(SELECT 1 FROM pending_metadata_edit WHERE linkId = :linkId)")
+    suspend fun has(linkId: String): Boolean
+
+    /** Points a waiting edit of [oldLinkId] at [newLinkId], the copy that replaced the photo meanwhile, so
+     *  the edit lands on the photo the user sees. An edit already uploading a copy of its own is left. */
+    @Query("UPDATE OR IGNORE pending_metadata_edit SET linkId = :newLinkId WHERE linkId = :oldLinkId AND newLinkId IS NULL")
+    suspend fun retarget(oldLinkId: String, newLinkId: String)
+
     /** Live count of pending edits, so a progress surface can show the outstanding backlog. */
     @Query("SELECT COUNT(*) FROM pending_metadata_edit")
     fun observeCount(): Flow<Int>

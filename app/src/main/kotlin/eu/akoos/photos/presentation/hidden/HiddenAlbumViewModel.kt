@@ -45,6 +45,7 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
+import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.domain.entity.SyncStatus
 import kotlinx.coroutines.launch
 import me.proton.core.accountmanager.domain.AccountManager
@@ -479,10 +480,7 @@ class HiddenAlbumViewModel @Inject constructor(
      */
     fun unhideAlbum(linkId: String) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_ALBUM_IDS] = current - linkId
-            }
+            HiddenCloudPhotos.revealAlbums(context, listOf(linkId))
         }
     }
 
@@ -514,10 +512,7 @@ class HiddenAlbumViewModel @Inject constructor(
      *  it returns to every listing. Nothing on Drive changes. The reveal screen calls this. */
     fun unhideCloudPhoto(linkId: String) {
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
-                val current = prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] ?: emptySet()
-                prefs[SettingsKeys.HIDDEN_CLOUD_PHOTO_IDS] = current - linkId
-            }
+            HiddenCloudPhotos.reveal(context, listOf(linkId))
         }
     }
 

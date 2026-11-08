@@ -46,8 +46,8 @@ import javax.inject.Inject
 /**
  * The save and the restore the label sync worker runs, apart from WorkManager so the worker stays thin.
  *
- * Save seals this install's labels ([PhotoLabelRepository.snapshotPhotos] and [PhotoLabelRepository.snapshotNames])
- * into one file under the account's address key and uploads it under this install's own name, as a new revision
+ * Save seals this install's labels ([PhotoLabelRepository.loadSyncState], written by [LabelCopyMerge.forDrive] with
+ * every change time) into one file under the account's address key and uploads it under this install's own name, as a new revision
  * of the file it wrote before. Restore downloads the newest file of every install, opens each, and merges it into
  * the labels here ([PhotoLabelRepository.applySnapshot]). Neither creates the Labels folder unless the request
  * says the user agreed. Every Drive, storage and key failure ends as a [LabelBackupResult], never a crash, and
@@ -122,9 +122,10 @@ class LabelBackupRunner @Inject constructor(
             LabelBackupOutcome(LabelBackupOperation.SAVE, result, photos, newLabels)
         report(LabelBackupProgress(LabelBackupStep.PREPARING))
         if (signOut.isSigningOut(userId)) return outcome(LabelBackupResult.NOT_SIGNED_IN)
-        val photos = labels.snapshotPhotos(userId)
-        val names = labels.snapshotNames(userId)
-        if (photos.isEmpty() && names.isEmpty()) return outcome(LabelBackupResult.NOTHING_TO_SAVE)
+        val state = labels.loadSyncState(userId)
+        if (state.photos.values.all { it.labels.isEmpty() } && state.names.isEmpty()) {
+            return outcome(LabelBackupResult.NOTHING_TO_SAVE)
+        }
         // Looked up before anything is sealed, so a missing folder the user has not agreed to create costs nothing.
         when (val folder = driveStore.folder(userId, createIfMissing = createFolder, area = DriveDataFolder.LABELS)) {
             is MlDriveResult.Ok -> if (folder.value == null) return outcome(LabelBackupResult.FOLDER_MISSING)
@@ -136,13 +137,7 @@ class LabelBackupRunner @Inject constructor(
             }
         }
         val deviceId = driveStore.deviceId()
-        val snapshot = LabelSnapshot(
-            deviceId = deviceId,
-            deviceLabel = driveStore.deviceLabel,
-            createdAtMillis = System.currentTimeMillis(),
-            photos = photos,
-            names = names,
-        )
+        val snapshot = LabelCopyMerge.forDrive(state, deviceId, driveStore.deviceLabel, System.currentTimeMillis())
         report(LabelBackupProgress(LabelBackupStep.ENCRYPTING))
         val scratch = withContext(Dispatchers.IO) { newScratchFile("labels-save-") }
         try {
@@ -157,7 +152,11 @@ class LabelBackupRunner @Inject constructor(
                 val upload = driveStore.upload(userId, name, scratch, LabelDriveNaming.MEDIA_TYPE, DriveDataFolder.LABELS)
                 when (upload) {
                     is MlDriveResult.Ok ->
-                        return outcome(LabelBackupResult.SAVED, photos.count { it.labels.isNotEmpty() }, names.size)
+                        return outcome(
+                            LabelBackupResult.SAVED,
+                            snapshot.photos.count { it.labels.isNotEmpty() },
+                            snapshot.names.size,
+                        )
                     MlDriveResult.NotCapable -> return outcome(LabelBackupResult.NOT_CAPABLE)
                     MlDriveResult.FolderMissing -> return outcome(LabelBackupResult.FOLDER_MISSING)
                     // The file changed between the lookup of its active revision and the upload: the retry looks afresh.

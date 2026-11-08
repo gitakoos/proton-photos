@@ -124,6 +124,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     private val driveRepo: DrivePhotoRepository,
     private val publicLink: eu.akoos.photos.presentation.common.PublicLinkController,
     private val upload: eu.akoos.photos.domain.usecase.UploadPendingUseCase,
+    private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
     private val undoController: UndoController,
     private val favoriteWriter: eu.akoos.photos.presentation.common.FavoriteWriter,
     private val moveController: MoveToFolderController,
@@ -237,6 +238,9 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     /** The folder this screen is showing, as a flow so the per-folder preference states can key on it. */
     private val bucketName = MutableStateFlow("")
+
+    /** The folder's name as it is now: the one it was opened with until a rename moves it. */
+    val folderName: StateFlow<String> = bucketName.asStateFlow()
 
     /**
      * True where this screen was opened from the vault's card for the folder rather than from the
@@ -361,9 +365,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
         val name = bucketName.value
         if (name.isEmpty()) return
         viewModelScope.launch {
-            context.settingsDataStore.edit { prefs ->
+            val updated = context.settingsDataStore.edit { prefs ->
                 prefs.putAlbumMirrorFolders(prefs.albumMirrorFolders().flipped(name))
             }
+            if (name in updated.albumMirrorFolders()) folderAlbumBackfill.onAlbumTurnedOn(name)
         }
     }
 
@@ -495,17 +500,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** The pending clearing of [_backupTarget]: armed when a back-up is asked for, replaced once the pipeline idles. */
-    private var targetEndJob: Job? = null
-
-    /** Clears the target after [afterMs] unless a photo starting cancels it first. */
-    private fun armBackupTargetEnd(afterMs: Long) {
-        targetEndJob?.cancel()
-        targetEndJob = viewModelScope.launch {
-            delay(afterMs)
-            targetEndJob = null
-            _backupTarget.value = emptySet()
-        }
-    }
+    private val backupTargetEnd = BackupTargetEnd(viewModelScope, _backupTarget)
 
     init {
         // The back-up can end without every queued photo reaching Synced (stopped from the notification or the
@@ -514,19 +509,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
         // left a longer while for the worker to start: the progress replays the idle event of the last run to a
         // screen that has only just opened, and that must not count against a back-up asked for after it.
         viewModelScope.launch {
-            upload.progress.collect { evt ->
-                when (evt.status) {
-                    UploadStatus.Queued, UploadStatus.Compressing, UploadStatus.Encrypting,
-                    UploadStatus.Uploading, UploadStatus.PreparingBackup -> {
-                        targetEndJob?.cancel()
-                        targetEndJob = null
-                    }
-                    UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi -> {
-                        if (targetEndJob == null && _backupTarget.value.isNotEmpty()) armBackupTargetEnd(BACKUP_TARGET_HOLD_MS)
-                    }
-                    UploadStatus.Done -> Unit
-                }
-            }
+            upload.progress.collect { evt -> backupTargetEnd.onStatus(evt.status) }
         }
         viewModelScope.launch { accountManager.getPrimaryUserId().collect { primaryUserId = it } }
         // Drop the progress bar once every queued photo has uploaded.
@@ -600,6 +583,11 @@ class DeviceFolderDetailViewModel @Inject constructor(
                 // rather than of the whole vault.
                 Triple(ordered, vaultedUris, vaultedUris intersect vault.pairedUris)
             }.collect { (ordered, vaultedUris, pairedUris) ->
+                // Right after a rename the device list still files the moved photos under the old name for a
+                // few seconds; the photos already shown stay until the new folder lists them.
+                val renaming = android.os.SystemClock.elapsedRealtime() < renameHoldUntil
+                if (ordered.isEmpty() && renaming && _items.value.isNotEmpty()) return@collect
+                if (ordered.isNotEmpty()) renameHoldUntil = 0L
                 _vaultedUris.value = vaultedUris
                 _pairedVaultUris.value = pairedUris
                 _items.value = ordered
@@ -776,7 +764,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
             if (toUpload.isNotEmpty()) {
                 _backupTarget.value = toUpload.toSet()
-                armBackupTargetEnd(BACKUP_TARGET_START_MS)
+                backupTargetEnd.arm(BACKUP_TARGET_START_MS)
             }
             val queued = if (toUpload.isNotEmpty()) {
                 forceUploadLocalUris.forceUpload(userId, toUpload)
@@ -847,7 +835,10 @@ class DeviceFolderDetailViewModel @Inject constructor(
     fun backUpAll(asMirror: Boolean, onResult: (UploadOutcome) -> Unit) {
         val userId = primaryUserId ?: return
         viewModelScope.launch {
-            if (asMirror) setFolderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, enable = true)
+            if (asMirror) {
+                setFolderFlag(SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES, enable = true)
+                folderAlbumBackfill.onAlbumTurnedOn(bucketName.value)
+            }
             val syncedUris = _items.value
                 .filterIsInstance<GalleryItem.Synced>()
                 .map { it.local.uri }
@@ -858,7 +849,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
             val alreadyBackedUp = allLocal.size - toUpload.size
             if (toUpload.isNotEmpty()) {
                 _backupTarget.value = toUpload.toSet()
-                armBackupTargetEnd(BACKUP_TARGET_START_MS)
+                backupTargetEnd.arm(BACKUP_TARGET_START_MS)
             }
             val queued = if (toUpload.isNotEmpty()) forceUploadLocalUris.forceUpload(userId, toUpload) else 0
             onResult(UploadOutcome(queued = queued, alreadyBackedUp = alreadyBackedUp))
@@ -924,6 +915,9 @@ class DeviceFolderDetailViewModel @Inject constructor(
 
     fun clearPendingMove() = moveController.clearPending()
 
+    /** Until when (elapsed realtime) an empty listing right after a rename keeps the photos already shown. */
+    @Volatile private var renameHoldUntil = 0L
+
     /** One-shot confirmation for a completed folder rename, carrying the new name for the snackbar. */
     private val _folderRenameConfirmation = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
     val folderRenameConfirmation: SharedFlow<String> = _folderRenameConfirmation.asSharedFlow()
@@ -932,6 +926,7 @@ class DeviceFolderDetailViewModel @Inject constructor(
      *  keeps the screen on the same photos as they follow into the renamed folder, with no nav-pop. */
     fun renameFolder(newName: String) {
         moveController.rename(viewModelScope, bucketName.value, newName) { renamed ->
+            renameHoldUntil = android.os.SystemClock.elapsedRealtime() + RENAME_HOLD_MS
             bucketName.value = renamed
             _folderRenameConfirmation.tryEmit(renamed)
         }
@@ -1481,7 +1476,48 @@ class DeviceFolderDetailViewModel @Inject constructor(
 }
 
 /** How long the pipeline must stay idle before a folder's back-up target is dropped. */
-private const val BACKUP_TARGET_HOLD_MS = 12_000L
+internal const val BACKUP_TARGET_HOLD_MS = 12_000L
 
 /** How long a back-up just asked for may take to show its first photo before its target is dropped. */
-private const val BACKUP_TARGET_START_MS = 90_000L
+internal const val BACKUP_TARGET_START_MS = 90_000L
+
+/**
+ * Clears a folder page's back-up [target] once the back-up is over. The back-up can end without every queued
+ * photo reaching Synced (stopped from the notification or the Activity screen, a failed photo, a full Drive, no
+ * Wi-Fi), so the target is also cleared once the pipeline has been idle for [BACKUP_TARGET_HOLD_MS]; a photo
+ * starting in between keeps it. A target set just now is [arm]ed for longer, and an idle report does not cut
+ * that short: the progress replays the idle event of the last run to a screen that has only just opened.
+ */
+internal class BackupTargetEnd(
+    private val scope: kotlinx.coroutines.CoroutineScope,
+    private val target: MutableStateFlow<Set<String>>,
+) {
+    private var job: Job? = null
+
+    /** Clears the target after [afterMs] unless a photo starting cancels it first. */
+    fun arm(afterMs: Long) {
+        job?.cancel()
+        job = scope.launch {
+            delay(afterMs)
+            job = null
+            target.value = emptySet()
+        }
+    }
+
+    fun onStatus(status: UploadStatus) {
+        when (status) {
+            UploadStatus.Queued, UploadStatus.Compressing, UploadStatus.Encrypting,
+            UploadStatus.Uploading, UploadStatus.PreparingBackup -> {
+                job?.cancel()
+                job = null
+            }
+            UploadStatus.Idle, UploadStatus.StorageFull, UploadStatus.Failed, UploadStatus.WaitingForWifi -> {
+                if (job == null && target.value.isNotEmpty()) arm(BACKUP_TARGET_HOLD_MS)
+            }
+            UploadStatus.Done -> Unit
+        }
+    }
+}
+
+/** How long the folder screen holds its photos after a rename while the device list catches up. */
+private const val RENAME_HOLD_MS = 10_000L

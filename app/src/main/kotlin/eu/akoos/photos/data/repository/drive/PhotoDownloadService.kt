@@ -222,12 +222,14 @@ class PhotoDownloadService @Inject constructor(
         // (Per-block dec_*.bin files are NOT swept — they are the resume state.)
         if (tempFile.exists()) tempFile.delete()
 
-        // The Drive SDK route, for a photo on this user's own volume only: a shared album's photo needs
-        // the share-scoped fetches below. A failed, unverified or short SDK download runs those instead.
+        // The Drive SDK route: a photo on this user's own volume follows the download switch, one on another
+        // user's volume (inside an album shared with this user) the shared-albums switch, since the SDK
+        // reaches it through the album's share itself. A failed, unverified or short SDK download runs the
+        // app's own fetches below instead, share-scoped for a shared album's photo.
         val ownVolume = runCatching { shareService.getVolumeId(userId) }.getOrNull()
-        if (ownVolume != null && photo.volumeId == ownVolume) {
+        if (ownVolume != null && photo.volumeId.isNotBlank()) {
             val viaSdk = sdkRouting.run(
-                SdkRoute.DOWNLOAD,
+                if (photo.volumeId == ownVolume) SdkRoute.DOWNLOAD else SdkRoute.SHARED,
                 viaSdk = {
                     sdkPhotoDownloadOps.streamToFile(userId, photo.volumeId, photo.linkId, tempFile, onProgress, photo.sizeBytes)
                     if (!sdkDownloadComplete(tempFile.length(), photo.sizeBytes)) {

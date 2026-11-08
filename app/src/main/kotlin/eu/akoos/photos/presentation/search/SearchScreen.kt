@@ -91,11 +91,14 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.material3.Text
+import eu.akoos.photos.presentation.common.AppModalSheet
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.PhotoCell
@@ -139,6 +142,7 @@ import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.rememberAddLabelsAction
+import eu.akoos.photos.presentation.common.rememberCloudCompressAction
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.SearchFieldTerm
 import eu.akoos.photos.presentation.common.SearchTermRow
@@ -348,7 +352,7 @@ fun SearchScreen(
     LaunchedEffect(Unit) {
         vm.shareIntent.collect { intent ->
             appLock.runWhenOpen {
-                runCatching { context.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle)) }
+                runCatching { context.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(context, intent, shareChooserTitle)) }
             }
         }
     }
@@ -615,6 +619,8 @@ fun SearchScreen(
     val pickBottom = pickBottomBase + 62.dp + if (searchTerms.isNotEmpty()) 32.dp else 0.dp
 
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -661,7 +667,7 @@ fun SearchScreen(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.glassSource(glass).fillMaxSize(),
                     contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = pickBottom),
                 ) {
                     if (people.isNotEmpty()) {
@@ -702,6 +708,7 @@ fun SearchScreen(
             LazyColumn(
                 state = idleListState,
                 modifier = Modifier
+                    .glassSource(glass)
                     .fillMaxSize()
                     .navigationBarsPadding(),
                 contentPadding = PaddingValues(top = headerPad + 4.dp, bottom = 24.dp),
@@ -848,7 +855,7 @@ fun SearchScreen(
                     ),
                     horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
                     verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 4.dp),
-                    modifier = Modifier
+                    modifier = Modifier.glassSource(glass)
                         .fillMaxSize()
                         .then(if (pick == null) Modifier.navigationBarsPadding() else Modifier)
                         .then(dragSelectModifier),
@@ -926,6 +933,8 @@ fun SearchScreen(
       // The whole thing slides away on a downward scroll and returns on scroll up / stop, like the
       // timeline chrome. Its measured height feeds `headerPad` above so the first row clears it; the
       // height sticks while hidden, so the content padding does not jump as the header slides.
+      // The header's pills frost whatever list is under them: the idle page, the picker's or the results.
+      CompositionLocalProvider(LocalGlassBackdrop provides glass) {
       AnimatedVisibility(
         // While the field is focused the header stays mounted, so a results-driven scroll does not
         // dispose the text field mid-typing and drop the keyboard; hide-on-scroll still applies otherwise.
@@ -1025,12 +1034,13 @@ fun SearchScreen(
             Spacer(modifier = Modifier.height(10.dp))
         }
       }
+      }
 
         // The filter button floats at the bottom right, so the field above can run the full width. It takes
         // the accent while a filter the sheet holds is on, and steps aside for the selection drawer.
         val sheetFilterActive = filter.syncStatus != SyncStatusFilter.All || filter.mediaType != MediaType.All ||
             filter.year != null || filter.dateFrom != null || selectedCategory != GalleryFilter.All
-        if (pick == null && !isSelectionMode) {
+        if (pick == null && !isSelectionMode) CompositionLocalProvider(LocalGlassBackdrop provides glass) {
             IconBubble(
                 icon = Icons.Filled.FilterList,
                 contentDescription = stringResource(R.string.filter_title),
@@ -1107,6 +1117,7 @@ fun SearchScreen(
                 vm.clearSelection()
             },
         )
+        val compressAction = rememberCloudCompressAction(selectedItems, isSignedIn)
         val searchSelectionActions = buildList {
             // Rings while cloud originals download for the chooser and takes no second tap meanwhile.
             add(
@@ -1142,9 +1153,8 @@ fun SearchScreen(
                     )
                 )
             }
-            // Move the device selection into another folder, the logged-out counterpart to
-            // Add-to-album, offered only without an account and on the Android 10+ MediaStore floor.
-            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Move the device selection into another folder, on the Android 10+ MediaStore floor.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(
                     SelectionAction(
                         icon = Icons.AutoMirrored.Filled.DriveFileMove,
@@ -1227,6 +1237,9 @@ fun SearchScreen(
                     )
                 )
             }
+            // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
+            // smaller copy is up.
+            compressAction?.let(::add)
             // The strip stays behind an all-device-only selection: a Synced photo keeps its Drive
             // copy's EXIF, so stripping just the local file is a misleading half-strip.
             if (allLocalOnly(selectedItems)) {
@@ -1265,6 +1278,7 @@ fun SearchScreen(
             )
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = pick == null && isSelectionMode,
             items = remember(selectedItems) { selectedItems.toList() },
             actions = searchSelectionActions,
@@ -1366,7 +1380,7 @@ fun SearchScreen(
         }
 
         // Move-to-folder host: the picker, the new-folder name dialog, the write-consent launcher a
-        // foreign-file move needs and the completion snackbar, all logged-out and device-only. The
+        // foreign-file move needs and the completion snackbar, device files only. The
         // selection is snapshotted in the ViewModel, so the host carries only the picked name.
         MoveToFolderHost(
             targetFolders = moveTargetFolders,
@@ -1388,7 +1402,7 @@ fun SearchScreen(
     }
 
     if (showFilterSheet) {
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { showFilterSheet = false },
             sheetState = filterSheetState,
             containerColor = colors.sheetBg,

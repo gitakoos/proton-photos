@@ -108,13 +108,16 @@ sealed interface SearchSnapshotImportResult {
  * Whether one snapshot row is written into this device's index. A photo with no row here takes it in
  * either mode. For a photo this device has embedded, [SearchImportMode.Merge] keeps the local row and
  * [SearchImportMode.Replace] takes the snapshot's vector, except a tombstone: it only records that the
- * other device could not read the photo, so it never replaces a row this device holds.
+ * writing device could not read the photo, so it never replaces a row this device holds, and a tombstone
+ * from another device ([fromOtherDevice]) is never taken at all: this device indexes that photo itself.
  */
 internal fun shouldImportSearchEmbedding(
     mode: SearchImportMode,
     embeddedHere: Boolean,
     tombstone: Boolean,
+    fromOtherDevice: Boolean = false,
 ): Boolean = when {
+    tombstone && fromOtherDevice -> false
     !embeddedHere -> true
     tombstone -> false
     else -> mode == SearchImportMode.Replace
@@ -158,6 +161,7 @@ class SearchSnapshotImporter @Inject constructor(
         userId: UserId?,
         mode: SearchImportMode,
         expectedDeviceId: String? = null,
+        fromOtherDevice: Boolean = false,
         releaseSnapshot: () -> Unit = {},
         openSnapshot: () -> InputStream,
     ): SearchSnapshotImportResult {
@@ -175,6 +179,7 @@ class SearchSnapshotImporter @Inject constructor(
             openKeys = { refresh -> envelopeCrypto.openKeys(userId, refreshAddresses = refresh) },
             openSnapshot = openSnapshot,
             expectedDeviceId = expectedDeviceId,
+            fromOtherDevice = fromOtherDevice,
             releaseSnapshot = releaseSnapshot,
         )
     }
@@ -209,6 +214,7 @@ internal class SearchSnapshotImportEngine(
         openSnapshot: () -> InputStream,
         importedAtMillis: Long = System.currentTimeMillis(),
         expectedDeviceId: String? = null,
+        fromOtherDevice: Boolean = false,
         releaseSnapshot: () -> Unit = {},
     ): SearchSnapshotImportResult = withContext(Dispatchers.IO) {
         var plaintext: File? = null
@@ -217,7 +223,7 @@ internal class SearchSnapshotImportEngine(
             when (openInto(scratch, openKeys, openSnapshot)) {
                 is EnvelopeOpenResult.Opened -> {
                     releaseSnapshot()
-                    apply(account, mode, scratch, importedAtMillis, expectedDeviceId)
+                    apply(account, mode, scratch, importedAtMillis, expectedDeviceId, fromOtherDevice)
                 }
                 EnvelopeOpenResult.WrongKey -> failed(SearchImportFailure.WRONG_ACCOUNT)
                 EnvelopeOpenResult.Corrupt -> failed(SearchImportFailure.DAMAGED)
@@ -274,13 +280,14 @@ internal class SearchSnapshotImportEngine(
         plaintext: File,
         importedAtMillis: Long,
         expectedDeviceId: String?,
+        fromOtherDevice: Boolean,
     ): SearchSnapshotImportResult {
         survey(plaintext, expectedDeviceId)?.let { return it }
         if (!importFits(plaintext.length(), SEARCH_IMPORT_SPACE_FACTOR, freeBytes())) {
             Log.w(TAG, "search snapshot refused: not enough free space")
             return failed(SearchImportFailure.NO_SPACE)
         }
-        return FileInputStream(plaintext).use { write(account, mode, MlSnapshotReader(it), importedAtMillis) }
+        return FileInputStream(plaintext).use { write(account, mode, MlSnapshotReader(it), importedAtMillis, fromOtherDevice) }
     }
 
     /**
@@ -315,6 +322,7 @@ internal class SearchSnapshotImportEngine(
         mode: SearchImportMode,
         reader: MlSnapshotReader,
         importedAtMillis: Long,
+        fromOtherDevice: Boolean,
     ): SearchSnapshotImportResult {
         // A row of an older model or a wrong width is stale and counts as not embedded, so it is replaced.
         val embeddedHere = embeddings.currentSearchKeys(account, keyPageSize)
@@ -323,7 +331,7 @@ internal class SearchSnapshotImportEngine(
         val chunk = ArrayList<ImageEmbeddingEntity>(chunkSize)
         for (record in reader) {
             if (record !is MlSnapshotRecord.SearchEmbedding || !isPortableSearchKey(record.photoKey)) continue
-            if (!shouldImportSearchEmbedding(mode, record.photoKey in embeddedHere, record.isTombstone)) {
+            if (!shouldImportSearchEmbedding(mode, record.photoKey in embeddedHere, record.isTombstone, fromOtherDevice)) {
                 kept++
                 continue
             }

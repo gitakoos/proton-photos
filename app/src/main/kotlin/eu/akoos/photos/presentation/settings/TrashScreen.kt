@@ -100,6 +100,8 @@ import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionCheckPop
 import eu.akoos.photos.presentation.common.SelectionDrawer
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.selectAllCountFor
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.selectPressScale
@@ -201,6 +203,8 @@ fun TrashScreen(
         onViewerActionHandled()
     }
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -273,7 +277,7 @@ fun TrashScreen(
                 contentPadding = PaddingValues(bottom = 120.dp + navBottom),
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.glassSource(glass).fillMaxSize(),
             ) {
                 if (activeIsDevice) {
                     // ── Device tab content ────────────────────────────────────────
@@ -472,6 +476,7 @@ fun TrashScreen(
         val trashTotal = if (trashActiveIsDevice) state.device.items.size else state.cloud.items.size
         val trashSelectAllCount = selectAllCountFor(total = trashTotal, selected = trashSelectedCount)
         SelectionDrawer(
+            backdrop = glass,
             visible = trashSelecting,
             items = remember(selectedTrashItems) { selectedTrashItems.toList() },
             actions = trashActions,
@@ -488,11 +493,12 @@ fun TrashScreen(
 
         if (trashSelecting) {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.album_picker_selected, trashSelectedCount),
                 onBack = { clearTrashSelection() },
             )
         } else {
-            FloatingHeader(title = stringResource(R.string.trash_title), onBack = onBack)
+            FloatingHeader(backdrop = glass, title = stringResource(R.string.trash_title), onBack = onBack)
         }
     }
 

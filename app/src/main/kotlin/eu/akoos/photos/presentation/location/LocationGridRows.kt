@@ -46,11 +46,13 @@ internal sealed interface LocationGridRow {
  * month (read in [zone]) differs from the photo before, then the photo. [labelOf] names a header from
  * the capture time of the first photo under it. A header's key is its year and month, so it holds
  * across a language change; a month the list comes back to later, which only an unsorted list does,
- * gets a numbered key so no two headers share one. Pure.
+ * gets a numbered key so no two headers share one. [keyOf] gives a photo's grid key, the one the page's
+ * drag-select resolves. Pure.
  */
 internal fun locationGridRows(
     items: List<GalleryItem>,
     zone: TimeZone,
+    keyOf: (GalleryItem) -> String = ::locationCellKey,
     labelOf: (Long) -> String,
 ): List<LocationGridRow> {
     val calendar = GregorianCalendar(zone)
@@ -72,7 +74,7 @@ internal fun locationGridRows(
             )
             previousMonth = monthId
         }
-        rows += LocationGridRow.Photo(key = locationCellKey(item), index = index, item = item)
+        rows += LocationGridRow.Photo(key = keyOf(item), index = index, item = item)
     }
     return rows
 }

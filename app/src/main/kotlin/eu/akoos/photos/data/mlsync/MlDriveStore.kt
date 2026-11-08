@@ -24,6 +24,7 @@ package eu.akoos.photos.data.mlsync
 
 import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import androidx.datastore.preferences.core.edit
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -31,9 +32,12 @@ import eu.akoos.photos.data.api.DriveApiService
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.data.sdk.SdkDriveClientProvider
+import eu.akoos.photos.util.SyncDiagnostics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.sync.Mutex
@@ -56,6 +60,7 @@ import me.proton.drive.sdk.entity.FileRevisionUploaderRequest
 import me.proton.drive.sdk.entity.FileUploaderRequest
 import me.proton.drive.sdk.entity.FolderNode
 import me.proton.drive.sdk.entity.Node
+import me.proton.drive.sdk.entity.NodeResultPair
 import me.proton.drive.sdk.entity.NodeUid
 import me.proton.drive.sdk.entity.RevisionUid
 import me.proton.drive.sdk.entity.UploadResult
@@ -90,6 +95,9 @@ sealed interface MlDriveResult<out T> {
         companion object {
             /** A node of the wrong type (a file where a folder belongs, or the reverse) holds the name. */
             const val NAME_TAKEN = "NameTaken"
+
+            /** Drive kept one or more of the files a trash asked for. */
+            const val TRASH_REFUSED = "TrashRefused"
 
             /** The name is not one of this install's own file names. */
             const val FOREIGN_NAME = "ForeignName"
@@ -144,8 +152,11 @@ class MlDriveStore @Inject constructor(
 
     /**
      * This install's id, created the first time it is asked for and kept in
-     * [SettingsKeys.ML_SYNC_DEVICE_ID] across sign-outs. Throws the preferences store's IOException
-     * when the value can be neither read nor written.
+     * [SettingsKeys.ML_SYNC_DEVICE_ID] across sign-outs. A new one is made from the phone's Android id
+     * ([stableDeviceId]), which stays the same across a reinstall of the app on the same phone, so a
+     * reinstall writes on in its earlier files instead of leaving them behind next to a new set; an
+     * install that already has an id keeps it. Throws the preferences store's IOException when the value
+     * can be neither read nor written.
      */
     suspend fun deviceId(): String {
         cachedDeviceId?.let { return it }
@@ -154,7 +165,9 @@ class MlDriveStore @Inject constructor(
                 val saved = context.settingsDataStore.edit { prefs ->
                     val stored = prefs[SettingsKeys.ML_SYNC_DEVICE_ID]
                     if (stored == null || !MlDriveNaming.isDeviceId(stored)) {
-                        prefs[SettingsKeys.ML_SYNC_DEVICE_ID] = UUID.randomUUID().toString()
+                        prefs[SettingsKeys.ML_SYNC_DEVICE_ID] = MlDriveNaming.stableDeviceId(
+                            Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID),
+                        )
                     }
                 }[SettingsKeys.ML_SYNC_DEVICE_ID]
                 checkNotNull(saved).also { cachedDeviceId = it }
@@ -218,40 +231,90 @@ class MlDriveStore @Inject constructor(
             val modified = Instant.ofEpochMilli(
                 localFile.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis(),
             )
-            val existing = findChild(client, folderUid, name, AvailableNameTarget.FILE)
-            val uploader = when (existing) {
-                null -> client.uploader(
-                    FileUploaderRequest(
-                        parentFolderUid = folderUid,
-                        name = name,
-                        mediaType = mediaType,
-                        fileSize = size,
-                        lastModificationTime = modified,
-                        // The name carries this install's id, so a draft holding it is this install's
-                        // own leftover from an interrupted upload.
-                        overrideExistingDraftByOtherClient = true,
-                        noWaiting = false,
-                    ),
-                )
-                is FileNode -> client.uploader(
-                    FileRevisionUploaderRequest(
-                        currentActiveRevisionUid = existing.activeRevision.uid,
-                        lastModificationTime = modified,
-                        size = size,
-                        noWaiting = false,
-                    ),
-                )
-                else -> return@sdkCall MlDriveResult.Failed(MlDriveResult.Failed.NAME_TAKEN)
+            uploadWithRetries(client, folderUid, name, mediaType, localFile, size, modified)
+        }
+    }
+
+    /**
+     * An upload right after another one often fails at once with a network error and goes through when made again a
+     * moment later, so the file is looked up afresh and sent again, after a short wait each time. A conflict is not
+     * tried again here; the caller decides on that.
+     */
+    private suspend fun uploadWithRetries(
+        client: ProtonDriveClient,
+        folderUid: NodeUid,
+        name: String,
+        mediaType: String,
+        localFile: File,
+        size: Long,
+        modified: Instant,
+    ): MlDriveResult<MlDriveUpload> {
+        var attempt = 0
+        while (true) {
+            try {
+                return uploadOnce(client, folderUid, name, mediaType, localFile, size, modified)
+            } catch (t: Throwable) {
+                currentCoroutineContext().ensureActive()
+                if (isConflict(t) || attempt >= UPLOAD_RETRY_WAITS_MS.size) throw t
+                SyncDiagnostics.log("drive data: upload failed, trying again: ${describe(t)}")
+                delay(UPLOAD_RETRY_WAITS_MS[attempt++])
             }
-            val result = uploader.use { sendFile(it, localFile) }
-            MlDriveResult.Ok(
-                MlDriveUpload(
-                    nodeUid = result.nodeUid.value,
-                    revisionUid = result.revisionUid.value,
-                    createdFile = existing == null,
+        }
+    }
+
+    private suspend fun uploadOnce(
+        client: ProtonDriveClient,
+        folderUid: NodeUid,
+        name: String,
+        mediaType: String,
+        localFile: File,
+        size: Long,
+        modified: Instant,
+    ): MlDriveResult<MlDriveUpload> {
+        val existing = findChild(client, folderUid, name, AvailableNameTarget.FILE)
+        val uploader = when (existing) {
+            null -> client.uploader(
+                FileUploaderRequest(
+                    parentFolderUid = folderUid,
+                    name = name,
+                    mediaType = mediaType,
+                    fileSize = size,
+                    lastModificationTime = modified,
+                    // The name carries this install's id, so a draft holding it is this install's
+                    // own leftover from an interrupted upload.
+                    overrideExistingDraftByOtherClient = true,
+                    noWaiting = false,
                 ),
             )
+            is FileNode -> client.uploader(
+                FileRevisionUploaderRequest(
+                    currentActiveRevisionUid = existing.activeRevision.uid,
+                    lastModificationTime = modified,
+                    size = size,
+                    noWaiting = false,
+                ),
+            )
+            else -> return MlDriveResult.Failed(MlDriveResult.Failed.NAME_TAKEN)
         }
+        val result = uploader.use { sendFile(it, localFile) }
+        return MlDriveResult.Ok(
+            MlDriveUpload(
+                nodeUid = result.nodeUid.value,
+                revisionUid = result.revisionUid.value,
+                createdFile = existing == null,
+            ),
+        )
+    }
+
+    /**
+     * Moves the files [nodeUids] (ones [list] returned) to the Drive trash, where they can be restored from. Ok when
+     * every one went, or was gone already.
+     */
+    suspend fun trash(userId: UserId, nodeUids: List<String>): MlDriveResult<Unit> = sdkCall("trash", userId) { client ->
+        if (nodeUids.isEmpty()) return@sdkCall MlDriveResult.Ok(Unit)
+        var refused = 0
+        client.trashNodes(nodeUids.map { NodeUid(it) }).collect { if (it is NodeResultPair.Failure) refused++ }
+        if (refused == 0) MlDriveResult.Ok(Unit) else MlDriveResult.Failed(MlDriveResult.Failed.TRASH_REFUSED)
     }
 
     /**
@@ -296,7 +359,9 @@ class MlDriveStore @Inject constructor(
             clientProvider.withClient(userId) { client -> block(client) } ?: MlDriveResult.NotCapable
         } catch (t: Throwable) {
             ensureActive()
-            Log.w(TAG, "$operation failed: ${describe(t)}")
+            // Class names and the API's numeric codes only, so the line is safe in a shared diagnostics log.
+            SyncDiagnostics.log("drive data: $operation failed: ${describe(t)}")
+            if (isNetworkFailure(t)) clientProvider.recycle(userId)
             if (isConflict(t)) MlDriveResult.Conflict else MlDriveResult.Failed(failureName(t))
         }
     }
@@ -491,6 +556,10 @@ class MlDriveStore @Inject constructor(
                 )
     }
 
+    /** A failure with no answer from the server at all, which a client made in a bad moment keeps giving. */
+    private fun isNetworkFailure(t: Throwable): Boolean =
+        sdkErrors(t).firstOrNull()?.domain == ProtonSdkError.ErrorDomain.Network
+
     /** The most specific class name behind [t]: the SDK's own error type when it carries one. */
     private fun failureName(t: Throwable): String {
         sdkErrors(t).firstOrNull()?.type?.substringAfterLast('.')?.takeIf { it.isNotEmpty() }
@@ -500,8 +569,12 @@ class MlDriveStore @Inject constructor(
     }
 
     private fun describe(t: Throwable): String {
-        val error = sdkErrors(t).firstOrNull() ?: return failureName(t)
-        return "${failureName(t)} (${error.domain}, ${error.primaryCode}/${error.secondaryCode})"
+        val errors = sdkErrors(t).toList()
+        if (errors.isEmpty()) return failureName(t)
+        val chain = errors.joinToString(" < ") { error ->
+            "${error.type.substringAfterLast('.').take(MAX_NAME_LENGTH)} (${error.domain}, ${error.primaryCode}/${error.secondaryCode})"
+        }
+        return "${failureName(t)}: $chain"
     }
 
     private sealed interface Lookup {
@@ -518,6 +591,9 @@ class MlDriveStore @Inject constructor(
 
     private companion object {
         const val TAG = "MlDriveStore"
+
+        /** The waits before an upload that failed with a network error is made again, one per further try. */
+        val UPLOAD_RETRY_WAITS_MS = longArrayOf(2_000L, 5_000L)
         const val PARTIAL_SUFFIX = ".part"
         const val CLEANUP_TIMEOUT_MS = 5_000L
         const val MAX_CAUSE_DEPTH = 8

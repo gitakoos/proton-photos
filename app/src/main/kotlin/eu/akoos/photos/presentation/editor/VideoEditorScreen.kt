@@ -50,6 +50,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -71,6 +72,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import eu.akoos.photos.presentation.common.AppModalSheet
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
+import eu.akoos.photos.presentation.common.pillSurface
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.PillBg
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -92,6 +97,7 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.BrightnessMedium
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Contrast
+import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.ContentCut
@@ -112,7 +118,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -819,6 +824,9 @@ fun VideoEditorScreen(
     // Back reaches it first.
     androidx.activity.compose.BackHandler(enabled = videoOption != null) { videoOption = null }
 
+    // The editor's pills are glass over its plain background, drawn once: nothing they sample moves.
+    val glass = rememberGlassBackdrop(Bg0, heavy = true)
+    CompositionLocalProvider(LocalGlassBackdrop provides glass) {
     Column(
         Modifier.fillMaxSize().background(Bg0).statusBarsPadding(),
     ) {
@@ -1031,8 +1039,7 @@ fun VideoEditorScreen(
                 modifier = Modifier
                     .padding(horizontal = 18.dp)
                     .fillMaxWidth()
-                    .background(PillBgOpaque, RoundedCornerShape(999.dp))
-                    .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                    .pillSurface(PillBgOpaque, RoundedCornerShape(999.dp), border = PillBorder)
                     .padding(4.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
@@ -1046,6 +1053,7 @@ fun VideoEditorScreen(
                 }
             }
         }
+    }
     }
 
     if (showDiscardDialog) {
@@ -1096,7 +1104,7 @@ fun VideoEditorScreen(
 
     val hasCloudCounterpart by vm.hasCloudCounterpart.collectAsStateWithLifecycle()
     if (showSaveSheet && hasSource) {
-        ModalBottomSheet(
+        AppModalSheet(
             onDismissRequest = { if (!state.isSaving) showSaveSheet = false },
             sheetState = saveSheetState,
             containerColor = SheetBg,
@@ -1952,7 +1960,7 @@ private enum class VideoAdjustment(
     val set: (VideoEditorViewModel, Int) -> Unit,
 ) {
     Brightness(R.string.editor_adj_brightness, Icons.Default.BrightnessMedium, { it.adjBrightness }, { vm, v -> vm.setAdjBrightness(v) }),
-    Exposure(R.string.editor_adj_exposure, Icons.Default.AutoFixHigh, { it.adjExposure }, { vm, v -> vm.setAdjExposure(v) }),
+    Exposure(R.string.editor_adj_exposure, Icons.Default.Exposure, { it.adjExposure }, { vm, v -> vm.setAdjExposure(v) }),
     Contrast(R.string.editor_adj_contrast, Icons.Default.Contrast, { it.adjContrast }, { vm, v -> vm.setAdjContrast(v) }),
     Highlights(R.string.editor_adj_highlights, Icons.Default.Tune, { it.adjHighlights }, { vm, v -> vm.setAdjHighlights(v) }),
     Shadows(R.string.editor_adj_shadows, Icons.Default.Block, { it.adjShadows }, { vm, v -> vm.setAdjShadows(v) }),
@@ -2305,8 +2313,7 @@ private fun VideoEditorPlayPill(
 
     Row(
         modifier = Modifier
-            .background(PillBg, editorPillShape)
-            .border(0.5.dp, PillBorder, editorPillShape)
+            .pillSurface(PillBg, editorPillShape, border = PillBorder)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -2737,7 +2744,7 @@ private fun undoActionIcon(labelRes: Int): ImageVector = when (labelRes) {
 @Composable
 private fun EditorActionSheet(actions: List<EditorSheetAction>, onDismiss: () -> Unit, title: String? = null) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = SheetBg,

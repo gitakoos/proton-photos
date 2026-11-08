@@ -255,6 +255,11 @@ fun settingsSearchIndex(): List<SettingsSearchEntry> = listOf(
         Screen.AlbumsSettings.route,
     ),
     SettingsSearchEntry(
+        R.string.gallery_category_people, R.string.settings_appearance,
+        listOf("people", "faces", "person", "cover size", "columns", "list", "grid", "emberek", "arcok"),
+        Screen.PeopleSettings.route,
+    ),
+    SettingsSearchEntry(
         R.string.settings_viewer_long_press, R.string.settings_viewer,
         listOf("long press", "hold", "press and hold", "menu", "one hand", "viewer", "text", "select", "copy", "ocr", "hosszú nyomás", "nyomva tartás", "menü", "szöveg", "kijelölés", "másolás"),
         Screen.ViewerSettings.route,

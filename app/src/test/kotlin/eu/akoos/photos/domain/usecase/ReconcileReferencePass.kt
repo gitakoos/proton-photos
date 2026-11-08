@@ -221,12 +221,16 @@ internal class ReconcileReferencePass(
         val syncedStates = existingByUri.values
             .filter { it.status == SyncStatus.SYNCED && it.cloudFileId != null }
         val goneCandidates = mutableListOf<SyncState>()
+        val removedFromDrive = mutableSetOf<String>()
         for (state in syncedStates) {
             when {
                 state.cloudFileId !in cloudByLinkId ->
                     if (nowMs - (state.lastSyncSuccessMs ?: 0L) > CLOUD_ABSENCE_GRACE_MS) {
-                        syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
-                        syncStateRepo.clearQueuedForSynced(state.localUri)
+                        val demoted = syncStateRepo.demoteToLocalIfCloudIdMatches(state.localUri, state.cloudFileId!!)
+                        if (demoted > 0) {
+                            syncStateRepo.markRemovedFromDrive(state.localUri)
+                            removedFromDrive += state.localUri
+                        }
                     }
                 goneFromDevice(state, localUriSet) -> goneCandidates += state
             }
@@ -253,7 +257,7 @@ internal class ReconcileReferencePass(
         }
         val autoFolderNow = System.currentTimeMillis()
         for (uri in freshAutoFolderUris) {
-            if (uri in skippedDemotionUris) continue
+            if (uri in skippedDemotionUris || uri in removedFromDrive) continue
             syncStateRepo.markQueued(uri, eu.akoos.photos.domain.entity.QueueSource.AUTO_FOLDER, autoFolderNow)
         }
         for (uri in pairedSyncedUris) {

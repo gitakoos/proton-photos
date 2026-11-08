@@ -87,11 +87,13 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -116,6 +118,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -136,6 +139,9 @@ import eu.akoos.photos.data.semantic.SemanticModelAssets
 import eu.akoos.photos.data.semantic.SemanticStatusLabel
 import eu.akoos.photos.data.semantic.semanticStatusLabel
 import eu.akoos.photos.domain.entity.compression.VideoCompressionProfile
+import eu.akoos.photos.presentation.common.AppModalSheet
+import eu.akoos.photos.presentation.common.DestructiveButton
+import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.gallery.PersonTile
 import eu.akoos.photos.presentation.people.NameOrMergeSheet
 import eu.akoos.photos.presentation.people.PersonTapTarget
@@ -152,6 +158,7 @@ import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.ShimmerTextLine
 import eu.akoos.photos.presentation.lock.showAppLockPrompt
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.util.HealthBlockReason
 import eu.akoos.photos.util.sanitizeErrorMessage
 import eu.akoos.photos.presentation.settings.compression.CodecPicker
@@ -590,15 +597,17 @@ fun SettingsScreen(
                             ShimmerTextLine(widthFraction = 1f, height = 14.dp, modifier = Modifier.width(72.dp))
                         } else {
                             // Split photos vs videos so the user can spot at a glance that the
-                            // backed-up total isn't pure-photos. Reuses the same selection_* strings
-                            // as the gallery/album selection counter, already translated to 6 locales.
+                            // backed-up total isn't pure-photos, in the album header's plural counts.
+                            val photosLabel = pluralStringResource(
+                                R.plurals.count_photos_plural, state.syncedPhotoCount, state.syncedPhotoCount,
+                            )
+                            val videosLabel = pluralStringResource(
+                                R.plurals.count_videos_plural, state.syncedVideoCount, state.syncedVideoCount,
+                            )
                             val backedUpLabel = when {
-                                state.syncedPhotoCount > 0 && state.syncedVideoCount > 0 ->
-                                    stringResource(R.string.selection_mixed, state.syncedPhotoCount, state.syncedVideoCount)
-                                state.syncedVideoCount > 0 ->
-                                    stringResource(R.string.selection_videos_only, state.syncedVideoCount)
-                                state.syncedPhotoCount > 0 ->
-                                    stringResource(R.string.selection_photos_only, state.syncedPhotoCount)
+                                state.syncedPhotoCount > 0 && state.syncedVideoCount > 0 -> "$photosLabel, $videosLabel"
+                                state.syncedVideoCount > 0 -> videosLabel
+                                state.syncedPhotoCount > 0 -> photosLabel
                                 // A running sync with zero rows yet is the fresh-login first-sync
                                 // window: the DB-backed count is genuinely 0 because the listing is
                                 // still being page-fetched. Show progress copy instead of a bald
@@ -769,6 +778,10 @@ fun SettingsScreen(
                     onClick = onLabelsClick,
                 )
             }
+            // The shared backup keeps the faces, search, labels and hidden items in step with the account's other
+            // devices through Drive: an account and a device the Drive client runs on.
+            val sharedBackupCapable = remember { eu.akoos.photos.data.sdk.SdkGate().isCapable }
+            if (state.isSignedIn && sharedBackupCapable) SharedBackupCard()
             Spacer(Modifier.height(12.dp))
             SettingsCard {
                 NavRow(
@@ -1138,7 +1151,6 @@ fun AiSettingsScreen(
         // Save and Restore of the face and search data through the account's Drive, so another device of
         // the account restores them instead of scanning again. The section hides itself for a guest, while
         // the features are off, and on a device the Drive client does not run on.
-        MlDriveSyncSection(mlEnabled = state.aiFeaturesEnabled)
         Spacer(Modifier.height(20.dp))
     }
 }
@@ -1307,6 +1319,7 @@ fun FaceRecognitionScreen(
             FaceMaintenanceCard(
                 onRescan = viewModel::rescanFaces,
                 onClear = viewModel::clearFaceIndex,
+                askWhere = state.sharedBackupOn,
             )
         }
 
@@ -1422,7 +1435,7 @@ private fun FaceStatusCard(
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             Text(
                 when {
-                    groups.isNotEmpty() -> stringResource(R.string.settings_ai_groups_found, groups.size)
+                    groups.isNotEmpty() -> pluralStringResource(R.plurals.settings_ai_groups_found, groups.size, groups.size)
                     faceCount > 0 -> stringResource(R.string.settings_ai_faces_found, faceCount)
                     else -> stringResource(R.string.settings_ai_face_desc)
                 },
@@ -1554,7 +1567,8 @@ private fun FaceStatusCard(
 @Composable
 private fun FaceMaintenanceCard(
     onRescan: () -> Unit,
-    onClear: () -> Unit,
+    onClear: (everywhere: Boolean) -> Unit,
+    askWhere: Boolean,
 ) {
     var showRescanConfirm by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
@@ -1586,16 +1600,68 @@ private fun FaceMaintenanceCard(
             onDismiss = { showRescanConfirm = false },
         )
     }
-    if (showClearConfirm) {
+    if (showClearConfirm && askWhere) {
+        FaceClearWhereSheet(
+            onPick = { everywhere -> showClearConfirm = false; onClear(everywhere) },
+            onDismiss = { showClearConfirm = false },
+        )
+    } else if (showClearConfirm) {
         ConfirmDialog(
             title = stringResource(R.string.settings_ai_clear_confirm_title),
             message = stringResource(R.string.settings_ai_clear_confirm_msg),
             confirmLabel = stringResource(R.string.settings_ai_clear),
             dismissLabel = stringResource(R.string.cancel),
-            onConfirm = { showClearConfirm = false; onClear() },
+            onConfirm = { showClearConfirm = false; onClear(false) },
             onDismiss = { showClearConfirm = false },
             destructive = true,
         )
+    }
+}
+
+/**
+ * Where the face data goes, asked while the Drive backup is on: only on this phone (the copies on Drive bring it
+ * back) or everywhere (Drive and the other devices too, with face recognition turned off on each).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FaceClearWhereSheet(onPick: (everywhere: Boolean) -> Unit, onDismiss: () -> Unit) {
+    val colors = AppColors.current
+    AppModalSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = SheetBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                stringResource(R.string.settings_ai_clear_confirm_title),
+                color = colors.fgPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(stringResource(R.string.settings_ai_clear_where_msg), color = colors.fgDim, fontSize = 14.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SecondaryButton(
+                    stringResource(R.string.settings_ai_clear_here),
+                    { onPick(false) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                DestructiveButton(
+                    stringResource(R.string.settings_ai_clear_everywhere),
+                    { onPick(true) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                    Text(stringResource(R.string.cancel), color = colors.fgDim, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
     }
 }
 
@@ -1620,7 +1686,7 @@ fun SemanticSearchScreen(
     // kick. Paused-respecting and idempotent (see the VM), so it is safe on every entry.
     LaunchedEffect(Unit) { viewModel.resumeSemanticIndexingIfNeeded() }
 
-    SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_semantic), onBack = onBack) {
+    SettingsSubPageScaffold(title = stringResource(R.string.settings_ai_semantic_page_title), onBack = onBack) {
         SettingsCard {
             ToggleRow(
                 label = stringResource(R.string.settings_ai_semantic),

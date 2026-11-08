@@ -24,7 +24,8 @@ package eu.akoos.photos.presentation.viewer
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -43,7 +44,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,7 +98,7 @@ private fun screenRectOf(
  * mapped to the screen through the same letterbox fit and pinch the image rides ([imagePointToScreen]),
  * so a tag stays on its face while the photo is panned and zoomed. Tapping a named face opens that person;
  * a nameless one, an unnamed group or a single Unsorted face, shows an add chip that opens the sheet to
- * name it.
+ * name it. Long-pressing a named face asks whether it is really that person ([onFaceLongClick]).
  *
  * The name label is placed dynamically around each face (below, above, or to a side) and nudged off any
  * label already placed, so a group shot reads as a set of separate names rather than one overlapping
@@ -109,6 +112,7 @@ fun ViewerFaceTags(
     offset: Offset,
     people: List<PhotoViewerViewModel.ViewerPerson>,
     onFaceClick: (PhotoViewerViewModel.ViewerPerson) -> Unit,
+    onFaceLongClick: (PhotoViewerViewModel.ViewerPerson) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     if (imageSize.width <= 0 || imageSize.height <= 0) return
@@ -118,6 +122,7 @@ fun ViewerFaceTags(
     val fit = fitImageInBox(imageSize.width.toFloat(), imageSize.height.toFloat(), containerW, containerH)
     val transform = viewerTransform(containerSize, scale, offset)
     val density = LocalDensity.current
+    val haptics = LocalHapticFeedback.current
 
     val rects = people.mapNotNull { screenRectOf(it, imageSize, fit, transform, containerW, containerH) }
     if (rects.isEmpty()) return
@@ -200,19 +205,34 @@ fun ViewerFaceTags(
                     .size(0.dp)
                     .wrapContentSize(align = Alignment.Center, unbounded = true),
             ) {
-                FaceTagPill(name = fr.person.name, onClick = { onFaceClick(fr.person) })
+                FaceTagPill(
+                    name = fr.person.name,
+                    onClick = { onFaceClick(fr.person) },
+                    onLongClick = if (fr.person.name != null) {
+                        {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onFaceLongClick(fr.person)
+                        }
+                    } else null,
+                )
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FaceTagPill(name: String?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun FaceTagPill(
+    name: String?,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(999.dp))
             .background(Color.Black.copy(alpha = 0.72f))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {

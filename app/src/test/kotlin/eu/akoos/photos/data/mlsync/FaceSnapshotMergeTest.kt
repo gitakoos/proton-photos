@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.data.mlsync
 
+import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
 import eu.akoos.photos.domain.usecase.ReattachFace
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -155,7 +156,8 @@ class FaceSnapshotMergeTest {
 
     @Test
     fun `the snapshot's grouping fills only a face this device has not grouped under a named person`() {
-        assertEquals(FaceMergeChange.Confirm("Ann"), mergeFaceCuration(LocalFaceCuration(), snapshot(personName = "Ann")))
+        // Grouped, not confirmed: another device's automatic grouping must stay correctable by a regroup.
+        assertEquals(FaceMergeChange.Group("Ann"), mergeFaceCuration(LocalFaceCuration(), snapshot(personName = "Ann")))
         assertEquals(
             FaceMergeChange.Keep,
             mergeFaceCuration(LocalFaceCuration(groupedName = "Bob"), snapshot(personName = "Ann")),
@@ -276,5 +278,36 @@ class FaceSnapshotMergeTest {
         assertNull(snapshotName("  "))
         assertNull(snapshotName(null))
         assertNull(snapshotName("x".repeat(MlSnapshotFormat.MAX_STRING_BYTES + 1)))
+    }
+    @Test
+    fun `a rename from a name renamed here earlier finds the person under the name it got here`() {
+        val changes = listOf(PersonNameChangeEntity("u", "Lincoln", "LincolnPC", 100L))
+        val held = setOf("LincolnPC")
+        assertEquals("LincolnPC", nameHeldNow("Lincoln", 200L, changes) { it in held })
+    }
+
+    @Test
+    fun `a rename made here after the other device's is not followed, so the later one stays`() {
+        val changes = listOf(PersonNameChangeEntity("u", "Lincoln", "LincolnPC", 300L))
+        assertNull(nameHeldNow("Lincoln", 200L, changes) { it == "LincolnPC" })
+    }
+
+    @Test
+    fun `the trail follows several renames and stops where no one holds the name`() {
+        val changes = listOf(
+            PersonNameChangeEntity("u", "A", "B", 10L),
+            PersonNameChangeEntity("u", "B", "C", 20L),
+        )
+        assertEquals("C", nameHeldNow("A", 50L, changes) { it == "C" })
+        assertNull(nameHeldNow("A", 50L, changes) { false })
+        assertEquals("A", nameHeldNow("A", 50L, changes) { it == "A" })
+    }
+
+    @Test
+    fun `a removed name is not a place to follow, and a loop ends`() {
+        val removed = listOf(PersonNameChangeEntity("u", "A", "", 10L))
+        assertNull(nameHeldNow("A", 50L, removed) { it.isEmpty() })
+        val loop = listOf(PersonNameChangeEntity("u", "A", "B", 10L), PersonNameChangeEntity("u", "B", "A", 20L))
+        assertNull(nameHeldNow("A", 50L, loop) { false })
     }
 }

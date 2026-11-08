@@ -4,12 +4,11 @@
 
     <string name="onboarding_back">Geri</string>
     <string name="onboarding_continue">Devam</string>
-    <string name="onboarding_skip">Şimdilik atla</string>
+    <string name="onboarding_not_now">Şimdi değil</string>
+    <string name="onboarding_get_started">Başla</string>
     <string name="onboarding_allow">İzin ver</string>
     <string name="onboarding_open_settings">Ayarları aç</string>
-    <string name="onboarding_permission_granted">İzin verildi</string>
     <string name="onboarding_finish">Galerimi aç</string>
-    <string name="onboarding_recommended">Önerilen</string>
 
     <string name="onboarding_welcome_title">Photos for Proton\'a hoş geldin</string>
     <string name="onboarding_welcome_subtitle">Fotoğrafların ve videoların, Proton Drive\'da uçtan uca şifreli. Uygulamayı kullanım şekline uydurmak için birkaç tercihi ayarla.</string>
@@ -17,9 +16,9 @@
     <string name="onboarding_backup_title">Neyin yedekleneceğini seç</string>
     <string name="onboarding_backup_subtitle">Bunu istediğin zaman Ayarlar\'dan değiştirebilirsin.</string>
     <string name="onboarding_backup_everything">Her şeyi yedekle</string>
-    <string name="onboarding_backup_everything_desc">Cihazındaki tüm fotoğraf ve videolar, sonradan hariç tuttuğun klasörler dışında.</string>
+    <string name="onboarding_backup_everything_desc">Bu cihazdaki tüm fotoğraflar ve videolar. Sonraki ekranda klasörleri hariç tutabilirsin.</string>
     <string name="onboarding_backup_folders">Belirli klasörleri seç</string>
-    <string name="onboarding_backup_folders_desc">Hangi klasörlerin yedekleneceğini Ayarlar\'dan seç. Sen seçene kadar hiçbir şey yüklenmez.</string>
+    <string name="onboarding_backup_folders_desc">Yalnızca sonraki ekranda seçtiğin klasörler.</string>
     <string name="onboarding_backup_nothing">Şimdilik hiçbiri</string>
     <string name="onboarding_backup_nothing_desc">Yeni fotoğrafları yedeklemeden Proton Drive\'da zaten olanlara göz at.</string>
 
@@ -40,7 +39,7 @@
 
     <string name="onboarding_manage_media_title">Medyayı yönet</string>
     <string name="onboarding_all_files_title">Tüm dosyalara erişim</string>
-    <string name="onboarding_all_files_subtitle">Önerilir. Uygulamanın, geri yüklenen gizli fotoğrafları orijinal klasörlerine (örneğin yalnızca Resimler değil, bir sohbet uygulamasının medya klasörü) geri koymasını ve yerel dosyalarındaki değişiklikleri yerinde yazmasını sağlar. Sistem ayarlarını açmak için dokun.</string>
+    <string name="onboarding_all_files_subtitle">Önerilir. Geri getirilen gizli fotoğraflar orijinal klasörlerine döner ve uygulama yerel dosyalarını yerinde güncelleyebilir.</string>
     <string name="permissions_title">İzinler</string>
     <string name="permissions_intro">Photos for Proton\'un nelere erişebileceğini yönet. Her öğe neden kullanıldığını açıklar.</string>
     <string name="permissions_state_granted">İzin verildi</string>
@@ -60,7 +59,7 @@
     <string name="permissions_install_title">Güncellemeleri kur</string>
     <string name="permissions_install_why">Uygulama içinden indirdiğin uygulama güncellemelerini kurmak için.</string>
     <string name="permissions_network_note">Ağ erişimi her zaman açıktır ve yalnızca Proton Drive ile iletişim kurmak için kullanılır.</string>
-    <string name="onboarding_manage_media_subtitle">Kesinlikle önerilir. Uygulamanın, cihazındaki fotoğrafları ve videoları her seferinde bir sistem onay penceresi göstermeden düzenlemesini, silmesini ve yeniden adlandırmasını sağlar. Uygulama içi düzenleme, cihaza geri kaydetme, çöp kutusu akışı ve Yedeklemeden sonra sil için kullanılır. Sistem ayarlarını açmak için dokun.</string>
+    <string name="onboarding_manage_media_subtitle">Kesinlikle önerilir. Uygulama bu cihazdaki fotoğrafları her seferinde onay istemeden düzenleyebilir, silebilir ve yeniden adlandırabilir.</string>
     <string name="onboarding_folders_include_title">Yedeklenecek klasörler</string>
     <string name="onboarding_folders_include_subtitle">Hangi klasörlerin Drive\'a yükleneceğini seç. Diğer klasörlerdeki öğeler yalnızca bu cihazda kalır.</string>
     <string name="onboarding_folders_exclude_title">Atlanacak klasörler</string>
@@ -73,7 +72,6 @@
 
     <string name="onboarding_about_title">Bağımsız üçüncü taraf istemci</string>
     <string name="onboarding_about_subtitle">Tek bir geliştirici tarafından yapıldı. Proton AG ile bağlantılı değildir. Kaynak kodu açık, GPL lisanslı, kendine ait telemetrisi yok.</string>
-    <string name="onboarding_about_author_subtitle">Geliştiricinin kişisel sitesi.</string>
     <string name="onboarding_about_github_subtitle">GitHub\'da tam kaynak kodu.</string>
 
     <string name="onboarding_appearance_title">Kendine göre ayarla</string>
@@ -86,7 +84,15 @@
     <string name="onboarding_lock_timeout_label">Yeniden kilitleme süresi</string>
 
     <string name="onboarding_done_title">Her şey hazır</string>
-    <string name="onboarding_done_subtitle">Ayarların kaydedildi. Buradaki her şey daha sonra Ayarlar sayfasından değiştirilebilir.</string>
+    <string name="onboarding_done_subtitle">Ayarlanacaklar bunlar. Hepsini daha sonra Ayarlar\'dan değiştirebilirsin.</string>
+    <string name="onboarding_done_backup_everything">Yedekleme: tüm fotoğraflar ve videolar</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Yedekleme: %d klasör</item>
+        <item quantity="other">Yedekleme: %d klasör</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Yedekleme: şimdilik kapalı</string>
+    <string name="onboarding_done_ml">Kurulumdan sonra indirilecek: %s</string>
+    <string name="onboarding_done_lock">Uygulama kilidi: açık</string>
 
     <string name="sign_in_subtitle">Özel, uçtan uca şifreli fotoğraf yedekleme.</string>
     <string name="sign_in_unofficial_tag">Resmi olmayan üçüncü taraf uygulama, Proton AG ile bağlantılı değildir</string>
@@ -100,13 +106,13 @@
     <string name="gallery_tab_photos">Fotoğraflar</string>
     <string name="gallery_tab_albums">Albümler</string>
     <string name="gallery_tab_shared">Paylaşılanlar</string>
-    <string name="selection_photos_only">%d fotoğraf</string>
-    <string name="selection_videos_only">%d video</string>
-    <string name="selection_mixed">%1$d fotoğraf, %2$d video</string>
 
     <string name="metadata_editor_title">Meta verileri düzenle</string>
+    <plurals name="metadata_editor_bulk_title">
+        <item quantity="one">%d fotoğrafı düzenle</item>
+        <item quantity="other">%d fotoğrafı düzenle</item>
+    </plurals>
     <string name="metadata_editor_done">Bitti</string>
-    <string name="metadata_editor_change">Değiştir</string>
     <string name="metadata_editor_saved">Kaydedildi</string>
     <string name="metadata_editor_write_failed">Değişiklik kaydedilemedi</string>
     <string name="metadata_editor_saved_partial">%1$d kaydedildi, %2$d kaydedilemedi</string>
@@ -115,7 +121,6 @@
     <string name="metadata_editor_source_device">Bu cihazdan</string>
     <string name="metadata_editor_source_cloud">Proton Drive\'dan</string>
     <string name="metadata_editor_next">İleri</string>
-    <string name="metadata_editor_set">Ayarla</string>
     <string name="metadata_editor_place_label">Konum</string>
     <string name="metadata_editor_place_none">Konum yok</string>
     <string name="metadata_editor_place_search">Ülke veya şehir ara</string>
@@ -127,7 +132,6 @@
     <string name="metadata_editor_note_place_format">Konum yalnızca JPEG, PNG ve WebP fotoğraflara eklenebilir.</string>
     <string name="metadata_editor_note_date_format">Bu biçimdeki fotoğrafların tarihi değiştirilemez.</string>
     <string name="metadata_editor_bulk_date_label">Bu fotoğraflar için tarih ayarla</string>
-    <string name="metadata_editor_bulk_place_label">Bu fotoğraflar için konum ayarla</string>
     <string name="metadata_editor_bulk_apply_hint">Seçili tüm fotoğraflara uygulanır</string>
     <string name="metadata_editor_bulk_summary">%1$d fotoğraf düzenleniyor</string>
     <string name="metadata_editor_bulk_summary_skipped">%1$d düzenleniyor, %2$d atlandı</string>
@@ -143,8 +147,6 @@
     <string name="metadata_editor_shift_label">Bu fotoğrafları zamanda kaydır</string>
     <string name="metadata_editor_shift_hint">En eski fotoğrafın gerçekte ne zaman çekildiğini seç. Diğer tüm fotoğraflar aynı miktarda kayar, böylece aralarındaki farklar korunur.</string>
     <string name="metadata_editor_shift_picker_title">En eski fotoğraf ne zaman çekildi?</string>
-    <string name="metadata_editor_shift_range_current">Şu an: %1$s ile %2$s arası</string>
-    <string name="metadata_editor_shift_range_after">Kaydırmadan sonra: %1$s ile %2$s arası</string>
     <string name="metadata_editor_shift_too_late">Bu, en yeni fotoğrafı geleceğe taşır. Daha erken bir tarih veya saat seç.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d fotoğrafın kendi tarihi yok, bu yüzden kaydırma onu olduğu yerde bırakır. Hepsi için aynı tarih seçeneği yine de onu kapsar.</item>
@@ -231,7 +233,6 @@
     <string name="editor_tool_frame">Çerçeve</string>
     <string name="editor_frame_none">Yok</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Kenarlık</string>
     <string name="editor_tab_transform">Kırp ve döndür</string>
     <string name="editor_tab_more">Daha fazla</string>
     <string name="editor_transform_ratio">En boy oranı</string>
@@ -562,7 +563,7 @@
 
     <string name="settings_title">Ayarlar</string>
     <string name="settings_more_title">Diğer ayarlar</string>
-    <string name="settings_more_desc">Yapay zeka, gizlilik, bildirimler ve yardım</string>
+    <string name="settings_more_desc">Makine öğrenimi, gizlilik, bildirimler ve yardım</string>
     <string name="settings_sync_wifi_only">Yalnızca Wi‑Fi\'de eşitle</string>
     <string name="settings_sync_now">Şimdi eşitle</string>
     <string name="settings_storage_section">Depolama alanı</string>
@@ -581,7 +582,7 @@
     <string name="settings_sign_out">Oturumu kapat</string>
     <string name="settings_sign_out_desc">Bu cihazdaki oturumu sonlandır.</string>
     <string name="sign_out_dialog_title">Oturum kapatılsın mı?</string>
-    <string name="sign_out_dialog_message">Oturumu kapatmak bu cihazdaki şu verileri siler ve tekrar oturum açtığında geri yüklenmezler (gerekirse önce dışa aktar):</string>
+    <string name="sign_out_dialog_message">Oturumu kapatmak bu cihazdaki şu verileri siler ve tekrar oturum açtığında geri yüklenmezler:</string>
     <string name="sign_out_dialog_item_faces">Adlandırılmış kişiler ve yüz verileri</string>
     <string name="sign_out_dialog_item_day_notes">Takvim notları</string>
     <string name="sign_out_dialog_item_vault">Gizli fotoğraflar</string>
@@ -718,7 +719,7 @@
     <string name="settings_section_extras">Ekstralar</string>
     <string name="settings_section_about">Hakkında</string>
     <string name="settings_ai_section">Makine öğrenimi</string>
-    <string name="settings_ai_nav_desc">Cihaz üzerinde metin kopyalama, yüz gizleme ve daha fazlası</string>
+    <string name="settings_ai_nav_desc">Yüz tanıma, fotoğrafta ne olduğuna göre arama ve metin kopyalama</string>
     <string name="settings_ai_enable">Makine öğrenimini etkinleştir</string>
     <string name="settings_ai_ocr">Metni kopyala</string>
     <string name="settings_ai_ocr_desc">Fotoğrafta gördüğün metni tanı ve kopyala</string>
@@ -731,7 +732,7 @@
     <string name="settings_ai_ocr_remove_confirm">Kaldır</string>
     <string name="settings_ai_ocr_remove_keep">Koru</string>
     <string name="settings_ai_face_toggle">Yüz tanıma</string>
-    <string name="settings_ai_face_desc">Fotoğrafları içindeki kişilere göre cihazında grupla</string>
+    <string name="settings_ai_face_desc">Fotoğrafları içindeki kişilere göre bu telefonda gruplar</string>
     <string name="settings_ai_face_downloading">İndiriliyor…</string>
     <string name="settings_ai_face_download_failed">Yüz modeli indirilemedi.</string>
     <string name="settings_ai_face_download_retry">Tekrar denemek için anahtarı yeniden aç.</string>
@@ -742,19 +743,19 @@
     <string name="settings_ai_face_download_confirm">İndir</string>
     <string name="settings_ai_face_model_missing">Yüz modeli bu cihazda yok.</string>
     <string name="settings_ai_face_remove_title">Yüz verileri kaldırılsın mı?</string>
-    <string name="settings_ai_face_remove_message">Yüz tanıma kapalı. Yüz modeli ve algılanan tüm yüzler ve adlar bu cihazdan kaldırılsın mı? Bir kopyasını saklamak istersen önce Tanınan yüzler sayfasından dışa aktar.</string>
+    <string name="settings_ai_face_remove_message">Yüz tanıma kapalı. Yüz modeli ve algılanan tüm yüzler ve adlar bu cihazdan kaldırılsın mı?</string>
     <string name="settings_ai_face_remove_confirm">Kaldır</string>
     <string name="settings_ai_face_remove_keep">Koru</string>
     <string name="settings_ai_face_remove_confirm_title">Emin misin?</string>
-    <string name="settings_ai_face_remove_confirm_message">Bu işlem yüz modelini ve tanınan tüm yüzleri ve adları kalıcı olarak kaldırır. Geri alınamaz.</string>
-    <string name="settings_ai_semantic">Anlamsal arama</string>
+    <string name="settings_ai_face_remove_confirm_message">Bu işlem yüz modelini ve tanınan tüm yüzleri ve adları bu cihazdan kaldırır. Proton Drive\'a yedeklenen kopya korunur.</string>
+    <string name="settings_ai_semantic">Fotoğrafta ne olduğuna göre ara</string>
     <string name="settings_ai_semantic_desc">Fotoğrafları içinde ne olduğunu tarif ederek bul</string>
     <string name="settings_ai_semantic_downloading">İndiriliyor…</string>
     <string name="settings_ai_semantic_download_failed">Arama modelleri indirilemedi.</string>
     <string name="settings_ai_semantic_download_retry">Tekrar denemek için anahtarı yeniden aç.</string>
     <string name="settings_ai_semantic_download_title">Arama modelleri indirilsin mi?</string>
-    <string name="settings_ai_semantic_download_message">Anlamsal arama için %1$s boyutunda bir model indirilmesi gerekir. Her bağlantıda çalışır, ancak Wi-Fi önerilir.</string>
-    <string name="settings_ai_semantic_download_message_metered">Anlamsal arama için %1$s boyutunda bir model indirilmesi gerekir. Wi-Fi bağlı değil, bu yüzden bu indirme mobil veri kullanacak.</string>
+    <string name="settings_ai_semantic_download_message">Fotoğraf arama için %1$s boyutunda bir model indirilmesi gerekir. Her bağlantıda çalışır, ancak Wi-Fi önerilir.</string>
+    <string name="settings_ai_semantic_download_message_metered">Fotoğraf arama için %1$s boyutunda bir model indirilmesi gerekir. Wi-Fi bağlı değil, bu yüzden bu indirme mobil veri kullanacak.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">İndir</string>
     <string name="settings_ai_semantic_remove_title">İndirilen modeller kaldırılsın mı?</string>
@@ -806,6 +807,12 @@
     <string name="sdk_route_download_desc">Drive\'daki fotoğrafları tam çözünürlükte açma ve kaydetme</string>
     <string name="sdk_route_upload">Yedekleme ve yükleme</string>
     <string name="sdk_route_upload_desc">Fotoğrafları Drive\'a gönderme, yedeklemede ve diğer her yüklemede</string>
+    <string name="sdk_route_albums">Albümler</string>
+    <string name="sdk_route_albums_desc">Drive\'da albüm oluşturma, yeniden adlandırma ve silme, fotoğraf ekleme veya çıkarma</string>
+    <string name="sdk_route_events">Değişiklik takibi</string>
+    <string name="sdk_route_events_desc">Zaman çizelgesini diğer cihazlarda ve webde yapılan değişikliklerle güncel tutma</string>
+    <string name="sdk_route_shared">Sizinle paylaşılan albümler</string>
+    <string name="sdk_route_shared_desc">Başkalarının sizinle paylaştığı albümleri listeleme ve bırakma, bunlara fotoğraf ekleme ve fotoğraflarını tam çözünürlükte açma</string>
     <string name="sdk_route_activity">%1$s. Bu oturumda: kitaplık üzerinden %2$d, her zamanki yoldan %3$d.</string>
     <string name="settings_ai_indexing_progress">%2$d fotoğraftan %1$d</string>
     <string name="settings_ai_grouping_progress">%2$d yüzden %1$d</string>
@@ -816,11 +823,7 @@
     <string name="settings_ai_pause">Duraklat</string>
     <string name="settings_ai_resume">Devam et</string>
     <string name="settings_ai_rescan">Fotoğrafları yeniden tara</string>
-    <string name="settings_ml_drive_section">Drive\'daki yüz ve arama verileri</string>
-    <string name="settings_ml_drive_save">Drive\'a kaydet</string>
-    <string name="settings_ml_drive_save_desc">Diğer cihazlarının geri yükleyebileceği şifreli bir kopya sakla</string>
     <string name="settings_ml_drive_restore">Drive\'dan geri yükle</string>
-    <string name="settings_ml_drive_restore_desc">Yeniden taramak yerine cihazlarından birinin kaydettiği verileri kullan</string>
     <string name="settings_face_file_link">Eski bir sürümle kaydedilen yüzleri yükle</string>
     <string name="settings_face_file_title">Eski bir sürümden yüzler</string>
     <string name="settings_face_file_msg">2.5.0 ve önceki sürümler yüzleri “Yüz dizinini dışa aktar” ile photosforproton-faces.ppfi adlı bir dosyaya kaydediyordu. Bu dosya sizdeyse buradan seçin, içindeki yüzler ve adlar geri gelir. Mevcut yüzleriniz korunur. Daha yeni kayıtlar Drive\'da, “Drive\'dan geri yükle” altındadır.</string>
@@ -830,20 +833,6 @@
     <string name="settings_ai_import_wrong_account">Bu yüz dizini başka bir hesaba ait ve burada açılamaz.</string>
     <string name="settings_ai_transfer_failed">Yüz dizini aktarımı başarısız oldu.</string>
     <string name="settings_ai_transfer_working">Çalışıyor…</string>
-    <string name="settings_autosave_title">Otomatik kaydet</string>
-    <string name="settings_autosave_desc">Drive kopyasını arka planda güncel tutar.</string>
-    <string name="settings_autosave_after_changes">Değişikliklerden sonra</string>
-    <string name="settings_autosave_daily">Günlük</string>
-    <string name="settings_autosave_weekly">Haftalık</string>
-    <string name="settings_autosave_after_changes_desc">Son değişiklikten yaklaşık 10 dakika sonra kaydeder, saatte en fazla bir kez.</string>
-    <string name="settings_autosave_daily_desc">Bir şey değiştiyse her gece 23:59 civarında kaydeder.</string>
-    <string name="settings_autosave_weekly_desc">Bir şey değiştiyse pazar gecesi 23:59 civarında kaydeder.</string>
-    <string name="settings_autosave_last_saved">Son kayıt %1$s</string>
-    <string name="settings_autosave_failed">Son kayıt tamamlanmadı. Yeniden denenecek.</string>
-    <string name="settings_autosave_confirm_title">Otomatik kaydedilsin mi?</string>
-    <string name="settings_autosave_confirm_ml">Yüz tanıma ve arama verilerinizin şifreli bir kopyası arka planda Proton Drive\'ınıza kaydedilir ve güncel tutulur. Drive\'da alan kullanır; mobil veriyi yalnızca yedeklemelerin kullanmasına izin verilmişse kullanır. İlk kayıt şimdi başlar.</string>
-    <string name="settings_autosave_confirm_labels">Etiketlerinizin şifreli bir kopyası arka planda Proton Drive\'ınıza kaydedilir ve güncel tutulur. Drive\'da alan kullanır; mobil veriyi yalnızca yedeklemelerin kullanmasına izin verilmişse kullanır. İlk kayıt şimdi başlar.</string>
-    <string name="settings_autosave_confirm_on">Aç</string>
     <string name="settings_ml_drive_step_preparing">Hazırlanıyor…</string>
     <string name="settings_ml_drive_step_encrypting_faces">Yüz verileri şifreleniyor…</string>
     <string name="settings_ml_drive_step_encrypting_search">Arama verileri şifreleniyor…</string>
@@ -854,12 +843,6 @@
     <string name="settings_ml_drive_step_importing_faces">Yüz verileri içe aktarılıyor…</string>
     <string name="settings_ml_drive_step_importing_search">Arama verileri içe aktarılıyor…</string>
     <string name="settings_ml_drive_step_finishing">Tamamlanıyor…</string>
-    <string name="settings_ml_drive_folder_title">Drive\'ında bir klasör oluşturulsun mu?</string>
-    <string name="settings_ml_drive_folder_message">Kaydetme, Dosyalarım içinde \"Photos for Proton/ML data\" klasörünü oluşturur. İçindeki yüz ve arama verileri fotoğrafların gibi uçtan uca şifrelenir ve Drive depolama alanından düşülür.</string>
-    <string name="settings_ml_drive_folder_confirm">Oluştur ve kaydet</string>
-    <string name="settings_ml_drive_restore_loading">Kaydedilmiş veriler aranıyor…</string>
-    <string name="settings_ml_drive_restore_pick">Geri yüklenecek cihazı seç.</string>
-    <string name="settings_ml_drive_restore_empty">Drive\'da henüz kaydedilmiş bir şey yok. Verilerin bulunduğu cihazda \"Drive\'a kaydet\" seçeneğini kullan, ardından tekrar dene.</string>
     <string name="settings_ml_drive_restore_list_failed">Drive\'ına ulaşılamadı. Daha sonra tekrar dene.</string>
     <string name="settings_ml_drive_this_device">Bu cihaz</string>
     <string name="settings_ml_drive_another_device">Başka bir cihaz</string>
@@ -868,12 +851,6 @@
     <string name="settings_ml_drive_holds_search">Arama verileri</string>
     <string name="settings_ml_drive_saved_at">Kaydedilme: %1$s</string>
     <string name="settings_ml_drive_restore_confirm">Geri yükle</string>
-    <string name="settings_ml_drive_mode_title">Birleştirilsin mi, değiştirilsin mi?</string>
-    <string name="settings_ml_drive_mode_message">Bu cihazda zaten yüz verileri var. Nasıl geri yükleneceğini seç.</string>
-    <string name="settings_ml_drive_mode_merge">Birleştir</string>
-    <string name="settings_ml_drive_mode_merge_desc">Bu cihazdaki adları koru ve kaydedilmiş olanları ekle</string>
-    <string name="settings_ml_drive_mode_replace">Değiştir</string>
-    <string name="settings_ml_drive_mode_replace_desc">Drive\'ındaki fotoğraflar için kaydedilmiş yüzleri ve adları kullan</string>
     <string name="settings_ml_drive_saved">Drive\'a kaydedildi</string>
     <string name="settings_ml_drive_restored">Drive\'dan geri yüklendi</string>
     <string name="settings_ml_drive_saved_partly">Kısmen kaydedildi</string>
@@ -881,7 +858,7 @@
     <string name="settings_ml_drive_save_failed">Drive\'a kaydedilemedi</string>
     <string name="settings_ml_drive_restore_failed">Drive\'dan geri yüklenemedi</string>
     <string name="settings_ml_drive_nothing_title">Henüz kaydedilecek bir şey yok</string>
-    <string name="settings_ml_drive_nothing_message">Bu cihazda henüz yüz veya arama verisi yok. Önce yüz tanımanın ya da anlamsal aramanın fotoğraflarını taramasına izin ver.</string>
+    <string name="settings_ml_drive_nothing_message">Bu cihazda henüz yüz veya arama verisi yok. Önce yüz tanımanın ya da fotoğraf aramanın fotoğraflarını taramasına izin ver.</string>
     <string name="settings_ml_drive_not_capable">Bu cihazda kullanılamıyor</string>
     <string name="settings_ml_drive_faces_not_saved">Yüz verileri kaydedilemedi.</string>
     <string name="settings_ml_drive_search_not_saved">Arama verileri kaydedilemedi.</string>
@@ -906,13 +883,14 @@
         <item quantity="one">%1$d fotoğraf için arama verisi</item>
         <item quantity="other">%1$d fotoğraf için arama verisi</item>
     </plurals>
-    <string name="settings_ml_drive_list_two">%1$s ve %2$s</string>
-    <string name="settings_ml_drive_list_three">%1$s, %2$s ve %3$s</string>
     <string name="settings_ai_rescan_confirm_title">Tüm fotoğraflar yeniden taransın mı?</string>
     <string name="settings_ai_rescan_confirm_msg">Her fotoğraf yüzler için daha yüksek ayrıntıyla yeniden taranır, böylece daha küçük ve daha uzaktaki yüzler de bulunur. Adların ve düzeltmelerin korunur ve yüzler yeniden algılandığında geri eklenir.</string>
     <string name="settings_ai_clear">Yüz verilerini temizle</string>
     <string name="settings_ai_clear_confirm_title">Yüz verileri temizlensin mi?</string>
     <string name="settings_ai_clear_confirm_msg">Bu işlem bulunan tüm kişileri ve tüm yüz verilerini kaldırır. Fotoğrafların etkilenmez. Yüzler, dizinleme bir sonraki çalıştığında yeniden algılanır.</string>
+    <string name="settings_ai_clear_where_msg">Yüz verilerinin Proton Drive\'da da yedeği var.\n\nYalnızca bu telefonda: burada silinir ve hemen Drive\'dan geri gelir.\n\nHer yerde: burada, Proton Drive\'da ve diğer cihazlarında silinir ve yüz tanıma her birinde kapanır. Fotoğrafların etkilenmez.</string>
+    <string name="settings_ai_clear_here">Yalnızca bu telefonda</string>
+    <string name="settings_ai_clear_everywhere">Her yerde</string>
     <string name="settings_privacy">Gizlilik</string>
     <string name="settings_privacy_desc">Önbellek, çevrimdışı fotoğraflar ve telemetri</string>
     <string name="settings_metadata">Yükleme işlemleri</string>
@@ -1109,6 +1087,8 @@
     <string name="map_style_modern">Dünya haritası</string>
     <string name="map_style_modern_summary">Yerlerine doğru döndürebileceğin modern bir küre.</string>
     <string name="settings_amoled_black">Saf siyah (AMOLED)</string>
+    <string name="settings_liquid_glass">Sıvı cam</string>
+    <string name="settings_liquid_glass_desc">Menüler, sayfa başlıkları, paneller ve fotoğraf görüntüleyicinin düğmeleri altlarındakini bulanıklaştırır. Hâlâ geliştiriliyor, henüz her ekranda yok</string>
     <string name="settings_tint_cloud">Vurgu renkli bulut rozetleri</string>
 
     <string name="language_en">İngilizce, English</string>
@@ -1154,17 +1134,43 @@
 
     <string name="faq_title">Sık sorulan sorular</string>
     <string name="faq_settings_entry">SSS</string>
-    <string name="faq_onboarding_intro">Başlamana yardımcı olacak birkaç kısa cevap. Bunları sonra Ayarlar\'da da bulabilirsin.</string>
     <string name="faq_q_cloud_icons">Bulut simgeleri ne anlama geliyor?</string>
     <string name="faq_a_cloud_icons">Yeşil bulut, fotoğrafın Proton Drive\'a yedeklendiği ve hâlâ bu cihazda olduğu anlamına gelir. Beyaz bulut, fotoğrafın yalnızca Proton Drive\'da olduğu, bu cihazda olmadığı anlamına gelir. Simge yoksa fotoğraf yalnızca bu cihazdadır ve henüz yedeklenmemiştir.</string>
     <string name="faq_q_backup">Yedekleme nasıl çalışır?</string>
-    <string name="faq_a_backup">Yedekleme açıkken yeni fotoğraflar ve videolar otomatik olarak yedeklenir. Ayarlar\'dan yedeklemeyi yalnızca Wi-Fi ile sınırlayabilirsin, böylece mobil veride duraklar.</string>
+    <string name="faq_a_backup">Yedekleme açıkken yeni fotoğraflar ve videolar otomatik olarak yedeklenir. Ayarlamak için \"%3$s\" sekmesinin sağ üstündeki yuvarlak düğmeye dokun ve \"%1$s\" bölümünü aç, örneğin \"%2$s\" ile.</string>
     <string name="faq_q_albums">Albümler nedir ve klasör yansıtma ne işe yarar?</string>
-    <string name="faq_a_albums">Albümler, Proton Drive\'daki fotoğrafları gruplar. \"Cihaz klasörlerini Drive albümleri olarak yansıt\" seçeneği, Kamera veya Ekran görüntüleri gibi telefon klasörlerinin yedeklenirken Drive\'da eşleşen albümler olarak görünmesini sağlar.</string>
-    <string name="faq_q_mirror_local">\"Değişiklikleri yerel dosyalara yansıt\" ne yapar?</string>
+    <string name="faq_a_albums">Albümler fotoğrafları Proton Drive\'da gruplar. \"%1$s\" içinde, \"%2$s\" altında her klasörün bir \"%3$s\" kutusu vardır. İşaretlersen klasör yedeklenirken Drive\'da eşleşen bir albüm alır.</string>
+    <string name="faq_q_mirror_local">\"%1$s\" ne yapar?</string>
     <string name="faq_a_mirror_local">Uygulama bir fotoğrafı yedeklerken meta verilerini temizlediğinde veya yeniden adlandırdığında, aynı değişiklikleri telefonundaki orijinale de uygular, böylece yerel dosya ile yedeklenen kopya aynı kalır. Yalnızca bu uygulamanın bundan sonra yedeklediği fotoğraflara uygulanır ve Proton Drive web\'de yaptığın düzenlemeleri telefonuna geri çekmez.</string>
     <string name="faq_q_existing">Uygulama mevcut fotoğraflarımı değiştirir mi?</string>
     <string name="faq_a_existing">Hayır. Meta veri değişiklikleri yalnızca uygulama bir fotoğrafı yedeklerken yapılır ve yalnızca meta veri temizlemeyi veya yerel yansıtmayı açtıysan. Telefonundaki mevcut fotoğraflar, fotoğraf başına bir işlem seçmediğin sürece olduğu gibi bırakılır.</string>
+    <string name="faq_section_backup">Yedekleme</string>
+    <string name="faq_section_albums">Albümler</string>
+    <string name="faq_section_where">Ne nerede</string>
+    <string name="faq_q_folders">Hangi klasörlerin yedekleneceğini nasıl seçerim?</string>
+    <string name="faq_a_folders">\"%4$s\" sekmesinin sağ üstündeki yuvarlak düğmeye dokun ve \"%1$s\" bölümünü aç. \"%2$s\" seçeneğini aç ya da klasörleri \"%3$s\" altında tek tek seç.</string>
+    <string name="faq_q_free_space">Telefonda nasıl yer açarım?</string>
+    <string name="faq_a_free_space">Proton Drive\'da zaten olan fotoğraflar telefondan kaldırılabilir. \"%2$s\" içinde \"%1$s\" seçeneğini aç ya da fotoğrafları seç, silmeye dokun ve \"%3$s\" seçeneğini seç. Drive\'daki kopya kalır.</string>
+    <string name="faq_q_album_create">Nasıl albüm oluşturur ve fotoğraf eklerim?</string>
+    <string name="faq_a_album_create">\"%1$s\" sekmesinde \"%2$s\" düğmesine dokun (artılı klasör). Fotoğraf eklemek için onları zaman çizelgesinde seç ve \"%3$s\" seçeneğine dokun ya da albümü açıp menüsünden \"%4$s\" seçeneğini seç.</string>
+    <string name="faq_q_album_share">Bir albümü nasıl paylaşırım?</string>
+    <string name="faq_a_album_share">Albümü aç, menüsüne dokun ve \"%1$s\" seçeneğini seç. Kişileri e-postayla görüntüleyici veya düzenleyici olarak davet et. Proton hesabı olmayan biri e-postayla davet alır. Seninle paylaşılan albümler \"%3$s\" sekmesinde, \"%2$s\" altındadır.</string>
+    <string name="faq_q_album_contribute">Benimle paylaşılan bir albüme fotoğraf ekleyebilir miyim?</string>
+    <string name="faq_a_album_contribute">Evet, düzenleme iznin varsa. Fotoğrafları kendi albümüne eklediğin gibi ekle. Albüm, sahibinin depolama alanından düşen bir kopya alır ve orijinalin olduğu yerde kalır.</string>
+    <string name="faq_q_folders_albums">Klasörler ile albümler arasındaki fark nedir?</string>
+    <string name="faq_a_folders_albums">Albümler Proton Drive\'dadır. Klasörler bu telefondaki klasörlerdir, örneğin Camera veya Screenshots, ve \"%1$s\" etiketi taşır. \"%4$s\" sekmesindeki filtre \"%2$s\" veya \"%3$s\" ile yalnızca bir türü gösterir.</string>
+    <string name="faq_q_album_delete">Fotoğrafları kaldırınca veya silince ne olur?</string>
+    <string name="faq_a_album_delete">\"%1$s\" fotoğrafları yalnızca albümden çıkarır, zaman çizelgende kalırlar. Silinen bir fotoğraf \"%2$s\" bölümüne gider ve oradan geri yükleyebilirsin. Bir albümü silersen fotoğrafları Proton Drive\'da kalır.</string>
+    <string name="faq_q_where_ml">Yüzleri, aramayı ve Metni kopyala özelliğini nerede açarım?</string>
+    <string name="faq_a_where_ml">\"%3$s\" sekmesinin sağ üstündeki yuvarlak düğmeye, ardından \"%1$s\" > \"%2$s\" bölümüne dokun. Her özelliğin kendi anahtarı vardır ve modelini bir kez indirir. Her şey bu telefonda çalışır.</string>
+    <string name="faq_q_where_lock">Uygulama kilidi ve gizli fotoğraflar nerede?</string>
+    <string name="faq_a_where_lock">\"%1$s\" > \"%2$s\" içinde \"%3$s\" ve \"%4$s\" bulunur. Fotoğrafları gizlemek için onları seç ve \"%5$s\" seçeneğini seç.</string>
+    <string name="faq_q_where_drive">Yüzler, etiketler ve gizli öğeler diğer cihazlarıma nasıl ulaşır?</string>
+    <string name="faq_a_where_drive">\"%1$s\" içinde, \"%2$s\" altında \"%3$s\" seçeneğini aç. Yüzler ve adlar, arama dizini, etiketler ve gizli öğeler Proton Drive\'a kaydedilir ve masaüstü uygulaması dahil diğer cihazlarında aynı kalır.</string>
+    <string name="faq_q_where_trash">Silinen fotoğraflar nereye gider?</string>
+    <string name="faq_a_where_trash">\"%1$s\" bölümüne. \"%2$s\" sekmesinin sağ üstündeki yuvarlak düğmeyle açabilirsin. Telefondan ve Proton Drive\'dan silinen fotoğraflar orada bekler ve geri yüklenebilir.</string>
+    <string name="faq_q_no_account">Uygulamayı Proton hesabı olmadan kullanabilir miyim?</string>
+    <string name="faq_a_no_account">Evet. Giriş ekranında \"%1$s\" seçeneğini seç. Göz atma, düzenleme, klasörler, gizli fotoğraflar, yüzler ve arama bu telefonda çalışır. Proton Drive\'a yedekleme için hesap gerekir.</string>
 
     <string name="albums_new_album">Yeni albüm</string>
     <string name="albums_create_album">Albüm oluştur</string>
@@ -1409,6 +1415,9 @@
     <string name="person_unsorted_hint">Bir kişiyle kesin olarak eşleştirilemeyen yüzler. Gerçek bir kişiyi buradan taşımak için fotoğrafları seç veya kalanları kişi değil olarak işaretle.</string>
     <string name="person_unsorted_caption">Eşleştirilemeyen artan yüzler. Sınıflandırmak için aç.</string>
     <string name="person_rename_title">Yeniden adlandır</string>
+    <string name="person_remove_name">Adı kaldır</string>
+    <string name="person_remove_name_confirm_title">Ad kaldırılsın mı?</string>
+    <string name="person_remove_name_confirm_body">Fotoğraflar kalır. Grup incelenecek yüzlere geri döner ve tek fotoğrafı varsa Kişiler\'den çıkar.</string>
     <string name="person_add_name">Ad ekle</string>
     <string name="person_rename_hint">Ad</string>
     <string name="person_add_photos">Fotoğraf ekle</string>
@@ -1486,6 +1495,8 @@
     </plurals>
 
     <string name="viewer_play_slideshow">Slayt gösterisini oynat</string>
+    <string name="viewer_video_seek_seconds">%1$d sn</string>
+    <string name="viewer_video_hold_speed">%1$s×</string>
     <string name="viewer_pause_slideshow">Slayt gösterisini duraklat</string>
 
     <string name="widget_description">Photos for Proton, fotoğraflarını ana ekranda gösterir</string>
@@ -1505,7 +1516,10 @@
     <string name="widget_mode_cloud">Bulut fotoğrafları</string>
     <string name="widget_mode_cloud_desc">Fotoğrafları diğer uygulamalara açmadan şifreli bulut önbelleğinden göster</string>
     <string name="widget_section_choose_cloud_photos">Bulut fotoğraflarını seç</string>
-    <string name="widget_cloud_photos_selected">%d bulut fotoğrafı seçildi</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d bulut fotoğrafı seçildi</item>
+        <item quantity="other">%d bulut fotoğrafı seçildi</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Henüz bulut fotoğrafı yok</string>
     <string name="widget_no_cloud_albums">Henüz bulut albümü yok. Albümlerini eşitlemek için uygulamayı aç.</string>
     <string name="widget_interval_section">Fotoğraf değiştirme sıklığı</string>
@@ -1515,7 +1529,10 @@
     <string name="widget_interval_8hr">8 saat</string>
     <string name="widget_interval_1day">1 gün</string>
     <string name="widget_add_button">Widget ekle</string>
-    <string name="widget_photos_selected">%d fotoğraf seçildi</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d fotoğraf seçildi</item>
+        <item quantity="other">%d fotoğraf seçildi</item>
+    </plurals>
     <string name="widget_no_photos">Fotoğraf bulunamadı</string>
 
     <plurals name="delete_title_plural">
@@ -1581,6 +1598,8 @@
     <string name="cd_motion_photo">Hareketli fotoğraf</string>
     <string name="cd_panorama">Panorama</string>
     <string name="cd_play_motion_photo">Hareketli fotoğrafı oynat</string>
+    <string name="cd_video_play">Oynat</string>
+    <string name="cd_video_pause">Duraklat</string>
     <string name="cd_stop_motion_photo">Hareketli fotoğrafı durdur</string>
     <string name="cd_exit_panorama">Panoramadan çık</string>
     <string name="viewer_view_panorama">Panoramayı görüntüle</string>
@@ -1688,6 +1707,11 @@
     <string name="device_folders_section">Bu cihazdaki klasörler</string>
     <string name="device_folder_already_backed_up">Zaten Drive\'a yedeklendi</string>
     <string name="backup_started">Drive\'a yedekleniyor</string>
+    <string name="share_backup_label">Drive\'a yedekle</string>
+    <string name="share_backup_sign_in">Drive\'a yedeklemek için oturum aç</string>
+    <string name="share_backup_unreadable">Paylaşılanlardan hiçbir fotoğraf veya video okunamadı</string>
+    <string name="share_backup_some_unreadable">Drive\'a yedekleniyor. %2$d öğeden %1$d tanesi okunamadı ve atlandı</string>
+    <string name="share_backup_saved_to_phone">Telefona kaydedildi, Drive\'a yedekleniyor</string>
     <string name="upload_confirm_title">Drive\'a yüklensin mi?</string>
     <string name="upload_confirm_message">Seçili %1$d öğe Proton Drive\'ına yedeklensin mi?</string>
     <string name="upload_action_short">Yükle</string>
@@ -1745,6 +1769,7 @@
         <item quantity="other">%1$d fotoğrafın cihaz kopyası silinip %2$s yer açılsın mı? Drive\'da kalırlar.</item>
     </plurals>
     <string name="settings_free_up_error">Yer açılamadı: %1$s</string>
+    <string name="free_up_skipped_pre_r">Bazı cihaz kopyalarının kaldırılması için Android 11 veya üstü gerekiyor, bunlar atlandı.</string>
     <string name="upload_status_uploading">Yükleniyor…</string>
     <string name="upload_status_encrypting">Şifreleniyor…</string>
     <string name="upload_status_queued">Sırada</string>
@@ -1822,6 +1847,36 @@
     <string name="albums_view_heading">Görünüm</string>
     <string name="albums_view_grid">Izgara</string>
     <string name="albums_view_list">Liste</string>
+    <string name="people_display_settings">Görünüm</string>
+    <string name="people_follow_albums">Albümler sekmesiyle aynı</string>
+    <string name="people_follow_albums_desc">Kişileri Albümler sekmesinin görünümü ve kapak boyutuyla gösterir</string>
+    <string name="drive_backup_section">Proton Drive\'a yedekle</string>
+    <string name="drive_backup_auto">Otomatik yedekleme</string>
+    <string name="drive_backup_auto_desc">Yüzleri, arama dizinini, etiketleri ve gizli öğeleri kaydeder ve diğer cihazlarında aynı tutar</string>
+    <string name="drive_backup_turn_on_title">Otomatik yedekleme açılsın mı?</string>
+    <string name="drive_backup_turn_on_msg">Başka bir telefonda bunun için Photos for Proton 2.6.0 veya daha yenisi, bir bilgisayarda ise Photos for Proton desktop 1.3.0 veya daha yenisi gerekir. Eski bir sürüm bu telefonun kaydettiklerine dokunmaz ve kendi verilerini olduğu gibi tutar.</string>
+    <string name="drive_backup_turn_on">Aç</string>
+    <string name="drive_backup_save_now">Şimdi yedekle</string>
+    <string name="drive_backup_load">Drive\'dan yükle</string>
+    <string name="drive_backup_load_desc">Diğer cihazlarının kaydettiklerini getirir</string>
+    <string name="drive_copies_row">Drive\'daki yedekler</string>
+    <string name="drive_copies_row_desc">Hangi cihaz neyi ne zaman kaydetti</string>
+    <string name="drive_copies_this_device">Bu telefon</string>
+    <string name="drive_copies_other_device">Başka bir cihaz</string>
+    <string name="drive_copies_saved">Kaydedildi: %s</string>
+    <string name="drive_copies_stale">30 günden uzun süredir güncellenmedi</string>
+    <string name="drive_copies_trash">Çöp kutusuna taşı</string>
+    <string name="drive_copies_trash_title">Bu cihazın yedeği çöp kutusuna taşınsın mı?</string>
+    <string name="drive_copies_trash_msg">%s: Proton Drive\'daki yüzleri, arama dizini, etiketleri ve gizli listesi Drive çöp kutusuna gider ve oradan geri yüklenebilir. O cihaz yeniden yedeklerse yeni bir kopya kaydeder.</string>
+    <string name="drive_copies_loading">Drive\'daki yedekler okunuyor…</string>
+    <string name="drive_copies_failed">Drive\'daki yedekler okunamadı</string>
+    <string name="drive_copies_empty">Drive\'a henüz bir şey kaydedilmedi</string>
+    <string name="drive_copies_trash_failed">Çöp kutusuna taşınamadı</string>
+    <string name="sign_out_dialog_drive_kept">Otomatik yedekleme açıkken yüzler, adlar, etiketler ve gizli öğeler Proton Drive\'da kalır ve tekrar oturum açtığında geri gelir.</string>
+    <string name="shared_backup_syncing">Proton Drive ile eşitleniyor</string>
+    <string name="shared_backup_last">Son eşitleme: %1$s</string>
+    <string name="shared_backup_never">Henüz eşitlenmedi</string>
+    <string name="shared_backup_failed">Eşitleme başarısız, daha sonra yeniden denenecek</string>
     <string name="albums_more_settings">Diğer ayarlar</string>
     <string name="album_options">Albüm seçenekleri</string>
     <string name="album_group_heading">Gruplama ölçütü</string>
@@ -1870,7 +1925,6 @@
     <string name="viewer_meta_flash_none">Flaş yok</string>
     <string name="viewer_meta_wb_auto">Otomatik</string>
     <string name="viewer_meta_wb_manual">Manuel</string>
-    <string name="viewer_meta_orientation_normal">Normal</string>
     <string name="viewer_meta_orientation_180">180° döndürülmüş</string>
     <string name="viewer_meta_orientation_90_cw">Saat yönünde 90° döndürülmüş</string>
     <string name="viewer_meta_orientation_90_ccw">Saat yönünün tersine 90° döndürülmüş</string>
@@ -1878,11 +1932,43 @@
     <string name="viewer_meta_source_backed_up">Proton Drive ve cihaz</string>
     <string name="viewer_meta_source_cloud">Yalnızca Proton Drive</string>
     <string name="viewer_meta_strip">Temizle</string>
-    <string name="viewer_meta_strip_all">Tüm özel meta verileri temizle</string>
-    <string name="viewer_meta_strip_all_desc">Bu dosyadan GPS, kamera bilgisi, yazılım, sanatçı ve telif hakkı alanlarını kaldırır</string>
+    <string name="viewer_meta_all_details">Tüm ayrıntılar</string>
+    <string name="details_adjust">Ayarla</string>
+    <string name="details_edit">Düzenle</string>
+    <string name="details_add">Ekle</string>
+    <string name="details_add_location">Konum ekle</string>
+    <string name="details_time">Saat</string>
+    <string name="details_remove_private">Özel bilgileri kaldır</string>
+    <string name="details_private_intro">Dosyada şu an bunlar var. Neyin gideceğini seç.</string>
+    <string name="details_private_undo">Bu geri alınamaz.</string>
+    <string name="details_private_none">Bu dosyada özel bilgi yok.</string>
+    <string name="details_private_dates">Tarih etiketleri</string>
+    <string name="details_private_author">Yazar</string>
+    <string name="details_place_hint">Haritayı iğnenin altına sürükle</string>
+    <string name="cloud_compress_title">Drive\'da sıkıştır</string>
+    <string name="cloud_compress_confirm_title">Drive\'da sıkıştırılsın mı?</string>
+    <string name="cloud_compress_confirm">Sıkıştır</string>
+    <string name="cloud_compress_started">Arka planda sıkıştırılıyor</string>
+    <string name="cloud_compress_waiting_wifi">Yedekleme yalnızca Wi-Fi ile çalıştığı için Wi-Fi bekleniyor</string>
+    <string name="cloud_compress_confirm_stop">İstediğin zaman bildirimden veya Etkinlik sayfasından durdurabilirsin.</string>
+    <string name="cloud_compress_progress">%1$d / %2$d</string>
+    <string name="cloud_compress_done">%1$d sıkıştırıldı, %2$s kazanıldı.</string>
+    <string name="cloud_compress_done_left">%1$d olduğu gibi bırakıldı.</string>
+    <string name="cloud_compress_channel_desc">Drive\'daki fotoğrafların sıkıştırılma ilerlemesi</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">Drive\'daki %1$d fotoğraf veya video indirilir, yükleme sıkıştırma ayarlarınla sıkıştırılır ve yeniden yüklenir. Küçük kopyası albümlerine girince orijinal Drive çöp kutusuna gider. En az %%10 küçülmeyecek olan olduğu gibi kalır.</item>
+        <item quantity="other">Drive\'daki %1$d fotoğraf ve video indirilir, yükleme sıkıştırma ayarlarınla sıkıştırılır ve yeniden yüklenir. Her orijinal, küçük kopyası albümlerine girince Drive çöp kutusuna gider. En az %%10 küçülmeyecek olan olduğu gibi kalır.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">Bu telefonda da olan %1$d öğe atlanır.</item>
+        <item quantity="other">Bu telefonda da olan %1$d öğe atlanır.</item>
+    </plurals>
+    <plurals name="details_private_remove">
+        <item quantity="one">%d öğeyi kaldır</item>
+        <item quantity="other">%d öğeyi kaldır</item>
+    </plurals>
     <string name="label_section_title">Etiketler</string>
     <string name="label_add_hint">Etiket ekle</string>
-    <string name="label_add_chip">Etiket ekle</string>
     <string name="label_remove_cd">Etiketi kaldır: %1$s</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d / %2$d etiket</item>
@@ -1930,16 +2016,10 @@
     <string name="label_leave_selection_title">Etiketler sayfasından çıkılsın mı?</string>
     <string name="label_leave_selection_message">Seçimin temizlenecek.</string>
     <string name="label_leave_selection_confirm">Çık</string>
-    <string name="label_backup_section">Drive\'daki etiketler</string>
-    <string name="label_backup_save_desc">Etiketlerinin şifreli bir kopyasını Drive\'da tut</string>
-    <string name="label_backup_restore_desc">Bu veya başka bir cihazın kaydettiği etiketleri birleştir</string>
     <string name="label_backup_restore_note">O sırada kaydedilen etiketleri geri getirir, sonradan sildiklerin de dahil. Sonradan eklediğin etiketler kalır.</string>
     <string name="label_backup_show_all">Tümünü göster (%1$d)</string>
-    <string name="label_backup_save_confirm_title">Etiketler Drive\'a kaydedilsin mi?</string>
-    <string name="label_backup_save_confirm_message">Bu cihazın daha önce kaydettiği kopya değiştirilir. Etiketler, fotoğrafların gibi uçtan uca şifrelenir.</string>
     <string name="label_backup_working_save">Etiketler kaydediliyor…</string>
     <string name="label_backup_working_restore">Etiketler geri yükleniyor…</string>
-    <string name="label_backup_folder_message">Kaydetme, Dosyalarım\'da \"Photos for Proton/Labels\" klasörünü oluşturur. İçindeki etiketler, fotoğrafların gibi uçtan uca şifrelenir ve Drive depolama alanına dahil edilir.</string>
     <string name="label_backup_nothing_message">Henüz hiçbir fotoğrafın etiketi yok. Önce bir fotoğrafa etiket ekle.</string>
     <string name="label_backup_restore_empty">Drive\'da henüz kaydedilmiş etiket yok. Etiketlerin bulunduğu cihazda \"Drive\'a kaydet\" seçeneğini kullan, sonra tekrar dene.</string>
     <string name="label_backup_up_to_date">Etiketlerin zaten güncel.</string>
@@ -1956,18 +2036,13 @@
     <string name="label_rename_save">Kaydet</string>
     <string name="label_rename_merge">Birleştir</string>
     <string name="label_delete_action">Etiketi sil</string>
+    <string name="label_delete_unused_title">Bu etiket silinsin mi?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Bu etiket %d fotoğraftan kaldırılsın mı?</item>
         <item quantity="other">Bu etiket %d fotoğraftan kaldırılsın mı?</item>
     </plurals>
     <string name="label_delete_confirm">Kaldır</string>
     <string name="viewer_meta_strip_confirm_title">Meta veriler temizlensin mi?</string>
-    <string name="viewer_meta_strip_confirm_message">Bu işlem, cihazındaki dosyadan şunları kalıcı olarak kaldırır: %1$s. Bu geri alınamaz.</string>
-    <string name="viewer_meta_strip_what_gps">GPS konumu</string>
-    <string name="viewer_meta_strip_what_camera">kamera bilgisi</string>
-    <string name="viewer_meta_strip_what_timestamps">zaman damgaları</string>
-    <string name="viewer_meta_strip_what_software">yazılım bilgisi</string>
-    <string name="viewer_meta_strip_what_authorship">sanatçı ve telif hakkı</string>
 
     <string name="viewer_delete_title_local">Fotoğraf silinsin mi?</string>
     <string name="viewer_delete_title_synced">Fotoğraf kaldırılsın mı?</string>
@@ -2303,7 +2378,11 @@
     <string name="permissions_action_open">Aç</string>
     <string name="albums_search_hint">Albümlerde ara</string>
     <string name="albums_search_no_results">Aramanla eşleşen albüm yok.</string>
-    <string name="settings_ai_groups_found">%1$d grup</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d grup</item>
+        <item quantity="other">%1$d grup</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Fotoğraf arama</string>
     <string name="settings_ai_faces_found">%1$d yüz</string>
     <string name="person_rename_merge_confirm_title">Mevcut kişiyle birleştirilsin mi?</string>
     <string name="person_rename_merge_confirm_body">%1$s adlı bir kişi zaten var. Bu adı kullanmak ikisini tek kişide birleştirir ve geri alınamaz. Birleştirilsin mi?</string>
@@ -2346,7 +2425,7 @@
     <string name="compression_unavailable_fallback">%1$s bu telefonda kullanılamıyor, bu yüzden videolarda %2$s kullanılır.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Fotoğraf etiketleri</string>
-    <string name="whats_new_260_labels_body">Bir fotoğrafı açın, “Ayrıntılar” öğesine dokunun ve “Etiketler” kutusuna en fazla beş etiket ekleyin; ya da birkaç fotoğraf seçip “Etiket ekle” öğesini seçin. Arama fotoğrafları etiketlerine göre bulur. Etiketleri yeniden adlandırabilir, birleştirebilir, silebilir, Drive\'a yedekleyebilir veya geri yükleyebilirsiniz: “Ayarlar > Diğer ayarlar > Etiketler”.</string>
+    <string name="whats_new_260_labels_body">Bir fotoğrafı açın, “Ayrıntılar” öğesine dokunun ve “Etiketler” kutusuna en fazla beş etiket ekleyin; ya da birkaç fotoğraf seçip “Etiket ekle” öğesini seçin. Arama fotoğrafları etiketlerine göre bulur. Etiketleri yeniden adlandırabilir, birleştirebilir ve silebilirsiniz: “Ayarlar > Diğer ayarlar > Etiketler”.</string>
     <string name="whats_new_260_compress_title">Video sıkıştırma</string>
     <string name="whats_new_260_compress_body">“Ayarlar > Yedekleme ve depolama > Yedekleme ayarları > Kalite ve boyut” altında “Videoları sıkıştır” seçeneğini açın, sonra kodeki ve kaliteyi seçin. Varsayılan her yerde oynatılan H.264\'tür. Yükleme ilerlemeyi ve kazanılan alanı gösterir, bir video sıkıştırılırken fotoğraflarınız yüklenmeye devam eder.</string>
     <string name="whats_new_260_vault_title">Oturum kapatırken gizli fotoğraflar</string>
@@ -2368,11 +2447,11 @@
     <string name="whats_new_260_details_title">Ayrıntılarda kişiler ve harita</string>
     <string name="whats_new_260_details_body">Bir fotoğrafın “Ayrıntılar” bölümü artık içindeki kişileri ve çekildiği yerin haritasını gösterir. Sayfasını açmak için bir kişiye, tam ekran görmek için haritaya dokunun. Adsız bir yüze dokunarak ona ad verin veya birine ekleyin.</string>
     <string name="whats_new_260_frame_title">Çerçeve aracı</string>
-    <string name="whats_new_260_frame_body">Fotoğraf düzenleyicide bir fotoğrafı 1:1, 9:16 veya Polaroid gibi başka şekilli bir tuvale, bir renkle veya yumuşak bir bulanıklıkla doldurarak yerleştirin. Araç hâlâ geliştiriliyor ve yeni iyileştirmeler gelecek.</string>
+    <string name="whats_new_260_frame_body">Fotoğraf düzenleyicide bir fotoğrafı 1:1, 9:16 veya Polaroid gibi başka şekilli bir tuvale, bir renkle veya yumuşak bir bulanıklıkla doldurarak yerleştirin.</string>
     <string name="whats_new_260_drive_title">Drive\'da yüz ve arama verileri</string>
-    <string name="whats_new_260_drive_body">Yüz adlarını ve arama verilerini Drive\'a kaydedin ve başka bir telefonda geri yükleyin; neyin geri geleceğini siz seçersiniz: “Ayarlar > Diğer ayarlar > Makine öğrenimi”.</string>
-    <string name="whats_new_260_autosave_title">Drive\'a otomatik kayıt</string>
-    <string name="whats_new_260_autosave_body">Yüz ve arama verilerinizin ya da etiketlerinizin Drive kopyasında “Otomatik kaydet” seçeneğini açın; kopya arka planda güncel kalır: değişikliklerden sonra, günlük veya haftalık. Bunları “Ayarlar > Diğer ayarlar” altında, “Makine öğrenimi” ve “Etiketler” bölümlerinde bulabilirsiniz.</string>
+    <string name="whats_new_260_drive_body">Yüz adlarını, arama verilerini, etiketleri ve gizli öğeleri Drive\'a kaydedin ve başka bir telefonda “Drive\'dan yükle” ile geri getirin: “Ayarlar > Diğer ayarlar > Proton Drive\'a yedekle”.</string>
+    <string name="whats_new_260_autosave_title">Otomatik yedekleme</string>
+    <string name="whats_new_260_autosave_body">“Otomatik yedekleme” seçeneğini açın; Drive kopyası arka planda güncel kalır, her değişiklikten birkaç dakika sonra, ve diğer cihazlarınızda da aynı olur. “Şimdi yedekle” hemen kaydeder.</string>
     <string name="whats_new_260_worldmap_title">Daha zengin dünya haritası</string>
     <string name="whats_new_260_worldmap_body">Dünya haritası artık ülke ve il sınırlarını çiziyor, fotoğraf çektiğiniz ili renklendiriyor, yaklaştıkça yerlerin adlarını gösteriyor ve klasik haritayla aynı iğneleri kullanıyor. Avrupa üzerinde açılır; kaydırırken ve sıkıştırırken parmaklarınızın altındaki nokta yerinde kalır.</string>
     <string name="whats_new_260_time_title">Saat biçimi</string>
@@ -2382,15 +2461,15 @@
     <string name="whats_new_260_duplicates_title">Kopyaları inceleme</string>
     <string name="whats_new_260_duplicates_body">Bir kopyayı, neyi sileceğinize karar vermeden önce sıkıştırarak, sürükleyerek veya çift dokunarak 6 kata kadar büyütün. “Grubu sil” bir grubun tüm kopyalarını tek seferde seçer.</string>
     <string name="whats_new_260_intro_title">Önceki test sürümleri dahil</string>
-    <string name="whats_new_260_intro_body">Bu sürüm 1\'den 5\'e kadar test sürümlerindeki her şeyi de içerir. Sonraki kartlar yalnızca o zamandan beri yeni olanı gösterir.</string>
+    <string name="whats_new_260_intro_body">Bu sürüm 1\'den 6\'ya kadar test sürümlerindeki her şeyi de içerir. Sonraki kartlar yalnızca o zamandan beri yeni olanı gösterir.</string>
     <string name="whats_new_260_sdk_title">Proton Drive SDK anahtarları</string>
-    <string name="whats_new_260_sdk_body">Ayarlar, Diğer ayarlar, Proton Drive SDK altında favoriler ve kategoriler, çöp kutusu, tam kalitede indirme ve yükleme için ayrı birer anahtar var. Hepsi kapalı. Birini açtığında o işlem Proton\'un kendi Drive SDK\'sı üzerinden yürür; başarısız olursa uygulama işi her zamanki gibi yapar.</string>
+    <string name="whats_new_260_sdk_body">Ayarlar, Diğer ayarlar, Proton Drive SDK altında favoriler ve kategoriler, çöp kutusu, tam kalitede indirme, yükleme, albümler, değişiklik akışı ve sizinle paylaşılan albümler için ayrı birer anahtar var. Hepsi kapalı. Birini açtığında o işlem Proton\'un kendi Drive SDK\'sı üzerinden yürür; başarısız olursa uygulama işi her zamanki gibi yapar.</string>
     <string name="whats_new_260_setas_title">Farklı ayarla ve diğer uygulamalara fotoğraf</string>
     <string name="whats_new_260_setas_body">Görüntüleyicinin menüsü fotoğrafı telefonun duvar kağıdı veya kişi fotoğrafı ayarına iletir. Gizlilik ve güvenlik altında fotoğraf seçmeyi açarsan diğer uygulamalar buradan fotoğraf seçebilir; gizli fotoğraflar asla dışarı çıkmaz.</string>
     <string name="whats_new_260_folderimport_title">Klasörden içe aktarma</string>
     <string name="whats_new_260_folderimport_body">Ente veya Google Takeout dışa aktarımını ya da düz fotoğrafları zip\'in yanında bir klasörden de içe aktar. Live Photo videosuyla birlikte tek fotoğraf olarak gelir ve her fotoğraf gerçek bir tarih alır.</string>
     <string name="whats_new_260_mlsetup_title">Kurulumda akıllı özellikler</string>
-    <string name="whats_new_260_mlsetup_body">İlk açılış kurulumu yüz tanıma, fotoğraf arama ve Metni kopyala özelliklerini, her birinin indirme boyutuyla sunar. İstediğini seç, arka planda iner.</string>
+    <string name="whats_new_260_mlsetup_body">İlk açılış kurulumu yüz tanıma, fotoğraf arama ve Metni kopyala özelliklerini, her birinin indirme boyutuyla sunar. İstediğini seç, arka planda iner. Bunları daha sonra “Ayarlar > Diğer ayarlar > Makine öğrenimi” altında da açabilirsin.</string>
     <string name="whats_new_260_longpress_title">Uzun basma, senin istediğin gibi</string>
     <string name="whats_new_260_longpress_body">Ayarlar, Görünüm altında görüntüleyicide uzun basmanın metni mi seçeceğini yoksa menüyü mü açacağını seç. Menüde Metni tanı var ve artık düğmeleri tekrarlamıyor.</string>
     <string name="whats_new_260_nothumb_title">Drive fotoğrafları yeniden açılıyor</string>
@@ -2401,6 +2480,56 @@
     <string name="whats_new_260_nullisland_body">Kamerası konum olarak 0,0 yazan bir fotoğraf artık haritada Takoradi, Gana\'da görünmez. Tarih veya yer düzenlemesi fotoğrafı etiketleri ve yüzleriyle birlikte favoride tutar.</string>
     <string name="whats_new_260_likeness_title">Bu kim? daha iyi biliyor</string>
     <string name="whats_new_260_likeness_body">Bir yüze ad verirken en çok benzeyen kişiler yeniden en üstte. Büyük kitaplıklarda verdiğin veya içe aktardığın adlar kişilerinde kalır ve sayı artık donmaz.</string>
+    <string name="whats_new_260_videoseek_title">Videoları atla ve hızlandır</string>
+    <string name="whats_new_260_videoseek_body">Bir videonun sol ya da sağ kenarına iki kez dokunarak 10 saniye geri ya da ileri atla, ya da bir kenarı basılı tutarak bırakana kadar daha hızlı oynat.</string>
+    <string name="whats_new_260_cloudcompress_title">Drive\'da sıkıştır</string>
+    <string name="whats_new_260_cloudcompress_body">Yalnızca Drive\'da olan fotoğraf ve videoları görüntüleyiciden ya da bir seçimden küçültebilirsin; her orijinal, küçük kopyası yerine oturunca Drive çöp kutusuna gider. Arama, bir albüm ya da bir yerden de başlatabilirsin; en yenilerden başlar.</string>
+    <string name="whats_new_260_sharebackup_title">Diğer uygulamalardan yedekle</string>
+    <string name="whats_new_260_sharebackup_body">Başka bir uygulamadan fotoğraf ya da video paylaşırken “Drive\'a yedekle” seçeneğini seç ya da başka bir uygulamadan açılan bir fotoğrafı, örneğin bir e-posta ekini, doğrudan görüntüleyiciden yedekle.</string>
+    <string name="whats_new_260_foldermove_title">Oturum açıkken klasör taşı</string>
+    <string name="whats_new_260_foldermove_body">“Klasöre taşı” ve “Klasörü yeniden adlandır” artık oturum açıkken de çalışır ve Drive\'da zaten olan bir fotoğraf, taşındığı klasörün albümüne geçer.</string>
+    <string name="whats_new_260_drivecopies_title">Drive\'daki yedekler</string>
+    <string name="whats_new_260_drivecopies_body">“Drive\'daki yedekler” her cihazın yedeğini ve en son ne zaman kaydedildiğini listeler; “Otomatik yedekleme” açıkken “Yüz verilerini temizle” yalnızca bu telefonda mı yoksa her yerde mi silineceğini sorar.</string>
+    <string name="whats_new_260_glass_title">Sıvı cam</string>
+    <string name="whats_new_260_glass_body">Android 12 ve sonrasında “Ayarlar > Görünüm ve dil > Tema ve palet” altında “Sıvı cam” seçeneğini aç; menüler, sayfa başlıkları, paneller, görüntüleyici düğmeleri ve arama alanı buzlu cam gibi görünür, hâlâ geliştiriliyor ve henüz her ekranda yok.</string>
+    <string name="whats_new_260_detailsheet_title">Yeni ayrıntılar paneli</string>
+    <string name="whats_new_260_detailsheet_body">“Ayrıntılar” fotoğrafın bir özetiyle açılır; tarih, yer, etiketler ve kategoriler de panelin içinde birer sayfa olarak, takvim ve haritayla açılır.</string>
+    <string name="whats_new_260_multiedit_title">Birden çok fotoğrafı düzenleme</string>
+    <string name="whats_new_260_multiedit_body">Birden çok fotoğrafın tarihini ya da yerini değiştirmek artık ayrıntılar paneline benziyor; tarih seçenekleri tek bir düğmede, takvim ve harita ise ayrı panellerde açılıyor.</string>
+    <string name="whats_new_260_personmonths_title">Kişi sayfasında aylar</string>
+    <string name="whats_new_260_personmonths_body">Bir kişinin sayfası her fotoğraf grubunun üstünde bir ay başlığı gösterir ve adı olan bir kişiden açılan görüntüleyici “Kapak olarak ayarla” ve “Kişiden kaldır” seçeneklerini sunar.</string>
+    <string name="whats_new_260_timelinestay_title">Zaman çizelgesi yerinde kalır</string>
+    <string name="whats_new_260_timelinestay_body">Koleksiyon\'dan ya da bir kişinin sayfasından fotoğraf açıp diğerlerine kaydırmak artık alttaki zaman çizelgesini yerinden oynatmaz.</string>
+    <string name="whats_new_260_setup_title">Daha anlaşılır ilk kurulum</string>
+    <string name="whats_new_260_setup_body">İlk açılıştaki kurulum artık Ayarlar\'a benziyor; her adımda tek bir ana düğme, izin adımlarında “Şimdi değil” ve neleri açacağını listeleyen bir son adım var.</string>
+    <string name="whats_new_260_folderbackfill_title">Klasör albümleri dolar</string>
+    <string name="whats_new_260_folderbackfill_body">Bir klasörün albümünü açmak, o klasörün zaten yedeklenmiş fotoğraflarını da ekler ve gerekirse albümü oluşturur.</string>
+    <string name="whats_new_260_freeupcheck_title">Yer açma, iki kez kontrol</string>
+    <string name="whats_new_260_freeupcheck_body">Yer aç, cihazdaki kopyaları silmeden hemen önce küçük gruplar halinde Drive\'a karşı kontrol eder ve 2.000\'den fazla fotoğraf izin gerektirdiğinde birkaç sistem penceresinde sorar.</string>
+    <string name="whats_new_260_removedstays_title">Kaldırılan fotoğraflar geri gelmez</string>
+    <string name="whats_new_260_removedstays_body">Drive kopyasını burada, başka bir cihazda veya web\'de çöp kutusuna taşıdığınız bir fotoğraf artık otomatik yedekleme tarafından yeniden yüklenmez.</string>
+    <string name="whats_new_260_peoplepics_title">Kişi resimleri ve düzen</string>
+    <string name="whats_new_260_peoplepics_body">Kişiler sayfasındaki ve “Bu kim?” penceresindeki yüz resimleri büyük kitaplıklarda artık karanlık kalmaz ve Kişiler sayfası Albümler sekmesinin görünümünü izleyebilir ya da kendi ızgarasını veya listesini kullanabilir.</string>
+    <string name="whats_new_260_desktopsync_title">Masaüstü uygulamasıyla birlikte</string>
+    <string name="whats_new_260_desktopsync_body">“Otomatik yedekleme” açıkken yüzler, adlar, etiketler, arama ve gizli fotoğraflar bu telefonda, diğer telefonlarında ve Photos for Proton masaüstü uygulamasında aynı kalır; birindeki değişiklik birkaç dakika içinde diğerlerinde görünür. Açarken diğer cihazların hangi sürümlere ihtiyaç duyduğunu söyler.</string>
+    <string name="whats_new_260_facefix_title">Görüntüleyiciden yüz düzelt</string>
+    <string name="whats_new_260_facefix_body">Görüntüleyicide adlandırılmış bir yüze uzun bas ve o kişi olmadığını belirt; adlandırılmış bir kişinin menüsünde “Adı kaldır” var.</string>
+    <string name="whats_new_260_coldstart_title">Büyük kitaplıklarda daha hızlı açılış</string>
+    <string name="whats_new_260_coldstart_body">Uygulama açılınca, geri kalanı okunurken yalnızca en yeni fotoğraflar yerine tüm kitaplık hemen görünür.</string>
+    <string name="whats_new_260_newphotos_title">Yeni fotoğraflar kendiliğinden eklenir</string>
+    <string name="whats_new_260_newphotos_body">Uygulama açıkken çektiğin veya kaydettiğin fotoğraflar, yeniden başlatma ya da çekip yenileme olmadan yüzler ve arama için kendiliğinden taranır.</string>
+    <string name="whats_new_260_namessafe_title">Yüz adları güvende</string>
+    <string name="whats_new_260_namessafe_body">Yüzler gruplanırken yapılan bir yeniden adlandırma veya birleştirme artık geri alınmaz, otomatik birleştirmeler düzeltilebilir kalır, yedeklenmiş bir fotoğrafın yüzleri yer açtıktan sonra da kalır ve gizli fotoğraflar Kişiler\'den çıkar.</string>
+    <string name="whats_new_260_namecase_title">Bir ad, bir kişi</string>
+    <string name="whats_new_260_namecase_body">“adam” ve “Adam” masaüstü uygulamasında olduğu gibi tek kişidir, “Ádám” ve “Adam” ise iki kişi olarak kalır; bir kişinin fotoğraf sayısı sayfasıyla eşleşir.</string>
+    <string name="whats_new_260_favsync_title">Diğer cihazlardan favoriler</string>
+    <string name="whats_new_260_favsync_body">Web\'de veya başka bir cihazda eklenen ya da kaldırılan bir favori birkaç saniye içinde burada görünür.</string>
+    <string name="whats_new_260_copydate_title">Kopyalanan fotoğrafların tarihi</string>
+    <string name="whats_new_260_copydate_body">Telefona kendi tarihi olmadan kopyalanan bir fotoğraf veya video, eklendiği gün yerine çekildiği günü gösterir.</string>
+    <string name="whats_new_260_widgetopen_title">Widget fotoğrafı açar</string>
+    <string name="whats_new_260_widgetopen_body">Drive fotoğrafları gösteren bir widget\'a dokunmak zaman çizelgesi yerine o fotoğrafı açar ve fotoğraf seçicisi ilk seçimde artık zıplamaz.</string>
+    <string name="whats_new_260_smallfixes_title">Küçük düzeltmeler</string>
+    <string name="whats_new_260_smallfixes_body">Kayıpsız video kırpma artık başta kare kaybetmiyor, görüntüleyici düğmelerine uzun basmak artık fotoğrafın metnini okumuyor, ilk yedekleme sırasında açılan klasör albümü fotoğraflarını alıyor ve ekran kenarındaki kırpma tutamaçları yeniden çalışıyor.</string>
     <string name="whats_new_260_group_title">Büyük kitaplıklarda yüz gruplama</string>
     <string name="whats_new_260_group_body">Otuz binden fazla yüzü olan kitaplıklar artık gruplamayı tamamlıyor. Kişiler çalışırken ortaya çıkar, verilen adlar kişilerinde kalır ve uygulamadan çıkıldıktan sonra da iş arka planda sürer.</string>
     <string name="whats_new_260_savedrive_title">Paylaşılan fotoğrafı Drive\'ına kaydet</string>
@@ -2450,7 +2579,10 @@
     <string name="viewer_save_to_drive_failed">Drive\'a kaydedilemedi</string>
     <string name="viewer_remove_shared_confirm_body">Fotoğraf paylaşılan albümden çıkarılır. Albümün sahibinde kalır ve burada artık görünmez.</string>
     <string name="onboarding_ml_title">Cihazında akıllı özellikler</string>
-    <string name="onboarding_ml_subtitle">Fotoğraflarındaki kişileri ve nesneleri bul, içlerindeki metni kopyala. Her şey bu telefonda çalışır ve hiçbir şey telefondan çıkmaz. Ne istediğini şimdi seç ya da sonra Ayarlar\'dan değiştir.</string>
+    <string name="onboarding_ml_subtitle">Fotoğraflarındaki kişileri ve nesneleri bul, içlerindeki metni kopyala. Her şey bu telefonda çalışır ve hiçbir şey dışarı çıkmaz.</string>
     <string name="onboarding_ml_size">%1$s indirme</string>
     <string name="onboarding_ml_note">Modeller kurulumdan sonra arka planda bir kez indirilir. Wi-Fi önerilir, çünkü Wi-Fi yokken indirme mobil veri kullanır.</string>
+    <string name="viewer_not_person_title">Bu %1$s değil mi?</string>
+    <string name="viewer_not_person_body">Yüz, %1$s kişisinden çıkarılır. Fotoğraf kalır ve yüz başka birine önerilebilir.</string>
+    <string name="viewer_not_person_confirm">%1$s değil</string>
 </resources>

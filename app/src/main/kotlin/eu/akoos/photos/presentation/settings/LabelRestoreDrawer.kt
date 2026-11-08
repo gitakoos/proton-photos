@@ -47,7 +47,6 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -72,6 +71,7 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.data.label.LabelCount
 import eu.akoos.photos.data.label.LabelSavedCopy
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.PrimaryButton
 import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.theme.Accent
@@ -111,7 +111,7 @@ internal fun LabelRestoreDrawer(
 
     listAllOf?.let { AllLabelsSheet(it, onClose = { listAllOf = null }) }
 
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onClose,
         sheetState = sheetState,
         containerColor = SheetBg,
@@ -308,7 +308,7 @@ private fun AllLabelsSheet(copy: LabelSavedCopy, onClose: () -> Unit) {
     val locale = appLocale()
     val is24Hour = LocalIs24Hour.current
     val savedAt = remember(copy.savedAtMillis, locale, is24Hour) { formatDateTimeMinute(copy.savedAtMillis, locale, is24Hour) }
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onClose,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,

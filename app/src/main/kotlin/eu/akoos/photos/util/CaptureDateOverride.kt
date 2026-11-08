@@ -127,15 +127,27 @@ object CaptureDateOverride {
     }
 
     /** The date a local media row should report: the recorded override (ms) when one exists, else the
-     *  MediaStore DATE_TAKEN (ms) when set, else the file's added time ([dateAddedSeconds], promoted to
-     *  ms). The override leads because an entry is recorded only where the column is established to be
-     *  missing or wrong, so reading the column first would keep reporting the very value the entry
-     *  exists to replace. */
-    fun resolveDateTaken(rawDateTaken: Long, overrideMs: Long?, dateAddedSeconds: Long): Long = when {
+     *  MediaStore DATE_TAKEN (ms) when set, else the earlier of the file's modified and added times
+     *  (seconds, promoted to ms). The override leads because an entry is recorded only where the column
+     *  is established to be missing or wrong, so reading the column first would keep reporting the very
+     *  value the entry exists to replace. Without either, a file copied or restored onto the device keeps
+     *  its own modified time, the date the device gallery shows, while its added time is the day of the
+     *  copy; a modified time at the 1970 or 1980 (FAT/ZIP) epoch is no real date and is passed over. */
+    fun resolveDateTaken(
+        rawDateTaken: Long,
+        overrideMs: Long?,
+        dateAddedSeconds: Long,
+        dateModifiedSeconds: Long = 0L,
+    ): Long = when {
         overrideMs != null && overrideMs > 0L -> overrideMs
         rawDateTaken > 0L -> rawDateTaken
+        dateModifiedSeconds > MODIFIED_FLOOR_SECONDS &&
+            (dateAddedSeconds <= 0L || dateModifiedSeconds < dateAddedSeconds) -> dateModifiedSeconds * 1000L
         else -> dateAddedSeconds * 1000L
     }
+
+    /** 1980-01-02: a modified time at or before it is an epoch default (1970, or 1980 from FAT and ZIP). */
+    private const val MODIFIED_FLOOR_SECONDS = 315_619_200L
 
     /**
      * Move the recorded override of every uri in [uris] to [captureMs], the value a metadata edit just

@@ -181,7 +181,7 @@ class DayDetailViewModel @Inject constructor(
 
     private fun isInDay(captureTimeMs: Long, date: String): Boolean {
         if (captureTimeMs <= 0L) return false
-        return ISO_DATE.get().format(Date(captureTimeMs)) == date
+        return ISO_DATE.get()!!.format(Date(captureTimeMs)) == date
     }
 
     companion object {

@@ -23,6 +23,8 @@
 package eu.akoos.photos.domain.usecase
 
 import androidx.room.withTransaction
+import eu.akoos.photos.data.face.FaceEditCounter
+import eu.akoos.photos.data.face.PersonNameLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.data.db.AppDatabase
@@ -51,28 +53,44 @@ class AssignPersonNameUseCase @Inject constructor(
     private val personCoverDao: PersonCoverDao,
     private val clusterSummaryDao: ClusterSummaryDao,
     private val appDatabase: AppDatabase,
+    private val faceEdits: FaceEditCounter = FaceEditCounter(),
 ) {
-    suspend operator fun invoke(account: String, fromPersonId: Long, rawName: String): Long =
+    /**
+     * With [confirm] false the folded faces join the person without being confirmed under the name, so a fold
+     * the app chose on its own (an auto-merge) stays open to the next rebuild instead of pinning every face.
+     */
+    suspend operator fun invoke(account: String, fromPersonId: Long, rawName: String, confirm: Boolean = true): Long =
         withContext(Dispatchers.IO) {
             val name = rawName.trim()
             if (name.isEmpty()) return@withContext -1L
             // One transaction, so the people lists read the fold once it is whole and a failed write leaves both
             // people as they were.
-            appDatabase.withTransaction { fold(account, fromPersonId, name) }
+            faceEdits.edit {
+                appDatabase.withTransaction { fold(account, fromPersonId, name, confirm) }
+            }
         }
 
-    private suspend fun fold(account: String, fromPersonId: Long, name: String): Long {
-        val target = personDao.namedPeopleForUser(account)
-            .firstOrNull { it.displayName == name && it.id != fromPersonId }?.id ?: fromPersonId
+    private suspend fun fold(account: String, fromPersonId: Long, typed: String, confirm: Boolean): Long {
+        // Another person already of this name, spelt as typed or differing only in case, takes the faces in and
+        // keeps its own spelling.
+        val namesake = personDao.namedPeopleForUser(account)
+            .filter { it.id != fromPersonId && samePersonName(it.displayName, typed) }
+            .let { same -> same.firstOrNull { it.displayName?.trim() == typed } ?: same.maxByOrNull { it.faceCount } }
+        val target = namesake?.id ?: fromPersonId
+        val name = namesake?.displayName?.trim() ?: typed
         val faceIds = faceDao.faceIdsForPerson(account, fromPersonId)
         if (target != fromPersonId && faceIds.isNotEmpty()) faceDao.reassignFacesToPerson(faceIds, target)
-        if (faceIds.isNotEmpty()) faceDao.labelFacesByIds(faceIds, name)
+        if (confirm && faceIds.isNotEmpty()) faceDao.labelFacesByIds(faceIds, name)
         val oldName = personDao.personById(fromPersonId)?.displayName
         if (!oldName.isNullOrBlank() && oldName != name) {
             personManualPhotoDao.rename(account, oldName, name)
             faceDao.renameManualName(account, oldName, name)
             notPersonDao.rename(account, oldName, name)
             personCoverDao.rename(account, oldName, name)
+            appDatabase.faceCurationTimeDao().rename(account, oldName, name)
+            PersonNameLog.renamed(appDatabase.personNameDao(), account, oldName, name, System.currentTimeMillis())
+        } else if (oldName.isNullOrBlank() && target == fromPersonId) {
+            PersonNameLog.named(appDatabase.personNameDao(), account, name, System.currentTimeMillis())
         }
         personDao.updateName(target, name)
         val manual = personManualPhotoDao.photoKeysForNameList(account, name)

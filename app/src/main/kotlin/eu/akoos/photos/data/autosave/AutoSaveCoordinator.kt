@@ -75,6 +75,7 @@ class AutoSaveCoordinator @Inject constructor(
     private val accountManager: AccountManager,
     private val mlSyncController: MlSyncController,
     private val labelBackupController: LabelBackupController,
+    private val sharedBackupStore: eu.akoos.photos.data.sharedbackup.SharedBackupStore,
     private val database: AppDatabase,
     @AppScope private val appScope: CoroutineScope,
 ) {
@@ -151,6 +152,11 @@ class AutoSaveCoordinator @Inject constructor(
         if (!state.enabled) {
             cancelWork(kind)
             return "off"
+        }
+        // The shared backup saves every Drive copy itself while it is on; the automatic save waits until it is off.
+        if (sharedBackupStore.isEnabled()) {
+            cancelWork(kind)
+            return "the shared backup saves it"
         }
         val userId = accountManager.getPrimaryUserId().first()
         if (userId == null) {

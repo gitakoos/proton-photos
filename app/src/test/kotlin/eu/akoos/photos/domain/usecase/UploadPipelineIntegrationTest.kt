@@ -127,6 +127,8 @@ class UploadPipelineIntegrationTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
+        // The force-upload path hands the run to the sync job, so WorkManager has to be there.
+        eu.akoos.photos.util.WorkManagerTestSetup.initialize(context)
 
         // WorkManager is initialised so ForceUploadLocalUrisUseCase.run()'s trailing
         // SyncWorker.runNow(context) can enqueue without throwing. A synchronous executor keeps it
@@ -312,7 +314,7 @@ class UploadPipelineIntegrationTest {
             assertEquals(SyncStatus.LOCAL_ONLY, it.status)
             assertNull(it.cloudFileId)
             assertEquals("a demoted deletion must not stay queued", false, it.queued)
-            assertNull(it.queueSource)
+            assertEquals(eu.akoos.photos.domain.entity.QueueSource.REMOVED_FROM_DRIVE, it.queueSource)
         }
 
         // The next upload pass must NOT resurrect it: the row is LOCAL_ONLY but un-queued, and the
@@ -323,6 +325,36 @@ class UploadPipelineIntegrationTest {
             assertEquals(SyncStatus.LOCAL_ONLY, it.status)
             assertEquals(false, it.queued)
         }
+    }
+
+    @Test
+    fun `a photo whose Drive copy went elsewhere is not uploaded again from a folder in the backup`() = runTest {
+        // The folder IS selected this time: the folder backup itself would queue the photo again in the
+        // same pass that finds its Drive copy gone, unless that pass leaves a photo it marked removed out.
+        seedBulkUploadGates(folder = "Camera")
+        val uri = "content://media/folder-removed"
+        local.add(localItem(uri, bucket = "Camera"))
+        forceUploadUseCase.forceUpload(userId, listOf(uri))
+        uploadUseCase(userId)
+
+        val cloudId = cloud.photos.value.single().linkId
+        assertEquals(SyncStatus.SYNCED, row(uri)!!.status)
+
+        cloud.removeByLinkId(cloudId)
+        syncRepo.upsert(row(uri)!!.copy(lastSyncSuccessMs = System.currentTimeMillis() - (16 * 60 * 1000L)), userId)
+
+        reconcileUseCase(userId).collectToEnd()
+        row(uri)!!.let {
+            assertEquals(SyncStatus.LOCAL_ONLY, it.status)
+            assertEquals("a photo removed from Drive must not be queued again", false, it.queued)
+            assertEquals(eu.akoos.photos.domain.entity.QueueSource.REMOVED_FROM_DRIVE, it.queueSource)
+        }
+
+        // A later pass leaves it alone too: its folder is still selected, the mark is what keeps it off.
+        reconcileUseCase(userId).collectToEnd()
+        uploadUseCase(userId)
+        assertTrue("a photo removed from Drive must not upload again", cloud.photos.value.isEmpty())
+        assertEquals(false, row(uri)!!.queued)
     }
 
     // ── Scenario 3: cancel ──────────────────────────────────────────────────────────
@@ -496,6 +528,26 @@ class UploadPipelineIntegrationTest {
         uploadUseCase(userId)
         assertEquals(1, cloud.callLog.count { it == "UPLOAD" })
         assertEquals(1, cloud.callLog.count { it == "ADD:$albumLinkId" })
+    }
+
+    @Test
+    fun `a folder album turned on while the folder backs up takes in the photos of that pass`() = runTest {
+        val uris = listOf("content://media/fa1", "content://media/fa2")
+        uris.forEach { local.add(localItem(it, bucket = "PfpTest")) }
+        forceUploadUseCase.forceUpload(userId, uris)
+        // The album is ticked once the pass is already uploading, while this photo's upload is in flight.
+        var inFlight: String? = null
+        cloud.onUploadStarted = { item ->
+            cloud.onUploadStarted = null
+            inFlight = item.displayName
+            context.settingsDataStore.edit { it[SettingsKeys.ALBUM_OPT_IN_FOLDER_NAMES] = setOf("PfpTest") }
+        }
+
+        uploadUseCase(userId)
+
+        // A photo that finishes after the tick joins the folder's album, made for it on the spot.
+        val landedAfterTick = cloud.photos.value.single { it.displayName == inFlight }.linkId
+        assertTrue(cloud.callLog.toString(), landedAfterTick in cloud.albumMembers("album-PfpTest"))
     }
 
     @Test

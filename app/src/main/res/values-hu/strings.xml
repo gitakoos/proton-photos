@@ -5,12 +5,11 @@
     <!-- Onboarding varázsló -->
     <string name="onboarding_back">Vissza</string>
     <string name="onboarding_continue">Tovább</string>
-    <string name="onboarding_skip">Kihagyás most</string>
+    <string name="onboarding_not_now">Most nem</string>
+    <string name="onboarding_get_started">Kezdés</string>
     <string name="onboarding_allow">Engedélyezés</string>
     <string name="onboarding_open_settings">Beállítások megnyitása</string>
-    <string name="onboarding_permission_granted">Engedélyezve</string>
     <string name="onboarding_finish">Galéria megnyitása</string>
-    <string name="onboarding_recommended">Ajánlott</string>
 
     <string name="onboarding_welcome_title">Üdv a Photos for Proton appban</string>
     <string name="onboarding_welcome_subtitle">Fényképeid és videóid végpontok közötti titkosítással a Proton Drive-on. Állíts be pár dolgot, hogy az app úgy működjön, ahogy szereted.</string>
@@ -18,9 +17,9 @@
     <string name="onboarding_backup_title">Válaszd ki, mi kerüljön mentésre</string>
     <string name="onboarding_backup_subtitle">Bármikor módosíthatod a Beállításokban.</string>
     <string name="onboarding_backup_everything">Mindent</string>
-    <string name="onboarding_backup_everything_desc">Az eszközöd összes fotója és videója, kivéve amit később kizársz.</string>
+    <string name="onboarding_backup_everything_desc">Az eszköz összes fotója és videója. A következő oldalon kihagyhatsz mappákat.</string>
     <string name="onboarding_backup_folders">Mappák kiválasztása</string>
-    <string name="onboarding_backup_folders_desc">A Beállításokban választod ki a mappákat. Addig semmi nem töltődik fel.</string>
+    <string name="onboarding_backup_folders_desc">Csak a következő oldalon kiválasztott mappák.</string>
     <string name="onboarding_backup_nothing">Egyelőre semmit</string>
     <string name="onboarding_backup_nothing_desc">Böngészd a Proton Drive-on már fent lévő fotókat új feltöltés nélkül.</string>
 
@@ -41,7 +40,7 @@
 
     <string name="onboarding_manage_media_title">Média kezelése</string>
     <string name="onboarding_all_files_title">Hozzáférés minden fájlhoz</string>
-    <string name="onboarding_all_files_subtitle">Ajánlott. Lehetővé teszi, hogy a visszahozott rejtett fotók az eredeti mappájukba kerüljenek (például egy csevegőalkalmazás média-mappájába, ne csak a Picturesbe), és a helyi fájlok a helyükön frissüljenek. Koppints a rendszerbeállítások megnyitásához.</string>
+    <string name="onboarding_all_files_subtitle">Ajánlott. A visszahozott rejtett fotók az eredeti mappájukba kerülnek, és az app a helyükön frissítheti a helyi fájlokat.</string>
     <string name="permissions_title">Engedélyek</string>
     <string name="permissions_intro">Itt kezelheted, mihez férhet hozzá a Photos for Proton. Mindegyiknél látod, miért kell.</string>
     <string name="permissions_state_granted">Megadva</string>
@@ -61,7 +60,7 @@
     <string name="permissions_install_title">Frissítések telepítése</string>
     <string name="permissions_install_why">Hogy telepíteni tudd az appon belül letöltött frissítéseket.</string>
     <string name="permissions_network_note">A hálózati hozzáférés mindig aktív, és kizárólag a Proton Drive-val való kommunikációra szolgál.</string>
-    <string name="onboarding_manage_media_subtitle">Erősen ajánlott. Engedi, hogy az app a rendszer megerősítő ablaka nélkül szerkessze, törölje és nevezze át az eszközöd fotóit és videóit. Az appon belüli szerkesztéshez, az eszközre mentéshez, a kukába helyezéshez és a mentés utáni törléshez kell. Koppints a rendszerbeállítások megnyitásához.</string>
+    <string name="onboarding_manage_media_subtitle">Erősen ajánlott. Az app megerősítés kérése nélkül szerkesztheti, törölheti és nevezheti át a fotókat az eszközön.</string>
     <string name="onboarding_folders_include_title">Mentendő mappák</string>
     <string name="onboarding_folders_include_subtitle">Válaszd ki, mely mappák kerüljenek a Drive-ra. A többi mappa tartalma csak az eszközön marad.</string>
     <string name="onboarding_folders_exclude_title">Kihagyandó mappák</string>
@@ -74,7 +73,6 @@
 
     <string name="onboarding_about_title">Független, harmadik féltől származó kliens</string>
     <string name="onboarding_about_subtitle">Egyetlen fejlesztő készíti. Nem áll kapcsolatban a Proton AG-vel. Nyílt forráskódú, GPL-licencű, és nem küld saját telemetriát.</string>
-    <string name="onboarding_about_author_subtitle">A fejlesztő személyes oldala.</string>
     <string name="onboarding_about_github_subtitle">Teljes forráskód a GitHubon.</string>
 
     <string name="onboarding_appearance_title">Tedd a sajátoddá</string>
@@ -87,7 +85,15 @@
     <string name="onboarding_lock_timeout_label">Újrazárás ennyi után</string>
 
     <string name="onboarding_done_title">Készen állsz</string>
-    <string name="onboarding_done_subtitle">A beállításaid el lettek mentve. Bármelyik később módosítható a Beállítások oldalon.</string>
+    <string name="onboarding_done_subtitle">Ezeket állítja be az app. Bármelyiket módosíthatod később a Beállításokban.</string>
+    <string name="onboarding_done_backup_everything">Mentés: minden fotó és videó</string>
+    <plurals name="onboarding_done_backup_folders">
+        <item quantity="one">Mentés: %d mappa</item>
+        <item quantity="other">Mentés: %d mappa</item>
+    </plurals>
+    <string name="onboarding_done_backup_nothing">Mentés: egyelőre kikapcsolva</string>
+    <string name="onboarding_done_ml">Letöltés a beállítás után: %s</string>
+    <string name="onboarding_done_lock">Alkalmazászár: bekapcsolva</string>
 
     <!-- Auth / Sign-in landing -->
     <string name="sign_in_subtitle">Privát, végpontok közötti titkosítású fotómentés.</string>
@@ -220,7 +226,7 @@
     <!-- Settings -->
     <string name="settings_title">Beállítások</string>
     <string name="settings_more_title">További beállítások</string>
-    <string name="settings_more_desc">AI, adatvédelem, értesítések és súgó</string>
+    <string name="settings_more_desc">Gépi tanulás, adatvédelem, értesítések és súgó</string>
     <string name="settings_search_hint">Beállítások keresése</string>
     <string name="settings_search_no_results">Nincs megfelelő beállítás</string>
     <string name="settings_sync_wifi_only">Szinkronizálás csak Wi‑Fi-n</string>
@@ -241,7 +247,7 @@
     <string name="settings_sign_out">Kijelentkezés</string>
     <string name="settings_sign_out_desc">Munkamenet befejezése ezen az eszközön.</string>
     <string name="sign_out_dialog_title">Kijelentkezés?</string>
-    <string name="sign_out_dialog_message">A kijelentkezés törli ezeket az eszközön tárolt adatokat, és nem állnak vissza, amikor újra bejelentkezel (ha szükséged van rájuk, előbb exportáld őket):</string>
+    <string name="sign_out_dialog_message">A kijelentkezés törli ezeket az eszközön tárolt adatokat, és nem állnak vissza, amikor újra bejelentkezel:</string>
     <string name="sign_out_dialog_item_faces">Elnevezett emberek és arcadatok</string>
     <string name="sign_out_dialog_item_day_notes">Naptárjegyzetek</string>
     <string name="sign_out_dialog_item_vault">Rejtett fotók</string>
@@ -474,9 +480,6 @@
     <string name="cd_select_day">Nap kijelölése</string>
     <string name="cd_select_month">Hónap kijelölése</string>
     <string name="cd_select_year">Év kijelölése</string>
-    <string name="selection_photos_only">%d kép</string>
-    <string name="selection_videos_only">%d videó</string>
-    <string name="selection_mixed">%1$d kép, %2$d videó</string>
     <string name="editor_error_load_local">Nem sikerült betölteni a képet</string>
     <string name="editor_saved_as_copy">Egy másolat elmentve a Photos for Proton mappába</string>
     <string name="editor_external_load_error">A fájl megnyitása sikertelen</string>
@@ -559,6 +562,8 @@
     <string name="map_style_modern">Világtérkép</string>
     <string name="map_style_modern_summary">Modern földgömb, amelyet a helyeidhez pörgethetsz.</string>
     <string name="settings_amoled_black">Tiszta fekete (AMOLED)</string>
+    <string name="settings_liquid_glass">Liquid glass</string>
+    <string name="settings_liquid_glass_desc">A menük, az oldalfejlécek, a lenyíló lapok és a fotónézegető gombjai elmossák a mögöttük lévő tartalmat. Még fejlesztés alatt, nem minden képernyőn működik</string>
     <string name="settings_tint_cloud">Felhő jelvények a paletta színével</string>
     <string name="settings_gif_autoplay_grid">GIF-ek lejátszása a rácsokban</string>
     <string name="settings_gif_autoplay_covers">GIF album borítók lejátszása</string>
@@ -839,6 +844,8 @@
     <string name="search_ago_years"># éve|# évvel ezelőtt|egy éve</string>
 
     <string name="viewer_play_slideshow">Diavetítés indítása</string>
+    <string name="viewer_video_seek_seconds">%1$d mp</string>
+    <string name="viewer_video_hold_speed">%1$s×</string>
     <string name="viewer_pause_slideshow">Diavetítés szüneteltetése</string>
 
     <!-- Widget -->
@@ -859,7 +866,10 @@
     <string name="widget_mode_cloud">Felhős fotók</string>
     <string name="widget_mode_cloud_desc">Fotók megjelenítése a titkosított felhő gyorsítótárból anélkül, hogy más alkalmazások hozzáférnének</string>
     <string name="widget_section_choose_cloud_photos">Felhős fotók kiválasztása</string>
-    <string name="widget_cloud_photos_selected">%d felhős fotó kiválasztva</string>
+    <plurals name="widget_cloud_photos_selected">
+        <item quantity="one">%d felhős fotó kiválasztva</item>
+        <item quantity="other">%d felhős fotó kiválasztva</item>
+    </plurals>
     <string name="widget_no_cloud_photos">Még nincs felhős fotó</string>
     <string name="widget_no_cloud_albums">Még nincs felhős album. Nyisd meg az alkalmazást az albumok szinkronizálásához.</string>
     <string name="widget_interval_section">Fotó cseréje</string>
@@ -869,7 +879,10 @@
     <string name="widget_interval_8hr">8 óra</string>
     <string name="widget_interval_1day">1 nap</string>
     <string name="widget_add_button">Widget hozzáadása</string>
-    <string name="widget_photos_selected">%d fotó kiválasztva</string>
+    <plurals name="widget_photos_selected">
+        <item quantity="one">%d fotó kiválasztva</item>
+        <item quantity="other">%d fotó kiválasztva</item>
+    </plurals>
     <string name="widget_no_photos">Nincs fotó</string>
 
     <plurals name="delete_title_plural">
@@ -937,6 +950,8 @@
     <string name="cd_motion_photo">Mozgó fénykép</string>
     <string name="cd_panorama">Panoráma</string>
     <string name="cd_play_motion_photo">Mozgó fénykép lejátszása</string>
+    <string name="cd_video_play">Lejátszás</string>
+    <string name="cd_video_pause">Szünet</string>
     <string name="cd_stop_motion_photo">Mozgó fénykép leállítása</string>
     <string name="cd_exit_panorama">Kilépés a panorámából</string>
     <string name="viewer_view_panorama">Panoráma megtekintése</string>
@@ -1197,6 +1212,36 @@
     <string name="albums_view_heading">Nézet</string>
     <string name="albums_view_grid">Rács</string>
     <string name="albums_view_list">Lista</string>
+    <string name="people_display_settings">Megjelenítés</string>
+    <string name="people_follow_albums">Ugyanaz, mint az Albumok lap</string>
+    <string name="people_follow_albums_desc">Az embereket az Albumok lap nézetével és borítóméretével mutatja</string>
+    <string name="drive_backup_section">Mentés a Proton Drive-ra</string>
+    <string name="drive_backup_auto">Automatikus mentés</string>
+    <string name="drive_backup_auto_desc">Menti az arcokat, a keresési indexet, a címkéket és a rejtett elemeket, és a többi eszközödön is ugyanazok maradnak</string>
+    <string name="drive_backup_turn_on_title">Bekapcsolod az automatikus mentést?</string>
+    <string name="drive_backup_turn_on_msg">Egy másik telefonon ehhez Photos for Proton 2.6.0 vagy újabb kell, a gépen pedig Photos for Proton desktop 1.3.0 vagy újabb. Egy régebbi verzió békén hagyja, amit ez a telefon ment, és a saját adatait úgy tartja meg, ahogy vannak.</string>
+    <string name="drive_backup_turn_on">Bekapcsolás</string>
+    <string name="drive_backup_save_now">Mentés most</string>
+    <string name="drive_backup_load">Betöltés a Drive-ról</string>
+    <string name="drive_backup_load_desc">Betölti, amit a többi eszközöd mentett</string>
+    <string name="drive_copies_row">Mentések a Drive-on</string>
+    <string name="drive_copies_row_desc">Melyik eszköz mit és mikor mentett</string>
+    <string name="drive_copies_this_device">Ez a telefon</string>
+    <string name="drive_copies_other_device">Másik eszköz</string>
+    <string name="drive_copies_saved">Mentve: %s</string>
+    <string name="drive_copies_stale">Több mint 30 napja nem frissült</string>
+    <string name="drive_copies_trash">Kukába</string>
+    <string name="drive_copies_trash_title">Az eszköz mentése a kukába kerüljön?</string>
+    <string name="drive_copies_trash_msg">%s: az arcai, a keresési indexe, a címkéi és a rejtett listája a Proton Drive kukájába kerülnek, ahonnan visszaállíthatók. Ha az eszköz újra ment, új példányt készít.</string>
+    <string name="drive_copies_loading">A Drive-on lévő mentések beolvasása…</string>
+    <string name="drive_copies_failed">Nem sikerült beolvasni a Drive-on lévő mentéseket</string>
+    <string name="drive_copies_empty">Még nincs mentés a Drive-on</string>
+    <string name="drive_copies_trash_failed">Nem sikerült a kukába tenni</string>
+    <string name="sign_out_dialog_drive_kept">Az automatikus mentéssel az arcok, a nevek, a címkék és a rejtett elemek megmaradnak a Proton Drive-on, és újra bejelentkezve visszajönnek.</string>
+    <string name="shared_backup_syncing">Szinkronizálás a Proton Drive-val</string>
+    <string name="shared_backup_last">Utoljára szinkronizálva: %1$s</string>
+    <string name="shared_backup_never">Még nem volt szinkronizálás</string>
+    <string name="shared_backup_failed">A szinkronizálás nem sikerült, később újrapróbálja</string>
     <string name="albums_more_settings">További beállítások</string>
     <string name="album_options">Albumműveletek</string>
     <string name="album_group_heading">Csoportosítás</string>
@@ -1246,7 +1291,6 @@
     <string name="viewer_meta_flash_none">Nincs vaku</string>
     <string name="viewer_meta_wb_auto">Automatikus</string>
     <string name="viewer_meta_wb_manual">Kézi</string>
-    <string name="viewer_meta_orientation_normal">Normál</string>
     <string name="viewer_meta_orientation_180">Elforgatva 180°</string>
     <string name="viewer_meta_orientation_90_cw">Elforgatva 90° jobbra</string>
     <string name="viewer_meta_orientation_90_ccw">Elforgatva 90° balra</string>
@@ -1254,15 +1298,42 @@
     <string name="viewer_meta_source_backed_up">Proton Drive és eszköz</string>
     <string name="viewer_meta_source_cloud">Csak a Proton Drive-on</string>
     <string name="viewer_meta_strip">Eltávolítás</string>
-    <string name="viewer_meta_strip_all">Minden privát metaadat eltávolítása</string>
-    <string name="viewer_meta_strip_all_desc">Eltávolítja a GPS-, kamera- és szoftveradatokat, valamint a szerzőt és a szerzői jogot ebből a fájlból</string>
+    <string name="viewer_meta_all_details">Összes részlet</string>
+    <string name="details_adjust">Módosítás</string>
+    <string name="details_edit">Szerkesztés</string>
+    <string name="details_add">Hozzáadás</string>
+    <string name="details_add_location">Hely hozzáadása</string>
+    <string name="details_time">Idő</string>
+    <string name="details_remove_private">Privát adatok eltávolítása</string>
+    <string name="details_private_intro">Ezek vannak most a fájlban. Válaszd ki, mi kerüljön ki.</string>
+    <string name="details_private_undo">Ez nem vonható vissza.</string>
+    <string name="details_private_none">Ebben a fájlban nincs privát adat.</string>
+    <string name="details_private_dates">Dátumcímkék</string>
+    <string name="details_private_author">Szerző</string>
+    <string name="details_place_hint">Húzd a térképet a tű alá</string>
+    <string name="cloud_compress_title">Tömörítés a Drive-on</string>
+    <string name="cloud_compress_confirm_title">Tömörítés a Drive-on?</string>
+    <string name="cloud_compress_confirm">Tömörítés</string>
+    <string name="cloud_compress_started">A tömörítés a háttérben fut</string>
+    <string name="cloud_compress_waiting_wifi">Wi-Fi-re vár, mert a mentés csak Wi-Fi-n fut</string>
+    <string name="cloud_compress_confirm_stop">Bármikor leállíthatod az értesítésből vagy a Tevékenység oldalon.</string>
+    <string name="cloud_compress_progress">%1$d / %2$d</string>
+    <string name="cloud_compress_done">%1$d tömörítve, %2$s megtakarítva.</string>
+    <string name="cloud_compress_done_left">%1$d változatlan maradt.</string>
+    <string name="cloud_compress_channel_desc">A Drive-on lévő fotók tömörítésének állapota</string>
+    <plurals name="cloud_compress_confirm_body">
+        <item quantity="one">%1$d Drive-on lévő fotó vagy videó letöltődik, a feltöltési tömörítés beállításaival tömörítődik, és újra feltöltődik. Az eredeti a Drive kukájába kerül, amint a kisebb másolat bekerült az albumaiba. Ami nem lenne legalább 10%%-kal kisebb, az változatlan marad.</item>
+        <item quantity="other">%1$d Drive-on lévő fotó és videó letöltődik, a feltöltési tömörítés beállításaival tömörítődik, és újra feltöltődik. Minden eredeti a Drive kukájába kerül, amint a kisebb másolata bekerült az albumaiba. Ami nem lenne legalább 10%%-kal kisebb, az változatlan marad.</item>
+    </plurals>
+    <plurals name="cloud_compress_confirm_left_out">
+        <item quantity="one">%1$d elem, ami a telefonon is megvan, kimarad.</item>
+        <item quantity="other">%1$d elem, ami a telefonon is megvan, kimarad.</item>
+    </plurals>
+    <plurals name="details_private_remove">
+        <item quantity="one">%d elem eltávolítása</item>
+        <item quantity="other">%d elem eltávolítása</item>
+    </plurals>
     <string name="viewer_meta_strip_confirm_title">Metaadat eltávolítása?</string>
-    <string name="viewer_meta_strip_confirm_message">Ez véglegesen eltávolítja a következőt az eszközön lévő fájlból: %1$s. Ez nem vonható vissza.</string>
-    <string name="viewer_meta_strip_what_gps">GPS-helyadat</string>
-    <string name="viewer_meta_strip_what_camera">kameraadatok</string>
-    <string name="viewer_meta_strip_what_timestamps">időbélyegek</string>
-    <string name="viewer_meta_strip_what_software">szoftveradatok</string>
-    <string name="viewer_meta_strip_what_authorship">szerző és szerzői jog</string>
 
     <!-- Viewer delete sheet + add-to-album sheet -->
     <string name="viewer_delete_title_local">Törlöd a fotót?</string>
@@ -1430,6 +1501,7 @@
         <item quantity="other">Törlöd %1$d fotó eszközön lévő példányát, és felszabadítasz %2$s helyet? A Drive-on maradnak.</item>
     </plurals>
     <string name="settings_free_up_error">Nem sikerült helyet felszabadítani: %1$s</string>
+    <string name="free_up_skipped_pre_r">Egyes eszközön lévő másolatok eltávolításához Android 11 vagy újabb kell, ezek kimaradtak.</string>
 
     <!-- Upload status labels (Sync progress panel) -->
     <string name="upload_status_uploading">Feltöltés…</string>
@@ -1480,6 +1552,11 @@
     <string name="dense_grid_warning_dismiss">Ne jelenjen meg többé</string>
 
     <string name="backup_started">Feltöltés a Drive-ra</string>
+    <string name="share_backup_label">Mentés a Drive-ra</string>
+    <string name="share_backup_sign_in">Jelentkezz be a Drive-ra mentéshez</string>
+    <string name="share_backup_unreadable">A megosztottakból egy fotó vagy videó sem olvasható</string>
+    <string name="share_backup_some_unreadable">Feltöltés a Drive-ra. %2$d elemből %1$d nem olvasható, ezek kimaradtak</string>
+    <string name="share_backup_saved_to_phone">Elmentve a telefonra, feltöltés a Drive-ra</string>
     <string name="upload_confirm_title">Feltöltöd a Drive-ra?</string>
     <string name="upload_confirm_message">%1$d kijelölt feltöltése a Proton Drive-ra?</string>
     <string name="upload_action_short">Feltöltés</string>
@@ -1491,17 +1568,43 @@
     <!-- FAQ -->
     <string name="faq_title">Gyakori kérdések</string>
     <string name="faq_settings_entry">GYIK</string>
-    <string name="faq_onboarding_intro">Néhány gyors válasz a kezdéshez. Ezeket később a Beállításokban is megtalálod.</string>
     <string name="faq_q_cloud_icons">Mit jelentenek a felhő ikonok?</string>
     <string name="faq_a_cloud_icons">A zöld felhő azt jelenti, hogy a fotó mentve van a Proton Drive-ra, és még ezen az eszközön is megvan. A fehér felhő azt jelenti, hogy csak a Proton Drive-on van, ezen az eszközön nincs. Ha nincs ikon, akkor csak ezen az eszközön van, és még nincs mentve.</string>
     <string name="faq_q_backup">Hogyan működik a mentés?</string>
-    <string name="faq_a_backup">Az új fotók és videók automatikusan mentésre kerülnek, amint a mentés be van kapcsolva. A Beállításokban a mentést csak Wi-Fi-re korlátozhatod, így mobiladaton szünetel.</string>
+    <string name="faq_a_backup">Az új fotók és videók automatikusan mentődnek, ha a mentés be van kapcsolva. A „%3$s” lap jobb felső sarkában lévő kerek gombbal nyisd meg ezt: „%1$s”. Ott állíthatod, például ezzel: „%2$s”.</string>
     <string name="faq_q_albums">Mik az albumok, és mit csinál a mappatükrözés?</string>
-    <string name="faq_a_albums">Az albumok a fotókat csoportosítják a Proton Drive-on. Az \"Eszközmappák tükrözése Drive-albumként\" hatására a telefonod mappái, például a Camera vagy a Screenshots, a mentés során megfelelő albumokként jelennek meg a Drive-on.</string>
-    <string name="faq_q_mirror_local">Mit csinál a \"Változások tükrözése a helyi fájlokra\"?</string>
+    <string name="faq_a_albums">Az albumok a Proton Drive-on csoportosítják a fotókat. Itt: „%1$s”, a „%2$s” részben minden mappa mellett van egy „%3$s” jelölőnégyzet. Ha bejelölöd, a mappa a mentéssel együtt megfelelő albumot kap a Drive-on.</string>
+    <string name="faq_q_mirror_local">Mit csinál a „%1$s”?</string>
     <string name="faq_a_mirror_local">Amikor az alkalmazás a mentés során eltávolítja a metaadatokat vagy átnevez egy fotót, ugyanezeket a változtatásokat a telefonodon lévő eredetin is alkalmazza, így a helyi fájl és a mentett másolat azonos marad. Ez csak az alkalmazás által mentett fotókra vonatkozik, mostantól kezdve, és nem tölti vissza a telefonodra a Proton Drive webes felületén végzett módosításokat.</string>
     <string name="faq_q_existing">Módosítja az alkalmazás a meglévő fotóimat?</string>
     <string name="faq_a_existing">Nem. Metaadat-változás csak akkor történik, amikor az alkalmazás ment egy fotót, és csak akkor, ha bekapcsolod a metaadatok eltávolítását vagy a helyi tükrözést. A telefonodon már meglévő fotók változatlanok maradnak, hacsak nem választasz egy fotóra vonatkozó műveletet.</string>
+    <string name="faq_section_backup">Mentés</string>
+    <string name="faq_section_albums">Albumok</string>
+    <string name="faq_section_where">Mit hol találsz</string>
+    <string name="faq_q_folders">Hogyan választom ki, melyik mappa mentődjön?</string>
+    <string name="faq_a_folders">A „%4$s” lap jobb felső sarkában lévő kerek gombbal nyisd meg ezt: „%1$s”. Kapcsold be ezt: „%2$s”, vagy válaszd ki a mappákat egyenként itt: „%3$s”.</string>
+    <string name="faq_q_free_space">Hogyan szabadítok fel helyet a telefonon?</string>
+    <string name="faq_a_free_space">A már Proton Drive-on lévő fotók lekerülhetnek a telefonról. Kapcsold be ezt: „%1$s” (itt: „%2$s”), vagy jelölj ki fotókat, koppints a törlésre, és válaszd ezt: „%3$s”. A Drive-os példány megmarad.</string>
+    <string name="faq_q_album_create">Hogyan készítek albumot, és hogyan teszek bele fotót?</string>
+    <string name="faq_a_album_create">Az „%1$s” lapon koppints erre: „%2$s” (a pluszjeles mappa gomb). Fotót úgy adhatsz hozzá, hogy kijelölöd őket az idővonalon, és erre koppintasz: „%3$s”, vagy megnyitod az albumot, és a menüjéből ezt választod: „%4$s”.</string>
+    <string name="faq_q_album_share">Hogyan osztok meg egy albumot?</string>
+    <string name="faq_a_album_share">Nyisd meg az albumot, koppints a menüjére, és válaszd ezt: „%1$s”. E-mailben hívhatsz meg embereket megtekintőként vagy szerkesztőként. Akinek nincs Proton-fiókja, e-mailes meghívót kap. A veled megosztott albumokat az „%3$s” lapon találod, itt: „%2$s”.</string>
+    <string name="faq_q_album_contribute">Tehetek fotót egy velem megosztott albumba?</string>
+    <string name="faq_a_album_contribute">Igen, ha szerkesztési jogot kaptál. Ugyanúgy add hozzá, mint a saját albumodhoz. Az album egy másolatot kap, ami a tulajdonos tárhelyét terheli, az eredeti pedig ott marad, ahol volt.</string>
+    <string name="faq_q_folders_albums">Mi a különbség a mappák és az albumok között?</string>
+    <string name="faq_a_folders_albums">Az albumok a Proton Drive-on vannak. A mappák a telefon mappái, például a Camera vagy a Screenshots, és „%1$s” jelzést viselnek. Az „%4$s” lap szűrőjével egyszerre csak az egyik fajtát látod: „%2$s” vagy „%3$s”.</string>
+    <string name="faq_q_album_delete">Mi történik, ha eltávolítok vagy törlök fotókat?</string>
+    <string name="faq_a_album_delete">Az albumból eltávolítás („%1$s”) csak kiveszi a fotókat az albumból, az idővonalon megmaradnak. A törölt fotó ide kerül: „%2$s”, ahonnan visszaállíthatod. Ha albumot törölsz, a fotói a Proton Drive-on maradnak.</string>
+    <string name="faq_q_where_ml">Hol kapcsolom be az arcokat, a keresést és a szövegmásolást?</string>
+    <string name="faq_a_where_ml">A „%3$s” lap jobb felső sarkában lévő kerek gombbal nyisd meg ezt: „%1$s”, majd ezt: „%2$s”. Minden funkciónak saját kapcsolója van, a modelljét egyszer tölti le, és minden ezen a telefonon fut.</string>
+    <string name="faq_q_where_lock">Hol van az alkalmazászár és a rejtett fotók?</string>
+    <string name="faq_a_where_lock">Itt: „%1$s”, majd „%2$s”, megtalálod ezeket: „%3$s” és „%4$s”. Fotót úgy rejthetsz el, hogy kijelölöd, és ezt választod: „%5$s”.</string>
+    <string name="faq_q_where_drive">Hogyan jutnak el az arcok, a címkék és a rejtett elemek a többi eszközömre?</string>
+    <string name="faq_a_where_drive">Kapcsold be ezt: „%3$s”, itt: „%1$s”, a „%2$s” részben. Ekkor az arcok és a nevek, a keresési index, a címkék és a rejtett elemek a Proton Drive-ra mentődnek, és a többi eszközödön, a gépes appban is ugyanazok maradnak.</string>
+    <string name="faq_q_where_trash">Hová kerülnek a törölt fotók?</string>
+    <string name="faq_a_where_trash">Ide: „%1$s”. A „%2$s” lap jobb felső sarkában lévő kerek gombbal éred el. A telefonról és a Proton Drive-ról törölt fotók itt várnak, és visszaállíthatók.</string>
+    <string name="faq_q_no_account">Használhatom az appot Proton-fiók nélkül?</string>
+    <string name="faq_a_no_account">Igen. A bejelentkező képernyőn válaszd ezt: „%1$s”. A böngészés, a szerkesztés, a mappák, a rejtett fotók, az arcok és a keresés mind működnek ezen a telefonon. A Proton Drive-ra mentéshez fiók kell.</string>
     <string name="settings_copy_diagnostics">Diagnosztika megosztása</string>
     <string name="settings_copy_diagnostics_desc">Összeomlási, szinkronizálási és teljesítményadatok. Se fotó, se fiókadat.</string>
     <string name="settings_diagnostics_copied">Diagnosztikai napló kimásolva</string>
@@ -1658,8 +1761,11 @@
 
     <!-- Metadata editor (#36): edit a photo's capture date and place. -->
     <string name="metadata_editor_title">Metaadatok szerkesztése</string>
+    <plurals name="metadata_editor_bulk_title">
+        <item quantity="one">%d fotó szerkesztése</item>
+        <item quantity="other">%d fotó szerkesztése</item>
+    </plurals>
     <string name="metadata_editor_done">Kész</string>
-    <string name="metadata_editor_change">Módosítás</string>
     <string name="metadata_editor_saved">Mentve</string>
     <string name="metadata_editor_write_failed">A módosítást nem sikerült menteni</string>
     <string name="metadata_editor_saved_partial">%1$d mentve, %2$d nem sikerült</string>
@@ -1668,7 +1774,6 @@
     <string name="metadata_editor_source_device">Erről az eszközről</string>
     <string name="metadata_editor_source_cloud">A Proton Drive-ról</string>
     <string name="metadata_editor_next">Tovább</string>
-    <string name="metadata_editor_set">Beállítás</string>
     <string name="metadata_editor_place_label">Hely</string>
     <string name="metadata_editor_place_none">Nincs helyadat</string>
     <string name="metadata_editor_place_search">Ország vagy város keresése</string>
@@ -1680,7 +1785,6 @@
     <string name="metadata_editor_note_place_format">A helyadat csak JPEG, PNG és WebP fotókban tárolható.</string>
     <string name="metadata_editor_note_date_format">Ebben a formátumban a dátum nem módosítható.</string>
     <string name="metadata_editor_bulk_date_label">Dátum beállítása ezekhez a fotókhoz</string>
-    <string name="metadata_editor_bulk_place_label">Hely beállítása ezekhez a fotókhoz</string>
     <string name="metadata_editor_bulk_apply_hint">Minden kijelölt fotóra érvényes</string>
     <string name="metadata_editor_bulk_summary">%1$d fotó szerkesztése</string>
     <string name="metadata_editor_bulk_summary_skipped">%1$d szerkesztése, %2$d kihagyva</string>
@@ -1696,8 +1800,6 @@
     <string name="metadata_editor_shift_label">Fotók eltolása az időben</string>
     <string name="metadata_editor_shift_hint">Válaszd ki, mikor készült valójában a legrégebbi fotó. A többi ugyanannyival mozdul, így a köztük lévő időkülönbségek megmaradnak.</string>
     <string name="metadata_editor_shift_picker_title">Mikor készült a legrégebbi fotó?</string>
-    <string name="metadata_editor_shift_range_current">Most: %1$s és %2$s között</string>
-    <string name="metadata_editor_shift_range_after">Eltolás után: %1$s és %2$s között</string>
     <string name="metadata_editor_shift_too_late">Így a legújabb fotó a jövőbe kerülne. Válassz korábbi dátumot vagy időt.</string>
     <plurals name="metadata_editor_shift_skipped">
         <item quantity="one">%1$d fotónak nincs saját dátuma, ezért az eltolás nem mozdítja meg. Az azonos dátum beállítása viszont eléri.</item>
@@ -1705,7 +1807,7 @@
     </plurals>
     <string name="settings_section_about">Névjegy</string>
     <string name="settings_ai_section">Gépi tanulás</string>
-    <string name="settings_ai_nav_desc">Szövegmásolás, arcelrejtés és még több, közvetlenül az eszközön</string>
+    <string name="settings_ai_nav_desc">Arcfelismerés, keresés aszerint, mi van a fotón, és szöveg másolása</string>
     <string name="settings_ai_enable">Gépi tanulás bekapcsolása</string>
     <string name="settings_ai_ocr">Szöveg másolása</string>
     <string name="settings_ai_ocr_desc">Felismeri és lemásolja a fényképen látható szöveget</string>
@@ -1718,7 +1820,7 @@
     <string name="settings_ai_ocr_remove_confirm">Eltávolítás</string>
     <string name="settings_ai_ocr_remove_keep">Megtartás</string>
     <string name="settings_ai_face_toggle">Arcfelismerés</string>
-    <string name="settings_ai_face_desc">Csoportosítja a fényképeket a rajtuk lévő személyek szerint, az eszközödön</string>
+    <string name="settings_ai_face_desc">Csoportosítja a fényképeket a rajtuk lévő személyek szerint, ezen a telefonon</string>
     <string name="settings_ai_face_downloading">Letöltés…</string>
     <string name="settings_ai_face_download_failed">Az arcmodellt nem sikerült letölteni.</string>
     <string name="settings_ai_face_download_retry">A kapcsoló ismételt bekapcsolásával újrapróbálható.</string>
@@ -1729,19 +1831,19 @@
     <string name="settings_ai_face_download_confirm">Letöltés</string>
     <string name="settings_ai_face_model_missing">Az arcmodell nincs ezen az eszközön.</string>
     <string name="settings_ai_face_remove_title">Eltávolítja az arcadatokat?</string>
-    <string name="settings_ai_face_remove_message">Az arcfelismerés ki van kapcsolva. Eltávolítja erről az eszközről az arcmodellt és az összes felismert arcot és nevet? Ha szeretne megőrizni egy másolatot, előbb exportálja őket a Felismert arcok oldalról.</string>
+    <string name="settings_ai_face_remove_message">Az arcfelismerés ki van kapcsolva. Eltávolítja erről az eszközről az arcmodellt és az összes felismert arcot és nevet?</string>
     <string name="settings_ai_face_remove_confirm">Eltávolítás</string>
     <string name="settings_ai_face_remove_keep">Megtartás</string>
     <string name="settings_ai_face_remove_confirm_title">Biztos benne?</string>
-    <string name="settings_ai_face_remove_confirm_message">Ezzel véglegesen eltávolítja az arcmodellt és az összes felismert arcot és nevet. A művelet nem vonható vissza.</string>
-    <string name="settings_ai_semantic">Szemantikus keresés</string>
+    <string name="settings_ai_face_remove_confirm_message">Ezzel eltávolítod erről az eszközről az arcmodellt és az összes felismert arcot és nevet. A Proton Drive-ra mentett másolat megmarad.</string>
+    <string name="settings_ai_semantic">Keresés aszerint, mi van a képen</string>
     <string name="settings_ai_semantic_desc">Fényképek keresése annak leírásával, hogy mi látható rajtuk</string>
     <string name="settings_ai_semantic_downloading">Letöltés…</string>
     <string name="settings_ai_semantic_download_failed">A keresési modelleket nem sikerült letölteni.</string>
     <string name="settings_ai_semantic_download_retry">A kapcsoló ismételt bekapcsolásával újrapróbálható.</string>
     <string name="settings_ai_semantic_download_title">Letölti a keresési modelleket?</string>
-    <string name="settings_ai_semantic_download_message">A szemantikus kereséshez le kell tölteni egy %1$s méretű modellt. Bármilyen kapcsolaton működik, de a Wi-Fi ajánlott.</string>
-    <string name="settings_ai_semantic_download_message_metered">A szemantikus kereséshez le kell tölteni egy %1$s méretű modellt. A Wi-Fi nincs csatlakoztatva, ezért ez a letöltés mobiladatot használ.</string>
+    <string name="settings_ai_semantic_download_message">A fotókereséshez le kell tölteni egy %1$s méretű modellt. Bármilyen kapcsolaton működik, de a Wi-Fi ajánlott.</string>
+    <string name="settings_ai_semantic_download_message_metered">A fotókereséshez le kell tölteni egy %1$s méretű modellt. A Wi-Fi nincs csatlakoztatva, ezért ez a letöltés mobiladatot használ.</string>
     <string name="settings_ai_semantic_downloading_progress">%1$s / %2$s</string>
     <string name="settings_ai_semantic_download_confirm">Letöltés</string>
     <string name="settings_ai_semantic_remove_title">Eltávolítja a letöltött modelleket?</string>
@@ -1788,6 +1890,12 @@
     <string name="sdk_route_download_desc">Fotók megnyitása és mentése a Drive-ról teljes felbontásban</string>
     <string name="sdk_route_upload">Mentés és feltöltés</string>
     <string name="sdk_route_upload_desc">Fotók küldése a Drive-ra, mentéskor és minden más feltöltéskor</string>
+    <string name="sdk_route_albums">Albumok</string>
+    <string name="sdk_route_albums_desc">Albumok létrehozása, átnevezése és törlése a Drive-on, fotók hozzáadása és eltávolítása</string>
+    <string name="sdk_route_events">Változások követése</string>
+    <string name="sdk_route_events_desc">Az idővonal frissen tartása a más eszközökön és a weben végzett változásokkal</string>
+    <string name="sdk_route_shared">Veled megosztott albumok</string>
+    <string name="sdk_route_shared_desc">A mások által veled megosztott albumok listázása és elhagyása, fotók hozzáadása, és fotóik megnyitása teljes felbontásban</string>
     <string name="sdk_route_activity">%1$s. Ebben a munkamenetben: %2$d a könyvtáron át, %3$d a megszokott módon.</string>
     <string name="settings_ai_indexing_progress">%1$d / %2$d fotó</string>
     <string name="settings_ai_grouping_progress">%1$d / %2$d arc</string>
@@ -1800,6 +1908,9 @@
     <string name="settings_ai_clear">Arcadatok törlése</string>
     <string name="settings_ai_clear_confirm_title">Arcadatok törlése?</string>
     <string name="settings_ai_clear_confirm_msg">Ez eltávolít minden megtalált embert és az összes arcadatot. A fotóidat nem érinti. Az arcokat a következő indexeléskor újra megtalálja.</string>
+    <string name="settings_ai_clear_where_msg">Az arcadataid a Proton Drive-on is mentve vannak.\n\nCsak ezen a telefonon: itt törlődnek, és a Drive-ról azonnal visszajönnek.\n\nMindenhol: itt, a Proton Drive-on és a többi eszközödön is törlődnek, és mindegyiken kikapcsol az arcfelismerés. A fotóidat nem érinti.</string>
+    <string name="settings_ai_clear_here">Csak ezen a telefonon</string>
+    <string name="settings_ai_clear_everywhere">Mindenhol</string>
     <string name="gallery_add_to_person">Hozzáadás emberhez</string>
     <string name="people_search_hint">Emberek keresése</string>
     <string name="person_set_cover">Beállítás borítóként</string>
@@ -1875,11 +1986,7 @@
     <string name="settings_ai_rescan">Fotók újravizsgálata</string>
     <string name="settings_ai_rescan_confirm_msg">Minden fotót újra átvizsgál arcok után nagyobb részletességgel, ami kisebb és távolabbi arcokat is megtalál. A neveid és javításaid megmaradnak, és visszakerülnek az újra felismert arcokra.</string>
     <string name="settings_ai_rescan_confirm_title">Újravizsgálod az összes fotót?</string>
-    <string name="settings_ml_drive_section">Arc- és keresési adatok a Drive-on</string>
-    <string name="settings_ml_drive_save">Mentés a Drive-ra</string>
-    <string name="settings_ml_drive_save_desc">Titkosított másolatot ment, amelyet a többi eszközöd visszaállíthat</string>
     <string name="settings_ml_drive_restore">Visszaállítás a Drive-ról</string>
-    <string name="settings_ml_drive_restore_desc">Egy eszközöd mentését tölti be az újravizsgálás helyett</string>
     <string name="settings_face_file_link">Korábbi verzióban mentett arcok betöltése</string>
     <string name="settings_face_file_title">Arcok egy korábbi verzióból</string>
     <string name="settings_face_file_msg">A 2.5.0-s és korábbi verziók az „Arc-index exportálása” gombbal egy photosforproton-faces.ppfi nevű fájlba mentették az arcokat. Ha megvan ez a fájl, itt kiválaszthatod, és visszakerülnek a benne lévő arcok és nevek. A jelenlegi arcaid megmaradnak. Az azóta készült mentések a Drive-on vannak, azokat a „Visszaállítás a Drive-ról” tölti be.</string>
@@ -1889,20 +1996,6 @@
     <string name="settings_ai_import_wrong_account">Ez az arc-index egy másik fiókhoz tartozik, és itt nem nyitható meg.</string>
     <string name="settings_ai_transfer_failed">Az arc-index átvitele sikertelen.</string>
     <string name="settings_ai_transfer_working">Folyamatban…</string>
-    <string name="settings_autosave_title">Automatikus mentés</string>
-    <string name="settings_autosave_desc">A háttérben naprakészen tartja a Drive-másolatot.</string>
-    <string name="settings_autosave_after_changes">Változás után</string>
-    <string name="settings_autosave_daily">Naponta</string>
-    <string name="settings_autosave_weekly">Hetente</string>
-    <string name="settings_autosave_after_changes_desc">Az utolsó változás után nagyjából 10 perccel ment, óránként legfeljebb egyszer.</string>
-    <string name="settings_autosave_daily_desc">Minden éjjel 23:59 körül ment, ha változott valami.</string>
-    <string name="settings_autosave_weekly_desc">Vasárnap éjjel 23:59 körül ment, ha változott valami.</string>
-    <string name="settings_autosave_last_saved">Utoljára mentve: %1$s</string>
-    <string name="settings_autosave_failed">Az utolsó mentés nem fejeződött be. Újra megpróbálja.</string>
-    <string name="settings_autosave_confirm_title">Automatikus mentés?</string>
-    <string name="settings_autosave_confirm_ml">Az arc- és keresési adataid titkosított másolata a háttérben a Proton Drive-odra kerül, és naprakészen marad. Drive-tárhelyet használ, mobiladatot pedig csak akkor, ha a biztonsági mentések használhatják. Az első mentés most indul.</string>
-    <string name="settings_autosave_confirm_labels">A címkéid titkosított másolata a háttérben a Proton Drive-odra kerül, és naprakészen marad. Drive-tárhelyet használ, mobiladatot pedig csak akkor, ha a biztonsági mentések használhatják. Az első mentés most indul.</string>
-    <string name="settings_autosave_confirm_on">Bekapcsolás</string>
     <string name="settings_ml_drive_step_preparing">Előkészítés…</string>
     <string name="settings_ml_drive_step_encrypting_faces">Arcadatok titkosítása…</string>
     <string name="settings_ml_drive_step_encrypting_search">Keresési adatok titkosítása…</string>
@@ -1913,12 +2006,6 @@
     <string name="settings_ml_drive_step_importing_faces">Arcadatok importálása…</string>
     <string name="settings_ml_drive_step_importing_search">Keresési adatok importálása…</string>
     <string name="settings_ml_drive_step_finishing">Befejezés…</string>
-    <string name="settings_ml_drive_folder_title">Létrehozol egy mappát a Drive-on?</string>
-    <string name="settings_ml_drive_folder_message">A mentés létrehozza a „Photos for Proton/ML data” mappát a Saját fájlok között. A benne lévő arc- és keresési adatok a fotóidhoz hasonlóan végpontok közötti titkosítással tárolódnak, és beleszámítanak a Drive-tárhelyedbe.</string>
-    <string name="settings_ml_drive_folder_confirm">Létrehozás és mentés</string>
-    <string name="settings_ml_drive_restore_loading">Mentett adatok keresése…</string>
-    <string name="settings_ml_drive_restore_pick">Válaszd ki, melyik eszköz mentését állítod vissza.</string>
-    <string name="settings_ml_drive_restore_empty">Még nincs mentés a Drive-on. Azon az eszközön, amelyiken az adatok vannak, válaszd a „Mentés a Drive-ra” lehetőséget, majd próbáld újra.</string>
     <string name="settings_ml_drive_restore_list_failed">Nem sikerült elérni a Drive-ot. Próbáld újra később.</string>
     <string name="settings_ml_drive_this_device">Ez az eszköz</string>
     <string name="settings_ml_drive_another_device">Másik eszköz</string>
@@ -1927,12 +2014,6 @@
     <string name="settings_ml_drive_holds_search">Keresési adatok</string>
     <string name="settings_ml_drive_saved_at">Mentve: %1$s</string>
     <string name="settings_ml_drive_restore_confirm">Visszaállítás</string>
-    <string name="settings_ml_drive_mode_title">Összevonás vagy csere?</string>
-    <string name="settings_ml_drive_mode_message">Ezen az eszközön már vannak arcadatok. Válaszd ki, hogyan történjen a visszaállítás.</string>
-    <string name="settings_ml_drive_mode_merge">Összevonás</string>
-    <string name="settings_ml_drive_mode_merge_desc">Megtartja ennek az eszköznek a neveit, és hozzáadja a mentetteket</string>
-    <string name="settings_ml_drive_mode_replace">Csere</string>
-    <string name="settings_ml_drive_mode_replace_desc">A Drive-on lévő fotóidhoz a mentett arcokat és neveket használja</string>
     <string name="settings_ml_drive_saved">Mentve a Drive-ra</string>
     <string name="settings_ml_drive_restored">Visszaállítva a Drive-ról</string>
     <string name="settings_ml_drive_saved_partly">Részben mentve</string>
@@ -1940,7 +2021,7 @@
     <string name="settings_ml_drive_save_failed">Nem sikerült menteni a Drive-ra</string>
     <string name="settings_ml_drive_restore_failed">Nem sikerült visszaállítani a Drive-ról</string>
     <string name="settings_ml_drive_nothing_title">Még nincs mit menteni</string>
-    <string name="settings_ml_drive_nothing_message">Ezen az eszközön még nincsenek arc- vagy keresési adatok. Előbb hagyd, hogy az arcfelismerés vagy a szemantikus keresés átvizsgálja a fotóidat.</string>
+    <string name="settings_ml_drive_nothing_message">Ezen az eszközön még nincsenek arc- vagy keresési adatok. Előbb hagyd, hogy az arcfelismerés vagy a fotókeresés átvizsgálja a fotóidat.</string>
     <string name="settings_ml_drive_not_capable">Ezen az eszközön nem érhető el</string>
     <string name="settings_ml_drive_faces_not_saved">Az arcadatokat nem sikerült menteni.</string>
     <string name="settings_ml_drive_search_not_saved">A keresési adatokat nem sikerült menteni.</string>
@@ -1965,8 +2046,6 @@
         <item quantity="one">%1$d fotó keresési adatai</item>
         <item quantity="other">%1$d fotó keresési adatai</item>
     </plurals>
-    <string name="settings_ml_drive_list_two">%1$s és %2$s</string>
-    <string name="settings_ml_drive_list_three">%1$s, %2$s és %3$s</string>
     <plurals name="person_suggestions_left">
         <item quantity="one">%1$d áttekintésre vár</item>
         <item quantity="other">%1$d áttekintésre vár</item>
@@ -2123,7 +2202,6 @@
     <string name="editor_tool_frame">Keret</string>
     <string name="editor_frame_none">Nincs</string>
     <string name="editor_frame_polaroid">Polaroid</string>
-    <string name="editor_frame_border">Szegély</string>
     <string name="editor_tab_transform">Vágás és forgatás</string>
     <string name="editor_tab_more">Továbbiak</string>
     <string name="editor_transform_ratio">Képarány</string>
@@ -2282,6 +2360,9 @@
     <string name="person_unsorted_hint">Arcok, amelyeket nem sikerült biztosan senkihez kötni. Jelölj ki képeket, hogy kihúzz egy valódi embert, a többit pedig jelöld meg mint nem személy.</string>
     <string name="person_unsorted_caption">Megmaradt arcok, amelyeket nem sikerült hozzárendelni. Nyisd meg a rendezésükhöz.</string>
     <string name="person_rename_title">Átnevezés</string>
+    <string name="person_remove_name">Név eltávolítása</string>
+    <string name="person_remove_name_confirm_title">Eltávolítod a nevet?</string>
+    <string name="person_remove_name_confirm_body">A fotók megmaradnak. A csoport visszakerül az átnézendő arcok közé, és ha csak egy fotója van, kikerül az Emberek közül.</string>
     <string name="person_rename_hint">Név</string>
     <string name="permissions_default_gallery_title">Beállítás alapértelmezett galériaként</string>
     <string name="permissions_default_gallery_why">Nyisd meg a rendszerbeállításokat, hogy ez az alkalmazás legyen az alapértelmezett a fotók és videók megnyitásához.</string>
@@ -2303,7 +2384,11 @@
     <string name="face_excluded_undo">Visszavonás</string>
     <string name="albums_search_hint">Albumok keresése</string>
     <string name="albums_search_no_results">Nincs a keresésnek megfelelő album.</string>
-    <string name="settings_ai_groups_found">%1$d csoport</string>
+    <plurals name="settings_ai_groups_found">
+        <item quantity="one">%1$d csoport</item>
+        <item quantity="other">%1$d csoport</item>
+    </plurals>
+    <string name="settings_ai_semantic_page_title">Fotókeresés</string>
     <string name="settings_ai_faces_found">%1$d arc</string>
     <string name="person_rename_merge_confirm_title">Összevonás a meglévő személlyel?</string>
     <string name="person_rename_merge_confirm_body">Már létezik egy %1$s nevű személy. Ezt a nevet használva a kettő eggyé olvad, ami nem vonható vissza. Összevonod?</string>
@@ -2314,7 +2399,6 @@
 
     <string name="label_section_title">Címkék</string>
     <string name="label_add_hint">Címke hozzáadása</string>
-    <string name="label_add_chip">Címke hozzáadása</string>
     <string name="label_remove_cd">%1$s címke eltávolítása</string>
     <plurals name="label_full_hint">
         <item quantity="one">%1$d / %2$d címke</item>
@@ -2362,16 +2446,10 @@
     <string name="label_leave_selection_title">Kilépsz a címkék oldaláról?</string>
     <string name="label_leave_selection_message">A kijelölés törlődik.</string>
     <string name="label_leave_selection_confirm">Kilépés</string>
-    <string name="label_backup_section">Címkék a Drive-on</string>
-    <string name="label_backup_save_desc">Titkosított másolat a címkéidről a Drive-ban</string>
-    <string name="label_backup_restore_desc">Az ezen vagy egy másik eszközön mentett címkék egyesítése</string>
     <string name="label_backup_restore_note">Visszahozza az akkor mentett címkéket, az azóta törölteket is. Az azóta hozzáadott címkék megmaradnak.</string>
     <string name="label_backup_show_all">Mind megjelenítése (%1$d)</string>
-    <string name="label_backup_save_confirm_title">Mented a címkéket a Drive-ra?</string>
-    <string name="label_backup_save_confirm_message">Az ezen az eszközön korábban mentett másolat lecserélődik. A címkék a fotóidhoz hasonlóan végpontok közötti titkosítással tárolódnak.</string>
     <string name="label_backup_working_save">Címkék mentése…</string>
     <string name="label_backup_working_restore">Címkék visszaállítása…</string>
-    <string name="label_backup_folder_message">A mentés létrehozza a „Photos for Proton/Labels” mappát a Saját fájlok között. A benne lévő címkék a fotóidhoz hasonlóan végpontok közötti titkosítással tárolódnak, és beleszámítanak a Drive-tárhelyedbe.</string>
     <string name="label_backup_nothing_message">Még egyetlen fotónak sincs címkéje. Előbb adj hozzá egyet egy fotóhoz.</string>
     <string name="label_backup_restore_empty">Még nincsenek mentett címkék a Drive-on. Azon az eszközön, amelyiken vannak, válaszd a „Mentés a Drive-ra” lehetőséget, majd próbáld újra.</string>
     <string name="label_backup_up_to_date">A címkéid már naprakészek.</string>
@@ -2388,6 +2466,7 @@
     <string name="label_rename_save">Mentés</string>
     <string name="label_rename_merge">Összevonás</string>
     <string name="label_delete_action">Címke törlése</string>
+    <string name="label_delete_unused_title">Törlöd ezt a címkét?</string>
     <plurals name="label_delete_confirm_title">
         <item quantity="one">Eltávolítod ezt a címkét %d fotóról?</item>
         <item quantity="other">Eltávolítod ezt a címkét %d fotóról?</item>
@@ -2428,7 +2507,7 @@
     <string name="compression_unavailable_fallback">A(z) %1$s nem érhető el ezen a telefonon, ezért a videók %2$s kodeket használnak.</string>
     <!-- 2.6.0 -->
     <string name="whats_new_260_labels_title">Fotócímkék</string>
-    <string name="whats_new_260_labels_body">Nyiss meg egy fotót, koppints a(z) „Részletek” gombra, és a „Címkék” mezőben adj hozzá legfeljebb öt címkét, vagy jelölj ki több fotót, és válaszd a(z) „Címkék hozzáadása” lehetőséget. A keresés a címkék alapján találja meg a fotókat. A címkéket átnevezheted, összevonhatod és törölheted, valamint mentheted Drive-ra vagy visszaállíthatod: „Beállítások > További beállítások > Címkék”.</string>
+    <string name="whats_new_260_labels_body">Nyiss meg egy fotót, koppints a(z) „Részletek” gombra, és a „Címkék” mezőben adj hozzá legfeljebb öt címkét, vagy jelölj ki több fotót, és válaszd a(z) „Címkék hozzáadása” lehetőséget. A keresés a címkék alapján találja meg a fotókat. A címkéket átnevezheted, összevonhatod és törölheted itt: „Beállítások > További beállítások > Címkék”.</string>
     <string name="whats_new_260_compress_title">Videótömörítés</string>
     <string name="whats_new_260_compress_body">Kapcsold be a(z) „Videók tömörítése” beállítást itt: „Beállítások > Biztonsági mentés és tárhely > Mentési beállítások > Minőség és méret”, majd válaszd ki a kodeket és a minőséget. Az alapértelmezett a H.264, amely mindenhol lejátszható. A feltöltés mutatja az előrehaladást és a megtakarított helyet, a fotók pedig tovább töltődnek fel, amíg egy videó tömörítése folyik.</string>
     <string name="whats_new_260_vault_title">Rejtett fotók kijelentkezéskor</string>
@@ -2450,11 +2529,11 @@
     <string name="whats_new_260_details_title">Emberek és térkép a részletekben</string>
     <string name="whats_new_260_details_body">A fotó „Részletek” most megmutatja a rajta lévő embereket és egy térképet arról, hol készült. Egy személyre koppintva megnyílik az oldala, a térképre koppintva teljes képernyőn látod. Egy név nélküli arcra koppintva elnevezheted, vagy valakihez adhatod.</string>
     <string name="whats_new_260_frame_title">Keret eszköz</string>
-    <string name="whats_new_260_frame_body">A fotószerkesztőben helyezz egy fotót más alakú vászonra, például 1:1, 9:16 vagy Polaroid, színnel vagy lágy elmosással kitöltve. Az eszköz még fejlesztés alatt áll, további fejlesztések érkeznek.</string>
+    <string name="whats_new_260_frame_body">A fotószerkesztőben helyezz egy fotót más alakú vászonra, például 1:1, 9:16 vagy Polaroid, színnel vagy lágy elmosással kitöltve.</string>
     <string name="whats_new_260_drive_title">Arc- és keresési adatok a Drive-on</string>
-    <string name="whats_new_260_drive_body">Mentsd az arcnevek és a keresési adatok másolatát Drive-ra, és állítsd vissza egy másik telefonon, a visszatérő elemeket kiválasztva, itt: „Beállítások > További beállítások > Gépi tanulás”.</string>
-    <string name="whats_new_260_autosave_title">Automatikus mentés a Drive-ra</string>
-    <string name="whats_new_260_autosave_body">Kapcsold be a(z) „Automatikus mentés” kapcsolót az arc- és keresési adatok vagy a címkék Drive-másolatánál, és a másolat a háttérben naprakész marad: változás után, naponta vagy hetente. Itt találod: „Beállítások > További beállítások”, a(z) „Gépi tanulás” és a(z) „Címkék” részben.</string>
+    <string name="whats_new_260_drive_body">Mentsd az arcneveket, a keresési adatokat, a címkéket és a rejtett elemeket a Drive-ra, és egy másik telefonon hozd vissza őket a(z) „Betöltés a Drive-ról” gombbal, itt: „Beállítások > További beállítások > Mentés a Proton Drive-ra”.</string>
+    <string name="whats_new_260_autosave_title">Automatikus mentés</string>
+    <string name="whats_new_260_autosave_body">Kapcsold be az „Automatikus mentés” kapcsolót, és a Drive-másolat a háttérben naprakész marad, minden változás után pár perccel, a többi eszközödön pedig ugyanaz lesz. A(z) „Mentés most” azonnal ment.</string>
     <string name="whats_new_260_worldmap_title">Gazdagabb világtérkép</string>
     <string name="whats_new_260_worldmap_body">A világtérkép már az országok és tartományok határait is rajzolja, kiszínezi azt a tartományt, ahol fotóztál, nagyításkor kiírja a helyek nevét, és ugyanazokat a tűket mutatja, mint a klasszikus térkép. Európa felett nyílik meg, mozgatáskor és csippentéskor pedig az ujjaid alatti pont a helyén marad.</string>
     <string name="whats_new_260_time_title">Időformátum</string>
@@ -2464,15 +2543,15 @@
     <string name="whats_new_260_duplicates_title">Duplikátumok áttekintése</string>
     <string name="whats_new_260_duplicates_body">Csippentéssel, húzással vagy duplakoppintással akár 6-szorosára nagyíthatsz egy példányt, mielőtt döntesz a törlésről. A(z) „Csoport törlése” gomb a csoport összes példányát egyszerre kijelöli.</string>
     <string name="whats_new_260_intro_title">A korábbi tesztverziók is benne vannak</string>
-    <string name="whats_new_260_intro_body">Ez a verzió az 1., 2., 3., 4. és 5. tesztverzió összes újdonságát is tartalmazza. A következő kártyák csak az azóta újat mutatják.</string>
+    <string name="whats_new_260_intro_body">Ez a verzió az 1., 2., 3., 4., 5. és 6. tesztverzió összes újdonságát is tartalmazza. A következő kártyák csak az azóta újat mutatják.</string>
     <string name="whats_new_260_sdk_title">Proton Drive SDK kapcsolók</string>
-    <string name="whats_new_260_sdk_body">A Beállítások, További beállítások, Proton Drive SDK oldalon külön kapcsoló van a kedvencekhez és kategóriákhoz, a kukához, a teljes felbontású letöltéshez és a feltöltéshez. Mind ki van kapcsolva. Ha bekapcsolsz egyet, az a művelet a Proton saját Drive SDK-ján fut, és ha az nem sikerül, az app a megszokott módon végzi el.</string>
+    <string name="whats_new_260_sdk_body">A Beállítások, További beállítások, Proton Drive SDK oldalon külön kapcsoló van a kedvencekhez és kategóriákhoz, a kukához, a teljes felbontású letöltéshez, a feltöltéshez, az albumokhoz, a változások követéséhez és a veled megosztott albumokhoz. Mind ki van kapcsolva. Ha bekapcsolsz egyet, az a művelet a Proton saját Drive SDK-ján fut, és ha az nem sikerül, az app a megszokott módon végzi el.</string>
     <string name="whats_new_260_setas_title">Beállítás mint, és fotók más appoknak</string>
     <string name="whats_new_260_setas_body">A néző menüjéből a fotó a telefon háttérkép- vagy névjegyfotó-beállítójához kerül. Az Adatvédelem és biztonság alatt bekapcsolva más appok innen választhatnak fotót; a rejtett fotók sosem kerülnek ki.</string>
     <string name="whats_new_260_folderimport_title">Importálás mappából</string>
     <string name="whats_new_260_folderimport_body">Ente vagy Google Takeout exportot, vagy sima fotókat zip mellett mappából is importálhatsz. A Live Photo egy fotóként érkezik a videójával, és minden fotó valódi dátumot kap.</string>
     <string name="whats_new_260_mlsetup_title">Okos funkciók a beállításban</string>
-    <string name="whats_new_260_mlsetup_body">Az első indításkori beállítás felajánlja az arcfelismerést, a fotókeresést és a szövegmásolást, mindegyiket a letöltési méretével. Válaszd ki, amit szeretnél, és a háttérben letöltődik.</string>
+    <string name="whats_new_260_mlsetup_body">Az első indításkori beállítás felajánlja az arcfelismerést, a fotókeresést és a szövegmásolást, mindegyiket a letöltési méretével. Válaszd ki, amit szeretnél, és a háttérben letöltődik. Később is bekapcsolhatod őket itt: „Beállítások > További beállítások > Gépi tanulás”.</string>
     <string name="whats_new_260_longpress_title">Hosszú nyomás, ahogy szeretnéd</string>
     <string name="whats_new_260_longpress_body">A Beállítások, Megjelenés alatt választhatod ki, hogy a nézőben a hosszú nyomás szöveget jelöl ki vagy a menüt nyitja meg. A menüben ott a Szöveg felismerése, és már nem ismétli a gombokat.</string>
     <string name="whats_new_260_nothumb_title">A Drive-os fotók újra megnyílnak</string>
@@ -2483,6 +2562,56 @@
     <string name="whats_new_260_nullisland_body">Az a fotó, amelynek a kamerája 0,0 helyet írt, már nem jelenik meg a térképen Takoradiban, Ghánában. A dátum- vagy helyszerkesztés után a fotó kedvenc marad, a címkéivel és arcaival együtt.</string>
     <string name="whats_new_260_likeness_title">A Ki ez? jobban tudja</string>
     <string name="whats_new_260_likeness_body">Egy arc elnevezésekor újra azok az emberek állnak elöl, akik a leginkább hasonlítanak. Nagy könyvtárakon a megadott vagy importált nevek a személyükön maradnak, és a szám már nem akad el.</string>
+    <string name="whats_new_260_videoseek_title">Videók léptetése és gyorsítása</string>
+    <string name="whats_new_260_videoseek_body">Koppints duplán egy videó bal vagy jobb szélére, hogy 10 másodpercet ugorj vissza vagy előre, vagy tartsd lenyomva az egyik szélét, és amíg el nem engeded, gyorsabban megy.</string>
+    <string name="whats_new_260_cloudcompress_title">Tömörítés a Drive-on</string>
+    <string name="whats_new_260_cloudcompress_body">A csak a Drive-on lévő fotókat és videókat a nézegetőből vagy egy kijelölésből kisebbre tömörítheted, és minden eredeti a Drive kukájába kerül, amint a kisebb másolata a helyén van. Indíthatod a keresésből, egy albumból vagy egy helyről is, a legújabbakkal kezdve.</string>
+    <string name="whats_new_260_sharebackup_title">Mentés más appokból</string>
+    <string name="whats_new_260_sharebackup_body">Más appból megosztva válaszd a „Mentés a Drive-ra” lehetőséget, vagy egy más appból megnyitott fotót, például e-mail-mellékletet, közvetlenül a nézegetőből is elmenthetsz.</string>
+    <string name="whats_new_260_foldermove_title">Mappák áthelyezése bejelentkezve is</string>
+    <string name="whats_new_260_foldermove_body">Az „Áthelyezés mappába” és a „Mappa átnevezése” most bejelentkezve is működik, és a már Drive-on lévő fotó átkerül annak a mappának az albumába, ahová áthelyezted.</string>
+    <string name="whats_new_260_drivecopies_title">Mentések a Drive-on</string>
+    <string name="whats_new_260_drivecopies_body">A „Mentések a Drive-on” megmutatja minden eszköz mentését és azt, mikor mentett utoljára, és amíg az „Automatikus mentés” be van kapcsolva, az „Arcadatok törlése” megkérdezi, hogy csak ezen a telefonon vagy mindenhol töröljön.</string>
+    <string name="whats_new_260_glass_title">Liquid glass</string>
+    <string name="whats_new_260_glass_body">Android 12-n és újabbon kapcsold be a „Liquid glass” kapcsolót itt: „Beállítások > Megjelenés és nyelv > Téma és paletta”, és a menük, az oldalfejlécek, a lenyíló lapok, a nézegető gombjai és a keresőmező üvegesen elmossák a mögöttük lévő tartalmat; még fejlesztés alatt van, és nem minden képernyőn működik.</string>
+    <string name="whats_new_260_detailsheet_title">Új részletek lap</string>
+    <string name="whats_new_260_detailsheet_body">A „Részletek” a fotó összefoglalójával nyílik, a dátum, a hely, a címkék és a kategóriák pedig egy-egy oldalként nyílnak meg a lapon belül, naptárral és térképpel.</string>
+    <string name="whats_new_260_multiedit_title">Több fotó szerkesztése</string>
+    <string name="whats_new_260_multiedit_body">Több fotó dátumának vagy helyének módosítása most a részletek lapra hasonlít, a dátum módjai egy kapcsolóban vannak, a naptár és a térkép pedig külön lapon nyílik meg.</string>
+    <string name="whats_new_260_personmonths_title">Hónapok a személyoldalon</string>
+    <string name="whats_new_260_personmonths_body">Egy személy oldalán minden fotósor fölött hónapfejléc áll, és a megnevezett személytől megnyitott nézegető felkínálja a „Beállítás borítóként” és az „Eltávolítás embertől” lehetőséget.</string>
+    <string name="whats_new_260_timelinestay_title">Az idővonal a helyén marad</string>
+    <string name="whats_new_260_timelinestay_body">Ha a Gyűjteményből vagy egy személyoldalról nyitsz meg egy fotót és továbblapozol, az idővonal alatta már nem ugrik el.</string>
+    <string name="whats_new_260_setup_title">Átláthatóbb első beállítás</string>
+    <string name="whats_new_260_setup_body">Az első indításkori beállítás most a Beállításokra hasonlít, lépésenként egy fő gombbal, az engedélyeknél „Most nem” lehetőséggel és egy utolsó lépéssel, amely felsorolja, mit kapcsol be.</string>
+    <string name="whats_new_260_folderbackfill_title">Feltöltődnek a mappaalbumok</string>
+    <string name="whats_new_260_folderbackfill_body">Ha bekapcsolod egy mappa albumát, a mappa már elmentett fotói is bekerülnek, és ha kell, az album is létrejön.</string>
+    <string name="whats_new_260_freeupcheck_title">Helyfelszabadítás dupla ellenőrzéssel</string>
+    <string name="whats_new_260_freeupcheck_body">A helyfelszabadítás kis csoportokban, közvetlenül a törlés előtt ellenőrzi a Drive-on az eszközön lévő másolatokat, és ha több mint 2000 fotóhoz kell rendszerengedély, több ablakban kéri.</string>
+    <string name="whats_new_260_removedstays_title">A törölt fotók nem jönnek vissza</string>
+    <string name="whats_new_260_removedstays_body">Ha egy fotó Drive-os példányát a kukába teszed, itt, egy másik eszközön vagy a weben, az automatikus mentés már nem tölti fel újra.</string>
+    <string name="whats_new_260_peoplepics_title">Arcképek és elrendezés</string>
+    <string name="whats_new_260_peoplepics_body">Az Emberek oldalon és a „Ki ez?” ablakban az arcképek nagy könyvtáraknál már nem maradnak sötétek, és az Emberek oldal követheti az Albumok lap nézetét, vagy saját rácsot vagy listát kaphat.</string>
+    <string name="whats_new_260_desktopsync_title">Együtt a gépes appal</string>
+    <string name="whats_new_260_desktopsync_body">Ha az „Automatikus mentés” be van kapcsolva, az arcok, a nevek, a címkék, a keresés és a rejtett fotók egyformák ezen a telefonon, a többi telefonodon és a Photos for Proton gépes appban; ami az egyiken változik, pár percen belül a többin is megjelenik. Bekapcsoláskor kiírja, milyen verzió kell a többi eszközre.</string>
+    <string name="whats_new_260_facefix_title">Arc javítása a nézegetőből</string>
+    <string name="whats_new_260_facefix_body">A nézegetőben nyomj hosszan egy elnevezett arcra, és jelezd, hogy nem ő az; egy elnevezett személy menüjében pedig ott a „Név eltávolítása”.</string>
+    <string name="whats_new_260_coldstart_title">Gyorsabb indulás nagy könyvtárnál</string>
+    <string name="whats_new_260_coldstart_body">Az app megnyitásakor azonnal megjelenik a teljes könyvtár, nem csak a legújabb fotók, amíg a többit beolvassa.</string>
+    <string name="whats_new_260_newphotos_title">Az új fotók maguktól bekerülnek</string>
+    <string name="whats_new_260_newphotos_body">Amit nyitott appnál fotózol vagy mentesz, azt magától beszkenneli arcokra és a keresésre, újraindítás és lehúzásos frissítés nélkül.</string>
+    <string name="whats_new_260_namessafe_title">Biztonságban az arcok nevei</string>
+    <string name="whats_new_260_namessafe_body">Ha csoportosítás közben átnevezel vagy összevonsz valakit, az már nem vész el, az automatikus összevonások javíthatók maradnak, a mentett fotó arcai helyfelszabadítás után is megmaradnak, a rejtett fotók pedig kikerülnek az Emberek közül.</string>
+    <string name="whats_new_260_namecase_title">Egy név, egy ember</string>
+    <string name="whats_new_260_namecase_body">Az „adam” és az „Adam” egy ember, ahogy a gépes appban is, az „Ádám” és az „Adam” viszont kettő marad, és egy személy fotószáma egyezik az oldalán láthatóval.</string>
+    <string name="whats_new_260_favsync_title">Kedvencek más eszközökről</string>
+    <string name="whats_new_260_favsync_body">A weben vagy egy másik eszközön adott vagy levett kedvenc pár másodpercen belül itt is látszik.</string>
+    <string name="whats_new_260_copydate_title">Másolt fotók dátuma</string>
+    <string name="whats_new_260_copydate_body">A telefonra saját dátum nélkül másolt fotó vagy videó azt a napot mutatja, amikor készült, nem azt, amikor a telefonra került.</string>
+    <string name="whats_new_260_widgetopen_title">A widget a fotót nyitja meg</string>
+    <string name="whats_new_260_widgetopen_body">Egy Drive-fotókat mutató widgetre koppintva az a fotó nyílik meg, nem az idővonal, és a fotóválasztója sem ugrik meg az első választásnál.</string>
+    <string name="whats_new_260_smallfixes_title">Kisebb javítások</string>
+    <string name="whats_new_260_smallfixes_body">A veszteségmentes videóvágás már nem veszít képkockákat az elején, a nézegető gombjain a hosszú nyomás nem olvassa ki a fotó szövegét, az első mentés közben bekapcsolt mappaalbum megkapja a fotóit, és a vágókeret fogantyúi a képernyő szélén is működnek.</string>
     <string name="whats_new_260_group_title">Arcok csoportosítása nagy könyvtárakban</string>
     <string name="whats_new_260_group_body">A harmincezernél több arcot tartalmazó könyvtárak csoportosítása most már végigfut. A személyek menet közben megjelennek, a megadott nevek a személyeiknél maradnak, a munka pedig a háttérben folytatódik, ha elhagyod az alkalmazást.</string>
     <string name="whats_new_260_savedrive_title">Megosztott fotó mentése a Drive-odra</string>
@@ -2532,7 +2661,10 @@
     <string name="viewer_save_to_drive_failed">Nem sikerült a Drive-ra menteni</string>
     <string name="viewer_remove_shared_confirm_body">Ez kiveszi a fotót a megosztott albumból. Az album tulajdonosánál marad, és te már nem látod itt.</string>
     <string name="onboarding_ml_title">Okos funkciók az eszközödön</string>
-    <string name="onboarding_ml_subtitle">Embereket és tárgyakat találhatsz a fotóidon, és szöveget másolhatsz ki belőlük. Minden ezen a telefonon fut, és semmi nem hagyja el. Válaszd ki most, mit szeretnél, vagy módosítsd később a Beállításokban.</string>
+    <string name="onboarding_ml_subtitle">Embereket és tárgyakat találhatsz a fotóidon, és szöveget másolhatsz ki belőlük. Minden ezen a telefonon fut, és semmi nem hagyja el.</string>
     <string name="onboarding_ml_size">%1$s letöltés</string>
     <string name="onboarding_ml_note">A modellek egyszer töltődnek le, a beállítás után, a háttérben. A Wi-Fi ajánlott, mert Wi-Fi nélkül a letöltés mobiladatot használ.</string>
+    <string name="viewer_not_person_title">Nem %1$s?</string>
+    <string name="viewer_not_person_body">Az arc kikerül %1$s alól. A fotó megmarad, és az arcot más személynek is javasolhatja az app.</string>
+    <string name="viewer_not_person_confirm">Nem %1$s</string>
 </resources>

@@ -120,6 +120,16 @@ object HiddenVaultDecisions {
     }
 
     /**
+     * The photo keys a published hide drops the faces of: every key [labelKeysOfHidden] names, and each vault
+     * uri itself, so no face of a hidden photo is left under any key it was ever scanned by.
+     */
+    fun faceKeysOfHidden(
+        vaultUris: Collection<String>,
+        sourceByVaultUri: Map<String, String>,
+        cloudIdEntries: Collection<String>,
+    ): List<String> = (labelKeysOfHidden(vaultUris, sourceByVaultUri, cloudIdEntries) + vaultUris).distinct()
+
+    /**
      * Whether a vault copy is provably the whole photo. [expectedBytes] is what the source states it
      * holds, negative when it states nothing; [copiedBytes] is what the copy reported writing, and
      * [storedBytes] what the vault file holds once the write has reached the disk.

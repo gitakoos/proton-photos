@@ -188,7 +188,7 @@ private fun statusRank(status: MlSyncPartStatus): Int = when (status) {
     MlSyncPartStatus.DONE -> 4
     MlSyncPartStatus.NAMES_ONLY -> 3
     MlSyncPartStatus.MODEL_MISMATCH -> 2
-    MlSyncPartStatus.EMPTY -> 1
+    MlSyncPartStatus.EMPTY, MlSyncPartStatus.BEFORE_WIPE -> 1
     else -> 0
 }
 
@@ -219,6 +219,7 @@ internal fun FaceSnapshotImportResult.partStatus(): MlSyncPartStatus = when (thi
     FaceSnapshotImportResult.UnsupportedVersion -> MlSyncPartStatus.TOO_NEW
     FaceSnapshotImportResult.Unreadable -> MlSyncPartStatus.DAMAGED
     FaceSnapshotImportResult.NotEnoughSpace -> MlSyncPartStatus.NO_SPACE
+    FaceSnapshotImportResult.BeforeWipe -> MlSyncPartStatus.BEFORE_WIPE
 }
 
 /** The file status a search snapshot import ended in. */

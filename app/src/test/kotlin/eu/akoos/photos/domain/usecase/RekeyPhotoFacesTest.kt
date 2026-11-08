@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.domain.usecase
 
+import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -53,6 +54,39 @@ class RekeyPhotoFacesTest {
     @Test
     fun `skips a self pair`() {
         assertEquals(emptyList<Pair<String, String>>(), backupRekeyPairs(listOf(cloudA to cloudA), scannedKeys = setOf(cloudA)))
+    }
+
+    private fun time(name: String, ref: String, at: Long, kind: Int = FaceCurationTimeEntity.KIND_NOT_PERSON) =
+        FaceCurationTimeEntity("acct", kind, name, ref, removed = false, changedAt = at)
+
+    @Test
+    fun `curation times move to their new refs, and one with nowhere to go is dropped`() {
+        val rows = rekeyCurationTimes(
+            moving = listOf(time("Bob", "$devA#0", 10L), time("Bob", "$devA#5", 20L)),
+            present = emptyList(),
+        ) { row -> if (row.ref == "$devA#0") "$cloudA#0" else null }
+
+        assertEquals(listOf(time("Bob", "$cloudA#0", 10L)), rows)
+    }
+
+    @Test
+    fun `a later time already on the new key is kept, an earlier one is replaced`() {
+        val rows = rekeyCurationTimes(
+            moving = listOf(time("Bob", "$devA#0", 10L), time("Eve", "$devA#0", 30L)),
+            present = listOf(time("Bob", "$cloudA#0", 15L), time("Eve", "$cloudA#0", 25L)),
+        ) { "$cloudA#0" }
+
+        assertEquals(listOf(time("Eve", "$cloudA#0", 30L)), rows)
+    }
+
+    @Test
+    fun `two times landing on one piece keep the later`() {
+        val rows = rekeyCurationTimes(
+            moving = listOf(time("Bob", "$devA#0", 40L), time("Bob", "$devA#1", 35L)),
+            present = emptyList(),
+        ) { "$cloudA#0" }
+
+        assertEquals(listOf(time("Bob", "$cloudA#0", 40L)), rows)
     }
 
     @Test

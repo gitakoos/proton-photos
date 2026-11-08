@@ -255,6 +255,8 @@ class ImportWorker @AssistedInject constructor(
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
         runCatching { NotificationManagerCompat.from(context).cancel(NotificationIds.IMPORT) }
+        // A denied notification grant throws, which runCatching absorbs: the summary is informational.
+        @android.annotation.SuppressLint("MissingPermission")
         runCatching { NotificationManagerCompat.from(context).notify(NotificationIds.IMPORT_DONE, notification) }
     }
 

@@ -39,7 +39,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -91,7 +90,6 @@ internal fun AlbumMirrorStep(
 
     Column {
         StepHeader(
-            icon = Icons.Default.PhotoLibrary,
             title = stringResource(R.string.onboarding_album_mirror_title),
             subtitle = stringResource(R.string.onboarding_album_mirror_subtitle),
         )

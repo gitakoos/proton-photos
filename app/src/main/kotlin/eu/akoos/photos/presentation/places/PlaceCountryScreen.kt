@@ -38,6 +38,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.util.appLocale
 import eu.akoos.photos.util.countryName
@@ -64,34 +66,39 @@ fun PlaceCountryScreen(
         ?: ""
     val title = countryName(countryCode, locale, storedName)
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.pageBg),
     ) {
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            contentPadding = PaddingValues(
-                start = 14.dp,
-                end = 14.dp,
-                top = floatingHeaderContentTopPadding(),
-                bottom = 24.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            items(items = cities, key = { it.city + " " + it.countryCode }) { city ->
-                PlaceCard(
-                    coverItem = city.cover,
-                    title = city.city,
-                    count = city.count,
-                    onClick = { onCityClick(city.latitude, city.longitude) },
-                )
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                contentPadding = PaddingValues(
+                    start = 14.dp,
+                    end = 14.dp,
+                    top = floatingHeaderContentTopPadding(),
+                    bottom = 24.dp,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(items = cities, key = { it.city + " " + it.countryCode }) { city ->
+                    PlaceCard(
+                        coverItem = city.cover,
+                        title = city.city,
+                        count = city.count,
+                        onClick = { onCityClick(city.latitude, city.longitude) },
+                    )
+                }
             }
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = title,
             onBack = onBack,
         )

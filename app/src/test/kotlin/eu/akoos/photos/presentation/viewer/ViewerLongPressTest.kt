@@ -86,9 +86,9 @@ class ViewerLongPressTest {
     }
 
     @Test
-    fun `a press on a control leaves the text read as it was`() {
-        assertEquals(ViewerLongPressAction.ReadText, action(onControls = true))
-        assertEquals(ViewerLongPressAction.ReadText, action(opensMenu = true, trashMode = true, onControls = true))
+    fun `a press on a control never reads the text either`() {
+        assertEquals(ViewerLongPressAction.None, action(onControls = true))
+        assertEquals(ViewerLongPressAction.None, action(opensMenu = true, trashMode = true, onControls = true))
     }
 
     @Test

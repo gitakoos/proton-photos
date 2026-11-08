@@ -89,6 +89,8 @@ import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.AppSearchField
 import eu.akoos.photos.presentation.common.IconBubble
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.BottomDock
 import eu.akoos.photos.presentation.gallery.GridZoom
 import eu.akoos.photos.presentation.gallery.PhotoCell
@@ -250,6 +252,8 @@ fun AlbumPhotoPickerScreen(
             }
     }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(appColors.bg0)
     Box(modifier = Modifier.fillMaxSize().background(appColors.bg0)) {
         // Pinch-zoom level: opening at the grid-layout default, then driven by the pinch gesture.
         // The level fixes both the column count and the date grouping for the headers below.
@@ -269,143 +273,145 @@ fun AlbumPhotoPickerScreen(
             scopeFolder = scopeFolder,
             grouping = grouping,
         )
-        androidx.compose.runtime.LaunchedEffect(query) { viewModel.setQuery(query) }
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            androidx.compose.runtime.LaunchedEffect(query) { viewModel.setQuery(query) }
 
-        // Drag-sweep and decrypt both read the FLAT photos order; the sections below keep that order,
-        // so the flat key->index map stays valid for hit-testing across group headers.
-        val photoKeys = content?.photoKeys ?: emptyList()
-        // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
-        // cell back off (otherwise a stationary long-press would select then immediately deselect).
-        val tapGuard = remember { mutableStateOf(false) }
-        val dragSelectModifier = rememberDragMultiSelectModifier(
-            gridState = gridState,
-            items = photoKeys,
-            indexByKey = keyToIndex,
-            selected = selected,
-            onSelectionChange = { proposed ->
-                // A locked key (the video editor's primary) stays selected even through a drag-sweep.
-                val withLocked = if (lockedKeys.isEmpty()) proposed else proposed + lockedKeys
-                viewModel.setSelection(
-                    if (maxSelectable == null || withLocked.size <= maxSelectable) {
-                        withLocked
-                    } else {
-                        // Over the cap: keep every locked key first, then fill the remaining budget
-                        // from the swept keys in grid order. Taking the first N of the whole set
-                        // instead could drop a locked key sitting past the first N swept tiles,
-                        // briefly showing the primary unselected.
-                        val remaining = (maxSelectable - lockedKeys.size).coerceAtLeast(0)
-                        lockedKeys + photoKeys.filter { it in withLocked && it !in lockedKeys }.take(remaining)
-                    },
-                )
-            },
-            tapGuard = tapGuard,
-        )
-        val pinchModifier = rememberGridPinchZoomModifier(levelIndex, GridZoom.LEVELS.size) { levelIndex = it }
+            // Drag-sweep and decrypt both read the FLAT photos order; the sections below keep that order,
+            // so the flat key->index map stays valid for hit-testing across group headers.
+            val photoKeys = content?.photoKeys ?: emptyList()
+            // Armed at the long-press anchor so the cell's release-tap skips toggling the just-selected
+            // cell back off (otherwise a stationary long-press would select then immediately deselect).
+            val tapGuard = remember { mutableStateOf(false) }
+            val dragSelectModifier = rememberDragMultiSelectModifier(
+                gridState = gridState,
+                items = photoKeys,
+                indexByKey = keyToIndex,
+                selected = selected,
+                onSelectionChange = { proposed ->
+                    // A locked key (the video editor's primary) stays selected even through a drag-sweep.
+                    val withLocked = if (lockedKeys.isEmpty()) proposed else proposed + lockedKeys
+                    viewModel.setSelection(
+                        if (maxSelectable == null || withLocked.size <= maxSelectable) {
+                            withLocked
+                        } else {
+                            // Over the cap: keep every locked key first, then fill the remaining budget
+                            // from the swept keys in grid order. Taking the first N of the whole set
+                            // instead could drop a locked key sitting past the first N swept tiles,
+                            // briefly showing the primary unselected.
+                            val remaining = (maxSelectable - lockedKeys.size).coerceAtLeast(0)
+                            lockedKeys + photoKeys.filter { it in withLocked && it !in lockedKeys }.take(remaining)
+                        },
+                    )
+                },
+                tapGuard = tapGuard,
+            )
+            val pinchModifier = rememberGridPinchZoomModifier(levelIndex, GridZoom.LEVELS.size) { levelIndex = it }
 
-        val grouped = content?.sections ?: emptyList()
+            val grouped = content?.sections ?: emptyList()
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(columnCount),
-            state = gridState,
-            // Match the timeline grid so tiles render at the same size/spacing. Top inset clears the
-            // floating back-pill so the first row starts below it (content only slides under once scrolled).
-            // Edge-to-edge drops the side inset and tightens the gap.
-            contentPadding = PaddingValues(
-                start = if (seamless) 0.dp else 20.dp,
-                end = if (seamless) 0.dp else 20.dp,
-                top = headerTopInset,
-                bottom = dockInset + navBottomInset,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            // Drag-select first (claims the gesture only after a long-press time-out), then pinch
-            // (two-finger). Plain single-finger drags fall through to the grid's own scroll.
-            modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(pinchModifier),
-        ) {
-            if (photos.isEmpty()) {
-                val loading = content == null
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    Box(Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
-                        if (loading) CircularProgressIndicator(color = Accent)
-                        else Text(stringResource(R.string.album_picker_empty), color = FgMute, fontSize = 14.sp)
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columnCount),
+                state = gridState,
+                // Match the timeline grid so tiles render at the same size/spacing. Top inset clears the
+                // floating back-pill so the first row starts below it (content only slides under once scrolled).
+                // Edge-to-edge drops the side inset and tightens the gap.
+                contentPadding = PaddingValues(
+                    start = if (seamless) 0.dp else 20.dp,
+                    end = if (seamless) 0.dp else 20.dp,
+                    top = headerTopInset,
+                    bottom = dockInset + navBottomInset,
+                ),
+                horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+                verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
+                // Drag-select first (claims the gesture only after a long-press time-out), then pinch
+                // (two-finger). Plain single-finger drags fall through to the grid's own scroll.
+                modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(pinchModifier),
+            ) {
+                if (photos.isEmpty()) {
+                    val loading = content == null
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        Box(Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp).fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
+                            if (loading) CircularProgressIndicator(color = Accent)
+                            else Text(stringResource(R.string.album_picker_empty), color = FgMute, fontSize = 14.sp)
+                        }
                     }
-                }
-            } else {
-                for ((label, groupItems) in grouped) {
-                    // Full-span date header: no photo key, so drag hit-testing skips it. Keeps a
-                    // side inset in seamless mode so the label never hits the screen edge.
-                    item(span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
-                        PickerSectionHeader(
-                            label = label,
-                            count = groupItems.size,
-                            modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp),
-                        )
-                    }
-                    items(groupItems, key = { AlbumPhotoPickerViewModel.stableKeyOf(it) }, contentType = { "photo" }) { item ->
-                        val key = AlbumPhotoPickerViewModel.stableKeyOf(item)
-                        val inputs = remember(item) { photoCellInputsFor(item) }
-                        PhotoCell(
-                            imageData = inputs.imageData,
-                            stableKey = inputs.stableKey,
-                            isVideo = inputs.isVideo,
-                            isLocalVideo = inputs.isLocalVideo,
-                            durationMs = inputs.durationMs,
-                            isPlaceholder = inputs.isPlaceholder,
-                            selected = key in selected,
-                            isSelectionMode = true,
-                            showCloudBadge = inputs.showCloudBadge,
-                            showSyncedBadge = inputs.showSyncedBadge,
-                            isFavorite = inputs.isFavorite,
-                            typeBadgeRes = inputs.typeBadgeRes,
-                            typeBadgeCdRes = inputs.typeBadgeCdRes,
-                            columns = columnCount,
-                            cornerRadius = if (seamless) 0.dp else 10.dp,
-                            onClick = {
-                                // Skip the release-tap that follows a long-press select; it would
-                                // otherwise toggle the just-anchored cell back off.
-                                if (tapGuard.value) tapGuard.value = false
-                                // A locked key (the video editor's primary) can never be deselected.
-                                else if (key in lockedKeys) {}
-                                else if (key in selected || maxSelectable == null || selected.size < maxSelectable) viewModel.toggle(key)
-                                else android.widget.Toast.makeText(
-                                    context, context.getString(R.string.picker_selection_limit, maxSelectable),
-                                    android.widget.Toast.LENGTH_SHORT,
-                                ).show()
-                            },
-                        )
+                } else {
+                    for ((label, groupItems) in grouped) {
+                        // Full-span date header: no photo key, so drag hit-testing skips it. Keeps a
+                        // side inset in seamless mode so the label never hits the screen edge.
+                        item(span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
+                            PickerSectionHeader(
+                                label = label,
+                                count = groupItems.size,
+                                modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp),
+                            )
+                        }
+                        items(groupItems, key = { AlbumPhotoPickerViewModel.stableKeyOf(it) }, contentType = { "photo" }) { item ->
+                            val key = AlbumPhotoPickerViewModel.stableKeyOf(item)
+                            val inputs = remember(item) { photoCellInputsFor(item) }
+                            PhotoCell(
+                                imageData = inputs.imageData,
+                                stableKey = inputs.stableKey,
+                                isVideo = inputs.isVideo,
+                                isLocalVideo = inputs.isLocalVideo,
+                                durationMs = inputs.durationMs,
+                                isPlaceholder = inputs.isPlaceholder,
+                                selected = key in selected,
+                                isSelectionMode = true,
+                                showCloudBadge = inputs.showCloudBadge,
+                                showSyncedBadge = inputs.showSyncedBadge,
+                                isFavorite = inputs.isFavorite,
+                                typeBadgeRes = inputs.typeBadgeRes,
+                                typeBadgeCdRes = inputs.typeBadgeCdRes,
+                                columns = columnCount,
+                                cornerRadius = if (seamless) 0.dp else 10.dp,
+                                onClick = {
+                                    // Skip the release-tap that follows a long-press select; it would
+                                    // otherwise toggle the just-anchored cell back off.
+                                    if (tapGuard.value) tapGuard.value = false
+                                    // A locked key (the video editor's primary) can never be deselected.
+                                    else if (key in lockedKeys) {}
+                                    else if (key in selected || maxSelectable == null || selected.size < maxSelectable) viewModel.toggle(key)
+                                    else android.widget.Toast.makeText(
+                                        context, context.getString(R.string.picker_selection_limit, maxSelectable),
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                },
+                            )
+                        }
                     }
                 }
             }
-        }
 
-        // Fast-scroll scrubber over the grid — the same handle as the timeline. The drag tooltip
-        // follows the pinch-derived grouping (day / month / year). Keyed to match the grid cells.
-        if (photos.isNotEmpty() && !browsingAlbums) {
-            TimelineScrubber(
-                gridState = gridState,
-                items = photos,
-                grouping = grouping,
-                topPadding = headerTopInset,
-                bottomPadding = dockInset,
-                keyOf = { AlbumPhotoPickerViewModel.stableKeyOf(it) },
-            )
-        }
+            // Fast-scroll scrubber over the grid — the same handle as the timeline. The drag tooltip
+            // follows the pinch-derived grouping (day / month / year). Keyed to match the grid cells.
+            if (photos.isNotEmpty() && !browsingAlbums) {
+                TimelineScrubber(
+                    gridState = gridState,
+                    items = photos,
+                    grouping = grouping,
+                    topPadding = headerTopInset,
+                    bottomPadding = dockInset,
+                    keyOf = { AlbumPhotoPickerViewModel.stableKeyOf(it) },
+                )
+            }
 
-        if (browsingAlbums) {
-            PickerAlbumsGrid(
-                source = browseSource,
-                query = albumQuery,
-                hideLinkId = albumLinkId,
-                topInset = headerTopInset,
-                bottomInset = dockInset + navBottomInset,
-                onOpen = { entry ->
-                    openScopeKey = when (entry) {
-                        is SearchAlbum.Cloud -> "c:${entry.album.linkId}"
-                        is SearchAlbum.Folder -> "f:${entry.folder.name}"
-                    }
-                    openScopeName = entry.name
-                },
-            )
+            if (browsingAlbums) {
+                PickerAlbumsGrid(
+                    source = browseSource,
+                    query = albumQuery,
+                    hideLinkId = albumLinkId,
+                    topInset = headerTopInset,
+                    bottomInset = dockInset + navBottomInset,
+                    onOpen = { entry ->
+                        openScopeKey = when (entry) {
+                            is SearchAlbum.Cloud -> "c:${entry.album.linkId}"
+                            is SearchAlbum.Folder -> "f:${entry.folder.name}"
+                        }
+                        openScopeName = entry.name
+                    },
+                )
+            }
         }
 
         // The shared floating page header: back at the start (cancels, or steps out of an opened album),
@@ -414,6 +420,7 @@ fun AlbumPhotoPickerScreen(
         val isWorking = addState is PickerAddState.Working
         val canAdd = selected.isNotEmpty() && !isWorking
         FloatingHeader(
+            backdrop = glass,
             title = when {
                 selected.isNotEmpty() -> stringResource(R.string.album_picker_selected, selected.size)
                 inAlbum -> openScopeName

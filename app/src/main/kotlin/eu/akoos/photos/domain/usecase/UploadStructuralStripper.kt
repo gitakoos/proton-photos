@@ -37,8 +37,6 @@ import java.io.RandomAccessFile
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val UPLOAD_TAG = "UploadUseCase"
-
 /**
  * Byte-level structural strip helpers for the upload path. Splits a Motion Photo or an Ultra HDR
  * still around its appended trailer, strips the primary image's EXIF, and re-attaches the trailer

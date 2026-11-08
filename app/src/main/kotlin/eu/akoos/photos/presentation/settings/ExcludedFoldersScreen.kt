@@ -66,6 +66,8 @@ import coil.compose.AsyncImage
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.FgDim
@@ -92,6 +94,8 @@ fun ExcludedFoldersScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val colors = AppColors.current
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -100,127 +104,130 @@ fun ExcludedFoldersScreen(
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val contentTopPad = floatingHeaderContentTopPadding()
 
-        if (state.isLoading) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = contentTopPad)
-                    .padding(horizontal = 20.dp)
-                    .background(colors.cardBg, cardShape)
-                    .border(0.5.dp, colors.cardBorder, cardShape),
-            ) {
-                repeat(5) { idx ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        eu.akoos.photos.presentation.common.ShimmerBox(
-                            modifier = Modifier.size(56.dp),
-                            cornerRadius = 10.dp,
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            if (state.isLoading) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = contentTopPad)
+                        .padding(horizontal = 20.dp)
+                        .background(colors.cardBg, cardShape)
+                        .border(0.5.dp, colors.cardBorder, cardShape),
+                ) {
+                    repeat(5) { idx ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            eu.akoos.photos.presentation.common.ShimmerBox(
+                                modifier = Modifier.size(56.dp),
+                                cornerRadius = 10.dp,
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                eu.akoos.photos.presentation.common.ShimmerTextLine(widthFraction = 0.55f, height = 14.dp)
+                                Spacer(Modifier.height(6.dp))
+                                eu.akoos.photos.presentation.common.ShimmerTextLine(widthFraction = 0.3f, height = 11.dp)
+                            }
+                        }
+                        if (idx < 4) HorizontalDivider(
+                            modifier = Modifier.padding(start = 86.dp),
+                            thickness = 0.5.dp,
+                            color = colors.cardBorder,
                         )
-                        Column(modifier = Modifier.weight(1f)) {
-                            eu.akoos.photos.presentation.common.ShimmerTextLine(widthFraction = 0.55f, height = 14.dp)
-                            Spacer(Modifier.height(6.dp))
-                            eu.akoos.photos.presentation.common.ShimmerTextLine(widthFraction = 0.3f, height = 11.dp)
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = contentTopPad, bottom = navBottom),
+                ) {
+                    // ── Intro text ───────────────────────────────────────────────
+                    item {
+                        Text(
+                            stringResource(R.string.settings_excluded_folders_intro),
+                            color = FgMute,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            modifier = Modifier
+                                .padding(horizontal = 20.dp)
+                                .padding(top = 4.dp, bottom = 12.dp),
+                        )
+                    }
+
+                    // ── Counter + include/exclude-all toggle ──────────────────────
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                                .padding(bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.End,
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (state.allExcluded)
+                                        R.string.settings_excluded_folders_deselect_all
+                                    else
+                                        R.string.settings_excluded_folders_select_all
+                                ),
+                                color = Accent,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.clickable {
+                                    if (state.allExcluded) viewModel.includeAll()
+                                    else viewModel.excludeAll()
+                                },
+                            )
                         }
                     }
-                    if (idx < 4) HorizontalDivider(
-                        modifier = Modifier.padding(start = 86.dp),
-                        thickness = 0.5.dp,
-                        color = colors.cardBorder,
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = contentTopPad, bottom = navBottom),
-            ) {
-                // ── Intro text ───────────────────────────────────────────────
-                item {
-                    Text(
-                        stringResource(R.string.settings_excluded_folders_intro),
-                        color = FgMute,
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        modifier = Modifier
-                            .padding(horizontal = 20.dp)
-                            .padding(top = 4.dp, bottom = 12.dp),
-                    )
-                }
 
-                // ── Counter + include/exclude-all toggle ──────────────────────
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .padding(bottom = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.End,
-                    ) {
-                        Text(
-                            stringResource(
-                                if (state.allExcluded)
-                                    R.string.settings_excluded_folders_deselect_all
-                                else
-                                    R.string.settings_excluded_folders_select_all
-                            ),
-                            color = Accent,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clickable {
-                                if (state.allExcluded) viewModel.includeAll()
-                                else viewModel.excludeAll()
-                            },
-                        )
-                    }
-                }
-
-                // ── Folder lists: the folders that are backed up, then the ones left out ───────────
-                item {
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-                        val backedUp = state.folders.filterNot { it.isExcluded }
-                        val excluded = state.folders.filter { it.isExcluded }
-                        FolderGroup(
-                            title = stringResource(R.string.settings_excluded_folders_section_backed_up, backedUp.size),
-                            folders = backedUp,
-                            onToggle = viewModel::toggle,
-                            onMirrorToggle = viewModel::toggleMirror,
-                        )
-                        if (backedUp.isNotEmpty() && excluded.isNotEmpty()) Spacer(Modifier.height(20.dp))
-                        FolderGroup(
-                            title = stringResource(R.string.settings_excluded_folders_section_excluded, excluded.size),
-                            folders = excluded,
-                            onToggle = viewModel::toggle,
-                            onMirrorToggle = viewModel::toggleMirror,
-                        )
-                        if (state.folders.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(colors.cardBg, cardShape)
-                                    .border(0.5.dp, colors.cardBorder, cardShape)
-                                    .padding(vertical = 32.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    stringResource(R.string.settings_excluded_folders_empty),
-                                    color = FgMute, fontSize = 13.sp,
-                                )
+                    // ── Folder lists: the folders that are backed up, then the ones left out ───────────
+                    item {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                            val backedUp = state.folders.filterNot { it.isExcluded }
+                            val excluded = state.folders.filter { it.isExcluded }
+                            FolderGroup(
+                                title = stringResource(R.string.settings_excluded_folders_section_backed_up, backedUp.size),
+                                folders = backedUp,
+                                onToggle = viewModel::toggle,
+                                onMirrorToggle = viewModel::toggleMirror,
+                            )
+                            if (backedUp.isNotEmpty() && excluded.isNotEmpty()) Spacer(Modifier.height(20.dp))
+                            FolderGroup(
+                                title = stringResource(R.string.settings_excluded_folders_section_excluded, excluded.size),
+                                folders = excluded,
+                                onToggle = viewModel::toggle,
+                                onMirrorToggle = viewModel::toggleMirror,
+                            )
+                            if (state.folders.isEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(colors.cardBg, cardShape)
+                                        .border(0.5.dp, colors.cardBorder, cardShape)
+                                        .padding(vertical = 32.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        stringResource(R.string.settings_excluded_folders_empty),
+                                        color = FgMute, fontSize = 13.sp,
+                                    )
+                                }
                             }
                         }
                     }
-                }
 
-                item { Spacer(Modifier.height(32.dp)) }
+                    item { Spacer(Modifier.height(32.dp)) }
+                }
             }
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.settings_excluded_folders_title),
             onBack = onBack,
         )

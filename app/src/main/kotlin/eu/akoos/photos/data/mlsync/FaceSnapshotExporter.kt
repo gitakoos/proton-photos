@@ -27,16 +27,24 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.dao.FaceDao
 import eu.akoos.photos.data.db.dao.FaceHead
+import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity
+import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity.Companion.KIND_COVER
+import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity.Companion.KIND_MANUAL_PHOTO
+import eu.akoos.photos.data.db.entity.FaceCurationTimeEntity.Companion.KIND_NOT_PERSON
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
+import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FaceCurationLog
 import eu.akoos.photos.data.face.FaceModelAssets
+import eu.akoos.photos.data.face.PersonNameLog
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_MODEL_VERSION
+import eu.akoos.photos.widget.widgetHiddenSets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -78,6 +86,7 @@ internal data class FaceSnapshotOrigin(
     val faceModelSha256: String,
     val clusterParamsVersion: Int,
     val createdAtMillis: Long,
+    val facesWipedAtMillis: Long = 0L,
 )
 
 /** The face index changed under every one of an export's attempts, so nothing was sealed. */
@@ -92,7 +101,7 @@ class FaceIndexChangedException : IllegalStateException("the face index kept cha
  * bit, embedding, the named person it is grouped under and the name confirmed for it, plus the manual
  * photos, "not this person" marks and chosen covers of those photos, and the scan marker of every cloud
  * photo the indexer finished, a face-free one as much as any, so a restoring device never scans those
- * photos again. The header names the face pipeline and recognition model the embeddings belong to and
+ * photos again. A photo put away in the hidden area here ([hiddenPhotoKeys]) is never carried. The header names the face pipeline and recognition model the embeddings belong to and
  * the clustering parameters the people were grouped under, as stored with the index here.
  *
  * Nothing is held whole in memory: the faces are read a page at a time and streamed out, and only the
@@ -137,6 +146,7 @@ class FaceSnapshotExporter internal constructor(
             faceModelSha256 = FaceModelAssets.EMBED_MODEL.sha256,
             clusterParamsVersion = prefs[SettingsKeys.FACE_CLUSTER_PARAMS_VERSION_KEY] ?: FACE_CLUSTER_PARAMS_VERSION,
             createdAtMillis = System.currentTimeMillis(),
+            facesWipedAtMillis = prefs[SettingsKeys.SHARED_BACKUP_FACES_WIPED_AT] ?: 0L,
         )
         sealing.sealKeys(userId).use { keys ->
             val plaintext = FaceSnapshotScratch.newFile(context)
@@ -170,10 +180,15 @@ class FaceSnapshotExporter internal constructor(
         origin: FaceSnapshotOrigin,
     ): FaceSnapshotExport? {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
-        val plan = plan(account)
+        val hidden = hiddenPhotoKeys(account)
+        val plan = plan(account, hidden)
         val writer = MlSnapshotWriter(output, plan.header(origin))
         for (key in plan.keys) writer.write(MlSnapshotRecord.PhotoKey(key))
-        for (name in plan.names) writer.write(MlSnapshotRecord.Person(name))
+        for (name in plan.names) writer.write(MlSnapshotRecord.Person(name, plan.namedAt[name] ?: 0L))
+        for (change in plan.nameChanges) {
+            writer.write(MlSnapshotRecord.NameChange(change.fromName, change.toName, change.changedAt))
+        }
+        for (removal in plan.removals) writer.write(removal)
         var facesWritten = 0
         val groupedNames = HashSet<String>()
         forEachFace(account) { face ->
@@ -187,11 +202,19 @@ class FaceSnapshotExporter internal constructor(
             facesWritten++
         }
         if (facesWritten < plan.faces.size) return null
-        for (row in plan.manualPhotos) writer.write(MlSnapshotRecord.ManualPhoto(row.personName, row.photoKey))
-        for (mark in plan.notPersons) writer.write(MlSnapshotRecord.NotPerson(mark.personName, mark.photoKey, mark.faceIndex))
-        for (row in plan.covers) writer.write(MlSnapshotRecord.Cover(row.personName, row.photoKey))
+        for (row in plan.manualPhotos) {
+            writer.write(MlSnapshotRecord.ManualPhoto(row.personName, row.photoKey, plan.setAt(KIND_MANUAL_PHOTO, row.personName, row.photoKey)))
+        }
+        for (mark in plan.notPersons) {
+            writer.write(
+                MlSnapshotRecord.NotPerson(mark.personName, mark.photoKey, mark.faceIndex, plan.setAt(KIND_NOT_PERSON, mark.personName, mark.faceId)),
+            )
+        }
+        for (row in plan.covers) {
+            writer.write(MlSnapshotRecord.Cover(row.personName, row.photoKey, plan.setAt(KIND_COVER, row.personName, "")))
+        }
         var markersWritten = 0
-        forEachMarker(account) { photoKey, hiRes ->
+        forEachMarker(account, hidden) { photoKey, hiRes ->
             if (markersWritten < plan.markers.size && photoKey == plan.markers[markersWritten]) {
                 writer.write(MlSnapshotRecord.ScanMarker(photoKey, hiRes))
                 markersWritten++
@@ -216,16 +239,16 @@ class FaceSnapshotExporter internal constructor(
      * stream. The second pass in [writePlaintext] applies the very same tests to the whole rows, and meets
      * the planned faces and markers in the same key order.
      */
-    private suspend fun plan(account: String): ExportPlan {
+    private suspend fun plan(account: String, hidden: Set<String>): ExportPlan {
         val nameByPersonId = namedPeople(account)
         val manualPhotos = appDatabase.personManualPhotoDao().allForUser(account)
-            .filter { snapshotName(it.personName) != null && carriesPhotoKey(it.photoKey) }
+            .filter { snapshotName(it.personName) != null && carriesPhotoKey(it.photoKey) && it.photoKey !in hidden }
         val covers = appDatabase.personCoverDao().allForUser(account)
-            .filter { snapshotName(it.personName) != null && carriesPhotoKey(it.photoKey) }
+            .filter { snapshotName(it.personName) != null && carriesPhotoKey(it.photoKey) && it.photoKey !in hidden }
         val marks = appDatabase.notPersonDao().allForUser(account).mapNotNull { row ->
             val name = snapshotName(row.personName) ?: return@mapNotNull null
             val (photoKey, faceIndex) = faceIdParts(row.faceId) ?: return@mapNotNull null
-            if (carriesPhotoKey(photoKey)) ExportedMark(name, photoKey, faceIndex, row.faceId) else null
+            if (carriesPhotoKey(photoKey) && photoKey !in hidden) ExportedMark(name, photoKey, faceIndex, row.faceId) else null
         }
         val markedFaceIds = marks.mapTo(HashSet()) { it.faceId }
 
@@ -236,7 +259,7 @@ class FaceSnapshotExporter internal constructor(
         val faces = PlannedFaces()
         val exportedMarkedFaces = HashSet<String>()
         forEachFaceHead(account) { head ->
-            if (!exportsFace(head.id, head.photoKey, head.embeddingBytes)) return@forEachFaceHead
+            if (head.photoKey in hidden || !exportsFace(head.id, head.photoKey, head.embeddingBytes)) return@forEachFaceHead
             val faceIndex = faceIndexIn(head.id, head.photoKey) ?: return@forEachFaceHead
             faces.add(addKey(head.photoKey), faceIndex)
             groupedName(head.personId, head.rejected, nameByPersonId)?.let(names::add)
@@ -250,17 +273,47 @@ class FaceSnapshotExporter internal constructor(
         for (mark in notPersons) { addKey(mark.photoKey); names += mark.personName }
         for (row in covers) { addKey(row.photoKey); names += row.personName }
         val markers = ArrayList<String>()
-        forEachMarker(account) { photoKey, _ -> markers += addKey(photoKey) }
+        forEachMarker(account, hidden) { photoKey, _ -> markers += addKey(photoKey) }
+        val nameDao = appDatabase.personNameDao()
+        val namedAt = nameDao.statesForUser(account).associate { it.name to it.namedAt }
+        val nameChanges = nameDao.recentChanges(account, PersonNameLog.MAX_CHANGES)
+            .filter { snapshotName(it.fromName) != null && (it.toName.isEmpty() || snapshotName(it.toName) != null) }
+        val curation = appDatabase.faceCurationTimeDao().allForUser(account).filter { snapshotName(it.personName) != null }
+        val setAt = curation.filterNot { it.removed }.associate { CurationRef(it.kind, it.personName, it.ref) to it.changedAt }
+        val removals = curation.filter { it.removed }
+            .sortedBy { it.changedAt }
+            .takeLast(FaceCurationLog.MAX_REMOVALS)
+            .mapNotNull { row -> removalRecord(row)?.takeIf { it.photoKey !in hidden } }
         return ExportPlan(
+            hidden = hidden,
             nameByPersonId = nameByPersonId,
             keys = keys.keys,
             nameSet = names,
+            namedAt = namedAt,
+            nameChanges = nameChanges,
+            curationSetAt = setAt,
+            removals = removals,
             faces = faces,
             manualPhotos = manualPhotos,
             notPersons = notPersons,
             covers = covers,
             markers = markers,
         )
+    }
+
+    /**
+     * The cloud photos put away on this device, which a snapshot never carries: those hidden one by one, the
+     * members of a hidden album, and the Drive copies of photos moved into the vault, the sets every listing
+     * leaves out.
+     */
+    private suspend fun hiddenPhotoKeys(account: String): Set<String> {
+        val prefs = context.settingsDataStore.data.first()
+        val albumMembers = HashSet<String>()
+        for (albumLinkId in prefs[SettingsKeys.HIDDEN_ALBUM_IDS].orEmpty()) {
+            albumMembers += appDatabase.albumPhotoMembershipDao().getPhotoLinkIds(albumLinkId)
+        }
+        val vaultedRowCloudIds = appDatabase.syncStateDao().getVaulted(account).mapNotNull { it.cloudFileId }
+        return widgetHiddenSets(prefs, albumMembers, vaultedRowCloudIds).cloudIds
     }
 
     /** Every named person's id with the name a snapshot carries for them, what a face's person resolves to. */
@@ -292,13 +345,13 @@ class FaceSnapshotExporter internal constructor(
         }
     }
 
-    /** Every scan marker the snapshot carries, in key order: those of the cloud photos. */
-    private suspend inline fun forEachMarker(account: String, action: (String, Boolean) -> Unit) {
+    /** Every scan marker the snapshot carries, in key order: those of the cloud photos not [hidden]. */
+    private suspend inline fun forEachMarker(account: String, hidden: Set<String>, action: (String, Boolean) -> Unit) {
         var after = ""
         while (true) {
             val page = appDatabase.faceScanDao().markersAfter(account, after, HEAD_PAGE)
             for (marker in page) {
-                if (carriesPhotoKey(marker.photoKey)) action(marker.photoKey, marker.hiResScanned)
+                if (carriesPhotoKey(marker.photoKey) && marker.photoKey !in hidden) action(marker.photoKey, marker.hiResScanned)
             }
             if (page.size < HEAD_PAGE) return
             after = page.last().photoKey
@@ -306,6 +359,8 @@ class FaceSnapshotExporter internal constructor(
     }
 
     private class ExportedMark(val personName: String, val photoKey: String, val faceIndex: Int, val faceId: String)
+
+    private data class CurationRef(val kind: Int, val name: String, val ref: String)
 
     /**
      * The faces a plan picked, in the order the face walk meets them, each as its photo key (the key table's
@@ -335,9 +390,14 @@ class FaceSnapshotExporter internal constructor(
     }
 
     private class ExportPlan(
+        private val hidden: Set<String>,
         val nameByPersonId: Map<Long, String>,
         val keys: Collection<String>,
         private val nameSet: Set<String>,
+        val namedAt: Map<String, Long>,
+        val nameChanges: List<PersonNameChangeEntity>,
+        private val curationSetAt: Map<CurationRef, Long>,
+        val removals: List<MlSnapshotRecord.Removal>,
         val faces: PlannedFaces,
         val manualPhotos: List<PersonManualPhotoEntity>,
         val notPersons: List<ExportedMark>,
@@ -361,11 +421,17 @@ class FaceSnapshotExporter internal constructor(
             notPersonCount = notPersons.size,
             coverCount = covers.size,
             scanMarkerCount = markers.size,
+            nameChangeCount = nameChanges.size,
+            removalCount = removals.size,
+            facesWipedAtMillis = origin.facesWipedAtMillis,
         )
+
+        /** When the piece [ref] of [name]'s curation of [kind] was set by hand, 0 when unknown. */
+        fun setAt(kind: Int, name: String, ref: String): Long = curationSetAt[CurationRef(kind, name, ref)] ?: 0L
 
         /** [face] as its snapshot record, or null for a face the plan left out. */
         fun faceRecord(face: FaceEntity): MlSnapshotRecord.Face? {
-            if (!exportsFace(face.id, face.photoKey, face.embedding.size)) return null
+            if (face.photoKey in hidden || !exportsFace(face.id, face.photoKey, face.embedding.size)) return null
             return MlSnapshotRecord.Face(
                 photoKey = face.photoKey,
                 faceIndex = faceIndexIn(face.id, face.photoKey) ?: return null,
@@ -393,6 +459,18 @@ class FaceSnapshotExporter internal constructor(
          *  form, and an embedding of this pipeline's width. */
         fun exportsFace(id: String, photoKey: String, embeddingBytes: Int): Boolean =
             embeddingBytes == FACE_EMBEDDING_BYTES && carriesPhotoKey(photoKey) && faceIndexIn(id, photoKey) != null
+
+        /** A kept removal as its snapshot record, or null for one about a photo the snapshot never carries. */
+        fun removalRecord(row: FaceCurationTimeEntity): MlSnapshotRecord.Removal? = when (row.kind) {
+            KIND_MANUAL_PHOTO -> if (carriesPhotoKey(row.ref)) {
+                MlSnapshotRecord.Removal(MlSnapshotFormat.REMOVAL_MANUAL_PHOTO, row.personName, row.ref, 0, row.changedAt)
+            } else null
+            KIND_NOT_PERSON -> faceIdParts(row.ref)?.takeIf { carriesPhotoKey(it.first) }?.let { (photoKey, faceIndex) ->
+                MlSnapshotRecord.Removal(MlSnapshotFormat.REMOVAL_NOT_PERSON, row.personName, photoKey, faceIndex, row.changedAt)
+            }
+            KIND_COVER -> MlSnapshotRecord.Removal(MlSnapshotFormat.REMOVAL_COVER, row.personName, "", 0, row.changedAt)
+            else -> null
+        }
 
         /** The named person a face is grouped under; a removed face belongs to no one. */
         fun groupedName(personId: Long?, rejected: Boolean, nameByPersonId: Map<Long, String>): String? =

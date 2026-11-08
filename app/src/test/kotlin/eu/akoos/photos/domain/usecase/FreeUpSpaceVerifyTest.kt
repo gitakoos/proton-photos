@@ -92,7 +92,7 @@ class FreeUpSpaceVerifyTest {
     @Test
     fun `a candidate whose link is active is kept`() = runTest {
         val row = candidate("cloud-1")
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
             mapOf("cloud-1" to linkAt("cloud-1", state = 1))
 
         val verified = useCase.verifyActiveBackups(userId, listOf(row))
@@ -103,7 +103,7 @@ class FreeUpSpaceVerifyTest {
     @Test
     fun `a candidate whose link is trashed is dropped`() = runTest {
         // State 2 is a trashed link: present on the server but not a copy the sweep may act on.
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns
             mapOf("cloud-1" to linkAt("cloud-1", state = 2))
 
         val verified = useCase.verifyActiveBackups(userId, listOf(candidate("cloud-1")))
@@ -114,7 +114,7 @@ class FreeUpSpaceVerifyTest {
     @Test
     fun `a candidate absent from the answer is dropped`() = runTest {
         // A link the server omits (404 / gone) never appears in the map, so it stays on the device.
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns emptyMap()
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns emptyMap()
 
         val verified = useCase.verifyActiveBackups(userId, listOf(candidate("cloud-1")))
 
@@ -127,13 +127,13 @@ class FreeUpSpaceVerifyTest {
 
         assertTrue("a row with no cloud link cannot be verified, so it is dropped", verified.isEmpty())
         // A null-link-only set short-circuits before any network call.
-        coVerify(exactly = 0) { linkDetailHelpers.batchFetchLinkDetails(any(), any(), any()) }
+        coVerify(exactly = 0) { linkDetailHelpers.batchFetchLinkDetails(any(), any(), any(), any()) }
     }
 
     @Test
     fun `only the active links survive a mixed batch`() = runTest {
         val rows = listOf(candidate("a"), candidate("b"), candidate("c"), candidate(null))
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } returns mapOf(
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } returns mapOf(
             "a" to linkAt("a", state = 1),   // active  -> kept
             "b" to linkAt("b", state = 2),   // trashed -> dropped
             // "c" absent                     // gone    -> dropped
@@ -150,7 +150,7 @@ class FreeUpSpaceVerifyTest {
         // batchFetchLinkDetails re-throws a 429 / 5xx / network error rather than returning a short
         // map; verifyActiveBackups must not swallow it, or the caller would delete against an
         // unconfirmed batch.
-        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any()) } throws
+        coEvery { linkDetailHelpers.batchFetchLinkDetails(userId, volumeId, any(), strict = true) } throws
             IOException("simulated 429/5xx transient error")
 
         val propagated: Throwable? = try {

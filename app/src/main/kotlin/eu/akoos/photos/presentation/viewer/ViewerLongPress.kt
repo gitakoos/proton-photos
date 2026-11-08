@@ -28,8 +28,8 @@ enum class ViewerLongPressAction { ReadText, OpenMenu, None }
 /**
  * The long press on the photo. With [opensMenu] it opens the top-right menu, except in trash mode,
  * which has no menu and keeps the text read. A press that lands on the bars around the photo
- * ([onControls]: a button, the seek bar, the filmstrip) never opens the menu, since that press belongs to
- * the control. Either way it does nothing while recognised text is up (a press then belongs to the text
+ * ([onControls]: a button, the seek bar, the filmstrip) does nothing here, since that press belongs to
+ * the control. It also does nothing while recognised text is up (a press then belongs to the text
  * selection) or while the details sheet is open.
  */
 fun viewerLongPressAction(
@@ -40,8 +40,8 @@ fun viewerLongPressAction(
     metadataShown: Boolean,
     onControls: Boolean = false,
 ): ViewerLongPressAction = when {
-    textShowing || metadataShown -> ViewerLongPressAction.None
-    opensMenu && !trashMode -> if (onControls) ViewerLongPressAction.None else ViewerLongPressAction.OpenMenu
+    textShowing || metadataShown || onControls -> ViewerLongPressAction.None
+    opensMenu && !trashMode -> ViewerLongPressAction.OpenMenu
     copyTextEnabled -> ViewerLongPressAction.ReadText
     else -> ViewerLongPressAction.None
 }

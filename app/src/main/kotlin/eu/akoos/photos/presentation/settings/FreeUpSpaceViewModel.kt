@@ -76,6 +76,8 @@ class FreeUpSpaceViewModel @Inject constructor(
         /** Terminal message for the finished sweep, shown on this screen rather than the one the
          *  button used to live on. */
         val message: String? = null,
+        /** Whether [message] reports a failure rather than what the sweep freed. */
+        val messageIsError: Boolean = false,
         /** Android 11+ batch consent for files this app does not own. */
         val pendingIntent: PendingIntent? = null,
         /**
@@ -97,6 +99,13 @@ class FreeUpSpaceViewModel @Inject constructor(
 
     /** URIs handed to the system consent dialog, settled once it returns. */
     private var pendingLocalUris: List<String> = emptyList()
+
+    /** Confirmed copies waiting for a dialog of their own after the current one, at most one
+     *  request's worth being asked for at a time. */
+    private var pendingRemaining: List<SyncState> = emptyList()
+
+    /** What the current run freed so far, across its dialogs, for the closing message. */
+    private var freedThisRun = 0
 
     init { load() }
 
@@ -128,47 +137,25 @@ class FreeUpSpaceViewModel @Inject constructor(
                 it.copy(running = true, verifying = true, done = 0, total = it.candidates.size, message = null)
             }
             try {
-                // Check against Drive before deleting anything. This reclaims every backed-up photo,
+                // Checked against Drive before anything is deleted, a slice of 50 at a time, each
+                // slice deleted right after its own check. This reclaims every backed-up photo,
                 // including copies the user downloaded back, so acting on a sync_state that nothing
-                // has verified lately could take a last copy. The check confirms only the on-device
-                // candidates' cloud links are active right now (one batched call per 50), which is
-                // bounded by the on-device count. The refresh-plus-reconcile pass this replaced walked
-                // the entire Drive volume first, so on a large library it ran past the point the sweep
-                // could start and nothing was reclaimed.
+                // has verified lately could take a last copy, and so could an answer minutes old. A
+                // copy whose Drive link is gone or trashed is left on the device.
                 //
-                // A thrown transient error (a rate-limited verification batch) is deliberately NOT
-                // swallowed: sweeping against links that could not be confirmed is the situation this
-                // exists to prevent, so it falls through to the catch and the sweep does not run.
+                // A thrown error (a rate-limited verification batch) is deliberately NOT swallowed:
+                // deleting against links that could not be confirmed is the situation this exists to
+                // prevent, so it falls through to the catch and the rest of the sweep does not run.
                 val candidates = freeUpSpace.candidates(userId, Long.MAX_VALUE, protectDownloaded = false)
-                val verified = freeUpSpace.verifyActiveBackups(userId, candidates)
-                // Settle the grid onto the confirmed set before a single file is deleted: only links
-                // that came back active survive here, so a candidate whose cloud copy is gone or
-                // trashed is dropped rather than reclaimed.
-                _uiState.update {
-                    it.copy(
-                        verifying = false,
-                        candidates = verified,
-                        reclaimableBytes = totalBytes(verified),
-                        done = 0,
-                        total = verified.size,
-                    )
-                }
-                val result = freeUpSpace.reclaimCandidates(
-                    candidates = verified,
+                freedThisRun = 0
+                val result = freeUpSpace.verifyAndReclaim(
+                    userId = userId,
+                    candidates = candidates,
                     onProgress = { done, total ->
-                        _uiState.update { it.copy(done = done, total = total) }
+                        _uiState.update { it.copy(verifying = done == 0, done = done, total = total) }
                     },
                 )
-                when (result) {
-                    is FreeUpSpaceUseCase.FreeUpResult.Done -> {
-                        _uiState.update { it.copy(running = false, verifying = false, message = freedMessage(result.freed)) }
-                        load()
-                    }
-                    is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
-                        pendingLocalUris = result.localUris
-                        _uiState.update { it.copy(running = false, verifying = false, pendingIntent = result.pendingIntent) }
-                    }
-                }
+                handle(result)
             } catch (e: Exception) {
                 // Cancellation is the ordinary way this ends: the user left the screen, which stops
                 // the sweep by design. Everything already reclaimed stays reclaimed.
@@ -177,26 +164,65 @@ class FreeUpSpaceViewModel @Inject constructor(
                     it.copy(
                         running = false,
                         verifying = false,
-                        message = context.getString(R.string.settings_free_up_error, e.message ?: ""),
+                        message = context.getString(R.string.settings_free_up_error, e.message ?: ""), messageIsError = true,
                     )
                 }
             }
         }
     }
 
-    /** The system consent dialog returned OK: it did the deleting, so only the rows move here. */
+    private suspend fun handle(result: FreeUpSpaceUseCase.FreeUpResult) {
+        when (result) {
+            is FreeUpSpaceUseCase.FreeUpResult.Done -> {
+                freedThisRun += result.freed
+                _uiState.update {
+                    it.copy(
+                        running = false, verifying = false, pendingIntent = null,
+                        message = doneMessage(result.skipped), messageIsError = freeUpLeftCopies(result.skipped),
+                    )
+                }
+                load()
+            }
+            is FreeUpSpaceUseCase.FreeUpResult.NeedsPermission -> {
+                pendingLocalUris = result.localUris
+                pendingRemaining = result.remaining
+                _uiState.update { it.copy(running = false, verifying = false, pendingIntent = result.pendingIntent) }
+            }
+        }
+    }
+
+    /**
+     * The system consent dialog returned OK: it did the deleting, so only the rows move here. More
+     * copies than one dialog may carry are asked for in the next one, checked against Drive again.
+     */
     fun onPermissionGranted() {
         viewModelScope.launch {
             val uris = pendingLocalUris
+            val next = pendingRemaining
             pendingLocalUris = emptyList()
-            uris.forEach { syncStateRepo.updateStatusAndDeleteLocal(it, SyncStatus.CLOUD_ONLY) }
-            _uiState.update { it.copy(pendingIntent = null, message = freedMessage(uris.size)) }
-            load()
+            pendingRemaining = emptyList()
+            syncStateRepo.updateStatuses(uris, SyncStatus.CLOUD_ONLY)
+            freedThisRun += uris.size
+            _uiState.update { it.copy(pendingIntent = null) }
+            val userId = accountManager.getPrimaryUserId().first()
+            if (next.isEmpty() || userId == null) {
+                _uiState.update { it.copy(message = doneMessage(0), messageIsError = false) }
+                load()
+                return@launch
+            }
+            try {
+                handle(freeUpSpace.consentFor(userId, next))
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _uiState.update { it.copy(message = context.getString(R.string.settings_free_up_error, e.message ?: ""), messageIsError = true) }
+                load()
+            }
         }
     }
 
     fun onPermissionDenied() {
         pendingLocalUris = emptyList()
+        pendingRemaining = emptyList()
         _uiState.update { it.copy(pendingIntent = null) }
         load()
     }
@@ -217,6 +243,11 @@ class FreeUpSpaceViewModel @Inject constructor(
         }
     }
 
+    private fun doneMessage(skipped: Int): String {
+        val freed = freedMessage(freedThisRun)
+        return if (skipped > 0) freed + " " + context.getString(R.string.free_up_skipped_pre_r) else freed
+    }
+
     private fun freedMessage(freed: Int): String =
         if (freed > 0) {
             context.resources.getQuantityString(R.plurals.settings_freed_photos, freed, freed)
@@ -224,3 +255,7 @@ class FreeUpSpaceViewModel @Inject constructor(
             context.getString(R.string.settings_free_up_none)
         }
 }
+
+/** A finished Free up shows a warning rather than the check when some device copies stayed: [skipped] could not
+ *  be removed here. Pure. */
+internal fun freeUpLeftCopies(skipped: Int): Boolean = skipped > 0

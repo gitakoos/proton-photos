@@ -39,16 +39,26 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Panorama
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import eu.akoos.photos.presentation.common.AppModalSheet
+import eu.akoos.photos.presentation.common.GlassBackdrop
+import eu.akoos.photos.presentation.common.LocalGlassBackdrop
+import eu.akoos.photos.presentation.common.glassPanel
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.pillSurface
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -98,7 +108,6 @@ import androidx.compose.material.icons.filled.MotionPhotosOn
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -392,10 +401,12 @@ fun PhotoViewerScreen(
     /** Opens the date + place metadata editor for the current item. Suppressed for a shared-with-me
      *  album (the sheet hides the affordance), mirroring the rename gate. */
     onEditMetadata: (GalleryItem) -> Unit = {},
-    /** Opens the Labels settings page, from the title of the details panel's Labels section. */
-    onOpenLabelsSettings: () -> Unit = {},
     /** Opens the page of the person the face index grouped, from the "people in this photo" bar. */
     onOpenPerson: (Long) -> Unit = {},
+    /** Opened from a named person's page: make the photo on screen that person's cover, or take it off
+     *  them. Null anywhere else, which leaves both out of the menu. */
+    onSetPersonCover: ((GalleryItem) -> Unit)? = null,
+    onRemoveFromPerson: ((GalleryItem) -> Unit)? = null,
     /** Opens the full map centred on the photo's place, from the map box in the details panel. */
     onOpenMapAt: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
     /** True when the viewer was opened from the Trash screen: adds a Restore / Delete-forever bar to
@@ -512,6 +523,7 @@ fun PhotoViewerScreen(
     // The nameless face or group a face tag or a People pill was tapped for, or null while the naming
     // sheet is closed.
     var nameOrMergeSubject by remember { mutableStateOf<NameOrMergeSubject?>(null) }
+    var notPersonFace by remember { mutableStateOf<PhotoViewerViewModel.ViewerPerson?>(null) }
     // The settled photo's decoded pixel size, shared by the tags and the long-press face hit-test.
     var settledImageSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     // Once any settled photo decodes to HDR, hold the window in HDR colour mode for the rest of the
@@ -636,7 +648,7 @@ fun PhotoViewerScreen(
             launch {
                 viewModel.shareIntent.collect { intent ->
                     appLock.runWhenOpen {
-                        shareContext.startActivity(Intent.createChooser(intent, shareChooserTitle))
+                        shareContext.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(shareContext, intent, shareChooserTitle))
                     }
                 }
             }
@@ -1121,11 +1133,19 @@ fun PhotoViewerScreen(
     }
 
     var showMetadata by remember { mutableStateOf(false) }
+    var metadataPages by remember { mutableStateOf(listOf(DetailsPage.Main)) }
     // Every trash action confirms in-app, since a device delete under MANAGE_MEDIA runs with no OS
     // dialog. Null hides the confirm; "restore" or "delete" name the pending action.
     var trashConfirmAction by remember { mutableStateOf<String?>(null) }
-    var showStripPicker by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var pendingPersonCover by remember { mutableStateOf<GalleryItem?>(null) }
+    // Compress on Drive for the photo on screen, when it lives only on Drive and is the user's own.
+    val compressItem = items.getOrNull(pagerState.settledPage)
+        ?.takeIf { !isReadOnlyAlbum && !trashMode && !secure && (it as? GalleryItem.CloudOnly)?.cloud?.linkId !in hiddenCloudLinkIds }
+    val compressAction = eu.akoos.photos.presentation.common.rememberCloudCompressAction(
+        listOfNotNull(compressItem), isSignedIn,
+    )
+    var pendingPersonRemove by remember { mutableStateOf<GalleryItem?>(null) }
     val renameState by viewModel.renameState.collectAsStateWithLifecycle()
     val metadataSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -1292,6 +1312,19 @@ fun PhotoViewerScreen(
     val rootMetaShown  by rememberUpdatedState(showMetadata)
     val rootScale      by rememberUpdatedState(scale)
     val rootSlideshow  by rememberUpdatedState(isPlaying)
+    val rootPlayer     by rememberUpdatedState(currentPlayer)
+    val rootIsVideo    by rememberUpdatedState(
+        when (val item = items.getOrNull(pagerState.settledPage)) {
+            is GalleryItem.LocalOnly -> item.local.mimeType.startsWith("video/")
+            is GalleryItem.Synced    -> item.local.mimeType.startsWith("video/")
+            is GalleryItem.CloudOnly -> item.cloud.mimeType.startsWith("video/")
+            null -> false
+        },
+    )
+    // The label of a double tap that seeked a video, shown on the side it went to.
+    var seekFlash by remember { mutableStateOf<VideoSeekFlash?>(null) }
+    // The speed a held side of a video plays it at, null while nothing is held.
+    var holdSpeed by remember { mutableStateOf<Float?>(null) }
     // The top-right menu's open state, held here so a long press opens the same menu the button does. The
     // bars' bounds tell a press on a control from one on the photo, and are zero while a bar is not shown.
     var menuExpanded by remember { mutableStateOf(false) }
@@ -1301,6 +1334,8 @@ fun PhotoViewerScreen(
     val rootTopBar by rememberUpdatedState(topBarBounds)
     val rootBottomBar by rememberUpdatedState(bottomBarBounds)
     val rootOrigin by rememberUpdatedState(viewerOrigin)
+    // The photo as the viewer's pills frost it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(Bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1374,8 +1409,58 @@ fun PhotoViewerScreen(
                             )
                         }
                     }
+                    // On a video the outer thirds seek back or forward instead; the middle still zooms.
+                    val doubleTapAt = { p: Offset ->
+                        val player = rootPlayer?.takeIf { rootIsVideo }
+                        val tap = if (player == null) VideoDoubleTap.Zoom else videoDoubleTap(p.x, containerSize.width.toFloat(), rootScale)
+                        when (tap) {
+                            VideoDoubleTap.Zoom -> zoomToward(p)
+                            VideoDoubleTap.Back, VideoDoubleTap.Forward -> {
+                                val forward = tap == VideoDoubleTap.Forward
+                                val delta = if (forward) VIDEO_SEEK_STEP_MS else -VIDEO_SEEK_STEP_MS
+                                runCatching { player!!.seekTo(videoSeekTarget(player.currentPosition, delta, player.duration)) }
+                                seekFlash = nextVideoSeekFlash(seekFlash, forward)
+                            }
+                        }
+                    }
                     when (val first = awaitViewerTapOutcome(down.id, down.position, slop, longPressMs)) {
-                        ViewerTapOutcome.HeldLong -> longPress(down.position)
+                        ViewerTapOutcome.HeldLong -> {
+                            val player = rootPlayer?.takeIf { rootIsVideo }
+                            // A press on the controls (the video's scrubber, the bars) belongs to them, as it does
+                            // for the long press: holding there never speeds the video up.
+                            val onControls = rootTopBar.translate(-rootOrigin).contains(down.position) ||
+                                rootBottomBar.translate(-rootOrigin).contains(down.position)
+                            if (player != null && !onControls &&
+                                videoHoldPlaysFaster(down.position.x, containerSize.width.toFloat(), rootScale)
+                            ) {
+                                // A held side plays the video faster (as fast as this phone decodes it smoothly)
+                                // until the finger lifts, then it goes
+                                // back to its own speed, and to a pause if it was paused. The events are
+                                // taken first so the pager does not turn the page under a moving finger.
+                                val wasPlaying = player.isPlaying
+                                val speed = player.playbackParameters.speed
+                                val fast = runCatching { videoHoldSpeedOf(player) }.getOrDefault(VIDEO_HOLD_SPEEDS.first())
+                                runCatching { player.setPlaybackSpeed(fast); player.play() }
+                                textHaptics.performHapticFeedback(
+                                    androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress,
+                                )
+                                holdSpeed = fast
+                                try {
+                                    do {
+                                        val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                                        event.changes.forEach { it.consume() }
+                                    } while (event.changes.any { it.pressed })
+                                } finally {
+                                    holdSpeed = null
+                                    runCatching {
+                                        player.setPlaybackSpeed(speed)
+                                        if (!wasPlaying) player.pause()
+                                    }
+                                }
+                            } else {
+                                longPress(down.position)
+                            }
+                        }
                         ViewerTapOutcome.Cancelled -> Unit
                         // A tap whose up a control consumed (a chrome button) belongs to that control,
                         // so tapping the top or bottom bar uses the button without also hiding the bar.
@@ -1386,7 +1471,7 @@ fun PhotoViewerScreen(
                             if (second == null) {
                                 toggleChrome()
                             } else when (awaitViewerTapOutcome(second.id, second.position, slop, longPressMs)) {
-                                is ViewerTapOutcome.Lifted -> zoomToward(second.position)
+                                is ViewerTapOutcome.Lifted -> doubleTapAt(second.position)
                                 ViewerTapOutcome.HeldLong -> { toggleChrome(); longPress(second.position) }
                                 ViewerTapOutcome.Cancelled -> toggleChrome()
                             }
@@ -1450,7 +1535,7 @@ fun PhotoViewerScreen(
             // Compose and load one page either side, so swiping onto a neighbour finds its thumbnail
             // already decoded instead of a blank Bg0 frame while it loads.
             beyondViewportPageCount = 1,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().glassSource(glass),
             // Key each page slot to its item's stable identity so a live reconcile rebinds per-page
             // state (video flags, painted-thumb gate) to the photo rather than the position. When a
             // LocalOnly is swapped for the Synced it became, its stable id changes (uri → linkId)
@@ -1808,6 +1893,7 @@ fun PhotoViewerScreen(
                                     onOpenPerson(person.personId)
                                 }
                             },
+                            onFaceLongClick = { person -> notPersonFace = person },
                         )
                     }
 
@@ -2027,8 +2113,7 @@ fun PhotoViewerScreen(
                 Row(
                     modifier = Modifier
                         .height(48.dp)
-                        .background(PillBgOpaque, infoPillShape)
-                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2101,8 +2186,7 @@ fun PhotoViewerScreen(
             Row(
                 modifier = Modifier
                     .height(40.dp)
-                    .background(PillBgOpaque, infoPillShape)
-                    .border(0.5.dp, PillBorder, infoPillShape)
+                    .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                     .clickable { showMetadata = true }
                     .padding(horizontal = 16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -2121,12 +2205,15 @@ fun PhotoViewerScreen(
                     effectiveSynced -> Icon(
                         Icons.Default.Cloud,
                         contentDescription = stringResource(R.string.cd_status_backed_up_device),
-                        // Green, as in the grid, so a photo on Drive and on the device reads differently from one on
-                        // Drive only (white); the green of the grid is too pale on the light theme's pill.
-                        tint = if (eu.akoos.photos.presentation.theme.AppColors.current.isLight) {
-                            androidx.compose.ui.graphics.Color(0xFF1E9E48)
-                        } else {
-                            cloudBadgeTint(CloudBadgeSurface.DarkChip)
+                        // Green (or the accent, when the cloud is set to take it), as in the grid, so a photo on Drive
+                        // and on the device reads differently from one on Drive only (white); the grid's green is too
+                        // pale on the light theme's pill, so the pill takes a deeper one.
+                        tint = when {
+                            !eu.akoos.photos.presentation.theme.AppColors.current.isLight ->
+                                cloudBadgeTint(CloudBadgeSurface.DarkChip)
+                            eu.akoos.photos.presentation.theme.LocalTintCloudWithAccent.current ->
+                                cloudBadgeTint(CloudBadgeSurface.Pill)
+                            else -> androidx.compose.ui.graphics.Color(0xFF1E9E48)
                         },
                         modifier = Modifier.size(16.dp),
                     )
@@ -2152,7 +2239,11 @@ fun PhotoViewerScreen(
             }
         }
 
+        VideoSeekFlashLabel(flash = seekFlash, onDone = { seekFlash = null })
+        VideoHoldSpeedLabel(speed = holdSpeed)
+
         // ── Top bar (fades with overlays) ─────────────────────────────────────
+        CompositionLocalProvider(LocalGlassBackdrop provides glass) {
         AnimatedVisibility(
             visible = showChrome,
             enter = fadeIn(),
@@ -2208,12 +2299,24 @@ fun PhotoViewerScreen(
                                     tint = FgPrimary, modifier = Modifier.size(20.dp))
                             }
                         }
+                        // The menu opens in a window of its own, over a photo that stands still while it is open,
+                        // so its glass frosts one picture of the photo taken as it opens.
+                        val liveGlass = LocalGlassBackdrop.current
+                        var menuGlass by remember { mutableStateOf<GlassBackdrop?>(null) }
+                        LaunchedEffect(menuExpanded, liveGlass) {
+                            menuGlass = if (menuExpanded) liveGlass?.freeze() else null
+                        }
+                        val menuShape = RoundedCornerShape(18.dp)
                         androidx.compose.material3.DropdownMenu(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false },
-                            shape = RoundedCornerShape(18.dp),
-                            containerColor = appColors.cardBg,
-                            border = androidx.compose.foundation.BorderStroke(0.5.dp, appColors.pillBorder),
+                            shape = menuShape,
+                            containerColor = if (menuGlass != null) Color.Transparent else appColors.cardBg,
+                            border = androidx.compose.foundation.BorderStroke(
+                                0.5.dp,
+                                if (menuGlass != null) Color.White.copy(alpha = 0.10f) else appColors.pillBorder,
+                            ),
+                            modifier = Modifier.glassPanel(menuGlass, appColors.cardBg, menuShape),
                         ) {
                             // Menu order: the favourite and edit listed turned sideways, then the people and
                             // metadata cluster, then the album and storage actions, then playback, and hide
@@ -2258,7 +2361,18 @@ fun PhotoViewerScreen(
                             // People in this photo: detect the faces on this photo (if not already) and
                             // pin their name tags, or take them down. The reliable path when a long
                             // press is awkward, and the only one on a photo not yet scanned.
-                            if (aiFeaturesEnabled && faceEnabled && !isReadOnlyAlbum) {
+                            if (viewerOffersPeopleInPhoto(
+                                    faceFeaturesOn = aiFeaturesEnabled && faceEnabled,
+                                    readOnlyAlbum = isReadOnlyAlbum,
+                                    secure = secure,
+                                    vaulted = isVaultedItem,
+                                    hidden = isHidden || when (val s = settledItem) {
+                                        is GalleryItem.CloudOnly -> s.cloud.linkId in hiddenCloudLinkIds
+                                        is GalleryItem.Synced -> s.cloud.linkId in hiddenCloudLinkIds
+                                        else -> false
+                                    },
+                                )
+                            ) {
                                 androidx.compose.material3.DropdownMenuItem(
                                     text = { Text(stringResource(R.string.viewer_people_in_photo),
                                         color = FgPrimary) },
@@ -2305,6 +2419,32 @@ fun PhotoViewerScreen(
                                         addLabelsAction.onClick()
                                     },
                                 )
+                            }
+                            // From a person's page the photo can be made their cover or taken off them right
+                            // here, the same two actions (and confirms) the page's own selection offers.
+                            if (settledItem != null && !trashMode && !secure) {
+                                onSetPersonCover?.let { setCover ->
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.person_set_cover), color = FgPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.AccountCircle, null,
+                                            tint = Accent, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            pendingPersonCover = settledItem
+                                        },
+                                    )
+                                }
+                                onRemoveFromPerson?.let {
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(stringResource(R.string.person_remove_from), color = FgPrimary) },
+                                        leadingIcon = { Icon(Icons.Default.PersonRemove, null,
+                                            tint = Accent, modifier = Modifier.size(20.dp)) },
+                                        onClick = {
+                                            menuExpanded = false
+                                            pendingPersonRemove = settledItem
+                                        },
+                                    )
+                                }
                             }
                             // Recognize text runs the read the long press starts, so it is in reach however the
                             // long press is set. Offered for an image shown as itself, not a panorama, an inline
@@ -2357,7 +2497,10 @@ fun PhotoViewerScreen(
                                         tint = Accent, modifier = Modifier.size(20.dp)) },
                                     onClick = {
                                         menuExpanded = false
-                                        showStripPicker = true
+                                        // The details sheet's own page: what this file holds, each group
+                                        // picked on its own, rather than a fixed list of checkboxes.
+                                        metadataPages = listOf(DetailsPage.Main, DetailsPage.Private)
+                                        showMetadata = true
                                     },
                                 )
                             }
@@ -2417,11 +2560,11 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
-                            // Move to folder, the logged-out counterpart of Add to album: with no account
-                            // there is no Drive album to add to, so a device photo is relocated into another
-                            // DCIM folder instead. Q+ only (the relocation uses MediaStore), and only for an
-                            // item with a device file (LocalOnly / Synced); a cloud-only photo has none.
-                            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                            // Move to folder: a device photo is relocated into another DCIM folder, and the
+                            // Drive albums of mirrored folders follow a backed-up one. Q+ only (the relocation
+                            // uses MediaStore), and only for an item with a device file (LocalOnly / Synced);
+                            // a cloud-only photo has none.
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
                                 (settledItem is GalleryItem.LocalOnly || settledItem is GalleryItem.Synced)
                             ) {
                                 androidx.compose.material3.DropdownMenuItem(
@@ -2523,6 +2666,17 @@ fun PhotoViewerScreen(
                                     },
                                 )
                             }
+                            compressAction?.let { action ->
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(action.label, color = FgPrimary) },
+                                    leadingIcon = { Icon(action.icon, null,
+                                        tint = Accent, modifier = Modifier.size(20.dp)) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        action.onClick()
+                                    },
+                                )
+                            }
                             // Back up: force-upload a not-yet-backed-up local photo. Only
                             // LocalOnly qualifies; Synced / CloudOnly are already on Drive.
                             // A vaulted photo never does: uploading it undoes the hide. Same
@@ -2600,7 +2754,10 @@ fun PhotoViewerScreen(
             }
         }
 
+        }
+
         // ── Bottom section — hidden when overlays are off ────────────────────
+        CompositionLocalProvider(LocalGlassBackdrop provides glass) {
         AnimatedVisibility(
             visible = showChrome,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -2634,8 +2791,7 @@ fun PhotoViewerScreen(
             if (fullResBlockedByMetered && !meteredHintDismissed) {
                 Row(
                     modifier = Modifier
-                        .background(PillBgOpaque, RoundedCornerShape(999.dp))
-                        .border(0.5.dp, PillBorder, RoundedCornerShape(999.dp))
+                        .pillSurface(PillBgOpaque, RoundedCornerShape(999.dp), border = PillBorder)
                         .padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2708,8 +2864,7 @@ fun PhotoViewerScreen(
                 val motionPlaying = motionVideoFile != null
                 Row(
                     modifier = Modifier
-                        .background(PillBgOpaque, infoPillShape)
-                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                         .clickable(enabled = !isExtractingMotion) {
                             if (motionPlaying) viewModel.stopMotionPhoto()
                             else viewModel.playMotionPhoto(motionKey)
@@ -2747,8 +2902,7 @@ fun PhotoViewerScreen(
                 state is PhotoViewerViewModel.ViewerState.ShowImage) {
                 Row(
                     modifier = Modifier
-                        .background(PillBgOpaque, infoPillShape)
-                        .border(0.5.dp, PillBorder, infoPillShape)
+                        .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                         .clickable { viewModel.enterPanorama() }
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -2806,8 +2960,7 @@ fun PhotoViewerScreen(
                 ) {
                     Row(
                         modifier = Modifier
-                            .background(PillBgOpaque, infoPillShape)
-                            .border(0.5.dp, PillBorder, infoPillShape)
+                            .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                             .clickable { if (settledItem != null) trashConfirmAction = "restore" }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -2826,8 +2979,7 @@ fun PhotoViewerScreen(
                     }
                     Row(
                         modifier = Modifier
-                            .background(PillBgOpaque, infoPillShape)
-                            .border(0.5.dp, PillBorder, infoPillShape)
+                            .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
                             .clickable { if (settledItem != null) trashConfirmAction = "delete" }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -2848,6 +3000,7 @@ fun PhotoViewerScreen(
             }
         }
         } // AnimatedVisibility
+        }
 
         // Text mode takes the viewer's own chrome down, so this is the only thing on screen that
         // names the mode and the only control it needs; everything the user does with the words
@@ -2945,22 +3098,6 @@ fun PhotoViewerScreen(
     }
 
     // ── Metadata sheet ─────────────────────────────────────────────────────────
-    if (showStripPicker) {
-        val stripItem = items.getOrNull(pagerState.settledPage)
-        MetadataStripPickerDialog(
-            onConfirm = { config ->
-                showStripPicker = false
-                val uri = when (stripItem) {
-                    is GalleryItem.LocalOnly -> stripItem.local.uri
-                    is GalleryItem.Synced -> stripItem.local.uri
-                    else -> null
-                }
-                if (uri != null) viewModel.stripMetadataFromLocal(uri, config)
-            },
-            onDismiss = { showStripPicker = false },
-        )
-    }
-
     if (showMetadata) {
         val item = items.getOrNull(pagerState.settledPage)
         LaunchedEffect(item) {
@@ -2993,14 +3130,19 @@ fun PhotoViewerScreen(
         val placeLabel = remember(detailsPlace, locale) {
             detailsPlace?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
         }
-        ModalBottomSheet(
-            onDismissRequest = { showMetadata = false },
+        AppModalSheet(
+            onDismissRequest = { showMetadata = false; metadataPages = listOf(DetailsPage.Main) },
             sheetState = metadataSheetState,
             containerColor = SheetBg,
             scrimColor = Color.Black.copy(alpha = 0.5f),
+            onBackStep = {
+                (metadataPages.size > 1).also { stepped -> if (stepped) metadataPages = metadataPages.dropLast(1) }
+            },
         ) {
             PhotoMetadataSheet(
                 item = item,
+                pages = metadataPages,
+                onPagesChange = { metadataPages = it },
                 exif = metadata,
                 place = placeLabel,
                 resolvedGps = detailsGps,
@@ -3020,32 +3162,43 @@ fun PhotoViewerScreen(
                     }
                     if (uri != null) viewModel.stripMetadataFromLocal(uri, config)
                 },
-                onRenameClick = {
-                    // Rename is a node-level mutation we don't grant guests of a
-                    // shared-with-me album. The metadata sheet's button is hidden
-                    // when no callback fires, and this stays a no-op on that path.
-                    if (!isReadOnlyAlbum) {
-                        showMetadata = false
-                        showRenameDialog = true
+                // Date and place: none on a shared-with-me album, and none for an item no editor can change, so
+                // the Adjust buttons show exactly where the multi-select entry does.
+                metadataEditable = !isReadOnlyAlbum && item != null && anyMetadataEditable(listOf(item)),
+                isReadOnlyAlbum = isReadOnlyAlbum,
+                onMetadataSaved = {
+                    when (item) {
+                        is GalleryItem.LocalOnly -> viewModel.loadMetadata(item.local.uri)
+                        is GalleryItem.Synced -> viewModel.loadMetadata(item.local.uri)
+                        else -> Unit
                     }
-                },
-                // Edit date + place. Null on a shared-with-me album, and null for an item the editor
-                // cannot change, so the row shows exactly where the multi-select entry does (a cloud or
-                // synced video included, whose capture date it can change).
-                onEditMetadata = if (isReadOnlyAlbum || item == null ||
-                    !anyMetadataEditable(listOf(item))
-                ) null else {
-                    { showMetadata = false; onEditMetadata(item) }
+                    item?.let { viewModel.loadDetailsPlace(it) }
                 },
                 // Labels are the user's own: none on a vaulted or hidden photo, nor on someone else's.
-                // The details sheet closes first, so neither the Add labels sheet nor the settings
-                // page opens over it.
-                labelsBox = {
-                    if (item != null && !detailsPrivate && !isReadOnlyAlbum) DetailsLabels(
-                        viewModel, item,
-                        onAddLabels = addLabelsAction?.let { add -> { showMetadata = false; add.onClick() } },
-                        onOpenSettings = { showMetadata = false; onOpenLabelsSettings() },
-                    )
+                labelsSection = if (item != null && !detailsPrivate && !isReadOnlyAlbum) {
+                    { onEdit -> DetailsLabels(viewModel, item, onEdit = onEdit) }
+                } else null,
+                labelsPage = if (item != null && !detailsPrivate && !isReadOnlyAlbum) {
+                    { close -> DetailsLabelsPage(viewModel, item, onClose = close) }
+                } else null,
+                // Rename is a node-level mutation a guest of a shared-with-me album is not granted.
+                renamePage = if (item == null || isReadOnlyAlbum) null else {
+                    { _ ->
+                        RenameForm(
+                            currentName = when (item) {
+                                is GalleryItem.LocalOnly -> item.local.displayName
+                                is GalleryItem.Synced -> item.local.displayName
+                                is GalleryItem.CloudOnly -> item.cloud.displayName
+                            },
+                            isCloud = item is GalleryItem.CloudOnly,
+                            isVaulted = isVaultedItem,
+                            isWorking = renameState is PhotoViewerViewModel.RenameState.Working,
+                            errorMessage = (renameState as? PhotoViewerViewModel.RenameState.Failed)?.message,
+                            onConfirm = { newName, replaceOriginal ->
+                                viewModel.renameItem(item, newName, replaceOriginal, sourceAlbumLinkId)
+                            },
+                        )
+                    }
                 },
                 peopleBox = {
                     if (showPeopleBox) {
@@ -3075,6 +3228,34 @@ fun PhotoViewerScreen(
                 },
             )
         }
+    }
+
+    pendingPersonCover?.let { item ->
+        ConfirmDialog(
+            title = stringResource(R.string.person_set_cover_confirm_title),
+            message = stringResource(R.string.person_set_cover_confirm_body),
+            confirmLabel = stringResource(R.string.person_set_cover),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                onSetPersonCover?.invoke(item)
+                pendingPersonCover = null
+            },
+            onDismiss = { pendingPersonCover = null },
+        )
+    }
+    pendingPersonRemove?.let { item ->
+        ConfirmDialog(
+            title = stringResource(R.string.person_remove_confirm_title),
+            message = stringResource(R.string.person_remove_confirm_body),
+            confirmLabel = stringResource(R.string.person_remove_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            destructive = true,
+            onConfirm = {
+                onRemoveFromPerson?.invoke(item)
+                pendingPersonRemove = null
+            },
+            onDismiss = { pendingPersonRemove = null },
+        )
     }
 
     // ── Rename dialog ─────────────────────────────────────────────────────────
@@ -3111,6 +3292,7 @@ fun PhotoViewerScreen(
         if (rs is PhotoViewerViewModel.RenameState.Done) {
             items.getOrNull(pagerState.settledPage)?.let { viewModel.invalidateAfterRename(it) }
             showRenameDialog = false
+            if (metadataPages.lastOrNull() == DetailsPage.Rename) metadataPages = listOf(DetailsPage.Main)
             viewModel.resetRenameState()
         } else if (rs is PhotoViewerViewModel.RenameState.NeedsPermission) {
             runCatching {
@@ -3184,7 +3366,7 @@ fun PhotoViewerScreen(
             is GalleryItem.Synced    -> settledItem.local.uri
             else -> null
         }
-        if (!isSignedIn && currentUri != null) {
+        if (currentUri != null) {
             val moveTargetFolders by viewModel.moveTargetFolders.collectAsStateWithLifecycle()
             val pendingMoveIntent by viewModel.pendingMoveIntent.collectAsStateWithLifecycle()
             MoveToFolderHost(
@@ -3273,7 +3455,7 @@ fun PhotoViewerScreen(
         val item = items.getOrNull(pagerState.settledPage)
         if (item != null) {
             val deleteSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-            ModalBottomSheet(
+            AppModalSheet(
                 onDismissRequest = { showDeleteSheet = false },
                 sheetState = deleteSheetState,
                 containerColor = SheetBg,
@@ -3300,6 +3482,22 @@ fun PhotoViewerScreen(
                 )
             }
         }
+    }
+
+    notPersonFace?.let { face ->
+        val faceName = face.name.orEmpty()
+        ConfirmDialog(
+            title = stringResource(R.string.viewer_not_person_title, faceName),
+            message = stringResource(R.string.viewer_not_person_body, faceName),
+            confirmLabel = stringResource(R.string.viewer_not_person_confirm, faceName),
+            dismissLabel = stringResource(R.string.cancel),
+            destructive = true,
+            onConfirm = {
+                items.getOrNull(pagerState.settledPage)?.let { viewModel.markFaceNotThisPerson(it, face) }
+                notPersonFace = null
+            },
+            onDismiss = { notPersonFace = null },
+        )
     }
 
     // ── Name a nameless face tapped in the tags overlay or the People box ──────

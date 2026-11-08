@@ -308,6 +308,19 @@ class ThumbnailDecryptScheduler @Inject constructor(
     }
 
     /**
+     * [pinCovers] for one face cover a tile is showing now: kept from LRU eviction like an album cover,
+     * and decrypted at [Band.VISIBLE] since the tile waits on it. Face grouping decrypts the HD
+     * thumbnail only, so on a large library most person covers have no gallery thumbnail until asked.
+     */
+    fun requestPinnedCover(userId: UserId, linkId: String) {
+        scope.launch {
+            if (pinnedCoverLinkIds.size < MAX_PINNED_COVERS) pinnedCoverLinkIds.add(linkId)
+            val row = runCatching { photoListingDao.getByLinkId(linkId) }.getOrNull() ?: return@launch
+            request(userId, row)
+        }
+    }
+
+    /**
      * Warm the background thumbnail cache, newest photos first, stopping once it reaches the
      * adaptive budget ([trimTargetBytes]). The size is sampled (not estimated) every [BACKFILL_SAMPLE_EVERY]
      * enqueues while pacing enqueue to the decrypt rate, so the guard tracks real on-disk growth
@@ -634,12 +647,9 @@ class ThumbnailDecryptScheduler @Inject constructor(
             if (!ok || total <= cap) return
 
             val target = (cap / 10) * 9
-            entries.sortBy { it.mtime }
             val evicted = ArrayList<String>()
-            for (e in entries) {
+            for (e in evictionOrder(entries, pinnedCoverLinkIds, { it.linkId }, { it.mtime })) {
                 if (total <= target) break
-                // Never evict a pinned album / Collection cover, even if it is the oldest file.
-                if (e.linkId in pinnedCoverLinkIds) continue
                 if (runCatching { java.nio.file.Files.deleteIfExists(e.path) }.getOrDefault(false)) {
                     total -= e.size
                     evicted += e.linkId
@@ -1035,3 +1045,14 @@ class ThumbnailDecryptScheduler @Inject constructor(
         const val MAX_PINNED_COVERS = 2000
     }
 }
+
+/**
+ * The cached thumbnails a trim may delete, oldest first. A pinned cover (an album, Collection or face
+ * cover) is never among them, even when it is the oldest file.
+ */
+internal fun <T> evictionOrder(
+    entries: List<T>,
+    pinned: Set<String>,
+    linkIdOf: (T) -> String,
+    mtimeOf: (T) -> Long,
+): List<T> = entries.filter { linkIdOf(it) !in pinned }.sortedBy(mtimeOf)

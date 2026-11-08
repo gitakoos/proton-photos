@@ -63,12 +63,17 @@ enum class SyncStatus {
  * - [AUTO_FOLDER]: reconcile queued it because its folder is in the backup selection.
  * - [ALBUM_ADD]: the user added a not-yet-backed-up photo to a cloud album, forcing its upload.
  * - [EDITOR]: an editor save produced the local file and needs it backed up.
+ * - [REMOVED_FROM_DRIVE]: not a reason to upload but the opposite: the photo was backed up and its
+ *   Drive copy was then removed (from this app or anywhere else) while the device file stayed. The
+ *   folder backup leaves such a photo alone, so a deliberate removal is not undone by the next pass;
+ *   an explicit back-up or album add replaces the mark and uploads it again.
  */
 object QueueSource {
     const val MANUAL = "MANUAL"
     const val AUTO_FOLDER = "AUTO_FOLDER"
     const val ALBUM_ADD = "ALBUM_ADD"
     const val EDITOR = "EDITOR"
+    const val REMOVED_FROM_DRIVE = "REMOVED_FROM_DRIVE"
 
     /**
      * True when the row is up for upload because the automatic folder backup put it there, rather

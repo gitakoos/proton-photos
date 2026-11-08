@@ -533,7 +533,8 @@ class AlbumDetailViewModel @Inject constructor(
         observeJob?.cancel()
         observedLinkIds = emptyList()
         _uiState.update { it.copy(
-            isLoading = true, albumName = albumName, albumLinkId = albumLinkId,
+            isLoading = true, albumName = albumNameOnLoad(it.albumLinkId, it.albumName, albumLinkId, albumName),
+            albumLinkId = albumLinkId,
             shareId = shareId, sharedByEmail = sharedByEmail, volumeId = volumeId, error = null,
         ) }
         albumJob = viewModelScope.launch {
@@ -2046,10 +2047,7 @@ class AlbumDetailViewModel @Inject constructor(
         if (albumLinkId.isBlank()) return
         viewModelScope.launch {
             runCatching {
-                context.settingsDataStore.edit { prefs ->
-                    val current = prefs[SettingsKeys.HIDDEN_ALBUM_IDS] ?: emptySet()
-                    prefs[SettingsKeys.HIDDEN_ALBUM_IDS] = current + albumLinkId
-                }
+                HiddenCloudPhotos.hideAlbums(context, listOf(albumLinkId))
             }.onSuccess {
                 _uiState.update { it.copy(hideAlbumDone = true) }
             }.onFailure { e ->
@@ -2427,3 +2425,11 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 }
+
+/**
+ * The name [AlbumDetailViewModel.load] shows. Coming back to the same album (from the photo picker, say) runs
+ * the load again with the name the screen was opened with, while the one on screen may be newer after a
+ * rename here, so the shown name is kept; another album takes the name it was opened with.
+ */
+internal fun albumNameOnLoad(shownLinkId: String, shownName: String, linkId: String, openedWithName: String): String =
+    if (shownLinkId == linkId && shownName.isNotBlank()) shownName else openedWithName

@@ -41,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
 import eu.akoos.photos.presentation.common.FloatingHeader
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.settings.components.NavRow
 import eu.akoos.photos.presentation.settings.components.RowDivider
 import eu.akoos.photos.presentation.settings.components.SettingsCard
@@ -62,32 +64,37 @@ fun WhatsNewHistoryScreen(
     val colors = AppColors.current
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.pageBg),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-        ) {
-            Spacer(Modifier.height(floatingHeaderContentTopPadding()))
-            SettingsCard {
-                WhatsNewReleases.forEachIndexed { index, release ->
-                    if (index > 0) RowDivider()
-                    NavRow(
-                        label = stringResource(R.string.whats_new_version, release.version),
-                        description = stringResource(release.headlineRes),
-                        onClick = { onOpenRelease(release.version) },
-                    )
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+            ) {
+                Spacer(Modifier.height(floatingHeaderContentTopPadding()))
+                SettingsCard {
+                    WhatsNewReleases.forEachIndexed { index, release ->
+                        if (index > 0) RowDivider()
+                        NavRow(
+                            label = stringResource(R.string.whats_new_version, release.version),
+                            description = stringResource(release.headlineRes),
+                            onClick = { onOpenRelease(release.version) },
+                        )
+                    }
                 }
+                Spacer(Modifier.height(navBottom + 24.dp))
             }
-            Spacer(Modifier.height(navBottom + 24.dp))
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.whats_new_title),
             onBack = onBack,
         )

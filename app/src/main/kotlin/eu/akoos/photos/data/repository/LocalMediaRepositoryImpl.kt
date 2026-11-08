@@ -53,9 +53,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import eu.akoos.photos.data.db.dao.LocalTagDao
 import eu.akoos.photos.data.db.entity.LocalTagEntity
@@ -92,6 +95,21 @@ private const val RECENT_SCAN_MAX_AGE_MS = 90_000L
 
 /** Longest a steady stream of changes (an import landing file by file) holds the re-scan back. */
 private const val CHANGE_MAX_WAIT_MS = 2_000L
+
+/** The file the last complete device scan is kept in for the next cold start, in the no-backup files dir. */
+private const val SNAPSHOT_FILE = "device_media_snapshot.bin"
+
+/** How long after a complete scan its snapshot is written, so a burst of re-scans writes once. */
+private const val SNAPSHOT_WRITE_DELAY_MS = 3_000L
+
+/** A heap at least this large shows a kept snapshot of any size at a cold start. */
+private const val SNAPSHOT_FULL_HEAP_BYTES = 400L * 1024 * 1024
+
+/** Below [SNAPSHOT_FULL_HEAP_BYTES], a snapshot of more items than this is not read (the newest photos are). */
+private const val SNAPSHOT_SMALL_HEAP_ITEMS = 40_000
+
+/** How long a file the app removed stays out of the device list while scans still list it. */
+private const val REMOVED_HOLD_MS = 60_000L
 
 /** How long the shared list outlives its last collector, so moving between screens reuses it
  *  instead of re-scanning. After that it is dropped. The gallery feed keeps the same window. */
@@ -251,10 +269,10 @@ internal fun Cursor.readMediaRow(
     // missing or wrong (a downloaded PNG whose DATE_TAKEN write MediaStore refuses, or a file whose
     // column disagrees with its own EXIF), so it is the better value wherever it is present. The
     // column comes next, and the file's added time is the last resort.
-    val dateTaken    = CaptureDateOverride.resolveDateTaken(
-        rawDateTaken, dateOverrides[uri]?.captureMs, dateAdded,
-    )
     val dateModified = longOrZero(columns.dateModified)
+    val dateTaken    = CaptureDateOverride.resolveDateTaken(
+        rawDateTaken, dateOverrides[uri]?.captureMs, dateAdded, dateModified,
+    )
     val sizeBytes    = longOrZero(columns.size)
 
     val displayName  = stringOrNull(columns.displayName) ?: ""
@@ -393,6 +411,75 @@ class LocalMediaRepositoryImpl @Inject constructor(
         }
     }
 
+    private val snapshotFile by lazy { java.io.File(context.noBackupFilesDir, SNAPSHOT_FILE) }
+
+    private val snapshotLock = kotlinx.coroutines.sync.Mutex()
+
+    /** What [snapshotFile] holds as written or read by this process (item count and list hash), so an unchanged
+     *  re-scan writes nothing; a fingerprint rather than the list, which would keep a whole library alive. */
+    @Volatile private var snapshotPrint: Pair<Int, Int>? = null
+
+    private val snapshotJobLock = Any()
+
+    private var snapshotJob: kotlinx.coroutines.Job? = null
+
+    private val snapshotScope = appScope
+
+    /** The environment a snapshot is kept under: the scan's grants and volumes, plus the build that wrote it. */
+    private fun snapshotEnvironment(environment: String) = environment + "|" + eu.akoos.photos.BuildConfig.VERSION_CODE
+
+    /**
+     * Keeps a complete scan for the next cold start ([lastKnownMedia]). Written a moment after the scan, so a
+     * burst of changes writes once, and only when the list differs from what the file already holds.
+     */
+    private fun keepSnapshot(environment: String, items: List<LocalMediaItem>) {
+        synchronized(snapshotJobLock) {
+            snapshotJob?.cancel()
+            snapshotJob = snapshotScope.launch(Dispatchers.IO) {
+                delay(SNAPSHOT_WRITE_DELAY_MS)
+                val print = items.size to items.hashCode()
+                snapshotLock.withLock {
+                    if (snapshotPrint == print) return@withLock
+                    runCatching { DeviceMediaSnapshot.writeFile(snapshotFile, snapshotEnvironment(environment), items) }
+                        .onSuccess { snapshotPrint = print }
+                        .onFailure { Log.w(TAG, "device list snapshot not written: ${it.message}") }
+                }
+            }
+        }
+    }
+
+    /** Drops the kept snapshot: files the app just removed (a delete, a hide into the vault) must not come back
+     *  in a first picture, not even for another account whose hidden list does not name them. */
+    private fun dropSnapshot() {
+        synchronized(snapshotJobLock) {
+            snapshotJob?.cancel()
+            snapshotJob = snapshotScope.launch(Dispatchers.IO) {
+                snapshotLock.withLock {
+                    snapshotPrint = null
+                    snapshotFile.delete()
+                }
+            }
+        }
+    }
+
+    override suspend fun lastKnownMedia(): List<LocalMediaItem>? = withContext(Dispatchers.IO) {
+        if (!checkMediaPermission()) return@withContext null
+        // A library this large needs a heap that can hold a second copy of it while the scan runs.
+        val maxItems = if (Runtime.getRuntime().maxMemory() >= SNAPSHOT_FULL_HEAP_BYTES) Int.MAX_VALUE else SNAPSHOT_SMALL_HEAP_ITEMS
+        val job = coroutineContext[kotlinx.coroutines.Job]
+        snapshotLock.withLock {
+            DeviceMediaSnapshot.readFile(snapshotFile, snapshotEnvironment(mediaEnvironment()), maxItems) {
+                job?.isActive != false
+            }
+        }
+    }
+
+    /** Asks for a new scan when the access or volumes the last one ran under have changed since. */
+    override fun refreshIfAccessChanged() {
+        val last = lastScanEnvironment
+        if (last != null && last != mediaEnvironment()) deviceMedia.requestRefresh()
+    }
+
     /** The grants and mounted volumes the latest device scan ran under; see [mediaEnvironment]. */
     @Volatile private var lastScanEnvironment: String? = null
 
@@ -415,9 +502,11 @@ class LocalMediaRepositoryImpl @Inject constructor(
         onReadFailure = { Log.w(TAG, "device media scan failed: ${it.message}") },
         onEvent = { eu.akoos.photos.util.PerfDiagnostics.count("devicescan-$it") },
     ) {
-        lastScanEnvironment = mediaEnvironment()
-        queryAllMedia()
+        val environment = mediaEnvironment()
+        lastScanEnvironment = environment
+        queryAllMedia().also { if (it.complete) keepSnapshot(environment, it.items) }
     }
+
 
     // A permission grant fires no MediaStore notification, so without this the gallery would stay
     // empty after the first grant until the app restarts. A change to a side store the scan reads
@@ -426,9 +515,28 @@ class LocalMediaRepositoryImpl @Inject constructor(
         deviceMedia.requestRefresh()
     }
 
-    // A re-scan that found the same files is not handed on again, whether or not it saw all of them.
+    /** Device files the app removed, by uri, with when, until a scan no longer lists them; see [forgetRemoved]. */
+    private val removedUris = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Long>>(emptyMap())
+
+    override fun forgetRemoved(uris: Collection<String>) {
+        if (uris.isEmpty()) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        removedUris.update { it + uris.associateWith { now } }
+        dropSnapshot()
+    }
+
+    // A re-scan that found the same files is not handed on again, whether or not it saw all of them. A file the
+    // app just removed is left out until a scan stops listing it (a scan that began before the removal still
+    // does), or for [REMOVED_HOLD_MS] at most, so a file put back from the system's trash shows again.
     override fun observeLocalMedia(): Flow<List<LocalMediaItem>> =
-        deviceMedia.shared.map { it.items }.distinctUntilChanged()
+        kotlinx.coroutines.flow.combine(deviceMedia.shared, removedUris) { scan, removed ->
+            if (removed.isEmpty()) return@combine scan.items
+            val now = android.os.SystemClock.elapsedRealtime()
+            val listed = removed.keys.filterTo(HashSet()) { uri -> scan.items.any { it.uri == uri } }
+            val held = removed.filter { (uri, at) -> uri in listed && now - at < REMOVED_HOLD_MS }
+            if (held.size != removed.size) removedUris.update { current -> current.filterKeys { it in held } }
+            if (held.isEmpty()) scan.items else scan.items.filterNot { it.uri in held }
+        }.distinctUntilChanged()
 
     // A scan that saw the whole device, finished within [RECENT_SCAN_MAX_AGE_MS] with no change signalled since
     // it began, answers a one-shot reader as a new one would: every reconcile, backfill walk and upload pass

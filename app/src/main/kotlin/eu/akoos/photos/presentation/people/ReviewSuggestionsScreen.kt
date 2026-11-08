@@ -22,6 +22,7 @@
 
 package eu.akoos.photos.presentation.people
 
+import eu.akoos.photos.domain.usecase.samePersonName
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
@@ -61,6 +62,8 @@ import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.PersonCard
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.common.FloatingHeader
@@ -106,6 +109,8 @@ fun ReviewSuggestionsScreen(
 
     BackHandler(enabled = selecting) { selection = emptySet() }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -118,96 +123,99 @@ fun ReviewSuggestionsScreen(
             resolvedClusters.isEmpty() -> 1
             else -> 2
         }
-        Crossfade(targetState = phase, label = "reviewContent", modifier = Modifier.fillMaxSize()) { p ->
-            when (p) {
-                0 ->
-                    // Skeleton grid matching the 2-column cluster layout so there is no jump when the
-                    // real cards arrive.
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(
-                            start = 14.dp,
-                            end = 14.dp,
-                            top = floatingHeaderContentTopPadding(),
-                            bottom = 24.dp,
-                        ),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(8) {
-                            ShimmerBox(
-                                modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
-                                cornerRadius = 16.dp,
-                            )
-                        }
-                    }
-                1 ->
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            text = stringResource(R.string.people_review_empty),
-                            color = colors.fgMute,
-                            fontSize = 14.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 40.dp),
-                        )
-                    }
-                else ->
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        contentPadding = PaddingValues(
-                            start = 14.dp,
-                            end = 14.dp,
-                            top = floatingHeaderContentTopPadding(),
-                            bottom = 24.dp,
-                        ),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(items = resolvedClusters, key = { it.personId }) { person ->
-                            val card: @Composable () -> Unit = {
-                                PersonCard(
-                                    person = person,
-                                    selected = person.personId in selection,
-                                    // The Unsorted bucket is opened to curate its faces one by one, never bulk-merged
-                                    // or bulk-rejected as a whole, so it always opens and cannot join a selection.
-                                    // Outside a selection any other cluster opens the name-or-merge sheet.
-                                    onClick = {
-                                        when {
-                                            selecting && !person.isOther -> toggle(person.personId)
-                                            personTapTarget(person) == PersonTapTarget.NameOrMerge -> {
-                                                nameOrMerge = person
-                                            }
-                                            else -> onOpenCluster(person.personId)
-                                        }
-                                    },
-                                    onLongClick = if (person.isOther) null else { { toggle(person.personId) } },
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            Crossfade(targetState = phase, label = "reviewContent", modifier = Modifier.fillMaxSize()) { p ->
+                when (p) {
+                    0 ->
+                        // Skeleton grid matching the 2-column cluster layout so there is no jump when the
+                        // real cards arrive.
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            contentPadding = PaddingValues(
+                                start = 14.dp,
+                                end = 14.dp,
+                                top = floatingHeaderContentTopPadding(),
+                                bottom = 24.dp,
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(8) {
+                                ShimmerBox(
+                                    modifier = Modifier.fillMaxWidth().aspectRatio(132f / 168f),
+                                    cornerRadius = 16.dp,
                                 )
                             }
-                            // Only the Unsorted bucket carries a caption, so it reads as the leftover pile to sort
-                            // rather than a person the app recognised.
-                            if (person.isOther) {
-                                Column {
-                                    card()
-                                    Text(
-                                        text = stringResource(R.string.person_unsorted_caption),
-                                        color = colors.fgDim,
-                                        fontSize = 11.sp,
-                                        lineHeight = 15.sp,
-                                        modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp),
+                        }
+                    1 ->
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = stringResource(R.string.people_review_empty),
+                                color = colors.fgMute,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(horizontal = 40.dp),
+                            )
+                        }
+                    else ->
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            contentPadding = PaddingValues(
+                                start = 14.dp,
+                                end = 14.dp,
+                                top = floatingHeaderContentTopPadding(),
+                                bottom = 24.dp,
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(items = resolvedClusters, key = { it.personId }) { person ->
+                                val card: @Composable () -> Unit = {
+                                    PersonCard(
+                                        person = person,
+                                        selected = person.personId in selection,
+                                        // The Unsorted bucket is opened to curate its faces one by one, never bulk-merged
+                                        // or bulk-rejected as a whole, so it always opens and cannot join a selection.
+                                        // Outside a selection any other cluster opens the name-or-merge sheet.
+                                        onClick = {
+                                            when {
+                                                selecting && !person.isOther -> toggle(person.personId)
+                                                personTapTarget(person) == PersonTapTarget.NameOrMerge -> {
+                                                    nameOrMerge = person
+                                                }
+                                                else -> onOpenCluster(person.personId)
+                                            }
+                                        },
+                                        onLongClick = if (person.isOther) null else { { toggle(person.personId) } },
                                     )
                                 }
-                            } else {
-                                card()
+                                // Only the Unsorted bucket carries a caption, so it reads as the leftover pile to sort
+                                // rather than a person the app recognised.
+                                if (person.isOther) {
+                                    Column {
+                                        card()
+                                        Text(
+                                            text = stringResource(R.string.person_unsorted_caption),
+                                            color = colors.fgDim,
+                                            fontSize = 11.sp,
+                                            lineHeight = 15.sp,
+                                            modifier = Modifier.padding(top = 6.dp, start = 2.dp, end = 2.dp),
+                                        )
+                                    }
+                                } else {
+                                    card()
+                                }
                             }
                         }
-                    }
+                }
             }
         }
 
         if (selecting) {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.album_picker_selected, selection.size),
                 onBack = { selection = emptySet() },
                 trailing = {
@@ -236,6 +244,7 @@ fun ReviewSuggestionsScreen(
             )
         } else {
             FloatingHeader(
+                backdrop = glass,
                 title = stringResource(R.string.people_review_title),
                 onBack = onBack,
             )
@@ -266,7 +275,7 @@ fun ReviewSuggestionsScreen(
                 // Typing a name another person already holds is a merge, not a new person, so route it
                 // through the same confirm the list-pick uses; a genuinely new name commits at once.
                 val trimmed = name.trim()
-                if (trimmed.isNotEmpty() && namedPeople.any { it.displayName == trimmed }) {
+                if (trimmed.isNotEmpty() && namedPeople.any { samePersonName(it.displayName, trimmed) }) {
                     pendingBulkMerge = sel to trimmed
                 } else {
                     viewModel.bulkMerge(sel, name)

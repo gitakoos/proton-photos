@@ -64,8 +64,10 @@ import coil.request.ImageRequest
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.FloatingHeader
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.FaceCropTransformation
-import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
+import eu.akoos.photos.presentation.gallery.rememberFaceCoverModel
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.pillShape
 
@@ -74,7 +76,7 @@ import eu.akoos.photos.presentation.theme.pillShape
  * person", one section per name) and faces dismissed as "not a person" (one "Ignored" section). Each
  * face shows as a cropped thumbnail with an Undo control that reverses the underlying exclusion so the
  * face is re-evaluated on the next clustering pass. Reuses the People rail's cover resolution
- * ([LocalThumbnailUrls]) and [FaceCropTransformation], so no new decrypt path is introduced.
+ * ([rememberFaceCoverModel]) and [FaceCropTransformation], so no new decrypt path is introduced.
  */
 @Composable
 fun FaceExclusionsScreen(
@@ -84,54 +86,59 @@ fun FaceExclusionsScreen(
     onUndoIgnored: (faceId: String) -> Unit,
 ) {
     val colors = AppColors.current
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(colors.pageBg),
     ) {
-        if (!state.isLoading && state.isEmpty) {
-            Text(
-                text = stringResource(R.string.face_excluded_empty),
-                color = colors.fgMute,
-                fontSize = 14.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(horizontal = 40.dp),
-            )
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(
-                    start = 14.dp,
-                    end = 14.dp,
-                    top = floatingHeaderContentTopPadding(),
-                    bottom = 24.dp,
-                ),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                state.notThisPerson.forEach { group ->
-                    item(span = { GridItemSpan(maxLineSpan) }, key = "np-header-${group.name}") {
-                        SectionHeader(stringResource(R.string.face_excluded_not_person_section, group.name))
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            if (!state.isLoading && state.isEmpty) {
+                Text(
+                    text = stringResource(R.string.face_excluded_empty),
+                    color = colors.fgMute,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(horizontal = 40.dp),
+                )
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(3),
+                    contentPadding = PaddingValues(
+                        start = 14.dp,
+                        end = 14.dp,
+                        top = floatingHeaderContentTopPadding(),
+                        bottom = 24.dp,
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    state.notThisPerson.forEach { group ->
+                        item(span = { GridItemSpan(maxLineSpan) }, key = "np-header-${group.name}") {
+                            SectionHeader(stringResource(R.string.face_excluded_not_person_section, group.name))
+                        }
+                        items(group.faces, key = { "np-${group.name}-${it.faceId}" }) { face ->
+                            ExcludedFaceTile(face = face, onUndo = { onUndoNotThisPerson(group.name, face.faceId) })
+                        }
                     }
-                    items(group.faces, key = { "np-${group.name}-${it.faceId}" }) { face ->
-                        ExcludedFaceTile(face = face, onUndo = { onUndoNotThisPerson(group.name, face.faceId) })
-                    }
-                }
-                if (state.ignored.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }, key = "ig-header") {
-                        SectionHeader(stringResource(R.string.face_excluded_ignored_section))
-                    }
-                    items(state.ignored, key = { "ig-${it.faceId}" }) { face ->
-                        ExcludedFaceTile(face = face, onUndo = { onUndoIgnored(face.faceId) })
+                    if (state.ignored.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }, key = "ig-header") {
+                            SectionHeader(stringResource(R.string.face_excluded_ignored_section))
+                        }
+                        items(state.ignored, key = { "ig-${it.faceId}" }) { face ->
+                            ExcludedFaceTile(face = face, onUndo = { onUndoIgnored(face.faceId) })
+                        }
                     }
                 }
             }
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.settings_face_excluded),
             onBack = onBack,
         )
@@ -160,7 +167,7 @@ private fun SectionHeader(text: String) {
 private fun ExcludedFaceTile(face: ExcludedFaceUi, onUndo: () -> Unit) {
     val context = LocalContext.current
     val colors = AppColors.current
-    val model = LocalThumbnailUrls.current.value[face.photoKey] ?: face.photoKey
+    val model = rememberFaceCoverModel(face.photoKey)
     val request = remember(model, face.box) {
         ImageRequest.Builder(context)
             .data(model)

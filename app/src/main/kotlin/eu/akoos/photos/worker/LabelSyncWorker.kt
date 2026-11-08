@@ -61,6 +61,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
@@ -99,11 +100,14 @@ class LabelSyncWorker @AssistedInject constructor(
 
     /** Tracked whole, so a sign-out can stop the run and wait for it to end. */
     override suspend fun doWork(): Result = signOut.track {
-        runStartedMs = System.currentTimeMillis()
-        try {
-            runRequest()
-        } finally {
-            withContext(NonCancellable) { recordAutoSave() }
+        // Never beside the ML sync job, whose shared-backup round reads and writes the labels too.
+        eu.akoos.photos.data.sharedbackup.DriveJobLock.mutex.withLock {
+            runStartedMs = System.currentTimeMillis()
+            try {
+                runRequest()
+            } finally {
+                withContext(NonCancellable) { recordAutoSave() }
+            }
         }
     }
 

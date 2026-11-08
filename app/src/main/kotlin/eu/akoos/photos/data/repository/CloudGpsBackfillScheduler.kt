@@ -158,7 +158,7 @@ class CloudGpsBackfillScheduler @Inject constructor(
                 // from the same spot. (Cached rows count as resolved, so a page that's all cache still
                 // makes progress.) A page made up only of hidden rows still advances via the flag below,
                 // so pause only when the geocodable rows resolved nothing.
-                if (resolved.ids.isEmpty() && hidden.isEmpty()) {
+                if (resolved.ids.isEmpty() && resolved.goneForGood.isEmpty() && hidden.isEmpty()) {
                     Log.d(TAG, "page resolved 0 revisions — pausing walk, will retry on a later run")
                     break
                 }
@@ -194,10 +194,15 @@ class CloudGpsBackfillScheduler @Inject constructor(
                         }
                 }
                 // Flag rows whose revision was actually read (cached or freshly fetched), including
-                // no-GPS ones, plus the hidden rows skipped above: both advance the walk and never need
-                // reprocessing. Rows whose fetch FAILED are absent from resolved.ids, so they keep
-                // gpsChecked=0 and a later run retries them.
-                val toMark = resolved.ids.toList() + hidden.map { it.linkId }
+                // no-GPS ones, the rows whose revision is gone for good, and the hidden rows skipped
+                // above: all advance the walk and never need reprocessing. A row that is never flagged
+                // comes back first on every page, newest first, so enough unreadable ones would stop the
+                // walk for good and leave every older photo off the map. Rows whose fetch failed for a
+                // passing reason keep gpsChecked=0 and a later run retries them.
+                if (resolved.goneForGood.isNotEmpty()) {
+                    eu.akoos.photos.util.SyncDiagnostics.log("map: ${resolved.goneForGood.size} photo(s) with an unreadable revision set aside")
+                }
+                val toMark = resolved.ids.toList() + resolved.goneForGood + hidden.map { it.linkId }
                 runCatching { photoListingDao.markGpsChecked(toMark) }
                     .onFailure {
                         if (it is CancellationException) throw it
@@ -224,6 +229,8 @@ class CloudGpsBackfillScheduler @Inject constructor(
     private class ResolvedXAttrs(
         val byLinkId: Map<String, String>,
         val ids: Set<String>,
+        /** Rows whose revision the server reports missing or invalid ([isRevisionGoneForGood]): no retry reads them. */
+        val goneForGood: Set<String> = emptySet(),
     )
 
     /**
@@ -243,6 +250,7 @@ class CloudGpsBackfillScheduler @Inject constructor(
     ): ResolvedXAttrs {
         val map = ConcurrentHashMap<String, String>(batch.size)
         val resolvedIds = ConcurrentHashMap.newKeySet<String>()
+        val goneForGood = ConcurrentHashMap.newKeySet<String>()
         val missing = ArrayList<PhotoListingEntity>()
         for (row in batch) {
             val cached = row.encXAttr
@@ -274,7 +282,10 @@ class CloudGpsBackfillScheduler @Inject constructor(
                         // Fetch failed even after retries — leave the row unresolved so a later run
                         // retries it. A sustained rate-limit shows up as a page of these, which the
                         // zero-progress guard in backfillAll turns into a clean pause.
-                        if (isTransientApiError(e)) {
+                        if (isRevisionGoneForGood(e)) {
+                            goneForGood.add(row.linkId)
+                            Log.d(TAG, "fetch XAttr ${row.linkId}: revision gone, set aside: ${e.message}")
+                        } else if (isTransientApiError(e)) {
                             Log.d(TAG, "fetch XAttr ${row.linkId} transient, will retry later: ${e.message}")
                         } else {
                             Log.w(TAG, "fetch XAttr ${row.linkId} failed: ${e.message}")
@@ -283,8 +294,8 @@ class CloudGpsBackfillScheduler @Inject constructor(
                 }
             }
         }
-        Log.d(TAG, "resolveXAttrs via revision: missing=${missing.size} resolved=${resolvedIds.size} withXAttr=${map.size}")
-        return ResolvedXAttrs(map, resolvedIds)
+        Log.d(TAG, "resolveXAttrs via revision: missing=${missing.size} resolved=${resolvedIds.size} withXAttr=${map.size} gone=${goneForGood.size}")
+        return ResolvedXAttrs(map, resolvedIds, goneForGood)
     }
 
     private companion object {
@@ -304,4 +315,21 @@ class CloudGpsBackfillScheduler @Inject constructor(
         /** Rows pulled per page — bounds how many entities + their crypto material are resident. */
         const val PAGE = 200
     }
+}
+
+/** Proton's body codes for a link that no longer exists and for an id it does not recognise. */
+private const val REVISION_NOT_EXISTS_CODE = 2501
+private const val REVISION_INVALID_ID_CODE = 2061
+
+/**
+ * Whether a revision read failed because that photo's revision is missing or invalid, which no retry
+ * changes. A refused session (401 / 403), a rate limit, a server error or a dropped connection is not:
+ * those hit every photo alike and pass, so their rows stay for a later run.
+ */
+internal fun isRevisionGoneForGood(e: Throwable): Boolean {
+    val http = (e as? me.proton.core.network.domain.ApiException)?.error
+        as? me.proton.core.network.domain.ApiResult.Error.Http ?: return false
+    if (http.httpCode == 401 || http.httpCode == 403) return false
+    val code = http.proton?.code
+    return http.httpCode == 404 || code == REVISION_NOT_EXISTS_CODE || code == REVISION_INVALID_ID_CODE
 }

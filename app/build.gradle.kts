@@ -2,7 +2,6 @@ import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
@@ -41,8 +40,8 @@ android {
         // versionCode bumped per release tag — keep monotonically increasing.
         // versionName mirrors the GitHub release tag (e.g. v2.0.0 → "2.0.0") so the About
         // screen and the published APK report the same version the user downloaded.
-        versionCode = 278
-        versionName = "2.6.0-test6"
+        versionCode = 279
+        versionName = "2.6.0-test7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -150,10 +149,6 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        // Apply Hilt @ApplicationContext / @Inject etc. to BOTH the value parameter and the
-        // backing field. Without this Kotlin 2.x emits a deprecation warning per inject site
-        // (KT-73255). Behaviour matches what Hilt's KSP processor expects.
-        freeCompilerArgs.add("-Xannotation-default-target=param-property")
     }
 }
 
@@ -164,6 +159,11 @@ ksp {
 }
 
 dependencies {
+    // Media3 brings in an older Guava with a known deserialization flaw; the fixed one is required instead.
+    constraints {
+        implementation(libs.guava)
+    }
+
     // Proton Core
     implementation(libs.proton.drive.sdk)
     implementation(libs.proton.auth)
@@ -247,6 +247,8 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+    // The unit tests declare their own small @Database classes; Room generates them from the test sources too.
+    kspTest(libs.room.compiler)
 
     // Compose
     implementation(platform(libs.compose.bom))

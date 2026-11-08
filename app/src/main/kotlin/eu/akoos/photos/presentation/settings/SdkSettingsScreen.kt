@@ -101,6 +101,9 @@ private fun SdkRoute.titleRes(): Int = when (this) {
     SdkRoute.TRASH -> R.string.sdk_route_trash
     SdkRoute.DOWNLOAD -> R.string.sdk_route_download
     SdkRoute.UPLOAD -> R.string.sdk_route_upload
+    SdkRoute.ALBUMS -> R.string.sdk_route_albums
+    SdkRoute.EVENTS -> R.string.sdk_route_events
+    SdkRoute.SHARED -> R.string.sdk_route_shared
 }
 
 private fun SdkRoute.descriptionRes(): Int = when (this) {
@@ -108,6 +111,9 @@ private fun SdkRoute.descriptionRes(): Int = when (this) {
     SdkRoute.TRASH -> R.string.sdk_route_trash_desc
     SdkRoute.DOWNLOAD -> R.string.sdk_route_download_desc
     SdkRoute.UPLOAD -> R.string.sdk_route_upload_desc
+    SdkRoute.ALBUMS -> R.string.sdk_route_albums_desc
+    SdkRoute.EVENTS -> R.string.sdk_route_events_desc
+    SdkRoute.SHARED -> R.string.sdk_route_shared_desc
 }
 
 @HiltViewModel

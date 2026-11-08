@@ -24,6 +24,7 @@ package eu.akoos.photos.presentation.gallery
 
 import android.os.Build
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -41,6 +43,9 @@ import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.graphics.Color
 import eu.akoos.photos.presentation.collage.COLLAGE_MAX_PHOTOS
 import eu.akoos.photos.presentation.collage.COLLAGE_MIN_PHOTOS
 import eu.akoos.photos.presentation.collage.isVideo
@@ -70,6 +75,7 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.CloudPhoto
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.FavoriteActionState
 import eu.akoos.photos.presentation.common.PrimarySlot
 import eu.akoos.photos.presentation.common.SelectionAction
@@ -83,9 +89,11 @@ import eu.akoos.photos.presentation.common.favoriteTurnsOn
 import eu.akoos.photos.presentation.common.hasDownloadable
 import eu.akoos.photos.presentation.common.offlinePinnableLinkIds
 import eu.akoos.photos.presentation.common.offlineTurnsOn
+import eu.akoos.photos.presentation.common.rememberCloudCompressAction
 import eu.akoos.photos.presentation.common.selectionDrawerRestingHeight
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.ErrorColor
+import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.util.MetadataStripConfig
 
 /**
@@ -204,6 +212,7 @@ fun rememberGallerySelectionActions(
     val isDeleting = multiDeleteState is MultiDeleteState.Working
 
     var showStripPicker by remember { mutableStateOf(false) }
+    val compressAction = rememberCloudCompressAction(selectedItems, isSignedIn)
 
     // Which way the offline row goes, so it names the press rather than the state: a pin while
     // anything pinnable in the selection is still un-pinned, a removal once none is.
@@ -340,10 +349,14 @@ fun rememberGallerySelectionActions(
                 )
             )
         }
+        // Compress the Drive-only photos and videos in place, each original to the Drive trash once its
+        // smaller copy is up.
+        compressAction?.let(::add)
         // Move the selected on-device photos into a real DCIM/<name>/ folder other gallery apps can
-        // see. Offered only in local-only (signed-out) mode, where every photo is a device file and
-        // no cloud pairing is in play; it is an in-place scoped-storage relocation, so Android 10+ only.
-        if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && anyOnDevice(selectedItems)) {
+        // see. The move keeps each file's content URI, so a backed-up photo stays paired, and the Drive
+        // albums of mirrored folders follow it (FolderMoveAlbumFollow); it is an in-place scoped-storage
+        // relocation, so Android 10+ only.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && anyOnDevice(selectedItems)) {
             add(
                 SelectionAction(
                     icon = Icons.AutoMirrored.Filled.DriveFileMove,
@@ -396,8 +409,9 @@ fun rememberGallerySelectionActions(
  * device-folder view. It stands on its own, decoupled from the upload-strip settings: the user ticks
  * exactly which categories to remove from the selected device photos and [onConfirm] fires with that
  * config. Timestamps default off so capture dates are kept. Confirm is disabled until a box is ticked,
- * so an empty config never leaves this dialog.
+ * so an empty config never leaves this sheet.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MetadataStripPickerDialog(
     onConfirm: (MetadataStripConfig) -> Unit,
@@ -412,51 +426,59 @@ fun MetadataStripPickerDialog(
     // author name and rights on their own photos.
     var stripAuthorship by remember { mutableStateOf(true) }
     val anyChecked = stripGps || stripCamera || stripTimestamp || stripSoftware || stripAuthorship
-    AlertDialog(
+    AppModalSheet(
         onDismissRequest = onDismiss,
-        containerColor    = colors.cardBg,
-        titleContentColor = colors.fgPrimary,
-        textContentColor  = colors.fgDim,
-        title = {
-            Text(stringResource(R.string.viewer_meta_strip_confirm_title), fontWeight = FontWeight.SemiBold)
-        },
-        text = {
-            Column {
-                StripPickerRow(stringResource(R.string.settings_strip_gps), stripGps) { stripGps = it }
-                StripPickerRow(stringResource(R.string.settings_strip_camera), stripCamera) { stripCamera = it }
-                StripPickerRow(stringResource(R.string.settings_strip_timestamp), stripTimestamp) { stripTimestamp = it }
-                StripPickerRow(stringResource(R.string.settings_strip_software), stripSoftware) { stripSoftware = it }
-                StripPickerRow(stringResource(R.string.settings_strip_authorship), stripAuthorship) { stripAuthorship = it }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    onConfirm(
-                        MetadataStripConfig(
-                            stripGps          = stripGps,
-                            stripCameraInfo   = stripCamera,
-                            stripTimestamp    = stripTimestamp,
-                            stripSoftwareInfo = stripSoftware,
-                            stripAuthorship   = stripAuthorship,
-                        )
-                    )
-                },
-                enabled = anyChecked,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = SheetBg,
+        scrimColor = Color.Black.copy(alpha = 0.5f),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+        ) {
+            Text(
+                stringResource(R.string.viewer_meta_strip_confirm_title),
+                color = colors.fgPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            StripPickerRow(stringResource(R.string.settings_strip_gps), stripGps) { stripGps = it }
+            StripPickerRow(stringResource(R.string.settings_strip_camera), stripCamera) { stripCamera = it }
+            StripPickerRow(stringResource(R.string.settings_strip_timestamp), stripTimestamp) { stripTimestamp = it }
+            StripPickerRow(stringResource(R.string.settings_strip_software), stripSoftware) { stripSoftware = it }
+            StripPickerRow(stringResource(R.string.settings_strip_authorship), stripAuthorship) { stripAuthorship = it }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.End,
             ) {
-                Text(
-                    stringResource(R.string.viewer_meta_strip),
-                    color = if (anyChecked) ErrorColor else colors.fgDim,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.cancel), color = colors.fgDim)
+                }
+                TextButton(
+                    onClick = {
+                        onConfirm(
+                            MetadataStripConfig(
+                                stripGps          = stripGps,
+                                stripCameraInfo   = stripCamera,
+                                stripTimestamp    = stripTimestamp,
+                                stripSoftwareInfo = stripSoftware,
+                                stripAuthorship   = stripAuthorship,
+                            )
+                        )
+                    },
+                    enabled = anyChecked,
+                ) {
+                    Text(
+                        stringResource(R.string.viewer_meta_strip),
+                        color = if (anyChecked) ErrorColor else colors.fgDim,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.cancel), color = colors.fgDim)
-            }
-        },
-    )
+        }
+    }
 }
 
 @Composable

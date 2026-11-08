@@ -31,6 +31,7 @@ import eu.akoos.photos.data.db.entity.ClusterSummaryEntity
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase.Target.Existing
@@ -182,6 +183,22 @@ class AssignFacesToPersonUseCaseTest {
             db.clusterSummaryDao().getAllForUser(acct).map { it.personId },
         )
         assertEquals(2, db.personDao().personById(1L)!!.faceCount)
+    }
+
+    @Test
+    fun `a source left with no faces but photos added by hand stays, counted by those photos`() = runTest {
+        person(1L, "Anna", faceCount = 3)
+        person(2L, "Bob", faceCount = 1)
+        face("p1#0", 1L, manualName = "Anna")
+        face("p9#0", 2L, manualName = "Bob")
+        db.personManualPhotoDao().add(listOf(PersonManualPhotoEntity(acct, "Anna", "m1"), PersonManualPhotoEntity(acct, "Anna", "m2")))
+
+        assign(user, listOf("p1#0"), Existing(2L), recluster = false)
+
+        val anna = db.personDao().personById(1L)
+        assertNotNull("Anna keeps her place in People", anna)
+        assertEquals("counted by her hand-added photos", 2, anna!!.faceCount)
+        assertEquals(2, db.personDao().personById(2L)!!.faceCount)
     }
 
     @Test

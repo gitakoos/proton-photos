@@ -35,7 +35,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
@@ -56,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.data.hidden.HiddenRescue
 import eu.akoos.photos.data.hidden.SignOutVaultChoice
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.DestructiveButton
 import eu.akoos.photos.presentation.common.SecondaryButton
 import eu.akoos.photos.presentation.theme.AppColors
@@ -78,7 +78,7 @@ internal fun SignOutVaultSheet(
 ) {
     val colors = AppColors.current
     var choice by remember { mutableStateOf(SignOutVaultChoice.MOVE_OUT) }
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,

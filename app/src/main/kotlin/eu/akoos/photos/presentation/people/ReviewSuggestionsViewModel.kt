@@ -24,11 +24,13 @@
 
 package eu.akoos.photos.presentation.people
 
+import eu.akoos.photos.domain.usecase.samePersonName
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import android.util.Log
 import androidx.room.withTransaction
+import eu.akoos.photos.data.face.PersonNameLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,10 +52,10 @@ import eu.akoos.photos.data.db.dao.PersonManualPhotoDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
-import eu.akoos.photos.domain.usecase.HideSimilarFacesUseCase
+import eu.akoos.photos.data.face.FaceEditCounter
+import eu.akoos.photos.domain.usecase.IgnorePeopleUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.isNameableCluster
-import eu.akoos.photos.domain.usecase.unpackEmbedding
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
 import javax.inject.Inject
@@ -75,7 +77,8 @@ class ReviewSuggestionsViewModel @Inject constructor(
     private val personDao: PersonDao,
     private val personManualPhotoDao: PersonManualPhotoDao,
     private val notPersonDao: NotPersonDao,
-    private val hideSimilarFaces: HideSimilarFacesUseCase,
+    private val ignorePeople: IgnorePeopleUseCase,
+    private val faceEdits: FaceEditCounter,
 ) : ViewModel() {
 
     /** One-shot user feedback (a string res id) for a bulk action that otherwise finishes with no
@@ -132,12 +135,15 @@ class ReviewSuggestionsViewModel @Inject constructor(
      * clusters are removed.
      */
     fun bulkMerge(clusterIds: Set<Long>, rawName: String) {
-        val name = rawName.trim()
-        if (clusterIds.isEmpty() || name.isEmpty()) return
+        val typed = rawName.trim()
+        if (clusterIds.isEmpty() || typed.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-                val existing = personDao.namedPeopleForUser(account).firstOrNull { it.displayName == name }
+                // A person already of this name, also one differing only in case, takes them in under its spelling.
+                val existing = personDao.namedPeopleForUser(account).filter { samePersonName(it.displayName, typed) }
+                    .let { same -> same.firstOrNull { it.displayName?.trim() == typed } ?: same.maxByOrNull { it.faceCount } }
+                val name = existing?.displayName?.trim() ?: typed
                 val target = existing?.id
                     ?: clusterIds.maxByOrNull { faceDao.faceCountForPerson(account, it) }
                     ?: return@launch
@@ -145,17 +151,22 @@ class ReviewSuggestionsViewModel @Inject constructor(
                 val manual = personManualPhotoDao.photoKeysForNameList(account, name)
                 // One transaction, so the people streams read the merged state once instead of after every
                 // statement, and a failure part-way leaves the clusters as they were.
-                appDatabase.withTransaction {
-                    if (faceIds.isNotEmpty()) {
-                        faceDao.reassignFacesToPerson(faceIds, target)
-                        faceDao.labelFacesByIds(faceIds, name)
+                faceEdits.edit {
+                    appDatabase.withTransaction {
+                        if (faceIds.isNotEmpty()) {
+                            faceDao.reassignFacesToPerson(faceIds, target)
+                            faceDao.labelFacesByIds(faceIds, name)
+                        }
+                        personDao.updateName(target, name)
+                        if (existing == null) {
+                            PersonNameLog.named(appDatabase.personNameDao(), account, name, System.currentTimeMillis())
+                        }
+                        val count = (faceDao.distinctPhotoKeysForPerson(account, target) + manual).toHashSet().size
+                        val cover = faceDao.topFaceForPerson(account, target)
+                        personDao.updateCoverAndCount(target, cover, count)
+                        for (id in clusterIds) if (id != target) personDao.updateCoverAndCount(id, null, 0)
+                        personDao.deleteEmpty(account)
                     }
-                    personDao.updateName(target, name)
-                    val count = (faceDao.distinctPhotoKeysForPerson(account, target) + manual).toHashSet().size
-                    val cover = faceDao.topFaceForPerson(account, target)
-                    personDao.updateCoverAndCount(target, cover, count)
-                    for (id in clusterIds) if (id != target) personDao.updateCoverAndCount(id, null, 0)
-                    personDao.deleteEmpty(account)
                 }
                 _message.value = R.string.person_msg_merged
             } catch (e: CancellationException) {
@@ -169,22 +180,15 @@ class ReviewSuggestionsViewModel @Inject constructor(
 
     /**
      * Mark the selected clusters as "not a person" (a statue, a poster, a repeated false detection):
-     * their faces are rejected, so they leave People and are skipped by every future clustering pass.
+     * their faces are rejected, with the same thing's look-alikes elsewhere, so they leave People and are
+     * skipped by every future clustering pass. One transaction ([IgnorePeopleUseCase]).
      */
     fun bulkNotPerson(clusterIds: Set<Long>) {
         if (clusterIds.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
-                for (id in clusterIds) {
-                    // Read the cluster's faces before rejecting them, so their mean can also sweep the same
-                    // thing out of any other cluster it landed in (a statue across many photos).
-                    val reference = faceDao.facesForPerson(account, id).map { unpackEmbedding(it.embedding) }
-                    faceDao.rejectAllForPerson(account, id)
-                    hideSimilarFaces(account, reference)
-                    personDao.updateCoverAndCount(id, null, 0)
-                }
-                personDao.deleteEmpty(account)
+                ignorePeople(account, clusterIds)
                 _message.value = R.string.person_msg_dismissed
             } catch (e: CancellationException) {
                 throw e

@@ -23,7 +23,6 @@
 package eu.akoos.photos.presentation.common
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -109,12 +108,11 @@ internal fun AppSearchField(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
             ) { focusRequester.requestFocus() }
-            .clip(RoundedCornerShape(14.dp))
-            .background(background)
-            .border(
-                1.dp,
-                if (query.isNotEmpty() || filtered) colors.accent else colors.line,
+            // Glass over the page where the host provides a backdrop, the plain fill elsewhere.
+            .pillSurface(
+                background,
                 RoundedCornerShape(14.dp),
+                border = if (query.isNotEmpty() || filtered) colors.accent else colors.line,
             )
             .padding(start = 12.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

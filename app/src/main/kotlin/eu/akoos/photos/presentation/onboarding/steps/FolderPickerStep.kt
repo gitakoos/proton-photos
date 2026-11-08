@@ -36,7 +36,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -79,7 +78,6 @@ internal fun FolderPickerStep(
         stringResource(R.string.onboarding_folders_include_subtitle)
     Column {
         StepHeader(
-            icon = Icons.Default.Folder,
             title = title,
             subtitle = subtitle,
         )

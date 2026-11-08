@@ -66,4 +66,23 @@ object FaceReaper {
         }
         return reap
     }
+
+    /**
+     * What happens to each of [reap], the keys [facesToReap] found gone. A device photo with a Drive copy
+     * ([cloudKeyOf], device uri to linkId) moves its face data onto that copy's key instead of losing it, as
+     * freeing up space leaves the backed-up photo in Drive alone; only when [cloudGone] says the Drive copy is
+     * gone as well is it dropped. Every other key is dropped.
+     */
+    fun planReap(reap: Set<String>, cloudKeyOf: Map<String, String>, cloudGone: (String) -> Boolean): ReapPlan {
+        val moves = LinkedHashMap<String, String>()
+        val drops = LinkedHashSet<String>()
+        for (key in reap) {
+            val cloudKey = cloudKeyOf[key]?.takeIf { it.isNotBlank() && it != key && !cloudGone(it) }
+            if (cloudKey != null) moves[key] = cloudKey else drops += key
+        }
+        return ReapPlan(moves, drops)
+    }
+
+    /** Device keys to move onto their Drive copy's key, and the keys whose face data goes. */
+    data class ReapPlan(val moves: Map<String, String>, val drops: Set<String>)
 }

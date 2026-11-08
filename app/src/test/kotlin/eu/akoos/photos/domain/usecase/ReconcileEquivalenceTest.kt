@@ -153,7 +153,7 @@ class ReconcileEquivalenceTest {
                 // The fixture must reach every write the pass can make, or agreeing proves little.
                 val calls = reference.calls.joinToString("\n")
                 for (expected in listOf(
-                    "demote ", "clearQueuedForSynced ", "|CLOUD_ONLY|", "guardedUpdate ", "markQueued ",
+                    "demote ", "markRemovedFromDrive ", "|CLOUD_ONLY|", "guardedUpdate ", "markQueued ",
                     " ALBUM_ADD now", " AUTO_FOLDER now", "deleteLocalOnly ", "clearQueued content",
                 )) {
                     assertTrue("the rules fixture never reached '$expected'", expected in calls)
@@ -602,6 +602,11 @@ class ReconcileEquivalenceTest {
         override suspend fun clearQueued(localUri: String) {
             calls += "clearQueued $localUri"
             real.clearQueued(localUri)
+        }
+
+        override suspend fun markRemovedFromDrive(localUri: String) {
+            calls += "markRemovedFromDrive $localUri"
+            real.markRemovedFromDrive(localUri)
         }
 
         override suspend fun clearQueuedForSynced(localUri: String) {

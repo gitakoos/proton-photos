@@ -47,6 +47,8 @@ internal data class FaceRekeyMergePlan(
     val moved: Map<String, String>,
     /** Name to the cloud faces the device side confirms as it. */
     val confirm: Map<String, List<String>>,
+    /** Person to the ungrouped cloud faces the device side's automatic grouping puts with them, unconfirmed. */
+    val group: Map<Long, List<String>> = emptyMap(),
     /** Cloud faces the device side removes from People. */
     val remove: List<String>,
     /** Not-a-person marks the device side carries onto the faces that stay, none already present. */
@@ -96,6 +98,8 @@ internal fun planFaceRekeyMerge(
     val cloudById = cloud.associateBy { it.id }
     val cloudBlocked = cloudMarks.groupBy({ it.faceId }, { it.personName })
     val confirm = LinkedHashMap<String, MutableList<String>>()
+    val group = LinkedHashMap<Long, MutableList<String>>()
+    val personIdByName = namedPeople.entries.associate { (id, name) -> name to id }
     val remove = ArrayList<String>()
     val confirmedAfter = HashMap<String, String?>()
     for (face in device) {
@@ -116,6 +120,7 @@ internal fun planFaceRekeyMerge(
         )
         when (change) {
             is FaceMergeChange.Confirm -> confirm.getOrPut(change.name) { ArrayList() } += cloudId
+            is FaceMergeChange.Group -> personIdByName[change.name]?.let { group.getOrPut(it) { ArrayList() } += cloudId }
             FaceMergeChange.Remove -> remove += cloudId
             FaceMergeChange.Keep -> Unit
         }
@@ -156,12 +161,14 @@ internal fun planFaceRekeyMerge(
     device.mapNotNullTo(people) { it.personId }
     remove.mapNotNullTo(people) { cloudById[it]?.personId }
     people += covers.keys
+    people += group.keys
     for ((personId, name) in namedPeople) if (name in deviceManualNames) people += personId
 
     return FaceRekeyMergePlan(
         merged = merged,
         moved = moved,
         confirm = confirm,
+        group = group,
         remove = remove,
         marks = marks,
         covers = covers,

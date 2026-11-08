@@ -175,7 +175,12 @@ internal fun DrawScope.drawGlobeBase(style: BaseStyle, baseView: BaseView) {
     }
     drawPath(landPath, style.land)
     drawPath(tintPath, style.highlight, alpha = 0.28f)
-    if (radius >= PROVINCE_MIN_RADIUS) {
+    // While the globe turns, every border is a hairline: a stroke with a width is cut into triangles anew each
+    // frame, which on a globe showing whole continents took most of a frame; a hairline is drawn as it is and
+    // looks the same at this width. The province borders, finer still, wait until it settles.
+    val moving = baseView.moving
+    fun lineWidth(settled: Float): Float = if (moving) 0f else settled
+    if (radius >= PROVINCE_MIN_RADIUS && !moving) {
         val provincePath = Path()
         for (ring in detail.provinceRings) {
             if (!ringMayShow(ring, view, PROVINCE_MIN_PX)) continue
@@ -183,8 +188,8 @@ internal fun DrawScope.drawGlobeBase(style: BaseStyle, baseView: BaseView) {
         }
         drawPath(provincePath, style.border, alpha = 0.9f, style = Stroke(width = 1.2f * density))
     }
-    drawPath(tintBorderPath, style.highlight, alpha = 0.85f, style = Stroke(width = 1.4f * density))
-    drawPath(borderPath, style.border, style = Stroke(width = (1.1f + (baseView.zoom - 1f) * 0.05f).coerceAtMost(3f)))
+    drawPath(tintBorderPath, style.highlight, alpha = 0.85f, style = Stroke(width = lineWidth(1.4f * density)))
+    drawPath(borderPath, style.border, style = Stroke(width = lineWidth((1.1f + (baseView.zoom - 1f) * 0.05f).coerceAtMost(3f))))
     // Visited countries get a thicker accent outline: "you have been here".
     drawPath(
         highlightBorderPath, style.highlight, alpha = 0.9f,

@@ -102,6 +102,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val personCoverDao: eu.akoos.photos.data.db.dao.PersonCoverDao,
     private val personManualPhotoDao: eu.akoos.photos.data.db.dao.PersonManualPhotoDao,
     private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
+    private val personNameDao: eu.akoos.photos.data.db.dao.PersonNameDao,
+    private val faceCurationTimeDao: eu.akoos.photos.data.db.dao.FaceCurationTimeDao,
     private val photoLabels: eu.akoos.photos.data.label.PhotoLabelRepository,
     private val photoListingDao: PhotoListingDao,
     private val listingSweepSnapshotDao: ListingSweepSnapshotDao,
@@ -558,6 +560,9 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { personCoverDao.clearForUser(userId.id) }
         runCatching { personManualPhotoDao.clearForUser(userId.id) }
         runCatching { clusterSummaryDao.clearForUser(userId.id) }
+        runCatching { personNameDao.clearStates(userId.id) }
+        runCatching { personNameDao.clearChanges(userId.id) }
+        runCatching { faceCurationTimeDao.clearForUser(userId.id) }
         // The account's photo labels are its own private notes about its photos and leave with it.
         runCatching { photoLabels.clearForUser(userId) }
         // What the account queued and imported is free text and coordinates (descriptions, places, file

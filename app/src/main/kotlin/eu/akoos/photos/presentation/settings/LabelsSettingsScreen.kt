@@ -37,8 +37,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.LaunchedEffect
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.SearchFieldTerm
 import eu.akoos.photos.presentation.common.SearchTermPill
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.settings.components.ActionRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -70,7 +73,6 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -206,52 +208,56 @@ fun LabelsSettingsScreen(
         if (locked) whenLocked() else viewModel.create(text) { result -> if (result != null) query = "" }
     }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(start = 20.dp, end = 20.dp, top = floatingHeaderContentTopPadding(), bottom = 16.dp + navBottom),
-        ) {
-            LabelsCard(
-                labels = shown,
-                query = query,
-                onQueryChange = { query = renameFieldText(it) },
-                toCreate = toCreate,
-                locked = locked,
-                onCreate = create,
-                picked = picked,
-                onClick = { usage ->
-                    when {
-                        locked -> whenLocked()
-                        selecting -> picked = toggledLabelSelection(picked, usage.labelKey)
-                        else -> editing = usage
-                    }
-                },
-                onLongClick = { usage ->
-                    if (locked) whenLocked() else picked = toggledLabelSelection(picked, usage.labelKey)
-                },
-                modifier = Modifier.weight(1f),
-            )
-            if (selecting) {
-                LabelSelectionPanel(
-                    labels = selectedLabels(picked, labels.orEmpty()),
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 20.dp, end = 20.dp, top = floatingHeaderContentTopPadding(), bottom = 16.dp + navBottom),
+            ) {
+                LabelsCard(
+                    labels = shown,
+                    query = query,
+                    onQueryChange = { query = renameFieldText(it) },
+                    toCreate = toCreate,
                     locked = locked,
-                    onDeselect = { key -> picked = toggledLabelSelection(picked, key) },
-                    onAddPhotos = {
-                        val names = selectedLabels(picked, labels.orEmpty()).map { it.label }
-                        picked = emptyList()
-                        onAddPhotos(names)
+                    onCreate = create,
+                    picked = picked,
+                    onClick = { usage ->
+                        when {
+                            locked -> whenLocked()
+                            selecting -> picked = toggledLabelSelection(picked, usage.labelKey)
+                            else -> editing = usage
+                        }
                     },
-                    onDelete = { deletingPicked = true },
-                    onClose = { picked = emptyList() },
+                    onLongClick = { usage ->
+                        if (locked) whenLocked() else picked = toggledLabelSelection(picked, usage.labelKey)
+                    },
+                    modifier = Modifier.weight(1f),
                 )
-            } else {
-                LabelBackupSection(viewModel)
+                if (selecting) {
+                    LabelSelectionPanel(
+                        labels = selectedLabels(picked, labels.orEmpty()),
+                        locked = locked,
+                        onDeselect = { key -> picked = toggledLabelSelection(picked, key) },
+                        onAddPhotos = {
+                            val names = selectedLabels(picked, labels.orEmpty()).map { it.label }
+                            picked = emptyList()
+                            onAddPhotos(names)
+                        },
+                        onDelete = { deletingPicked = true },
+                        onClose = { picked = emptyList() },
+                    )
+                } else {
+                }
             }
         }
 
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.label_section_title),
             onBack = { if (selecting) confirmLeave = true else onBack() },
         )
@@ -311,7 +317,11 @@ fun LabelsSettingsScreen(
 
     deleting?.let { usage ->
         ConfirmDialog(
-            title = pluralStringResource(R.plurals.label_delete_confirm_title, usage.count, usage.count),
+            title = if (usage.count == 0) {
+                stringResource(R.string.label_delete_unused_title)
+            } else {
+                pluralStringResource(R.plurals.label_delete_confirm_title, usage.count, usage.count)
+            },
             message = null,
             confirmLabel = stringResource(R.string.label_delete_confirm),
             dismissLabel = stringResource(R.string.cancel),
@@ -580,7 +590,7 @@ private fun RenameLabelSheet(
             LabelRenamePlan.None -> Unit
         }
     }
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,

@@ -42,6 +42,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import eu.akoos.photos.domain.usecase.CloudPhotoReplacement
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -201,7 +202,7 @@ class MetadataEditWorker @AssistedInject constructor(
         // case still trashes the original only after its replacement is verified and re-added, so
         // running several of these at once never weakens the per-photo safety; it only overlaps their
         // network I/O. Each cloud item downloads to a per-photo working file, so the copies never clash.
-        suspend fun processRow(row: PendingMetadataEditEntity) {
+        suspend fun processClaimedRow(row: PendingMetadataEditEntity) {
             val photo = driveRepo.observePhotosByLinkIds(listOf(row.linkId)).first().firstOrNull()
             if (photo == null) {
                 // The listing row is gone (trashed or deleted elsewhere). Drop the pending edit so it
@@ -287,6 +288,24 @@ class MetadataEditWorker @AssistedInject constructor(
             done.incrementAndGet()
             runCatching { transferCenter.progress(transferId, done.get()) }
             publish(CloudSavePhase.FINISHING)
+        }
+
+        // A compression of the same photo replaces it too. While one runs the edit is kept for the next run;
+        // the compression points the edit at its smaller copy when it finishes.
+        suspend fun processRow(row: PendingMetadataEditEntity) {
+            if (!CloudPhotoReplacement.Claims.tryClaim(row.linkId)) {
+                kept.set(true)
+                transferCenter.setItemStatus(transferId, row.linkId, null)
+                done.incrementAndGet()
+                runCatching { transferCenter.progress(transferId, done.get()) }
+                publish(CloudSavePhase.FINISHING)
+                return
+            }
+            try {
+                processClaimedRow(row)
+            } finally {
+                CloudPhotoReplacement.Claims.release(row.linkId)
+            }
         }
 
         return try {

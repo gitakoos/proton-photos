@@ -73,6 +73,8 @@ import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.ErrorPopup
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import eu.akoos.photos.presentation.gallery.SyncedCloudBadge
 import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.common.FloatingHeader
@@ -119,145 +121,150 @@ fun FreeUpSpaceScreen(
             title = stringResource(R.string.settings_storage_free_up),
             message = message,
             onDismiss = viewModel::clearMessage,
+            isError = state.messageIsError,
         )
     }
 
+    // The page as its floating header frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(modifier = Modifier.fillMaxSize().background(colors.pageBg)) {
         val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val contentTop = floatingHeaderContentTopPadding()
 
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
-            modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
-            contentPadding = PaddingValues(top = contentTop, bottom = navBottom + 24.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Column {
-                    SettingsCard {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            when {
-                                state.loading -> Text(
-                                    stringResource(R.string.free_up_checking),
-                                    color = colors.fgDim,
-                                    fontSize = 13.sp,
-                                )
-                                state.isEmpty -> Text(
-                                    stringResource(R.string.settings_free_up_none),
-                                    color = colors.fgDim,
-                                    fontSize = 13.sp,
-                                )
-                                else -> {
-                                    Text(
-                                        pluralStringResource(
-                                            R.plurals.free_up_summary,
-                                            state.candidates.size,
-                                            state.candidates.size,
-                                            formatBytes(state.reclaimableBytes),
-                                        ),
-                                        color = colors.fgPrimary,
-                                        fontSize = 14.5.sp,
-                                        fontWeight = FontWeight.Medium,
+        Box(Modifier.fillMaxSize().glassSource(glass)) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                contentPadding = PaddingValues(top = contentTop, bottom = navBottom + 24.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column {
+                        SettingsCard {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                when {
+                                    state.loading -> Text(
+                                        stringResource(R.string.free_up_checking),
+                                        color = colors.fgDim,
+                                        fontSize = 13.sp,
                                     )
-                                    Spacer(Modifier.height(6.dp))
+                                    state.isEmpty -> Text(
+                                        stringResource(R.string.settings_free_up_none),
+                                        color = colors.fgDim,
+                                        fontSize = 13.sp,
+                                    )
+                                    else -> {
+                                        Text(
+                                            pluralStringResource(
+                                                R.plurals.free_up_summary,
+                                                state.candidates.size,
+                                                state.candidates.size,
+                                                formatBytes(state.reclaimableBytes),
+                                            ),
+                                            color = colors.fgPrimary,
+                                            fontSize = 14.5.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            stringResource(R.string.free_up_explainer),
+                                            color = colors.fgDim,
+                                            fontSize = 12.5.sp,
+                                        )
+                                    }
+                                }
+                                if (state.running) {
+                                    Spacer(Modifier.height(14.dp))
                                     Text(
-                                        stringResource(R.string.free_up_explainer),
+                                        // The Drive check has nothing to count, so it says what it is
+                                        // doing rather than showing a bar sitting at zero.
+                                        if (state.verifying) {
+                                            stringResource(R.string.free_up_verifying)
+                                        } else {
+                                            stringResource(R.string.free_up_progress, state.done, state.total)
+                                        },
                                         color = colors.fgDim,
                                         fontSize = 12.5.sp,
                                     )
-                                }
-                            }
-                            if (state.running) {
-                                Spacer(Modifier.height(14.dp))
-                                Text(
-                                    // The Drive check has nothing to count, so it says what it is
-                                    // doing rather than showing a bar sitting at zero.
+                                    Spacer(Modifier.height(8.dp))
                                     if (state.verifying) {
-                                        stringResource(R.string.free_up_verifying)
+                                        LinearProgressIndicator(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = colors.accent,
+                                        )
                                     } else {
-                                        stringResource(R.string.free_up_progress, state.done, state.total)
-                                    },
-                                    color = colors.fgDim,
-                                    fontSize = 12.5.sp,
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                if (state.verifying) {
-                                    LinearProgressIndicator(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = colors.accent,
-                                    )
-                                } else {
-                                    LinearProgressIndicator(
-                                        progress = {
-                                            if (state.total > 0) state.done.toFloat() / state.total else 0f
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = colors.accent,
-                                    )
-                                }
-                                Spacer(Modifier.height(8.dp))
-                                Text(
-                                    stringResource(R.string.free_up_leaving_stops),
-                                    color = colors.fgMute,
-                                    fontSize = 11.5.sp,
-                                )
-                            }
-                        }
-                    }
-                    if (!state.loading && !state.isEmpty) {
-                        Spacer(Modifier.height(12.dp))
-                        SettingsCard {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable(enabled = !state.running) { showConfirm = true }
-                                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(
-                                    stringResource(R.string.settings_storage_free_up),
-                                    color = if (state.running) colors.fgMute else colors.accent,
-                                    fontSize = 14.5.sp,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                if (state.running) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp,
-                                        color = colors.accent,
+                                        LinearProgressIndicator(
+                                            progress = {
+                                                if (state.total > 0) state.done.toFloat() / state.total else 0f
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            color = colors.accent,
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        stringResource(R.string.free_up_leaving_stops),
+                                        color = colors.fgMute,
+                                        fontSize = 11.5.sp,
                                     )
                                 }
                             }
                         }
+                        if (!state.loading && !state.isEmpty) {
+                            Spacer(Modifier.height(12.dp))
+                            SettingsCard {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(enabled = !state.running) { showConfirm = true }
+                                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        stringResource(R.string.settings_storage_free_up),
+                                        color = if (state.running) colors.fgMute else colors.accent,
+                                        fontSize = 14.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                    if (state.running) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = colors.accent,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(16.dp))
                     }
-                    Spacer(Modifier.height(16.dp))
                 }
-            }
 
-            items(state.candidates, key = { it.localUri }) { row ->
-                Box(
-                    modifier = Modifier
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(colors.cardBg),
-                ) {
-                    AsyncImage(
-                        model = row.localUri,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    // The same badge the timeline draws, from the same composable. The point of this
-                    // screen is that the user can see each photo has a Drive copy before its device
-                    // copy goes, and a lookalike drawn here could drift from the real one.
-                    SyncedCloudBadge()
+                items(state.candidates, key = { it.localUri }) { row ->
+                    Box(
+                        modifier = Modifier
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(colors.cardBg),
+                    ) {
+                        AsyncImage(
+                            model = row.localUri,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        // The same badge the timeline draws, from the same composable. The point of this
+                        // screen is that the user can see each photo has a Drive copy before its device
+                        // copy goes, and a lookalike drawn here could drift from the real one.
+                        SyncedCloudBadge()
+                    }
                 }
             }
         }
 
-        FloatingHeader(title = stringResource(R.string.settings_storage_free_up), onBack = onBack)
+        FloatingHeader(backdrop = glass, title = stringResource(R.string.settings_storage_free_up), onBack = onBack)
     }
 
     if (showConfirm) {

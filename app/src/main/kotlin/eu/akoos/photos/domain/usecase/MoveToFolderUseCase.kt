@@ -60,6 +60,7 @@ data class PendingMove(val uris: List<String>, val folderName: String)
  */
 class MoveToFolderUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val albumFollow: FolderMoveAlbumFollow,
 ) {
     sealed interface Result {
         /** [count] rows were relocated in place. */
@@ -107,13 +108,20 @@ class MoveToFolderUseCase @Inject constructor(
         Log.d(TAG, "move: uris=${uris.size} parsed=${parsed.size} -> $relPath")
 
         var moved = 0
+        // The folder each moved photo left and its name, read before the move, so the Drive albums of mirrored
+        // folders can follow it (see [FolderMoveAlbumFollow]).
+        val movedPhotos = mutableListOf<MovedPhoto>()
         val foreign = mutableListOf<ForeignUri>()
         for ((uriString, uri) in parsed) {
             try {
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
                 }
-                if (context.contentResolver.update(uri, values, null, null) > 0) moved++
+                val before = bucketAndNameOf(uri)
+                if (context.contentResolver.update(uri, values, null, null) > 0) {
+                    moved++
+                    movedPhotos += MovedPhoto(uriString, before?.bucket, before?.name, before?.takenMs)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SecurityException) {
@@ -123,6 +131,10 @@ class MoveToFolderUseCase @Inject constructor(
             } catch (e: Exception) {
                 Log.w(TAG, "Move failed for one uri", e)
             }
+        }
+
+        if (movedPhotos.isNotEmpty()) {
+            albumFollow.onPhotosMoved(movedPhotos, relPath.removePrefix("DCIM/").removeSuffix("/"))
         }
 
         if (foreign.isNotEmpty()) {
@@ -138,6 +150,23 @@ class MoveToFolderUseCase @Inject constructor(
 
         return if (moved > 0) Result.Moved(moved) else Result.NothingToDo
     }
+
+    /** The device folder (MediaStore bucket name) [uri] is in now and its file name, or null when unreadable. */
+    private data class Before(val bucket: String?, val name: String?, val takenMs: Long?)
+
+    private fun bucketAndNameOf(uri: Uri): Before? = runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(
+                MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.DATE_TAKEN,
+            ),
+            null, null, null,
+        )?.use { c ->
+            if (c.moveToFirst()) Before(c.getString(0), c.getString(1), if (c.isNull(2)) null else c.getLong(2)) else null
+        }
+    }.getOrNull()
 
     /**
      * The system write-consent request covering the [foreign] files. Android 11+ batches them all into

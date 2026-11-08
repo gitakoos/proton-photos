@@ -66,6 +66,7 @@ internal fun deviceBuckets(items: List<LocalMediaItem>): List<DeviceBucket> =
 class SyncFoldersViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localMediaRepo: LocalMediaRepository,
+    private val folderAlbumBackfill: eu.akoos.photos.domain.usecase.FolderAlbumBackfill,
 ) : ViewModel() {
 
     data class SyncFolder(
@@ -233,6 +234,7 @@ class SyncFoldersViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it.putAlbumMirrorFolders(next) }
         }
+        if (folderName in next) folderAlbumBackfill.onAlbumTurnedOn(folderName)
     }
 
     fun selectAll() {

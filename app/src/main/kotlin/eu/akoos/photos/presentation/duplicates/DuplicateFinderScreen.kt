@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.ConfirmDialog
 import eu.akoos.photos.presentation.common.SelectionAction
 import eu.akoos.photos.presentation.common.SelectionDrawer
@@ -75,7 +76,6 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -100,6 +100,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.delay
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -169,6 +171,8 @@ fun DuplicateFinderScreen(
     }
 
     val colors = AppColors.current
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(colors.pageBg)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -313,7 +317,7 @@ fun DuplicateFinderScreen(
                 )
             else -> LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.glassSource(glass).fillMaxSize(),
                 contentPadding = PaddingValues(
                     16.dp, contentTopPad, 16.dp,
                     // Reserve the selection drawer's resting height (its handle, count row, thumbnail
@@ -467,6 +471,7 @@ fun DuplicateFinderScreen(
         // Ticking all but the first of groups the user chose to leave alone would work against that choice.
         val showSelectAllButFirst = listedGroups.isNotEmpty() && !showIgnored
         FloatingHeader(
+            backdrop = glass,
             title = stringResource(R.string.duplicates_title),
             onBack = confirmedOnBack,
             trailing = {
@@ -507,6 +512,7 @@ fun DuplicateFinderScreen(
         // copies ride in its strip, its single Delete action removes them across every group at once,
         // and its close bubble clears the whole selection. This replaces the per-group card delete.
         SelectionDrawer(
+            backdrop = glass,
             visible = selectedItems.isNotEmpty(),
             items = selectedItems,
             actions = listOf(
@@ -597,7 +603,7 @@ fun DuplicateFinderScreen(
         }
 
         if (showFilterSheet) {
-            ModalBottomSheet(
+            AppModalSheet(
                 onDismissRequest = { showFilterSheet = false },
                 sheetState = filterSheetState,
                 containerColor = colors.sheetBg,

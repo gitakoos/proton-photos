@@ -50,6 +50,9 @@ enum class SdkRoute(val label: String, val key: Preferences.Key<Boolean>) {
     TRASH("trash", SettingsKeys.SDK_ROUTE_TRASH),
     DOWNLOAD("download", SettingsKeys.SDK_ROUTE_DOWNLOAD),
     UPLOAD("upload", SettingsKeys.SDK_ROUTE_UPLOAD),
+    ALBUMS("albums", SettingsKeys.SDK_ROUTE_ALBUMS),
+    EVENTS("events", SettingsKeys.SDK_ROUTE_EVENTS),
+    SHARED("shared", SettingsKeys.SDK_ROUTE_SHARED),
 }
 
 /**

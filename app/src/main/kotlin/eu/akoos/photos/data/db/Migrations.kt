@@ -780,5 +780,95 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40, MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48)
+    /** v48 to v49: the shared backup's change times. `photo_label_state` holds when each photo's labels last
+     *  changed (seeded from the newest label row of each photo), `photo_label_deleted` the labels deleted and
+     *  when, and `drive_copy_applied` which copy of each other install's data was taken in last. */
+    val MIGRATION_48_49 = object : Migration(48, 49) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `photo_label_state` (`userId` TEXT NOT NULL, `photoKey` TEXT NOT NULL, " +
+                    "`changedAt` INTEGER NOT NULL, PRIMARY KEY(`userId`, `photoKey`))"
+            )
+            db.execSQL(
+                "INSERT OR IGNORE INTO `photo_label_state` (`userId`, `photoKey`, `changedAt`) " +
+                    "SELECT `userId`, `photoKey`, MAX(`updatedAt`) FROM `photo_label` GROUP BY `userId`, `photoKey`"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `photo_label_deleted` (`userId` TEXT NOT NULL, `labelKey` TEXT NOT NULL, " +
+                    "`label` TEXT NOT NULL, `deletedAt` INTEGER NOT NULL, PRIMARY KEY(`userId`, `labelKey`))"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `drive_copy_applied` (`userId` TEXT NOT NULL, `kind` TEXT NOT NULL, " +
+                    "`deviceId` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`userId`, `kind`, `deviceId`))"
+            )
+        }
+    }
+
+    /**
+     * v49 -> v50: when each named person got their name and the renames and merges made since, so the shared
+     * face copy lets a later rename or merge made on one install win on the others. Both start empty: a name
+     * given before reads as 0, which any change made from now on outranks.
+     */
+    val MIGRATION_49_50 = object : Migration(49, 50) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `person_name_state` (`userId` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+                    "`namedAt` INTEGER NOT NULL, PRIMARY KEY(`userId`, `name`))"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `person_name_change` (`userId` TEXT NOT NULL, `fromName` TEXT NOT NULL, " +
+                    "`toName` TEXT NOT NULL, `changedAt` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`userId`, `fromName`, `toName`, `changedAt`))"
+            )
+        }
+    }
+
+    /**
+     * v50 -> v51: when each piece of a named person's curation (an attached photo, a "not this person" mark, the
+     * cover) was last changed by hand, removals included, so the shared face copy lets the later change win on
+     * every install. Starts empty: what is there now reads as changed at 0.
+     */
+    val MIGRATION_50_51 = object : Migration(50, 51) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `face_curation_time` (`userId` TEXT NOT NULL, `kind` INTEGER NOT NULL, " +
+                    "`personName` TEXT NOT NULL, `ref` TEXT NOT NULL, `removed` INTEGER NOT NULL, " +
+                    "`changedAt` INTEGER NOT NULL, PRIMARY KEY(`userId`, `kind`, `personName`, `ref`))"
+            )
+        }
+    }
+
+    /**
+     * v51 -> v52: the queue of photos and videos on Drive waiting to be compressed in place, one row per
+     * photo, drained a slice at a time by the compression worker.
+     */
+    val MIGRATION_51_52 = object : Migration(51, 52) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `pending_cloud_compress` (`linkId` TEXT NOT NULL, `userId` TEXT NOT NULL, " +
+                    "`enqueuedAt` INTEGER NOT NULL, `newLinkId` TEXT, `attemptRun` TEXT, PRIMARY KEY(`linkId`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_pending_cloud_compress_enqueuedAt` ON `pending_cloud_compress` (`enqueuedAt`)"
+            )
+        }
+    }
+
+    /** v52 -> v53: a photo's own count of failed compression tries, so a long batch gives up on a photo by
+     *  its own failures rather than by how many runs the whole batch took. */
+    val MIGRATION_52_53 = object : Migration(52, 53) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `pending_cloud_compress` ADD COLUMN `attempts` INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    /** v53 -> v54: whether a queued compression already moved the original's labels and faces to its copy,
+     *  so a later failure never takes that copy back. */
+    val MIGRATION_53_54 = object : Migration(53, 54) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `pending_cloud_compress` ADD COLUMN `carriedOver` INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25, MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31, MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36, MIGRATION_36_37, MIGRATION_37_38, MIGRATION_38_39, MIGRATION_39_40, MIGRATION_40_41, MIGRATION_41_42, MIGRATION_42_43, MIGRATION_43_44, MIGRATION_44_45, MIGRATION_45_46, MIGRATION_46_47, MIGRATION_47_48, MIGRATION_48_49, MIGRATION_49_50, MIGRATION_50_51, MIGRATION_51_52, MIGRATION_52_53, MIGRATION_53_54)
 }

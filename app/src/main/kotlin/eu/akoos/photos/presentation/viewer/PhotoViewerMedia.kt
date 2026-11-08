@@ -28,6 +28,7 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -35,6 +36,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -67,6 +70,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -91,6 +96,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -102,6 +108,7 @@ import androidx.media3.exoplayer.SeekParameters
 import androidx.media3.ui.PlayerView
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.decoderFallbackRenderersFactory
+import eu.akoos.photos.presentation.common.pillSurface
 import eu.akoos.photos.presentation.common.rememberVideoFilmstripFrames
 import eu.akoos.photos.presentation.theme.FgPrimary
 import androidx.compose.ui.graphics.toArgb
@@ -295,8 +302,7 @@ internal fun VideoControlPill(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp)
-            .background(PillBgOpaque, infoPillShape)
-            .border(0.5.dp, PillBorder, infoPillShape)
+            .pillSurface(PillBgOpaque, infoPillShape, border = PillBorder)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -314,7 +320,8 @@ internal fun VideoControlPill(
             Icon(
                 if (videoStarted && isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 // FgPrimary (not white): the pill goes near-white in light mode.
-                null, tint = FgPrimary, modifier = Modifier.size(20.dp),
+                stringResource(if (videoStarted && isPlaying) R.string.cd_video_pause else R.string.cd_video_play),
+                tint = FgPrimary, modifier = Modifier.size(20.dp),
             )
         }
 
@@ -391,7 +398,8 @@ internal fun VideoControlPill(
         ) {
             Icon(
                 if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                null, tint = FgPrimary.copy(alpha = if (videoStarted) 1f else 0.4f),
+                stringResource(if (isMuted) R.string.video_editor_unmute else R.string.video_editor_mute),
+                tint = FgPrimary.copy(alpha = if (videoStarted) 1f else 0.4f),
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -641,3 +649,154 @@ private fun PanoramaHintArrow(
         )
     }
 }
+
+/** What a double tap on a video does: the outer thirds seek, the middle zooms as it does on a photo. */
+internal enum class VideoDoubleTap { Back, Zoom, Forward }
+
+/** How far one double tap on a video's side seeks. */
+internal const val VIDEO_SEEK_STEP_MS = 10_000L
+
+/** What a double tap at [x] across a viewer [width] px wide does on a video shown at [scale]: zoomed in, it zooms back out. */
+internal fun videoDoubleTap(x: Float, width: Float, scale: Float): VideoDoubleTap = when {
+    scale > 1f || width <= 0f -> VideoDoubleTap.Zoom
+    x < width / 3f -> VideoDoubleTap.Back
+    x > width * 2f / 3f -> VideoDoubleTap.Forward
+    else -> VideoDoubleTap.Zoom
+}
+
+/** Where a seek of [deltaMs] from [positionMs] lands, inside the clip; [durationMs] is zero or less while not known. */
+internal fun videoSeekTarget(positionMs: Long, deltaMs: Long, durationMs: Long): Long {
+    val target = (positionMs + deltaMs).coerceAtLeast(0L)
+    return if (durationMs > 0) target.coerceAtMost(durationMs) else target
+}
+
+/** The speeds a held side can play a video at, fastest first. */
+internal val VIDEO_HOLD_SPEEDS = listOf(2f, 1.75f, 1.5f, 1.25f)
+
+/**
+ * The fastest hold speed at which a video of [fps] frames a second stays inside [decodableFps], the frame rate this
+ * device's decoder is measured to keep up for its size; the full speed when either is not known. Switching speed
+ * while held stalls the picture, so it is chosen once: a 4K 60 fps clip plays at 1.5x where it would stall at 2x.
+ */
+internal fun videoHoldSpeedFor(fps: Float, decodableFps: Double?): Float =
+    if (fps <= 0f || decodableFps == null || decodableFps <= 0.0) {
+        VIDEO_HOLD_SPEEDS.first()
+    } else {
+        VIDEO_HOLD_SPEEDS.firstOrNull { fps * it <= decodableFps } ?: VIDEO_HOLD_SPEEDS.last()
+    }
+
+/** The lowest frame rate this device's decoders are measured to reach for a [width] x [height] [mime] video, or null. */
+internal fun decodableFrameRate(mime: String?, width: Int, height: Int): Double? {
+    if (mime == null || width <= 0 || height <= 0) return null
+    val key = "$mime $width x $height"
+    decodableFrameRates[key]?.let { return it.takeIf { r -> r > 0.0 } }
+    val found = runCatching {
+        android.media.MediaCodecList(android.media.MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { !it.isEncoder && it.supportedTypes.any { t -> t.equals(mime, ignoreCase = true) } }
+            .sortedByDescending { android.os.Build.VERSION.SDK_INT >= 29 && it.isHardwareAccelerated }
+            .firstNotNullOfOrNull { info ->
+                runCatching { info.getCapabilitiesForType(mime).videoCapabilities?.getAchievableFrameRatesFor(width, height)?.lower }
+                    .getOrNull()
+            }
+    }.getOrNull()
+    decodableFrameRates[key] = found ?: 0.0
+    return found
+}
+
+/** What [decodableFrameRate] found per type and size; the codec list is slow to read on every hold. */
+private val decodableFrameRates = java.util.concurrent.ConcurrentHashMap<String, Double>()
+
+/** The speed a held side plays [player]'s current video at, by its size, frame rate and this device's decoder. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+internal fun videoHoldSpeedOf(player: ExoPlayer): Float {
+    val format = player.videoFormat ?: return VIDEO_HOLD_SPEEDS.first()
+    return videoHoldSpeedFor(format.frameRate, decodableFrameRate(format.sampleMimeType, format.width, format.height))
+}
+
+/** A held speed as the label writes it: 2, 1.75, 1.5 with the locale's decimal mark. */
+internal fun videoHoldSpeedText(speed: Float, locale: java.util.Locale): String =
+    java.text.DecimalFormat("0.##", java.text.DecimalFormatSymbols.getInstance(locale)).format(speed)
+
+/** Whether holding a press at [x] on a video plays it faster: the outer thirds do, the middle keeps its long press. */
+internal fun videoHoldPlaysFaster(x: Float, width: Float, scale: Float): Boolean =
+    videoDoubleTap(x, width, scale) != VideoDoubleTap.Zoom
+
+/** The "2x" label at the top while a held side plays the video faster, with the speed it plays at. */
+@Composable
+internal fun VideoHoldSpeedLabel(speed: Float?, modifier: Modifier = Modifier) {
+    var last by remember { mutableStateOf(speed ?: VIDEO_HOLD_SPEEDS.first()) }
+    if (speed != null) last = speed
+    val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    Box(modifier = modifier.fillMaxSize().padding(top = 120.dp), contentAlignment = Alignment.TopCenter) {
+        AnimatedVisibility(visible = speed != null, enter = fadeIn(tween(120)), exit = fadeOut(tween(200))) {
+            Row(
+                modifier = Modifier
+                    .pillSurface(PillBg, infoPillShape, border = PillBorder)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    stringResource(R.string.viewer_video_hold_speed, videoHoldSpeedText(last, locale)),
+                    color = FgPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Icon(Icons.Default.FastForward, null, tint = FgPrimary, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+/** The seek label of a run of double taps on one side; [tick] restarts its timer on every tap. */
+internal data class VideoSeekFlash(val forward: Boolean, val seconds: Int, val tick: Long)
+
+/** The label after a double tap: a tap on the side whose label still shows adds a step, the other side starts over. */
+internal fun nextVideoSeekFlash(shown: VideoSeekFlash?, forward: Boolean): VideoSeekFlash {
+    val step = (VIDEO_SEEK_STEP_MS / 1000).toInt()
+    val seconds = if (shown != null && shown.forward == forward) shown.seconds + step else step
+    return VideoSeekFlash(forward, seconds, (shown?.tick ?: 0L) + 1)
+}
+
+/** The "10 s" label on the side a double tap seeked to, gone shortly after the last tap. */
+@Composable
+internal fun VideoSeekFlashLabel(flash: VideoSeekFlash?, onDone: () -> Unit, modifier: Modifier = Modifier) {
+    LaunchedEffect(flash?.tick) {
+        if (flash != null) {
+            delay(VIDEO_SEEK_FLASH_MS)
+            onDone()
+        }
+    }
+    var last by remember { mutableStateOf(flash) }
+    if (flash != null) last = flash
+    val shown = last ?: return
+    Box(
+        modifier = modifier.fillMaxSize().padding(horizontal = 32.dp),
+        contentAlignment = if (shown.forward) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        AnimatedVisibility(visible = flash != null, enter = fadeIn(tween(120)), exit = fadeOut(tween(250))) {
+            Row(
+                modifier = Modifier
+                    .pillSurface(PillBg, infoPillShape, border = PillBorder)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (!shown.forward) {
+                    Icon(Icons.Default.FastRewind, null, tint = FgPrimary, modifier = Modifier.size(20.dp))
+                }
+                Text(
+                    stringResource(R.string.viewer_video_seek_seconds, shown.seconds),
+                    color = FgPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (shown.forward) {
+                    Icon(Icons.Default.FastForward, null, tint = FgPrimary, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+    }
+}
+
+private const val VIDEO_SEEK_FLASH_MS = 700L

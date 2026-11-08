@@ -97,7 +97,7 @@ class ObservePeopleCoversDbTest {
         db.personDao().upsert(PersonEntity(id = id, userId = acct, coverFaceId = cover, faceCount = 2))
 
     private suspend fun summaries(feed: List<GalleryItem>) =
-        ObservePeopleUseCase(db.personDao(), db.faceDao())(UserId(acct), flowOf(feed)).first()
+        ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())(UserId(acct), flowOf(feed)).first()
 
     @Test
     fun `a face scanned under a device uri keeps its person once the photo is backed up`() = runTest {
@@ -167,7 +167,7 @@ class ObservePeopleCoversDbTest {
             }
         }
 
-        val summaries = ObservePeopleUseCase(db.personDao(), db.faceDao())(UserId(acct), flowOf(feed)).first()
+        val summaries = ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())(UserId(acct), flowOf(feed)).first()
 
         val expected = (people downTo 1).filter { it % 11 != 0 }
         assertEquals(expected.map { it.toLong() }, summaries.map { it.personId })
@@ -193,5 +193,13 @@ class ObservePeopleCoversDbTest {
 
         assertEquals(ids.toSet(), rows.map { it.id }.toSet())
         assertEquals(1_100, rows.size)
+    }
+
+    @Test
+    fun `a named person's count is the photos in the library, as its page shows`() {
+        val feed = setOf("linkA", "linkB")
+        // linkT is in the trash (not in the feed), linkA has two faces, content://x is a stray device key.
+        assertEquals(2, livePhotoCount(listOf("linkA", "linkA", "linkB", "linkT", "content://x"), feed))
+        assertEquals(0, livePhotoCount(emptyList(), feed))
     }
 }

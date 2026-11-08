@@ -33,7 +33,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -47,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ActionSheetRow
 import eu.akoos.photos.presentation.common.ActionSheetSectionHeading
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.gallery.FilterChip
 import eu.akoos.photos.presentation.gallery.SharedFilter
 import eu.akoos.photos.presentation.theme.FgPrimary
@@ -67,7 +67,7 @@ internal fun SharedFilterSheet(
     onEmailChange: (String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,

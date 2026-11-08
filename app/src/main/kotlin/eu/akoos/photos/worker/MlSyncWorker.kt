@@ -29,10 +29,13 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.datastore.preferences.core.edit
 import androidx.hilt.work.HiltWorker
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -69,6 +72,7 @@ import eu.akoos.photos.data.mlsync.MlSyncTally
 import eu.akoos.photos.data.mlsync.MlSyncWorkData
 import eu.akoos.photos.data.mlsync.MlUploadDecision
 import eu.akoos.photos.data.mlsync.RETRY_LIMIT_FAILURE
+import eu.akoos.photos.data.mlsync.RoundMode
 import eu.akoos.photos.data.mlsync.SearchImportMode
 import eu.akoos.photos.data.mlsync.SearchSnapshotExportResult
 import eu.akoos.photos.data.mlsync.SearchSnapshotExporter
@@ -80,6 +84,16 @@ import eu.akoos.photos.data.mlsync.mlSyncRunAllowed
 import eu.akoos.photos.data.mlsync.partStatus
 import eu.akoos.photos.data.mlsync.planRestore
 import eu.akoos.photos.data.mlsync.uploadDecision
+import eu.akoos.photos.data.mlsync.DriveDataFolder
+import eu.akoos.photos.data.mlsync.faceIndexingPausedByUser
+import eu.akoos.photos.data.preferences.SettingsKeys
+import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.sharedbackup.DriveJobLock
+import eu.akoos.photos.data.sharedbackup.SharedBackupKind
+import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
+import eu.akoos.photos.data.sharedbackup.mlCopyPassedOver
+import eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
+import eu.akoos.photos.data.sharedbackup.SharedBackupStore
 import eu.akoos.photos.data.notification.NotificationIds
 import eu.akoos.photos.data.notification.ensureNotificationChannel
 import eu.akoos.photos.data.sdk.SdkGate
@@ -87,6 +101,7 @@ import eu.akoos.photos.data.semantic.SemanticIndexingScheduler
 import eu.akoos.photos.data.semantic.SemanticIndexingState
 import eu.akoos.photos.util.MlRail
 import eu.akoos.photos.util.MlWalkGate
+import eu.akoos.photos.util.SyncDiagnostics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -95,6 +110,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import me.proton.core.accountmanager.domain.AccountManager
@@ -155,6 +171,9 @@ class MlSyncWorker @AssistedInject constructor(
     private val mlWalkGate: MlWalkGate,
     private val signOut: MlSyncSignOut,
     private val autoSave: AutoSaveCoordinator,
+    private val sharedBackupRunner: SharedBackupRunner,
+    private val sharedBackupStore: SharedBackupStore,
+    private val sharedBackupScheduler: SharedBackupScheduler,
 ) : CoroutineWorker(context, params) {
 
     /** Read from the input on its own, so the notification knows it even for a request that is unreadable. */
@@ -164,15 +183,28 @@ class MlSyncWorker @AssistedInject constructor(
     private var runStartedMs = 0L
     private var lastOutcome: MlSyncOutcome? = null
 
-    /** Tracked whole, the hand-back included, so a sign-out can stop the run and wait for it to end. */
+    /** While a round reads: the newest delete of the face data everywhere it knows of, which every face copy it
+     *  imports is held against. Null outside a round, so a restore never deletes anything for it. */
+    private var roundWipeAtMs: Long? = null
+
+    /** While a round reads: set when it reads this install's own copies back after a fresh install or a sign-out. */
+    private var roundAfterFreshStart = false
+
+    /**
+     * Tracked whole, the hand-back included, so a sign-out can stop the run and wait for it to end. Held under the
+     * Drive job lock, so it never runs beside a label save or restore.
+     */
     override suspend fun doWork(): Result = signOut.track {
-        runStartedMs = System.currentTimeMillis()
-        try {
-            runRequest()
-        } finally {
-            withContext(NonCancellable) {
-                handBackLeftoverFacePause()
-                recordAutoSave()
+        DriveJobLock.mutex.withLock {
+            runStartedMs = System.currentTimeMillis()
+            try {
+                runRequest()
+            } finally {
+                withContext(NonCancellable) {
+                    handBackLeftoverFacePause()
+                    recordAutoSave()
+                    if (operation == MlSyncOperation.ROUND) runCatching { sharedBackupScheduler.scheduleNext() }
+                }
             }
         }
     }
@@ -219,6 +251,7 @@ class MlSyncWorker @AssistedInject constructor(
                     when (request) {
                         is MlSyncRequest.Save -> save(userId, request, scratch)
                         is MlSyncRequest.Restore -> restore(userId, request, scratch)
+                        is MlSyncRequest.Round -> round(userId, scratch, request.mode)
                     }
                 }
             }
@@ -377,8 +410,9 @@ class MlSyncWorker @AssistedInject constructor(
     private suspend fun export(userId: UserId, kind: MlDriveFileKind, into: File): SnapshotExport = when (kind) {
         MlDriveFileKind.FACES -> {
             val export = FileOutputStream(into).buffered().use { faceExporter.export(userId, it) }
-            // A face-free library still exports its scan markers, which spare another device the scan.
-            if (export.faces == 0 && export.scanMarkers == 0) {
+            // A face-free library still exports its scan markers, which spare another device the scan, and once the
+            // faces were deleted everywhere an empty copy carries that delete on to the other devices.
+            if (export.faces == 0 && export.scanMarkers == 0 && sharedBackupStore.facesWipedAt() == 0L) {
                 SnapshotExport.Empty
             } else {
                 SnapshotExport.Written(faces = export.faces, people = export.people, scanMarkers = export.scanMarkers)
@@ -431,7 +465,10 @@ class MlSyncWorker @AssistedInject constructor(
         }
     }
 
-    /** Downloads and imports one file. Returns a result that ends the whole run, or null. */
+    /**
+     * Downloads and imports one file, telling [onStatus] how that file ended. Returns a result that ends the whole
+     * run, or null.
+     */
     private suspend fun restoreStep(
         userId: UserId,
         step: MlRestoreStep,
@@ -440,6 +477,7 @@ class MlSyncWorker @AssistedInject constructor(
         tally: MlSyncTally,
         walks: WalkStandDown,
         scratch: TransferScratch,
+        onStatus: (MlSyncPartStatus) -> Unit = {},
     ): MlSyncResult? {
         val kind = step.file.kind
         report(MlSyncProgress(MlSyncPhase.DOWNLOADING, kind, index, total))
@@ -447,6 +485,7 @@ class MlSyncWorker @AssistedInject constructor(
             scratch.newFile("restore-${kind.prefix}-")
         } catch (e: IOException) {
             tally.record(kind, MlSyncPartStatus.FAILED, className(e))
+            onStatus(MlSyncPartStatus.FAILED)
             return null
         }
         try {
@@ -454,14 +493,17 @@ class MlSyncWorker @AssistedInject constructor(
                 is MlDriveResult.Ok -> Unit
                 MlDriveResult.NotCapable -> {
                     tally.record(kind, MlSyncPartStatus.FAILED)
+                    onStatus(MlSyncPartStatus.FAILED)
                     return MlSyncResult.NOT_CAPABLE
                 }
                 MlDriveResult.Conflict, MlDriveResult.FolderMissing -> {
                     tally.record(kind, MlSyncPartStatus.FAILED, download.javaClass.simpleName)
+                    onStatus(MlSyncPartStatus.FAILED)
                     return null
                 }
                 is MlDriveResult.Failed -> {
                     tally.record(kind, MlSyncPartStatus.FAILED, download.cause)
+                    onStatus(MlSyncPartStatus.FAILED)
                     return null
                 }
             }
@@ -469,7 +511,7 @@ class MlSyncWorker @AssistedInject constructor(
             val status = try {
                 when (kind) {
                     MlDriveFileKind.FACES -> importFaces(userId, step, file, tally, walks)
-                    MlDriveFileKind.SEARCH -> importSearch(userId, step, file, tally, walks)
+                    MlDriveFileKind.SEARCH -> importSearch(userId, step, file, tally, walks, ownDeviceId = null)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -479,6 +521,7 @@ class MlSyncWorker @AssistedInject constructor(
                 (if (isStorageFull(e)) MlSyncPartStatus.NO_SPACE else MlSyncPartStatus.FAILED)
                     .also { tally.record(kind, it, className(e)) }
             }
+            onStatus(status)
             // Full storage would fail every later file and a retry alike, so the run ends here.
             return if (status == MlSyncPartStatus.NO_SPACE) MlSyncResult.NO_SPACE else null
         } finally {
@@ -502,12 +545,18 @@ class MlSyncWorker @AssistedInject constructor(
         val result = faceIndexingScheduler.withImportFence {
             FileInputStream(file).use { input ->
                 // Opened and verified, the download is spent: deleted before the import writes, freeing its space.
-                faceImporter.import(userId, input, mode, expectedDeviceId = step.file.deviceId) {
+                faceImporter.import(userId, input, mode, expectedDeviceId = step.file.deviceId, knownWipeAtMillis = roundWipeAtMs) {
                     runCatching { input.close() }
                     file.delete()
                 }
             }
         }
+        val newerWipe = when (result) {
+            is FaceSnapshotImportResult.Imported -> result.newerWipeAtMillis
+            is FaceSnapshotImportResult.NamesStaged -> result.newerWipeAtMillis
+            else -> 0L
+        }
+        if (newerWipe > 0L) takeFacesWipe(newerWipe)
         val status = result.partStatus()
         tally.record(MlDriveFileKind.FACES, status)
         when (result) {
@@ -524,9 +573,24 @@ class MlSyncWorker @AssistedInject constructor(
             FaceSnapshotImportResult.WrongAccount,
             FaceSnapshotImportResult.UnsupportedVersion,
             FaceSnapshotImportResult.Unreadable,
+            FaceSnapshotImportResult.BeforeWipe,
             FaceSnapshotImportResult.NotEnoughSpace -> Unit
         }
         return status
+    }
+
+    /**
+     * Another device deleted the face data everywhere at [atMs], later than this one knew; the import has deleted
+     * the face data here already. Notes the time, so this device's copy carries it on and older copies are turned
+     * away, and turns face recognition off, as on the device that deleted. Not so on a fresh install or after a
+     * sign-out: there was nothing here to delete, and the switch is the one just set.
+     */
+    private suspend fun takeFacesWipe(atMs: Long) {
+        roundWipeAtMs = atMs
+        sharedBackupStore.recordFacesWiped(atMs, madeHere = false)
+        sharedBackupStore.markChanged(listOf(SharedBackupKind.FACES), System.currentTimeMillis(), byUser = true)
+        if (!roundAfterFreshStart) applicationContext.settingsDataStore.edit { it[SettingsKeys.FACE_ENABLED] = false }
+        SyncDiagnostics.log("shared backup: face data was deleted everywhere on another device, deleted here too")
     }
 
     /** Imports the search file [file] of [step] and returns the status it ended in. */
@@ -536,15 +600,18 @@ class MlSyncWorker @AssistedInject constructor(
         file: File,
         tally: MlSyncTally,
         walks: WalkStandDown,
+        ownDeviceId: String?,
     ): MlSyncPartStatus {
         walks.pauseSemantic()
         val mode = if (step.replace) SearchImportMode.Replace else SearchImportMode.Merge
         // The importer opens the file afresh for its second try with refreshed address keys. Opened and
         // verified, the download is spent: deleted before the first row is written, to free its space.
+        val own = ownDeviceId ?: runCatching { driveStore.deviceId() }.getOrNull()
         val result = searchImporter.importFrom(
             userId,
             mode,
             expectedDeviceId = step.file.deviceId,
+            fromOtherDevice = own == null || own != step.file.deviceId,
             releaseSnapshot = { file.delete() },
         ) {
             FileInputStream(file)
@@ -556,6 +623,125 @@ class MlSyncWorker @AssistedInject constructor(
             tally.count(searchEmbeddings = result.imported, searchKept = result.kept)
         }
         return status
+    }
+
+    // ---- Shared backup round -------------------------------------------------------------------------
+
+    /**
+     * One round of the shared backup. Reads first: the three Drive folders are listed (a listing that fails ends the
+     * round with nothing written), the other installs' face and search files newer than the copy taken in last are
+     * imported filling gaps only, the way a Merge restore does (a face file's scan markers mark its photos as
+     * scanned here, so each photo is scanned once), and their label copies and hidden lists are merged. Then this
+     * install's own copy of each kind is written when its read went through and something in it changed. Ends with
+     * the round's outcome recorded for the settings row.
+     */
+    private suspend fun round(userId: UserId, scratch: TransferScratch, mode: RoundMode): MlSyncOutcome {
+        val tally = MlSyncTally(MlSyncOperation.ROUND, filesTotal = 0)
+        if (mode == RoundMode.AUTO && !sharedBackupStore.isEnabled()) return tally.outcome(MlSyncResult.SUCCESS)
+        val retake = mode == RoundMode.LOAD_NOW
+        report(MlSyncProgress(MlSyncPhase.PREPARING, kind = null, done = 0, total = 0))
+        val ownDeviceId = try {
+            driveStore.deviceId()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return endRound(tally.outcome(MlSyncResult.FAILED, className(e)), failed = true)
+        }
+        val listing = sharedBackupRunner.list(userId)
+            ?: return endRound(tally.outcome(MlSyncResult.FAILED, READ_FAILURE), failed = true)
+
+        // After a fresh install or a sign-out, the copies named after this install hold what an earlier install on
+        // this phone, or this one before the sign-out, saved, so they are read like any other device's until a round
+        // has taken them in. An id no copy carries stands in for this install's own while reading.
+        val takesOwnCopy = !sharedBackupStore.ownCopyTaken()
+        val readsAs = if (takesOwnCopy) EARLIER_INSTALL else ownDeviceId
+        val unread = HashSet<MlDriveFileKind>()
+        val knownWipe = sharedBackupStore.facesWipedAt()
+        roundWipeAtMs = knownWipe
+        roundAfterFreshStart = takesOwnCopy
+        val plan = planRestore(
+            sharedBackupRunner.mlFilesToTake(userId, listing, readsAs, retake, facesWiped = knownWipe > 0L),
+            FaceSnapshotMode.Merge,
+        )
+        if (plan.isNotEmpty()) {
+            promoteToForeground()
+            val pause = MlSyncFacePause.read(applicationContext)
+            val walks = WalkStandDown(faceIndexingPausedByUser(pause?.switchOn, pause?.held))
+            try {
+                if (plan.any { it.file.kind == MlDriveFileKind.FACES }) walks.standDownFaces()
+                for ((index, step) in plan.withIndex()) {
+                    var status: MlSyncPartStatus? = null
+                    val ends = restoreStep(userId, step, index, plan.size, tally, walks, scratch) { status = it }
+                    val kind = step.file.kind
+                    val recorded = if (kind == MlDriveFileKind.FACES) SharedBackupKind.FACES else SharedBackupKind.SEARCH
+                    when {
+                        status?.finished == true || mlCopyPassedOver(status) ->
+                            sharedBackupRunner.markApplied(userId, recorded, step.file.deviceId, step.file.serverModifiedAtMs)
+                        // Written by a newer version: read again next round, without holding this device's own save.
+                        status == MlSyncPartStatus.TOO_NEW -> Unit
+                        else -> unread += kind
+                    }
+                    if (ends != null) return endRound(tally.outcome(ends), failed = true)
+                }
+            } finally {
+                withContext(NonCancellable) { walks.handBack(userId) }
+            }
+        }
+        val labelsRead = sharedBackupRunner.takeInLabels(userId, listing, readsAs, retake)
+        val hiddenRead = sharedBackupRunner.takeInHidden(userId, listing, readsAs, retake)
+        if (takesOwnCopy && unread.isEmpty() && labelsRead && hiddenRead) sharedBackupStore.markOwnCopyTaken()
+        val failedParts = ArrayList<String>()
+        unread.mapTo(failedParts) { "read ${it.name.lowercase()}" }
+        if (!labelsRead) failedParts += "read labels"
+        if (!hiddenRead) failedParts += "read hidden"
+
+        val writes = mode == RoundMode.SAVE_NOW || (mode == RoundMode.AUTO && sharedBackupStore.isEnabled())
+        if (writes) {
+            for ((index, kind) in ML_SYNC_KIND_ORDER.withIndex()) {
+                if (kind in unread) continue
+                if (mode != RoundMode.SAVE_NOW && !sharedBackupStore.mlDue(kind, System.currentTimeMillis())) continue
+                if (!sharedBackupRunner.ensureFolder(userId, DriveDataFolder.ML)) {
+                    failedParts += "ml folder"
+                    continue
+                }
+                promoteToForeground()
+                val saveStarted = System.currentTimeMillis()
+                val kindTally = MlSyncTally(MlSyncOperation.SAVE, filesTotal = 1)
+                saveKind(userId, kind, ownDeviceId, index, ML_SYNC_KIND_ORDER.size, kindTally, scratch)
+                val kindOutcome = kindTally.outcome()
+                val saved = if (kind == MlDriveFileKind.FACES) kindOutcome.faces else kindOutcome.search
+                if (saved == MlSyncPartStatus.DONE || saved == MlSyncPartStatus.EMPTY) {
+                    sharedBackupStore.mlSaved(kind, saveStarted)
+                    // This device's copy now carries the delete made here, so the other devices' copies can go.
+                    if (kind == MlDriveFileKind.FACES && sharedBackupStore.facesTrashPending()) {
+                        if (sharedBackupRunner.trashOtherFaceCopies(userId, listing, ownDeviceId)) {
+                            sharedBackupStore.facesTrashDone()
+                        } else {
+                            failedParts += "trash faces"
+                        }
+                    }
+                } else {
+                    failedParts += "save ${kind.name.lowercase()}" + (kindOutcome.failure?.let { ": $it" } ?: "")
+                }
+            }
+            val now = System.currentTimeMillis()
+            if (labelsRead && sharedBackupRunner.saveLabels(userId, ownDeviceId, now) == null) failedParts += "save labels"
+            if (hiddenRead && sharedBackupRunner.saveHidden(userId, ownDeviceId, now) == null) failedParts += "save hidden"
+        }
+        val failed = failedParts.isNotEmpty()
+        return endRound(
+            tally.outcome(if (failed) MlSyncResult.PARTIAL else MlSyncResult.SUCCESS),
+            failed,
+            failedParts.joinToString(", "),
+        )
+    }
+
+    /** Records how a round ended for the settings row and the diagnostics, and hands its outcome on. */
+    private suspend fun endRound(outcome: MlSyncOutcome, failed: Boolean, failedParts: String = ""): MlSyncOutcome {
+        runCatching { sharedBackupStore.recordRound(System.currentTimeMillis(), failed) }
+        val what = failedParts.ifEmpty { outcome.failure.orEmpty() }
+        SyncDiagnostics.log("shared backup round: ${outcome.result.name.lowercase()}" + if (failed) " ($what)" else "")
+        return outcome
     }
 
     /**
@@ -733,7 +919,11 @@ class MlSyncWorker @AssistedInject constructor(
         val context = applicationContext
         ensureChannel(context)
         val restoring = operation == MlSyncOperation.RESTORE
-        val title = if (restoring) R.string.ml_sync_restore_title else R.string.ml_sync_save_title
+        val title = when (operation) {
+            MlSyncOperation.RESTORE -> R.string.ml_sync_restore_title
+            MlSyncOperation.ROUND -> R.string.shared_backup_syncing
+            else -> R.string.ml_sync_save_title
+        }
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(if (restoring) android.R.drawable.stat_sys_download else android.R.drawable.stat_sys_upload)
             .setContentTitle(context.getString(title))
@@ -780,6 +970,12 @@ class MlSyncWorker @AssistedInject constructor(
 
         private const val SCRATCH_DIR = "mlsync/transfer"
 
+        /** The failure a round names when it could not read the copies on Drive. */
+        private const val READ_FAILURE = "ReadFailed"
+
+        /** The install id a round reads as while it takes this install's own copies in: no copy carries it. */
+        private const val EARLIER_INSTALL = ""
+
         /** How long a restore waits for a stood-down walk to put its model session away before importing
          *  anyway; the import's single transaction still holds the walk's writes back until it commits. */
         private const val WALK_SETTLE_TIMEOUT_MS = 30_000L
@@ -800,10 +996,33 @@ class MlSyncWorker @AssistedInject constructor(
         }
 
         /**
-         * Enqueues [request] as the one ML sync job and returns its id. Under [ExistingWorkPolicy.KEEP] a job
-         * already queued or running stays and this request is dropped. The operation also rides as a tag, so a
-         * reader knows it while the job is still queued.
+         * Enqueues a shared-backup round as the one ML sync job and returns its id: on any connection when
+         * [anyNetwork], otherwise on an unmetered one. Under [ExistingWorkPolicy.KEEP] a job already queued or
+         * running stays and this request is dropped, unless [replaceWaiting], for a round the user asked for that
+         * takes the place of an automatic one still waiting for its network. The operation also rides as a tag,
+         * so a reader knows it while the job is still queued.
          */
+        fun enqueueRound(
+            context: Context,
+            userId: UserId,
+            anyNetwork: Boolean,
+            replaceWaiting: Boolean,
+            mode: RoundMode = RoundMode.AUTO,
+        ): UUID {
+            ensureChannel(context)
+            val request = MlSyncRequest.Round(userId.id, mode)
+            val network = if (anyNetwork) NetworkType.CONNECTED else NetworkType.UNMETERED
+            val work = OneTimeWorkRequestBuilder<MlSyncWorker>()
+                .setInputData(MlSyncWorkData.input(request))
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(network).build())
+                .addTag(TAG)
+                .addTag(MlSyncWorkData.operationTag(request.operation))
+                .build()
+            val policy = if (replaceWaiting) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP
+            WorkManager.getInstance(context).enqueueUniqueWork(UNIQUE_WORK_NAME, policy, work)
+            return work.id
+        }
+
         fun enqueue(context: Context, request: MlSyncRequest): UUID {
             ensureChannel(context)
             val work = OneTimeWorkRequestBuilder<MlSyncWorker>()

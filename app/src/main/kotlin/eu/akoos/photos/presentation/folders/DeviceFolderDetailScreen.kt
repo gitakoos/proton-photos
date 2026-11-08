@@ -92,6 +92,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import eu.akoos.photos.presentation.common.glassSource
+import eu.akoos.photos.presentation.common.rememberGlassBackdrop
 import kotlinx.coroutines.launch
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.GalleryItem
@@ -179,6 +181,8 @@ fun DeviceFolderDetailScreen(
     if (fromVault) SecureScreenEffect()
 
     val items by viewModel.items.collectAsStateWithLifecycle()
+    // The name shown follows a rename made on this screen; the one opened with until the folder loads.
+    val folderName = viewModel.folderName.collectAsStateWithLifecycle().value.ifEmpty { bucketName }
     val selectedUris by viewModel.selectedUris.collectAsStateWithLifecycle()
     // The folder's vaulted photos. They sit in the grid with the rest, but nothing that needs a device
     // file is offered on them — they are revealed instead.
@@ -286,7 +290,7 @@ fun DeviceFolderDetailScreen(
         viewModel.shareIntent.collect { intent ->
             appLock.runWhenOpen {
                 runCatching {
-                    shareCtx.startActivity(android.content.Intent.createChooser(intent, shareChooserTitle))
+                    shareCtx.startActivity(eu.akoos.photos.util.ShareIntentBuilder.chooser(shareCtx, intent, shareChooserTitle))
                 }
             }
         }
@@ -445,6 +449,8 @@ fun DeviceFolderDetailScreen(
         else -> photosText
     }
 
+    // The grid as the selection drawer frosts it, when the frosted pills are on.
+    val glass = rememberGlassBackdrop(Bg0)
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -515,7 +521,7 @@ fun DeviceFolderDetailScreen(
             ),
             horizontalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
             verticalArrangement = Arrangement.spacedBy(if (seamless) 2.dp else 6.dp),
-            modifier = Modifier.fillMaxSize().then(dragSelectModifier).then(pinchModifier),
+            modifier = Modifier.glassSource(glass).fillMaxSize().then(dragSelectModifier).then(pinchModifier),
         ) {
             // Hero header — cover, folder name and count, like the cloud-album detail page.
             item(span = { GridItemSpan(maxLineSpan) }) {
@@ -523,7 +529,7 @@ fun DeviceFolderDetailScreen(
                 Box(modifier = Modifier.padding(horizontal = if (seamless) 20.dp else 0.dp)) {
                 eu.akoos.photos.presentation.albums.components.AlbumHeroHeader(
                     coverModel = coverModel,
-                    title = bucketName,
+                    title = folderName,
                     photoCountText = countLabel,
                     titleActions = {
                         // One control at rest, like the cloud album's. Backing up, mirroring as an
@@ -700,6 +706,7 @@ fun DeviceFolderDetailScreen(
                 .padding(start = 12.dp, top = 8.dp),
         ) {
             IconBubble(
+                backdrop = glass,
                 icon = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = if (isSelectionMode)
                     stringResource(R.string.gallery_cancel_selection) else stringResource(R.string.close),
@@ -718,8 +725,9 @@ fun DeviceFolderDetailScreen(
             )
         }
         StickyAlbumHeader(
+            backdrop = glass,
             visible = stickyShown,
-            title = bucketName,
+            title = folderName,
             onBack = { if (folderVault != null) viewModel.cancelFolderVault() else onBack() },
             modifier = Modifier.align(Alignment.TopCenter),
             trailing = {
@@ -805,10 +813,10 @@ fun DeviceFolderDetailScreen(
                     )
                 )
             }
-            // Move selected into another device folder, the logged-out counterpart of "Add to album",
-            // relocating the files under DCIM/ with no cloud involved. Held to the scoped-storage move's
-            // Android 10+ floor and offered only on photos that still have a device file.
-            if (!isSignedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && selectedDeviceItems.isNotEmpty()) {
+            // Move selected into another device folder, relocating the files under DCIM/; the Drive albums of
+            // mirrored folders follow a backed-up photo. Held to the scoped-storage move's Android 10+ floor
+            // and offered only on photos that still have a device file.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && selectedDeviceItems.isNotEmpty()) {
                 add(
                     SelectionAction(
                         icon = Icons.AutoMirrored.Filled.DriveFileMove,
@@ -924,6 +932,7 @@ fun DeviceFolderDetailScreen(
             }
         }
         SelectionDrawer(
+            backdrop = glass,
             visible = isSelectionMode,
             items = selectedItems,
             actions = folderSelectionActions,
@@ -1051,7 +1060,7 @@ fun DeviceFolderDetailScreen(
         }
 
         // Move-to-folder host: the picker, the new-folder name dialog, the write-consent launcher a
-        // foreign-file move needs and the completion snackbar, all logged-out and device-only. The
+        // foreign-file move needs and the completion snackbar, device files only. The
         // selection is snapshotted in the ViewModel, so the host carries only the picked name.
         MoveToFolderHost(
             targetFolders = moveTargetFolders,
@@ -1189,6 +1198,7 @@ fun DeviceFolderDetailScreen(
                 .padding(bottom = 24.dp),
         ) {
             IconBubble(
+                backdrop = glass,
                 icon = Icons.Default.KeyboardArrowUp,
                 contentDescription = stringResource(R.string.cd_scroll_to_top),
                 onClick = { scope.launch { gridState.animateScrollToItem(0) } },
@@ -1277,10 +1287,10 @@ fun DeviceFolderDetailScreen(
         EditFieldSheet(
             title = stringResource(R.string.folder_rename),
             hint = stringResource(R.string.albums_create_album_hint),
-            initialValue = bucketName,
+            initialValue = folderName,
             singleLine = true,
             confirmLabel = stringResource(R.string.album_rename_confirm),
-            canConfirm = { AlbumRenameInput.isAcceptable(it, bucketName) },
+            canConfirm = { AlbumRenameInput.isAcceptable(it, folderName) },
             onDismiss = { showRenameSheet = false },
             onSave = { entered ->
                 showRenameSheet = false

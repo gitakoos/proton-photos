@@ -592,6 +592,8 @@ class WriteSyncedPhotoMetadataUseCaseTest {
             rows[localUri]?.let { rows[localUri] = it.copy(queued = true, queueSource = source) }
         }
 
+        override suspend fun markRemovedFromDrive(localUri: String) {}
+
         override suspend fun clearQueuedForSynced(localUri: String) {
             rows[localUri]?.let { rows[localUri] = it.copy(queued = false, queueSource = null) }
         }
@@ -605,6 +607,7 @@ class WriteSyncedPhotoMetadataUseCaseTest {
         override suspend fun updateDomainColumnsIfNotSyncedWithCloud(state: SyncState, userId: UserId): Int = 0
         override suspend fun demoteToLocalIfCloudIdMatches(localUri: String, expectedCloudId: String): Int = 0
         override suspend fun updateStatusAndDeleteLocal(localUri: String, newStatus: SyncStatus) {}
+        override suspend fun updateStatuses(localUris: Collection<String>, newStatus: SyncStatus) {}
         override suspend fun getByCloudId(cloudFileId: String): SyncState? = null
         override suspend fun cloudPairedLinkIds(userId: UserId, localUris: List<String>): Map<String, String> = emptyMap()
         override suspend fun claimForUpload(localUri: String): Int = 0

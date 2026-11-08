@@ -42,7 +42,6 @@ import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachData
 import eu.akoos.photos.data.face.FaceReattachSnapshot
 import eu.akoos.photos.data.face.ReattachManual
-import eu.akoos.photos.data.mlsync.FaceSnapshotExporter
 import eu.akoos.photos.data.mlsync.FaceSnapshotImportResult
 import eu.akoos.photos.data.mlsync.FaceSnapshotImporter
 import eu.akoos.photos.data.mlsync.FaceSnapshotMode
@@ -62,7 +61,6 @@ import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.io.OutputStream
 import java.security.MessageDigest
 import javax.inject.Inject
 
@@ -382,29 +380,6 @@ sealed interface FaceIndexImportOutcome {
     data object NotEnoughSpace : FaceIndexImportOutcome
 }
 
-/**
- * Writes the account's portable face index to [output] as a sealed face snapshot, the format
- * [FaceSnapshotExporter] streams: every face on a cloud photo with its embedding, box, landmarks, scores
- * and removed bit, the named people and confirmed names, manual photos, "not this person" marks, chosen
- * covers, and the scan marker of every cloud photo already scanned, encrypted and signed to the account.
- * Device-only faces are skipped. The heavy detection and embedding work is what this preserves, so
- * another device on the same account can reuse it without recomputing; clustering is re-derived cheaply
- * on import, which still reads the older v3 file as well.
- *
- * The embeddings are biometric-adjacent, so the file is sealed to the account and only ever produced on
- * the user's explicit request and handed to the user to store; nothing here uploads it.
- */
-class ExportFaceIndexUseCase @Inject constructor(
-    private val accountManager: AccountManager,
-    private val faceSnapshotExporter: FaceSnapshotExporter,
-) {
-    /** Number of faces written, or -1 when signed out. */
-    suspend operator fun invoke(output: OutputStream): Int = withContext(Dispatchers.IO) {
-        val userId = accountManager.getPrimaryUserId().first() ?: return@withContext -1
-        faceSnapshotExporter.export(userId, output).faces
-    }
-}
-
 /** Whether [source] begins with a sealed snapshot's clear-text magic. The stream is rewound either way. */
 internal fun startsWithSnapshotEnvelope(source: BufferedInputStream): Boolean {
     val magic = MlSnapshotEnvelope.MAGIC.toByteArray(Charsets.US_ASCII)
@@ -425,12 +400,14 @@ internal fun FaceSnapshotImportResult.toFaceIndexImportOutcome(): FaceIndexImpor
     is FaceSnapshotImportResult.Imported -> FaceIndexImportOutcome.Success(faces + facesUpdated, people)
     is FaceSnapshotImportResult.NamesStaged -> FaceIndexImportOutcome.ReattachScheduled(people)
     FaceSnapshotImportResult.WrongAccount -> FaceIndexImportOutcome.WrongAccount
-    FaceSnapshotImportResult.UnsupportedVersion, FaceSnapshotImportResult.Unreadable -> FaceIndexImportOutcome.Unreadable
+    FaceSnapshotImportResult.UnsupportedVersion,
+    FaceSnapshotImportResult.Unreadable,
+    FaceSnapshotImportResult.BeforeWipe -> FaceIndexImportOutcome.Unreadable
     FaceSnapshotImportResult.NotEnoughSpace -> FaceIndexImportOutcome.NotEnoughSpace
 }
 
 /**
- * Reads a face index written by [ExportFaceIndexUseCase] from [input] and folds it into the current
+ * Reads a face index an earlier version exported from [input] and folds it into the current
  * account. A sealed face snapshot, the current export, goes to [FaceSnapshotImporter] under [mode]; with
  * no mode given it replaces only on a fresh device and merges otherwise ([defaultRestoreMode]), so an
  * import that cannot ask never discards faces, curation or waiting names made here (see

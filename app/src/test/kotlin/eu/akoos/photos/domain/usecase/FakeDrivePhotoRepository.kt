@@ -220,11 +220,19 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         )
     }
 
+    /** Every link a trash was asked for, in order. */
+    val trashRequests = mutableListOf<String>()
+
     override suspend fun deleteFiles(userId: UserId, linkIds: List<String>): CloudTrashOutcome {
         callLog += "DELETE"
-        photos.value = photos.value.filterNot { it.linkId in linkIds }
-        return CloudTrashOutcome(trashedLinkIds = linkIds.toSet(), failedLinkIds = emptySet())
+        trashRequests += linkIds
+        val refused = linkIds.filter { it in refuseTrash }.toSet()
+        photos.value = photos.value.filterNot { it.linkId in linkIds && it.linkId !in refused }
+        return CloudTrashOutcome(trashedLinkIds = linkIds.toSet() - refused, failedLinkIds = refused)
     }
+
+    /** Links the server refuses to trash, reported per link the way the real trash call does. */
+    var refuseTrash: Set<String> = emptySet()
 
     override suspend fun getAlbumIdsByPhoto(userId: UserId): Map<String, Set<String>> = albumIdsByPhoto
 
@@ -241,10 +249,15 @@ internal class FakeDrivePhotoRepository : DrivePhotoRepository {
         photo: CloudPhoto,
         preResolvedLinkDetail: eu.akoos.photos.data.api.dto.BatchLinkDto?,
         onProgress: ((doneBytes: Long, totalBytes: Long) -> Unit)?,
-    ): File = File.createTempFile("fake-fullres-", ".bin").apply {
+    ): File = (fullResCacheDir?.let { dir ->
+        File(dir, "${photo.linkId}.${eu.akoos.photos.util.mimeToFileExtension(photo.mimeType)}").also { it.parentFile?.mkdirs() }
+    } ?: File.createTempFile("fake-fullres-", ".bin")).apply {
         writeBytes(downloadBytes)
         deleteOnExit()
     }
+
+    /** When set, downloads land where the real full-res cache keeps them (`<dir>/<linkId>.<ext>`). */
+    var fullResCacheDir: File? = null
 
     override suspend fun loadAlbums(userId: UserId): List<Album> = emptyList()
     override suspend fun createDriveAlbum(userId: UserId, name: String): Album =

@@ -109,6 +109,25 @@ class PhotoListingDaoTest {
     private fun video(linkId: String) = entity(linkId).copy(mimeType = "video/mp4")
 
     @Test
+    fun `the favourite rows a tag listing speaks for are the own stream photos holding that tag`() = runTest {
+        dao.upsertAll(
+            listOf(
+                entity("fav").copy(tagsCsv = "0,3"),
+                entity("ten").copy(tagsCsv = "10"),
+                entity("plain"),
+                contributedEntity("child").copy(tagsCsv = "0"),
+                sharedAlbumEntity("foreign").copy(tagsCsv = "0"),
+            ),
+        )
+
+        assertEquals(listOf(LinkTags("fav", "0,3")), dao.getListedRowsWithTag("user1", OWN_VOLUME, 0))
+
+        dao.setTagsCsv("fav", "3")
+        assertEquals(listOf(LinkTags("fav", "3")), dao.getTags(listOf("fav")))
+        assertEquals(emptyList<LinkTags>(), dao.getListedRowsWithTag("user1", OWN_VOLUME, 0))
+    }
+
+    @Test
     fun `upsertAll and observeAll returns inserted entities for user`() = runTest {
         dao.upsertAll(listOf(entity("link1"), entity("link2")))
 

@@ -40,7 +40,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SheetState
@@ -65,6 +64,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
+import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.selectionCloudLinkIds
 import eu.akoos.photos.presentation.theme.Accent
 import eu.akoos.photos.presentation.theme.AppColors
@@ -83,7 +83,7 @@ internal fun GalleryMultiDeleteDialog(
     onDismiss: () -> Unit,
     onDelete: (freeUpSpace: Boolean, deleteFromCloud: Boolean) -> Unit,
 ) {
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,
@@ -105,7 +105,7 @@ internal fun GalleryNewAlbumDialog(
 ) {
     var newAlbumName by remember { mutableStateOf("") }
     val appColors = AppColors.current
-    ModalBottomSheet(
+    AppModalSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SheetBg,
