@@ -2633,7 +2633,7 @@
     <string name="whats_new_260_peoplepics_title">Immagini e vista delle persone</string>
     <string name="whats_new_260_peoplepics_body">Le immagini dei volti nella pagina Persone e in “Chi è?” non restano più scure nelle librerie grandi, e la pagina Persone può seguire la vista della scheda Album o avere una griglia o un elenco tutti suoi.</string>
     <string name="whats_new_260_desktopsync_title">Insieme all\'app desktop</string>
-    <string name="whats_new_260_desktopsync_body">Con “Backup automatico” attivo, volti, nomi, etichette, ricerca e foto nascoste restano uguali su questo telefono, sugli altri tuoi telefoni e nell\'app desktop di Photos for Proton; una modifica su uno compare sugli altri entro pochi minuti.</string>
+    <string name="whats_new_260_desktopsync_body">Con “Backup automatico” attivo, volti, nomi, etichette, ricerca e foto nascoste restano uguali su questo telefono, sugli altri tuoi telefoni e nell\'app desktop di Photos for Proton; una modifica su uno compare sugli altri entro pochi minuti. Quando la attivi indica quali versioni servono sugli altri dispositivi.</string>
     <string name="whats_new_260_facefix_title">Correggi un volto dal visualizzatore</string>
     <string name="whats_new_260_facefix_body">Tieni premuto un volto con nome nel visualizzatore per dire che non è quella persona, e il menu di una persona con nome ha “Rimuovi nome”.</string>
     <string name="whats_new_260_coldstart_title">Avvio più rapido con librerie grandi</string>

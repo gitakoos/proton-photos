@@ -2593,7 +2593,7 @@
     <string name="whats_new_260_peoplepics_title">Arcképek és elrendezés</string>
     <string name="whats_new_260_peoplepics_body">Az Emberek oldalon és a „Ki ez?” ablakban az arcképek nagy könyvtáraknál már nem maradnak sötétek, és az Emberek oldal követheti az Albumok lap nézetét, vagy saját rácsot vagy listát kaphat.</string>
     <string name="whats_new_260_desktopsync_title">Együtt a gépes appal</string>
-    <string name="whats_new_260_desktopsync_body">Ha az „Automatikus mentés” be van kapcsolva, az arcok, a nevek, a címkék, a keresés és a rejtett fotók egyformák ezen a telefonon, a többi telefonodon és a Photos for Proton gépes appban; ami az egyiken változik, pár percen belül a többin is megjelenik.</string>
+    <string name="whats_new_260_desktopsync_body">Ha az „Automatikus mentés” be van kapcsolva, az arcok, a nevek, a címkék, a keresés és a rejtett fotók egyformák ezen a telefonon, a többi telefonodon és a Photos for Proton gépes appban; ami az egyiken változik, pár percen belül a többin is megjelenik. Bekapcsoláskor kiírja, milyen verzió kell a többi eszközre.</string>
     <string name="whats_new_260_facefix_title">Arc javítása a nézegetőből</string>
     <string name="whats_new_260_facefix_body">A nézegetőben nyomj hosszan egy elnevezett arcra, és jelezd, hogy nem ő az; egy elnevezett személy menüjében pedig ott a „Név eltávolítása”.</string>
     <string name="whats_new_260_coldstart_title">Gyorsabb indulás nagy könyvtárnál</string>

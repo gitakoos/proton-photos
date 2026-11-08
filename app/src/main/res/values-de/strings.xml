@@ -2594,7 +2594,7 @@
     <string name="whats_new_260_peoplepics_title">Personenbilder und Ansicht</string>
     <string name="whats_new_260_peoplepics_body">Gesichtsbilder auf der Seite „Personen“ und in „Wer ist das?“ bleiben bei großen Bibliotheken nicht mehr dunkel, und die Seite „Personen“ kann der Ansicht des Alben-Tabs folgen oder ein eigenes Raster oder eine Liste haben.</string>
     <string name="whats_new_260_desktopsync_title">Zusammen mit der Desktop-App</string>
-    <string name="whats_new_260_desktopsync_body">Ist „Automatische Sicherung“ an, bleiben Gesichter, Namen, Labels, Suche und ausgeblendete Fotos auf diesem Telefon, deinen anderen Telefonen und der Desktop-App von Photos for Proton gleich; eine Änderung auf einem Gerät erscheint innerhalb weniger Minuten auf den anderen.</string>
+    <string name="whats_new_260_desktopsync_body">Ist „Automatische Sicherung“ an, bleiben Gesichter, Namen, Labels, Suche und ausgeblendete Fotos auf diesem Telefon, deinen anderen Telefonen und der Desktop-App von Photos for Proton gleich; eine Änderung auf einem Gerät erscheint innerhalb weniger Minuten auf den anderen. Beim Einschalten steht da, welche Versionen die anderen Geräte brauchen.</string>
     <string name="whats_new_260_facefix_title">Gesicht in der Fotoansicht korrigieren</string>
     <string name="whats_new_260_facefix_body">Halte in der Fotoansicht ein benanntes Gesicht gedrückt, um zu sagen, dass es nicht diese Person ist, und das Menü einer benannten Person hat „Namen entfernen“.</string>
     <string name="whats_new_260_coldstart_title">Schnellerer Start bei großen Bibliotheken</string>

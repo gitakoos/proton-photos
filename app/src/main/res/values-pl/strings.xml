@@ -2725,7 +2725,7 @@
     <string name="whats_new_260_peoplepics_title">Zdjęcia i widok osób</string>
     <string name="whats_new_260_peoplepics_body">Zdjęcia twarzy na stronie Osoby i w „Kto to jest?” nie zostają już ciemne w dużych bibliotekach, a strona Osoby może przejąć widok karty Albumy albo mieć własną siatkę lub listę.</string>
     <string name="whats_new_260_desktopsync_title">Razem z aplikacją na komputer</string>
-    <string name="whats_new_260_desktopsync_body">Gdy „Automatyczna kopia” jest włączona, twarze, imiona, etykiety, wyszukiwanie i ukryte zdjęcia są takie same na tym telefonie, innych twoich telefonach i w aplikacji Photos for Proton na komputer; zmiana na jednym urządzeniu pojawia się na pozostałych w ciągu kilku minut.</string>
+    <string name="whats_new_260_desktopsync_body">Gdy „Automatyczna kopia” jest włączona, twarze, imiona, etykiety, wyszukiwanie i ukryte zdjęcia są takie same na tym telefonie, innych twoich telefonach i w aplikacji Photos for Proton na komputer; zmiana na jednym urządzeniu pojawia się na pozostałych w ciągu kilku minut. Przy włączaniu pokazuje, jakich wersji potrzebują inne urządzenia.</string>
     <string name="whats_new_260_facefix_title">Popraw twarz w przeglądarce</string>
     <string name="whats_new_260_facefix_body">Przytrzymaj nazwaną twarz w przeglądarce, aby zaznaczyć, że to nie ta osoba, a menu nazwanej osoby ma „Usuń imię”.</string>
     <string name="whats_new_260_coldstart_title">Szybszy start przy dużych bibliotekach</string>

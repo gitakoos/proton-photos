@@ -2511,7 +2511,7 @@
     <string name="whats_new_260_peoplepics_title">Kişi resimleri ve düzen</string>
     <string name="whats_new_260_peoplepics_body">Kişiler sayfasındaki ve “Bu kim?” penceresindeki yüz resimleri büyük kitaplıklarda artık karanlık kalmaz ve Kişiler sayfası Albümler sekmesinin görünümünü izleyebilir ya da kendi ızgarasını veya listesini kullanabilir.</string>
     <string name="whats_new_260_desktopsync_title">Masaüstü uygulamasıyla birlikte</string>
-    <string name="whats_new_260_desktopsync_body">“Otomatik yedekleme” açıkken yüzler, adlar, etiketler, arama ve gizli fotoğraflar bu telefonda, diğer telefonlarında ve Photos for Proton masaüstü uygulamasında aynı kalır; birindeki değişiklik birkaç dakika içinde diğerlerinde görünür.</string>
+    <string name="whats_new_260_desktopsync_body">“Otomatik yedekleme” açıkken yüzler, adlar, etiketler, arama ve gizli fotoğraflar bu telefonda, diğer telefonlarında ve Photos for Proton masaüstü uygulamasında aynı kalır; birindeki değişiklik birkaç dakika içinde diğerlerinde görünür. Açarken diğer cihazların hangi sürümlere ihtiyaç duyduğunu söyler.</string>
     <string name="whats_new_260_facefix_title">Görüntüleyiciden yüz düzelt</string>
     <string name="whats_new_260_facefix_body">Görüntüleyicide adlandırılmış bir yüze uzun bas ve o kişi olmadığını belirt; adlandırılmış bir kişinin menüsünde “Adı kaldır” var.</string>
     <string name="whats_new_260_coldstart_title">Büyük kitaplıklarda daha hızlı açılış</string>

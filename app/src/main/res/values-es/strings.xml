@@ -2631,7 +2631,7 @@
     <string name="whats_new_260_peoplepics_title">Caras y vista de Personas</string>
     <string name="whats_new_260_peoplepics_body">Las fotos de caras en la página Personas y en “¿Quién es?” ya no se quedan oscuras en bibliotecas grandes, y la página Personas puede seguir la vista de la pestaña Álbumes o tener su propia cuadrícula o lista.</string>
     <string name="whats_new_260_desktopsync_title">Funciona con la app de escritorio</string>
-    <string name="whats_new_260_desktopsync_body">Con “Copia automática” activada, las caras, los nombres, las etiquetas, la búsqueda y las fotos ocultas son iguales en este teléfono, tus otros teléfonos y la app de escritorio Photos for Proton; un cambio en uno aparece en los demás en pocos minutos.</string>
+    <string name="whats_new_260_desktopsync_body">Con “Copia automática” activada, las caras, los nombres, las etiquetas, la búsqueda y las fotos ocultas son iguales en este teléfono, tus otros teléfonos y la app de escritorio Photos for Proton; un cambio en uno aparece en los demás en pocos minutos. Al activarla indica qué versiones necesitan los otros dispositivos.</string>
     <string name="whats_new_260_facefix_title">Corregir una cara desde el visor</string>
     <string name="whats_new_260_facefix_body">Mantén pulsada una cara con nombre en el visor para indicar que no es esa persona, y el menú de una persona con nombre tiene “Quitar nombre”.</string>
     <string name="whats_new_260_coldstart_title">Inicio más rápido en bibliotecas grandes</string>

@@ -2631,7 +2631,7 @@
     <string name="whats_new_260_peoplepics_title">People pictures and layout</string>
     <string name="whats_new_260_peoplepics_body">Face pictures on the People page and in “Who is this?” no longer stay dark on big libraries, and the People page can follow the Albums tab\'s layout or keep its own grid or list.</string>
     <string name="whats_new_260_desktopsync_title">Works with the desktop app</string>
-    <string name="whats_new_260_desktopsync_body">With “Automatic backup” on, faces, names, labels, search and hidden photos stay the same on this phone, your other phones and the Photos for Proton desktop app; a change on one shows on the others within minutes.</string>
+    <string name="whats_new_260_desktopsync_body">With “Automatic backup” on, faces, names, labels, search and hidden photos stay the same on this phone, your other phones and the Photos for Proton desktop app; a change on one shows on the others within minutes. Turning it on says which versions the other devices need.</string>
     <string name="whats_new_260_facefix_title">Fix a face from the viewer</string>
     <string name="whats_new_260_facefix_body">Long press a named face in the viewer to say it isn\'t that person, and a named person\'s menu has “Remove name”.</string>
     <string name="whats_new_260_coldstart_title">Quicker start on big libraries</string>

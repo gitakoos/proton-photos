@@ -2731,7 +2731,7 @@
     <string name="whats_new_260_peoplepics_title">Obrázky a rozložení lidí</string>
     <string name="whats_new_260_peoplepics_body">Obrázky obličejů na stránce Lidé a v „Kdo to je?“ už u velkých knihoven nezůstávají tmavé a stránka Lidé se může řídit zobrazením karty Alba, nebo mít vlastní mřížku či seznam.</string>
     <string name="whats_new_260_desktopsync_title">Spolupráce s aplikací pro počítač</string>
-    <string name="whats_new_260_desktopsync_body">Se zapnutou „Automatická záloha“ zůstávají tváře, jména, štítky, vyhledávání a skryté fotky stejné na tomto telefonu, vašich dalších telefonech i v aplikaci Photos for Proton pro počítač; změna na jednom zařízení se na ostatních objeví během několika minut.</string>
+    <string name="whats_new_260_desktopsync_body">Se zapnutou „Automatická záloha“ zůstávají tváře, jména, štítky, vyhledávání a skryté fotky stejné na tomto telefonu, vašich dalších telefonech i v aplikaci Photos for Proton pro počítač; změna na jednom zařízení se na ostatních objeví během několika minut. Při zapnutí ukáže, jaké verze potřebují ostatní zařízení.</string>
     <string name="whats_new_260_facefix_title">Oprava tváře z prohlížeče</string>
     <string name="whats_new_260_facefix_body">Podržte v prohlížeči pojmenovanou tvář a označte, že to není ta osoba; nabídka pojmenované osoby má „Odebrat jméno“.</string>
     <string name="whats_new_260_coldstart_title">Rychlejší start u velkých knihoven</string>

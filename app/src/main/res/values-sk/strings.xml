@@ -2732,7 +2732,7 @@
     <string name="whats_new_260_peoplepics_title">Obrázky a rozloženie ľudí</string>
     <string name="whats_new_260_peoplepics_body">Obrázky tvárí na stránke Ľudia a v „Kto je to?“ už pri veľkých knižniciach nezostávajú tmavé a stránka Ľudia sa môže riadiť zobrazením karty Albumy, alebo mať vlastnú mriežku či zoznam.</string>
     <string name="whats_new_260_desktopsync_title">Spolupráca s aplikáciou pre počítač</string>
-    <string name="whats_new_260_desktopsync_body">So zapnutou „Automatická záloha“ zostávajú tváre, mená, štítky, vyhľadávanie a skryté fotky rovnaké na tomto telefóne, vašich ďalších telefónoch aj v aplikácii Photos for Proton pre počítač; zmena na jednom zariadení sa na ostatných objaví do niekoľkých minút.</string>
+    <string name="whats_new_260_desktopsync_body">So zapnutou „Automatická záloha“ zostávajú tváre, mená, štítky, vyhľadávanie a skryté fotky rovnaké na tomto telefóne, vašich ďalších telefónoch aj v aplikácii Photos for Proton pre počítač; zmena na jednom zariadení sa na ostatných objaví do niekoľkých minút. Pri zapnutí ukáže, aké verzie potrebujú ostatné zariadenia.</string>
     <string name="whats_new_260_facefix_title">Oprava tváre z prehliadača</string>
     <string name="whats_new_260_facefix_body">Podržte v prehliadači pomenovanú tvár a označte, že to nie je tá osoba; ponuka pomenovanej osoby má „Odstrániť meno“.</string>
     <string name="whats_new_260_coldstart_title">Rýchlejší štart pri veľkých knižniciach</string>

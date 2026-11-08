@@ -2725,7 +2725,7 @@
     <string name="whats_new_260_peoplepics_title">Slike in postavitev oseb</string>
     <string name="whats_new_260_peoplepics_body">Slike obrazov na strani Osebe in v „Kdo je to?“ pri velikih knjižnicah ne ostanejo več temne, stran Osebe pa lahko sledi pogledu zavihka Albumi ali ima svojo mrežo ali seznam.</string>
     <string name="whats_new_260_desktopsync_title">Deluje z namizno aplikacijo</string>
-    <string name="whats_new_260_desktopsync_body">Ko je vklopljena „Samodejna varnostna kopija“, ostanejo obrazi, imena, oznake, iskanje in skrite fotografije enaki na tem telefonu, vaših drugih telefonih in v namizni aplikaciji Photos for Proton; sprememba na eni napravi se na drugih pokaže v nekaj minutah.</string>
+    <string name="whats_new_260_desktopsync_body">Ko je vklopljena „Samodejna varnostna kopija“, ostanejo obrazi, imena, oznake, iskanje in skrite fotografije enaki na tem telefonu, vaših drugih telefonih in v namizni aplikaciji Photos for Proton; sprememba na eni napravi se na drugih pokaže v nekaj minutah. Ob vklopu pove, katere različice potrebujejo druge naprave.</string>
     <string name="whats_new_260_facefix_title">Popravite obraz iz pregledovalnika</string>
     <string name="whats_new_260_facefix_body">V pregledovalniku pridržite poimenovan obraz in označite, da to ni ta oseba; meni poimenovane osebe ima „Odstrani ime“.</string>
     <string name="whats_new_260_coldstart_title">Hitrejši zagon pri velikih knjižnicah</string>

@@ -2596,7 +2596,7 @@
     <string name="whats_new_260_peoplepics_title">Images et affichage des personnes</string>
     <string name="whats_new_260_peoplepics_body">Les images des visages sur la page Personnes et dans « Qui est-ce ? » ne restent plus sombres sur les grandes bibliothèques, et la page Personnes peut suivre l\'affichage de l\'onglet Albums ou garder sa propre grille ou liste.</string>
     <string name="whats_new_260_desktopsync_title">Avec l\'app de bureau</string>
-    <string name="whats_new_260_desktopsync_body">Avec « Sauvegarde automatique » activée, les visages, les noms, les étiquettes, la recherche et les photos masquées restent les mêmes sur ce téléphone, vos autres téléphones et l\'app de bureau Photos for Proton ; un changement sur l\'un apparaît sur les autres en quelques minutes.</string>
+    <string name="whats_new_260_desktopsync_body">Avec « Sauvegarde automatique » activée, les visages, les noms, les étiquettes, la recherche et les photos masquées restent les mêmes sur ce téléphone, vos autres téléphones et l\'app de bureau Photos for Proton ; un changement sur l\'un apparaît sur les autres en quelques minutes. En l\'activant, l\'app indique les versions dont les autres appareils ont besoin.</string>
     <string name="whats_new_260_facefix_title">Corriger un visage depuis la visionneuse</string>
     <string name="whats_new_260_facefix_body">Appuyez longuement sur un visage nommé dans la visionneuse pour indiquer que ce n\'est pas cette personne, et le menu d\'une personne nommée propose « Retirer le nom ».</string>
     <string name="whats_new_260_coldstart_title">Démarrage plus rapide sur les grandes bibliothèques</string>
