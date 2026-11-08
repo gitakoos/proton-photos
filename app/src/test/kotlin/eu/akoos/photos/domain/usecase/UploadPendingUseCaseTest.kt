@@ -291,12 +291,10 @@ class UploadPendingUseCaseTest {
     }
 
     @Test
-    fun `a Sync now that defers for Wi-Fi still counts on the next run`() = runTest {
-        // The flag is consumed past the early returns, not alongside the other prefs. A tap that lands
-        // on a batch which defers (Wi-Fi-only on, no Wi-Fi) must not be spent on a run that uploaded
-        // nothing: the rows would then be held by the switch on every later trigger, which is the same
-        // silent nothing the flag exists to prevent.
-        every { mockPrefsRef[SettingsKeys.AUTO_SYNC] } returns false
+    fun `Sync now uploads on mobile data with Wi-Fi only on, and the next automatic run waits again`() = runTest {
+        // A tap on Sync now is asked for by hand, like a photo backed up by hand, so the Wi-Fi-only
+        // switch does not hold it. The tap covers that one run: an automatic trigger after it waits for
+        // Wi-Fi as before.
         every { mockPrefsRef[SettingsKeys.SYNC_WIFI_ONLY] } returns true
         coEvery { networkObserver.currentlyOnWifi() } returns false
         every { syncStateRepo.observeAll(userId) } returns
@@ -304,12 +302,16 @@ class UploadPendingUseCaseTest {
         coEvery { localRepo.queryByUri(any()) } returns localItem("uri://1")
         coEvery { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) } returns "cloud-id"
 
-        useCase.requestManualRun()
         useCase(userId)
         coVerify(exactly = 0) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
 
-        // Wi-Fi is back. The tap is still owed, so this run honours it.
-        coEvery { networkObserver.currentlyOnWifi() } returns true
+        useCase.requestManualRun()
+        useCase(userId)
+        coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
+
+        every { syncStateRepo.observeAll(userId) } returns
+            flowOf(listOf(syncState("uri://2", SyncStatus.LOCAL_ONLY)))
+        coEvery { localRepo.queryByUri(any()) } returns localItem("uri://2")
         useCase(userId)
         coVerify(exactly = 1) { cloudRepo.uploadFile(userId, any(), any(), any(), any(), any()) }
     }

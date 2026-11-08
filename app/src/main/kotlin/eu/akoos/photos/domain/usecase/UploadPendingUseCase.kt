@@ -143,8 +143,8 @@ class UploadPendingUseCase @Inject constructor(
     /**
      * One-shot "the user asked for this run" flag, set by [requestManualRun] when Sync now is tapped.
      * The next [invoke] consumes it and lets the folder sweep's own rows through even with auto-backup
-     * off, which is the only thing it changes: the folder selection, the Wi-Fi guard and the listing
-     * guards all still apply exactly as they do to an automatic pass.
+     * off and on mobile data with Wi-Fi only on, since the user asked for this run; the folder selection
+     * and the listing guards still apply exactly as they do to an automatic pass.
      *
      * A flag rather than a queue-source rewrite because "back up now" is a fact about this RUN, not
      * about any photo. Stamping the rows MANUAL instead would also make them bypass the folder filter
@@ -421,9 +421,10 @@ class UploadPendingUseCase @Inject constructor(
         // app). ANY-Wi-Fi semantics: a metered Wi-Fi (hotspot, some routers) is still allowed, but
         // mobile data is not. Centralised here so the inline callers (pull-to-refresh, Settings sync,
         // editor) get the same guard the worker relies on. An explicit forced upload (a queued
-        // album-add / "back up now") bypasses it — the user asked for that one regardless of network.
+        // album-add / "back up now") and a tap on Sync now bypass it: the user asked for that one
+        // regardless of network. The Sync now flag is only read here and consumed further down.
         val wifiOnly = prefs[SettingsKeys.SYNC_WIFI_ONLY] != false
-        if (wifiOnly && !hasExplicitBypass && !networkObserver.currentlyOnWifi()) {
+        if (wifiOnly && !hasExplicitBypass && !manualRunRequested.get() && !networkObserver.currentlyOnWifi()) {
             Log.d(UPLOAD_TAG, "Wi-Fi-only on and not on Wi-Fi — skipping auto-sync upload")
             _progress.tryEmit(UploadProgress("", "", UploadStatus.WaitingForWifi, 0, 0))
             PerfDiagnostics.mark("upload:end", 0)
@@ -517,7 +518,7 @@ class UploadPendingUseCase @Inject constructor(
         }
 
         // Consumed HERE, past every early return above, not where the other prefs are read. A Sync now
-        // tap can land on a batch that defers for Wi-Fi or for an unsettled listing, and consuming the
+        // tap can land on a batch that defers for an unsettled listing, and consuming the
         // flag on the way into one of those would spend the user's request on a run that uploaded
         // nothing: the deferred rows would then be held by the switch on every later trigger, which is
         // the same silent nothing this flag exists to prevent. Surviving a deferral means the next run
@@ -753,8 +754,9 @@ class UploadPendingUseCase @Inject constructor(
                 // never rides mobile data, even when an explicit "back up now" or album-add opened this
                 // pass. Only the explicitly-picked photos (which skip this whole block) go over cellular,
                 // so a single manual pick uploads just that one rather than dragging the auto backlog
-                // onto mobile. Read live so a Wi-Fi drop mid-batch stops the not-yet-started items.
-                if (uploadDefersForWifiOnly(
+                // onto mobile. Read live so a Wi-Fi drop mid-batch stops the not-yet-started items. A run
+                // the user started with Sync now is exempt: they asked for the whole backup now.
+                if (!manualRun && uploadDefersForWifiOnly(
                         state.queueSource,
                         wifiOnly = livePrefs[SettingsKeys.SYNC_WIFI_ONLY] != false,
                         onWifi = networkObserver.currentlyOnWifi(),
