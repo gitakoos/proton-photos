@@ -202,4 +202,21 @@ class ObservePeopleCoversDbTest {
         assertEquals(2, livePhotoCount(listOf("linkA", "linkA", "linkB", "linkT", "content://x"), feed))
         assertEquals(0, livePhotoCount(emptyList(), feed))
     }
+
+    @Test
+    fun `the named people's counts from two reads match one read per person`() {
+        val feed = setOf("linkA", "linkB", "linkC", "linkD")
+        val named = listOf(1L to "Anna", 2L to "Bela", 3L to "Csaba")
+        // Anna: two faces on linkA, one on the trashed linkT, linkB added by hand. Bela: linkC, and linkA added
+        // to "bela", which is another name to the exact match. Csaba: only a photo added by hand. Person 4 is not
+        // named and is not counted here.
+        val faceKeys = listOf(1L to "linkA", 1L to "linkT", 1L to "linkA", 2L to "linkC", 4L to "linkD")
+        val manualKeys = listOf("Anna" to "linkB", "Anna" to "linkA", "bela" to "linkA", "Csaba" to "linkD")
+        val counts = livePhotoCounts(named, faceKeys, manualKeys, feed)
+        assertEquals(mapOf(1L to 2, 2L to 1, 3L to 1), counts)
+        for ((id, name) in named) {
+            val keys = faceKeys.filter { it.first == id }.map { it.second } + manualKeys.filter { it.first == name }.map { it.second }
+            assertEquals(livePhotoCount(keys, feed), counts[id])
+        }
+    }
 }

@@ -29,6 +29,7 @@ import androidx.test.core.app.ApplicationProvider
 import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.util.FaceDiagnostics
@@ -47,8 +48,10 @@ import org.robolectric.annotation.Config
 
 /**
  * The people list over a big library: 6,400 people holding 120,000 faces, half of whose stored covers are
- * off the feed, so half the people take the per-person fallback. Asserts only what the list holds; the time
- * of each stage of the build is printed for a measurement.
+ * off the feed, so half the people take the per-person fallback. Every tenth person carries a name and two
+ * photos added by hand, so the named people's counts (more of them than one statement's chunk) are built
+ * and checked too. Asserts what the list holds and that a build stays well inside a few seconds; the time of
+ * each stage of the build is printed for a measurement.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -89,7 +92,14 @@ class ObservePeopleScaleDbTest {
         db.withTransaction {
             for (chunk in rows.chunked(5_000)) db.faceDao().upsert(chunk)
             for (p in 1..people) {
-                db.personDao().upsert(PersonEntity(id = p.toLong(), userId = acct, coverFaceId = "ph${p - 1}#0", faceCount = p))
+                val name = if (p % 10 == 0) "Person $p" else null
+                db.personDao().upsert(PersonEntity(id = p.toLong(), userId = acct, coverFaceId = "ph${p - 1}#0", faceCount = p, displayName = name))
+                // One photo of another person that is in the library, one that is not.
+                if (name != null) {
+                    db.personManualPhotoDao().add(
+                        listOf(PersonManualPhotoEntity(acct, name, "ph$p"), PersonManualPhotoEntity(acct, name, "gone$p")),
+                    )
+                }
             }
         }
         val feed = ArrayList<GalleryItem>(faces)
@@ -104,6 +114,13 @@ class ObservePeopleScaleDbTest {
             }
         }
         val useCase = ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())
+        // What each named person's page shows, read one person at a time: the counts the list must match.
+        val feedIds = feed.mapTo(HashSet()) { it.stableId }
+        val wantedCounts = (1..people).filter { it % 10 == 0 }.associate { p ->
+            val keys = db.faceDao().distinctPhotoKeysForPerson(acct, p.toLong()) +
+                db.personManualPhotoDao().photoKeysForNameList(acct, "Person $p")
+            p.toLong() to livePhotoCount(keys, feedIds)
+        }
 
         repeat(2) { round ->
             val startNs = System.nanoTime()
@@ -120,6 +137,11 @@ class ObservePeopleScaleDbTest {
                 assertEquals("person $p", wanted, s.coverPhotoKey)
             }
             assertTrue(line, line.contains("fallbacks=${people / 2} "))
+            for (s in summaries) {
+                val wanted = wantedCounts[s.personId] ?: s.personId.toInt()
+                assertEquals("count of person ${s.personId}", wanted, s.faceCount)
+            }
+            assertTrue("a build took ${tookMs}ms", tookMs < 5_000L)
         }
 
         val first = useCase(UserId(acct), flowOf(ArrayList(feed))).first()

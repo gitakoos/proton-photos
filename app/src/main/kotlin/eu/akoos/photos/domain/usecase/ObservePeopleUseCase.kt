@@ -170,14 +170,18 @@ class ObservePeopleUseCase @Inject constructor(
             val feedIds: Set<String> = idsMemo.get()?.takeIf { it.first === items }?.second
                 ?: withContext(Dispatchers.Default) { items.mapTo(HashSet(items.size)) { it.stableId } }
                     .also { idsMemo.set(items to it) }
-            covers.mapNotNull { (person, _) ->
-                val name = person.displayName?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                val keys = runCatching {
-                    faceDao.distinctPhotoKeysForPerson(account, person.id) +
-                        personManualPhotoDao.photoKeysForNameList(account, name)
-                }.getOrNull() ?: return@mapNotNull null
-                person.id to livePhotoCount(keys, feedIds)
-            }.toMap()
+            // Two reads for every named person at once rather than two per person, which on a library with
+            // hundreds of named people would add seconds to every build.
+            val named = covers.mapNotNull { (person, _) ->
+                person.displayName?.takeIf { it.isNotBlank() }?.let { person.id to it }
+            }
+            val reads = runCatching {
+                faceDao.distinctPhotoKeysForPeople(account, named.map { it.first }) to
+                    personManualPhotoDao.allForUser(account)
+            }.getOrNull()
+            if (reads == null) emptyMap() else withContext(Dispatchers.Default) {
+                livePhotoCounts(named, reads.first.map { it.personId to it.photoKey }, reads.second.map { it.personName to it.photoKey }, feedIds)
+            }
         }
         // One light pass for the chosen covers' dimensions (early-continue on every other item), only when a
         // cover holds an older pixel box: a fraction box needs none. A backed-up photo answers to its uri too.
@@ -343,3 +347,21 @@ internal suspend fun chooseLiveCoverFace(
  *  each once: the count a person's page shows. */
 internal fun livePhotoCount(keys: Collection<String>, feedIds: Set<String>): Int =
     keys.filterTo(HashSet()) { it in feedIds }.size
+
+/** [livePhotoCount] for every person of [named] (id to name) from two account-wide reads: the photos their
+ *  faces sit on ([faceKeys], person id to photo key) and the photos added to a name by hand ([manualKeys],
+ *  name to photo key, matched on the exact name as the per-person read does). */
+internal fun livePhotoCounts(
+    named: List<Pair<Long, String>>,
+    faceKeys: List<Pair<Long, String>>,
+    manualKeys: List<Pair<String, String>>,
+    feedIds: Set<String>,
+): Map<Long, Int> {
+    val byPerson = HashMap<Long, MutableList<String>>()
+    for ((id, key) in faceKeys) byPerson.getOrPut(id) { ArrayList() }.add(key)
+    val byName = HashMap<String, MutableList<String>>()
+    for ((name, key) in manualKeys) byName.getOrPut(name) { ArrayList() }.add(key)
+    return named.associate { (id, name) ->
+        id to livePhotoCount(byPerson[id].orEmpty() + byName[name].orEmpty(), feedIds)
+    }
+}

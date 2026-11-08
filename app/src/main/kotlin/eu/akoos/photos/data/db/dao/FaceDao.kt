@@ -131,6 +131,12 @@ data class FaceHead(
     val embeddingBytes: Int,
 )
 
+/** A photo one of a person's kept faces appears in. */
+data class PersonPhotoKey(
+    val personId: Long,
+    val photoKey: String,
+)
+
 /**
  * One face reduced to its photo, its stored box, its detection [score] and the person it is grouped
  * under ([personId], null while it waits to be clustered). The embedding blob is left out, so listing
@@ -341,6 +347,14 @@ interface FaceDao {
      *  the manually attached photos rather than counting faces (a photo can hold several faces). */
     @Query("SELECT DISTINCT photoKey FROM face WHERE userId = :userId AND personId = :personId AND rejected = 0")
     suspend fun distinctPhotoKeysForPerson(userId: String, personId: Long): List<String>
+
+    /** [distinctPhotoKeysForPerson] for many people in a few statements, as (person, photo) pairs, so a list of
+     *  people can be counted without a query per person. Chunked for the host-variable limit. */
+    suspend fun distinctPhotoKeysForPeople(userId: String, personIds: Collection<Long>): List<PersonPhotoKey> =
+        personIds.toList().flatMapSqlChunks { distinctPhotoKeysForPeopleChunk(userId, it) }
+
+    @Query("SELECT DISTINCT personId, photoKey FROM face WHERE personId IN (:personIds) AND +userId = :userId AND rejected = 0")
+    suspend fun distinctPhotoKeysForPeopleChunk(userId: String, personIds: List<Long>): List<PersonPhotoKey>
 
     /** The clearest remaining face of a person, so a removal that takes out the old cover can repoint
      *  it to a face that still belongs. Null once none remain. */
