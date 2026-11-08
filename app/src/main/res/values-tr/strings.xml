@@ -1854,7 +1854,7 @@
     <string name="drive_backup_auto">Otomatik yedekleme</string>
     <string name="drive_backup_auto_desc">Yüzleri, arama dizinini, etiketleri ve gizli öğeleri kaydeder ve diğer cihazlarında aynı tutar</string>
     <string name="drive_backup_turn_on_title">Otomatik yedekleme açılsın mı?</string>
-    <string name="drive_backup_turn_on_msg">Başka bir telefonda bunun için Photos for Proton 2.6.0 veya daha yenisi, bir bilgisayarda ise Photos for Proton for Windows 1.3.0 veya daha yenisi gerekir. Eski bir sürüm bu telefonun kaydettiklerine dokunmaz ve kendi verilerini olduğu gibi tutar.</string>
+    <string name="drive_backup_turn_on_msg">Başka bir telefonda bunun için Photos for Proton 2.6.0 veya daha yenisi, bir bilgisayarda ise Photos for Proton desktop 1.3.0 veya daha yenisi gerekir. Eski bir sürüm bu telefonun kaydettiklerine dokunmaz ve kendi verilerini olduğu gibi tutar.</string>
     <string name="drive_backup_turn_on">Aç</string>
     <string name="drive_backup_save_now">Şimdi yedekle</string>
     <string name="drive_backup_load">Drive\'dan yükle</string>
@@ -2483,7 +2483,7 @@
     <string name="whats_new_260_videoseek_title">Videoları atla ve hızlandır</string>
     <string name="whats_new_260_videoseek_body">Bir videonun sol ya da sağ kenarına iki kez dokunarak 10 saniye geri ya da ileri atla, ya da bir kenarı basılı tutarak bırakana kadar daha hızlı oynat.</string>
     <string name="whats_new_260_cloudcompress_title">Drive\'da sıkıştır</string>
-    <string name="whats_new_260_cloudcompress_body">Yalnızca Drive\'da olan fotoğraf ve videoları görüntüleyiciden ya da bir seçimden küçültebilirsin; her orijinal, küçük kopyası yerine oturunca Drive çöp kutusuna gider.</string>
+    <string name="whats_new_260_cloudcompress_body">Yalnızca Drive\'da olan fotoğraf ve videoları görüntüleyiciden ya da bir seçimden küçültebilirsin; her orijinal, küçük kopyası yerine oturunca Drive çöp kutusuna gider. Arama, bir albüm ya da bir yerden de başlatabilirsin; en yenilerden başlar.</string>
     <string name="whats_new_260_sharebackup_title">Diğer uygulamalardan yedekle</string>
     <string name="whats_new_260_sharebackup_body">Başka bir uygulamadan fotoğraf ya da video paylaşırken “Drive\'a yedekle” seçeneğini seç ya da başka bir uygulamadan açılan bir fotoğrafı, örneğin bir e-posta ekini, doğrudan görüntüleyiciden yedekle.</string>
     <string name="whats_new_260_foldermove_title">Oturum açıkken klasör taşı</string>

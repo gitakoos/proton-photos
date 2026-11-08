@@ -1219,7 +1219,7 @@
     <string name="drive_backup_auto">Automatikus mentés</string>
     <string name="drive_backup_auto_desc">Menti az arcokat, a keresési indexet, a címkéket és a rejtett elemeket, és a többi eszközödön is ugyanazok maradnak</string>
     <string name="drive_backup_turn_on_title">Bekapcsolod az automatikus mentést?</string>
-    <string name="drive_backup_turn_on_msg">Egy másik telefonon ehhez Photos for Proton 2.6.0 vagy újabb kell, a gépen pedig Photos for Proton for Windows 1.3.0 vagy újabb. Egy régebbi verzió békén hagyja, amit ez a telefon ment, és a saját adatait úgy tartja meg, ahogy vannak.</string>
+    <string name="drive_backup_turn_on_msg">Egy másik telefonon ehhez Photos for Proton 2.6.0 vagy újabb kell, a gépen pedig Photos for Proton desktop 1.3.0 vagy újabb. Egy régebbi verzió békén hagyja, amit ez a telefon ment, és a saját adatait úgy tartja meg, ahogy vannak.</string>
     <string name="drive_backup_turn_on">Bekapcsolás</string>
     <string name="drive_backup_save_now">Mentés most</string>
     <string name="drive_backup_load">Betöltés a Drive-ról</string>
@@ -2565,7 +2565,7 @@
     <string name="whats_new_260_videoseek_title">Videók léptetése és gyorsítása</string>
     <string name="whats_new_260_videoseek_body">Koppints duplán egy videó bal vagy jobb szélére, hogy 10 másodpercet ugorj vissza vagy előre, vagy tartsd lenyomva az egyik szélét, és amíg el nem engeded, gyorsabban megy.</string>
     <string name="whats_new_260_cloudcompress_title">Tömörítés a Drive-on</string>
-    <string name="whats_new_260_cloudcompress_body">A csak a Drive-on lévő fotókat és videókat a nézegetőből vagy egy kijelölésből kisebbre tömörítheted, és minden eredeti a Drive kukájába kerül, amint a kisebb másolata a helyén van.</string>
+    <string name="whats_new_260_cloudcompress_body">A csak a Drive-on lévő fotókat és videókat a nézegetőből vagy egy kijelölésből kisebbre tömörítheted, és minden eredeti a Drive kukájába kerül, amint a kisebb másolata a helyén van. Indíthatod a keresésből, egy albumból vagy egy helyről is, a legújabbakkal kezdve.</string>
     <string name="whats_new_260_sharebackup_title">Mentés más appokból</string>
     <string name="whats_new_260_sharebackup_body">Más appból megosztva válaszd a „Mentés a Drive-ra” lehetőséget, vagy egy más appból megnyitott fotót, például e-mail-mellékletet, közvetlenül a nézegetőből is elmenthetsz.</string>
     <string name="whats_new_260_foldermove_title">Mappák áthelyezése bejelentkezve is</string>

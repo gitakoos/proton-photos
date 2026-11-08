@@ -1209,7 +1209,7 @@
     <string name="drive_backup_auto">Automatische back-up</string>
     <string name="drive_backup_auto_desc">Bewaart gezichten, de zoekindex, labels en verborgen items en houdt ze gelijk op je andere apparaten</string>
     <string name="drive_backup_turn_on_title">Automatische back-up aanzetten?</string>
-    <string name="drive_backup_turn_on_msg">Op een andere telefoon is hiervoor Photos for Proton 2.6.0 of nieuwer nodig, en op een computer Photos for Proton for Windows 1.3.0 of nieuwer. Een oudere versie laat met rust wat deze telefoon opslaat en houdt zijn eigen gegevens zoals ze zijn.</string>
+    <string name="drive_backup_turn_on_msg">Op een andere telefoon is hiervoor Photos for Proton 2.6.0 of nieuwer nodig, en op een computer Photos for Proton desktop 1.3.0 of nieuwer. Een oudere versie laat met rust wat deze telefoon opslaat en houdt zijn eigen gegevens zoals ze zijn.</string>
     <string name="drive_backup_turn_on">Aanzetten</string>
     <string name="drive_backup_save_now">Nu back-uppen</string>
     <string name="drive_backup_load">Laden van Drive</string>
@@ -2590,7 +2590,7 @@
     <string name="whats_new_260_videoseek_title">Video\'s overslaan en versnellen</string>
     <string name="whats_new_260_videoseek_body">Tik twee keer op de linker- of rechterkant van een video om 10 seconden terug of vooruit te springen, of houd een kant vast om hem sneller af te spelen tot je loslaat.</string>
     <string name="whats_new_260_cloudcompress_title">Comprimeren op Drive</string>
-    <string name="whats_new_260_cloudcompress_body">Foto\'s en video\'s die alleen op Drive staan, maak je kleiner vanuit de fotoweergave of een selectie, en elk origineel gaat naar de prullenbak van Drive zodra de kleinere kopie klaarstaat.</string>
+    <string name="whats_new_260_cloudcompress_body">Foto\'s en video\'s die alleen op Drive staan, maak je kleiner vanuit de fotoweergave of een selectie, en elk origineel gaat naar de prullenbak van Drive zodra de kleinere kopie klaarstaat. Het werkt ook vanuit Zoeken, een album of een plaats, de nieuwste eerst.</string>
     <string name="whats_new_260_sharebackup_title">Back-up vanuit andere apps</string>
     <string name="whats_new_260_sharebackup_body">Kies “Back-up naar Drive” als je foto\'s of video\'s vanuit een andere app deelt, of maak direct vanuit de fotoweergave een back-up van een foto die je vanuit een andere app opende, zoals een e-mailbijlage.</string>
     <string name="whats_new_260_foldermove_title">Mappen verplaatsen als je bent ingelogd</string>

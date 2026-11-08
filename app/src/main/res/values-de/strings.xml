@@ -1196,7 +1196,7 @@
     <string name="drive_backup_auto">Automatische Sicherung</string>
     <string name="drive_backup_auto_desc">Sichert Gesichter, Suchindex, Labels und ausgeblendete Elemente und hält sie auf deinen anderen Geräten gleich</string>
     <string name="drive_backup_turn_on_title">Automatische Sicherung einschalten?</string>
-    <string name="drive_backup_turn_on_msg">Auf einem anderen Telefon braucht das Photos for Proton 2.6.0 oder neuer und auf einem Computer Photos for Proton for Windows 1.3.0 oder neuer. Eine ältere Version lässt in Ruhe, was dieses Telefon sichert, und behält ihre eigenen Daten, wie sie sind.</string>
+    <string name="drive_backup_turn_on_msg">Auf einem anderen Telefon braucht das Photos for Proton 2.6.0 oder neuer und auf einem Computer Photos for Proton desktop 1.3.0 oder neuer. Eine ältere Version lässt in Ruhe, was dieses Telefon sichert, und behält ihre eigenen Daten, wie sie sind.</string>
     <string name="drive_backup_turn_on">Einschalten</string>
     <string name="drive_backup_save_now">Jetzt sichern</string>
     <string name="drive_backup_load">Von Drive laden</string>
@@ -2566,7 +2566,7 @@
     <string name="whats_new_260_videoseek_title">Videos überspringen und beschleunigen</string>
     <string name="whats_new_260_videoseek_body">Tippe doppelt auf die linke oder rechte Seite eines Videos, um 10 Sekunden zurück- oder vorzuspringen, oder halte eine Seite gedrückt, um es schneller abzuspielen, bis du loslässt.</string>
     <string name="whats_new_260_cloudcompress_title">Auf Drive komprimieren</string>
-    <string name="whats_new_260_cloudcompress_body">Fotos und Videos, die nur auf Drive liegen, lassen sich in der Fotoansicht oder einer Auswahl verkleinern, und jedes Original wandert in den Drive-Papierkorb, sobald seine kleinere Kopie bereitsteht.</string>
+    <string name="whats_new_260_cloudcompress_body">Fotos und Videos, die nur auf Drive liegen, lassen sich in der Fotoansicht oder einer Auswahl verkleinern, und jedes Original wandert in den Drive-Papierkorb, sobald seine kleinere Kopie bereitsteht. Das geht auch aus der Suche, einem Album oder einem Ort, die neuesten zuerst.</string>
     <string name="whats_new_260_sharebackup_title">Aus anderen Apps sichern</string>
     <string name="whats_new_260_sharebackup_body">Wähle beim Teilen von Fotos oder Videos aus einer anderen App „Auf Drive sichern“, oder sichere ein aus einer anderen App geöffnetes Foto, etwa einen Mailanhang, direkt in der Fotoansicht.</string>
     <string name="whats_new_260_foldermove_title">Ordner verschieben, auch angemeldet</string>

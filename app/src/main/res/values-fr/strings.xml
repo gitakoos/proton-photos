@@ -1198,7 +1198,7 @@
     <string name="drive_backup_auto">Sauvegarde automatique</string>
     <string name="drive_backup_auto_desc">Sauvegarde les visages, l\'index de recherche, les étiquettes et les éléments masqués, et les garde identiques sur vos autres appareils</string>
     <string name="drive_backup_turn_on_title">Activer la sauvegarde automatique ?</string>
-    <string name="drive_backup_turn_on_msg">Sur un autre téléphone, il faut Photos for Proton 2.6.0 ou ultérieur, et sur un ordinateur Photos for Proton for Windows 1.3.0 ou ultérieur. Une version plus ancienne laisse de côté ce que ce téléphone sauvegarde et garde ses propres données telles quelles.</string>
+    <string name="drive_backup_turn_on_msg">Sur un autre téléphone, il faut Photos for Proton 2.6.0 ou ultérieur, et sur un ordinateur Photos for Proton desktop 1.3.0 ou ultérieur. Une version plus ancienne laisse de côté ce que ce téléphone sauvegarde et garde ses propres données telles quelles.</string>
     <string name="drive_backup_turn_on">Activer</string>
     <string name="drive_backup_save_now">Sauvegarder maintenant</string>
     <string name="drive_backup_load">Charger depuis Drive</string>
@@ -2568,7 +2568,7 @@
     <string name="whats_new_260_videoseek_title">Sauter et accélérer les vidéos</string>
     <string name="whats_new_260_videoseek_body">Touchez deux fois le côté gauche ou droit d\'une vidéo pour reculer ou avancer de 10 secondes, ou maintenez un côté pour la lire plus vite jusqu\'à ce que vous relâchiez.</string>
     <string name="whats_new_260_cloudcompress_title">Compresser sur Drive</string>
-    <string name="whats_new_260_cloudcompress_body">Les photos et vidéos présentes uniquement sur Drive peuvent être réduites depuis la visionneuse ou une sélection, et chaque original part dans la corbeille de Drive une fois sa copie plus légère en place.</string>
+    <string name="whats_new_260_cloudcompress_body">Les photos et vidéos présentes uniquement sur Drive peuvent être réduites depuis la visionneuse ou une sélection, et chaque original part dans la corbeille de Drive une fois sa copie plus légère en place. Cela marche aussi depuis la recherche, un album ou un lieu, en commençant par les plus récentes.</string>
     <string name="whats_new_260_sharebackup_title">Sauvegarder depuis d\'autres apps</string>
     <string name="whats_new_260_sharebackup_body">Choisissez « Sauvegarder sur Drive » en partageant des photos ou des vidéos depuis une autre app, ou sauvegardez une photo ouverte depuis une autre app, comme une pièce jointe d\'e-mail, directement depuis la visionneuse.</string>
     <string name="whats_new_260_foldermove_title">Déplacer des dossiers une fois connecté</string>

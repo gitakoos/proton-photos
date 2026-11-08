@@ -1955,7 +1955,7 @@
     <string name="drive_backup_auto">Automatic backup</string>
     <string name="drive_backup_auto_desc">Saves faces, the search index, labels and hidden items, and keeps them the same on your other devices</string>
     <string name="drive_backup_turn_on_title">Turn on Automatic backup?</string>
-    <string name="drive_backup_turn_on_msg">On another phone this needs Photos for Proton 2.6.0 or newer, and on a computer Photos for Proton for Windows 1.3.0 or newer. An older version leaves what this phone saves alone and keeps its own data as it is.</string>
+    <string name="drive_backup_turn_on_msg">On another phone this needs Photos for Proton 2.6.0 or newer, and on a computer Photos for Proton desktop 1.3.0 or newer. An older version leaves what this phone saves alone and keeps its own data as it is.</string>
     <string name="drive_backup_turn_on">Turn on</string>
     <string name="drive_backup_save_now">Back up now</string>
     <string name="drive_backup_load">Load from Drive</string>
@@ -2603,7 +2603,7 @@
     <string name="whats_new_260_videoseek_title">Skip and speed up videos</string>
     <string name="whats_new_260_videoseek_body">Double tap the left or right side of a video to skip 10 seconds back or forward, or hold a side to play it faster until you let go.</string>
     <string name="whats_new_260_cloudcompress_title">Compress on Drive</string>
-    <string name="whats_new_260_cloudcompress_body">Photos and videos that are only on Drive can be made smaller from the viewer or a selection, and each original goes to the Drive trash once its smaller copy is in place.</string>
+    <string name="whats_new_260_cloudcompress_body">Photos and videos that are only on Drive can be made smaller from the viewer or a selection, and each original goes to the Drive trash once its smaller copy is in place. It also starts from Search, an album or a place, newest first.</string>
     <string name="whats_new_260_sharebackup_title">Back up from other apps</string>
     <string name="whats_new_260_sharebackup_body">Choose “Back up to Drive” when you share photos or videos from another app, or back up a photo opened from another app, such as a mail attachment, right from the viewer.</string>
     <string name="whats_new_260_foldermove_title">Move folders when signed in</string>

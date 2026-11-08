@@ -1211,7 +1211,7 @@
     <string name="drive_backup_auto">Copia automática</string>
     <string name="drive_backup_auto_desc">Guarda las caras, el índice de búsqueda, las etiquetas y los elementos ocultos, y los mantiene iguales en tus otros dispositivos</string>
     <string name="drive_backup_turn_on_title">¿Activar la copia automática?</string>
-    <string name="drive_backup_turn_on_msg">En otro teléfono necesita Photos for Proton 2.6.0 o posterior, y en un ordenador Photos for Proton for Windows 1.3.0 o posterior. Una versión anterior deja en paz lo que guarda este teléfono y mantiene sus propios datos como están.</string>
+    <string name="drive_backup_turn_on_msg">En otro teléfono necesita Photos for Proton 2.6.0 o posterior, y en un ordenador Photos for Proton desktop 1.3.0 o posterior. Una versión anterior deja en paz lo que guarda este teléfono y mantiene sus propios datos como están.</string>
     <string name="drive_backup_turn_on">Activar</string>
     <string name="drive_backup_save_now">Copiar ahora</string>
     <string name="drive_backup_load">Cargar desde Drive</string>
@@ -2603,7 +2603,7 @@
     <string name="whats_new_260_videoseek_title">Salta y acelera vídeos</string>
     <string name="whats_new_260_videoseek_body">Toca dos veces el lado izquierdo o derecho de un vídeo para retroceder o avanzar 10 segundos, o mantén pulsado un lado para reproducirlo más rápido hasta que lo sueltes.</string>
     <string name="whats_new_260_cloudcompress_title">Comprimir en Drive</string>
-    <string name="whats_new_260_cloudcompress_body">Las fotos y vídeos que solo están en Drive se pueden reducir desde el visor o una selección, y cada original va a la papelera de Drive cuando su copia más pequeña ya está en su sitio.</string>
+    <string name="whats_new_260_cloudcompress_body">Las fotos y vídeos que solo están en Drive se pueden reducir desde el visor o una selección, y cada original va a la papelera de Drive cuando su copia más pequeña ya está en su sitio. También se inicia desde la búsqueda, un álbum o un lugar, empezando por las más recientes.</string>
     <string name="whats_new_260_sharebackup_title">Respalda desde otras apps</string>
     <string name="whats_new_260_sharebackup_body">Elige “Respaldar en Drive” al compartir fotos o vídeos desde otra app, o respalda una foto abierta desde otra app, como un adjunto de correo, directamente desde el visor.</string>
     <string name="whats_new_260_foldermove_title">Mueve carpetas con la sesión iniciada</string>

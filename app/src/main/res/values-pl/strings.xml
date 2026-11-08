@@ -1436,7 +1436,7 @@
     <string name="drive_backup_auto">Automatyczna kopia</string>
     <string name="drive_backup_auto_desc">Zapisuje twarze, indeks wyszukiwania, etykiety i ukryte elementy oraz utrzymuje je takie same na Twoich innych urządzeniach</string>
     <string name="drive_backup_turn_on_title">Włączyć automatyczną kopię?</string>
-    <string name="drive_backup_turn_on_msg">Na innym telefonie potrzebny jest Photos for Proton 2.6.0 lub nowszy, a na komputerze Photos for Proton for Windows 1.3.0 lub nowszy. Starsza wersja zostawia w spokoju to, co zapisuje ten telefon, i zachowuje własne dane bez zmian.</string>
+    <string name="drive_backup_turn_on_msg">Na innym telefonie potrzebny jest Photos for Proton 2.6.0 lub nowszy, a na komputerze Photos for Proton desktop 1.3.0 lub nowszy. Starsza wersja zostawia w spokoju to, co zapisuje ten telefon, i zachowuje własne dane bez zmian.</string>
     <string name="drive_backup_turn_on">Włącz</string>
     <string name="drive_backup_save_now">Utwórz kopię teraz</string>
     <string name="drive_backup_load">Wczytaj z Drive</string>
@@ -2697,7 +2697,7 @@
     <string name="whats_new_260_videoseek_title">Przewijanie i przyspieszanie filmów</string>
     <string name="whats_new_260_videoseek_body">Stuknij dwa razy lewą lub prawą stronę filmu, aby cofnąć go lub przewinąć o 10 sekund, albo przytrzymaj stronę, aby odtwarzać go szybciej, dopóki jej nie puścisz.</string>
     <string name="whats_new_260_cloudcompress_title">Kompresuj na Drive</string>
-    <string name="whats_new_260_cloudcompress_body">Zdjęcia i filmy, które są tylko na Drive, możesz zmniejszyć z przeglądarki zdjęć lub zaznaczenia, a każdy oryginał trafia do kosza Drive, gdy jego mniejsza kopia jest już na miejscu.</string>
+    <string name="whats_new_260_cloudcompress_body">Zdjęcia i filmy, które są tylko na Drive, możesz zmniejszyć z przeglądarki zdjęć lub zaznaczenia, a każdy oryginał trafia do kosza Drive, gdy jego mniejsza kopia jest już na miejscu. Działa też z wyszukiwania, albumu lub miejsca, od najnowszych.</string>
     <string name="whats_new_260_sharebackup_title">Kopia z innych aplikacji</string>
     <string name="whats_new_260_sharebackup_body">Wybierz „Kopia w Drive”, gdy udostępniasz zdjęcia lub filmy z innej aplikacji, albo zrób kopię zdjęcia otwartego z innej aplikacji, na przykład załącznika e-mail, prosto z przeglądarki zdjęć.</string>
     <string name="whats_new_260_foldermove_title">Przenoszenie folderów po zalogowaniu</string>

@@ -1211,7 +1211,7 @@
     <string name="drive_backup_auto">Backup automatico</string>
     <string name="drive_backup_auto_desc">Salva volti, indice di ricerca, etichette ed elementi nascosti e li mantiene uguali sugli altri tuoi dispositivi</string>
     <string name="drive_backup_turn_on_title">Attivare il backup automatico?</string>
-    <string name="drive_backup_turn_on_msg">Su un altro telefono serve Photos for Proton 2.6.0 o successivo, e su un computer Photos for Proton for Windows 1.3.0 o successivo. Una versione precedente lascia stare ciò che salva questo telefono e mantiene i propri dati come sono.</string>
+    <string name="drive_backup_turn_on_msg">Su un altro telefono serve Photos for Proton 2.6.0 o successivo, e su un computer Photos for Proton desktop 1.3.0 o successivo. Una versione precedente lascia stare ciò che salva questo telefono e mantiene i propri dati come sono.</string>
     <string name="drive_backup_turn_on">Attiva</string>
     <string name="drive_backup_save_now">Esegui backup ora</string>
     <string name="drive_backup_load">Carica da Drive</string>
@@ -2605,7 +2605,7 @@
     <string name="whats_new_260_videoseek_title">Salta e accelera i video</string>
     <string name="whats_new_260_videoseek_body">Tocca due volte il lato sinistro o destro di un video per tornare indietro o andare avanti di 10 secondi, oppure tieni premuto un lato per riprodurlo più veloce finché non lo lasci.</string>
     <string name="whats_new_260_cloudcompress_title">Comprimi su Drive</string>
-    <string name="whats_new_260_cloudcompress_body">Le foto e i video che sono solo su Drive si possono rimpicciolire dal visualizzatore o da una selezione, e ogni originale va nel cestino di Drive appena la sua copia più leggera è al suo posto.</string>
+    <string name="whats_new_260_cloudcompress_body">Le foto e i video che sono solo su Drive si possono rimpicciolire dal visualizzatore o da una selezione, e ogni originale va nel cestino di Drive appena la sua copia più leggera è al suo posto. Si avvia anche dalla ricerca, da un album o da un luogo, partendo dai più recenti.</string>
     <string name="whats_new_260_sharebackup_title">Salva da altre app</string>
     <string name="whats_new_260_sharebackup_body">Scegli “Salva su Drive” quando condividi foto o video da un\'altra app, oppure salva una foto aperta da un\'altra app, come un allegato email, direttamente dal visualizzatore.</string>
     <string name="whats_new_260_foldermove_title">Sposta le cartelle anche con l\'accesso</string>

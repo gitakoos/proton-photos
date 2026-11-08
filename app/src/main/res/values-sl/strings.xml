@@ -1437,7 +1437,7 @@
     <string name="drive_backup_auto">Samodejna varnostna kopija</string>
     <string name="drive_backup_auto_desc">Shrani obraze, iskalni indeks, oznake in skrite elemente ter jih ohranja enake na tvojih drugih napravah</string>
     <string name="drive_backup_turn_on_title">Vklopim samodejno varnostno kopijo?</string>
-    <string name="drive_backup_turn_on_msg">Na drugem telefonu je za to potreben Photos for Proton 2.6.0 ali novejši, na računalniku pa Photos for Proton for Windows 1.3.0 ali novejši. Starejša različica pusti pri miru, kar shrani ta telefon, in svoje podatke obdrži takšne, kot so.</string>
+    <string name="drive_backup_turn_on_msg">Na drugem telefonu je za to potreben Photos for Proton 2.6.0 ali novejši, na računalniku pa Photos for Proton desktop 1.3.0 ali novejši. Starejša različica pusti pri miru, kar shrani ta telefon, in svoje podatke obdrži takšne, kot so.</string>
     <string name="drive_backup_turn_on">Vklopi</string>
     <string name="drive_backup_save_now">Varnostno kopiraj zdaj</string>
     <string name="drive_backup_load">Naloži z Drive</string>
@@ -2697,7 +2697,7 @@
     <string name="whats_new_260_videoseek_title">Preskakovanje in pospeševanje videov</string>
     <string name="whats_new_260_videoseek_body">Dvakrat tapnite levo ali desno stran videa, da skočite 10 sekund nazaj ali naprej, ali pridržite stran, da se predvaja hitreje, dokler je ne spustite.</string>
     <string name="whats_new_260_cloudcompress_title">Stisni na Drive</string>
-    <string name="whats_new_260_cloudcompress_body">Fotografije in videe, ki so samo na Drive, lahko pomanjšate v pregledovalniku ali iz izbora, vsak izvirnik pa gre v koš na Drive, ko je njegova manjša kopija na mestu.</string>
+    <string name="whats_new_260_cloudcompress_body">Fotografije in videe, ki so samo na Drive, lahko pomanjšate v pregledovalniku ali iz izbora, vsak izvirnik pa gre v koš na Drive, ko je njegova manjša kopija na mestu. Zaženete ga lahko tudi iz iskanja, albuma ali kraja, od najnovejših naprej.</string>
     <string name="whats_new_260_sharebackup_title">Varnostno kopiranje iz drugih aplikacij</string>
     <string name="whats_new_260_sharebackup_body">Pri deljenju fotografij ali videov iz druge aplikacije izberite „Varnostno kopiraj v Drive“ ali pa fotografijo, odprto iz druge aplikacije, na primer prilogo e-pošte, varnostno kopirajte kar v pregledovalniku.</string>
     <string name="whats_new_260_foldermove_title">Premikanje map tudi po prijavi</string>
