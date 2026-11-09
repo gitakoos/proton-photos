@@ -202,6 +202,10 @@ class FaceSnapshotImporter internal constructor(
      * older one is turned away ([FaceSnapshotImportResult.BeforeWipe]); one that carries a newer one deletes this
      * account's face data in the import's own transaction before it is taken in, and says so in its result's
      * `newerWipeAtMillis`.
+     *
+     * [ownDeviceId] is this install's id among the devices of the shared backup: on a Merge, a photo both this
+     * device and the writer scanned takes the writer's set of faces in place of its own when the writer's id
+     * sorts first ([incomingSetWins]). Null for an import that keeps this device's sets.
      */
     suspend fun import(
         userId: UserId,
@@ -209,6 +213,7 @@ class FaceSnapshotImporter internal constructor(
         mode: FaceSnapshotMode,
         expectedDeviceId: String? = null,
         knownWipeAtMillis: Long? = null,
+        ownDeviceId: String? = null,
         releaseInput: () -> Unit = {},
     ): FaceSnapshotImportResult =
         withContext(Dispatchers.IO) {
@@ -217,7 +222,7 @@ class FaceSnapshotImporter internal constructor(
                 when (val opened = open(userId, input, plaintext)) {
                     is EnvelopeOpenResult.Opened -> {
                         releaseInput()
-                        importPlaintext(userId, plaintext, mode, expectedDeviceId, knownWipeAtMillis)
+                        importPlaintext(userId, plaintext, mode, expectedDeviceId, knownWipeAtMillis, ownDeviceId)
                     }
                     EnvelopeOpenResult.WrongKey -> FaceSnapshotImportResult.WrongAccount
                     is EnvelopeOpenResult.UnsupportedVersion -> FaceSnapshotImportResult.UnsupportedVersion
@@ -277,7 +282,7 @@ class FaceSnapshotImporter internal constructor(
     /**
      * Imports the verified plaintext snapshot in [plaintext] into [userId]'s face data under [mode], unless
      * it names another install than [expectedDeviceId] or a full import would not fit in the free space. A
-     * null [userId] writes the guest partition. [knownWipeAtMillis] as for [import].
+     * null [userId] writes the guest partition. [knownWipeAtMillis] and [ownDeviceId] as for [import].
      */
     internal suspend fun importPlaintext(
         userId: UserId?,
@@ -285,6 +290,7 @@ class FaceSnapshotImporter internal constructor(
         mode: FaceSnapshotMode,
         expectedDeviceId: String? = null,
         knownWipeAtMillis: Long? = null,
+        ownDeviceId: String? = null,
     ): FaceSnapshotImportResult {
         val survey = try {
             FileInputStream(plaintext).use { surveyFaceSnapshot(it) } ?: return FaceSnapshotImportResult.Unreadable
@@ -315,7 +321,7 @@ class FaceSnapshotImporter internal constructor(
             appDatabase.withStorageAwareTransaction {
                 // Deleted everywhere since this device last read: what it holds is from before the delete.
                 if (newerWipe > 0L) appDatabase.clearFaceData(account)
-                val applier = FaceSnapshotApplier(appDatabase, account, mode, fit, survey)
+                val applier = FaceSnapshotApplier(appDatabase, account, mode, fit, survey, ownDeviceId)
                 val result = FileInputStream(plaintext).use { applier.run(MlSnapshotReader(it)) }
                 // Inside the transaction, so a failure to stage the names rolls the rows back with it.
                 if (fit == FaceSnapshotFit.NamesOnly) stageForReattach(result.staged, mode)

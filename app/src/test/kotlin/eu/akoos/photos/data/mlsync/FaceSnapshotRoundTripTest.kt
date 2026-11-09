@@ -96,6 +96,10 @@ private const val ALICE = "alice"
 private const val BOB = "bob"
 private const val DEVICE_ID = "0b5f3c2e-1111-4a4a-9c9c-123456789abc"
 
+/** A device whose id sorts after [DEVICE_ID], and one whose id sorts before it. */
+private const val LATER_DEVICE = "f0000000-0000-4000-8000-000000000001"
+private const val EARLIER_DEVICE = "00000000-0000-4000-8000-000000000001"
+
 /** Five points in the exact form the indexer writes them. */
 private const val LANDMARKS = "101.5,220.25;140.0,221.0;120.75,250.5;105.0,280.0;138.0,281.5"
 private const val PLAIN_LANDMARKS = "1.0,2.0;3.0,4.0;5.0,6.0;7.0,8.0;9.0,10.0"
@@ -158,7 +162,11 @@ class FaceSnapshotRoundTripTest {
 
     private fun reattachFile(): File = FaceReattachSnapshot.file(File(context.filesDir, FaceModelAssets.DIRECTORY))
 
-    private fun sealing(opener: String = ALICE, refreshedOpener: String = opener) = FaceSnapshotSealing(
+    private fun sealing(
+        opener: String = ALICE,
+        refreshedOpener: String = opener,
+        device: String = DEVICE_ID,
+    ) = FaceSnapshotSealing(
         crypto = FaceSnapshotTestCrypto(),
         sealKeysFor = { EnvelopeSealKeys(publicKey(ALICE), privateKey(ALICE)) },
         openKeysFor = { _, refresh ->
@@ -166,12 +174,12 @@ class FaceSnapshotRoundTripTest {
             val owner = if (refresh) refreshedOpener else opener
             EnvelopeOpenKeys(listOf(privateKey(owner)), listOf(publicKey(owner)))
         },
-        deviceFor = { FaceSnapshotDevice(DEVICE_ID, "Test phone") },
+        deviceFor = { FaceSnapshotDevice(device, "Test phone") },
     )
 
-    private suspend fun export(db: AppDatabase = source): ByteArray {
+    private suspend fun export(db: AppDatabase = source, device: String = DEVICE_ID): ByteArray {
         val out = ByteArrayOutputStream()
-        FaceSnapshotExporter(context, db, sealing()).export(user, out)
+        FaceSnapshotExporter(context, db, sealing(device = device)).export(user, out)
         return out.toByteArray()
     }
 
@@ -179,7 +187,10 @@ class FaceSnapshotRoundTripTest {
         sealed: ByteArray,
         mode: FaceSnapshotMode,
         sealing: FaceSnapshotSealing = sealing(),
-    ): FaceSnapshotImportResult = FaceSnapshotImporter(context, target, sealing).import(user, ByteArrayInputStream(sealed), mode)
+        into: AppDatabase = target,
+        ownDeviceId: String? = null,
+    ): FaceSnapshotImportResult =
+        FaceSnapshotImporter(context, into, sealing).import(user, ByteArrayInputStream(sealed), mode, ownDeviceId = ownDeviceId)
 
     private fun embedding(seed: Int) = ByteArray(FACE_EMBEDDING_DIM * Float.SIZE_BYTES) { (it * 31 + seed * 7).toByte() }
 
@@ -196,6 +207,7 @@ class FaceSnapshotRoundTripTest {
         rejected: Boolean = false,
         blur: Float? = null,
         landmarks: String = PLAIN_LANDMARKS,
+        vector: ByteArray = embedding(seed),
     ) = FaceEntity(
         id = id,
         userId = ACCOUNT,
@@ -205,7 +217,7 @@ class FaceSnapshotRoundTripTest {
         right = right,
         bottom = bottom,
         landmarks = landmarks,
-        embedding = embedding(seed),
+        embedding = vector,
         personId = personId,
         score = 0.80f + seed / 100f,
         blur = blur,
@@ -339,7 +351,7 @@ class FaceSnapshotRoundTripTest {
     }
 
     @Test
-    fun `a merge adds only unscanned photos and lands the rest by overlap, local confirmed names winning`() = runTest {
+    fun `a merge adds unscanned photos and faces found only there, and lands the rest by overlap, local confirmed names winning`() = runTest {
         seedSource()
         target.personDao().upsert(PersonEntity(id = 10, userId = ACCOUNT, displayName = "Ally", faceCount = 1))
         target.personDao().upsert(PersonEntity(id = 11, userId = ACCOUNT, displayName = null, faceCount = 1))
@@ -360,12 +372,14 @@ class FaceSnapshotRoundTripTest {
         val result = import(export(), FaceSnapshotMode.Merge)
 
         assertEquals(
-            FaceSnapshotImportResult.Imported(faces = 1, facesUpdated = 1, people = 2, scanMarkers = 5, regroupRequested = false),
+            FaceSnapshotImportResult.Imported(faces = 2, facesUpdated = 1, people = 2, scanMarkers = 5, regroupRequested = false),
             result,
         )
         val merged = faces()
-        // Only the photo this device had not scanned brought rows.
-        assertEquals(setOf("linkA#0", "linkB#3", "linkC#1", "linkG#0"), merged.keys)
+        // The photo this device had not scanned brought its rows, and linkA's second face, found only there, came
+        // as it was there: removed from People.
+        assertEquals(setOf("linkA#0", "linkA#1", "linkB#3", "linkC#1", "linkG#0"), merged.keys)
+        assertTrue(merged.getValue("linkA#1").rejected)
         assertEquals("Ally", merged.getValue("linkA#0").manualName)
         // The source only grouped linkB#0 under Alice: the local twin joins Alice, unconfirmed, so a regroup can
         // still correct an automatic grouping.
@@ -386,6 +400,128 @@ class FaceSnapshotRoundTripTest {
         )
         assertEquals(setOf("Alice" to "linkX"), covers())
         assertEquals(setOf("Alice" to "linkE"), manualPhotos())
+    }
+
+    /** A unit vector pointing along axis [axis], so two faces' vectors agree exactly or not at all. */
+    private fun direction(axis: Int): ByteArray {
+        val buffer = java.nio.ByteBuffer.allocate(FACE_EMBEDDING_DIM * Float.SIZE_BYTES).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until FACE_EMBEDDING_DIM) buffer.putFloat(if (i == axis) 1f else 0f)
+        return buffer.array()
+    }
+
+    /**
+     * linkP scanned on both devices. The source found Alice's face (grouped, not confirmed) at the left and a
+     * second face at the right. The target found the right face as its #0, confirmed as Bea and marked as not
+     * Alice; the left face as its #1, in a box that overlaps the source's by only 0.4 but with the same vector;
+     * and a third face, confirmed as Cid, that the source did not find.
+     */
+    private suspend fun seedBothScanned() {
+        source.personDao().upsert(PersonEntity(id = 1, userId = ACCOUNT, displayName = "Alice", faceCount = 1))
+        source.faceDao().upsert(
+            listOf(
+                face("linkP#0", "linkP", 0.10f, 0.10f, 0.30f, 0.40f, seed = 1, personId = 1, vector = direction(1)),
+                face("linkP#1", "linkP", 0.60f, 0.10f, 0.80f, 0.40f, seed = 2, vector = direction(2)),
+            ),
+        )
+        source.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkP")))
+        target.personDao().upsert(PersonEntity(id = 10, userId = ACCOUNT, displayName = "Bea", faceCount = 1))
+        target.personDao().upsert(PersonEntity(id = 11, userId = ACCOUNT, displayName = "Cid", faceCount = 1))
+        target.faceDao().upsert(
+            listOf(
+                face("linkP#0", "linkP", 0.61f, 0.10f, 0.81f, 0.40f, seed = 5, personId = 10, manualName = "Bea", vector = direction(5)),
+                face("linkP#1", "linkP", 0.185f, 0.10f, 0.385f, 0.40f, seed = 6, vector = direction(1)),
+                face("linkP#2", "linkP", 0.40f, 0.60f, 0.55f, 0.85f, seed = 7, personId = 11, manualName = "Cid", vector = direction(7)),
+            ),
+        )
+        target.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "linkP")))
+        target.notPersonDao().add(listOf(NotPersonEntity(ACCOUNT, "Alice", "linkP#0")))
+        target.faceCurationTimeDao().set(
+            listOf(
+                eu.akoos.photos.data.db.entity.FaceCurationTimeEntity(
+                    ACCOUNT, eu.akoos.photos.data.db.entity.FaceCurationTimeEntity.KIND_NOT_PERSON, "Alice", "linkP#0", false, 5L,
+                ),
+            ),
+        )
+    }
+
+    private suspend fun boxes(db: AppDatabase): Map<String, List<Float>> =
+        faces(db).mapValues { (_, f) -> listOf(f.left, f.top, f.right, f.bottom) }
+
+    @Test
+    fun `a device whose id sorts later takes the other set in place of its own, keeping what it decided by hand`() = runTest {
+        seedBothScanned()
+
+        import(export(), FaceSnapshotMode.Merge, ownDeviceId = LATER_DEVICE)
+
+        val merged = faces()
+        assertEquals(setOf("linkP#0", "linkP#1", "linkP#2"), merged.keys)
+        // The source's faces stand under the source's ids, vectors and all.
+        assertEquals(listOf(0.10f, 0.10f, 0.30f, 0.40f), boxes(target).getValue("linkP#0"))
+        assertArrayEquals(direction(1), merged.getValue("linkP#0").embedding)
+        assertArrayEquals(direction(2), merged.getValue("linkP#1").embedding)
+        // The right face kept the name confirmed here, and its mark and the mark's time moved with it.
+        assertEquals("Bea", merged.getValue("linkP#1").manualName)
+        assertEquals(10L, merged.getValue("linkP#1").personId)
+        assertEquals(setOf("Alice" to "linkP#1"), notPersons())
+        assertEquals(
+            listOf("linkP#1"),
+            target.faceCurationTimeDao().allForUser(ACCOUNT).filter { it.kind == 2 }.map { it.ref },
+        )
+        // The left face, which overlapped only loosely here, took the source's grouping under Alice.
+        assertEquals(namedPeople().getValue("Alice"), merged.getValue("linkP#0").personId)
+        assertNull(merged.getValue("linkP#0").manualName)
+        // The face only this device found stays, confirmed, under its own free id.
+        assertEquals("Cid", merged.getValue("linkP#2").manualName)
+        assertEquals(listOf(0.40f, 0.60f, 0.55f, 0.85f), boxes(target).getValue("linkP#2"))
+        assertEquals(setOf("linkP" to false), markers())
+
+        // The source reads the copy back, keeps its set, and takes the name, the mark and the third face.
+        import(export(target, device = LATER_DEVICE), FaceSnapshotMode.Merge, into = source, ownDeviceId = DEVICE_ID)
+
+        assertEquals(boxes(target), boxes(source))
+        val back = faces(source)
+        assertEquals("Bea", back.getValue("linkP#1").manualName)
+        assertEquals("Cid", back.getValue("linkP#2").manualName)
+        assertEquals(
+            setOf("Alice" to "linkP#1"),
+            source.notPersonDao().allForUser(ACCOUNT).mapTo(HashSet()) { it.personName to it.faceId },
+        )
+
+        // Once together, reading the same copy again changes no face.
+        val before = faces()
+        import(export(), FaceSnapshotMode.Merge, ownDeviceId = LATER_DEVICE)
+        assertEquals(before, faces())
+    }
+
+    @Test
+    fun `a device whose id sorts first keeps its set, pairing loose boxes by their vectors`() = runTest {
+        seedBothScanned()
+
+        import(export(), FaceSnapshotMode.Merge, ownDeviceId = EARLIER_DEVICE)
+
+        val merged = faces()
+        assertEquals(setOf("linkP#0", "linkP#1", "linkP#2"), merged.keys)
+        assertEquals(listOf(0.61f, 0.10f, 0.81f, 0.40f), boxes(target).getValue("linkP#0"))
+        assertEquals("Bea", merged.getValue("linkP#0").manualName)
+        // Paired by vector though the boxes overlap only 0.4: the source's grouping reaches it.
+        assertEquals(namedPeople().getValue("Alice"), merged.getValue("linkP#1").personId)
+        assertEquals("Cid", merged.getValue("linkP#2").manualName)
+    }
+
+    @Test
+    fun `a face found only on the other device lands under a free id when its own is taken here`() = runTest {
+        seedBothScanned()
+        source.faceDao().upsert(
+            listOf(face("linkP#2", "linkP", 0.05f, 0.60f, 0.20f, 0.90f, seed = 3, manualName = "Dan", vector = direction(3))),
+        )
+
+        import(export(), FaceSnapshotMode.Merge, ownDeviceId = EARLIER_DEVICE)
+
+        val merged = faces()
+        assertEquals("Cid", merged.getValue("linkP#2").manualName)
+        assertEquals("Dan", merged.getValue("linkP#3").manualName)
+        assertEquals(listOf(0.05f, 0.60f, 0.20f, 0.90f), boxes(target).getValue("linkP#3"))
+        assertEquals(setOf("linkP" to false), markers())
     }
 
     /** The target holding "Ally" with its first face confirmed under that name, named at [allyNamedAt]. */

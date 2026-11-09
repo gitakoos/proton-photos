@@ -280,6 +280,17 @@ interface FaceDao {
     )
     suspend fun facesOnPhotosChunk(userId: String, photoKeys: List<String>): List<FaceOnPhoto>
 
+    /** Every face on the given photos, removed ones included, with its vector, so a merging import can
+     *  bring two devices' sets of the same photos together. Chunked for the SQL host-variable limit. */
+    suspend fun allFacesOnPhotos(userId: String, photoKeys: Collection<String>): List<FaceEntity> {
+        val out = ArrayList<FaceEntity>()
+        photoKeys.toSet().forEachSqlChunk { out += allFacesOnPhotosChunk(userId, it) }
+        return out
+    }
+
+    @Query("SELECT * FROM face WHERE photoKey IN (:photoKeys) AND +userId = :userId ORDER BY photoKey, id")
+    suspend fun allFacesOnPhotosChunk(userId: String, photoKeys: List<String>): List<FaceEntity>
+
     /** The account's faces among the given ids with their current person, so an assignment writes only
      *  this account's faces and knows which people it takes them from. Removed faces are included, since
      *  assigning one brings it back. Chunked for the SQL host-variable limit. The account term is written

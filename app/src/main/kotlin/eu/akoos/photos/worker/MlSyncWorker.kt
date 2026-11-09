@@ -540,12 +540,20 @@ class MlSyncWorker @AssistedInject constructor(
         walks.standDownFaces()
         val mode = if (step.replace) FaceSnapshotMode.Replace else FaceSnapshotMode.Merge
         walks.faceImportStarted = true
+        val ownDeviceId = runCatching { driveStore.deviceId() }.getOrNull()
         // Inside the scheduler's import fence as well: a walk the user resumes from the face card meanwhile, or
         // one a stand-down that could not be written left running, writes nothing over the imported faces.
         val result = faceIndexingScheduler.withImportFence {
             FileInputStream(file).use { input ->
                 // Opened and verified, the download is spent: deleted before the import writes, freeing its space.
-                faceImporter.import(userId, input, mode, expectedDeviceId = step.file.deviceId, knownWipeAtMillis = roundWipeAtMs) {
+                faceImporter.import(
+                    userId,
+                    input,
+                    mode,
+                    expectedDeviceId = step.file.deviceId,
+                    knownWipeAtMillis = roundWipeAtMs,
+                    ownDeviceId = ownDeviceId,
+                ) {
                     runCatching { input.close() }
                     file.delete()
                 }
