@@ -494,6 +494,26 @@ class FaceSnapshotRoundTripTest {
     }
 
     @Test
+    fun `a not-this-person removal from the other device lands on its face, not on the face here under that id`() = runTest {
+        seedBothScanned()
+        // The source took "not Alice" off its own linkP#0, the left face, after the target set it on its
+        // right face, then still called linkP#0 here.
+        source.faceCurationTimeDao().set(
+            listOf(
+                eu.akoos.photos.data.db.entity.FaceCurationTimeEntity(
+                    ACCOUNT, eu.akoos.photos.data.db.entity.FaceCurationTimeEntity.KIND_NOT_PERSON, "Alice", "linkP#0", true, 9L,
+                ),
+            ),
+        )
+
+        import(export(), FaceSnapshotMode.Merge, ownDeviceId = LATER_DEVICE)
+
+        // The mark set here moved with the right face, now linkP#1, and stays.
+        assertEquals(setOf("Alice" to "linkP#1"), notPersons())
+        assertEquals("Bea", faces().getValue("linkP#1").manualName)
+    }
+
+    @Test
     fun `a device whose id sorts first keeps its set, pairing loose boxes by their vectors`() = runTest {
         seedBothScanned()
 

@@ -23,7 +23,6 @@
 package eu.akoos.photos.data.mlsync
 
 import eu.akoos.photos.domain.usecase.REATTACH_MIN_IOU
-import eu.akoos.photos.domain.usecase.ReattachFace
 import eu.akoos.photos.domain.usecase.boxIou
 import eu.akoos.photos.domain.usecase.cosineSimilarity
 import eu.akoos.photos.domain.usecase.normalize
@@ -67,8 +66,6 @@ internal class SetFace(
 ) {
     /** The vector at unit length, empty when it is not one of this model's. */
     val direction: FloatArray by lazy { unpackEmbedding(embedding).let { if (it.isEmpty()) it else normalize(it) } }
-
-    internal fun onPhoto(photoKey: String) = ReattachFace(id, photoKey, left, top, right, bottom)
 }
 
 /**
@@ -94,30 +91,51 @@ internal fun sameFace(a: SetFace, b: SetFace): Boolean {
 }
 
 /**
- * Pairs [incoming] faces with [local] faces of one photo, each face once: first by box through
- * [matchSnapshotFaces] (the same id first where that is safe, then the strongest overlap), then the rest
- * whose boxes overlap loosely and whose vectors agree, the closest vectors first. Returns incoming id to
- * local id.
+ * Pairs [incoming] faces with [local] faces of one photo, each face once: first every two boxes that
+ * overlap by half, the strongest overlap first, then, when the vectors compare ([loose]), the rest whose
+ * boxes overlap loosely and whose vectors agree, the closest vectors first. Ties go to the lower index.
+ * The desktop pairs by the very same steps (`pairOnPhoto`), so both devices pick the same twins. Returns
+ * incoming id to local id.
  */
-internal fun pairSameFaces(photoKey: String, incoming: List<SetFace>, local: List<SetFace>): Map<String, String> {
+internal fun pairSameFaces(
+    photoKey: String,
+    incoming: List<SetFace>,
+    local: List<SetFace>,
+    loose: Boolean = true,
+): Map<String, String> {
     if (incoming.isEmpty() || local.isEmpty()) return emptyMap()
-    val pairs = HashMap(matchSnapshotFaces(incoming.map { it.onPhoto(photoKey) }, local.map { it.onPhoto(photoKey) }))
-    val takenLocal = pairs.values.toHashSet()
-    val options = ArrayList<Triple<SetFace, SetFace, Float>>()
+    val indexOf = { face: SetFace -> faceIndexIn(face.id, photoKey) ?: Int.MAX_VALUE }
+    val pairs = HashMap<String, String>()
+    val takenLocal = HashSet<String>()
+    fun take(options: List<Triple<SetFace, SetFace, Float>>) {
+        val ordered = options.sortedWith(
+            compareByDescending<Triple<SetFace, SetFace, Float>> { it.third }
+                .thenBy { indexOf(it.first) }
+                .thenBy { indexOf(it.second) },
+        )
+        for ((a, b) in ordered) {
+            if (a.id in pairs || b.id in takenLocal) continue
+            pairs[a.id] = b.id
+            takenLocal += b.id
+        }
+    }
+    val close = ArrayList<Triple<SetFace, SetFace, Float>>()
+    for (a in incoming) for (b in local) {
+        val iou = overlap(a, b)
+        if (iou >= REATTACH_MIN_IOU) close += Triple(a, b, iou)
+    }
+    take(close)
+    if (!loose) return pairs
+    val near = ArrayList<Triple<SetFace, SetFace, Float>>()
     for (a in incoming) {
         if (a.id in pairs) continue
         for (b in local) {
             if (b.id in takenLocal || overlap(a, b) < SAME_FACE_LOOSE_IOU) continue
             val similarity = similarity(a, b)
-            if (similarity >= SAME_FACE_MIN_COSINE) options += Triple(a, b, similarity)
+            if (similarity >= SAME_FACE_MIN_COSINE) near += Triple(a, b, similarity)
         }
     }
-    options.sortWith(compareByDescending<Triple<SetFace, SetFace, Float>> { it.third }.thenBy { it.first.id }.thenBy { it.second.id })
-    for ((a, b) in options) {
-        if (a.id in pairs || b.id in takenLocal) continue
-        pairs[a.id] = b.id
-        takenLocal += b.id
-    }
+    take(near)
     return pairs
 }
 
@@ -174,8 +192,10 @@ internal fun planFaceSetAdoption(photoKey: String, incoming: List<SetFace>, loca
 }
 
 /**
- * The [incoming] faces of [photoKey] this device lacks: not paired with a face here ([paired], incoming id
- * to local id) and the same face as none of [local]. Each gets its own id when that is free here, else the
+ * The [incoming] faces of [photoKey] this device lacks: every one not paired with a face here ([paired],
+ * incoming id to local id, paired against all of [local], removed ones too). Pairing takes every same face
+ * it can, so an unpaired face is none of the faces here, or a second detection the other device holds and
+ * this one must hold too for the two sets to be one. Each gets its own id when that is free here, else the
  * lowest free one. Returns incoming id to the id it is written under.
  */
 internal fun planIncomingAdds(
@@ -184,7 +204,7 @@ internal fun planIncomingAdds(
     local: List<SetFace>,
     paired: Map<String, String>,
 ): Map<String, String> {
-    val missing = incoming.filter { face -> face.id !in paired && local.none { sameFace(face, it) } }
+    val missing = incoming.filter { it.id !in paired }
     if (missing.isEmpty()) return emptyMap()
     return freeFaceIds(photoKey, missing.map { it.id }, local.mapTo(HashSet()) { it.id })
 }

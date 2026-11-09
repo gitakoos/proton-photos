@@ -113,15 +113,36 @@ class FaceSetConvergenceTest {
     }
 
     @Test
-    fun `only a face that is none of the faces here is taken in`() {
+    fun `every face left unpaired is taken in, a second box on a face here too, so both hold one set`() {
         val incoming = listOf(
             face("p#0", 0.10f, 0.30f),
             face("p#1", 0.12f, 0.32f),
             face("p#2", 0.60f, 0.80f),
         )
         val local = listOf(face("p#0", 0.10f, 0.30f), face("p#5", 0.40f, 0.45f))
-        // p#1 sits on the face here that p#0 paired with: a twin, not a face of its own.
-        assertEquals(mapOf("p#2" to "p#2"), planIncomingAdds("p", incoming, local, mapOf("p#0" to "p#0")))
+        val paired = pairSameFaces("p", incoming, local)
+        assertEquals(mapOf("p#0" to "p#0"), paired)
+        assertEquals(mapOf("p#1" to "p#1", "p#2" to "p#2"), planIncomingAdds("p", incoming, local, paired))
+    }
+
+    @Test
+    fun `pairing takes the strongest overlap first, whatever the ids say`() {
+        // The only face here is #0. The other device's #0 is a small box beside it, its #1 the face itself,
+        // with a vector that disagrees: the face pairs with #1, and #0 stays a face of its own.
+        val local = listOf(face("p#0", 0.10f, 0.30f, vector(0)))
+        val incoming = listOf(
+            SetFace("p#0", 0.25f, 0.1f, 0.32f, 0.2f, vector(3)),
+            face("p#1", 0.11f, 0.31f, vector(5)),
+        )
+        assertEquals(mapOf("p#1" to "p#0"), pairSameFaces("p", incoming, local))
+    }
+
+    @Test
+    fun `boxes alone pair when the vectors do not compare`() {
+        val incoming = listOf(face("p#0", 0.185f, 0.385f, vector(0)))
+        val local = listOf(face("p#0", 0.10f, 0.30f, vector(0)))
+        assertEquals(mapOf("p#0" to "p#0"), pairSameFaces("p", incoming, local))
+        assertEquals(emptyMap<String, String>(), pairSameFaces("p", incoming, local, loose = false))
     }
 
     @Test

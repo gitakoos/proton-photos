@@ -188,6 +188,9 @@ internal class FaceSnapshotApplier(
     private var scanMarkers = 0
     private var section = Section.KEYS
 
+    /** The "not this person" removals an adopting Merge applies once the faces are in ([onRemoval]). */
+    private val heldRemovals = ArrayList<MlSnapshotRecord.Removal>()
+
     /** Streams [reader]'s records into the database; see the class comment for what each one does. */
     suspend fun run(reader: MlSnapshotReader): FaceSnapshotApplied {
         prepare()
@@ -298,6 +301,8 @@ internal class FaceSnapshotApplier(
                 Section.FACES -> {
                     flushFaceRows()
                     matchWaitingFaces()
+                    for (removal in heldRemovals) applyRemoval(removal)
+                    heldRemovals.clear()
                 }
                 Section.MANUAL_PHOTOS -> flushManualRows()
                 Section.NOT_PERSONS -> flushNotPersonRows()
@@ -390,6 +395,16 @@ internal class FaceSnapshotApplier(
      * the removal so a setting of the same piece from before it is passed over here and handed on as removed.
      */
     private suspend fun onRemoval(removal: MlSnapshotRecord.Removal) {
+        // A "not this person" removal names a face by the other device's id, which a photo whose set this
+        // import takes in carries only once its faces are in: it waits for the end of the faces.
+        if (adopts && removal.kind == MlSnapshotFormat.REMOVAL_NOT_PERSON) {
+            heldRemovals += removal
+            return
+        }
+        applyRemoval(removal)
+    }
+
+    private suspend fun applyRemoval(removal: MlSnapshotRecord.Removal) {
         val name = snapshotName(removal.personName) ?: return
         val at = removal.removedAtMillis
         val ref = when (removal.kind) {
@@ -589,11 +604,10 @@ internal class FaceSnapshotApplier(
     }
 
     /**
-     * Pairs [held] with this device's kept faces on the same photos and applies each pair's
-     * [mergeFaceCuration] change. A face removed here is not a candidate, so nothing reaches it. With the
-     * other device's vectors ([rows] holds every face here on those photos), a pair is also two loosely
-     * overlapping boxes whose vectors agree ([pairSameFaces]), and a face found there that is none of the
-     * faces here is written here as found there ([planIncomingAdds]).
+     * Pairs [held] with this device's faces on the same photos and applies each pair's [mergeFaceCuration]
+     * change; a face removed here takes none. With the other device's vectors ([rows] holds every face here on
+     * those photos) the pairing is [pairSameFaces] over every face, removed ones too, and every face there left
+     * unpaired is written here as found there ([planIncomingAdds]).
      */
     private suspend fun pairWithLocal(held: List<WaitingFace>, rows: Map<String, List<FaceEntity>>) {
         if (held.isEmpty()) return
@@ -605,7 +619,7 @@ internal class FaceSnapshotApplier(
             localById = kept.associate { it.id to LocalFace(it.personId, it.manualName?.takeIf(String::isNotBlank)) }
             val paired = HashMap<String, String>()
             for ((photoKey, faces) in byPhoto) {
-                val local = rows[photoKey].orEmpty().filter { !it.rejected }.map { it.setFace() }
+                val local = rows[photoKey].orEmpty().map { it.setFace() }
                 paired.putAll(pairSameFaces(photoKey, faces.map { it.setFace() }, local))
             }
             pairs = paired
@@ -838,10 +852,11 @@ internal class FaceSnapshotApplier(
         // the next clustering pass regroups; a Merge also drops the person's cached centroid, which no longer
         // covers those faces, so that pass rebuilds it.
         for (personId in touchedPeople) {
-            val name = nameByPersonId[personId] ?: continue
-            val manual = manualPhotoDao.photoKeysForNameList(account, name)
+            // An unnamed person reaches here only when a set taken in moved its faces to other ids.
+            val name = nameByPersonId[personId]
+            val manual = name?.let { manualPhotoDao.photoKeysForNameList(account, it) }.orEmpty()
             val count = (faceDao.distinctPhotoKeysForPerson(account, personId) + manual).toHashSet().size
-            val cover = coverDao.photoKeyForName(account, name)
+            val cover = name?.let { coverDao.photoKeyForName(account, it) }
                 ?.let { faceDao.topFaceForPersonPhoto(account, personId, it) }
                 ?: faceDao.topFaceForPerson(account, personId)
             personDao.updateCoverAndCount(personId, cover, count)
