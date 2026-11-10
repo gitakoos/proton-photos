@@ -183,6 +183,10 @@ Plus the layers around them:
 
 No private endpoints, no undocumented APIs, no obfuscation (`-dontobfuscate` in `proguard-rules.pro` so the released APK can be byte-compared to a fresh build from this source).
 
+## Contributing
+
+Development happens on the [`beta`](https://github.com/gitakoos/proton-photos/tree/beta) branch. `main` holds the stable releases and `preview` the test builds. Pull requests go against `beta`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, the commit rules and how pull requests are reviewed.
+
 ## Disclaimer
 
 Not affiliated with Proton AG. Proton, Proton Drive, and Proton Photos are trademarks of Proton AG. Built against the publicly documented Drive API with no proprietary code from Proton.
