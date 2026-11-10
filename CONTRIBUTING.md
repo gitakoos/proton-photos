@@ -8,6 +8,16 @@ Photos for Proton is an independent, unofficial Android client for Proton Drive 
 
 By contributing you agree that your contributions are licensed under GPL-3.0.
 
+## Branches
+
+| Branch | What it holds |
+|---|---|
+| `beta` | The development branch. All work lands here first, commit by commit. **Open pull requests against `beta`.** |
+| `main` | Stable releases only, one commit per release, tagged `vX.Y.Z`. Nothing is merged into it directly. |
+| `preview` | The source of each test build, one commit per build, tagged `vX.Y.Z-testN`. |
+
+`beta` is never rewritten: no force pushes, no rebases of published commits. A release puts the exact `beta` tree onto `main`, so everything merged into `beta` reaches the next release.
+
 ## Tech stack
 
 - Kotlin, single Gradle module (`app/`)
@@ -108,7 +118,22 @@ The repository pins a SHA-256 for every dependency in `gradle/verification-metad
 
 Review the diff so only the changed dependency's hashes move. A verification failure you did not cause by a deliberate dependency change means an artifact's bytes differ from what was pinned; investigate it instead of regenerating to force it through.
 
-## Commits and pull requests
+## Commit messages
 
-- Write commit messages in the imperative and describe the user-visible change, for example "Fix crash when opening a shared album".
-- Open a pull request with a short description of what changed and how you tested it.
+Every commit on `beta` is public and stays in the history for good.
+
+- English, imperative mood, describing the change: "Fix crash when opening a shared album", not "fixed stuff" or "WIP".
+- A short subject line (about 72 characters at most), then optionally a blank line and a body explaining what changed and why.
+- No personal data (other people's names, email addresses, local file paths, device serials) and no tokens, keys or passwords.
+- No `fixup!`, `squash!` or `wip` commits; clean them up before opening the pull request.
+
+## Pull requests
+
+1. Open the pull request against `beta`, with a short description of what changed, why, and how you tested it (device, Android version, guest or signed in). Link the issue it fixes.
+2. Run the three Gradle checks above; CI runs them again on the pull request.
+3. Changes to build scripts, the Gradle wrapper, `gradle/verification-metadata.xml`, GitHub workflows, the manifest (permissions, exported components) or ProGuard rules are reviewed line by line before anything is built. Explain each such change in the description. New dependencies need a reason and a release at least two weeks old.
+4. Only the maintainer can merge. Each pull request is fetched, checked against the rules on this page, reviewed against the current `beta`, built, tested, and tried on a real device when it changes something visible.
+5. The outcome is one of: merged as it is; merged with a follow-up commit from the maintainer; changes requested; part of it taken; or declined with a reason.
+6. When it is merged, your commits keep your name. If the history needs cleaning up (work-in-progress commits, or a message containing something that must not be public), the pull request is squashed into one commit, still authored by you. If only part of it is taken, that part is committed under your name. Every contribution is credited in the notes of the build it first ships in.
+
+Do not post links to builds or downloads in pull requests or issues; only the official releases on this repository are trusted.
