@@ -1,0 +1,112 @@
+name: Report a bug, a crash or an idea
+description: A few short fields. Only the ones marked * are required.
+title: ""
+labels: ["triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Photos for Proton is made by one person in spare time. The more exact the details, the faster I can fix it.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of report is this?
+      options:
+        - Crash (the app closed, froze or shows a black screen)
+        - Bug (something does not work the way it should)
+        - Feature request (an idea or an improvement)
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where in the app?
+      description: The screen or menu where it happens.
+      options:
+        - Photos tab (timeline, category chips, filters, On this day)
+        - Photo or video viewer (opening a photo, playback, details, share)
+        - Editor (photo editor, video editor, collage, GIF maker)
+        - Albums tab (albums, Shared albums, saving a shared album)
+        - Albums tab tiles (Collection, Map, Calendar, People, Hidden, Offline)
+        - Search tab (text search, photo search, filters)
+        - Backup and uploads (Backup settings, folders, Activity, a photo that does not upload)
+        - Settings > Backup & storage (Storage, Find duplicates, Recently Deleted, Import photos)
+        - Settings > Machine learning (face recognition, photo search, labels)
+        - Settings > Privacy & security or Account (sign-in, app lock, hidden photos)
+        - Other settings (Appearance & Language, Notifications, Permissions, About)
+        - Something else, or not sure
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: In the app under Settings > About.
+      placeholder: "2.5.0 (272)"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Phone and Android version
+      placeholder: "Pixel 9 Pro, Android 15"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, or what would you like to see?
+      description: One or two sentences are enough.
+    validations:
+      required: true
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Sometimes
+        - Only once
+        - Not a bug, an idea
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Only for a bug or a crash.
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. ...
+  - type: dropdown
+    id: library-size
+    attributes:
+      label: How many photos are on this phone?
+      options:
+        - Under 1,000
+        - 1,000 to 10,000
+        - 10,000 to 50,000
+        - Over 50,000
+  - type: dropdown
+    id: account
+    attributes:
+      label: Do you use a Proton account?
+      options:
+        - Yes, signed in
+        - No, on-device only
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics from the app
+      description: |
+        In the app: Settings > Share diagnostics, then Copy, and paste it here. It holds the last crash and sync and performance info, with no photos and no account data.
+      render: text
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or a screen recording
+      description: Drag and drop them into this box. Blur anything private first.
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else?
+      description: Related issues, things you tried, mockups for an idea.
