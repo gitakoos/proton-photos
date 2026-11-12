@@ -151,4 +151,45 @@ class ObservePeopleScaleDbTest {
         println("people scale list equality ${(System.nanoTime() - equalsStart) / 1_000_000L}ms")
         assertTrue(same)
     }
+
+    @Test
+    fun `twenty thousand groups with a few hundred named build within seconds`() = runBlocking {
+        // The shape of a big library seen in the field: about 20,700 groups over 122,000 faces, 236 of them named.
+        val people = 20_700
+        val faces = 122_000
+        val named = 236
+        val rows = ArrayList<FaceEntity>(faces)
+        for (i in 0 until faces) {
+            rows.add(
+                FaceEntity(
+                    id = "ph$i#0", userId = acct, photoKey = "ph$i",
+                    left = 0.1f, top = 0.2f, right = 0.3f, bottom = 0.4f, landmarks = "",
+                    embedding = ByteArray(16), personId = (i % people + 1).toLong(), score = 0.9f,
+                ),
+            )
+        }
+        db.withTransaction {
+            for (chunk in rows.chunked(5_000)) db.faceDao().upsert(chunk)
+            for (p in 1..people) {
+                val name = if (p <= named) "Person $p" else null
+                db.personDao().upsert(PersonEntity(id = p.toLong(), userId = acct, coverFaceId = "ph${p - 1}#0", faceCount = people - p + 1, displayName = name))
+            }
+        }
+        val feed = ArrayList<GalleryItem>(faces)
+        for (i in 0 until faces) {
+            feed.add(
+                GalleryItem.LocalOnly(
+                    LocalMediaItem(uri = "ph$i", dateTaken = 1L, displayName = "p", mimeType = "image/jpeg", sizeBytes = 1L, bucketName = null),
+                ),
+            )
+        }
+        val useCase = ObservePeopleUseCase(db.personDao(), db.faceDao(), db.personManualPhotoDao())
+        val startNs = System.nanoTime()
+        val summaries = useCase(UserId(acct), flowOf(feed)).first()
+        val tookMs = (System.nanoTime() - startNs) / 1_000_000L
+        println("people at 20k groups: ${tookMs}ms")
+        assertEquals(people, summaries.size)
+        assertEquals(named, summaries.count { !it.displayName.isNullOrBlank() })
+        assertTrue("a build took ${tookMs}ms", tookMs < 5_000L)
+    }
 }

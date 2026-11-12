@@ -200,6 +200,7 @@ class SettingsViewModel @Inject constructor(
     private val notPersonDao: NotPersonDao,
     private val personCoverDao: PersonCoverDao,
     private val observePeopleUseCase: ObservePeopleUseCase,
+    private val peopleListCache: eu.akoos.photos.domain.usecase.PeopleListCache,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val newsRepository: NewsRepository,
     private val networkObserver: NetworkObserver,
@@ -374,7 +375,10 @@ class SettingsViewModel @Inject constructor(
      *  Live, so the row grows as a walk runs. */
     val faceGroups: StateFlow<List<PersonUi>> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
-            observePeopleUseCase(userId, if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId))
+            peopleListCache.remembered(
+                userId,
+                observePeopleUseCase(userId, if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId)),
+            )
                 .map { list ->
                     list.filter { (!it.displayName.isNullOrBlank() && !it.isOther) || isNameableCluster(it.displayName, it.isOther, it.faceCount) }
                         .mapNotNull { it.toPersonUi() }

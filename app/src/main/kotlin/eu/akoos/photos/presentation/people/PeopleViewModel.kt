@@ -42,6 +42,7 @@ import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
+import eu.akoos.photos.domain.usecase.PeopleListCache
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.toPersonUi
 import javax.inject.Inject
@@ -58,6 +59,7 @@ class PeopleViewModel @Inject constructor(
     private val accountManager: AccountManager,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
+    private val peopleListCache: PeopleListCache,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -72,9 +74,12 @@ class PeopleViewModel @Inject constructor(
     ) { faceOn, userId -> faceOn to userId }
         .flatMapLatest { (faceOn, userId) ->
             if (!faceOn) flowOf(emptyList())
-            else observePeopleUseCase(
+            else peopleListCache.remembered(
                 userId,
-                if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
+                observePeopleUseCase(
+                    userId,
+                    if (userId == null) getGalleryItems.invokeLocalOnly() else getGalleryItems.invoke(userId),
+                ),
             ).map { list -> list.mapNotNull { it.toPersonUi() } }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
