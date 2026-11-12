@@ -38,10 +38,13 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
+import eu.akoos.photos.data.db.dao.LocalExifCheckDao
 import eu.akoos.photos.data.db.dao.PhotoLocationDao
+import eu.akoos.photos.data.db.entity.LocalExifCheckEntity
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.domain.entity.LocalMediaItem
 import eu.akoos.photos.domain.repository.LocalMediaRepository
 import eu.akoos.photos.util.CaptureDateOverride
 import eu.akoos.photos.util.DeviceHealthPolicy
@@ -50,10 +53,12 @@ import eu.akoos.photos.util.ExifHelper
 import eu.akoos.photos.util.Mp4CreationTime
 import eu.akoos.photos.util.PerfDiagnostics
 import eu.akoos.photos.util.PhotoGpsResolver
+import eu.akoos.photos.util.forEachSqlChunk
 import eu.akoos.photos.util.hasMediaLocationGrant
 import eu.akoos.photos.util.originalUriForExif
 import java.time.ZoneId
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -78,7 +83,8 @@ private const val TAG = "LocalExifBackfill"
  * touch disk, so [backfillAll] runs them on a fixed pool of [WORKER_COUNT] workers the same way the
  * tag and thumbnail schedulers do: a whole-library walk that never floods I/O and runs on a few
  * coroutines, not one per photo. It is resumable and idempotent, each leg carrying its own
- * skip set (the located URIs for GPS, the already recorded URIs for the date), and an in-process
+ * skip set (the located URIs for GPS, the already recorded URIs for the date, and for both the
+ * [LocalExifCheckEntity] rows of files read before that left nothing to store), and an in-process
  * [inFlight] set collapses overlapping calls so a second invocation while one is running re-reads
  * nothing. The date skip set holds only the entries that still match their file's DATE_MODIFIED: one
  * the file has outgrown is dropped instead, which is what lets an EXIF edit made in another app
@@ -91,6 +97,7 @@ class LocalExifBackfillScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val localMediaRepository: LocalMediaRepository,
     private val photoLocationDao: PhotoLocationDao,
+    private val checkDao: LocalExifCheckDao,
     private val deviceHealth: DeviceHealthPolicy,
 ) {
     /** Concurrency bound on in-flight EXIF reads, a handful keeping disk I/O off any hot path. Shared
@@ -114,7 +121,12 @@ class LocalExifBackfillScheduler @Inject constructor(
         val dateModified: Long,
         val needsGps: Boolean,
         val needsDate: Boolean,
+        val prior: LocalExifCheckEntity?,
     )
+
+    /** Checks waiting to be written; flushed in batches so a walk the system kills keeps most of them. */
+    private val unsavedChecks = ConcurrentLinkedQueue<LocalExifCheckEntity>()
+    private val checkFlushLock = Mutex()
 
     /**
      * Read every device photo that still owes a GPS fix or a capture-date check for [userId] and
@@ -152,9 +164,21 @@ class LocalExifBackfillScheduler @Inject constructor(
                     context.settingsDataStore.data.first()[SettingsKeys.DOWNLOAD_DATE_OVERRIDES]
                 )
             }.getOrDefault(emptyMap())
+            val checks: Map<String, LocalExifCheckEntity> = runCatching {
+                checkDao.all().associateBy { it.uri }
+            }.getOrDefault(emptyMap())
+            pruneChecks(checks.keys, items)
             items.mapNotNull { item ->
-                val needsGps = canReadLocation && item.uri !in located
                 val recorded = dated[item.uri]
+                val prior = checks[item.uri]
+                val owed = owedLegs(
+                    dateModified = item.dateModified,
+                    canReadLocation = canReadLocation,
+                    located = item.uri in located,
+                    dateRecorded = recorded != null,
+                    check = prior,
+                )
+                val needsGps = owed.gps
                 // A recorded date describes the file as it stood when it was written. Once the file's
                 // DATE_MODIFIED moves, something outside the app has edited it and the entry is void,
                 // so this walk only drops it: the item's own date already reads back THROUGH that
@@ -176,7 +200,7 @@ class LocalExifBackfillScheduler @Inject constructor(
                         voided += item.uri
                     }
                 }
-                val needsDate = recorded == null
+                val needsDate = owed.date
                 if (!needsGps && !needsDate) null
                 else if (!inFlight.add(item.uri)) null
                 else Pending(
@@ -186,6 +210,7 @@ class LocalExifBackfillScheduler @Inject constructor(
                     dateModified = item.dateModified,
                     needsGps = needsGps,
                     needsDate = needsDate,
+                    prior = prior,
                 )
             }
         }
@@ -218,32 +243,70 @@ class LocalExifBackfillScheduler @Inject constructor(
                 finished = processed,
                 onFailure = { entry, e -> Log.w(TAG, "exif read ${entry.uri} failed: ${e.message}") },
             ) { entry ->
-                semaphore.withPermit { readAndStore(entry, userId, corrections) }
+                val gpsFound = semaphore.withPermit { readAndStore(entry, userId, corrections) }
+                checkAfterRead(
+                    uri = entry.uri,
+                    dateModified = entry.dateModified,
+                    readGps = entry.needsGps,
+                    gpsFound = gpsFound,
+                    readDate = entry.needsDate,
+                    prior = entry.prior,
+                )?.let { unsavedChecks.add(it) }
+                if (unsavedChecks.size >= CHECK_FLUSH_BATCH) flushChecks()
             }
         } finally {
             pending.forEach { inFlight.remove(it.uri) }
-            // NonCancellable so a cancelled walk still banks the corrections it already found:
-            // dropping them would only make the next walk re-read the very same files.
-            withContext(NonCancellable) { persistDates(corrections, voided) }
+            // NonCancellable so a cancelled walk still banks the corrections and checks it already
+            // found: dropping them would only make the next walk re-read the very same files.
+            withContext(NonCancellable) {
+                persistDates(corrections, voided)
+                flushChecks()
+            }
             PerfDiagnostics.mark("exif:end", processed.get())
         }
     }
 
+    /** Write the checks the walk has gathered so far. A write failure is logged, and a later walk
+     *  reads those files again. */
+    private suspend fun flushChecks() {
+        checkFlushLock.withLock {
+            val batch = ArrayList<LocalExifCheckEntity>()
+            while (true) batch.add(unsavedChecks.poll() ?: break)
+            if (batch.isEmpty()) return
+            runCatching { batch.chunked(CHECK_FLUSH_BATCH).forEach { checkDao.upsert(it) } }
+                .onFailure { Log.w(TAG, "exif check write failed: ${it.message}") }
+        }
+    }
+
+    /** Drop the checks of files no longer on the device, so the table does not keep a row for every
+     *  photo ever deleted. */
+    private suspend fun pruneChecks(checked: Set<String>, items: List<LocalMediaItem>) {
+        if (checked.isEmpty()) return
+        val present = items.mapTo(HashSet(items.size)) { it.uri }
+        val gone = checked.filter { it !in present }
+        if (gone.isEmpty()) return
+        runCatching { gone.forEachSqlChunk { checkDao.deleteByUris(it) } }
+            .onFailure { Log.w(TAG, "exif check prune failed: ${it.message}") }
+    }
+
     /** Run the legs [entry] still owes, off ONE read of the file where the two share a source, and
-     *  store what each produced. */
+     *  store what each produced. Returns whether a GPS fix was found. */
     private suspend fun readAndStore(
         entry: Pending,
         userId: UserId?,
         corrections: MutableMap<String, CaptureDateOverride.Entry>,
-    ) {
+    ): Boolean {
+        var gpsFound = false
         if (entry.isVideo) {
             // A video keeps neither leg in EXIF: GPS sits in the container's location atom and the
             // capture time in the mvhd, so each leg reads its own source. The GPS leg reads the
             // original-tagged URI, so Android 10+ hands back a stream with the location left in
             // (the caller already holds the grant).
             if (entry.needsGps) {
-                PhotoGpsResolver.videoGps(context, originalUriForExif(context, entry.uri))
-                    ?.let { storeLocation(entry.uri, userId, it) }
+                PhotoGpsResolver.videoGps(context, originalUriForExif(context, entry.uri))?.let {
+                    gpsFound = true
+                    storeLocation(entry.uri, userId, it)
+                }
             }
             if (entry.needsDate) {
                 val correction = CaptureDateOverride.captureDateCorrection(
@@ -260,7 +323,7 @@ class LocalExifBackfillScheduler @Inject constructor(
                     corrections[entry.uri] = CaptureDateOverride.Entry(correction, entry.dateModified)
                 }
             }
-            return
+            return gpsFound
         }
         // The original-tagged URI is what the GPS leg needs; the date leg reads the plain URI,
         // because Android redacts location, not timestamps.
@@ -269,7 +332,10 @@ class LocalExifBackfillScheduler @Inject constructor(
         if (entry.needsGps) {
             val la = meta.gpsLatitude
             val lo = meta.gpsLongitude
-            if (la != null && lo != null) storeLocation(entry.uri, userId, la to lo)
+            if (la != null && lo != null) {
+                gpsFound = true
+                storeLocation(entry.uri, userId, la to lo)
+            }
         }
         if (entry.needsDate) {
             val exifMs = ExifHelper.captureMs(meta, ZoneId.systemDefault())
@@ -284,6 +350,7 @@ class LocalExifBackfillScheduler @Inject constructor(
                 corrections[entry.uri] = CaptureDateOverride.Entry(correction, entry.dateModified)
             }
         }
+        return gpsFound
     }
 
     /** Upsert one located photo's coordinates; a write failure costs that fix alone, not the walk. */
@@ -346,7 +413,52 @@ class LocalExifBackfillScheduler @Inject constructor(
     private companion object {
         /** EXIF reads are light; a small pool clears a large library without disturbing scroll. */
         const val WORKER_COUNT = 4
+
+        /** Checks written per batch, well under the SQL host-variable cap. */
+        const val CHECK_FLUSH_BATCH = 500
     }
+}
+
+/** The legs one device file still owes the walk. */
+internal data class OwedLegs(val gps: Boolean, val date: Boolean)
+
+/**
+ * Which legs a file still owes: GPS while the grant allows reading it, no fix is stored and no current
+ * [check] says the file carries none; the date while no override is recorded and no current [check]
+ * says it was already read. A [check] counts only while the file still reads its [dateModified].
+ */
+internal fun owedLegs(
+    dateModified: Long,
+    canReadLocation: Boolean,
+    located: Boolean,
+    dateRecorded: Boolean,
+    check: LocalExifCheckEntity?,
+): OwedLegs {
+    val current = check?.takeIf { it.modifiedSeconds == dateModified }
+    return OwedLegs(
+        gps = canReadLocation && !located && current?.gpsNone != true,
+        date = !dateRecorded && current?.dateRead != true,
+    )
+}
+
+/**
+ * The check a finished read leaves for [uri], or null when it has nothing to keep. What [prior] knew
+ * about the same file state carries over for a leg this read did not run; a found fix is not a check,
+ * it is a [PhotoLocationEntity] row.
+ */
+internal fun checkAfterRead(
+    uri: String,
+    dateModified: Long,
+    readGps: Boolean,
+    gpsFound: Boolean,
+    readDate: Boolean,
+    prior: LocalExifCheckEntity?,
+): LocalExifCheckEntity? {
+    val current = prior?.takeIf { it.modifiedSeconds == dateModified }
+    val gpsNone = if (readGps) !gpsFound else current?.gpsNone == true
+    val dateRead = readDate || current?.dateRead == true
+    if (!gpsNone && !dateRead) return null
+    return LocalExifCheckEntity(uri, dateModified, gpsNone, dateRead)
 }
 
 /**

@@ -1687,8 +1687,24 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrations_registerEveryStepUpToV55() {
-        for (from in 48..54) {
+    fun migrate_v55_to_v56_createsTheExifCheckTable() {
+        Migrations.MIGRATION_55_56.migrate(db)
+
+        db.execSQL("INSERT INTO local_exif_check (uri, modifiedSeconds, gpsNone, dateRead) VALUES ('content://m/1', 100, 1, 0)")
+        db.execSQL("INSERT OR REPLACE INTO local_exif_check (uri, modifiedSeconds, gpsNone, dateRead) VALUES ('content://m/1', 200, 0, 1)")
+        db.query("SELECT uri, modifiedSeconds, gpsNone, dateRead FROM local_exif_check").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("content://m/1", cur.getString(0))
+            assertEquals("one row per file, the newer check replacing the older", 200L, cur.getLong(1))
+            assertEquals(0, cur.getInt(2))
+            assertEquals(1, cur.getInt(3))
+            assertTrue(!cur.moveToNext())
+        }
+    }
+
+    @Test
+    fun migrations_registerEveryStepUpToV56() {
+        for (from in 48..55) {
             assertTrue("$from -> ${from + 1}", Migrations.ALL.any { it.startVersion == from && it.endVersion == from + 1 })
         }
     }
