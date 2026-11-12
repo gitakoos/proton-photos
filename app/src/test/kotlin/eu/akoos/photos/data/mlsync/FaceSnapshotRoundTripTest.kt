@@ -921,6 +921,24 @@ class FaceSnapshotRoundTripTest {
     }
 
     @Test
+    fun `a marker for a photo this device could not read never travels`() = runTest {
+        source.faceScanDao().upsert(
+            listOf(
+                FaceScanEntity(ACCOUNT, "linkA"),
+                FaceScanEntity(ACCOUNT, "linkU", skipped = true),
+            ),
+        )
+        assertEquals(
+            setOf("linkA" to false, "linkU" to false),
+            source.faceScanDao().markersAfter(ACCOUNT, "", 1000).mapTo(HashSet()) { it.photoKey to it.hiResScanned },
+        )
+
+        import(export(), FaceSnapshotMode.Replace)
+
+        assertEquals(setOf("linkA" to false), markers())
+    }
+
+    @Test
     fun `a cloud photo put away here never travels, however it was hidden`() = runTest {
         source.faceDao().upsert(
             listOf(

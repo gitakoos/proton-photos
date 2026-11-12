@@ -1669,8 +1669,26 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrations_registerEveryStepUpToV54() {
-        for (from in 48..53) {
+    fun migrate_v54_to_v55_addsTheSkippedFlag_withAZeroDefaultForEveryMarker() {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `face_scan` (`userId` TEXT NOT NULL, `photoKey` TEXT NOT NULL, `hiResScanned` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`userId`, `photoKey`))")
+        db.execSQL("INSERT OR REPLACE INTO face_scan (userId, photoKey, hiResScanned) VALUES ('u', 'k1', 1)")
+
+        Migrations.MIGRATION_54_55.migrate(db)
+
+        db.execSQL("INSERT INTO face_scan (userId, photoKey, skipped) VALUES ('u', 'k2', 1)")
+        db.query("SELECT photoKey, hiResScanned, skipped FROM face_scan ORDER BY photoKey").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("k1", cur.getString(0))
+            assertEquals(1, cur.getInt(1))
+            assertEquals("an existing marker is not skipped", 0, cur.getInt(2))
+            assertTrue(cur.moveToNext())
+            assertEquals(1, cur.getInt(2))
+        }
+    }
+
+    @Test
+    fun migrations_registerEveryStepUpToV55() {
+        for (from in 48..54) {
             assertTrue("$from -> ${from + 1}", Migrations.ALL.any { it.startVersion == from && it.endVersion == from + 1 })
         }
     }

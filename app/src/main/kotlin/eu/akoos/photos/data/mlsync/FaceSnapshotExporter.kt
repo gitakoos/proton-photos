@@ -345,13 +345,14 @@ class FaceSnapshotExporter internal constructor(
         }
     }
 
-    /** Every scan marker the snapshot carries, in key order: those of the cloud photos not [hidden]. */
+    /** Every scan marker the snapshot carries, in key order: those of the cloud photos not [hidden], leaving out
+     *  the photos this device only gave up on, so no other device takes them as scanned. */
     private suspend inline fun forEachMarker(account: String, hidden: Set<String>, action: (String, Boolean) -> Unit) {
         var after = ""
         while (true) {
             val page = appDatabase.faceScanDao().markersAfter(account, after, HEAD_PAGE)
             for (marker in page) {
-                if (carriesPhotoKey(marker.photoKey) && marker.photoKey !in hidden) action(marker.photoKey, marker.hiResScanned)
+                if (!marker.skipped && carriesPhotoKey(marker.photoKey) && marker.photoKey !in hidden) action(marker.photoKey, marker.hiResScanned)
             }
             if (page.size < HEAD_PAGE) return
             after = page.last().photoKey

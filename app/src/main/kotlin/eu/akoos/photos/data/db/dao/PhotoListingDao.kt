@@ -251,6 +251,11 @@ interface PhotoListingDao {
     @Query("UPDATE photo_listing SET tagsCsv = :tagsCsv WHERE linkId = :linkId")
     suspend fun setTagsCsv(linkId: String, tagsCsv: String)
 
+    /** Which of [linkIds] the user's cloud listing holds. Callers slice [linkIds] with
+     *  [eu.akoos.photos.util.flatMapSqlChunks], one host variable per link. */
+    @Query("SELECT linkId FROM photo_listing WHERE userId = :userId AND linkId IN (:linkIds)")
+    suspend fun listedLinkIds(userId: String, linkIds: List<String>): List<String>
+
     /** Returns all linkIds currently stored for a user. Used by the smart-merge refresh strategy. */
     @Query("SELECT linkId FROM photo_listing WHERE userId = :userId")
     suspend fun getAllLinkIds(userId: String): List<String>

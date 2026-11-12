@@ -90,6 +90,7 @@ object SemanticDiagnostics {
      *  that the link, its keys or its revision are gone, or the downloaded original is a format the
      *  decoder cannot read. */
     private val permanentSkips = AtomicInteger(0)
+    private val rescanLoops = AtomicInteger(0)
 
     /** As of the last pass end: photos waiting out a retry backoff after a transient load failure, and
      *  photos that pass left for the next one because its download budget was spent. */
@@ -158,6 +159,11 @@ object SemanticDiagnostics {
         permanentSkips.incrementAndGet()
     }
 
+    /** Add the photos a pass settled again after the process had already settled them as often as a loop allows. */
+    fun recordRescanLoops(count: Int) {
+        if (count > 0) rescanLoops.addAndGet(count)
+    }
+
     /** Record, at a pass end, how many photos wait out a retry backoff and how many the pass left over
      *  its download budget. */
     fun recordSourceBacklog(transientWaiting: Int, overBudget: Int) {
@@ -218,6 +224,7 @@ object SemanticDiagnostics {
         abandonedSessions = 0
         indexHalted = false
         permanentSkips.set(0)
+        rescanLoops.set(0)
         transientWaiting = 0
         overBudget = 0
         fgsStartMs.set(0L)
@@ -257,7 +264,8 @@ object SemanticDiagnostics {
             append(" embedFailures=").append(embedFailures.get()).append('\n')
             append("permanentSkipped=").append(permanentSkips.get())
             append(" transientWaiting=").append(transientWaiting)
-            append(" overBudget=").append(overBudget).append('\n')
+            append(" overBudget=").append(overBudget)
+            append(" rescanLoops=").append(rescanLoops.get()).append('\n')
             append("lastPark=").append(lastParkReason).append('\n')
             append("abandonedSessions=").append(abandonedSessions)
             append(" indexHalted=").append(if (indexHalted) "yes" else "no").append('\n')

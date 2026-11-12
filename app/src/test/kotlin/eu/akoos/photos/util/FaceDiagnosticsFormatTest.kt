@@ -196,7 +196,7 @@ class FaceDiagnosticsFormatTest {
     @Test
     fun source_deferrals_read_zero_before_anything_is_recorded() {
         val snapshot = FaceDiagnostics.snapshot(now = 0L)
-        assertTrue(snapshot, snapshot.contains("watchdogSkips=0\npermanentSkipped=0 transientWaiting=0 overBudget=0 waitingForWifi=0\nfacesDetected=0\n"))
+        assertTrue(snapshot, snapshot.contains("watchdogSkips=0\npermanentSkipped=0 transientWaiting=0 overBudget=0 waitingForWifi=0 rescanLoops=0\nfacesDetected=0\n"))
     }
 
     @Test
@@ -207,14 +207,23 @@ class FaceDiagnosticsFormatTest {
         // A later pass end replaces the backlog rather than adding to it.
         FaceDiagnostics.recordSourceBacklog(transientWaiting = 5, overBudget = 90)
         val snapshot = FaceDiagnostics.snapshot(now = 0L)
-        assertTrue(snapshot, snapshot.contains("permanentSkipped=2 transientWaiting=5 overBudget=90 waitingForWifi=0\n"))
+        assertTrue(snapshot, snapshot.contains("permanentSkipped=2 transientWaiting=5 overBudget=90 waitingForWifi=0 rescanLoops=0\n"))
     }
 
     @Test
     fun source_deferrals_print_the_photos_waiting_for_wifi() {
         FaceDiagnostics.recordSourceBacklog(transientWaiting = 0, overBudget = 0, deferredOffWifi = 21856)
         val snapshot = FaceDiagnostics.snapshot(now = 0L)
-        assertTrue(snapshot, snapshot.contains("overBudget=0 waitingForWifi=21856\n"))
+        assertTrue(snapshot, snapshot.contains("overBudget=0 waitingForWifi=21856 rescanLoops=0\n"))
+    }
+
+    @Test
+    fun rescan_loops_add_up_and_clear_resets_them() {
+        FaceDiagnostics.recordRescanLoops(2)
+        FaceDiagnostics.recordRescanLoops(3)
+        assertTrue(FaceDiagnostics.snapshot(now = 0L).contains("rescanLoops=5\n"))
+        FaceDiagnostics.clear()
+        assertTrue(FaceDiagnostics.snapshot(now = 0L).contains("rescanLoops=0\n"))
     }
 
     @Test
@@ -223,7 +232,7 @@ class FaceDiagnosticsFormatTest {
         FaceDiagnostics.recordSourceBacklog(transientWaiting = 7, overBudget = 120, deferredOffWifi = 40)
         FaceDiagnostics.clear()
         val snapshot = FaceDiagnostics.snapshot(now = 0L)
-        assertTrue(snapshot, snapshot.contains("permanentSkipped=0 transientWaiting=0 overBudget=0 waitingForWifi=0\n"))
+        assertTrue(snapshot, snapshot.contains("permanentSkipped=0 transientWaiting=0 overBudget=0 waitingForWifi=0 rescanLoops=0\n"))
     }
 
     @Test

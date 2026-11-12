@@ -104,7 +104,7 @@ class FaceDataKeyingDbTest {
     }
 
     @Test
-    fun `a backed-up device photo pairs with its Drive key, a hidden or unsent one does not`() {
+    fun `a backed-up device photo pairs with its listed Drive key, a hidden, unsent or unlisted one does not`() {
         fun row(uri: String, user: String, cloud: String?, status: eu.akoos.photos.domain.entity.SyncStatus) =
             eu.akoos.photos.data.db.entity.SyncStateEntity(
                 localUri = uri, userId = user, cloudFileId = cloud, localHash = "", cloudHash = null, status = status,
@@ -117,9 +117,52 @@ class FaceDataKeyingDbTest {
             row("content://media/3", "acct", "linkC", eu.akoos.photos.domain.entity.SyncStatus.HIDDEN),
             row("content://media/4", "other", "linkD", synced),
             row("content://media/5", "acct", "", synced),
+            row("content://media/6", "acct", "linkF", synced),
+            row("content://media/7", "acct", "content://media/7", synced),
+            row("content://media/8", "acct", "linkH", eu.akoos.photos.domain.entity.SyncStatus.LOCAL_MODIFIED),
         )
+        val listed = setOf("linkA", "linkC", "linkD", "content://media/7", "linkH")
 
-        assertEquals(listOf("content://media/1" to "linkA"), syncStateRekeyPairs("acct", rows))
+        assertEquals(listOf("content://media/1" to "linkA"), syncStateRekeyPairs("acct", rows, listed))
+    }
+
+    @Test
+    fun `a skipped marker keeps its flag through a re-key and still counts as scanned`() = runTest {
+        db.faceScanDao().upsert(listOf(FaceScanEntity("acct", "content://media/3", skipped = true)))
+
+        assertTrue(rekey.invoke("acct", "content://media/3", "linkC"))
+
+        assertEquals(listOf("linkC"), db.faceScanDao().scannedKeysForUser("acct"))
+        assertTrue(db.faceScanDao().markersAfter("acct", "", 10).single().skipped)
+
+        db.faceScanDao().clearForUser("acct")
+        assertTrue(db.faceScanDao().scannedKeysForUser("acct").isEmpty())
+    }
+
+    @Test
+    fun `the pairs are empty when nothing is listed, and a second run over the moved keys finds nothing`() {
+        fun row(uri: String, cloud: String) =
+            eu.akoos.photos.data.db.entity.SyncStateEntity(
+                localUri = uri, userId = "acct", cloudFileId = cloud, localHash = "", cloudHash = null,
+                status = eu.akoos.photos.domain.entity.SyncStatus.SYNCED, lastSyncAttemptMs = 0, lastSyncSuccessMs = null, backedUpAtMs = null, sizeBytes = 0,
+            )
+        val rows = listOf(row("content://media/1", "linkA"))
+
+        assertTrue(syncStateRekeyPairs("acct", rows, emptySet()).isEmpty())
+        val first = syncStateRekeyPairs("acct", rows, setOf("linkA"))
+        assertEquals(1, first.size)
+        val deviceKeysAfterMove = setOf<String>()
+        assertTrue(syncStateRekeyPairs("acct", rows.filter { it.localUri in deviceKeysAfterMove }, setOf("linkA")).isEmpty())
+    }
+
+    @Test
+    fun `the listing query names the listed links among those asked`() = runTest {
+        fun listing(id: String, user: String) = eu.akoos.photos.data.db.entity.PhotoListingEntity(
+            linkId = id, userId = user, shareId = "s", volumeId = "v", captureTime = 1L, displayName = "$id.jpg",
+            mimeType = "image/jpeg", sizeBytes = 1L, revisionId = "r",
+        )
+        db.photoListingDao().upsertAll(listOf(listing("linkA", "acct"), listing("linkB", "other")))
+        assertEquals(listOf("linkA"), db.photoListingDao().listedLinkIds("acct", listOf("linkA", "linkB", "linkC")))
     }
 
     private suspend fun seedPerson(user: String, id: Long, name: String, photoKey: String) {

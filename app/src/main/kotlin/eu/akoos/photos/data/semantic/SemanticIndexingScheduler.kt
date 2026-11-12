@@ -66,6 +66,8 @@ import eu.akoos.photos.util.WalkRestart
 import eu.akoos.photos.util.WalkRetryKick
 import eu.akoos.photos.util.boundedDetachedRun
 import eu.akoos.photos.util.retryKickDelayMs
+import eu.akoos.photos.util.RescanGuard
+import eu.akoos.photos.util.settledCloudMiss
 import eu.akoos.photos.util.settledLocalMiss
 import eu.akoos.photos.util.sourceMissForDownloadFailure
 import eu.akoos.photos.util.sourceMissForUndecodedDownload
@@ -267,6 +269,7 @@ class SemanticIndexingScheduler @Inject constructor(
      *  [stateStore] at the end of a pass and taken back by the first pass of a new process; dropped on
      *  [reset], so a rescan or a new account tries everything afresh. */
     private val retryBook = SourceRetryBook()
+    private val rescanGuard = RescanGuard()
 
     /** What the walk keeps between process starts, so a process the system killed does not begin its
      *  backoffs again. */
@@ -396,7 +399,7 @@ class SemanticIndexingScheduler @Inject constructor(
         val embeddedThisPass = AtomicInteger(0)
         // What this pass's loads came to: files each transient failure for a backoff, and counts the
         // photos left over the download budget.
-        val tally = SourcePassTally(retryBook)
+        val tally = SourcePassTally(retryBook, rescanGuard)
         try {
             val modelFile = semanticModelManager.imageModelFile()
             if (modelFile == null) {
@@ -431,6 +434,7 @@ class SemanticIndexingScheduler @Inject constructor(
             val scannedBefore = libraryTotal - total
             if (total == 0) {
                 retryBook.clear()
+                rescanGuard.clear()
                 _progress.value = SemanticIndexingProgress(SemanticIndexingState.Done, libraryTotal, libraryTotal)
                 return
             }
@@ -517,6 +521,7 @@ class SemanticIndexingScheduler @Inject constructor(
                 if (gated) mlWalkGate.release(MlRail.SEMANTIC)
             }
             SemanticDiagnostics.recordPass(embeddedThisPass.get(), SystemClock.elapsedRealtime() - passStart)
+            SemanticDiagnostics.recordRescanLoops(tally.repeats)
             SemanticDiagnostics.recordSourceBacklog(transientWaiting = retryBook.size(), overBudget = tally.overBudget)
 
             val indexedNow = scannedBefore + embeddedThisPass.get()
@@ -527,7 +532,7 @@ class SemanticIndexingScheduler @Inject constructor(
                 paused || stopRequested -> SemanticIndexingProgress(SemanticIndexingState.Paused, indexedNow, libraryTotal)
                 // A re-kick is coming (this pass wrote a row, or a restart is already queued), so stay
                 // Running to match the tail re-kick below and not flap the foreground service.
-                embeddedThisPass.get() > 0 || restart.isRequested() -> SemanticIndexingProgress(SemanticIndexingState.Running, indexedNow, libraryTotal)
+                embeddedThisPass.get() - tally.repeats > 0 || restart.isRequested() -> SemanticIndexingProgress(SemanticIndexingState.Running, indexedNow, libraryTotal)
                 // A full pass that embedded nothing and is not paused means the remainder can't be
                 // processed right now (deferred off Wi-Fi, every attempt failed transiently, or every photo
                 // left waits out a retry backoff). There is no immediate re-kick in that case, so settle to
@@ -546,7 +551,7 @@ class SemanticIndexingScheduler @Inject constructor(
             // due. A resume is for the account last asked for, a continuation for this walk's own, and either
             // starts only while that account is still the one signed in ([restartIfCurrent]).
             val resume = restart.take()
-            if (resume || (active() && embeddedThisPass.get() > 0)) {
+            if (resume || (active() && embeddedThisPass.get() - tally.repeats > 0)) {
                 val next = if (resume) restart.lastUserId else userId
                 scope.launch { restartIfCurrent(next) }
             } else if (active() && !abandonCap.reached()) {
@@ -626,6 +631,7 @@ class SemanticIndexingScheduler @Inject constructor(
         stopRequested = true
         retryKick.cancel()
         retryBook.clear()
+        rescanGuard.clear()
         runCatching { stateStore.delete() }
         stateRestoredFor = null
         restart.reset()
@@ -666,7 +672,8 @@ class SemanticIndexingScheduler @Inject constructor(
                 // download timeout kept off loadTimedOut) waits out a backoff; a cloud item deferred off
                 // Wi-Fi or out of budget stays pending for a later pass.
                 val miss = missNote.reason.let {
-                    if (item is GalleryItem.LocalOnly) settledLocalMiss(it, tally.attempts(photoKey)) else it
+                    val prior = tally.attempts(photoKey)
+                    if (item is GalleryItem.LocalOnly) settledLocalMiss(it, prior) else settledCloudMiss(it, prior)
                 }
                 if (shouldTombstoneOnNullSource(loadTimedOut.get(), miss)) {
                     val permanent = item !is GalleryItem.LocalOnly && miss == SourceMiss.PERMANENT

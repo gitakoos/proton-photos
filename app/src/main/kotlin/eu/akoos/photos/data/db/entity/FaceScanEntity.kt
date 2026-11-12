@@ -40,6 +40,9 @@ import androidx.room.Index
  * faceless photo at the high-resolution detector setting. The background walk leaves it false; the
  * sweep sets it once it has looked, so each faceless photo is hi-res swept at most once ever and a
  * repeat "find more" run does not re-scan the whole faceless set from zero.
+ *
+ * [skipped] marks a photo the walk gave up on because its source could not be read: it still counts as
+ * scanned here, but it is never handed to another device as a scanned photo.
  */
 @Entity(
     tableName = "face_scan",
@@ -51,4 +54,6 @@ data class FaceScanEntity(
     val photoKey: String,
     @ColumnInfo(defaultValue = "0")
     val hiResScanned: Boolean = false,
+    @ColumnInfo(defaultValue = "0")
+    val skipped: Boolean = false,
 )

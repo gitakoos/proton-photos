@@ -107,6 +107,45 @@ const val LOCAL_UNREADABLE_ATTEMPTS = 3
 fun settledLocalMiss(miss: SourceMiss, priorAttempts: Int): SourceMiss =
     if (miss == SourceMiss.TRANSIENT && priorAttempts + 1 >= LOCAL_UNREADABLE_ATTEMPTS) SourceMiss.PERMANENT else miss
 
+/** How many transient failures in a row a Drive photo may have before the walk settles it: a connection
+ *  that comes back clears the count at the next load, a photo that fails this often on the whole ladder
+ *  is not going to load. */
+const val CLOUD_TRANSIENT_ATTEMPTS = 8
+
+/**
+ * A Drive photo's miss after [priorAttempts] earlier failed attempts: a transient miss that has now
+ * repeated [CLOUD_TRANSIENT_ATTEMPTS] times counts as permanent. An over-budget or deferred miss is
+ * never an attempt, and any other miss is returned as it is.
+ */
+fun settledCloudMiss(miss: SourceMiss, priorAttempts: Int): SourceMiss =
+    if (miss == SourceMiss.TRANSIENT && priorAttempts + 1 >= CLOUD_TRANSIENT_ATTEMPTS) SourceMiss.PERMANENT else miss
+
+/** How many times in one process a photo may be settled before a further settle stops counting as
+ *  headway: a photo scanned again and again is a loop, not progress. */
+const val RESCAN_LOOP_SETTLES = 3
+
+/**
+ * The process-wide count of how many times each photo's scan was settled, so a walk can tell a photo
+ * scanned over and over (its marker lost between passes) from real headway. Thread-safe; dropped with a
+ * rescan or a sign-out.
+ */
+class RescanGuard(private val limit: Int = RESCAN_LOOP_SETTLES) {
+    private val settles = HashMap<String, Int>()
+
+    /** Files one more settle of [key]; true when it is a repeat, the [limit]th or a later one. */
+    @Synchronized
+    fun settled(key: String): Boolean {
+        val count = (settles[key] ?: 0) + 1
+        settles[key] = count
+        return count >= limit
+    }
+
+    @Synchronized
+    fun clear() {
+        settles.clear()
+    }
+}
+
 /** The waits between a photo's transient failure and its next attempt: five minutes, thirty minutes, two
  *  hours, then six hours for every later one. */
 val SOURCE_RETRY_BACKOFF_MS: List<Long> = listOf(5L * 60_000L, 30L * 60_000L, 2L * 3_600_000L, 6L * 3_600_000L)
@@ -238,8 +277,9 @@ class SourceRetryBook(private val backoffMs: List<Long> = SOURCE_RETRY_BACKOFF_M
  * [moved] counts the photos the pass moved on (a source loaded, or the photo settled without one); the
  * rest say why photos stayed pending. Shared by the pass's workers, so every counter is atomic.
  */
-class SourcePassTally(private val book: SourceRetryBook) {
+class SourcePassTally(private val book: SourceRetryBook, private val guard: RescanGuard? = null) {
     private val movedOn = AtomicInteger(0)
+    private val repeatedSettles = AtomicInteger(0)
     private val permanentMisses = AtomicInteger(0)
     private val transientMisses = AtomicInteger(0)
     private val overBudgetMisses = AtomicInteger(0)
@@ -249,6 +289,12 @@ class SourcePassTally(private val book: SourceRetryBook) {
     fun attempts(key: String): Int = book.attempts(key)
 
     val moved: Int get() = movedOn.get()
+
+    /** How many of the [moved] photos were settled again and again in this process, a loop and not headway. */
+    val repeats: Int get() = repeatedSettles.get()
+
+    /** The photos that moved on for the first times: what decides whether another pass is worth starting. */
+    val progress: Int get() = (movedOn.get() - repeatedSettles.get()).coerceAtLeast(0)
     val permanent: Int get() = permanentMisses.get()
     val transient: Int get() = transientMisses.get()
     val overBudget: Int get() = overBudgetMisses.get()
@@ -261,6 +307,7 @@ class SourcePassTally(private val book: SourceRetryBook) {
     fun movedOn(key: String, permanent: Boolean = false) {
         book.forget(key)
         movedOn.incrementAndGet()
+        if (guard?.settled(key) == true) repeatedSettles.incrementAndGet()
         if (permanent) permanentMisses.incrementAndGet()
     }
 
