@@ -310,7 +310,7 @@ class BackgroundSyncService : Service() {
         /**
          * Idempotently starts the service as foreground. Repeated calls are cheap — the
          * OS routes them through onStartCommand and we just stay running. Safe to call
-         * from MainActivity.onCreate, BootCompletedReceiver, and SettingsViewModel.
+         * from MainHostActivity.onCreate, BootCompletedReceiver, and SettingsViewModel.
          */
         fun start(context: Context) {
             val intent = Intent(context, BackgroundSyncService::class.java)

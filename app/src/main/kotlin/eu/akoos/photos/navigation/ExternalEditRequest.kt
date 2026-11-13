@@ -24,7 +24,7 @@ package eu.akoos.photos.navigation
 
 /**
  * Carries an external photo/video that arrived via ACTION_EDIT or ACTION_VIEW intent.
- * MainActivity extracts the values from intent.data / intent.type / a ContentResolver
+ * MainHostActivity extracts the values from intent.data / intent.type / a ContentResolver
  * display-name query and hands the request to NavGraph, which routes either to the
  * viewer (ACTION_VIEW, the "Open with" chooser path) or to the editor (ACTION_EDIT,
  * the "Edit with" chooser path).

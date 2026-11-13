@@ -140,7 +140,7 @@ class OnboardingViewModel @Inject constructor(
      * Forces the device-folder list to re-query. The [folders] flow seeds an empty
      * list while the media permission is unset (MediaStore returns nothing), and a
      * permission grant does not fire a content-change notification for media that was
-     * already present — so without an explicit poke the folder picker would stay empty
+     * already present - so without an explicit poke the folder picker would stay empty
      * after the user grants access until the app restarts or a new photo is captured.
      * Called from the permission-result callback.
      */
@@ -149,7 +149,7 @@ class OnboardingViewModel @Inject constructor(
     }
 
     /**
-     * Live appearance selections backed by DataStore — single source of truth so
+     * Live appearance selections backed by DataStore - single source of truth so
      * the picker UI always reflects the most recently written value and survives
      * recomposition without a local shadow `rememberSaveable`. Initial values
      * mirror the persisted defaults; `stringResource` calls re-resolve via
@@ -177,7 +177,7 @@ class OnboardingViewModel @Inject constructor(
 
     /**
      * Bucket list for the folder picker step. Empty list while the photos read
-     * permission hasn't been granted (MediaStore returns nothing) — the step UI
+     * permission hasn't been granted (MediaStore returns nothing) - the step UI
      * shows a "grant permission first" placeholder in that case. Once granted,
      * a single Flow emission populates the list and the step re-renders.
      */
@@ -202,10 +202,10 @@ class OnboardingViewModel @Inject constructor(
      * Canonical DataStore write + boot-mirror update. We DELIBERATELY do not call
      * AppCompatDelegate.setDefaultNightMode here: it forces an Activity recreate
      * which the user perceives as a screen-scale-from-center animation. The Compose
-     * tree re-themes via the DataStore flow [MainActivity] collects, so the in-app
+     * tree re-themes via the DataStore flow [MainHostActivity] collects, so the in-app
      * surface flips immediately without any recreate. ProtonCore login Activities
      * pick up the right theme at the next cold start through [App.applyStoredThemeMode]
-     * — they never appear during the onboarding flow itself.
+     * - they never appear during the onboarding flow itself.
      */
     fun setThemeLive(mode: ThemeMode) {
         viewModelScope.launch {
@@ -217,7 +217,7 @@ class OnboardingViewModel @Inject constructor(
         }
     }
 
-    /** Palette is purely an in-Compose accent swap — no boot-mirror, no AppCompat. */
+    /** Palette is purely an in-Compose accent swap - no boot-mirror, no AppCompat. */
     fun setPaletteLive(palette: ThemePalette) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.THEME_PALETTE] = palette.storageKey }
@@ -225,12 +225,12 @@ class OnboardingViewModel @Inject constructor(
     }
 
     /**
-     * Language switch — canonical DataStore write plus boot-mirror update so the
+     * Language switch - canonical DataStore write plus boot-mirror update so the
      * next cold start hands the right locale to ProtonCore login Activities. Does
      * NOT call `AppCompatDelegate.setApplicationLocales`: that triggers an Activity
      * recreate which loses navigation state and plays a reload animation. The
      * in-app Compose tree re-resolves strings via [eu.akoos.photos.presentation.util.LocaleOverride]
-     * wired up in `MainActivity` — DataStore change → flow re-emits → override key
+     * wired up in `MainHostActivity` - DataStore change → flow re-emits → override key
      * changes → recomposition picks up the new locale.
      */
     fun setLanguageLive(tag: String) {
@@ -392,7 +392,7 @@ fun OnboardingScreen(
     var mlSemantic by rememberSaveable { mutableStateOf(false) }
     var mlOcr by rememberSaveable { mutableStateOf(false) }
     // Theme / palette / language are read from the VM (DataStore-backed) instead of
-    // shadow `rememberSaveable` state — the live setters below already persist to
+    // shadow `rememberSaveable` state - the live setters below already persist to
     // DataStore, so a single source of truth keeps the picker UI consistent with the
     // active theme + locale of the rest of the app (and survives process death).
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -449,7 +449,7 @@ fun OnboardingScreen(
         add(OnboardingStep.Welcome)
         add(OnboardingStep.Appearance)
         add(OnboardingStep.PhotosAccess)
-        // All-files access right after the media grant — the app asks for it by default (not only
+        // All-files access right after the media grant - the app asks for it by default (not only
         // behind the mirror opt-in) so restored hidden photos can return to their real folders.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) add(OnboardingStep.AllFilesAccess)
         add(OnboardingStep.BackupMode)
@@ -567,7 +567,7 @@ fun OnboardingScreen(
                 key = { it },
             ) { pageIndex ->
                 // Step lookup uses the PAGER's pageIndex (not the outer
-                // currentStep) so each page composes its OWN step content —
+                // currentStep) so each page composes its OWN step content -
                 // otherwise pages on either side of `currentPage` would all
                 // render the same content for one frame (the original
                 // "double-skip" symptom).

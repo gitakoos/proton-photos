@@ -2827,4 +2827,35 @@
     <string name="viewer_not_person_title">Ni to %1$s?</string>
     <string name="viewer_not_person_body">Obraz ne pripada več osebi %1$s. Fotografija ostane, obraz pa se lahko predlaga nekomu drugemu.</string>
     <string name="viewer_not_person_confirm">Ni %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">Ikona aplikacije</string>
+    <string name="app_icon_section_preview">Predogled</string>
+    <string name="app_icon_section_disguise">Preobleka</string>
+    <string name="app_icon_disguise_intro">Videti je kot običajna aplikacija. Spremeni se tudi ime na domačem zaslonu.</string>
+    <string name="app_icon_cut_entries">Skrij vnosa za deljenje in izbiro</string>
+    <string name="app_icon_cut_entries_desc">Če izberete eno od treh ikon preobleke, se izključita vnos za deljenje Varnostno kopiraj v Drive in vnos zunanjega izbirnika fotografij. Pri izbiri katere koli druge ikone se spet vklopita.</string>
+    <string name="app_icon_disguise_hint">Spremeni se samo ikona in ime na domačem zaslonu. Obvestila, nastavitve Androida in meni Odpri z še vedno prikazujejo Photos for Proton, zaklep aplikacije pa še vedno vpraša prvi.</string>
+    <string name="app_icon_variants_hint">Zagonski program lahko potrebuje nekaj sekund, da prikaže novo ikono, morda pa jo boste morali znova dodati na domači zaslon. Pri tematskih ikonah v Androidu 13 ali novejšem so vse barve videti enako.</string>
+    <string name="app_icon_default">Privzeta</string>
+    <string name="app_icon_black">Črna</string>
+    <string name="app_icon_white">Bela</string>
+    <string name="app_icon_silver">Srebrna</string>
+    <string name="app_icon_label_clock">Ura</string>
+    <string name="app_icon_label_calculator">Računalo</string>
+    <string name="app_icon_label_notes">Zapiski</string>
+    <string name="app_icon_preview_default">Privzeta ikona</string>
+    <string name="app_icon_preview_disguise">Preobleka: %1$s</string>
+    <string name="app_icon_preview_variant">Različica: %1$s</string>
+    <string name="app_icon_confirm_title">Spremeniti ikono aplikacije: %1$s?</string>
+    <string name="app_icon_confirm_disguise">Ikona in ime na domačem zaslonu bosta: %1$s. Aplikacija še vedno odpre %2$s, zaklep aplikacije pa še vedno vpraša prvi.</string>
+    <string name="app_icon_confirm_variant">Ikona na domačem zaslonu bo: %1$s. Ime ostane %2$s.</string>
+    <string name="app_icon_confirm_delay">Sprememba ikone lahko traja nekaj sekund. Na nekaterih telefonih se aplikacija ob menjavi ikone zapre; znova jo odprite z novo ikono.</string>
+    <string name="app_icon_readd_hint">Morda boste morali ikono znova dodati na domači zaslon.</string>
+    <string name="app_icon_confirm_still_visible">Obvestila, nastavitve Androida in meni Odpri z še vedno prikazujejo %1$s.</string>
+    <string name="app_icon_confirm_action">Spremeni ikono</string>
+    <string name="app_icon_changed">Ikona spremenjena. Zagonski program se lahko posodobi šele čez nekaj sekund.</string>
+    <string name="app_icon_failed">Ikone ni bilo mogoče spremeniti.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, ikona preobleke, izbrano</string>
+    <string name="app_icon_a11y_disguise">%1$s, ikona preobleke</string>
+    <string name="app_icon_a11y_selected">%1$s, izbrano</string>
 </resources>

@@ -44,7 +44,7 @@ import javax.inject.Singleton
 /**
  * The single piece of glue between the repository (does an update exist?), the downloader
  * (fetch the APK), the installer (hand it to the OS), and the Compose dialog state. Lives
- * as a @Singleton so a recreated MainActivity (config change, theme swap) still observes
+ * as a @Singleton so a recreated MainHostActivity (config change, theme swap) still observes
  * the same in-flight download.
  *
  * Threading model: every public method either takes a [CoroutineScope] explicitly or is

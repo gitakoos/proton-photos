@@ -209,7 +209,7 @@ fun HiddenAlbumScreen(
         if (!state.isAuthenticated && !promptShown) {
             // LocaleOverride wraps LocalContext in a ContextWrapper, so a direct cast
             // to FragmentActivity throws ClassCastException. findFragmentActivity()
-            // walks the baseContext chain to reach the underlying MainActivity.
+            // walks the baseContext chain to reach the underlying MainHostActivity.
             val fragmentActivity = context.findFragmentActivity()
             if (fragmentActivity == null) {
                 onBack()

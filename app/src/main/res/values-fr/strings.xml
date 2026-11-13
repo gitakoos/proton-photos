@@ -2698,4 +2698,35 @@
     <string name="viewer_not_person_title">Ce n\'est pas %1$s ?</string>
     <string name="viewer_not_person_body">Le visage quitte %1$s. La photo reste, et le visage peut être suggéré à quelqu\'un d\'autre.</string>
     <string name="viewer_not_person_confirm">Pas %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">Icône de l\'app</string>
+    <string name="app_icon_section_preview">Aperçu</string>
+    <string name="app_icon_section_disguise">Déguisement</string>
+    <string name="app_icon_disguise_intro">Ressemble à une app courante. Le nom sur l\'écran d\'accueil change aussi.</string>
+    <string name="app_icon_cut_entries">Masquer les entrées de partage et de sélection</string>
+    <string name="app_icon_cut_entries_desc">Choisir l\'une des trois icônes de déguisement désactive l\'entrée de partage Sauvegarder sur Drive et l\'entrée du sélecteur de photos externe. Choisir toute autre icône les réactive.</string>
+    <string name="app_icon_disguise_hint">Seuls l\'icône et le nom sur l\'écran d\'accueil changent. Les notifications, les réglages Android et le menu Ouvrir avec affichent toujours Photos for Proton, et le verrouillage de l\'app demande toujours d\'abord.</string>
+    <string name="app_icon_variants_hint">Le lanceur peut mettre quelques secondes à afficher une nouvelle icône, et il faudra peut-être la rajouter à l\'écran d\'accueil. Avec les icônes thématiques d\'Android 13 ou plus récent, toutes les couleurs se ressemblent.</string>
+    <string name="app_icon_default">Par défaut</string>
+    <string name="app_icon_black">Noir</string>
+    <string name="app_icon_white">Blanc</string>
+    <string name="app_icon_silver">Argent</string>
+    <string name="app_icon_label_clock">Horloge</string>
+    <string name="app_icon_label_calculator">Calculatrice</string>
+    <string name="app_icon_label_notes">Notes</string>
+    <string name="app_icon_preview_default">Icône par défaut</string>
+    <string name="app_icon_preview_disguise">Déguisement : %1$s</string>
+    <string name="app_icon_preview_variant">Variante : %1$s</string>
+    <string name="app_icon_confirm_title">Changer l\'icône de l\'app : %1$s ?</string>
+    <string name="app_icon_confirm_disguise">L\'icône et le nom sur l\'écran d\'accueil deviendront : %1$s. L\'app ouvre toujours %2$s et le verrouillage de l\'app demande toujours d\'abord.</string>
+    <string name="app_icon_confirm_variant">L\'icône sur l\'écran d\'accueil deviendra : %1$s. Le nom reste %2$s.</string>
+    <string name="app_icon_confirm_delay">Le changement d\'icône peut prendre quelques secondes. Sur certains téléphones, l\'app se ferme au changement d\'icône ; rouvrez-la depuis la nouvelle icône.</string>
+    <string name="app_icon_readd_hint">Vous devrez peut-être rajouter l\'icône à l\'écran d\'accueil.</string>
+    <string name="app_icon_confirm_still_visible">Les notifications, les réglages Android et le menu Ouvrir avec affichent toujours %1$s.</string>
+    <string name="app_icon_confirm_action">Changer l\'icône</string>
+    <string name="app_icon_changed">Icône modifiée. Le lanceur peut mettre quelques secondes à se mettre à jour.</string>
+    <string name="app_icon_failed">Impossible de changer l\'icône.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, icône de déguisement, sélectionnée</string>
+    <string name="app_icon_a11y_disguise">%1$s, icône de déguisement</string>
+    <string name="app_icon_a11y_selected">%1$s, sélectionnée</string>
 </resources>

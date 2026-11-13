@@ -345,7 +345,7 @@ val LocalGifAutoplayGrid = staticCompositionLocalOf { false }
 val LocalGifAutoplayCovers = staticCompositionLocalOf { false }
 
 /** The animated-decoder-free Coil loader, used to render a GIF as its still first frame with no
- *  playback. Null until MainActivity provides the application's instance. */
+ *  playback. Null until MainHostActivity provides the application's instance. */
 val LocalStaticImageLoader = staticCompositionLocalOf<coil.ImageLoader?> { null }
 
 /** Accessor — call AppColors.current to read tokens in a Composable. */

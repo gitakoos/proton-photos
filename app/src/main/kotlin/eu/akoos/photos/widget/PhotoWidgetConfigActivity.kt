@@ -142,7 +142,7 @@ class PhotoWidgetConfigActivity : FragmentActivity() {
         lockGate.followSettings(this)
 
         setContent {
-            // Mirror MainActivity: respect the user's THEME_MODE + THEME_PALETTE so the
+            // Mirror MainHostActivity: respect the user's THEME_MODE + THEME_PALETTE so the
             // widget config screen renders in the same theme/accent as the rest of the app.
             val themeKeyFlow = remember {
                 settingsDataStore.data.map { prefs ->

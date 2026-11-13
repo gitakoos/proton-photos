@@ -99,6 +99,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -185,6 +186,7 @@ import eu.akoos.photos.presentation.theme.StatusPending
 import eu.akoos.photos.presentation.theme.StatusSynced
 import eu.akoos.photos.presentation.theme.pillShape
 import eu.akoos.photos.presentation.util.formatBytes
+import kotlinx.coroutines.launch
 
 private val cardShape = RoundedCornerShape(12.dp)
 
@@ -2438,6 +2440,7 @@ fun PrivacySecuritySettingsScreen(
             var externalPicker by remember {
                 mutableStateOf(eu.akoos.photos.presentation.picker.ExternalPicker.isEnabled(pickerContext))
             }
+            val pickerScope = rememberCoroutineScope()
             ToggleRow(
                 label = stringResource(R.string.settings_external_picker),
                 description = stringResource(R.string.settings_external_picker_desc),
@@ -2445,6 +2448,11 @@ fun PrivacySecuritySettingsScreen(
                 onCheckedChange = { on ->
                     eu.akoos.photos.presentation.picker.ExternalPicker.setEnabled(pickerContext, on)
                     externalPicker = eu.akoos.photos.presentation.picker.ExternalPicker.isEnabled(pickerContext)
+                    // A choice made here wins over the state a disguise icon remembers for the picker.
+                    pickerScope.launch {
+                        eu.akoos.photos.presentation.settings.appicon.DisguiseEntrySettings(pickerContext)
+                            .setSavedPicker(null)
+                    }
                 },
             )
             // Offline photos and the telemetry mirror are both Proton-account concepts, so the whole

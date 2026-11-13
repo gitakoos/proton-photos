@@ -2827,4 +2827,35 @@
     <string name="viewer_not_person_title">To nie %1$s?</string>
     <string name="viewer_not_person_body">Twarz przestaje należeć do osoby %1$s. Zdjęcie zostaje, a twarz może zostać zaproponowana komuś innemu.</string>
     <string name="viewer_not_person_confirm">To nie %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">Ikona aplikacji</string>
+    <string name="app_icon_section_preview">Podgląd</string>
+    <string name="app_icon_section_disguise">Kamuflaż</string>
+    <string name="app_icon_disguise_intro">Wygląda jak zwykła aplikacja. Zmienia się też nazwa na ekranie głównym.</string>
+    <string name="app_icon_cut_entries">Ukryj wpisy udostępniania i wyboru</string>
+    <string name="app_icon_cut_entries_desc">Wybranie jednej z trzech ikon kamuflażu wyłącza wpis udostępniania Kopia w Drive i wpis zewnętrznego wyboru zdjęć. Wybranie dowolnej innej ikony włącza je z powrotem.</string>
+    <string name="app_icon_disguise_hint">Zmienia się tylko ikona i nazwa na ekranie głównym. Powiadomienia, ustawienia Androida i menu Otwórz za pomocą nadal pokazują Photos for Proton, a blokada aplikacji nadal pyta jako pierwsza.</string>
+    <string name="app_icon_variants_hint">Launcher może potrzebować kilku sekund, by pokazać nową ikonę, a być może trzeba będzie dodać ją ponownie do ekranu głównego. Przy ikonach tematycznych w Androidzie 13 lub nowszym wszystkie kolory wyglądają tak samo.</string>
+    <string name="app_icon_default">Domyślna</string>
+    <string name="app_icon_black">Czarny</string>
+    <string name="app_icon_white">Biały</string>
+    <string name="app_icon_silver">Srebrny</string>
+    <string name="app_icon_label_clock">Zegar</string>
+    <string name="app_icon_label_calculator">Kalkulator</string>
+    <string name="app_icon_label_notes">Notatki</string>
+    <string name="app_icon_preview_default">Ikona domyślna</string>
+    <string name="app_icon_preview_disguise">Kamuflaż: %1$s</string>
+    <string name="app_icon_preview_variant">Wariant: %1$s</string>
+    <string name="app_icon_confirm_title">Zmienić ikonę aplikacji: %1$s?</string>
+    <string name="app_icon_confirm_disguise">Ikona i nazwa na ekranie głównym zmienią się na: %1$s. Aplikacja nadal otwiera %2$s, a blokada aplikacji nadal pyta jako pierwsza.</string>
+    <string name="app_icon_confirm_variant">Ikona na ekranie głównym zmieni się na: %1$s. Nazwa pozostaje %2$s.</string>
+    <string name="app_icon_confirm_delay">Zmiana ikony może potrwać kilka sekund. Na niektórych telefonach aplikacja zamyka się przy zmianie ikony; otwórz ją ponownie z nowej ikony.</string>
+    <string name="app_icon_readd_hint">Być może trzeba będzie dodać ikonę ponownie do ekranu głównego.</string>
+    <string name="app_icon_confirm_still_visible">Powiadomienia, ustawienia Androida i menu Otwórz za pomocą nadal pokazują %1$s.</string>
+    <string name="app_icon_confirm_action">Zmień ikonę</string>
+    <string name="app_icon_changed">Ikona zmieniona. Aktualizacja w launcherze może potrwać kilka sekund.</string>
+    <string name="app_icon_failed">Nie udało się zmienić ikony.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, ikona kamuflażu, wybrana</string>
+    <string name="app_icon_a11y_disguise">%1$s, ikona kamuflażu</string>
+    <string name="app_icon_a11y_selected">%1$s, wybrana</string>
 </resources>

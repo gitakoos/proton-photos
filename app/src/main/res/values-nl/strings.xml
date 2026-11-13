@@ -2720,4 +2720,35 @@
     <string name="viewer_not_person_title">Is dit niet %1$s?</string>
     <string name="viewer_not_person_body">Het gezicht wordt van %1$s losgekoppeld. De foto blijft staan en het gezicht kan aan iemand anders worden voorgesteld.</string>
     <string name="viewer_not_person_confirm">Niet %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">App-pictogram</string>
+    <string name="app_icon_section_preview">Voorbeeld</string>
+    <string name="app_icon_section_disguise">Vermomming</string>
+    <string name="app_icon_disguise_intro">Ziet eruit als een gewone app. Ook de naam op het startscherm verandert.</string>
+    <string name="app_icon_cut_entries">Deel- en kiezerinvoer verbergen</string>
+    <string name="app_icon_cut_entries_desc">Als je een van de drie vermommingspictogrammen kiest, worden de deelinvoer Back-up naar Drive en de invoer van de externe fotokiezer uitgezet. Bij elk ander pictogram gaan ze weer aan.</string>
+    <string name="app_icon_disguise_hint">Alleen het pictogram en de naam op je startscherm veranderen. Meldingen, de Android-instellingen en het menu Openen met tonen nog steeds Photos for Proton, en de appvergrendeling vraagt nog steeds eerst.</string>
+    <string name="app_icon_variants_hint">De launcher kan enkele seconden nodig hebben om een nieuw pictogram te tonen en mogelijk moet je het opnieuw aan het startscherm toevoegen. Bij thema-pictogrammen op Android 13 of nieuwer zien alle kleuren er hetzelfde uit.</string>
+    <string name="app_icon_default">Standaard</string>
+    <string name="app_icon_black">Zwart</string>
+    <string name="app_icon_white">Wit</string>
+    <string name="app_icon_silver">Zilver</string>
+    <string name="app_icon_label_clock">Klok</string>
+    <string name="app_icon_label_calculator">Rekenmachine</string>
+    <string name="app_icon_label_notes">Notities</string>
+    <string name="app_icon_preview_default">Standaardpictogram</string>
+    <string name="app_icon_preview_disguise">Vermomming: %1$s</string>
+    <string name="app_icon_preview_variant">Variant: %1$s</string>
+    <string name="app_icon_confirm_title">App-pictogram wijzigen: %1$s?</string>
+    <string name="app_icon_confirm_disguise">Het pictogram en de naam op je startscherm worden: %1$s. De app opent nog steeds %2$s en de appvergrendeling vraagt nog steeds eerst.</string>
+    <string name="app_icon_confirm_variant">Het pictogram op je startscherm wordt: %1$s. De naam blijft %2$s.</string>
+    <string name="app_icon_confirm_delay">Het wijzigen van het pictogram kan een paar seconden duren. Op sommige telefoons sluit de app bij het wisselen; open hem dan opnieuw via het nieuwe pictogram.</string>
+    <string name="app_icon_readd_hint">Mogelijk moet je het pictogram opnieuw aan je startscherm toevoegen.</string>
+    <string name="app_icon_confirm_still_visible">Meldingen, de Android-instellingen en het menu Openen met tonen nog steeds %1$s.</string>
+    <string name="app_icon_confirm_action">Pictogram wijzigen</string>
+    <string name="app_icon_changed">Pictogram gewijzigd. De launcher kan een paar seconden nodig hebben om bij te werken.</string>
+    <string name="app_icon_failed">Het pictogram kon niet worden gewijzigd.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, vermommingspictogram, geselecteerd</string>
+    <string name="app_icon_a11y_disguise">%1$s, vermommingspictogram</string>
+    <string name="app_icon_a11y_selected">%1$s, geselecteerd</string>
 </resources>

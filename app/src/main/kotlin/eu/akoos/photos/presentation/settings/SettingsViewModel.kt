@@ -453,13 +453,13 @@ class SettingsViewModel @Inject constructor(
      * Count what a sign-out takes with it: the photos the vault holds FILES for.
      *
      * Only a vault entry counts. An entry hiding a photo that is still on the device or on Drive is a
-     * filter, and sign-out only drops the filter — nothing of the photo is lost, so warning about it
+     * filter, and sign-out only drops the filter - nothing of the photo is lost, so warning about it
      * would be a warning the user cannot act on.
      *
      * Three things together keep the figure from ever sitting below what the wipe destroys.
      * Reconciliation is awaited first, so a hide interrupted between removing its original and
-     * recording its entry is already settled — published as a vault entry, or dropped because its
-     * original is proven to still be on the device — before any number reaches the screen. The count
+     * recording its entry is already settled - published as a vault entry, or dropped because its
+     * original is proven to still be on the device - before any number reaches the screen. The count
      * itself then comes from the files on disk as well as the index, because the wipe takes the vault
      * directory whole whether or not anything refers to a file in it. And
      * [SettingsUiState.vaultedCountSettled] holds the confirmation back until the first real figure
@@ -527,12 +527,12 @@ class SettingsViewModel @Inject constructor(
      * the on-disk app cache. Called once at init and again from [refresh] / after [clearAppCache].
      *
      * StatFs is cheap (a single statvfs syscall), but the cache walk can touch hundreds of files
-     * — keep it off the main thread via Dispatchers.IO.
+     * - keep it off the main thread via Dispatchers.IO.
      */
     fun refreshLocalStorage() {
         viewModelScope.launch {
             val measured = withContext(Dispatchers.IO) {
-                // /data partition — same partition where cacheDir lives, so it's the relevant
+                // /data partition - same partition where cacheDir lives, so it's the relevant
                 // "free space" number for users worrying about the app filling their device.
                 val statFs = StatFs(Environment.getDataDirectory().absolutePath)
                 val total = statFs.totalBytes
@@ -553,7 +553,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Walks [dir] and sums file lengths. Defensive against deletions racing with the walk —
+     * Walks [dir] and sums file lengths. Defensive against deletions racing with the walk -
      * dead File handles return length() == 0. Skips symlinks implicitly because File.length()
      * follows links and returns the target size (we never create symlinks in cacheDir).
      */
@@ -567,12 +567,12 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Wipes the three subdirs we manage under cacheDir:
-     * - `thumbnails/` — decrypted photo thumbnails
-     * - `fullres/`    — full-res photo + streamed video downloads
-     * - `upload_<id>/` — temp encrypted block dirs from in-flight uploads
+     * - `thumbnails/` - decrypted photo thumbnails
+     * - `fullres/`    - full-res photo + streamed video downloads
+     * - `upload_<id>/` - temp encrypted block dirs from in-flight uploads
      *
      * Everything else under cacheDir (including OkHttp's HTTP cache and Android's `code_cache/`)
-     * is left alone — those are managed by their owners and silently rebuilt, but blindly nuking
+     * is left alone - those are managed by their owners and silently rebuilt, but blindly nuking
      * them risks interfering with concurrent IO. After delete we recompute `appCacheBytes` so
      * the UI reflects the new value.
      */
@@ -588,7 +588,7 @@ class SettingsViewModel @Inject constructor(
                     val sub = File(cache, name)
                     if (sub.exists()) sub.deleteRecursively()
                 }
-                // upload_<fileId> dirs are siblings — enumerate.
+                // upload_<fileId> dirs are siblings - enumerate.
                 cache.listFiles()?.forEach { f ->
                     if (f.isDirectory && f.name.startsWith("upload_")) {
                         f.deleteRecursively()
@@ -605,7 +605,7 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Wipes the offline-pinned full-res blobs ([OfflineStorageManager.clearAll]) AND drops the
-     * pin set ([SettingsKeys.OFFLINE_PIN_IDS]) so the two stay consistent — deleting blobs while
+     * pin set ([SettingsKeys.OFFLINE_PIN_IDS]) so the two stay consistent - deleting blobs while
      * leaving the set would leave "pinned" photos with no blob backing them. Recomputes
      * `offlineBytes` afterwards so the row reflects the cleared figure.
      */
@@ -620,7 +620,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Manual refresh hook — currently invoked by the storage-card refresh affordance.
+     * Manual refresh hook - currently invoked by the storage-card refresh affordance.
      * Also re-pulls cloud usage from the Drive API so the Proton bar reflects fresh usage.
      */
     fun refresh() {
@@ -645,10 +645,10 @@ class SettingsViewModel @Inject constructor(
      */
     private fun observeUploadProgress() {
         viewModelScope.launch {
-            // Local batch-window state — only the observer touches it, so plain
+            // Local batch-window state - only the observer touches it, so plain
             // vals are fine. Reset on Idle, accumulated as files progress.
             var batchStartMs = 0L
-            // Live per-URI byte counter — Stage 3 plumbed `evt.doneBytes` via the
+            // Live per-URI byte counter - Stage 3 plumbed `evt.doneBytes` via the
             // per-block onProgress callback. Tracking each file's *current* upload
             // bytes (not just file-completion totals) means the MB/s read-out
             // tracks the real network throughput LIVE during one large upload
@@ -656,7 +656,7 @@ class SettingsViewModel @Inject constructor(
             // no longer reads as "150 KB/s" just because the per-file overhead
             // dominates the cumulative average.
             val uploadedBytesByUri = mutableMapOf<String, Long>()
-            // Use `collect` (NOT `collectLatest`) — with parallel uploads two or
+            // Use `collect` (NOT `collectLatest`) - with parallel uploads two or
             // three events can arrive in the same millisecond, and `collectLatest`
             // would cancel the in-flight `_uiState.update` block before its copy()
             // returned, leaving the Sync card stuck on a stale row.
@@ -684,7 +684,7 @@ class SettingsViewModel @Inject constructor(
                         UploadStatus.WaitingForWifi,
                         UploadStatus.PreparingBackup,
                         UploadStatus.StorageFull -> {
-                            // Deferral frame — no per-file payload. Surface the reason as a
+                            // Deferral frame - no per-file payload. Surface the reason as a
                             // one-line note in the Sync card without touching the events list
                             // or byte counters. StorageFull also ends the batch, so it clears the
                             // live counters the way Idle does; the reason itself has to survive,
@@ -742,13 +742,13 @@ class SettingsViewModel @Inject constructor(
                             )).takeLast(30)
 
                             // Start the batch timer on the FIRST per-file signal of the run
-                            // — Encrypting fires before Uploading so a CPU-bound first phase
+                            // - Encrypting fires before Uploading so a CPU-bound first phase
                             // doesn't get hidden from the bytes/sec window.
                             if (batchStartMs == 0L && firstPerFileStatus) {
                                 batchStartMs = System.currentTimeMillis()
                             }
 
-                            // Live byte counter — only Uploading + Done contribute to the
+                            // Live byte counter - only Uploading + Done contribute to the
                             // NETWORK byte count. Encrypting is CPU-only work; counting its
                             // doneBytes would inflate the speed during the pre-network phase.
                             // Done overrides the live counter with the full file size so a
@@ -765,7 +765,7 @@ class SettingsViewModel @Inject constructor(
                                     uploadedBytesByUri[evt.uri] = evt.sizeBytes.coerceAtLeast(0L)
                                 }
                                 UploadStatus.Failed -> {
-                                    // Leave the partial count — bytes that already left the
+                                    // Leave the partial count - bytes that already left the
                                     // wire still count toward the realised speed.
                                 }
                                 else -> Unit
@@ -955,7 +955,7 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Pull the Drive trash list and surface its size in UiState. There's no count-only
-     * endpoint, so we fetch the full list and read `.size` — same approach the Trash
+     * endpoint, so we fetch the full list and read `.size` - same approach the Trash
      * screen takes. Failures (offline, network error) leave `cloudTrashCount` at its
      * prior value or null; the UI then falls back to the device-only subtitle.
      *
@@ -1085,14 +1085,14 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(autoSync = enabled) }
             // One place arms or tears down ALL background triggers (periodic worker, content
             // observer, opt-in keep-alive service) from the just-written prefs. On disable it also
-            // cancels the content observer — leaving it armed would keep firing SyncWorker on every
+            // cancels the content observer - leaving it armed would keep firing SyncWorker on every
             // photo write and burn wake-ups even though nothing uploads.
             SyncWorker.reconcileBackgroundWork(context)
         }
     }
 
     /** Flip the global "back up every MediaStore image/video" mode. When ON, the
-     *  reconcile + upload pipeline ignores the folder selection — handy for users who
+     *  reconcile + upload pipeline ignores the folder selection - handy for users who
      *  don't want to micromanage which buckets sync. Off keeps the existing per-folder
      *  picker behaviour. */
     fun setBackupEverything(enabled: Boolean) {
@@ -1125,7 +1125,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     /** Persist the Wi-Fi-only-for-fullres preference. Affects only the viewer's auto
-     *  download — explicit user actions (Save to device, Edit) ignore this setting. */
+     *  download - explicit user actions (Save to device, Edit) ignore this setting. */
     fun setFullresWifiOnly(wifiOnly: Boolean) {
         viewModelScope.launch {
             context.settingsDataStore.edit { it[SettingsKeys.FULLRES_WIFI_ONLY] = wifiOnly }
@@ -1151,7 +1151,7 @@ class SettingsViewModel @Inject constructor(
             // ("Couldn't reconcile" vs "Couldn't upload") instead of one generic "Sync failed".
             var failedPhaseRes = R.string.settings_sync_failed
             try {
-                // 0. Fresh cloud photo listing — pulls the current Photos stream and DELETES
+                // 0. Fresh cloud photo listing - pulls the current Photos stream and DELETES
                 //    `photo_listing` rows for items no longer on Drive. Without this step the
                 //    subsequent reconcile would see stale SYNCED entries (cloud-deleted items
                 //    still mapped from a previous refresh) and keep them green in the UI.
@@ -1250,10 +1250,10 @@ class SettingsViewModel @Inject constructor(
             // We DELIBERATELY skip AppCompatDelegate.setDefaultNightMode here. That call
             // forces an Activity recreate (visible as a scale-from-center animation) any
             // time the new mode differs from the currently-applied one. The Compose tree
-            // re-themes via the DataStore flow MainActivity collects, so the in-app
+            // re-themes via the DataStore flow MainHostActivity collects, so the in-app
             // surfaces flip instantly without a recreate. ProtonCore login Activities
             // pick up the right theme at the next cold start through
-            // App.applyStoredThemeMode — they don't re-launch within the same session.
+            // App.applyStoredThemeMode - they don't re-launch within the same session.
             _uiState.update { it.copy(themeMode = mode) }
         }
     }
@@ -1261,7 +1261,7 @@ class SettingsViewModel @Inject constructor(
     /**
      * Persist the chosen accent palette and update the in-memory state so the active
      * `ProtonPhotosTheme` re-collects the new key. Note: NOT mirrored to ThemePrefsBoot
-     * and does NOT touch AppCompatDelegate — palette is purely an in-Compose accent
+     * and does NOT touch AppCompatDelegate - palette is purely an in-Compose accent
      * swap and doesn't affect light/dark, system-bar styling, or cold-start theming.
      */
     fun setThemePalette(palette: ThemePalette) {
@@ -1275,7 +1275,7 @@ class SettingsViewModel @Inject constructor(
 
     /**
      * Persist the AMOLED pure-black switch. Like the palette, this is a pure in-Compose surface
-     * swap: MainActivity re-collects the key and re-themes live, so no boot mirror and no
+     * swap: MainHostActivity re-collects the key and re-themes live, so no boot mirror and no
      * AppCompatDelegate recreate are needed.
      */
     fun setLiquidGlass(enabled: Boolean) {
@@ -1853,12 +1853,12 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Language switch — canonical DataStore write plus boot-mirror update so the
+     * Language switch - canonical DataStore write plus boot-mirror update so the
      * next cold start hands the right locale to ProtonCore login Activities.
      * Does NOT call `AppCompatDelegate.setApplicationLocales`: that triggers an
      * Activity recreate which loses navigation state, bounces the user back to
      * Gallery, and plays a reload animation. The in-app Compose tree re-resolves
-     * strings via `LocaleOverride` in `MainActivity` — DataStore change → flow
+     * strings via `LocaleOverride` in `MainHostActivity` - DataStore change → flow
      * re-emits → override key changes → recomposition picks up the new locale.
      */
     fun setLanguage(lang: String) {
@@ -2199,7 +2199,7 @@ class SettingsViewModel @Inject constructor(
 
 /**
  * Internal aggregate used inside [SettingsViewModel.observeBackedUpBytes] so the combine block
- * can return one strongly-typed value instead of a 4-element Tuple — keeps the upsert site
+ * can return one strongly-typed value instead of a 4-element Tuple - keeps the upsert site
  * readable when there are more than 3 derived counters.
  */
 private data class BackedUpSnapshot(
@@ -2210,7 +2210,7 @@ private data class BackedUpSnapshot(
 )
 
 /**
- * Off-thread measurement bundle for [SettingsViewModel.refreshLocalStorage] — folds the four
+ * Off-thread measurement bundle for [SettingsViewModel.refreshLocalStorage] - folds the four
  * storage figures into one strongly-typed value instead of a Tuple.
  */
 private data class LocalStorage(

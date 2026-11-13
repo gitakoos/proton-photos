@@ -2833,4 +2833,35 @@
     <string name="viewer_not_person_title">Není to %1$s?</string>
     <string name="viewer_not_person_body">Obličej přestane patřit osobě %1$s. Fotka zůstane a obličej může být navržen někomu jinému.</string>
     <string name="viewer_not_person_confirm">Není to %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">Ikona aplikace</string>
+    <string name="app_icon_section_preview">Náhled</string>
+    <string name="app_icon_section_disguise">Převlek</string>
+    <string name="app_icon_disguise_intro">Aplikace bude vypadat jako běžná. Změní se i název na domovské obrazovce.</string>
+    <string name="app_icon_cut_entries">Skrýt položky sdílení a výběru</string>
+    <string name="app_icon_cut_entries_desc">Zvolíte-li jednu ze tří ikon převleku, vypne se položka sdílení Zálohovat na Drive a položka externího výběru fotek. Při volbě jakékoli jiné ikony se znovu zapnou.</string>
+    <string name="app_icon_disguise_hint">Mění se jen ikona a název na domovské obrazovce. Oznámení, nastavení Androidu a nabídka Otevřít v aplikaci stále ukazují Photos for Proton a zámek aplikace se stále zeptá jako první.</string>
+    <string name="app_icon_variants_hint">Spouštěč může zobrazit novou ikonu až za několik sekund a možná ji bude třeba znovu přidat na domovskou obrazovku. U tematických ikon v Androidu 13 a novějším vypadají všechny barvy stejně.</string>
+    <string name="app_icon_default">Výchozí</string>
+    <string name="app_icon_black">Černá</string>
+    <string name="app_icon_white">Bílá</string>
+    <string name="app_icon_silver">Stříbrná</string>
+    <string name="app_icon_label_clock">Hodiny</string>
+    <string name="app_icon_label_calculator">Kalkulačka</string>
+    <string name="app_icon_label_notes">Poznámky</string>
+    <string name="app_icon_preview_default">Výchozí ikona</string>
+    <string name="app_icon_preview_disguise">Převlek: %1$s</string>
+    <string name="app_icon_preview_variant">Varianta: %1$s</string>
+    <string name="app_icon_confirm_title">Změnit ikonu aplikace: %1$s?</string>
+    <string name="app_icon_confirm_disguise">Ikona a název na domovské obrazovce se změní na: %1$s. Aplikace se dál otevře jako %2$s a zámek aplikace se dál zeptá jako první.</string>
+    <string name="app_icon_confirm_variant">Ikona na domovské obrazovce se změní na: %1$s. Název zůstane %2$s.</string>
+    <string name="app_icon_confirm_delay">Změna ikony může trvat několik sekund. Na některých telefonech se aplikace při změně ikony zavře; znovu ji otevřete novou ikonou.</string>
+    <string name="app_icon_readd_hint">Možná bude třeba ikonu znovu přidat na domovskou obrazovku.</string>
+    <string name="app_icon_confirm_still_visible">Oznámení, nastavení Androidu a nabídka Otevřít v aplikaci stále ukazují %1$s.</string>
+    <string name="app_icon_confirm_action">Změnit ikonu</string>
+    <string name="app_icon_changed">Ikona změněna. Spouštěč se může aktualizovat až za několik sekund.</string>
+    <string name="app_icon_failed">Ikonu se nepodařilo změnit.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, ikona převleku, vybráno</string>
+    <string name="app_icon_a11y_disguise">%1$s, ikona převleku</string>
+    <string name="app_icon_a11y_selected">%1$s, vybráno</string>
 </resources>

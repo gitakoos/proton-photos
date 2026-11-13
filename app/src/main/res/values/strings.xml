@@ -2733,4 +2733,35 @@
     <string name="viewer_not_person_title">This isn\'t %1$s?</string>
     <string name="viewer_not_person_body">The face leaves %1$s. The photo stays, and the face can be suggested for someone else.</string>
     <string name="viewer_not_person_confirm">Not %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">App icon</string>
+    <string name="app_icon_section_preview">Preview</string>
+    <string name="app_icon_section_disguise">Disguise</string>
+    <string name="app_icon_disguise_intro">Look like an everyday app. The name on the home screen changes too.</string>
+    <string name="app_icon_cut_entries">Hide share and picker entries</string>
+    <string name="app_icon_cut_entries_desc">Choosing one of the three disguise icons turns off the Back up to Drive share entry and the external photo picker entry. Choosing any other icon turns them back on.</string>
+    <string name="app_icon_disguise_hint">Only the icon and the name on your home screen change. Notifications, Android settings and the Open with menu still show Photos for Proton, and the app lock still asks first.</string>
+    <string name="app_icon_variants_hint">Your launcher may take a few seconds to show a new icon, and you may need to add it to the home screen again. With themed icons on Android 13 or newer, every colour looks the same.</string>
+    <string name="app_icon_default">Default</string>
+    <string name="app_icon_black">Black</string>
+    <string name="app_icon_white">White</string>
+    <string name="app_icon_silver">Silver</string>
+    <string name="app_icon_label_clock">Clock</string>
+    <string name="app_icon_label_calculator">Calculator</string>
+    <string name="app_icon_label_notes">Notes</string>
+    <string name="app_icon_preview_default">Default icon</string>
+    <string name="app_icon_preview_disguise">Disguise: %1$s</string>
+    <string name="app_icon_preview_variant">%1$s variant</string>
+    <string name="app_icon_confirm_title">Change app icon to %1$s?</string>
+    <string name="app_icon_confirm_disguise">The icon and the name on your home screen will change to %1$s. The app still opens %2$s, and the app lock still asks first.</string>
+    <string name="app_icon_confirm_variant">The icon on your home screen will change to %1$s. The name stays %2$s.</string>
+    <string name="app_icon_confirm_delay">The icon may take a few seconds to change. On some phones the app closes when the icon changes; open it again from the new icon.</string>
+    <string name="app_icon_readd_hint">You may need to add the icon to your home screen again.</string>
+    <string name="app_icon_confirm_still_visible">Notifications, Android settings and the Open with menu still show %1$s.</string>
+    <string name="app_icon_confirm_action">Change icon</string>
+    <string name="app_icon_changed">Icon changed. Your launcher may take a few seconds to update.</string>
+    <string name="app_icon_failed">The icon could not be changed.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, disguise icon, selected</string>
+    <string name="app_icon_a11y_disguise">%1$s, disguise icon</string>
+    <string name="app_icon_a11y_selected">%1$s, selected</string>
 </resources>

@@ -580,6 +580,12 @@ object SettingsKeys {
     val NOTIFY_ALBUM_DOWNLOAD = booleanPreferencesKey("notify_album_download")
     val NOTIFY_DELETE_REMINDER = booleanPreferencesKey("notify_delete_reminder")
 
+    /** The disguise icons turn off the share sheet entry and the external picker entry while they are
+     *  active. An opt-out: absent = on. DISGUISE_SAVED_PICKER holds the picker's own state from before
+     *  that, only while the entries are off, so leaving the disguise restores it. */
+    val DISGUISE_CUTS_ENTRIES = booleanPreferencesKey("disguise_cuts_entries")
+    val DISGUISE_SAVED_PICKER = booleanPreferencesKey("disguise_saved_picker")
+
     // Metadata stripping — which fields to strip when uploading photos
     val STRIP_GPS = booleanPreferencesKey("strip_gps")
     val STRIP_CAMERA_INFO = booleanPreferencesKey("strip_camera_info")

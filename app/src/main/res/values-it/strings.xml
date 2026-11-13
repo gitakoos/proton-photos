@@ -2735,4 +2735,35 @@
     <string name="viewer_not_person_title">Non è %1$s?</string>
     <string name="viewer_not_person_body">Il volto non appartiene più a %1$s. La foto resta, e il volto può essere suggerito a qualcun altro.</string>
     <string name="viewer_not_person_confirm">Non è %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">Icona dell\'app</string>
+    <string name="app_icon_section_preview">Anteprima</string>
+    <string name="app_icon_section_disguise">Camuffamento</string>
+    <string name="app_icon_disguise_intro">Sembra un\'app di uso comune. Cambia anche il nome nella schermata Home.</string>
+    <string name="app_icon_cut_entries">Nascondi le voci di condivisione e di selezione</string>
+    <string name="app_icon_cut_entries_desc">Scegliendo una delle tre icone di camuffamento si disattivano la voce di condivisione Salva su Drive e la voce del selettore foto esterno. Scegliendo qualsiasi altra icona si riattivano.</string>
+    <string name="app_icon_disguise_hint">Cambiano solo l\'icona e il nome nella schermata Home. Notifiche, impostazioni di Android e menu Apri con mostrano ancora Photos for Proton, e il blocco app chiede ancora per primo.</string>
+    <string name="app_icon_variants_hint">Il launcher può impiegare qualche secondo a mostrare una nuova icona e potresti doverla aggiungere di nuovo alla schermata Home. Con le icone a tema di Android 13 o successivo, tutti i colori appaiono uguali.</string>
+    <string name="app_icon_default">Predefinita</string>
+    <string name="app_icon_black">Nero</string>
+    <string name="app_icon_white">Bianco</string>
+    <string name="app_icon_silver">Argento</string>
+    <string name="app_icon_label_clock">Orologio</string>
+    <string name="app_icon_label_calculator">Calcolatrice</string>
+    <string name="app_icon_label_notes">Note</string>
+    <string name="app_icon_preview_default">Icona predefinita</string>
+    <string name="app_icon_preview_disguise">Camuffamento: %1$s</string>
+    <string name="app_icon_preview_variant">Variante: %1$s</string>
+    <string name="app_icon_confirm_title">Cambiare l\'icona dell\'app: %1$s?</string>
+    <string name="app_icon_confirm_disguise">L\'icona e il nome nella schermata Home diventeranno: %1$s. L\'app apre ancora %2$s e il blocco app chiede ancora per primo.</string>
+    <string name="app_icon_confirm_variant">L\'icona nella schermata Home diventerà: %1$s. Il nome resta %2$s.</string>
+    <string name="app_icon_confirm_delay">La modifica dell\'icona può richiedere qualche secondo. Su alcuni telefoni l\'app si chiude quando l\'icona cambia; riaprila dalla nuova icona.</string>
+    <string name="app_icon_readd_hint">Potrebbe essere necessario aggiungere di nuovo l\'icona alla schermata Home.</string>
+    <string name="app_icon_confirm_still_visible">Notifiche, impostazioni di Android e menu Apri con mostrano ancora %1$s.</string>
+    <string name="app_icon_confirm_action">Cambia icona</string>
+    <string name="app_icon_changed">Icona cambiata. Il launcher può impiegare qualche secondo ad aggiornarsi.</string>
+    <string name="app_icon_failed">Impossibile cambiare l\'icona.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, icona di camuffamento, selezionata</string>
+    <string name="app_icon_a11y_disguise">%1$s, icona di camuffamento</string>
+    <string name="app_icon_a11y_selected">%1$s, selezionata</string>
 </resources>

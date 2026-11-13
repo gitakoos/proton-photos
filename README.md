@@ -128,7 +128,7 @@ app/src/main/kotlin/eu/akoos/photos/
 ├── worker/           WorkManager workers
 ├── service/          Background-sync service + boot receiver + screenshot quick-action overlay
 ├── widget/           Home-screen widget (4 modes incl. Cloud Photos from encrypted cache)
-└── App.kt + MainActivity.kt
+└── App.kt + MainHostActivity.kt
 ```
 
 ## Tech stack

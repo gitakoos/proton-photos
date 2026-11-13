@@ -2695,4 +2695,35 @@
     <string name="viewer_not_person_title">Nem %1$s?</string>
     <string name="viewer_not_person_body">Az arc kikerül %1$s alól. A fotó megmarad, és az arcot más személynek is javasolhatja az app.</string>
     <string name="viewer_not_person_confirm">Nem %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">Alkalmazásikon</string>
+    <string name="app_icon_section_preview">Előnézet</string>
+    <string name="app_icon_section_disguise">Álcázás</string>
+    <string name="app_icon_disguise_intro">Hétköznapi appnak látszik. A kezdőképernyőn a név is megváltozik.</string>
+    <string name="app_icon_cut_entries">Megosztás és választó elrejtése</string>
+    <string name="app_icon_cut_entries_desc">Ha a három álcázó ikon valamelyikét választod, kikapcsol a Mentés a Drive-ra megosztási bejegyzés és a külső fotóválasztó bejegyzése. Bármelyik másik ikonnál újra bekapcsolnak.</string>
+    <string name="app_icon_disguise_hint">Csak az ikon és a név változik a kezdőképernyőn. Az értesítések, az Android beállításai és a Megnyitás ezzel menü továbbra is a Photos for Proton nevet mutatják, az alkalmazászár pedig továbbra is előbb kérdez.</string>
+    <string name="app_icon_variants_hint">Az indítónak eltelhet néhány másodperc, mire az új ikont mutatja, és lehet, hogy újra fel kell tenned a kezdőképernyőre. Az Android 13-as vagy újabb témázott ikonjainál minden szín egyformán néz ki.</string>
+    <string name="app_icon_default">Eredeti</string>
+    <string name="app_icon_black">Fekete</string>
+    <string name="app_icon_white">Fehér</string>
+    <string name="app_icon_silver">Ezüst</string>
+    <string name="app_icon_label_clock">Óra</string>
+    <string name="app_icon_label_calculator">Számológép</string>
+    <string name="app_icon_label_notes">Jegyzetek</string>
+    <string name="app_icon_preview_default">Alapértelmezett ikon</string>
+    <string name="app_icon_preview_disguise">Álcázás: %1$s</string>
+    <string name="app_icon_preview_variant">Változat: %1$s</string>
+    <string name="app_icon_confirm_title">Alkalmazásikon módosítása: %1$s?</string>
+    <string name="app_icon_confirm_disguise">A kezdőképernyő ikonja és neve erre változik: %1$s. Az app továbbra is a %2$s appot nyitja meg, az alkalmazászár pedig továbbra is előbb kérdez.</string>
+    <string name="app_icon_confirm_variant">A kezdőképernyő ikonja erre változik: %1$s. A név marad: %2$s.</string>
+    <string name="app_icon_confirm_delay">Az ikon megváltozása eltarthat néhány másodpercig. Egyes telefonokon az app ilyenkor bezárul, ekkor nyisd meg újra az új ikonról.</string>
+    <string name="app_icon_readd_hint">Lehet, hogy az ikont újra fel kell tenned a kezdőképernyőre.</string>
+    <string name="app_icon_confirm_still_visible">Az értesítések, az Android beállításai és a Megnyitás ezzel menü továbbra is a %1$s nevet mutatják.</string>
+    <string name="app_icon_confirm_action">Módosítás</string>
+    <string name="app_icon_changed">Az ikon megváltozott. Az indítónak eltarthat néhány másodpercig a frissítés.</string>
+    <string name="app_icon_failed">Az ikont nem sikerült módosítani.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, álcázó ikon, kiválasztva</string>
+    <string name="app_icon_a11y_disguise">%1$s, álcázó ikon</string>
+    <string name="app_icon_a11y_selected">%1$s, kiválasztva</string>
 </resources>

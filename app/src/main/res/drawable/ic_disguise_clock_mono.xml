@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Photos for Proton
+  ~ Copyright (C) 2026 Akoos <https://akoos.eu>
+  ~
+  ~ Source:  https://github.com/gitakoos/proton-photos
+  ~ Website: https://www.photosforproton.eu
+  ~
+  ~ This file is part of Photos for Proton.
+  ~
+  ~ Photos for Proton is free software: you can redistribute it and/or modify
+  ~ it under the terms of the GNU General Public License version 3 as
+  ~ published by the Free Software Foundation.
+  ~
+  ~ This program is distributed in the hope that it will be useful,
+  ~ but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  ~ GNU General Public License for more details.
+  ~
+  ~ You should have received a copy of the GNU General Public License
+  ~ along with this program. If not, see <https://www.gnu.org/licenses/>.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+    <path
+        android:pathData="M51.5,96 a44.5,44.5 0 1,0 89,0 a44.5,44.5 0 1,0 -89,0 z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M96,62 L96,56"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M130,96 L136,96"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M96,130 L96,136"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M62,96 L56,96"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.2"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M96,96 L77.98,83.38"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M96,96 L123.71,80"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"/>
+    <path
+        android:pathData="M91,96 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 z"
+        android:fillColor="#FFFFFF"/>
+</vector>

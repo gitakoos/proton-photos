@@ -678,7 +678,7 @@ class UploadPendingUseCase @Inject constructor(
             savedBytes = savedBytes.get(),
         )
         // Refresh the consent notification with the latest pending queue. Same
-        // call MainActivity.onResume fires so an externally deleted file (file
+        // call MainHostActivity.onResume fires so an externally deleted file (file
         // manager, OS trash flush) gets reconciled the moment the user opens the
         // app even without a worker run. Guarded like the other two call sites: its
         // DataStore read and write can throw, and a throw here reaches SyncWorker as

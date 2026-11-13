@@ -235,6 +235,7 @@ sealed class Screen(val route: String) {
     data object AppearanceSettings : Screen("appearance_settings")
     data object LandingTab : Screen("landing_tab")
     data object ThemeSettings : Screen("theme_settings")
+    data object AppIcon : Screen("app_icon_settings")
     data object LanguageSettings : Screen("language_settings")
     data object ViewerSettings : Screen("viewer_settings")
     data object ClockFormatSettings : Screen("clock_format_settings")
@@ -393,22 +394,22 @@ private sealed interface GifMakerSource {
 @Composable
 fun NavGraph(
     onStartLogin: () -> Unit = {},
-    /** Set by MainActivity when the user taps the home-screen photo widget. The Gallery
+    /** Set by MainHostActivity when the user taps the home-screen photo widget. The Gallery
      *  composable receives this and (once the items flow has populated) navigates straight
      *  to the viewer for the matching photo. Null on regular cold starts. */
     widgetPhotoUri: String? = null,
     onWidgetPhotoConsumed: () -> Unit = {},
-    /** Forwarded to [SettingsScreen]'s "Check for updates" row. MainActivity owns the
+    /** Forwarded to [SettingsScreen]'s "Check for updates" row. MainHostActivity owns the
      *  call into the singleton UpdateOrchestrator + the Toast feedback so the UI layer
      *  doesn't need to hold an Activity reference. */
     onCheckForUpdates: () -> Unit = {},
-    /** Set by MainActivity when the user opens an external image/video via the system
+    /** Set by MainHostActivity when the user opens an external image/video via the system
      *  "Open with" / "Edit with" chooser. After we reach the Ready startup state, the
      *  request is captured into Nav-scope state and the editor route is pushed on top
      *  of Gallery so the back press lands the user on their gallery. */
     externalEditRequest: ExternalEditRequest? = null,
     onExternalEditConsumed: () -> Unit = {},
-    /** Set by MainActivity when another app asks for a photo (GET_CONTENT / PICK). The album picker
+    /** Set by MainHostActivity when another app asks for a photo (GET_CONTENT / PICK). The album picker
      *  opens as the only screen, and [onExternalPickDone] hands its photos back. */
     externalPickRequest: eu.akoos.photos.presentation.picker.PickRequest? = null,
     externalPickWorking: Boolean = false,
@@ -538,7 +539,7 @@ fun NavGraph(
     var pendingLocalFolderName by remember { mutableStateOf<String?>(null) }
     var localFolderPicked by remember { mutableStateOf<List<GalleryItem>?>(null) }
 
-    // Captured from the MainActivity-owned request once we reach the Ready startup state.
+    // Captured from the MainHostActivity-owned request once we reach the Ready startup state.
     // Held in Nav scope so the PhotoEditor composable can read it without piping the value
     // through every screen on the back stack.
     var pendingExternalEdit by remember { mutableStateOf<ExternalEditRequest?>(null) }
@@ -628,7 +629,7 @@ fun NavGraph(
         }
     }
 
-    // Mirror the MainActivity-held request into Nav scope, then clear the Activity-side
+    // Mirror the MainHostActivity-held request into Nav scope, then clear the Activity-side
     // reference so a re-creation (config change) doesn't replay it.
     LaunchedEffect(externalEditRequest) {
         val req = externalEditRequest ?: return@LaunchedEffect
@@ -1704,6 +1705,7 @@ fun NavGraph(
             AppearanceSettingsScreen(
                 onBack = { navController.popBackStack() },
                 onThemeClick = { navController.navigate(Screen.ThemeSettings.route) },
+                onAppIconClick = { navController.navigate(Screen.AppIcon.route) },
                 onLanguageClick = { navController.navigate(Screen.LanguageSettings.route) },
                 onTimeFormatClick = { navController.navigate(Screen.ClockFormatSettings.route) },
                 onTimelineFilterClick = { navController.navigate(Screen.TimelineFilter.route) },
@@ -1774,6 +1776,12 @@ fun NavGraph(
 
         composable(Screen.ThemeSettings.route) {
             eu.akoos.photos.presentation.settings.ThemeSettingsScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+
+        composable(Screen.AppIcon.route) {
+            eu.akoos.photos.presentation.settings.appicon.AppIconSettingsScreen(
                 onBack = { navController.popBackStack() },
             )
         }

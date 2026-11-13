@@ -500,7 +500,7 @@ class PhotoStreamService @Inject constructor(
      * Single-flight guard AND owner of the walk's lifetime.
      *
      * Single-flight, because cold-start fires up to three concurrent refreshes (SyncWorker
-     * boot kick, MainActivity.onResume silent refresh, GalleryViewModel.doSync) and each
+     * boot kick, MainHostActivity.onResume silent refresh, GalleryViewModel.doSync) and each
      * one previously ran the full crypto loop in parallel. With 315 photos × 3 callers ×
      * sequential per-photo decrypt, the system would queue ~945 Go OpenPGP calls within a
      * couple of seconds on Android 16 beta firmware, and the runtime would eventually trip the

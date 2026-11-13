@@ -85,7 +85,7 @@ fun Context.findFragmentActivity(): FragmentActivity? = findActivity() as? Fragm
  *     override — any `applicationContext.getString(R.string.X)` callers (e.g.
  *     `friendlyNetworkError` paths in view-models) pick up the right strings.
  *     Activity recreation on that call is suppressed by the manifest's
- *     `android:configChanges="locale|layoutDirection|..."` on MainActivity,
+ *     `android:configChanges="locale|layoutDirection|..."` on MainHostActivity,
  *     so the in-memory navigation state and the LocaleOverride wrapper above
  *     survive the locale flip and just recompose with the new strings.
  *

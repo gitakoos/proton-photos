@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ~ Photos for Proton
+  ~ Copyright (C) 2026 Akoos <https://akoos.eu>
+  ~
+  ~ Source:  https://github.com/gitakoos/proton-photos
+  ~ Website: https://www.photosforproton.eu
+  ~
+  ~ This file is part of Photos for Proton.
+  ~
+  ~ Photos for Proton is free software: you can redistribute it and/or modify
+  ~ it under the terms of the GNU General Public License version 3 as
+  ~ published by the Free Software Foundation.
+  ~
+  ~ This program is distributed in the hope that it will be useful,
+  ~ but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  ~ GNU General Public License for more details.
+  ~
+  ~ You should have received a copy of the GNU General Public License
+  ~ along with this program. If not, see <https://www.gnu.org/licenses/>.
+  -->
+<resources>
+    <!-- Plate colours of the launcher icon variants. The mark's own colour is ic_mark_<key>. Black keeps the Default mark. -->
+    <color name="ic_plate_black">#0D0D0F</color>
+    <color name="ic_plate_white">#F5F5F7</color>
+    <color name="ic_plate_forest">#3F8C44</color>
+    <color name="ic_plate_sunset">#E64A19</color>
+    <color name="ic_plate_sea">#0288D1</color>
+    <color name="ic_plate_sepia">#8B6F47</color>
+    <color name="ic_plate_lavender">#9B7FD4</color>
+    <color name="ic_plate_rose">#E06699</color>
+    <color name="ic_plate_mint">#2FB89C</color>
+    <color name="ic_plate_gold">#E9AE3C</color>
+    <color name="ic_plate_ruby">#E84C5E</color>
+    <color name="ic_mark_white">#974CEE</color>
+    <color name="ic_mark_silver">#3F414C</color>
+    <color name="ic_mark_forest">#7BC47F</color>
+    <color name="ic_mark_sunset">#FF8A65</color>
+    <color name="ic_mark_sea">#4FC3F7</color>
+    <color name="ic_mark_sepia">#D4A574</color>
+    <color name="ic_mark_lavender">#C9A7EB</color>
+    <color name="ic_mark_rose">#F48FB1</color>
+    <color name="ic_mark_mint">#6FE0C4</color>
+    <color name="ic_mark_gold">#FFD166</color>
+    <color name="ic_mark_ruby">#FF7A88</color>
+</resources>

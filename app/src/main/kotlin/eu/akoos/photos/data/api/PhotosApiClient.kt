@@ -62,7 +62,7 @@ class PhotosApiClient @Inject constructor(
     override suspend fun shouldUseDoh(): Boolean = true
 
     override fun forceUpdate(errorMessage: String) {
-        // Persist the flag so MainActivity can show a non-dismissible "please update" dialog.
+        // Persist the flag so MainHostActivity can show a non-dismissible "please update" dialog.
         scope.launch {
             context.settingsDataStore.edit { it[FORCE_UPDATE_REQUIRED] = true }
         }

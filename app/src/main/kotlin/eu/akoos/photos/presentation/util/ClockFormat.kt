@@ -57,7 +57,7 @@ enum class ClockFormat(val key: String) {
 
 /**
  * The clock the screens are showing right now, kept for the formatters that have no composition to read it
- * from. [MainActivity][eu.akoos.photos.MainActivity] refreshes it whenever the choice or the phone's setting
+ * from. [MainHostActivity][eu.akoos.photos.MainHostActivity] refreshes it whenever the choice or the phone's setting
  * changes.
  */
 object ClockFormatState {

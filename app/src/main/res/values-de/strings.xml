@@ -2696,4 +2696,35 @@
     <string name="viewer_not_person_title">Das ist nicht %1$s?</string>
     <string name="viewer_not_person_body">Das Gesicht wird von %1$s entfernt. Das Foto bleibt erhalten, und das Gesicht kann jemand anderem vorgeschlagen werden.</string>
     <string name="viewer_not_person_confirm">Nicht %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">App-Symbol</string>
+    <string name="app_icon_section_preview">Vorschau</string>
+    <string name="app_icon_section_disguise">Tarnung</string>
+    <string name="app_icon_disguise_intro">Sieht aus wie eine alltägliche App. Auch der Name auf dem Startbildschirm ändert sich.</string>
+    <string name="app_icon_cut_entries">Teilen- und Auswahl-Einträge ausblenden</string>
+    <string name="app_icon_cut_entries_desc">Wählst du eines der drei Tarnsymbole, werden der Teilen-Eintrag Auf Drive sichern und der Eintrag der externen Fotoauswahl ausgeschaltet. Bei jedem anderen Symbol sind sie wieder an.</string>
+    <string name="app_icon_disguise_hint">Nur Symbol und Name auf dem Startbildschirm ändern sich. Benachrichtigungen, die Android-Einstellungen und das Menü Öffnen mit zeigen weiterhin Photos for Proton, und die App-Sperre fragt weiterhin zuerst.</string>
+    <string name="app_icon_variants_hint">Der Launcher braucht eventuell einige Sekunden, um ein neues Symbol anzuzeigen, und du musst es eventuell erneut zum Startbildschirm hinzufügen. Bei Themensymbolen ab Android 13 sehen alle Farben gleich aus.</string>
+    <string name="app_icon_default">Standard</string>
+    <string name="app_icon_black">Schwarz</string>
+    <string name="app_icon_white">Weiß</string>
+    <string name="app_icon_silver">Silber</string>
+    <string name="app_icon_label_clock">Uhr</string>
+    <string name="app_icon_label_calculator">Rechner</string>
+    <string name="app_icon_label_notes">Notizen</string>
+    <string name="app_icon_preview_default">Standardsymbol</string>
+    <string name="app_icon_preview_disguise">Tarnung: %1$s</string>
+    <string name="app_icon_preview_variant">Variante: %1$s</string>
+    <string name="app_icon_confirm_title">App-Symbol ändern: %1$s?</string>
+    <string name="app_icon_confirm_disguise">Symbol und Name auf dem Startbildschirm ändern sich zu: %1$s. Die App öffnet weiterhin %2$s, und die App-Sperre fragt weiterhin zuerst.</string>
+    <string name="app_icon_confirm_variant">Das Symbol auf dem Startbildschirm ändert sich zu: %1$s. Der Name bleibt %2$s.</string>
+    <string name="app_icon_confirm_delay">Das Ändern des Symbols kann einige Sekunden dauern. Auf manchen Telefonen schließt sich die App beim Wechsel; öffne sie dann über das neue Symbol.</string>
+    <string name="app_icon_readd_hint">Eventuell musst du das Symbol erneut zum Startbildschirm hinzufügen.</string>
+    <string name="app_icon_confirm_still_visible">Benachrichtigungen, die Android-Einstellungen und das Menü Öffnen mit zeigen weiterhin %1$s.</string>
+    <string name="app_icon_confirm_action">Symbol ändern</string>
+    <string name="app_icon_changed">Symbol geändert. Der Launcher braucht eventuell einige Sekunden zum Aktualisieren.</string>
+    <string name="app_icon_failed">Das Symbol konnte nicht geändert werden.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, Tarnsymbol, ausgewählt</string>
+    <string name="app_icon_a11y_disguise">%1$s, Tarnsymbol</string>
+    <string name="app_icon_a11y_selected">%1$s, ausgewählt</string>
 </resources>

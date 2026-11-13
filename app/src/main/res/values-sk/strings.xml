@@ -2834,4 +2834,35 @@
     <string name="viewer_not_person_title">Nie je to %1$s?</string>
     <string name="viewer_not_person_body">Tvár prestane patriť osobe %1$s. Fotka zostane a tvár môže byť navrhnutá niekomu inému.</string>
     <string name="viewer_not_person_confirm">Nie je to %1$s</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">Ikona aplikácie</string>
+    <string name="app_icon_section_preview">Náhľad</string>
+    <string name="app_icon_section_disguise">Prestrojenie</string>
+    <string name="app_icon_disguise_intro">Aplikácia bude vyzerať ako bežná. Zmení sa aj názov na domovskej obrazovke.</string>
+    <string name="app_icon_cut_entries">Skryť položky zdieľania a výberu</string>
+    <string name="app_icon_cut_entries_desc">Ak zvolíte jednu z troch ikon prestrojenia, vypne sa položka zdieľania Zálohovať na Drive a položka externého výberu fotiek. Pri voľbe akejkoľvek inej ikony sa znova zapnú.</string>
+    <string name="app_icon_disguise_hint">Mení sa len ikona a názov na domovskej obrazovke. Oznámenia, nastavenia Androidu a ponuka Otvoriť v aplikácii stále ukazujú Photos for Proton a zámok aplikácie sa stále opýta ako prvý.</string>
+    <string name="app_icon_variants_hint">Spúšťač môže zobraziť novú ikonu až o niekoľko sekúnd a možno ju bude treba znova pridať na domovskú obrazovku. Pri tematických ikonách v Androide 13 a novšom vyzerajú všetky farby rovnako.</string>
+    <string name="app_icon_default">Predvolená</string>
+    <string name="app_icon_black">Čierna</string>
+    <string name="app_icon_white">Biela</string>
+    <string name="app_icon_silver">Strieborná</string>
+    <string name="app_icon_label_clock">Hodiny</string>
+    <string name="app_icon_label_calculator">Kalkulačka</string>
+    <string name="app_icon_label_notes">Poznámky</string>
+    <string name="app_icon_preview_default">Predvolená ikona</string>
+    <string name="app_icon_preview_disguise">Prestrojenie: %1$s</string>
+    <string name="app_icon_preview_variant">Variant: %1$s</string>
+    <string name="app_icon_confirm_title">Zmeniť ikonu aplikácie: %1$s?</string>
+    <string name="app_icon_confirm_disguise">Ikona a názov na domovskej obrazovke sa zmenia na: %1$s. Aplikácia sa stále otvorí ako %2$s a zámok aplikácie sa stále opýta ako prvý.</string>
+    <string name="app_icon_confirm_variant">Ikona na domovskej obrazovke sa zmení na: %1$s. Názov zostane %2$s.</string>
+    <string name="app_icon_confirm_delay">Zmena ikony môže trvať niekoľko sekúnd. Na niektorých telefónoch sa aplikácia pri zmene ikony zavrie; znova ju otvorte novou ikonou.</string>
+    <string name="app_icon_readd_hint">Možno bude treba ikonu znova pridať na domovskú obrazovku.</string>
+    <string name="app_icon_confirm_still_visible">Oznámenia, nastavenia Androidu a ponuka Otvoriť v aplikácii stále ukazujú %1$s.</string>
+    <string name="app_icon_confirm_action">Zmeniť ikonu</string>
+    <string name="app_icon_changed">Ikona zmenená. Spúšťač sa môže aktualizovať až o niekoľko sekúnd.</string>
+    <string name="app_icon_failed">Ikonu sa nepodarilo zmeniť.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, ikona prestrojenia, vybraté</string>
+    <string name="app_icon_a11y_disguise">%1$s, ikona prestrojenia</string>
+    <string name="app_icon_a11y_selected">%1$s, vybraté</string>
 </resources>

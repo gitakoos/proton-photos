@@ -89,6 +89,7 @@ import kotlinx.coroutines.launch
 fun AppearanceSettingsScreen(
     onBack: () -> Unit,
     onThemeClick: () -> Unit = {},
+    onAppIconClick: () -> Unit = {},
     onLanguageClick: () -> Unit = {},
     onTimeFormatClick: () -> Unit = {},
     onTimelineFilterClick: () -> Unit = {},
@@ -104,6 +105,11 @@ fun AppearanceSettingsScreen(
             NavRow(
                 label = stringResource(R.string.settings_theme_palette),
                 onClick = onThemeClick,
+            )
+            RowDivider()
+            NavRow(
+                label = stringResource(R.string.settings_app_icon),
+                onClick = onAppIconClick,
             )
             RowDivider()
             NavRow(

@@ -2613,4 +2613,35 @@
     <string name="viewer_not_person_title">Bu %1$s değil mi?</string>
     <string name="viewer_not_person_body">Yüz, %1$s kişisinden çıkarılır. Fotoğraf kalır ve yüz başka birine önerilebilir.</string>
     <string name="viewer_not_person_confirm">%1$s değil</string>
+    <!-- App icon page: launcher icon choice, disguises, confirmation -->
+    <string name="settings_app_icon">Uygulama simgesi</string>
+    <string name="app_icon_section_preview">Önizleme</string>
+    <string name="app_icon_section_disguise">Kılık değiştirme</string>
+    <string name="app_icon_disguise_intro">Sıradan bir uygulama gibi görünür. Ana ekrandaki ad da değişir.</string>
+    <string name="app_icon_cut_entries">Paylaşım ve seçici girişlerini gizle</string>
+    <string name="app_icon_cut_entries_desc">Üç kılık değiştirme simgesinden birini seçmek, Drive\'a yedekle paylaşım girişini ve harici fotoğraf seçici girişini kapatır. Başka herhangi bir simge seçmek bunları yeniden açar.</string>
+    <string name="app_icon_disguise_hint">Yalnızca ana ekrandaki simge ve ad değişir. Bildirimler, Android ayarları ve Birlikte aç menüsü hâlâ Photos for Proton adını gösterir, uygulama kilidi de hâlâ önce sorar.</string>
+    <string name="app_icon_variants_hint">Başlatıcının yeni simgeyi göstermesi birkaç saniye sürebilir ve simgeyi ana ekrana yeniden eklemeniz gerekebilir. Android 13 ve üstünde temalı simgelerde tüm renkler aynı görünür.</string>
+    <string name="app_icon_default">Varsayılan</string>
+    <string name="app_icon_black">Siyah</string>
+    <string name="app_icon_white">Beyaz</string>
+    <string name="app_icon_silver">Gümüş</string>
+    <string name="app_icon_label_clock">Saat</string>
+    <string name="app_icon_label_calculator">Hesap Makinesi</string>
+    <string name="app_icon_label_notes">Notlar</string>
+    <string name="app_icon_preview_default">Varsayılan simge</string>
+    <string name="app_icon_preview_disguise">Kılık değiştirme: %1$s</string>
+    <string name="app_icon_preview_variant">Varyant: %1$s</string>
+    <string name="app_icon_confirm_title">Uygulama simgesi değiştirilsin mi: %1$s?</string>
+    <string name="app_icon_confirm_disguise">Ana ekrandaki simge ve ad şuna dönüşecek: %1$s. Uygulama yine %2$s uygulamasını açar ve uygulama kilidi yine önce sorar.</string>
+    <string name="app_icon_confirm_variant">Ana ekrandaki simge şuna dönüşecek: %1$s. Ad %2$s olarak kalır.</string>
+    <string name="app_icon_confirm_delay">Simgenin değişmesi birkaç saniye sürebilir. Bazı telefonlarda simge değişince uygulama kapanır; yeni simgeden yeniden açın.</string>
+    <string name="app_icon_readd_hint">Simgeyi ana ekrana yeniden eklemeniz gerekebilir.</string>
+    <string name="app_icon_confirm_still_visible">Bildirimler, Android ayarları ve Birlikte aç menüsü hâlâ %1$s adını gösterir.</string>
+    <string name="app_icon_confirm_action">Simgeyi değiştir</string>
+    <string name="app_icon_changed">Simge değiştirildi. Başlatıcının güncellenmesi birkaç saniye sürebilir.</string>
+    <string name="app_icon_failed">Simge değiştirilemedi.</string>
+    <string name="app_icon_a11y_disguise_selected">%1$s, kılık değiştirme simgesi, seçili</string>
+    <string name="app_icon_a11y_disguise">%1$s, kılık değiştirme simgesi</string>
+    <string name="app_icon_a11y_selected">%1$s, seçili</string>
 </resources>

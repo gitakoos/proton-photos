@@ -158,7 +158,7 @@ internal fun isAcceptableExternalEditUri(scheme: String?, authority: String?, ow
         !isOwnProviderAuthority(authority, ownPackage)
 
 @AndroidEntryPoint
-class MainActivity : AppCompatActivity() {
+class MainHostActivity : AppCompatActivity() {
 
     @Inject lateinit var authOrchestrator: AuthOrchestrator
     @Inject lateinit var workManager: WorkManager
@@ -237,7 +237,7 @@ class MainActivity : AppCompatActivity() {
             block()
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            android.util.Log.w("MainActivity", "sign-out cleanup step failed: ${e.javaClass.simpleName}")
+            android.util.Log.w("MainHostActivity", "sign-out cleanup step failed: ${e.javaClass.simpleName}")
         }
     }
 
@@ -285,7 +285,7 @@ class MainActivity : AppCompatActivity() {
         // Follow the real OS light/dark setting for THIS activity, so Compose's isSystemInDarkTheme()
         // reports it truthfully under the "System" theme. The app-wide default stays NIGHT_YES
         // (App.applyStoredThemeMode) to keep the XML ProtonCore login screens dark; this local
-        // override only affects MainActivity, whose every surface is themed by Compose.
+        // override only affects MainHostActivity, whose every surface is themed by Compose.
         delegate.setLocalNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         super.onCreate(savedInstanceState)
         authOrchestrator.register(this)
@@ -335,7 +335,7 @@ class MainActivity : AppCompatActivity() {
                 val persist = !eu.akoos.photos.util.SignOutCleanup.consumeUnfinishedSignIn(it.userId.id)
                 appScope.launch { cleanUpAfterSignOut(app, policy, it.userId, persist) }
             }
-            .onUserKeyCheckFailed { /* corrupt user key — best to just disable and re-login */ }
+            .onUserKeyCheckFailed { /* corrupt user key - best to just disable and re-login */ }
             .onUserAddressKeyCheckFailed { /* same */ }
 
         appScope.launch { replayUnfinishedSignOutCleanups(app, policy) }
@@ -352,25 +352,25 @@ class MainActivity : AppCompatActivity() {
             // content-URI (sub-second on stock Android), periodic 15-min (OEM-throttle safety net),
             // and the opt-in BG service (keeps the observer alive on Samsung One UI). Gated so
             // auto-sync ON with no folder selected arms nothing.
-            SyncWorker.reconcileBackgroundWork(this@MainActivity)
+            SyncWorker.reconcileBackgroundWork(this@MainHostActivity)
             // Opt-in screenshot quick-action overlay: a specialUse foreground service cannot be
             // launched from boot on Android 14+, so re-arm it here on launch when it is enabled and
             // the draw-over-other-apps grant is still in place. start() also self-guards the grant.
             if (prefs[SettingsKeys.SCREENSHOT_OVERLAY_ENABLED] == true &&
-                android.provider.Settings.canDrawOverlays(this@MainActivity)
+                android.provider.Settings.canDrawOverlays(this@MainHostActivity)
             ) {
-                eu.akoos.photos.service.ScreenshotOverlayService.start(this@MainActivity)
+                eu.akoos.photos.service.ScreenshotOverlayService.start(this@MainHostActivity)
             }
             // Kick a OneTime run now so pending uploads start at launch; APPEND_OR_REPLACE coalesces
             // with the periodic run. Only when backup will actually upload.
-            if (syncEffectivelyEnabled(this@MainActivity)) {
-                SyncWorker.runNow(this@MainActivity, wifiOnly)
+            if (syncEffectivelyEnabled(this@MainHostActivity)) {
+                SyncWorker.runNow(this@MainHostActivity, wifiOnly)
             }
             // Reclaim eligible device copies on launch too, not just on the hourly worker an OEM
             // doze can delay for hours. Same age gate; a sweep with no eligible photo is cheap.
             if (prefs[SettingsKeys.AUTO_FREE_UP] == true) {
                 val freeUpInterval = FreeUpInterval.fromKey(prefs[SettingsKeys.FREE_UP_INTERVAL])
-                FreeUpSpaceWorker.runNow(WorkManager.getInstance(this@MainActivity), freeUpInterval.ms)
+                FreeUpSpaceWorker.runNow(WorkManager.getInstance(this@MainHostActivity), freeUpInterval.ms)
             }
         }
 
@@ -397,18 +397,18 @@ class MainActivity : AppCompatActivity() {
         lockGate.followSettings(this)
 
         setContent {
-            // Theme mode lives in DataStore — re-collect so a change re-themes without a restart.
+            // Theme mode lives in DataStore - re-collect so a change re-themes without a restart.
             val themeKeyFlow = remember {
                 settingsDataStore.data.map { prefs ->
                     prefs[SettingsKeys.THEME_MODE]
                         ?: when (prefs[SettingsKeys.DARK_MODE]) {
                             true  -> "dark"
                             false -> "light"
-                            null  -> "dark"  // first-launch default — matches ThemePrefsBoot
+                            null  -> "dark"  // first-launch default - matches ThemePrefsBoot
                         }
                 }
             }
-            val themeKey by themeKeyFlow.collectAsState(initial = ThemePrefsBoot.read(this@MainActivity))
+            val themeKey by themeKeyFlow.collectAsState(initial = ThemePrefsBoot.read(this@MainHostActivity))
             val themeMode = ThemeMode.fromKey(themeKey)
             val systemDark = isSystemInDarkTheme()
             val useDark = when (themeMode) {
@@ -417,14 +417,14 @@ class MainActivity : AppCompatActivity() {
                 ThemeMode.Dark   -> true
             }
 
-            // Accent-color palette — DataStore-backed, re-collected so changes apply live.
+            // Accent-color palette - DataStore-backed, re-collected so changes apply live.
             val paletteFlow = remember {
                 settingsDataStore.data.map { it[SettingsKeys.THEME_PALETTE] }
             }
             val paletteKey by paletteFlow.collectAsState(initial = null)
             val palette = ThemePalette.fromKey(paletteKey)
 
-            // AMOLED pure-black switch — DataStore-backed, re-collected so it applies live.
+            // AMOLED pure-black switch - DataStore-backed, re-collected so it applies live.
             val amoledFlow = remember {
                 settingsDataStore.data.map { it[SettingsKeys.AMOLED_BLACK] == true }
             }
@@ -435,7 +435,7 @@ class MainActivity : AppCompatActivity() {
             }
             val liquidGlass by liquidGlassFlow.collectAsState(initial = false)
 
-            // Tint the green "backed up" cloud badges with the palette accent — DataStore-backed, live.
+            // Tint the green "backed up" cloud badges with the palette accent - DataStore-backed, live.
             val tintCloudFlow = remember {
                 settingsDataStore.data.map { it[SettingsKeys.TINT_CLOUD_WITH_ACCENT] == true }
             }
@@ -454,7 +454,7 @@ class MainActivity : AppCompatActivity() {
             // The animated-decoder-free Coil loader, exposed to grids/covers that render a GIF as a still.
             val staticImageLoader = remember { (application as App).staticImageLoader }
 
-            // Active locale — DataStore-driven so a change reflows string resolution without an
+            // Active locale - DataStore-driven so a change reflows string resolution without an
             // Activity recreate. Initial value from the boot-mirror to avoid a first-composition flash.
             val languageFlow = remember {
                 settingsDataStore.data.map { prefs ->
@@ -462,7 +462,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             val language by languageFlow.collectAsState(
-                initial = LanguagePrefsBoot.read(this@MainActivity),
+                initial = LanguagePrefsBoot.read(this@MainHostActivity),
             )
 
             // The clock choice is independent of the language; the formatters outside a composition read it
@@ -471,7 +471,7 @@ class MainActivity : AppCompatActivity() {
                 settingsDataStore.data.map { prefs -> ClockFormat.fromKey(prefs[SettingsKeys.CLOCK_FORMAT]) }
             }
             val clockFormat by clockFlow.collectAsState(initial = ClockFormat.AUTO)
-            val phoneIs24Hour = phoneUses24Hour(this@MainActivity)
+            val phoneIs24Hour = phoneUses24Hour(this@MainHostActivity)
             val is24Hour = clockFormat.is24Hour(phoneIs24Hour)
             ClockFormatState.update(clockFormat, phoneIs24Hour)
 
@@ -479,7 +479,7 @@ class MainActivity : AppCompatActivity() {
             val view = LocalView.current
             if (!view.isInEditMode) {
                 SideEffect {
-                    val window = this@MainActivity.window
+                    val window = this@MainHostActivity.window
                     val insets = WindowCompat.getInsetsController(window, view)
                     insets.isAppearanceLightStatusBars     = !useDark
                     insets.isAppearanceLightNavigationBars = !useDark
@@ -556,7 +556,7 @@ class MainActivity : AppCompatActivity() {
     private fun UpdaterHost(promptAllowed: Boolean) {
         val current by updateOrchestrator.state.collectAsStateWithLifecycle()
         val scope = rememberCoroutineScope()
-        // Back from the "Install unknown apps" permission screen — fire the install immediately if
+        // Back from the "Install unknown apps" permission screen - fire the install immediately if
         // the OS now allows it, so the user needn't tap Update again.
         val installLauncher = rememberLauncherForActivityResult(
             ActivityResultContracts.StartActivityForResult()
@@ -651,7 +651,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Settings "Check for updates" — runs a forced check; up-to-date and network-flake each show a
+     * Settings "Check for updates" - runs a forced check; up-to-date and network-flake each show a
      * Toast. A new version surfaces via [UpdatePromptDialog] through the orchestrator's state flow.
      */
     private fun runManualUpdateCheck() {
@@ -659,14 +659,14 @@ class MainActivity : AppCompatActivity() {
             when (updateOrchestrator.runManualCheck()) {
                 UpdateOrchestrator.ManualCheckOutcome.UpToDate -> {
                     Toast.makeText(
-                        this@MainActivity,
+                        this@MainHostActivity,
                         getString(R.string.update_no_update),
                         Toast.LENGTH_SHORT,
                     ).show()
                 }
                 is UpdateOrchestrator.ManualCheckOutcome.Failed -> {
                     Toast.makeText(
-                        this@MainActivity,
+                        this@MainHostActivity,
                         getString(R.string.update_check_failed),
                         Toast.LENGTH_SHORT,
                     ).show()
@@ -736,7 +736,7 @@ class MainActivity : AppCompatActivity() {
                 eu.akoos.photos.presentation.picker.PickAnswer.OnlyHidden -> R.string.picker_hidden_not_handed
                 eu.akoos.photos.presentation.picker.PickAnswer.Failed -> R.string.picker_prepare_failed
             }
-            Toast.makeText(this@MainActivity, getString(why), Toast.LENGTH_SHORT).show()
+            Toast.makeText(this@MainHostActivity, getString(why), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -834,11 +834,11 @@ class MainActivity : AppCompatActivity() {
                 // Lightweight pair: events-based Drive delta, then one SyncState pass.
                 driveRepo.refreshCloudPhotosIncremental(userId)
                 reconcile(userId).collect {}
-                // OneTime sync if backup is effectively on — picks up LOCAL_ONLY entries reconcile
+                // OneTime sync if backup is effectively on - picks up LOCAL_ONLY entries reconcile
                 // just flagged. Skipped when no folder is selected (nothing would upload).
-                if (syncEffectivelyEnabled(this@MainActivity)) SyncWorker.runNow(this@MainActivity, wifiOnly)
+                if (syncEffectivelyEnabled(this@MainHostActivity)) SyncWorker.runNow(this@MainHostActivity, wifiOnly)
             } catch (_: Exception) {
-                // Silent — onResume must never crash; the next refresh or SyncWorker tick retries.
+                // Silent - onResume must never crash; the next refresh or SyncWorker tick retries.
             }
         }
         // Silent in-app update check. The repository caches the result for 4h, so this is a no-op
