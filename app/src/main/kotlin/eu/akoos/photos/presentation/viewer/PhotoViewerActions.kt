@@ -42,19 +42,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -69,25 +61,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import eu.akoos.photos.R
-import eu.akoos.photos.domain.entity.Album
 import eu.akoos.photos.domain.entity.GalleryItem
-import eu.akoos.photos.presentation.common.AppModalSheet
 import eu.akoos.photos.presentation.common.deleteConfirmRows
 import eu.akoos.photos.presentation.common.deleteRowDescription
 import eu.akoos.photos.presentation.common.deleteRowTitleRes
 import eu.akoos.photos.presentation.common.pillSurface
 import eu.akoos.photos.presentation.gallery.LocalThumbnailUrls
 import eu.akoos.photos.presentation.theme.Accent
-import eu.akoos.photos.presentation.theme.Bg0
 import eu.akoos.photos.presentation.theme.Bg2
-import eu.akoos.photos.presentation.theme.SheetBg
 import eu.akoos.photos.presentation.theme.CardBg
 import eu.akoos.photos.presentation.theme.CardBorder
 import eu.akoos.photos.presentation.theme.DeleteTint
@@ -95,7 +82,6 @@ import eu.akoos.photos.presentation.theme.ErrorColor
 import eu.akoos.photos.presentation.theme.FgDim
 import eu.akoos.photos.presentation.theme.FgMute
 import eu.akoos.photos.presentation.theme.FgPrimary
-import eu.akoos.photos.presentation.theme.Line2
 import eu.akoos.photos.presentation.theme.PanelChip
 import eu.akoos.photos.presentation.theme.PillBgOpaque
 import eu.akoos.photos.presentation.theme.PillBorder
@@ -449,153 +435,5 @@ private fun DangerRow(
     ) {
         Text(title, color = titleColor, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         Text(subtitle, color = FgMute, fontSize = 12.sp)
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun AddToAlbumSheet(
-    sheetState: androidx.compose.material3.SheetState,
-    cloudAlbums: List<Album>,
-    currentPhotoAlbumIds: Set<String> = emptySet(),
-    onDismiss: () -> Unit,
-    onCreateNew: () -> Unit,
-    onCloudAlbumPicked: (String) -> Unit,
-) {
-    AppModalSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = SheetBg,
-        scrimColor = Color.Black.copy(alpha = 0.5f),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(bottom = 16.dp),
-        ) {
-            Text(
-                stringResource(R.string.viewer_add_to_album_title),
-                color = FgPrimary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-            )
-
-            // + New album — create one and drop this photo into it (matches the gallery sheet).
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onCreateNew() }
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(Accent.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Default.Add, null, tint = Accent, modifier = Modifier.size(22.dp))
-                }
-                Text(
-                    stringResource(R.string.albums_new_album),
-                    color = Accent,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            HorizontalDivider(color = Line2, thickness = 0.5.dp,
-                modifier = Modifier.padding(horizontal = 20.dp))
-
-            if (cloudAlbums.isEmpty()) {
-                Text(
-                    stringResource(R.string.viewer_add_to_album_empty),
-                    color = FgMute,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 24.dp),
-                )
-            } else {
-                Text(
-                    stringResource(R.string.viewer_drive_albums_header),
-                    color = FgMute,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                )
-                // Scroll the rows within a bounded height so a long album list stays reachable and
-                // the sheet doesn't grow past the screen.
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
-                    items(cloudAlbums) { album ->
-                        val isMember = album.linkId in currentPhotoAlbumIds
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onCloudAlbumPicked(album.linkId) }
-                                .padding(horizontal = 20.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            if (album.coverThumbnailUrl != null) {
-                                AsyncImage(
-                                    model = album.coverThumbnailUrl,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Bg0),
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .background(Bg0, RoundedCornerShape(8.dp)),
-                                )
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(album.name, color = FgPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                                val photoCountText = pluralStringResource(
-                                    R.plurals.count_photos_plural, album.photoCount, album.photoCount,
-                                )
-                                // Same subtitle vocabulary as the gallery drawer. Both sheets answer
-                                // the same question about the same albums, so they read alike.
-                                val subtitle = when {
-                                    isMember -> stringResource(R.string.viewer_tap_to_remove_from_album)
-                                    album.isSharedWithMe ->
-                                        stringResource(R.string.gallery_album_picker_count_shared, photoCountText)
-                                    else ->
-                                        stringResource(R.string.gallery_album_picker_count_drive, photoCountText)
-                                }
-                                Text(
-                                    subtitle,
-                                    color = if (isMember) Accent else FgMute,
-                                    fontSize = 12.sp,
-                                )
-                            }
-                            // Check tile marks membership; the row's onClick toggles add/remove.
-                            if (isMember) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .background(Accent, RoundedCornerShape(14.dp)),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = stringResource(R.string.cd_status_in_album),
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
-                        }
-                        HorizontalDivider(color = Line2, thickness = 0.5.dp,
-                            modifier = Modifier.padding(horizontal = 20.dp))
-                    }
-                }
-            }
-        }
     }
 }

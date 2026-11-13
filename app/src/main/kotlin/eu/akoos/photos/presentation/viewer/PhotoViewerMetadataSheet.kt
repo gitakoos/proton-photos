@@ -171,6 +171,11 @@ internal fun PhotoMetadataSheet(
     labelsSection: (@Composable (onEdit: () -> Unit) -> Unit)? = null,
     /** The Labels page, drawn whole by the caller and handed the way back. */
     labelsPage: (@Composable (onClose: () -> Unit) -> Unit)? = null,
+    /** The Albums section of the main page, above Labels, handed the way to the Albums page. Null leaves it
+     *  out (no account, a vaulted or hidden photo, someone else's album). */
+    albumsSection: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
+    /** The Albums page, drawn whole by the caller and handed the way back. */
+    albumsPage: (@Composable ColumnScope.(onClose: () -> Unit) -> Unit)? = null,
     /** The File name page's form under its title, handed the way back. Null leaves renaming out. */
     renamePage: (@Composable (onClose: () -> Unit) -> Unit)? = null,
     /** Whether the map may show. The caller turns it off for a photo whose place stays private, since
@@ -264,6 +269,7 @@ internal fun PhotoMetadataSheet(
                 } else if (showMapBox && metadataEditable && mimeType.startsWith("image/")) {
                     DetailsAddLocation(onClick = { push(DetailsPage.Place) })
                 }
+                albumsSection?.invoke { push(DetailsPage.Albums) }
                 labelsSection?.invoke { push(DetailsPage.Labels) }
                 val categoryNames = EDITABLE_CATEGORY_TAGS.filter { it.first in photoTags }.map { stringResource(it.second) }
                 DetailsChipSection(
@@ -290,6 +296,8 @@ internal fun PhotoMetadataSheet(
             )
 
             DetailsPage.Labels -> DetailsPageFrame { labelsPage?.invoke(back) }
+
+            DetailsPage.Albums -> DetailsPageFrame(scroll = false) { albumsPage?.invoke(this, back) }
 
             DetailsPage.Categories -> DetailsPageFrame {
                 DetailsPageHeader(stringResource(R.string.gallery_filter_categories), onBack = back)
@@ -368,7 +376,7 @@ internal fun PhotoMetadataSheet(
 
 /** The pages of the details sheet. [depth] orders them for the slide: a deeper page enters from the end. */
 internal enum class DetailsPage(val depth: Int) {
-    Main(0), Date(1), Place(1), Labels(1), Categories(1), Rename(1), All(1), Private(2),
+    Main(0), Date(1), Place(1), Labels(1), Albums(1), Categories(1), Rename(1), All(1), Private(2),
 }
 
 /** The file a details page belongs to, stable across the item a write refreshes. */

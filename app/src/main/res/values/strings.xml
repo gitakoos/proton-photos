@@ -475,8 +475,6 @@
     <string name="gallery_add_to_album_failed">Could not add to album</string>
     <string name="gallery_select_photos_first">Select photos first</string>
     <string name="gallery_create_album_failed">Could not create album: %1$s</string>
-    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
-    <string name="gallery_album_picker_count_shared">%1$s · Drive · Shared</string>
     <!-- How many of the selected photos an album already holds, e.g. "3 / 5". Digits only, so it
          needs no translation; the spoken form is cd_status_some_selected_in_album. -->
     <string name="gallery_album_picker_in_album_fraction" translatable="false">%1$d / %2$d</string>
@@ -1764,7 +1762,6 @@
     <string name="cd_status_cloud_only">Proton Drive only</string>
     <string name="cd_status_hidden_local">Hidden on this device</string>
     <string name="cd_status_backed_up">Backed up</string>
-    <string name="cd_status_in_album">In this album</string>
     <string name="cd_status_all_selected_in_album">All selected photos are in this album</string>
     <string name="cd_status_some_selected_in_album">%1$d of %2$d selected photos are in this album</string>
     <string name="cd_status_excluded">Excluded</string>
@@ -2038,6 +2035,8 @@
     <string name="details_adjust">Adjust</string>
     <string name="details_edit">Edit</string>
     <string name="details_add">Add</string>
+    <string name="details_albums_in">In these albums</string>
+    <string name="details_albums_pending">Joins the album after backup</string>
     <string name="details_add_location">Add a location</string>
     <string name="details_time">Time</string>
     <string name="details_remove_private">Remove private info</string>
@@ -2152,10 +2151,6 @@
     <string name="viewer_delete_title_cloud">Delete from Proton Drive?</string>
     <string name="viewer_delete_vault_body">Deleting removes the hidden copy from this device for good. Any Proton Drive copy stays as it is.</string>
     <string name="viewer_delete_vault_failed">Could not delete this photo</string>
-    <string name="viewer_add_to_album_title">Add to Album</string>
-    <string name="viewer_add_to_album_empty">No albums yet. Create one from the Albums tab.</string>
-    <string name="viewer_drive_albums_header">DRIVE ALBUMS</string>
-    <string name="viewer_tap_to_remove_from_album">Tap to remove from album</string>
 
     <!-- Viewer image/video states -->
     <string name="viewer_error_loading_photo">Error loading photo</string>

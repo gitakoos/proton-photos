@@ -327,8 +327,6 @@
     <string name="gallery_add_to_album_failed">Nie udało się dodać do albumu</string>
     <string name="gallery_select_photos_first">Najpierw wybierz zdjęcia</string>
     <string name="gallery_create_album_failed">Nie udało się utworzyć albumu: %1$s</string>
-    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
-    <string name="gallery_album_picker_count_shared">%1$s · Drive · Udostępniony</string>
     <string name="album_add_photos">Dodaj zdjęcia</string>
     <string name="album_picker_title">Dodaj do albumu</string>
     <string name="album_picker_selected">Wybrano: %1$d</string>
@@ -1241,7 +1239,6 @@
     <string name="cd_status_cloud_only">Tylko Proton Drive</string>
     <string name="cd_status_hidden_local">Ukryte na tym urządzeniu</string>
     <string name="cd_status_backed_up">Skopiowane</string>
-    <string name="cd_status_in_album">W tym albumie</string>
     <string name="cd_status_all_selected_in_album">Wszystkie zaznaczone zdjęcia są w tym albumie</string>
     <string name="cd_status_some_selected_in_album">%1$d z %2$d zaznaczonych zdjęć jest w tym albumie</string>
     <string name="cd_status_excluded">Wykluczone</string>
@@ -1519,6 +1516,8 @@
     <string name="details_adjust">Dostosuj</string>
     <string name="details_edit">Edytuj</string>
     <string name="details_add">Dodaj</string>
+    <string name="details_albums_in">W tych albumach</string>
+    <string name="details_albums_pending">Trafi do albumu po kopii zapasowej</string>
     <string name="details_add_location">Dodaj lokalizację</string>
     <string name="details_time">Godzina</string>
     <string name="details_remove_private">Usuń dane prywatne</string>
@@ -1564,10 +1563,6 @@
     <string name="viewer_delete_title_cloud">Usunąć z Proton Drive?</string>
     <string name="viewer_delete_vault_body">Usunięcie trwale kasuje ukrytą kopię z tego urządzenia. Kopia w Proton Drive, jeśli zdjęcie ją ma, pozostaje bez zmian.</string>
     <string name="viewer_delete_vault_failed">Nie udało się usunąć zdjęcia</string>
-    <string name="viewer_add_to_album_title">Dodaj do albumu</string>
-    <string name="viewer_add_to_album_empty">Brak albumów. Utwórz jeden w karcie Albumy.</string>
-    <string name="viewer_drive_albums_header">ALBUMY DRIVE</string>
-    <string name="viewer_tap_to_remove_from_album">Dotknij, aby usunąć z albumu</string>
 
     <!-- Viewer image/video states -->
     <string name="viewer_error_loading_photo">Błąd wczytywania zdjęcia</string>

@@ -1080,7 +1080,6 @@
     <string name="cd_status_cloud_only">Solo Proton Drive</string>
     <string name="cd_status_hidden_local">Nascosta su questo dispositivo</string>
     <string name="cd_status_backed_up">Salvata</string>
-    <string name="cd_status_in_album">In questo album</string>
     <string name="cd_status_all_selected_in_album">Tutte le foto selezionate sono in questo album</string>
     <string name="cd_status_some_selected_in_album">%1$d di %2$d foto selezionate sono in questo album</string>
     <string name="cd_status_excluded">Esclusa</string>
@@ -1294,6 +1293,8 @@
     <string name="details_adjust">Regola</string>
     <string name="details_edit">Modifica</string>
     <string name="details_add">Aggiungi</string>
+    <string name="details_albums_in">In questi album</string>
+    <string name="details_albums_pending">Entra nell’album dopo il backup</string>
     <string name="details_add_location">Aggiungi un luogo</string>
     <string name="details_time">Ora</string>
     <string name="details_remove_private">Rimuovi dati privati</string>
@@ -1333,10 +1334,6 @@
     <string name="viewer_delete_title_cloud">Eliminare da Proton Drive?</string>
     <string name="viewer_delete_vault_body">L\'eliminazione toglie per sempre la copia nascosta da questo dispositivo. La copia su Proton Drive, se la foto ne ha una, resta com\'è.</string>
     <string name="viewer_delete_vault_failed">Impossibile eliminare la foto</string>
-    <string name="viewer_add_to_album_title">Aggiungi all\'album</string>
-    <string name="viewer_add_to_album_empty">Ancora nessun album. Creane uno dalla scheda Album.</string>
-    <string name="viewer_drive_albums_header">ALBUM DI DRIVE</string>
-    <string name="viewer_tap_to_remove_from_album">Tocca per rimuovere dall\'album</string>
 
     <!-- Viewer image/video states -->
     <string name="viewer_error_loading_photo">Errore durante il caricamento della foto</string>
@@ -1414,8 +1411,6 @@
     <string name="gallery_add_to_album_failed">Impossibile aggiungere all\'album</string>
     <string name="gallery_select_photos_first">Seleziona prima delle foto</string>
     <string name="gallery_create_album_failed">Impossibile creare l\'album: %1$s</string>
-    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
-    <string name="gallery_album_picker_count_shared">%1$s · Drive · Condiviso</string>
     <string name="album_add_photos">Aggiungi foto</string>
     <string name="album_picker_title">Aggiungi all\'album</string>
     <string name="album_picker_selected">%1$d selezionate</string>

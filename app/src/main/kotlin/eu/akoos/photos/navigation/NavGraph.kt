@@ -1201,6 +1201,12 @@ fun NavGraph(
                     navController.navigate(Screen.MetadataEditor.route)
                 },
                 onOpenPerson = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
+                onOpenAlbum = { album ->
+                    selectedAlbum = album
+                    albumOpenedToShare = false
+                    albumOpenAction = null
+                    navController.navigate(Screen.AlbumDetail.route)
+                },
                 onSetPersonCover = if (viewerPerson != null && personActions != null) {
                     { item -> personActions.setCover(viewerPerson.personId, item.stableId) }
                 } else null,

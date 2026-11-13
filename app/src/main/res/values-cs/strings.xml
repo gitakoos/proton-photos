@@ -327,8 +327,6 @@
     <string name="gallery_add_to_album_failed">Nepodařilo se přidat do alba</string>
     <string name="gallery_select_photos_first">Nejprve vyberte fotky</string>
     <string name="gallery_create_album_failed">Nepodařilo se vytvořit album: %1$s</string>
-    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
-    <string name="gallery_album_picker_count_shared">%1$s · Drive · Sdíleno</string>
     <string name="album_add_photos">Přidat fotky</string>
     <string name="album_picker_title">Přidat do alba</string>
     <string name="album_picker_selected">Vybráno: %1$d</string>
@@ -1241,7 +1239,6 @@
     <string name="cd_status_cloud_only">Jen Proton Drive</string>
     <string name="cd_status_hidden_local">Skryto v tomto zařízení</string>
     <string name="cd_status_backed_up">Zálohováno</string>
-    <string name="cd_status_in_album">V tomto albu</string>
     <string name="cd_status_all_selected_in_album">Všechny vybrané fotky jsou v tomto albu</string>
     <string name="cd_status_some_selected_in_album">%1$d z %2$d vybraných fotek je v tomto albu</string>
     <string name="cd_status_excluded">Vyloučeno</string>
@@ -1519,6 +1516,8 @@
     <string name="details_adjust">Změnit</string>
     <string name="details_edit">Upravit</string>
     <string name="details_add">Přidat</string>
+    <string name="details_albums_in">V těchto albech</string>
+    <string name="details_albums_pending">Přidá se do alba po zálohování</string>
     <string name="details_add_location">Přidat polohu</string>
     <string name="details_time">Čas</string>
     <string name="details_remove_private">Odebrat soukromé údaje</string>
@@ -1564,10 +1563,6 @@
     <string name="viewer_delete_title_cloud">Smazat z Proton Drive?</string>
     <string name="viewer_delete_vault_body">Smazáním se skrytá kopie z tohoto zařízení nenávratně odstraní. Případná kopie na Proton Drive zůstane, jaká je.</string>
     <string name="viewer_delete_vault_failed">Fotku se nepodařilo smazat</string>
-    <string name="viewer_add_to_album_title">Přidat do alba</string>
-    <string name="viewer_add_to_album_empty">Zatím žádná alba. Vytvořte jedno v záložce Alba.</string>
-    <string name="viewer_drive_albums_header">ALBA NA DRIVE</string>
-    <string name="viewer_tap_to_remove_from_album">Klepnutím odeberete z alba</string>
 
     <!-- Viewer image/video states -->
     <string name="viewer_error_loading_photo">Chyba při načítání fotky</string>

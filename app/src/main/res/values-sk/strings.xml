@@ -327,8 +327,6 @@
     <string name="gallery_add_to_album_failed">Nepodarilo sa pridať do albumu</string>
     <string name="gallery_select_photos_first">Najprv vyberte fotky</string>
     <string name="gallery_create_album_failed">Nepodarilo sa vytvoriť album: %1$s</string>
-    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
-    <string name="gallery_album_picker_count_shared">%1$s · Drive · Zdieľané</string>
     <string name="album_add_photos">Pridať fotky</string>
     <string name="album_picker_title">Pridať do albumu</string>
     <string name="album_picker_selected">Vybraných: %1$d</string>
@@ -1241,7 +1239,6 @@
     <string name="cd_status_cloud_only">Len Proton Drive</string>
     <string name="cd_status_hidden_local">Skryté v tomto zariadení</string>
     <string name="cd_status_backed_up">Zálohované</string>
-    <string name="cd_status_in_album">V tomto albume</string>
     <string name="cd_status_all_selected_in_album">Všetky vybrané fotky sú v tomto albume</string>
     <string name="cd_status_some_selected_in_album">%1$d z %2$d vybraných fotiek je v tomto albume</string>
     <string name="cd_status_excluded">Vylúčené</string>
@@ -1519,6 +1516,8 @@
     <string name="details_adjust">Zmeniť</string>
     <string name="details_edit">Upraviť</string>
     <string name="details_add">Pridať</string>
+    <string name="details_albums_in">V týchto albumoch</string>
+    <string name="details_albums_pending">Pridá sa do albumu po zálohovaní</string>
     <string name="details_add_location">Pridať polohu</string>
     <string name="details_time">Čas</string>
     <string name="details_remove_private">Odstrániť súkromné údaje</string>
@@ -1564,10 +1563,6 @@
     <string name="viewer_delete_title_cloud">Odstrániť z Proton Drive?</string>
     <string name="viewer_delete_vault_body">Odstránením sa skrytá kópia z tohto zariadenia natrvalo stratí. Kópia na Proton Drive, ak fotka nejakú má, zostane taká, aká je.</string>
     <string name="viewer_delete_vault_failed">Fotku sa nepodarilo odstrániť</string>
-    <string name="viewer_add_to_album_title">Pridať do albumu</string>
-    <string name="viewer_add_to_album_empty">Zatiaľ žiadne albumy. Vytvorte jeden na karte Albumy.</string>
-    <string name="viewer_drive_albums_header">ALBUMY NA DRIVE</string>
-    <string name="viewer_tap_to_remove_from_album">Ťuknutím odstránite z albumu</string>
 
     <!-- Viewer image/video states -->
     <string name="viewer_error_loading_photo">Chyba pri načítaní fotky</string>

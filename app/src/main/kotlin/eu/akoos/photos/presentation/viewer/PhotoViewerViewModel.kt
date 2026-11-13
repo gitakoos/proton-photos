@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
@@ -121,9 +122,14 @@ data class CloudVideoMeta(val width: Int, val height: Int, val durationMs: Long)
 data class DetailsGps(val latitude: Double, val longitude: Double)
 
 /** Album context for the details sheet: the device MediaStore bucket the photo lives in (null when
- *  there is no on-device copy) and the names of every cloud album that owns it (a photo can belong
- *  to many). */
-data class DetailsAlbums(val localFolder: String? = null, val cloudAlbums: List<String> = emptyList())
+ *  there is no on-device copy), the names of every cloud album that owns it (a photo can belong to
+ *  many) with their linkIds, and the albums a device photo is queued to join once it is backed up. */
+data class DetailsAlbums(
+    val localFolder: String? = null,
+    val cloudAlbums: List<String> = emptyList(),
+    val albumIds: Set<String> = emptySet(),
+    val queuedAlbumIds: Set<String> = emptySet(),
+)
 
 /** The sorted, distinct names of the [albums] whose linkId is in [albumIds]. */
 internal fun albumNamesFor(albumIds: Set<String>, albums: List<Album>): List<String> =
@@ -273,6 +279,7 @@ class PhotoViewerViewModel @Inject constructor(
     private val labelRepo: PhotoLabelRepository,
     private val outgoingUris: eu.akoos.photos.util.OutgoingPhotoUris,
     private val syncStateRepo: eu.akoos.photos.domain.repository.SyncStateRepository,
+    private val uploadAlbumTargetDao: eu.akoos.photos.data.db.dao.UploadAlbumTargetDao,
     @eu.akoos.photos.di.AppScope private val appScope: kotlinx.coroutines.CoroutineScope,
 ) : ViewModel() {
 
@@ -2021,24 +2028,54 @@ class PhotoViewerViewModel @Inject constructor(
         }
         // Show the folder immediately; a LocalOnly photo has no cloud walk to wait on.
         _detailsAlbums.value = DetailsAlbums(localFolder = localFolder)
+        if (item is GalleryItem.LocalOnly) {
+            viewModelScope.launch {
+                val queued = runCatching { uploadAlbumTargetDao.getTargetsFor(item.local.uri) }
+                    .getOrDefault(emptyList()).toSet()
+                if (queued.isNotEmpty()) _detailsAlbums.update { it.copy(queuedAlbumIds = queued) }
+            }
+        }
         if (cloudLinkId == null) return
         viewModelScope.launch {
             // The stored albums and memberships answer at once; the walk of every album below is
             // the complete answer and replaces this one when it arrives.
+            val storedIds = runCatching { cloudRepo.getCachedAlbumIdsForPhoto(cloudLinkId) }.getOrDefault(emptySet())
             val stored = runCatching {
-                albumNamesFor(
-                    cloudRepo.getCachedAlbumIdsForPhoto(cloudLinkId),
-                    cloudRepo.loadAlbumsCached().ifEmpty { _albums.value },
-                )
+                albumNamesFor(storedIds, cloudRepo.loadAlbumsCached().ifEmpty { _albums.value })
             }.getOrDefault(emptyList())
             if (stored.isNotEmpty()) {
-                _detailsAlbums.value = DetailsAlbums(localFolder = localFolder, cloudAlbums = stored)
+                _detailsAlbums.value = DetailsAlbums(localFolder = localFolder, cloudAlbums = stored, albumIds = storedIds)
             }
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             // A failed walk keeps the stored answer; a finished one is the truth, a photo in no album included.
             val byPhoto = runCatching { cloudRepo.getAlbumIdsByPhoto(userId) }.getOrNull() ?: return@launch
-            val names = albumNamesFor(byPhoto[cloudLinkId].orEmpty(), _albums.value.ifEmpty { cloudRepo.loadAlbumsCached() })
-            _detailsAlbums.value = DetailsAlbums(localFolder = localFolder, cloudAlbums = names)
+            val ids = byPhoto[cloudLinkId].orEmpty()
+            val names = albumNamesFor(ids, _albums.value.ifEmpty { cloudRepo.loadAlbumsCached() })
+            _detailsAlbums.value = DetailsAlbums(localFolder = localFolder, cloudAlbums = names, albumIds = ids)
+        }
+    }
+
+    /** Moves the details sheet's album state for [albumLinkId] after an add or a removal, so its Albums box
+     *  and the album names follow at once instead of waiting for the next walk. [queued] is a device photo's
+     *  queued join rather than a membership. */
+    private fun noteDetailsAlbum(albumLinkId: String, member: Boolean, queued: Boolean = false) {
+        _detailsAlbums.update { current ->
+            if (queued) {
+                val ids = if (member) current.queuedAlbumIds + albumLinkId else current.queuedAlbumIds - albumLinkId
+                current.copy(queuedAlbumIds = ids)
+            } else {
+                val ids = if (member) current.albumIds + albumLinkId else current.albumIds - albumLinkId
+                current.copy(albumIds = ids, cloudAlbums = albumNamesFor(ids, _albums.value))
+            }
+        }
+        // The album's photo count on the Albums page follows the change; the next album load brings Drive's own.
+        if (!queued) {
+            _albums.update { list ->
+                list.map { album ->
+                    if (album.linkId != albumLinkId) album
+                    else album.copy(photoCount = (album.photoCount + if (member) 1 else -1).coerceAtLeast(0))
+                }
+            }
         }
     }
 
@@ -2049,13 +2086,20 @@ class PhotoViewerViewModel @Inject constructor(
             val cloudLinkId = when (item) {
                 is GalleryItem.Synced    -> item.cloud.linkId
                 is GalleryItem.CloudOnly -> item.cloud.linkId
-                is GalleryItem.LocalOnly -> return@launch
+                is GalleryItem.LocalOnly -> {
+                    // A device photo is not in the album yet, only queued to join it once backed up:
+                    // taking it out drops that one queued pair.
+                    runCatching { uploadAlbumTargetDao.deleteTarget(item.local.uri, albumLinkId) }
+                        .onSuccess { noteDetailsAlbum(albumLinkId, member = false, queued = true) }
+                    return@launch
+                }
             }
             val userId = accountManager.getPrimaryUserId().first() ?: return@launch
             _isAddingToAlbum.value = true
             runCatching { cloudRepo.removePhotosFromAlbum(userId, albumLinkId, listOf(cloudLinkId)) }
                 .onSuccess {
                     _currentPhotoAlbumIds.value = _currentPhotoAlbumIds.value - albumLinkId
+                    noteDetailsAlbum(albumLinkId, member = false)
                     // Undo re-adds by copying from this device's own volume, which cannot reach a
                     // photo that lives on the sharer's volume, so a shared album gets no Undo
                     // rather than one that silently does nothing. Same rule the album grid follows.
@@ -2122,7 +2166,10 @@ class PhotoViewerViewModel @Inject constructor(
                 is GalleryItem.LocalOnly -> {
                     _isAddingToAlbum.value = true
                     runCatching { forceUploadLocalUris.queueForAlbum(userId, albumLinkId, listOf(item.local.uri)) }
-                        .onSuccess { if (targetName.isNotEmpty()) _addToAlbumDone.tryEmit(targetName) }
+                        .onSuccess {
+                            noteDetailsAlbum(albumLinkId, member = true, queued = true)
+                            if (targetName.isNotEmpty()) _addToAlbumDone.tryEmit(targetName)
+                        }
                         .onFailure { e ->
                             if (e is kotlinx.coroutines.CancellationException) throw e
                             _transientError.value = context.getString(
@@ -2144,6 +2191,7 @@ class PhotoViewerViewModel @Inject constructor(
                         )
                     } else {
                         _currentPhotoAlbumIds.value = _currentPhotoAlbumIds.value + albumLinkId
+                        noteDetailsAlbum(albumLinkId, member = true)
                         if (targetName.isNotEmpty()) _addToAlbumDone.tryEmit(targetName)
                     }
                 }
@@ -2167,15 +2215,22 @@ class PhotoViewerViewModel @Inject constructor(
             val linkId = when (item) {
                 is GalleryItem.Synced    -> item.cloud.linkId
                 is GalleryItem.CloudOnly -> item.cloud.linkId
-                is GalleryItem.LocalOnly -> return@launch
+                is GalleryItem.LocalOnly -> null
             }
             _isAddingToAlbum.value = true
             runCatching {
                 val album = cloudRepo.createDriveAlbum(userId, trimmed)
-                cloudRepo.addPhotosToAlbum(userId, album.linkId, listOf(linkId))
-                // Cover failure must not fail the add — the photo is already in the album.
-                runCatching { cloudRepo.setAlbumCover(userId, album.linkId, linkId) }
                 _albums.value = listOf(album) + _albums.value
+                if (linkId != null) {
+                    cloudRepo.addPhotosToAlbum(userId, album.linkId, listOf(linkId))
+                    // Cover failure must not fail the add: the photo is already in the album.
+                    runCatching { cloudRepo.setAlbumCover(userId, album.linkId, linkId) }
+                    noteDetailsAlbum(album.linkId, member = true)
+                } else if (item is GalleryItem.LocalOnly) {
+                    // A device photo joins the new album once it is backed up, as with any other album.
+                    forceUploadLocalUris.queueForAlbum(userId, album.linkId, listOf(item.local.uri))
+                    noteDetailsAlbum(album.linkId, member = true, queued = true)
+                }
                 albumListEvents.notifyChanged()
             }.onSuccess {
                 _addToAlbumDone.tryEmit(trimmed)

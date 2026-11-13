@@ -1089,7 +1089,6 @@
     <string name="cd_status_cloud_only">Csak a Proton Drive-on</string>
     <string name="cd_status_hidden_local">Elrejtve ezen az eszközön</string>
     <string name="cd_status_backed_up">Mentve</string>
-    <string name="cd_status_in_album">Ebben az albumban</string>
     <string name="cd_status_all_selected_in_album">Minden kijelölt kép ebben az albumban van</string>
     <string name="cd_status_some_selected_in_album">%2$d kijelölt képből %1$d ebben az albumban van</string>
     <string name="cd_status_excluded">Kizárva</string>
@@ -1302,6 +1301,8 @@
     <string name="details_adjust">Módosítás</string>
     <string name="details_edit">Szerkesztés</string>
     <string name="details_add">Hozzáadás</string>
+    <string name="details_albums_in">Ezekben az albumokban</string>
+    <string name="details_albums_pending">Mentés után kerül be az albumba</string>
     <string name="details_add_location">Hely hozzáadása</string>
     <string name="details_time">Idő</string>
     <string name="details_remove_private">Privát adatok eltávolítása</string>
@@ -1341,10 +1342,6 @@
     <string name="viewer_delete_title_cloud">Törlöd a Proton Drive-ról?</string>
     <string name="viewer_delete_vault_body">A törlés véglegesen eltávolítja a rejtett példányt erről az eszközről. A Proton Drive-on lévő másolat, ha van ilyen, változatlanul megmarad.</string>
     <string name="viewer_delete_vault_failed">A fotót nem sikerült törölni</string>
-    <string name="viewer_add_to_album_title">Hozzáadás albumhoz</string>
-    <string name="viewer_add_to_album_empty">Még nincs egy albumod sem. Hozz létre egyet az Albumok lapon.</string>
-    <string name="viewer_drive_albums_header">DRIVE-ALBUMOK</string>
-    <string name="viewer_tap_to_remove_from_album">Koppints az albumból való eltávolításhoz</string>
 
     <!-- Viewer image/video states -->
     <string name="viewer_error_loading_photo">Hiba a fotó betöltésekor</string>
@@ -1421,8 +1418,6 @@
     <string name="gallery_add_to_album_failed">Nem sikerült az albumhoz adni</string>
     <string name="gallery_select_photos_first">Először válassz ki fotókat</string>
     <string name="gallery_create_album_failed">Nem sikerült létrehozni az albumot: %1$s</string>
-    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
-    <string name="gallery_album_picker_count_shared">%1$s · Drive · Megosztott</string>
     <string name="album_add_photos">Fotók hozzáadása</string>
     <string name="album_picker_title">Albumhoz adás</string>
     <string name="album_picker_selected">%1$d kijelölve</string>

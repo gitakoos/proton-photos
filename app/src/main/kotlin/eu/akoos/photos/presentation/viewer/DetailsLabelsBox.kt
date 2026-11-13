@@ -169,25 +169,7 @@ internal fun DetailsChipSection(
     footer: @Composable () -> Unit = {},
 ) {
     Column {
-        Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                title.uppercase(),
-                color = FgMute, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
-                modifier = Modifier.weight(1f),
-            )
-            if (onEdit != null) {
-                Text(
-                    stringResource(R.string.details_edit),
-                    color = Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
-                    // The word is small; its press area fills the row and reaches past its end.
-                    modifier = Modifier
-                        .pressArea(10.dp, 8.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onEdit)
-                        .padding(horizontal = 16.dp, vertical = 11.dp),
-                )
-            }
-        }
+        DetailsSectionHeader(title, onEdit)
         if (chips.isNotEmpty() || onEdit != null) {
             FlowRow(
                 modifier = Modifier
@@ -209,18 +191,7 @@ internal fun DetailsChipSection(
                     )
                 }
                 if (onEdit != null && addEnabled) {
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .dashedOutline(Accent.copy(alpha = 0.7f), 20.dp)
-                            .clickable(onClick = onEdit)
-                            .padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = Accent, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.details_add), color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                    }
+                    DetailsAddChip(stringResource(R.string.details_add), onClick = onEdit)
                 }
             }
         }
@@ -228,8 +199,49 @@ internal fun DetailsChipSection(
     }
 }
 
+/** A main-page section's title row: the title in small capitals and, when [onEdit] is set, Edit on the right. */
+@Composable
+internal fun DetailsSectionHeader(title: String, onEdit: (() -> Unit)?) {
+    Row(modifier = Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            title.uppercase(),
+            color = FgMute, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+            modifier = Modifier.weight(1f),
+        )
+        if (onEdit != null) {
+            Text(
+                stringResource(R.string.details_edit),
+                color = Accent, fontSize = 12.5.sp, fontWeight = FontWeight.Medium,
+                // The word is small; its press area fills the row and reaches past its end.
+                modifier = Modifier
+                    .pressArea(10.dp, 8.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(onClick = onEdit)
+                    .padding(horizontal = 16.dp, vertical = 11.dp),
+            )
+        }
+    }
+}
+
+/** The dashed chip that adds to a section rather than showing what is set. */
+@Composable
+internal fun DetailsAddChip(text: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .dashedOutline(Accent.copy(alpha = 0.7f), 20.dp)
+            .clickable(onClick = onClick)
+            .padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.Add, contentDescription = null, tint = Accent, modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(text, color = Accent, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
 /** A dashed rounded outline, the mark of a chip that adds rather than one that is set. */
-private fun Modifier.dashedOutline(color: Color, radius: Dp): Modifier = drawBehind {
+internal fun Modifier.dashedOutline(color: Color, radius: Dp): Modifier = drawBehind {
     val stroke = Stroke(
         width = 1.dp.toPx(),
         pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx())),

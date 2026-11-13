@@ -63,6 +63,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.pluralStringResource
@@ -113,6 +114,10 @@ internal fun albumsMatchingName(albums: List<Album>, query: String): List<Album>
  * [cloudAlbums] arrives in the Albums tab's order. A tap closes the screen and then calls
  * [onCloudAlbumSelected], the back gesture or the arrow calls [onDismiss], and the New album card calls
  * [onCreateNew]; every one of them runs after the slide-out has finished.
+ *
+ * A tap on an album that already holds the whole selection takes the selection out of it instead (see
+ * [pickerTapRemoves]), and the screen stays open so its mark can be seen going. [onCloudAlbumRemove] makes
+ * that removal when the caller keeps its own album state; without it the screen removes the photos itself.
  */
 @Composable
 internal fun GalleryAddToAlbumDialog(
@@ -122,6 +127,7 @@ internal fun GalleryAddToAlbumDialog(
     onCloudAlbumSelected: (Album) -> Unit,
     onDismiss: () -> Unit,
     hiddenAlbumIds: Set<String> = emptySet(),
+    onCloudAlbumRemove: ((Album) -> Unit)? = null,
 ) {
     val colors = AppColors.current
     // The "already in this album" marks follow from the selection alone, so the screen resolves them
@@ -131,6 +137,10 @@ internal fun GalleryAddToAlbumDialog(
     val albumMemberIds by remember(selectionLinkIds) {
         membershipViewModel.observeSelectionAlbumMembership(selectionLinkIds)
     }.collectAsStateWithLifecycle(initialValue = emptyMap())
+    val removing by membershipViewModel.removing.collectAsStateWithLifecycle()
+    // A photo still on the device only has no album membership to take away, so a selection holding one
+    // always adds.
+    val allInCloud = selectionLinkIds.size == selectedItems.size
 
     var query by remember { mutableStateOf("") }
     var searchActive by remember { mutableStateOf(false) }
@@ -170,15 +180,21 @@ internal fun GalleryAddToAlbumDialog(
                 }
                 val collapse = rememberStripCollapse()
                 val cardOf: @Composable (Album, Modifier) -> Unit = { album, modifier ->
+                    val membership = albumMembershipState(selectionLinkIds, albumMemberIds[album.linkId].orEmpty())
                     AlbumPickCard(
                         album = album,
                         listView = listView,
                         hidden = album.linkId in hiddenAlbumIds,
-                        membership = albumMembershipState(
-                            selectionLinkIds,
-                            albumMemberIds[album.linkId].orEmpty(),
-                        ),
-                        onClick = { closeThen { onCloudAlbumSelected(album) } },
+                        membership = membership,
+                        waiting = album.linkId in removing,
+                        onClick = {
+                            if (pickerTapRemoves(membership, allInCloud, album)) {
+                                if (onCloudAlbumRemove != null) onCloudAlbumRemove(album)
+                                else membershipViewModel.removeFromAlbum(album.linkId, selectionLinkIds)
+                            } else {
+                                closeThen { onCloudAlbumSelected(album) }
+                            }
+                        },
                         modifier = modifier,
                     )
                 }
@@ -293,13 +309,25 @@ private fun NewAlbumEntry(listView: Boolean, count: Int, onClick: () -> Unit, mo
     }
 }
 
-/** One album as the Albums tab's card, with a lock for a hidden album and the selection's membership mark. */
+/**
+ * Whether a tap on [album] in the picker takes the selection out of it rather than adding: the album holds
+ * every selected photo ([membership] is all), every selected photo is in the cloud ([allInCloud]), and this
+ * user may change the album, which takes the same right as adding to it.
+ */
+internal fun pickerTapRemoves(membership: AlbumMembership, allInCloud: Boolean, album: Album): Boolean =
+    membership is AlbumMembership.All && allInCloud && album.canAddPhotos
+
+/**
+ * One album as the Albums tab's card, with a lock for a hidden album and the selection's membership mark.
+ * [waiting] dims the mark while a removal from the album runs.
+ */
 @Composable
 private fun AlbumPickCard(
     album: Album,
     listView: Boolean,
     hidden: Boolean,
     membership: AlbumMembership,
+    waiting: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -351,6 +379,7 @@ private fun AlbumPickCard(
                 modifier = Modifier
                     .align(markEnd)
                     .padding(8.dp)
+                    .alpha(if (waiting) 0.45f else 1f)
                     .size(28.dp)
                     .background(Accent, RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center,

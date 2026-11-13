@@ -328,8 +328,6 @@
     <string name="gallery_add_to_album_failed">Dodajanje v album ni uspelo</string>
     <string name="gallery_select_photos_first">Najprej izberite fotografije</string>
     <string name="gallery_create_album_failed">Albuma ni bilo mogoče ustvariti: %1$s</string>
-    <string name="gallery_album_picker_count_drive">%1$s · Drive</string>
-    <string name="gallery_album_picker_count_shared">%1$s · Drive · V skupni rabi</string>
     <string name="album_add_photos">Dodaj fotografije</string>
     <string name="album_picker_title">Dodaj v album</string>
     <string name="album_picker_selected">Izbranih: %1$d</string>
@@ -1242,7 +1240,6 @@
     <string name="cd_status_cloud_only">Samo Proton Drive</string>
     <string name="cd_status_hidden_local">Skrito v tej napravi</string>
     <string name="cd_status_backed_up">Varnostno kopirano</string>
-    <string name="cd_status_in_album">V tem albumu</string>
     <string name="cd_status_all_selected_in_album">Vse izbrane fotografije so v tem albumu</string>
     <string name="cd_status_some_selected_in_album">%1$d od %2$d izbranih fotografij je v tem albumu</string>
     <string name="cd_status_excluded">Izključeno</string>
@@ -1520,6 +1517,8 @@
     <string name="details_adjust">Prilagodi</string>
     <string name="details_edit">Uredi</string>
     <string name="details_add">Dodaj</string>
+    <string name="details_albums_in">V teh albumih</string>
+    <string name="details_albums_pending">Doda se v album po varnostni kopiji</string>
     <string name="details_add_location">Dodaj lokacijo</string>
     <string name="details_time">Čas</string>
     <string name="details_remove_private">Odstrani zasebne podatke</string>
@@ -1565,10 +1564,6 @@
     <string name="viewer_delete_title_cloud">Izbrisati iz Proton Drive?</string>
     <string name="viewer_delete_vault_body">Izbris za vedno odstrani skrito kopijo iz te naprave. Kopija v Proton Drive, če jo fotografija ima, ostane taka, kot je.</string>
     <string name="viewer_delete_vault_failed">Fotografije ni bilo mogoče izbrisati</string>
-    <string name="viewer_add_to_album_title">Dodaj v album</string>
-    <string name="viewer_add_to_album_empty">Še ni albumov. Ustvarite enega v zavihku Albumi.</string>
-    <string name="viewer_drive_albums_header">ALBUMI DRIVE</string>
-    <string name="viewer_tap_to_remove_from_album">Tapnite za odstranitev iz albuma</string>
 
     <!-- Viewer image/video states -->
     <string name="viewer_error_loading_photo">Napaka pri nalaganju fotografije</string>

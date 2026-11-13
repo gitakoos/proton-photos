@@ -403,6 +403,8 @@ fun PhotoViewerScreen(
     onEditMetadata: (GalleryItem) -> Unit = {},
     /** Opens the page of the person the face index grouped, from the "people in this photo" bar. */
     onOpenPerson: (Long) -> Unit = {},
+    /** Opens an album the photo is in, from a cover in the details panel's Albums box. */
+    onOpenAlbum: (Album) -> Unit = {},
     /** Opened from a named person's page: make the photo on screen that person's cover, or take it off
      *  them. Null anywhere else, which leaves both out of the menu. */
     onSetPersonCover: ((GalleryItem) -> Unit)? = null,
@@ -1159,7 +1161,6 @@ fun PhotoViewerScreen(
     var showAddToAlbumSheet by remember { mutableStateOf(false) }
     // Logged-out "Move to folder" for the single on-device photo the viewer is showing.
     var showMoveSheet by remember { mutableStateOf(false) }
-    val addToAlbumSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     // Set when "New album" is tapped in the add-to-album sheet: holds the photo to drop into the
     // album the create dialog makes.
     var newAlbumForPhoto by remember { mutableStateOf<GalleryItem?>(null) }
@@ -3130,6 +3131,12 @@ fun PhotoViewerScreen(
         val placeLabel = remember(detailsPlace, locale) {
             detailsPlace?.let { cityCountryLabel(it.city, it.countryCode, it.countryName, locale) }
         }
+        // Albums live on Drive, so the Albums box needs an account; like labels, none on a vaulted or hidden
+        // photo, in the trash, or in someone else's album.
+        val showAlbumsBox = item != null && isSignedIn && !trashMode && !detailsPrivate && !isReadOnlyAlbum
+        val albumMembers = remember(albums, detailsAlbums) {
+            detailsMemberAlbums(albums, detailsAlbums.albumIds, detailsAlbums.queuedAlbumIds)
+        }
         AppModalSheet(
             onDismissRequest = { showMetadata = false; metadataPages = listOf(DetailsPage.Main) },
             sheetState = metadataSheetState,
@@ -3180,6 +3187,27 @@ fun PhotoViewerScreen(
                 } else null,
                 labelsPage = if (item != null && !detailsPrivate && !isReadOnlyAlbum) {
                     { close -> DetailsLabelsPage(viewModel, item, onClose = close) }
+                } else null,
+                albumsSection = if (showAlbumsBox) {
+                    { onOpen ->
+                        DetailsAlbumsSection(
+                            albumMembers,
+                            onOpen = onOpen,
+                            onOpenAlbum = onOpenAlbum,
+                            onAdd = { showAddToAlbumSheet = true },
+                        )
+                    }
+                } else null,
+                albumsPage = if (showAlbumsBox && item != null) {
+                    { close ->
+                        DetailsAlbumsPage(
+                            member = albumMembers,
+                            busy = isAddingToAlbum,
+                            onBack = close,
+                            onRemove = { album -> viewModel.removeFromAlbum(album.linkId, item) },
+                            onAdd = { showAddToAlbumSheet = true },
+                        )
+                    }
                 } else null,
                 // Rename is a node-level mutation a guest of a shared-with-me album is not granted.
                 renamePage = if (item == null || isReadOnlyAlbum) null else {
@@ -3303,46 +3331,31 @@ fun PhotoViewerScreen(
         }
     }
 
-    // ── Add to Album sheet ────────────────────────────────────────────────────────
+    // ── Add to album ──────────────────────────────────────────────────────────────
+    // The picker every multi-select uses, with the photo on screen as its selection. A tap on an album the
+    // photo is already in takes it out through the viewer, so the details sheet follows at once.
     if (showAddToAlbumSheet) {
-        val settledItem = items.getOrNull(pagerState.settledPage)
-        val currentPhotoAlbumIds by viewModel.currentPhotoAlbumIds.collectAsStateWithLifecycle()
-        val hasCloud = settledItem is GalleryItem.Synced || settledItem is GalleryItem.CloudOnly
-        // Refresh membership for the current photo every time the sheet opens — fast on cache
-        // hit (20-min TTL in AlbumService) and self-heals if the user removed the photo from an
-        // album on Drive web between sheet opens.
-        LaunchedEffect(showAddToAlbumSheet, settledItem) {
-            if (settledItem != null && hasCloud) viewModel.loadCurrentPhotoAlbumIds(settledItem)
+        items.getOrNull(pagerState.settledPage)?.let { settledItem ->
+            eu.akoos.photos.presentation.gallery.GalleryAddToAlbumDialog(
+                selectedItems = remember(settledItem) { setOf(settledItem) },
+                cloudAlbums = remember(albums) { albums.filter { it.canAddPhotos } },
+                onCreateNew = {
+                    newAlbumForPhoto = settledItem
+                    showAddToAlbumSheet = false
+                },
+                onCloudAlbumSelected = { album ->
+                    showAddToAlbumSheet = false
+                    viewModel.addToAlbum(album.linkId, settledItem)
+                },
+                onCloudAlbumRemove = { album ->
+                    if (!isAddingToAlbum) viewModel.removeFromAlbum(album.linkId, settledItem)
+                },
+                onDismiss = { showAddToAlbumSheet = false },
+            )
         }
-        AddToAlbumSheet(
-            sheetState = addToAlbumSheetState,
-            cloudAlbums = albums,
-            currentPhotoAlbumIds = currentPhotoAlbumIds,
-            onDismiss = { showAddToAlbumSheet = false },
-            onCreateNew = {
-                newAlbumForPhoto = settledItem
-                showAddToAlbumSheet = false
-            },
-            onCloudAlbumPicked = { albumLinkId ->
-                // A backed-up photo's membership is read back after each tap, so the sheet stays open
-                // for the next album. A photo still queued to upload has nothing to read back, so
-                // its sheet closes as before.
-                if (!isAddingToAlbum) {
-                    if (settledItem != null) {
-                        // Tap-to-remove when the photo is already in this album, otherwise add.
-                        if (albumLinkId in currentPhotoAlbumIds) {
-                            viewModel.removeFromAlbum(albumLinkId, settledItem)
-                        } else {
-                            viewModel.addToAlbum(albumLinkId, settledItem)
-                        }
-                    }
-                    if (!hasCloud) showAddToAlbumSheet = false
-                }
-            },
-        )
     }
 
-    // New album from the add-to-album sheet: create it and drop the photo in (same dialog the
+    // New album from the add-to-album picker: create it and drop the photo in (same dialog the
     // gallery uses).
     newAlbumForPhoto?.let { photo ->
         eu.akoos.photos.presentation.gallery.GalleryNewAlbumDialog(
