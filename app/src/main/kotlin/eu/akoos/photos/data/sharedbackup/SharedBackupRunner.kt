@@ -56,6 +56,8 @@ import eu.akoos.photos.data.mlsync.MlSyncScratch
 import eu.akoos.photos.util.SyncDiagnostics
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import me.proton.core.domain.entity.UserId
 import java.io.File
@@ -130,12 +132,19 @@ class SharedBackupRunner @Inject constructor(
     private val imageEmbeddingDao: ImageEmbeddingDao,
 ) {
 
-    /** The three folders' files, or null when any listing failed: a round that cannot read writes nothing. */
-    suspend fun list(userId: UserId): SharedBackupListing? {
-        val ml = listed(userId, DriveDataFolder.ML) ?: return null
-        val labels = listed(userId, DriveDataFolder.LABELS) ?: return null
-        val hidden = listed(userId, DriveDataFolder.HIDDEN) ?: return null
-        return SharedBackupListing(ml, labels, hidden)
+    /**
+     * The three folders' files, read side by side, or null when any listing failed: a round that cannot read
+     * writes nothing.
+     */
+    suspend fun list(userId: UserId): SharedBackupListing? = coroutineScope {
+        val ml = async { listed(userId, DriveDataFolder.ML) }
+        val labels = async { listed(userId, DriveDataFolder.LABELS) }
+        val hidden = async { listed(userId, DriveDataFolder.HIDDEN) }
+        SharedBackupListing(
+            ml.await() ?: return@coroutineScope null,
+            labels.await() ?: return@coroutineScope null,
+            hidden.await() ?: return@coroutineScope null,
+        )
     }
 
     private suspend fun listed(userId: UserId, area: DriveDataFolder): List<MlDriveFile>? =

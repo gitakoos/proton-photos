@@ -128,20 +128,20 @@ data class MlDriveUpload(val nodeUid: String, val revisionUid: String, val creat
  * `createIfMissing`, which callers reach after the user agreed; every other call treats a missing
  * folder as "nothing stored".
  *
- * The resolved folder uids are kept in memory only, and nothing here writes a My files node uid to
- * sync_state or photo_listing. Log lines carry class names and SDK error codes, never names, paths
- * or ids.
+ * The resolved folder uids are kept in [DriveFolderMemory] and checked before each use; nothing here
+ * writes a My files node uid to sync_state or photo_listing. Log lines carry class names and SDK error
+ * codes, never names, paths or ids.
  */
 @Singleton
 class MlDriveStore @Inject constructor(
     @ApplicationContext private val context: Context,
     private val clientProvider: SdkDriveClientProvider,
     private val apiProvider: ApiProvider,
+    private val folderMemory: DriveFolderMemory,
 ) {
     private val folderMutex = Mutex()
     private val uploadMutex = Mutex()
     private val deviceIdMutex = Mutex()
-    private val knownFolders = HashMap<Pair<UserId, DriveDataFolder>, KnownFolders>()
 
     @Volatile
     private var cachedDeviceId: String? = null
@@ -366,7 +366,10 @@ class MlDriveStore @Inject constructor(
         }
     }
 
-    /** Resolves the [area] folder, through the in-memory record while it still checks out. */
+    /**
+     * Resolves the [area] folder: through the remembered one while it still checks out, else from My files,
+     * where the app's folder found for another area is taken first, so My files is walked once for all three.
+     */
     private suspend fun dataFolder(
         client: ProtonDriveClient,
         userId: UserId,
@@ -374,14 +377,14 @@ class MlDriveStore @Inject constructor(
         create: Boolean,
     ): Lookup =
         folderMutex.withLock {
-            knownFolders[userId to area]?.let { known ->
+            folderMemory.get(userId.id, area)?.let { known ->
                 if (stillInPlace(client, known, area)) return@withLock Lookup.Found(NodeUid(known.dataFolderUid))
-                knownFolders.remove(userId to area)
+                folderMemory.remove(userId.id, area)
             }
             if (!create && !hasMyFiles(userId)) return@withLock Lookup.Missing
             val myFilesUid = client.getMyFilesFolder().uid
-            val appFolderUid =
-                when (val lookup = childFolder(client, myFilesUid, MlDriveNaming.APP_FOLDER_NAME, create)) {
+            val appFolderUid = knownAppFolder(client, userId, myFilesUid)
+                ?: when (val lookup = childFolder(client, myFilesUid, MlDriveNaming.APP_FOLDER_NAME, create)) {
                     is Lookup.Found -> lookup.uid
                     else -> return@withLock lookup
                 }
@@ -390,17 +393,42 @@ class MlDriveStore @Inject constructor(
                     is Lookup.Found -> lookup.uid
                     else -> return@withLock lookup
                 }
-            knownFolders[userId to area] = KnownFolders(myFilesUid.value, appFolderUid.value, dataFolderUid.value)
+            folderMemory.put(
+                userId.id,
+                area,
+                DriveFolderMemory.Folders(myFilesUid.value, appFolderUid.value, dataFolderUid.value),
+            )
             Lookup.Found(dataFolderUid)
         }
 
-    /** Whether both remembered folders are still live, named as expected, and where they were. */
-    private suspend fun stillInPlace(client: ProtonDriveClient, known: KnownFolders, area: DriveDataFolder): Boolean {
-        val appFolder = client.getNode(NodeUid(known.appFolderUid))
-        if (!appFolder.isLiveFolder(MlDriveNaming.APP_FOLDER_NAME, known.myFilesUid)) return false
-        val dataFolder = client.getNode(NodeUid(known.dataFolderUid))
-        return dataFolder.isLiveFolder(area.folderName, known.appFolderUid)
+    /** The app's folder remembered for another area of this account, while it is still live under [myFilesUid]. */
+    private suspend fun knownAppFolder(client: ProtonDriveClient, userId: UserId, myFilesUid: NodeUid): NodeUid? {
+        val candidates = DriveDataFolder.entries
+            .mapNotNull { folderMemory.get(userId.id, it) }
+            .filter { it.myFilesUid == myFilesUid.value }
+            .map { it.appFolderUid }
+            .distinct()
+        if (candidates.isEmpty()) return null
+        return nodesOf(client, candidates.map(::NodeUid))
+            .firstOrNull { it.isLiveFolder(MlDriveNaming.APP_FOLDER_NAME, myFilesUid.value) }
+            ?.uid
     }
+
+    /** Whether both remembered folders are still live, named as expected, and where they were. */
+    private suspend fun stillInPlace(
+        client: ProtonDriveClient,
+        known: DriveFolderMemory.Folders,
+        area: DriveDataFolder,
+    ): Boolean {
+        val nodes = nodesOf(client, listOf(NodeUid(known.appFolderUid), NodeUid(known.dataFolderUid)))
+            .associateBy { it.uid.value }
+        return nodes[known.appFolderUid].isLiveFolder(MlDriveNaming.APP_FOLDER_NAME, known.myFilesUid) &&
+            nodes[known.dataFolderUid].isLiveFolder(area.folderName, known.appFolderUid)
+    }
+
+    /** The nodes of [uids], fetched a batch per call instead of one call per node. */
+    private suspend fun nodesOf(client: ProtonDriveClient, uids: List<NodeUid>): List<Node> =
+        uids.chunked(NODE_BATCH).flatMap { client.enumerateNodes(it).toList() }
 
     private fun Node?.isLiveFolder(expectedName: String, expectedParentUid: String): Boolean =
         this is FolderNode &&
@@ -445,7 +473,7 @@ class MlDriveStore @Inject constructor(
 
     /**
      * The live child of [parentUid] named exactly [name], or null. A free name answers in one call;
-     * only a taken one walks the children, which costs a node fetch per child.
+     * only a taken one walks the children, fetched a batch at a time.
      */
     private suspend fun findChild(
         client: ProtonDriveClient,
@@ -455,16 +483,13 @@ class MlDriveStore @Inject constructor(
         checkAvailability: Boolean = true,
     ): Node? {
         if (checkAvailability && client.getAvailableName(parentUid, name, target) == name) return null
-        for (childUid in client.enumerateFolderChildrenNodeUids(parentUid).toList()) {
-            val child = client.getNode(childUid) ?: continue
-            if (child.trashTime == null && child.name.getOrNull() == name) return child
-        }
-        return null
+        return nodesOf(client, client.enumerateFolderChildrenNodeUids(parentUid).toList())
+            .firstOrNull { it.trashTime == null && it.name.getOrNull() == name }
     }
 
     private suspend fun filesIn(client: ProtonDriveClient, folderUid: NodeUid): List<MlDriveFile> =
-        client.enumerateFolderChildrenNodeUids(folderUid).toList().mapNotNull { childUid ->
-            val file = client.getNode(childUid) as? FileNode ?: return@mapNotNull null
+        nodesOf(client, client.enumerateFolderChildrenNodeUids(folderUid).toList()).mapNotNull { node ->
+            val file = node as? FileNode ?: return@mapNotNull null
             val name = file.name.getOrNull()
             if (file.trashTime != null || name == null) return@mapNotNull null
             val revision = file.activeRevision
@@ -583,14 +608,11 @@ class MlDriveStore @Inject constructor(
         data object NameTaken : Lookup
     }
 
-    private data class KnownFolders(
-        val myFilesUid: String,
-        val appFolderUid: String,
-        val dataFolderUid: String,
-    )
-
     private companion object {
         const val TAG = "MlDriveStore"
+
+        /** How many nodes one batch fetch asks for. */
+        const val NODE_BATCH = 100
 
         /** The waits before an upload that failed with a network error is made again, one per further try. */
         val UPLOAD_RETRY_WAITS_MS = longArrayOf(2_000L, 5_000L)

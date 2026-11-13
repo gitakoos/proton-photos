@@ -116,6 +116,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val sdkDriveClientProvider: eu.akoos.photos.data.sdk.SdkDriveClientProvider,
     private val widgetSignOut: eu.akoos.photos.widget.PhotoWidgetSignOut,
     private val mlSyncSignOut: eu.akoos.photos.data.mlsync.MlSyncSignOut,
+    private val driveFolderMemory: eu.akoos.photos.data.mlsync.DriveFolderMemory,
     private val pendingMetadataEditDao: eu.akoos.photos.data.db.dao.PendingMetadataEditDao,
     private val importStagedDao: eu.akoos.photos.data.db.dao.ImportStagedDao,
     private val importHistoryDao: eu.akoos.photos.data.db.dao.ImportHistoryDao,
@@ -565,6 +566,8 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { faceCurationTimeDao.clearForUser(userId.id) }
         // The account's photo labels are its own private notes about its photos and leave with it.
         runCatching { photoLabels.clearForUser(userId) }
+        // Where the account's Drive data folders were found leaves with it too.
+        runCatching { driveFolderMemory.clearUser(userId.id) }
         // What the account queued and imported is free text and coordinates (descriptions, places, file
         // and album names) about a library the next person on this phone does not own.
         runCatching { pendingMetadataEditDao.clear() }

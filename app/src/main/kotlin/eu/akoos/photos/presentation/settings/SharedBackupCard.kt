@@ -75,6 +75,7 @@ import eu.akoos.photos.data.mlsync.MlDriveStore
 import eu.akoos.photos.data.mlsync.MlSyncController
 import eu.akoos.photos.data.mlsync.MlSyncOperation
 import eu.akoos.photos.data.mlsync.MlSyncState
+import eu.akoos.photos.data.sharedbackup.DriveCopiesMemory
 import eu.akoos.photos.data.sharedbackup.DriveDeviceCopies
 import eu.akoos.photos.data.sharedbackup.SharedBackupRunner
 import eu.akoos.photos.data.sharedbackup.SharedBackupScheduler
@@ -90,6 +91,7 @@ import eu.akoos.photos.presentation.settings.components.SettingsCard
 import eu.akoos.photos.presentation.settings.components.ToggleRow
 import eu.akoos.photos.presentation.theme.AppColors
 import eu.akoos.photos.presentation.theme.SheetBg
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -101,6 +103,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import me.proton.core.accountmanager.domain.AccountManager
 
@@ -115,6 +118,23 @@ internal fun sharedBackupLine(running: Boolean, status: SharedBackupStatus): Sha
     else -> SharedBackupLine.LAST
 }
 
+/** How long reading the backups on Drive may take before the list stops waiting for it. */
+internal const val DRIVE_COPIES_READ_TIMEOUT_MS = 60_000L
+
+/**
+ * What the list of the backups on Drive shows once a read ended: the [fresh] list when it came, else the list [kept]
+ * from an earlier read in this app session, else the failure. Pure, so it is unit-tested.
+ */
+internal fun copiesAfterRead(
+    kept: List<DriveDeviceCopies>?,
+    fresh: List<DriveDeviceCopies>?,
+    ownDeviceId: String?,
+): SharedBackupViewModel.Copies = when {
+    fresh != null -> SharedBackupViewModel.Copies.Loaded(ownDeviceId, fresh)
+    kept != null -> SharedBackupViewModel.Copies.Loaded(ownDeviceId, kept)
+    else -> SharedBackupViewModel.Copies.Failed
+}
+
 /** The Drive backup card's automatic switch, its status, and the Back up now and Load from Drive rows. */
 @HiltViewModel
 class SharedBackupViewModel @Inject constructor(
@@ -123,6 +143,7 @@ class SharedBackupViewModel @Inject constructor(
     private val runner: SharedBackupRunner,
     private val driveStore: MlDriveStore,
     private val accountManager: AccountManager,
+    private val copiesMemory: DriveCopiesMemory,
     controller: MlSyncController,
 ) : ViewModel() {
 
@@ -144,12 +165,21 @@ class SharedBackupViewModel @Inject constructor(
         viewModelScope.launch { scheduler.loadNow() }
     }
 
-    /** The list of the backups on Drive while its sheet is open: null closed. */
+    /**
+     * The list of the backups on Drive while its sheet is open: null closed. [Loaded.refreshing] while a list read
+     * earlier in this app session is shown and the list is being read again.
+     */
     internal sealed interface Copies {
         data object Loading : Copies
         data object Failed : Copies
-        data class Loaded(val ownDeviceId: String?, val devices: List<DriveDeviceCopies>) : Copies
+        data class Loaded(
+            val ownDeviceId: String?,
+            val devices: List<DriveDeviceCopies>,
+            val refreshing: Boolean = false,
+        ) : Copies
     }
+
+    private var readJob: Job? = null
 
     private val _copies = MutableStateFlow<Copies?>(null)
     internal val copies: StateFlow<Copies?> = _copies.asStateFlow()
@@ -159,10 +189,11 @@ class SharedBackupViewModel @Inject constructor(
 
     fun openCopies() {
         _copies.value = Copies.Loading
-        viewModelScope.launch { _copies.value = readCopies() }
+        readCopies(showKept = true)
     }
 
     fun closeCopies() {
+        readJob?.cancel()
         _copies.value = null
     }
 
@@ -175,20 +206,37 @@ class SharedBackupViewModel @Inject constructor(
         viewModelScope.launch {
             val userId = accountManager.getPrimaryUserId().first()
             if (userId != null && runner.trash(userId, device)) {
+                copiesMemory.drop(userId.id, device.deviceId)
                 (_copies.value as? Copies.Loaded)?.let { loaded ->
                     _copies.value = loaded.copy(devices = loaded.devices.filterNot { it.deviceId == device.deviceId })
                 }
             } else {
                 _trashFailed.tryEmit(Unit)
-                if (_copies.value != null) _copies.value = readCopies()
+                if (_copies.value != null) readCopies(showKept = false)
             }
         }
     }
 
-    private suspend fun readCopies(): Copies {
-        val userId = accountManager.getPrimaryUserId().first() ?: return Copies.Failed
-        val own = runCatching { driveStore.deviceId() }.getOrNull()
-        return runner.devices(userId)?.let { Copies.Loaded(own, it) } ?: Copies.Failed
+    /**
+     * Reads the list of the backups on Drive into the open sheet, for at most [DRIVE_COPIES_READ_TIMEOUT_MS]. With
+     * [showKept] the list read earlier in this app session shows meanwhile. A sheet closed during the read stays
+     * closed.
+     */
+    private fun readCopies(showKept: Boolean) {
+        readJob?.cancel()
+        readJob = viewModelScope.launch {
+            val userId = accountManager.getPrimaryUserId().first()
+            if (userId == null) {
+                if (_copies.value != null) _copies.value = Copies.Failed
+                return@launch
+            }
+            val own = runCatching { driveStore.deviceId() }.getOrNull()
+            val kept = copiesMemory.get(userId.id)
+            if (showKept && kept != null && _copies.value != null) _copies.value = Copies.Loaded(own, kept, refreshing = true)
+            val fresh = withTimeoutOrNull(DRIVE_COPIES_READ_TIMEOUT_MS) { runner.devices(userId) }
+            fresh?.let { copiesMemory.put(userId.id, it) }
+            if (_copies.value != null) _copies.value = copiesAfterRead(kept, fresh, own)
+        }
     }
 }
 
@@ -351,13 +399,18 @@ private fun DriveCopiesSheet(
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 8.dp),
         ) {
-            Text(
-                stringResource(R.string.drive_copies_row),
-                color = colors.fgPrimary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 16.dp),
-            )
+            Row(modifier = Modifier.padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.drive_copies_row),
+                    color = colors.fgPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if ((copies as? SharedBackupViewModel.Copies.Loaded)?.refreshing == true) {
+                    Spacer(Modifier.width(10.dp))
+                    CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = colors.accent)
+                }
+            }
             when (copies) {
                 SharedBackupViewModel.Copies.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = colors.accent)
