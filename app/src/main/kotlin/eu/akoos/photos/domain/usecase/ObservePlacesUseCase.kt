@@ -30,16 +30,22 @@ import eu.akoos.photos.data.db.dao.PhotoLocationDao
 import eu.akoos.photos.data.db.entity.PhotoLocationEntity
 import eu.akoos.photos.data.db.entity.isNullIsland
 import eu.akoos.photos.data.repository.drive.ThumbnailUrlStore
+import eu.akoos.photos.di.AppScope
 import eu.akoos.photos.domain.entity.GalleryItem
 import eu.akoos.photos.util.OfflineGeocoder
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.shareIn
 import me.proton.core.accountmanager.domain.AccountManager
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * Streams the account's photos grouped into countries and cities for the Places surfaces, reusing the
@@ -50,23 +56,40 @@ import javax.inject.Inject
  * A per-location label cache makes a re-emit cheap: the coordinate is stable for a `photo_location` id,
  * so once a row is geocoded a later emit (a library or thumbnail change) reuses the label instead of
  * rescanning the dataset. A signed-out session has no location rows, so Places is simply empty.
+ *
+ * One instance and one grouping for the whole app: the Collection, Places and the map read the same
+ * stream, and the label cache outlives the screens, so opening one of them again reuses every label.
  */
+@Singleton
 class ObservePlacesUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
     private val accountManager: AccountManager,
     private val photoLocationDao: PhotoLocationDao,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val thumbnailUrlStore: ThumbnailUrlStore,
+    @AppScope private val appScope: CoroutineScope,
 ) {
     private val labelCache = ConcurrentHashMap<String, PlaceLabelParts>()
 
-    operator fun invoke(): Flow<PlacesData> = accountManager.getPrimaryUserId()
+    /** The locale the cached labels' country names are in; a language change empties the cache. */
+    @Volatile private var labelLocale: Locale? = null
+
+    operator fun invoke(): Flow<PlacesData> = shared
+
+    // Dropped a few seconds after the last screen leaves, and nothing replayed after that, so a later
+    // open (or another account) groups the current rows; the labels stay in [labelCache].
+    private val shared: Flow<PlacesData> = accountManager.getPrimaryUserId()
         .flatMapLatest { userId ->
             // Read the local partition when signed out, so a guest's places populate too.
             val locationFlow = photoLocationDao.observeForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER)
             val libraryFlow = if (userId == null) getGalleryItems.invokeLocalOnly()
             else getGalleryItems.invoke(userId)
             combine(locationFlow, libraryFlow, thumbnailUrlStore.urls) { locations, library, urls ->
+                val locale = Locale.getDefault()
+                if (labelLocale != locale) {
+                    labelCache.clear()
+                    labelLocale = locale
+                }
                 val itemByKey = itemsByKey(library)
                 val located = locations.filterNot { it.isNullIsland() }.mapNotNull { loc ->
                     itemByKey[loc.id]?.let {
@@ -79,6 +102,7 @@ class ObservePlacesUseCase @Inject constructor(
             }
         }
         .flowOn(Dispatchers.Default)
+        .shareIn(appScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), replay = 1)
 
     private suspend fun labelFor(item: LocatedItem): PlaceLabelParts? {
         labelCache[item.id]?.let { return it }

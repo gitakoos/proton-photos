@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import me.proton.core.accountmanager.domain.AccountManager
 import me.proton.core.domain.entity.UserId
@@ -167,8 +168,9 @@ class MemoriesViewModel @Inject constructor(
             }
         }
         // The busiest cities ride alongside the day/season/people groupings. ObservePlacesUseCase reads
-        // the local partition when signed out, so a guest's cities populate here too.
-        .combine(observePlacesUseCase().map { it.cities.take(12) }) { state, cities ->
+        // the local partition when signed out, so a guest's cities populate here too. The rest of the
+        // page shows without waiting for them: the cities start empty and their row fills in after.
+        .combine(observePlacesUseCase().map { it.cities.take(12) }.onStart { emit(emptyList()) }) { state, cities ->
             state.copy(places = cities)
         }
         .flowOn(Dispatchers.Default)
