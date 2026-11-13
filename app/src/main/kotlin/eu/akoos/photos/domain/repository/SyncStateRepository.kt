@@ -126,6 +126,10 @@ interface SyncStateRepository {
     /** Unguarded queued clear for the success / pairing path, where the row is known backed up. */
     suspend fun clearQueuedForSynced(localUri: String)
 
+    /** Drops the upload a device photo was given only to join an album, once no album is left for it to join.
+     *  Only a still pending LOCAL_ONLY row queued for an album add. */
+    suspend fun clearAlbumAddIntent(localUri: String) {}
+
     /** The device photo's Drive copy is gone: keep the folder backup from uploading it again. */
     suspend fun markRemovedFromDrive(localUri: String)
     /** [clearQueuedForSynced] for every one of [localUris], in as few writes as the SQL limit allows. */

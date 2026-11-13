@@ -282,4 +282,20 @@ class SelectionActionsTest {
             albumMembershipState(ids, setOf("link-a", "link-b")),
         )
     }
+
+    @Test
+    fun `device-only photos count towards the total when the picker passes them`() {
+        // One cloud photo in the album plus one device-only photo: a fraction, not All, since an add
+        // still queues the device photo to join the album.
+        val mixed = listOf(synced("link-a", "uri://a"), localOnly("uri://b"))
+        val ids = selectionCloudLinkIds(mixed)
+        assertEquals(
+            AlbumMembership.Some(inAlbum = 1, total = 2),
+            albumMembershipState(ids, setOf("link-a"), deviceOnlyCount = mixed.size - ids.size),
+        )
+        assertEquals(
+            AlbumMembership.None,
+            albumMembershipState(ids, setOf("other"), deviceOnlyCount = mixed.size - ids.size),
+        )
+    }
 }

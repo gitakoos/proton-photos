@@ -569,6 +569,12 @@ class PhotoViewerViewModel @Inject constructor(
     private val _albums = MutableStateFlow<List<Album>>(emptyList())
     val albums: StateFlow<List<Album>> = _albums.asStateFlow()
 
+    init {
+        // An album changed outside this screen, as when a device photo joins its album once backed up:
+        // reload, so the album counts and covers in the details sheet and the picker follow.
+        viewModelScope.launch { albumListEvents.changes.collect { loadAlbums() } }
+    }
+
     /** Cloud-album linkIds containing the viewed photo, driving the picker's checkmarks +
      *  remove-on-tap. Refreshed each time the sheet opens so a Drive-web change self-corrects. */
     private val _currentPhotoAlbumIds = MutableStateFlow<Set<String>>(emptySet())
@@ -2088,9 +2094,13 @@ class PhotoViewerViewModel @Inject constructor(
                 is GalleryItem.CloudOnly -> item.cloud.linkId
                 is GalleryItem.LocalOnly -> {
                     // A device photo is not in the album yet, only queued to join it once backed up:
-                    // taking it out drops that one queued pair.
-                    runCatching { uploadAlbumTargetDao.deleteTarget(item.local.uri, albumLinkId) }
-                        .onSuccess { noteDetailsAlbum(albumLinkId, member = false, queued = true) }
+                    // taking it out drops that one queued pair. With no album left to join, the upload
+                    // that only the join asked for is dropped too.
+                    val uri = item.local.uri
+                    runCatching {
+                        uploadAlbumTargetDao.deleteTarget(uri, albumLinkId)
+                        if (uploadAlbumTargetDao.getTargetsFor(uri).isEmpty()) syncStateRepo.clearAlbumAddIntent(uri)
+                    }.onSuccess { noteDetailsAlbum(albumLinkId, member = false, queued = true) }
                     return@launch
                 }
             }

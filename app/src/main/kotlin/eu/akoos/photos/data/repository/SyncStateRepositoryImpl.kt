@@ -149,6 +149,10 @@ class SyncStateRepositoryImpl @Inject constructor(
 
     override suspend fun clearQueuedForSynced(localUri: String) = dao.clearQueuedForSynced(localUri)
 
+    override suspend fun clearAlbumAddIntent(localUri: String) {
+        dao.clearAlbumAddIntent(localUri)
+    }
+
     override suspend fun markRemovedFromDrive(localUri: String) = dao.markRemovedFromDrive(localUri)
 
     override suspend fun clearQueuedForSyncedAll(localUris: List<String>) =

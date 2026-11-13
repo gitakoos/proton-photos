@@ -574,4 +574,26 @@ class SyncStateDaoTest {
         assertTrue(listOf("uri://claimed", "uri://done", "uri://hidden").none { rows.getValue(it).queued })
         assertTrue(rows.getValue("uri://new").queued)
     }
+
+    @Test
+    fun `clearAlbumAddIntent drops only a pending album-add upload`() = runTest {
+        dao.upsert(entity("uri://album"))
+        dao.markQueued("uri://album", source = "ALBUM_ADD", at = 5L)
+        dao.upsert(entity("uri://manual"))
+        dao.markQueued("uri://manual", source = "MANUAL", at = 5L)
+        dao.upsert(entity("uri://uploading", status = SyncStatus.UPLOADING))
+        dao.markQueued("uri://uploading", source = "ALBUM_ADD", at = 5L)
+
+        assertEquals(1, dao.clearAlbumAddIntent("uri://album"))
+        assertEquals(0, dao.clearAlbumAddIntent("uri://manual"))
+        assertEquals(0, dao.clearAlbumAddIntent("uri://uploading"))
+
+        val album = dao.getByUri("uri://album")!!
+        assertEquals(false, album.queued)
+        assertNull(album.queueSource)
+        assertNull(album.queuedAt)
+        assertEquals("MANUAL", dao.getByUri("uri://manual")?.queueSource)
+        assertTrue(dao.getByUri("uri://manual")!!.queued)
+        assertTrue(dao.getByUri("uri://uploading")!!.queued)
+    }
 }

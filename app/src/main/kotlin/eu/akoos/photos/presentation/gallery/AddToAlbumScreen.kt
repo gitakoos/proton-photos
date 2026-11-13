@@ -180,7 +180,11 @@ internal fun GalleryAddToAlbumDialog(
                 }
                 val collapse = rememberStripCollapse()
                 val cardOf: @Composable (Album, Modifier) -> Unit = { album, modifier ->
-                    val membership = albumMembershipState(selectionLinkIds, albumMemberIds[album.linkId].orEmpty())
+                    val membership = albumMembershipState(
+                        selectionLinkIds,
+                        albumMemberIds[album.linkId].orEmpty(),
+                        deviceOnlyCount = selectedItems.size - selectionLinkIds.size,
+                    )
                     AlbumPickCard(
                         album = album,
                         listView = listView,

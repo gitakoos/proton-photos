@@ -349,6 +349,18 @@ interface SyncStateDao {
     @Query("UPDATE sync_state SET queued = 0, queueSource = NULL, queuedAt = NULL WHERE localUri = :localUri")
     suspend fun clearQueuedForSynced(localUri: String)
 
+    /**
+     * Drops the upload a device photo was given only to join an album (`QueueSource.ALBUM_ADD`), for when it
+     * has no album left to join. The source is cleared with the flag, or reconcile would re-queue the row as a
+     * stranded intent; a photo whose folder is backed up is queued again by that folder's backup. Only a still
+     * pending LOCAL_ONLY row: an UPLOADING claim and a SYNCED row are left alone. Returns the rows changed.
+     */
+    @Query(
+        "UPDATE sync_state SET queued = 0, queueSource = NULL, queuedAt = NULL " +
+            "WHERE localUri = :localUri AND status = 'LOCAL_ONLY' AND queueSource = 'ALBUM_ADD'"
+    )
+    suspend fun clearAlbumAddIntent(localUri: String): Int
+
     /** Marks a device photo whose Drive copy is gone as removed from Drive on purpose, so the folder
      *  backup does not upload it again (see `QueueSource.REMOVED_FROM_DRIVE`). Only a LOCAL_ONLY row. */
     @Query(
