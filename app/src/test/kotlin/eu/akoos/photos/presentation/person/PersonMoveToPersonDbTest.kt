@@ -106,6 +106,8 @@ class PersonMoveToPersonDbTest {
             assignPersonName = mockk(relaxed = true),
             faceIndexingScheduler = scheduler,
             ignorePeople = mockk(relaxed = true),
+            hidePersonUseCase = mockk(relaxed = true),
+            undoController = mockk(relaxed = true),
             renamePerson = mockk(relaxed = true),
             assignFacesToPerson = AssignFacesToPersonUseCase(
                 db.faceDao(), db.personDao(), db.personManualPhotoDao(), db.personCoverDao(), db.notPersonDao(),

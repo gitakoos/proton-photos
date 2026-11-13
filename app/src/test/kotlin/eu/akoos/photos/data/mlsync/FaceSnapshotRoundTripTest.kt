@@ -38,9 +38,12 @@ import eu.akoos.photos.data.db.entity.FaceScanEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PersonHiddenEntity
+import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PersonNameStateEntity
 import eu.akoos.photos.data.db.entity.SyncStateEntity
+import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.face.FaceModelAssets
 import eu.akoos.photos.data.face.FaceReattachData
 import eu.akoos.photos.data.face.FaceCurationLog
@@ -51,6 +54,7 @@ import eu.akoos.photos.data.face.ReattachManual
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
 import eu.akoos.photos.domain.entity.SyncStatus
+import eu.akoos.photos.domain.usecase.ClusterFacesUseCase
 import eu.akoos.photos.domain.usecase.FACE_CLUSTER_PARAMS_VERSION
 import eu.akoos.photos.domain.usecase.FACE_EMBEDDING_DIM
 import eu.akoos.photos.domain.usecase.FACE_INDEX_VERSION_V3
@@ -87,6 +91,8 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.util.Base64
 import java.util.Random
@@ -1110,6 +1116,163 @@ class FaceSnapshotRoundTripTest {
         assertTrue(covers().isEmpty())
         assertFalse(reattachFile().exists())
         assertEquals(listOf("linkO#0"), target.faceDao().observeFacesForUser("other").first().map { it.id })
+    }
+
+    // ---- Hidden people (snapshot version 7) ----
+
+    private val hiddenToken = eu.akoos.photos.domain.usecase.HiddenPersonToken.PREFIX + "00112233445566778899aabbccddeeff"
+
+    /** A unit vector near [axis], so faces made from the same axis group together under clustering. */
+    private fun nearVector(axis: Int): ByteArray {
+        val v = FloatArray(FACE_EMBEDDING_DIM)
+        v[0] = 1f
+        v[axis] = 0.1f
+        val norm = Math.sqrt(v.sumOf { (it * it).toDouble() }).toFloat()
+        val buffer = ByteBuffer.allocate(FACE_EMBEDDING_DIM * Float.SIZE_BYTES).order(ByteOrder.LITTLE_ENDIAN)
+        for (x in v) buffer.putFloat(x / norm)
+        return buffer.array()
+    }
+
+    private suspend fun hiddenRows(db: AppDatabase = target): Map<String, Pair<Boolean, Long>> =
+        db.personHiddenDao().rowsForUser(ACCOUNT).associate { it.name to (it.hidden to it.changedAt) }
+
+    private suspend fun hiddenRow(db: AppDatabase, name: String, hidden: Boolean, at: Long) =
+        db.personHiddenDao().set(PersonHiddenEntity(ACCOUNT, name, hidden, at))
+
+    /** A named person "Alice" and a never-named group hidden under the reserved token, three faces each. */
+    private suspend fun seedHiddenSource() {
+        source.personDao().upsert(PersonEntity(id = 1, userId = ACCOUNT, displayName = "Alice", faceCount = 3))
+        source.personDao().upsert(PersonEntity(id = 2, userId = ACCOUNT, displayName = hiddenToken, faceCount = 3))
+        val rows = ArrayList<FaceEntity>()
+        for (i in 1..3) {
+            rows += face("a$i#0", "a$i", 0.1f, 0.1f, 0.3f, 0.3f, seed = i, personId = 1, manualName = "Alice", vector = nearVector(i))
+            rows += face("t$i#0", "t$i", 0.1f, 0.1f, 0.3f, 0.3f, seed = 10 + i, personId = 2, manualName = hiddenToken, vector = nearVector(i + 6))
+            source.faceScanDao().upsert(listOf(FaceScanEntity(ACCOUNT, "a$i"), FaceScanEntity(ACCOUNT, "t$i")))
+        }
+        source.faceDao().upsert(rows)
+        hiddenRow(source, "Alice", true, 1_700_000_000_000L)
+        hiddenRow(source, hiddenToken, true, 1_700_000_001_000L)
+    }
+
+    @Test
+    fun `a replace carries a hidden person and a token group, which stay together and hidden after a regroup`() = runTest {
+        seedHiddenSource()
+
+        val result = import(export(), FaceSnapshotMode.Replace)
+
+        assertTrue(result is FaceSnapshotImportResult.Imported)
+        assertEquals(
+            mapOf("Alice" to (true to 1_700_000_000_000L), hiddenToken to (true to 1_700_000_001_000L)),
+            hiddenRows(),
+        )
+        val cluster = ClusterFacesUseCase(
+            target.faceDao(), target.personDao(), target.personManualPhotoDao(), target.notPersonDao(),
+            target.personCoverDao(), target.clusterSummaryDao(), target, FaceEditCounter(),
+        )
+        assertTrue(cluster(user).committed)
+        val people = target.personDao().allForUser(ACCOUNT)
+        val tokenPerson = people.single { it.displayName == hiddenToken }
+        assertEquals(setOf("t1#0", "t2#0", "t3#0"), target.faceDao().faceIdsForPerson(ACCOUNT, tokenPerson.id).toSet())
+        assertEquals(
+            setOf("Alice", hiddenToken),
+            target.personDao().observeHiddenPeopleForUser(ACCOUNT).first().mapNotNull { it.displayName }.toSet(),
+        )
+        assertTrue(target.personDao().observePeopleForUser(ACCOUNT).first().none { it.displayName != null })
+    }
+
+    @Test
+    fun `a merge applies a newer hide, passes over an older one and carries a show`() = runTest {
+        hiddenRow(source, "Alice", false, 6_000L)
+        hiddenRow(source, "Bob", false, 50L)
+        hiddenRow(source, "Cara", true, 1_000L)
+        hiddenRow(source, "Dave", true, 3_000L)
+        hiddenRow(target, "Alice", true, 5_000L)
+        hiddenRow(target, "Bob", true, 100L)
+        hiddenRow(target, "Cara", true, 9_000L)
+
+        assertTrue(import(export(), FaceSnapshotMode.Merge) is FaceSnapshotImportResult.Imported)
+
+        assertEquals(
+            mapOf(
+                "Alice" to (false to 6_000L),
+                "Bob" to (true to 100L),
+                "Cara" to (true to 9_000L),
+                "Dave" to (true to 3_000L),
+            ),
+            hiddenRows(),
+        )
+    }
+
+    @Test
+    fun `a hidden row under another spelling of the name is one row`() = runTest {
+        hiddenRow(source, "anna", true, 2_000L)
+        hiddenRow(target, "Anna", false, 1_000L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertEquals(mapOf("Anna" to (true to 2_000L)), hiddenRows())
+    }
+
+    @Test
+    fun `a rename moves the hidden row and a name taken off drops it`() = runTest {
+        source.personNameDao().addChange(PersonNameChangeEntity(ACCOUNT, "Anna", "Anne", 7_000L))
+        source.personNameDao().addChange(PersonNameChangeEntity(ACCOUNT, "Bob", "", 7_000L))
+        hiddenRow(source, "Anne", true, 900L)
+        target.personDao().upsert(PersonEntity(id = 1, userId = ACCOUNT, displayName = "Anna", faceCount = 1))
+        target.personDao().upsert(PersonEntity(id = 2, userId = ACCOUNT, displayName = "Bob", faceCount = 1))
+        target.faceDao().upsert(
+            listOf(
+                face("x1#0", "x1", 0.1f, 0.1f, 0.3f, 0.3f, seed = 1, personId = 1, manualName = "Anna"),
+                face("x2#0", "x2", 0.1f, 0.1f, 0.3f, 0.3f, seed = 2, personId = 2, manualName = "Bob"),
+            ),
+        )
+        hiddenRow(target, "Anna", true, 1_000L)
+        hiddenRow(target, "Bob", true, 1_100L)
+
+        import(export(), FaceSnapshotMode.Merge)
+
+        assertEquals(mapOf("Anne" to (true to 1_000L)), hiddenRows())
+        assertEquals("Anne", target.personDao().personById(1L)!!.displayName)
+        assertNull(target.personDao().personById(2L)!!.displayName)
+    }
+
+    @Test
+    fun `reading the same copy again changes nothing`() = runTest {
+        seedHiddenSource()
+        val sealed = export()
+        import(sealed, FaceSnapshotMode.Merge)
+        val rows = hiddenRows()
+        val faceIds = faces().keys
+        val people = target.personDao().allForUser(ACCOUNT).map { it.displayName }.toSet()
+
+        import(sealed, FaceSnapshotMode.Merge)
+
+        assertEquals(rows, hiddenRows())
+        assertEquals(faceIds, faces().keys)
+        assertEquals(people, target.personDao().allForUser(ACCOUNT).map { it.displayName }.toSet())
+    }
+
+    @Test
+    fun `forgetting an account deletes its hidden rows`() = runTest {
+        hiddenRow(target, "Alice", true, 1L)
+
+        FaceSnapshotImporter(context, target, sealing()).forgetAccount(user)
+
+        assertTrue(hiddenRows().isEmpty())
+    }
+
+    @Test
+    fun `a reserved name token carries through a set taken in like any confirmed name`() {
+        val token = hiddenToken
+        val fresh = carriedCuration(null, SnapshotFaceCuration(personName = token, confirmedName = token, rejected = false))
+        assertEquals(CarriedCuration(false, token, token), fresh)
+
+        val adopted = carriedCuration(
+            LocalFaceCuration(groupedName = null),
+            SnapshotFaceCuration(personName = token, confirmedName = token, rejected = false),
+        )
+        assertEquals(token, adopted.confirmedName)
+        assertEquals(token, adopted.groupedName)
     }
 
     private fun v3File(faces: List<ParsedFace>, people: List<ParsedPerson>): ByteArray {

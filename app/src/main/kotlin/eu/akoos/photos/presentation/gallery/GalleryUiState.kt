@@ -239,13 +239,14 @@ data class FaceBox(
 
 /**
  * Adapt a domain [eu.akoos.photos.domain.model.PersonSummary] to the UI [PersonUi], dropping a person
- * with no resolvable cover (so a tile never renders blank). Shared by every surface that lists people.
+ * with no resolvable cover (so a tile never renders blank). A reserved hidden-group name reads as no name.
+ * Shared by every surface that lists people.
  */
 fun eu.akoos.photos.domain.model.PersonSummary.toPersonUi(): PersonUi? {
     val cover = coverPhotoKey ?: return null
     return PersonUi(
         personId = personId,
-        displayName = displayName,
+        displayName = eu.akoos.photos.domain.usecase.HiddenPersonToken.visibleName(displayName),
         coverPhotoKey = cover,
         faceBox = faceBox?.let { FaceBox(it.left, it.top, it.right, it.bottom) },
         faceCount = faceCount,

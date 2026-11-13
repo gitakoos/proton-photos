@@ -116,6 +116,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
@@ -125,6 +126,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawOutline
@@ -1027,6 +1030,8 @@ internal fun PersonCard(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     selected: Boolean = false,
+    /** A person the user hid: the cover is dimmed and carries the eye-off badge. */
+    hidden: Boolean = false,
 ) {
     val context = LocalContext.current
     val model = rememberFaceCoverModel(person.coverPhotoKey)
@@ -1057,7 +1062,8 @@ internal fun PersonCard(
             model = request,
             contentDescription = name,
             contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
+            colorFilter = if (hidden) HiddenCoverFilter else null,
+            modifier = Modifier.fillMaxSize().then(if (hidden) Modifier.alpha(HIDDEN_COVER_ALPHA) else Modifier),
         )
         // Bottom gradient so the caption stays legible over bright covers.
         Box(
@@ -1091,6 +1097,7 @@ internal fun PersonCard(
                 fontWeight = FontWeight.Medium,
             )
         }
+        if (hidden) HiddenBadge(Modifier.align(Alignment.TopEnd).padding(8.dp))
         if (selected) {
             Box(modifier = Modifier.matchParentSize().background(Accent.copy(alpha = 0.30f)))
             Box(
@@ -1121,6 +1128,10 @@ internal fun PersonCard(
 internal fun PersonRow(
     person: PersonUi,
     onClick: () -> Unit,
+    /** A person the user hid: the face is dimmed and carries the eye-off badge. */
+    hidden: Boolean = false,
+    /** Something after the name, such as an action; the row stays one tap target. */
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val model = rememberFaceCoverModel(person.coverPhotoKey)
@@ -1154,8 +1165,10 @@ internal fun PersonRow(
                 model = request,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
+                colorFilter = if (hidden) HiddenCoverFilter else null,
+                modifier = Modifier.fillMaxSize().then(if (hidden) Modifier.alpha(HIDDEN_COVER_ALPHA) else Modifier),
             )
+            if (hidden) HiddenBadge(Modifier.align(Alignment.BottomEnd).padding(2.dp), size = 20.dp)
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -1173,6 +1186,32 @@ internal fun PersonRow(
                 maxLines = 1,
             )
         }
+        trailing?.invoke()
+    }
+}
+
+/** How much of a hidden person's cover shows. */
+private const val HIDDEN_COVER_ALPHA = 0.45f
+
+/** A hidden person's cover loses most of its colour, so it reads as set aside. */
+private val HiddenCoverFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0.3f) })
+
+/** The small eye-off disc on a hidden person's cover. */
+@Composable
+private fun HiddenBadge(modifier: Modifier = Modifier, size: androidx.compose.ui.unit.Dp = 24.dp) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.55f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.VisibilityOff,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(size * 0.6f),
+        )
     }
 }
 

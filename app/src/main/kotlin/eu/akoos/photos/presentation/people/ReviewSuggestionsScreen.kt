@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CallMerge
 import androidx.compose.material.icons.filled.PersonOff
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -59,6 +60,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import eu.akoos.photos.R
 import eu.akoos.photos.presentation.common.ConfirmDialog
+import eu.akoos.photos.presentation.common.ConfirmSheet
 import eu.akoos.photos.presentation.common.IconBubble
 import eu.akoos.photos.presentation.common.ShimmerBox
 import eu.akoos.photos.presentation.common.floatingHeaderContentTopPadding
@@ -74,7 +76,8 @@ import eu.akoos.photos.presentation.theme.AppColors
  * or merge it into someone through the shared [NameOrMergeSheet], whose "See photos" opens the cluster;
  * the Unsorted pile opens instead, to be sorted face by face. Long-press to start a multi-selection,
  * then MERGE the selected clusters into one named person (folds a face split across a few clusters back
- * together) or mark them NOT A PERSON (drops statues, posters and false detections for good).
+ * together), HIDE them from People, or mark them NOT A PERSON (drops statues, posters and false detections
+ * for good).
  */
 @Composable
 fun ReviewSuggestionsScreen(
@@ -100,6 +103,7 @@ fun ReviewSuggestionsScreen(
     var showMerge by remember { mutableStateOf(false) }
     var pendingBulkMerge by remember { mutableStateOf<Pair<Set<Long>, String>?>(null) }
     var showNotPerson by remember { mutableStateOf(false) }
+    var showHide by remember { mutableStateOf(false) }
     var nameOrMerge by remember { mutableStateOf<PersonUi?>(null) }
     val selecting = selection.isNotEmpty()
 
@@ -230,6 +234,17 @@ fun ReviewSuggestionsScreen(
                         tint = colors.fgPrimary,
                     )
                     IconBubble(
+                        icon = Icons.Default.VisibilityOff,
+                        contentDescription = stringResource(R.string.person_hide_action),
+                        onClick = { showHide = true },
+                        diameter = 40.dp,
+                        iconSize = 18.dp,
+                        background = colors.pillBg,
+                        borderColor = colors.pillBorder,
+                        tint = colors.fgPrimary,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                    IconBubble(
                         icon = Icons.Default.PersonOff,
                         contentDescription = stringResource(R.string.person_not_a_person),
                         onClick = { showNotPerson = true },
@@ -300,6 +315,21 @@ fun ReviewSuggestionsScreen(
                 pendingBulkMerge = null
             },
             onDismiss = { pendingBulkMerge = null; selection = emptySet() },
+        )
+    }
+
+    if (showHide) {
+        ConfirmSheet(
+            title = stringResource(R.string.person_hide_confirm_title_group),
+            message = stringResource(R.string.person_hide_confirm_body),
+            confirmLabel = stringResource(R.string.person_hide_confirm),
+            dismissLabel = stringResource(R.string.cancel),
+            onConfirm = {
+                viewModel.bulkHide(selection)
+                selection = emptySet()
+                showHide = false
+            },
+            onDismiss = { showHide = false; selection = emptySet() },
         )
     }
 

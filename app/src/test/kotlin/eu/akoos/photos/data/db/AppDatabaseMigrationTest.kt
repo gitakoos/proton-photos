@@ -1703,8 +1703,22 @@ class AppDatabaseMigrationTest {
     }
 
     @Test
-    fun migrations_registerEveryStepUpToV56() {
-        for (from in 48..55) {
+    fun migrate_v56_to_v57_createsTheHiddenPeopleTable() {
+        Migrations.MIGRATION_56_57.migrate(db)
+
+        db.execSQL("INSERT INTO person_hidden (userId, name, hidden, changedAt) VALUES ('u', 'Anna', 1, 10)")
+        db.execSQL("INSERT OR REPLACE INTO person_hidden (userId, name, hidden, changedAt) VALUES ('u', 'Anna', 0, 20)")
+        db.query("SELECT hidden, changedAt FROM person_hidden").use { cur ->
+            assertTrue(cur.moveToFirst())
+            assertEquals("one row per name, the newer choice replacing the older", 0, cur.getInt(0))
+            assertEquals(20L, cur.getLong(1))
+            assertTrue(!cur.moveToNext())
+        }
+    }
+
+    @Test
+    fun migrations_registerEveryStepUpToV57() {
+        for (from in 48..56) {
             assertTrue("$from -> ${from + 1}", Migrations.ALL.any { it.startVersion == from && it.endVersion == from + 1 })
         }
     }

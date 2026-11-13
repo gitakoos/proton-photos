@@ -62,7 +62,7 @@ class AssignPersonNameUseCase @Inject constructor(
     suspend operator fun invoke(account: String, fromPersonId: Long, rawName: String, confirm: Boolean = true): Long =
         withContext(Dispatchers.IO) {
             val name = rawName.trim()
-            if (name.isEmpty()) return@withContext -1L
+            if (name.isEmpty() || HiddenPersonToken.isToken(name)) return@withContext -1L
             // One transaction, so the people lists read the fold once it is whole and a failed write leaves both
             // people as they were.
             faceEdits.edit {
@@ -86,6 +86,9 @@ class AssignPersonNameUseCase @Inject constructor(
             personManualPhotoDao.rename(account, oldName, name)
             faceDao.renameManualName(account, oldName, name)
             notPersonDao.rename(account, oldName, name)
+            // A hidden choice follows a rename of its own person, and goes with a person folded into another.
+            if (target == fromPersonId) appDatabase.personHiddenDao().rename(account, oldName, name)
+            else appDatabase.personHiddenDao().delete(account, oldName)
             personCoverDao.rename(account, oldName, name)
             appDatabase.faceCurationTimeDao().rename(account, oldName, name)
             PersonNameLog.renamed(appDatabase.personNameDao(), account, oldName, name, System.currentTimeMillis())

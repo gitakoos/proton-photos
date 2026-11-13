@@ -30,6 +30,11 @@ import eu.akoos.photos.data.db.AppDatabase
 import eu.akoos.photos.data.face.FaceEditCounter
 import eu.akoos.photos.data.db.entity.FaceEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.domain.usecase.HidePersonUseCase
+import eu.akoos.photos.domain.usecase.HiddenPersonToken
+import eu.akoos.photos.presentation.common.UndoAction
+import eu.akoos.photos.presentation.common.UndoController
+import io.mockk.verify
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.mockk.spyk
@@ -47,6 +52,7 @@ import me.proton.core.domain.entity.UserId
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -63,6 +69,7 @@ import org.robolectric.annotation.Config
 class ReviewSuggestionsBulkMergeDbTest {
 
     private val acct = "acct"
+    private val undoController = mockk<UndoController>(relaxed = true)
     private lateinit var db: AppDatabase
 
     @Before
@@ -94,6 +101,8 @@ class ReviewSuggestionsBulkMergeDbTest {
             personManualPhotoDao = db.personManualPhotoDao(),
             notPersonDao = db.notPersonDao(),
             ignorePeople = mockk(relaxed = true),
+            hidePersonUseCase = HidePersonUseCase(db.faceDao(), db.personDao(), db, FaceEditCounter()),
+            undoController = undoController,
             faceEdits = FaceEditCounter(),
         )
     }
@@ -172,5 +181,35 @@ class ReviewSuggestionsBulkMergeDbTest {
         assertEquals(setOf(1L, 2L), db.personDao().allForUser(acct).map { it.id }.toSet())
         assertNull(db.personDao().personById(1)!!.displayName)
         assertEquals(2, db.faceDao().faceIdsForPerson(acct, 2).size)
+    }
+
+    @Test
+    fun `a hide marks each chosen group hidden, keeps its faces and offers one undo`() = runBlocking {
+        cluster(1, listOf("a", "b", "c"), name = "Anna")
+        cluster(2, listOf("d", "e"))
+        cluster(3, listOf("f", "g"))
+        val vm = viewModel()
+
+        vm.bulkHide(setOf(1, 2))
+
+        verify(timeout = 10_000) { undoController.offer(UndoAction.PersonVisibility(listOf(1L, 2L), nowHidden = true)) }
+        assertEquals(setOf(1L, 2L), db.personDao().hiddenPersonIds(acct).toSet())
+        assertEquals(listOf(3L), db.personDao().allForUser(acct).map { it.id } - db.personDao().hiddenPersonIds(acct).toSet())
+        assertEquals(3, db.faceDao().faceIdsForPerson(acct, 1).size)
+        assertEquals(2, db.faceDao().faceIdsForPerson(acct, 2).size)
+        val unnamed = db.personDao().personById(2)!!
+        assertTrue(HiddenPersonToken.isToken(unnamed.displayName))
+        assertNull(HiddenPersonToken.visibleName(unnamed.displayName))
+    }
+
+    @Test
+    fun `a typed reserved name never names a group`() = runBlocking {
+        cluster(1, listOf("a", "b"))
+        val vm = viewModel()
+
+        vm.bulkMerge(setOf(1), HiddenPersonToken.make())
+
+        assertNull(db.personDao().personById(1)!!.displayName)
+        assertNull(vm.message.value)
     }
 }

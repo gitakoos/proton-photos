@@ -37,6 +37,7 @@ internal suspend fun AppDatabase.clearFaceData(account: String) {
     notPersonDao().clearForUser(account)
     personCoverDao().clearForUser(account)
     personNameDao().clearForUser(account)
+    personHiddenDao().clearForUser(account)
     faceCurationTimeDao().clearForUser(account)
     clusterSummaryDao().clearForUser(account)
 }

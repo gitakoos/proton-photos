@@ -45,6 +45,7 @@ import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.PeopleListCache
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.toPersonUi
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -60,6 +61,7 @@ class PeopleViewModel @Inject constructor(
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val getGalleryItems: GetGalleryItemsUseCase,
     private val peopleListCache: PeopleListCache,
+    private val hiddenPeopleSource: HiddenPeople,
     @ApplicationContext private val context: Context,
 ) : ViewModel() {
 
@@ -83,4 +85,13 @@ class PeopleViewModel @Inject constructor(
             ).map { list -> list.mapNotNull { it.toPersonUi() } }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), null)
+
+    /** The people the user hid, for the collapsible Hidden section. */
+    val hiddenPeople: StateFlow<List<PersonUi>> = hiddenPeopleSource.observe()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
+
+    /** Show a hidden person again, offering the undo ([HiddenPeople.show]). */
+    fun showPerson(personId: Long) {
+        viewModelScope.launch { hiddenPeopleSource.show(personId) }
+    }
 }

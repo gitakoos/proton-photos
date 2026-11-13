@@ -24,11 +24,13 @@ package eu.akoos.photos.data.mlsync
 
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.FACE_BLUR_KNOWN
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.FACE_REJECTED
+import eu.akoos.photos.data.mlsync.MlSnapshotFormat.HIDDEN_FLAG
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.NO_REFERENCE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.SCAN_HI_RES
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.SEARCH_TOMBSTONE
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_COVER
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_FACE
+import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_HIDDEN_PERSON
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_KEY
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_MANUAL_PHOTO
 import eu.akoos.photos.data.mlsync.MlSnapshotFormat.TAG_NAME_CHANGE
@@ -183,6 +185,14 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
                 out.i32(key)
                 out.u8(if (record.hiResScanned) SCAN_HI_RES else 0)
             }
+            is MlSnapshotRecord.HiddenPerson -> {
+                val person = personOf(record.personName)
+                require(record.changedAtMillis >= 0) { "a hidden change time is negative" }
+                out.u8(TAG_HIDDEN_PERSON)
+                out.i32(person)
+                out.u8(if (record.hidden) HIDDEN_FLAG else 0)
+                out.i64(record.changedAtMillis)
+            }
             is MlSnapshotRecord.SearchEmbedding -> writeSearchEmbedding(record)
         }
         writtenInSection++
@@ -311,6 +321,7 @@ class MlSnapshotWriter(output: OutputStream, val header: MlSnapshotHeader) {
         is MlSnapshotRecord.NotPerson -> TAG_NOT_PERSON
         is MlSnapshotRecord.Cover -> TAG_COVER
         is MlSnapshotRecord.ScanMarker -> TAG_SCAN_MARKER
+        is MlSnapshotRecord.HiddenPerson -> TAG_HIDDEN_PERSON
         is MlSnapshotRecord.SearchEmbedding -> TAG_SEARCH_EMBEDDING
     }
 

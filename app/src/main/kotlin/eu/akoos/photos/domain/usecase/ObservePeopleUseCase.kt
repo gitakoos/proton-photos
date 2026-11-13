@@ -81,25 +81,32 @@ class ObservePeopleUseCase @Inject constructor(
     /**
      * The account's people as summaries; [namedOnly] reads only the people carrying a name
      * ([PersonDao.observeNamedPeopleForUser]), for a surface that keeps no other, with the same people in the
-     * same order once the caller has dropped the blank names. The copied diagnostics time the full builds only.
+     * same order once the caller has dropped the blank names; [hiddenOnly] reads only the hidden people
+     * ([PersonDao.observeHiddenPeopleForUser]), a never-named one carrying its reserved name. The copied
+     * diagnostics time the full builds only.
      */
     operator fun invoke(
         userId: UserId?,
         items: Flow<List<GalleryItem>>,
         namedOnly: Boolean = false,
+        hiddenOnly: Boolean = false,
     ): Flow<List<PersonSummary>> {
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val keysMemo = AtomicReference<Pair<List<GalleryItem>, Set<String>>?>(null)
         val idsMemo = AtomicReference<Pair<List<GalleryItem>, Set<String>>?>(null)
-        val rows = if (namedOnly) personDao.observeNamedPeopleForUser(account) else personDao.observePeopleForUser(account)
+        val rows = when {
+            hiddenOnly -> personDao.observeHiddenPeopleForUser(account)
+            namedOnly -> personDao.observeNamedPeopleForUser(account)
+            else -> personDao.observePeopleForUser(account)
+        }
         return combine(rows.retryOnDbTear(TEAR_TAG, onRetry = { FaceDiagnostics.recordDbTear(TEAR_TAG, it) }), items) { people, feed ->
             people to feed
         }
             .mapCompleting { (people, feed) ->
-                if (!namedOnly) FaceDiagnostics.recordPeopleBuildStarted()
+                if (!namedOnly && !hiddenOnly) FaceDiagnostics.recordPeopleBuildStarted()
                 val startNs = System.nanoTime()
                 val build = buildSummaries(account, people, feed, keysMemo, idsMemo)
-                if (!namedOnly) {
+                if (!namedOnly && !hiddenOnly) {
                     FaceDiagnostics.recordPeopleBuildCompleted(
                         durationMs = (System.nanoTime() - startNs) / NANOS_PER_MS,
                         people = build.summaries.size,

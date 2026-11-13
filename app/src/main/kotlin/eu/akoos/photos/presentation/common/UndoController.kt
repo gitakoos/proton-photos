@@ -32,10 +32,14 @@ import eu.akoos.photos.data.hidden.HiddenCloudPhotos
 import eu.akoos.photos.data.hidden.HiddenVaultRestorer
 import eu.akoos.photos.data.preferences.SettingsKeys
 import eu.akoos.photos.data.preferences.settingsDataStore
+import eu.akoos.photos.data.db.entity.PhotoLocationEntity
+import eu.akoos.photos.data.face.FaceIndexingScheduler
 import eu.akoos.photos.domain.entity.SyncState
 import eu.akoos.photos.domain.entity.SyncStatus
 import eu.akoos.photos.domain.repository.DrivePhotoRepository
 import eu.akoos.photos.domain.repository.SyncStateRepository
+import eu.akoos.photos.domain.usecase.HidePersonUseCase
+import eu.akoos.photos.domain.usecase.ShowPersonUseCase
 import me.proton.core.domain.entity.UserId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,6 +74,9 @@ class UndoController @Inject constructor(
     private val cloudRepo: DrivePhotoRepository,
     private val syncStateRepo: SyncStateRepository,
     private val accountManager: AccountManager,
+    private val hidePerson: HidePersonUseCase,
+    private val showPerson: ShowPersonUseCase,
+    private val faceIndexingScheduler: FaceIndexingScheduler,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -135,6 +142,7 @@ class UndoController @Inject constructor(
                         cloudRepo.addPhotosToAlbum(userId, action.albumLinkId, action.photoLinkIds)
                         true
                     }
+                    is UndoAction.PersonVisibility -> reversePersonVisibility(action)
                 }
                 if (reversedSomething) _restored.tryEmit(action)
             } catch (e: Exception) {
@@ -173,6 +181,26 @@ class UndoController @Inject constructor(
         failed += hiddenVaultRestorer.restoreAll(action.hiddenUris)
         if (failed > 0) _undoFailed.tryEmit(failed)
         return failed < action.count
+    }
+
+    /**
+     * Do the opposite of a hide or a show, person by person, through the use cases that made it. Showing a
+     * never-named group takes its reserved label off, so the grouping is asked to run again, as the show
+     * on the People screen does.
+     */
+    private suspend fun reversePersonVisibility(action: UndoAction.PersonVisibility): Boolean {
+        val userId = accountManager.getPrimaryUserId().first()
+        val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
+        var regroup = false
+        for (id in action.personIds) {
+            if (action.nowHidden) {
+                if (showPerson(account, id)) regroup = true
+            } else {
+                hidePerson(account, id)
+            }
+        }
+        if (regroup) faceIndexingScheduler.requestRecluster(userId)
+        return true
     }
 
     /** Move each local MediaStore file back out of the device trash by clearing IS_TRASHED. Silent

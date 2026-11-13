@@ -76,6 +76,8 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.PersonCentroids
 import eu.akoos.photos.domain.usecase.cosineSimilarity
+import eu.akoos.photos.domain.usecase.HiddenPersonToken
+import eu.akoos.photos.presentation.common.UndoAction
 import eu.akoos.photos.domain.usecase.rankSuggestionCandidates
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.presentation.gallery.toPersonUi
@@ -131,6 +133,8 @@ class PersonDetailViewModel @Inject constructor(
     private val assignPersonName: eu.akoos.photos.domain.usecase.AssignPersonNameUseCase,
     private val faceIndexingScheduler: eu.akoos.photos.data.face.FaceIndexingScheduler,
     private val ignorePeople: eu.akoos.photos.domain.usecase.IgnorePeopleUseCase,
+    private val hidePersonUseCase: eu.akoos.photos.domain.usecase.HidePersonUseCase,
+    private val undoController: eu.akoos.photos.presentation.common.UndoController,
     private val renamePerson: eu.akoos.photos.domain.usecase.RenamePersonUseCase,
     private val assignFacesToPerson: eu.akoos.photos.domain.usecase.AssignFacesToPersonUseCase,
     private val faceEdits: eu.akoos.photos.data.face.FaceEditCounter,
@@ -263,7 +267,7 @@ class PersonDetailViewModel @Inject constructor(
             .withIndex()
             .filter { (index, row) -> index == 0 || row != null }
             .map { (_, row) ->
-                PageIdentity(name = row?.displayName?.takeIf { it.isNotBlank() }, isOther = row?.isOther == true)
+                PageIdentity(name = HiddenPersonToken.visibleName(row?.displayName), isOther = row?.isOther == true)
             }
             .distinctUntilChanged()
 
@@ -336,7 +340,7 @@ class PersonDetailViewModel @Inject constructor(
      */
     fun mergeWith(personId: Long, rawName: String) {
         val name = rawName.trim()
-        if (name.isEmpty()) return
+        if (name.isEmpty() || HiddenPersonToken.isToken(name)) return
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
@@ -399,7 +403,9 @@ class PersonDetailViewModel @Inject constructor(
         val userId = accountManager.getPrimaryUserId().first()
         val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
         val name = personDao.personById(personId)?.displayName
-        if (name.isNullOrBlank()) { _mergeSuggestion.value = null; return }
+        // A hidden person offers no merge, and is never offered as one.
+        val hiddenIds = personDao.hiddenPersonIds(account)
+        if (name.isNullOrBlank() || personId in hiddenIds) { _mergeSuggestion.value = null; return }
         // The Unsorted bucket is a mixed pile of junk, so its mean face is meaningless: never offer it
         // as a "might also be this person" merge, which would fold the whole pile into a named person.
         val otherId = personDao.otherPersonId(account)
@@ -410,7 +416,7 @@ class PersonDetailViewModel @Inject constructor(
             val rejectedFaceIds = notPersonDao.allForUser(account)
                 .filter { samePersonName(it.personName, name) }.mapTo(HashSet()) { it.faceId }
             val ranked = rankSuggestionCandidates(
-                target, centroids, skip = setOfNotNull(personId, otherId), threshold = FACE_SUGGEST_THRESHOLD,
+                target, centroids, skip = setOfNotNull(personId, otherId) + hiddenIds, threshold = FACE_SUGGEST_THRESHOLD,
             )
             for (pid in ranked) {
                 val pidFaces = faceDao.faceIdsForPerson(account, pid)
@@ -502,6 +508,7 @@ class PersonDetailViewModel @Inject constructor(
      *  onto the new name so added photos follow the rename, then re-observes under it. */
     fun rename(personId: Long, newName: String, onMergedAway: () -> Unit = {}) {
         val trimmed = newName.trim().ifEmpty { null }
+        if (HiddenPersonToken.isToken(trimmed)) return
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
@@ -568,7 +575,7 @@ class PersonDetailViewModel @Inject constructor(
                 clusterSummaryDao.deleteByPerson(personId)
             }
             faceIndexingScheduler.requestRecluster(accountManager.getPrimaryUserId().first())
-            _message.value = R.string.person_msg_dismissed
+            _message.value = R.string.person_msg_not_person
         }
     }
 
@@ -579,7 +586,7 @@ class PersonDetailViewModel @Inject constructor(
      *  existing name reassigns; a brand-new name splits the faces into a new person. */
     fun moveSelectedToPerson(fromPersonId: Long, photoKeys: Collection<String>, rawName: String) {
         val name = rawName.trim()
-        if (name.isEmpty() || photoKeys.isEmpty()) return
+        if (name.isEmpty() || HiddenPersonToken.isToken(name) || photoKeys.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             val userId = accountManager.getPrimaryUserId().first()
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
@@ -608,7 +615,39 @@ class PersonDetailViewModel @Inject constructor(
             val account = userId?.id ?: PhotoLocationEntity.LOCAL_USER
             ignorePeople(account, listOf(personId))
             faceIndexingScheduler.requestRecluster(userId)
-            withContext(Dispatchers.Main) { onDone() }
+            withContext(Dispatchers.Main) {
+                // The page is leaving, so the confirmation is told from here rather than by the page.
+                android.widget.Toast.makeText(context, R.string.person_msg_not_person, android.widget.Toast.LENGTH_SHORT).show()
+                onDone()
+            }
+        }
+    }
+
+    /**
+     * Hide this person from People and every suggestion ([HidePersonUseCase]); its photos and faces stay. A
+     * named person and a never-named group alike. [onDone] runs on the main thread so the page can go back,
+     * and the hide is then offered on the shared undo bar, whose Undo shows the person again. A person that
+     * could not be hidden is told and the page stays.
+     */
+    fun hidePerson(personId: Long, onDone: () -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val account = accountManager.getPrimaryUserId().first()?.id ?: PhotoLocationEntity.LOCAL_USER
+            val hidden = try {
+                hidePersonUseCase(account, personId)
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w(TAG, "hide person failed: ${e.javaClass.simpleName}")
+                null
+            }
+            if (hidden == null) {
+                _message.value = R.string.name_or_merge_failed
+                return@launch
+            }
+            withContext(Dispatchers.Main) {
+                // Offered after the page has left: the bar drops what was offered before a screen change.
+                onDone()
+                undoController.offer(UndoAction.PersonVisibility(listOf(personId), nowHidden = true))
+            }
         }
     }
 

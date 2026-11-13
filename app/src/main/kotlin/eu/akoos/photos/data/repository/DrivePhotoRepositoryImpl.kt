@@ -103,6 +103,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
     private val personManualPhotoDao: eu.akoos.photos.data.db.dao.PersonManualPhotoDao,
     private val clusterSummaryDao: eu.akoos.photos.data.db.dao.ClusterSummaryDao,
     private val personNameDao: eu.akoos.photos.data.db.dao.PersonNameDao,
+    private val personHiddenDao: eu.akoos.photos.data.db.dao.PersonHiddenDao,
     private val faceCurationTimeDao: eu.akoos.photos.data.db.dao.FaceCurationTimeDao,
     private val photoLabels: eu.akoos.photos.data.label.PhotoLabelRepository,
     private val photoListingDao: PhotoListingDao,
@@ -563,6 +564,7 @@ class DrivePhotoRepositoryImpl @Inject constructor(
         runCatching { clusterSummaryDao.clearForUser(userId.id) }
         runCatching { personNameDao.clearStates(userId.id) }
         runCatching { personNameDao.clearChanges(userId.id) }
+        runCatching { personHiddenDao.clearForUser(userId.id) }
         runCatching { faceCurationTimeDao.clearForUser(userId.id) }
         // The account's photo labels are its own private notes about its photos and leave with it.
         runCatching { photoLabels.clearForUser(userId) }

@@ -31,6 +31,7 @@ import eu.akoos.photos.data.db.entity.FaceScanEntity
 import eu.akoos.photos.data.db.entity.NotPersonEntity
 import eu.akoos.photos.data.db.entity.PersonCoverEntity
 import eu.akoos.photos.data.db.entity.PersonEntity
+import eu.akoos.photos.data.db.entity.PersonHiddenEntity
 import eu.akoos.photos.data.db.entity.PersonManualPhotoEntity
 import eu.akoos.photos.data.db.entity.PersonNameChangeEntity
 import eu.akoos.photos.data.db.entity.PersonNameStateEntity
@@ -125,6 +126,9 @@ internal class FaceSnapshotApplied(
  * a later name for is passed over. Every change and naming time is kept here too, so the next copy this
  * device writes hands them on.
  *
+ * A hidden choice ([MlSnapshotRecord.HiddenPerson]) is a name-keyed row the later of two devices' wins; a name
+ * change that applies moves it with the name, or drops it when the name is taken off.
+ *
  * Attached photos, "not this person" marks and covers carry the time each was set by hand, and the pieces taken
  * away by hand come as [MlSnapshotRecord.Removal]s before the faces. Of a setting and a removal of the same piece,
  * here or there, the later wins, and of two covers the later; the times are kept here as well.
@@ -145,6 +149,8 @@ internal class FaceSnapshotApplier(
     private val coverDao = db.personCoverDao()
     private val clusterSummaryDao = db.clusterSummaryDao()
     private val nameDao = db.personNameDao()
+    private val hiddenDao = db.personHiddenDao()
+    private val hiddenByKey = HashMap<String, PersonHiddenEntity>()
     private val namedAt = HashMap<String, Long>()
     private val curationDao = db.faceCurationTimeDao()
     private val curation = HashMap<CurationKey, FaceCurationTimeEntity>()
@@ -209,6 +215,7 @@ internal class FaceSnapshotApplier(
                 is MlSnapshotRecord.NotPerson -> onNotPerson(record)
                 is MlSnapshotRecord.Cover -> onCover(record)
                 is MlSnapshotRecord.ScanMarker -> onScanMarker(record)
+                is MlSnapshotRecord.HiddenPerson -> onHiddenPerson(record)
                 is MlSnapshotRecord.SearchEmbedding -> Unit
             }
         }
@@ -239,6 +246,7 @@ internal class FaceSnapshotApplier(
         is MlSnapshotRecord.ManualPhoto -> record.copy(personName = spelling.of(record.personName))
         is MlSnapshotRecord.NotPerson -> record.copy(personName = spelling.of(record.personName))
         is MlSnapshotRecord.Cover -> record.copy(personName = spelling.of(record.personName))
+        is MlSnapshotRecord.HiddenPerson -> record.copy(personName = spelling.of(record.personName))
         is MlSnapshotRecord.Face -> {
             val grouped = spelling.ofOrNull(record.personName)
             val confirmed = spelling.ofOrNull(record.confirmedName)
@@ -253,6 +261,11 @@ internal class FaceSnapshotApplier(
 
     private suspend fun prepare() {
         for (person in personDao.namedPeopleForUser(account)) person.displayName?.takeIf { it.isNotBlank() }?.let(spelling::hold)
+        // The hidden rows' spellings come after the named people's, so a person held here keeps its spelling.
+        for (row in hiddenDao.rowsForUser(account)) {
+            hiddenByKey[personNameKey(row.name)] = row
+            spelling.hold(row.name)
+        }
         if (full && !merge) clearCloudFaceData()
         nameDao.statesForUser(account).associateTo(namedAt) { it.name to it.namedAt }
         for (row in curationDao.allForUser(account)) curation[CurationKey(row.kind, row.personName, row.ref)] = row
@@ -337,6 +350,7 @@ internal class FaceSnapshotApplier(
         val at = change.changedAtMillis
         val heldFrom = heldName(from, at)
         val fromId = heldFrom?.let { personIdByName[it] }
+        if (nameChangeApplies(namedAt[heldFrom ?: from] ?: 0L, at)) moveHidden(heldFrom ?: from, to, foldsIntoPerson = personIdByName[to] != null)
         if (merge && fromId != null && heldFrom != to && nameChangeApplies(namedAt[heldFrom] ?: 0L, at)) {
             renameHere(fromId, heldFrom, to)
         }
@@ -356,6 +370,7 @@ internal class FaceSnapshotApplier(
     private suspend fun onNameRemoved(from: String, at: Long) {
         val heldFrom = heldName(from, at)
         val fromId = heldFrom?.let { personIdByName[it] }
+        if (nameChangeApplies(namedAt[heldFrom ?: from] ?: 0L, at)) moveHidden(heldFrom ?: from, null, foldsIntoPerson = false)
         if (merge && fromId != null && nameChangeApplies(namedAt[heldFrom] ?: 0L, at)) {
             val faceIds = faceDao.faceIdsForPerson(account, fromId)
             personDao.updateName(fromId, null)
@@ -369,6 +384,35 @@ internal class FaceSnapshotApplier(
             namedAt.remove(from)
             nameDao.deleteState(account, from)
         }
+    }
+
+    /**
+     * Follows a rename that applies here: the hidden choice recorded under [from] moves to [to], or is dropped when
+     * [to] is null (a name taken off) or when [foldsIntoPerson] (the person is folded into one already called [to],
+     * which keeps its own choice), as a rename or merge made here does.
+     */
+    private suspend fun moveHidden(from: String, to: String?, foldsIntoPerson: Boolean) {
+        val row = hiddenByKey.remove(personNameKey(from)) ?: return
+        if (to == null || foldsIntoPerson) {
+            hiddenDao.delete(account, row.name)
+            return
+        }
+        hiddenDao.rename(account, row.name, to)
+        hiddenByKey[personNameKey(to)] = row.copy(name = to)
+    }
+
+    /** Keeps the later of the hidden choices for a name, here or on the writing device; an equal or older one is
+     *  passed over, so reading the same copy twice changes nothing. */
+    private suspend fun onHiddenPerson(record: MlSnapshotRecord.HiddenPerson) {
+        val name = snapshotName(record.personName) ?: return
+        val key = personNameKey(name)
+        val held = hiddenByKey[key]
+        if (held != null && record.changedAtMillis <= held.changedAt) return
+        // The hidden match is by exact name, so a row held under another spelling is replaced by this one.
+        if (held != null && held.name != name) hiddenDao.delete(account, held.name)
+        val row = PersonHiddenEntity(account, name, record.hidden, record.changedAtMillis)
+        hiddenDao.set(row)
+        hiddenByKey[key] = row
     }
 
     /** The renames and merges kept here, oldest first, with the ones this copy brought in added as they come. */
@@ -903,12 +947,13 @@ internal class FaceSnapshotApplier(
         is MlSnapshotRecord.NotPerson -> Section.NOT_PERSONS
         is MlSnapshotRecord.Cover -> Section.COVERS
         is MlSnapshotRecord.ScanMarker -> Section.SCAN_MARKERS
+        is MlSnapshotRecord.HiddenPerson -> Section.HIDDEN_PEOPLE
         // The reader holds a FACES stream to its own sections, so no search record reaches here.
         is MlSnapshotRecord.SearchEmbedding -> throw MlSnapshotFormatException("a search record in a face snapshot")
     }
 
     /** The FACES sections in stream order, then the end. */
-    private enum class Section { KEYS, PEOPLE, NAME_CHANGES, REMOVALS, FACES, MANUAL_PHOTOS, NOT_PERSONS, COVERS, SCAN_MARKERS, END }
+    private enum class Section { KEYS, PEOPLE, NAME_CHANGES, REMOVALS, FACES, MANUAL_PHOTOS, NOT_PERSONS, COVERS, SCAN_MARKERS, HIDDEN_PEOPLE, END }
 
     private data class CurationKey(val kind: Int, val name: String, val ref: String)
 

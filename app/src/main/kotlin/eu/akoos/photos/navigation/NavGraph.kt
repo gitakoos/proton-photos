@@ -1032,6 +1032,7 @@ fun NavGraph(
                 onLoadMergeCandidates = { personVm.loadMergeCandidates(personId) },
                 onMergeName = { name -> personVm.mergeWith(personId, name); navController.popBackStack() },
                 onIgnorePerson = { personVm.ignorePerson(personId) { navController.popBackStack() } },
+                onHidePerson = { personVm.hidePerson(personId) { navController.popBackStack() } },
                 onBack = { navController.popBackStack() },
                 onOpenPhoto = { item ->
                     // Same viewer the timeline / location detail open, over this person's whole set
@@ -1860,11 +1861,14 @@ fun NavGraph(
             val exclusionsVm = hiltViewModel<eu.akoos.photos.presentation.people.FaceExclusionsViewModel>()
             LaunchedEffect(Unit) { exclusionsVm.load() }
             val exclusionsState by exclusionsVm.uiState.collectAsStateWithLifecycle()
+            val hiddenPeople by exclusionsVm.hiddenPeople.collectAsStateWithLifecycle()
             eu.akoos.photos.presentation.people.FaceExclusionsScreen(
                 state = exclusionsState,
                 onBack = { navController.popBackStack() },
                 onUndoNotThisPerson = { name, faceId -> exclusionsVm.undoNotThisPerson(name, faceId) },
                 onUndoIgnored = { faceId -> exclusionsVm.undoIgnored(faceId) },
+                hiddenPeople = hiddenPeople,
+                onShowPerson = { personId -> exclusionsVm.showPerson(personId) },
             )
         }
 
@@ -2370,6 +2374,8 @@ private fun UndoSnackbarHost(
                 R.plurals.gallery_moved_to_trash_snackbar, action.count, action.count)
             is UndoAction.AlbumRemove -> context.resources.getQuantityString(
                 R.plurals.album_removed_undo_snackbar, action.count, action.count)
+            is UndoAction.PersonVisibility -> context.getString(
+                if (action.nowHidden) R.string.person_hidden_snackbar else R.string.person_shown_snackbar)
         }
         val result = withTimeoutOrNull(5000L) {
             hostState.showSnackbar(

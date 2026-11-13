@@ -70,4 +70,12 @@ sealed class UndoAction {
     data class AlbumRemove(val albumLinkId: String, val photoLinkIds: List<String>) : UndoAction() {
         override val count: Int get() = photoLinkIds.size
     }
+
+    /**
+     * Undo a change of who is hidden from People: [personIds] were just hidden ([nowHidden]) or shown again,
+     * and the undo does the opposite to each, through the same use cases that made the change.
+     */
+    data class PersonVisibility(val personIds: List<Long>, val nowHidden: Boolean) : UndoAction() {
+        override val count: Int get() = personIds.size
+    }
 }

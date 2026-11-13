@@ -49,6 +49,7 @@ class RenamePersonUseCase @Inject constructor(
 ) {
     suspend operator fun invoke(account: String, personId: Long, newName: String?): String? = withContext(Dispatchers.IO) {
         val name = newName?.trim()?.ifEmpty { null }
+        if (HiddenPersonToken.isToken(name)) return@withContext HiddenPersonToken.visibleName(personDao.personById(personId)?.displayName)
         faceEdits.edit {
             appDatabase.withTransaction { rename(account, personId, name) }
         }
@@ -64,12 +65,14 @@ class RenamePersonUseCase @Inject constructor(
             faceDao.renameManualName(account, old, name)
             appDatabase.notPersonDao().rename(account, old, name)
             appDatabase.personCoverDao().rename(account, old, name)
+            appDatabase.personHiddenDao().rename(account, old, name)
             appDatabase.faceCurationTimeDao().rename(account, old, name)
             PersonNameLog.renamed(appDatabase.personNameDao(), account, old, name, now)
         } else if (old == null && name != null) {
             PersonNameLog.named(appDatabase.personNameDao(), account, name, now)
         } else if (old != null && name == null) {
             PersonNameLog.unnamed(appDatabase.personNameDao(), account, old, now)
+            appDatabase.personHiddenDao().delete(account, old)
         }
         val faceIds = faceDao.faceIdsForPerson(account, personId)
         if (name != null) {
