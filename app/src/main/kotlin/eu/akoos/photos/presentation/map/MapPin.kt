@@ -42,9 +42,37 @@ data class MapPin(
 internal const val MARKER_CAP = 150
 
 /**
- * The pins both maps plot: all of them up to [MARKER_CAP], else the first [MARKER_CAP]. The pins are one per city,
- * busiest first, so the busiest cities are the ones kept. One rule for both maps, so a place shows the same pins
- * on either.
+ * The pins both maps plot for the area in view: the cities inside it, busiest first, up to [MARKER_CAP]. The pins
+ * are one per city, busiest first, so a wide view keeps the busiest cities and a smaller city shows once the view
+ * narrows to its area. One rule for both maps, so a place shows the same pins on either.
  */
-internal fun samplePins(pins: List<MapPin>): List<MapPin> =
-    if (pins.size <= MARKER_CAP) pins else pins.subList(0, MARKER_CAP)
+internal fun pinsInView(pins: List<MapPin>, inView: (MapPin) -> Boolean): List<MapPin> {
+    val out = ArrayList<MapPin>(minOf(pins.size, MARKER_CAP))
+    for (pin in pins) {
+        if (!inView(pin)) continue
+        out += pin
+        if (out.size == MARKER_CAP) break
+    }
+    return out
+}
+
+/**
+ * How big a pin draws at an OSM zoom level, as a scale of its full size: smaller over a whole country, where many
+ * cities share the screen, full size at city level and larger at street level, where one place fills the view.
+ */
+internal fun pinScaleForZoom(zoom: Double): Float {
+    val scale = when {
+        zoom <= PIN_ZOOM_FAR -> PIN_SCALE_FAR
+        zoom <= PIN_ZOOM_CITY -> PIN_SCALE_FAR + (1f - PIN_SCALE_FAR) * ((zoom - PIN_ZOOM_FAR) / (PIN_ZOOM_CITY - PIN_ZOOM_FAR)).toFloat()
+        zoom <= PIN_ZOOM_STREET -> 1f + (PIN_SCALE_STREET - 1f) * ((zoom - PIN_ZOOM_CITY) / (PIN_ZOOM_STREET - PIN_ZOOM_CITY)).toFloat()
+        else -> PIN_SCALE_STREET
+    }
+    // In steps of a twentieth, so a pinch does not rebuild every pin on each frame.
+    return kotlin.math.round(scale * 20f) / 20f
+}
+
+private const val PIN_ZOOM_FAR = 5.0
+private const val PIN_ZOOM_CITY = 12.0
+private const val PIN_ZOOM_STREET = 18.0
+private const val PIN_SCALE_FAR = 0.7f
+private const val PIN_SCALE_STREET = 1.3f

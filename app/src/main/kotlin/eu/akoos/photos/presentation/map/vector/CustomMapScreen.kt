@@ -63,6 +63,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -118,7 +120,7 @@ import eu.akoos.photos.domain.usecase.PlaceCity
 import eu.akoos.photos.presentation.map.MapFocus
 import eu.akoos.photos.presentation.map.MapViewModel
 import eu.akoos.photos.presentation.map.ThumbnailPin
-import eu.akoos.photos.presentation.map.samplePins
+import eu.akoos.photos.presentation.map.pinsInView
 import eu.akoos.photos.presentation.map.MapPin
 import eu.akoos.photos.presentation.map.PIN_THUMB_PX
 import eu.akoos.photos.presentation.places.PlaceSearchSheet
@@ -260,24 +262,6 @@ fun CustomMapScreen(
         countries.associate { it.countryCode to countryName(it.countryCode, locale, it.countryName) }
     }
 
-    // The globe plots the same pins as the OSM map: one per city, the same cap, the same pin and thumbnail. A pin
-    // shows the neutral tile until its thumbnail decodes.
-    val shownPins = remember(pins) { samplePins(pins) }
-    val pinThumbs = remember { mutableStateMapOf<String, ImageBitmap>() }
-    val placeholderPin = remember(density) { ThumbnailPin.placeholder(density).asImageBitmap() }
-    LaunchedEffect(shownPins) {
-        for (pin in shownPins) {
-            if (pinThumbs.containsKey(pin.id)) continue
-            val imageData = pin.item?.let { photoCellInputsFor(it).imageData } ?: continue
-            val source = runCatching {
-                context.imageLoader.execute(
-                    ImageRequest.Builder(context).data(imageData).size(PIN_THUMB_PX).allowHardware(false).build(),
-                )
-            }.getOrNull()?.let { (it as? SuccessResult)?.drawable?.toBitmap() } ?: continue
-            pinThumbs[pin.id] = ThumbnailPin.build(source, density).asImageBitmap()
-        }
-    }
-
     // A focus decides the view up front: the globe opens turned to the place and zoomed in to its region,
     // within the latitude band a drag allows.
     // The view is saved with the screen, so coming back from a place opens the globe where it was left.
@@ -347,6 +331,39 @@ fun CustomMapScreen(
     // The base picture is drawn off the main thread into a bitmap and the screen shows the latest one, shifted and
     // scaled to the current view until the next is ready, so moving the globe never waits for the outlines.
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    // The globe plots the same pins as the OSM map: one per city, the same cap over the cities in view, the same pin
+    // and thumbnail. A pin shows the neutral tile until its thumbnail decodes.
+    val shownPins by remember(pins) {
+        derivedStateOf {
+            val w = canvasSize.width.toFloat()
+            val h = canvasSize.height.toFloat()
+            if (w == 0f || h == 0f) {
+                pinsInView(pins) { true }
+            } else {
+                val radius = (min(w, h) / 2f * 0.92f * zoom).toDouble()
+                val cLat = centerLat.toDouble()
+                val cLng = centerLng.toDouble()
+                pinsInView(pins) { pin -> pinSpot(pin, w, h, radius, cLat, cLng) != null }
+            }
+        }
+    }
+    // The tap below reads the pins through this, so a pin entering the view never restarts a gesture under way.
+    val currentShownPins by rememberUpdatedState(shownPins)
+    val pinThumbs = remember { mutableStateMapOf<String, ImageBitmap>() }
+    val placeholderPin = remember(density) { ThumbnailPin.placeholder(density).asImageBitmap() }
+    LaunchedEffect(shownPins) {
+        for (pin in shownPins) {
+            if (pinThumbs.containsKey(pin.id)) continue
+            val imageData = pin.item?.let { photoCellInputsFor(it).imageData } ?: continue
+            val source = runCatching {
+                context.imageLoader.execute(
+                    ImageRequest.Builder(context).data(imageData).size(PIN_THUMB_PX).allowHardware(false).build(),
+                )
+            }.getOrNull()?.let { (it as? SuccessResult)?.drawable?.toBitmap() } ?: continue
+            pinThumbs[pin.id] = ThumbnailPin.build(source, density).asImageBitmap()
+        }
+    }
+
     val baseRenderer = remember { GlobeBaseRenderer() }
     val baseStyle = remember(world, ocean, land, border, highlight, colors.isLight, density, hotOwner, visitedProvinces, provinceIsos) {
         world?.let { BaseStyle(ocean, land, border, highlight, colors.isLight, density, it, hotOwner, visitedProvinces, provinceIsos) }
@@ -378,7 +395,7 @@ fun CustomMapScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .onSizeChanged { canvasSize = it }
-                    .pointerInput(world, shownPins, highlightCodes) {
+                    .pointerInput(world, highlightCodes) {
                         // One handler for rotate/pinch, a glide after a flick, AND tap: a gesture that barely
                         // moved is treated as a tap and hit-tested, so a separate tap detector can't miss it.
                         awaitEachGesture {
@@ -437,7 +454,7 @@ fun CustomMapScreen(
                                 val cLat = centerLat.toDouble()
                                 val cLng = centerLng.toDouble()
                                 val tapped = placePins(
-                                    shownPins, size.width.toFloat(), size.height.toFloat(), radius.toDouble(), cLat, cLng,
+                                    currentShownPins, size.width.toFloat(), size.height.toFloat(), radius.toDouble(), cLat, cLng,
                                     placeholderPin.width, placeholderPin.height,
                                 ).sortedByDescending { it.asPin }
                                     .firstOrNull { it.hit(downPos.x, downPos.y, density, placeholderPin.width, placeholderPin.height) }
@@ -665,6 +682,16 @@ private class PinPlacement(val pin: MapPin, val x: Float, val y: Float, val asPi
     }
 }
 
+/** Where [pin] sits on a [width] by [height] canvas, or null when it is on the far side of the globe or off the screen. */
+internal fun pinSpot(pin: MapPin, width: Float, height: Float, radius: Double, cLat: Double, cLng: Double): Offset? {
+    val gp = GlobeProjection.project(pin.latitude, pin.longitude, cLat, cLng, radius)
+    if (!gp.visible) return null
+    val x = width / 2f + gp.x
+    val y = height / 2f + gp.y
+    if (x < -60f || x > width + 60f || y < -60f || y > height + 60f) return null
+    return Offset(x, y)
+}
+
 /**
  * The pins on the visible face of the globe that fall on screen, each as a full pin where the ones ahead of it
  * leave room and not at all where they do not, by the same rule the OSM map uses. Both the drawing and the tap use
@@ -680,20 +707,14 @@ private fun placePins(
     pinWidth: Int,
     pinHeight: Int,
 ): List<PinPlacement> {
-    val cx = width / 2f
-    val cy = height / 2f
     val onScreen = ArrayList<MapPin>()
     val spots = ArrayList<Offset>()
     val footprints = ArrayList<PinFootprint>()
     for (pin in pins) {
-        val gp = GlobeProjection.project(pin.latitude, pin.longitude, cLat, cLng, radius)
-        if (!gp.visible) continue
-        val x = cx + gp.x
-        val y = cy + gp.y
-        if (x < -60f || x > width + 60f || y < -60f || y > height + 60f) continue
+        val spot = pinSpot(pin, width, height, radius, cLat, cLng) ?: continue
         onScreen += pin
-        spots += Offset(x, y)
-        footprints += PinFootprint(x = x, y = y, halfWidth = pinWidth / 2f, above = pinHeight.toFloat(), below = 0f)
+        spots += spot
+        footprints += PinFootprint(x = spot.x, y = spot.y, halfWidth = pinWidth / 2f, above = pinHeight.toFloat(), below = 0f)
     }
     val kept = keptPins(footprints)
     return onScreen.indices.map { i -> PinPlacement(onScreen[i], spots[i].x, spots[i].y, kept[i]) }

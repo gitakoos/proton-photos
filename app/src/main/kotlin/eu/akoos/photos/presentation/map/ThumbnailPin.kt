@@ -185,3 +185,33 @@ internal object ThumbnailPin {
         canvas.drawPath(mountain, fill)
     }
 }
+
+/**
+ * A pin bitmap drawn at [scale] of its size, so the OSM map can size every pin to the zoom without building new
+ * bitmaps. The marker lays it out from the intrinsic size, which carries the scale.
+ */
+internal class ScaledPinDrawable(
+    private val bitmap: android.graphics.Bitmap,
+    private val scale: Float,
+) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+
+    override fun getIntrinsicWidth(): Int = kotlin.math.max(1, kotlin.math.round(bitmap.width * scale).toInt())
+
+    override fun getIntrinsicHeight(): Int = kotlin.math.max(1, kotlin.math.round(bitmap.height * scale).toInt())
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        canvas.drawBitmap(bitmap, null, bounds, paint)
+    }
+
+    override fun setAlpha(alpha: Int) {
+        paint.alpha = alpha
+    }
+
+    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+        paint.colorFilter = colorFilter
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+}

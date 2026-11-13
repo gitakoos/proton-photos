@@ -106,6 +106,22 @@ object PhotoGpsResolver {
     }
 
     /**
+     * The map row to store for a downloaded cloud photo whose file carries a fix: only when the photo has
+     * no row yet, so a place its Drive attributes gave (or a correction) is never overwritten. A photo
+     * another uploader sent without a Location attribute is plotted this way once it is downloaded.
+     */
+    fun fileFixToStore(
+        existing: eu.akoos.photos.data.db.entity.PhotoLocationEntity?,
+        fix: Pair<Double, Double>?,
+        userId: String,
+        linkId: String,
+    ): eu.akoos.photos.data.db.entity.PhotoLocationEntity? {
+        if (existing != null || fix == null) return null
+        if (!eu.akoos.photos.data.db.entity.isUsableGpsFix(fix.first, fix.second)) return null
+        return eu.akoos.photos.data.db.entity.PhotoLocationEntity(linkId, userId, fix.first, fix.second)
+    }
+
+    /**
      * The stored GPS fix for a cloud photo, keyed by [userId] and its cloud [linkId], or null when it
      * has not been located yet. The caller resolves the primary user, so no account state lives here.
      */

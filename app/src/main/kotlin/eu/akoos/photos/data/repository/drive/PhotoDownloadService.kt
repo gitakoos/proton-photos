@@ -23,6 +23,7 @@
 package eu.akoos.photos.data.repository.drive
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
@@ -93,6 +94,7 @@ class PhotoDownloadService @Inject constructor(
     private val photoListingDao: PhotoListingDao,
     private val sdkRouting: eu.akoos.photos.data.sdk.SdkRouting,
     private val sdkPhotoDownloadOps: eu.akoos.photos.data.sdk.SdkPhotoDownloadOps,
+    private val photoLocationDao: eu.akoos.photos.data.db.dao.PhotoLocationDao,
     @ApplicationContext private val context: Context,
 ) {
     private val semaphore get() = shareService.networkSemaphore
@@ -173,6 +175,7 @@ class PhotoDownloadService @Inject constructor(
         try {
             val file = doDownload(userId, photo, preResolvedLinkDetail, onProgress)
             deferred.complete(file)
+            recordFileFix(userId, photo, file)
             return file
         } catch (t: Throwable) {
             // CancellationException also lands here; completeExceptionally + the finally
@@ -181,6 +184,27 @@ class PhotoDownloadService @Inject constructor(
             throw t
         } finally {
             inFlight.remove(photo.linkId, deferred)
+        }
+    }
+
+    /**
+     * The map reads a cloud photo's place from its Drive attributes, which some uploaders leave without a
+     * Location. Once the file is here its own GPS fills that gap, so the photo is plotted like the rest.
+     * Never fails the download.
+     */
+    private suspend fun recordFileFix(userId: UserId, photo: CloudPhoto, file: File) {
+        try {
+            val existing = photoLocationDao.getById(userId.id, photo.linkId)
+            if (existing != null) return
+            val uri = Uri.fromFile(file).toString()
+            val fix = eu.akoos.photos.util.PhotoGpsResolver.localGps(context, uri, photo.mimeType)
+            val row = eu.akoos.photos.util.PhotoGpsResolver.fileFixToStore(existing, fix, userId.id, photo.linkId)
+                ?: return
+            photoLocationDao.upsert(listOf(row))
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "file GPS for ${photo.linkId} not recorded: ${e.message}")
         }
     }
 
