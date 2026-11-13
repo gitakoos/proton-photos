@@ -1164,6 +1164,27 @@
     <!-- Memories screen -->
     <string name="memories_title">Kolekcia</string>
     <string name="memories_seasons">Ročné obdobia</string>
+    <string name="memories_themes">Témy</string>
+    <string name="content_theme_food">Jedlo</string>
+    <string name="content_theme_pets">Domáce zvieratá</string>
+    <string name="content_theme_animals">Zvieratá</string>
+    <string name="content_theme_beach">Pláž</string>
+    <string name="content_theme_mountains">Hory</string>
+    <string name="content_theme_nature">Príroda</string>
+    <string name="content_theme_flowers">Kvety</string>
+    <string name="content_theme_city">Mesto</string>
+    <string name="content_theme_night">Noc</string>
+    <string name="content_theme_sunsets">Západy slnka</string>
+    <string name="content_theme_sky">Obloha</string>
+    <string name="content_theme_snow">Sneh</string>
+    <string name="content_theme_portraits">Portréty</string>
+    <string name="content_theme_group_photos">Skupinové fotky</string>
+    <string name="content_theme_celebrations">Oslavy</string>
+    <string name="content_theme_sports">Šport</string>
+    <string name="content_theme_cars">Autá</string>
+    <string name="content_theme_documents">Dokumenty</string>
+    <string name="content_theme_screenshots">Snímky obrazovky</string>
+    <string name="content_theme_drawings">Kresby</string>
     <string name="season_winter">Zima</string>
     <string name="season_spring">Jar</string>
     <string name="season_summer">Leto</string>

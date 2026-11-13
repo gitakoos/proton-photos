@@ -128,6 +128,20 @@ interface ImageEmbeddingDao {
         limit: Int,
     ): List<ImageEmbeddingRow>
 
+    /** The rows for [photoKeys] (at most 900, under the 999 host-variable limit of Android 11 and
+     *  older), key + blob, of the given model generation. The theme index reads only the photos it has
+     *  not classified yet through this. */
+    @Query(
+        "SELECT photoKey, embedding FROM image_embedding WHERE userId = :userId " +
+            "AND modelVersion = :modelVersion AND photoKey IN (:photoKeys)",
+    )
+    suspend fun embeddingsForKeys(userId: String, modelVersion: Int, photoKeys: List<String>): List<ImageEmbeddingRow>
+
+    /** Every photo key embedded by [modelVersion] for the account, keys only, so a diff against the
+     *  classified set finds the new and the removed photos without reading a single blob. */
+    @Query("SELECT photoKey FROM image_embedding WHERE userId = :userId AND modelVersion = :modelVersion")
+    suspend fun keysForModel(userId: String, modelVersion: Int): List<String>
+
     /** Drops one photo's embedding, the invalidation a removed or re-indexed photo needs. */
     @Query("DELETE FROM image_embedding WHERE userId = :userId AND photoKey = :photoKey")
     suspend fun deleteByPhotoKey(userId: String, photoKey: String)

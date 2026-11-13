@@ -930,6 +930,27 @@
     <!-- Emlékek képernyő -->
     <string name="memories_title">Gyűjtemény</string>
     <string name="memories_seasons">Évszakok</string>
+    <string name="memories_themes">Témák</string>
+    <string name="content_theme_food">Étel</string>
+    <string name="content_theme_pets">Háziállatok</string>
+    <string name="content_theme_animals">Állatok</string>
+    <string name="content_theme_beach">Tengerpart</string>
+    <string name="content_theme_mountains">Hegyek</string>
+    <string name="content_theme_nature">Természet</string>
+    <string name="content_theme_flowers">Virágok</string>
+    <string name="content_theme_city">Város</string>
+    <string name="content_theme_night">Éjszaka</string>
+    <string name="content_theme_sunsets">Naplementék</string>
+    <string name="content_theme_sky">Égbolt</string>
+    <string name="content_theme_snow">Hó</string>
+    <string name="content_theme_portraits">Portrék</string>
+    <string name="content_theme_group_photos">Csoportképek</string>
+    <string name="content_theme_celebrations">Ünnepek</string>
+    <string name="content_theme_sports">Sport</string>
+    <string name="content_theme_cars">Autók</string>
+    <string name="content_theme_documents">Dokumentumok</string>
+    <string name="content_theme_screenshots">Képernyőképek</string>
+    <string name="content_theme_drawings">Rajzok</string>
     <string name="season_winter">Tél</string>
     <string name="season_spring">Tavasz</string>
     <string name="season_summer">Nyár</string>

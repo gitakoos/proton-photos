@@ -921,6 +921,27 @@
     <!-- Pantalla de Recuerdos -->
     <string name="memories_title">Colección</string>
     <string name="memories_seasons">Estaciones</string>
+    <string name="memories_themes">Temas</string>
+    <string name="content_theme_food">Comida</string>
+    <string name="content_theme_pets">Mascotas</string>
+    <string name="content_theme_animals">Animales</string>
+    <string name="content_theme_beach">Playa</string>
+    <string name="content_theme_mountains">Montañas</string>
+    <string name="content_theme_nature">Naturaleza</string>
+    <string name="content_theme_flowers">Flores</string>
+    <string name="content_theme_city">Ciudad</string>
+    <string name="content_theme_night">Noche</string>
+    <string name="content_theme_sunsets">Atardeceres</string>
+    <string name="content_theme_sky">Cielo</string>
+    <string name="content_theme_snow">Nieve</string>
+    <string name="content_theme_portraits">Retratos</string>
+    <string name="content_theme_group_photos">Fotos de grupo</string>
+    <string name="content_theme_celebrations">Celebraciones</string>
+    <string name="content_theme_sports">Deportes</string>
+    <string name="content_theme_cars">Coches</string>
+    <string name="content_theme_documents">Documentos</string>
+    <string name="content_theme_screenshots">Capturas de pantalla</string>
+    <string name="content_theme_drawings">Dibujos</string>
     <string name="season_winter">Invierno</string>
     <string name="season_spring">Primavera</string>
     <string name="season_summer">Verano</string>

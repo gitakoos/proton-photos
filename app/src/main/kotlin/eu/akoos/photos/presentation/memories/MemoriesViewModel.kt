@@ -40,11 +40,15 @@ import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.ObservePlacesUseCase
 import eu.akoos.photos.domain.usecase.PlaceCity
+import eu.akoos.photos.domain.usecase.ThemeCategories
+import eu.akoos.photos.domain.usecase.ThemeIndex
+import eu.akoos.photos.domain.usecase.ThemeSnapshot
 import eu.akoos.photos.presentation.gallery.FaceBox
 import eu.akoos.photos.presentation.gallery.PersonUi
 import eu.akoos.photos.util.computeOnThisDay
 import eu.akoos.photos.util.onThisDayWindowDays
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -56,11 +60,21 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import me.proton.core.accountmanager.domain.AccountManager
+import me.proton.core.domain.entity.UserId
 import java.util.Calendar
 import javax.inject.Inject
 
 /** A meteorological-season bucket — every item shot in one season-year, newest cover first. */
 data class SeasonBucket(
+    val title: String,
+    val cover: GalleryItem,
+    val items: List<GalleryItem>,
+)
+
+/** One content theme (Food, Beach, ...): the photos carrying it, newest first, with its best-scoring
+ *  photo as [cover]. */
+data class ThemeBucket(
+    val id: Int,
     val title: String,
     val cover: GalleryItem,
     val items: List<GalleryItem>,
@@ -73,6 +87,7 @@ data class MemoriesUiState(
     val seasons: List<SeasonBucket> = emptyList(),
     val people: List<PersonUi> = emptyList(),
     val places: List<PlaceCity> = emptyList(),
+    val themes: List<ThemeBucket> = emptyList(),
 )
 
 /** Backs the Memories screen: derives "On this day" milestones and per-season buckets from the
@@ -83,6 +98,7 @@ class MemoriesViewModel @Inject constructor(
     getGalleryItems: GetGalleryItemsUseCase,
     observePeopleUseCase: ObservePeopleUseCase,
     observePlacesUseCase: ObservePlacesUseCase,
+    private val themeIndex: ThemeIndex,
     accountManager: AccountManager,
     private val thumbnailDecryptScheduler: ThumbnailDecryptScheduler,
     private val thumbnailUrlStore: ThumbnailUrlStore,
@@ -111,7 +127,9 @@ class MemoriesViewModel @Inject constructor(
                         else observePeopleUseCase(null, getGalleryItems.invokeLocalOnly())
                             .map { list -> list.mapNotNull { it.toPersonUi() } }
                     }
-                combine(memories, people) { state, ppl -> state.copy(people = ppl) }
+                combine(memories, people, themes(null, getGalleryItems.invokeLocalOnly())) { state, ppl, th ->
+                    state.copy(people = ppl, themes = th)
+                }
             } else {
                 val memories = combine(getGalleryItems.invoke(userId), context.onThisDayWindowDays()) { all, days ->
                     MemoriesUiState(isLoading = false, onThisDay = computeOnThisDay(all, days), seasons = buckets(all))
@@ -127,7 +145,9 @@ class MemoriesViewModel @Inject constructor(
                         else observePeopleUseCase(userId, getGalleryItems.invoke(userId))
                             .map { list -> list.mapNotNull { it.toPersonUi() } }
                     }
-                combine(memories, people) { state, ppl -> state.copy(people = ppl) }
+                combine(memories, people, themes(userId, getGalleryItems.invoke(userId))) { state, ppl, th ->
+                    state.copy(people = ppl, themes = th)
+                }
                     // Pin + warm the cover thumbnails so they survive the large-library cache trim and
                     // the Collection cards don't sit blank on a library too big to fully warm. Re-pin
                     // only when the cover set actually changes, not on every decrypt-driven re-emit.
@@ -153,6 +173,25 @@ class MemoriesViewModel @Inject constructor(
         }
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MemoriesUiState())
+
+    /** The content themes, only with the AI master switch and semantic search both on (the same opt-in
+     *  as People). The classification comes from [ThemeIndex], which only does work when the embedding
+     *  count changes; each category is then resolved against the live library, so a vaulted or hidden
+     *  photo never shows. */
+    private fun themes(userId: UserId?, library: Flow<List<GalleryItem>>): Flow<List<ThemeBucket>> =
+        context.settingsDataStore.data
+            .map { it[SettingsKeys.AI_FEATURES_ENABLED] == true && it[SettingsKeys.SEMANTIC_ENABLED] == true }
+            .distinctUntilChanged()
+            .flatMapLatest { enabled ->
+                if (!enabled) flowOf(emptyList())
+                else combine(
+                    themeIndex.observe(userId),
+                    library,
+                    context.settingsDataStore.data.map { it[SettingsKeys.HIDDEN_PHOTO_URIS] ?: emptySet() }.distinctUntilChanged(),
+                ) { snapshot, all, hidden ->
+                    buildThemeBuckets(snapshot, all.filterNot { it.isVaulted(hidden) }) { context.getString(it) }
+                }
+            }
 
     /** Map a clustered person to the round-tile model, dropping any without a resolvable cover. The
      *  Unsorted flag rides along so the Collection can keep that pile off its people row. */
@@ -180,6 +219,7 @@ class MemoriesViewModel @Inject constructor(
                 else year to (listOf(resolveThumbnail(items.first(), urls)) + items.drop(1))
             },
             seasons = seasons.map { it.copy(cover = resolveThumbnail(it.cover, urls)) },
+            themes = themes.map { it.copy(cover = resolveThumbnail(it.cover, urls)) },
         )
     }
 
@@ -197,7 +237,8 @@ class MemoriesViewModel @Inject constructor(
      *  season cover) so they can be pinned and warmed. Local-only covers have no cloud thumbnail to
      *  decrypt and are skipped. */
     private fun coverLinkIds(state: MemoriesUiState): List<String> {
-        val covers = state.onThisDay.mapNotNull { it.second.firstOrNull() } + state.seasons.map { it.cover }
+        val covers = state.onThisDay.mapNotNull { it.second.firstOrNull() } + state.seasons.map { it.cover } +
+            state.themes.map { it.cover }
         return covers.mapNotNull { item ->
             when (item) {
                 is GalleryItem.CloudOnly -> item.cloud.linkId
@@ -261,4 +302,40 @@ class MemoriesViewModel @Inject constructor(
         AUTUMN(R.string.season_autumn, 2),
         WINTER(R.string.season_winter, 3),
     }
+}
+
+/** True when this item's device uri is in the Hidden vault set. A cloud-only item carries no device uri. */
+private fun GalleryItem.isVaulted(hiddenUris: Set<String>): Boolean {
+    val uri = when (this) {
+        is GalleryItem.LocalOnly -> local.uri
+        is GalleryItem.Synced -> local.uri
+        is GalleryItem.CloudOnly -> null
+    }
+    return uri != null && uri in hiddenUris
+}
+
+/**
+ * Turns the classified [snapshot] into one bucket per category that still has photos in [library]:
+ * the items in library order (newest first), the cover the best-scoring photo that is in the library,
+ * the buckets ordered by size, largest first. [titleOf] names a category by its string resource. A key
+ * no longer in the library (deleted, vaulted, in a hidden album) drops out, and a category left with
+ * nothing is omitted. Pure.
+ */
+internal fun buildThemeBuckets(
+    snapshot: ThemeSnapshot,
+    library: List<GalleryItem>,
+    titleOf: (Int) -> String,
+): List<ThemeBucket> {
+    if (snapshot.keysByCategory.isEmpty() || library.isEmpty()) return emptyList()
+    val byKey = HashMap<String, GalleryItem>(library.size * 2)
+    for (item in library) byKey[item.stableId] = item
+    val buckets = ArrayList<ThemeBucket>()
+    for (category in ThemeCategories.ALL) {
+        val ranked = snapshot.keysByCategory[category.id] ?: continue
+        val cover = ranked.firstNotNullOfOrNull { byKey[it] } ?: continue
+        val keys = ranked.toHashSet()
+        val items = library.filter { it.stableId in keys }
+        buckets.add(ThemeBucket(category.id, titleOf(category.nameRes), cover, items))
+    }
+    return buckets.sortedWith(compareByDescending<ThemeBucket> { it.items.size }.thenBy { it.id })
 }

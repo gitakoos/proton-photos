@@ -1661,6 +1661,27 @@
     <!-- Memories screen -->
     <string name="memories_title">Collection</string>
     <string name="memories_seasons">Seasons</string>
+    <string name="memories_themes">Themes</string>
+    <string name="content_theme_food">Food</string>
+    <string name="content_theme_pets">Pets</string>
+    <string name="content_theme_animals">Animals</string>
+    <string name="content_theme_beach">Beach</string>
+    <string name="content_theme_mountains">Mountains</string>
+    <string name="content_theme_nature">Nature</string>
+    <string name="content_theme_flowers">Flowers</string>
+    <string name="content_theme_city">City</string>
+    <string name="content_theme_night">Night</string>
+    <string name="content_theme_sunsets">Sunsets</string>
+    <string name="content_theme_sky">Sky</string>
+    <string name="content_theme_snow">Snow</string>
+    <string name="content_theme_portraits">Portraits</string>
+    <string name="content_theme_group_photos">Group photos</string>
+    <string name="content_theme_celebrations">Celebrations</string>
+    <string name="content_theme_sports">Sports</string>
+    <string name="content_theme_cars">Cars</string>
+    <string name="content_theme_documents">Documents</string>
+    <string name="content_theme_screenshots">Screenshots</string>
+    <string name="content_theme_drawings">Drawings</string>
     <string name="season_winter">Winter</string>
     <string name="season_spring">Spring</string>
     <string name="season_summer">Summer</string>

@@ -637,6 +637,7 @@ class SemanticIndexingScheduler @Inject constructor(
         restart.reset()
         _progress.value = SemanticIndexingProgress(SemanticIndexingState.Idle, 0, 0)
         SemanticDiagnostics.clear()
+        ThemeCacheFiles.deleteAssignments(context, userId?.id ?: PhotoLocationEntity.LOCAL_USER)
         runCatching { imageEmbeddingDao.deleteAllForUser(userId?.id ?: PhotoLocationEntity.LOCAL_USER) }
             .onFailure { Log.w(TAG, "embedding wipe on reset failed: ${it.message}") }
     }

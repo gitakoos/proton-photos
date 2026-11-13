@@ -921,6 +921,27 @@
     <!-- Schermata Ricordi -->
     <string name="memories_title">Raccolta</string>
     <string name="memories_seasons">Stagioni</string>
+    <string name="memories_themes">Temi</string>
+    <string name="content_theme_food">Cibo</string>
+    <string name="content_theme_pets">Animali domestici</string>
+    <string name="content_theme_animals">Animali</string>
+    <string name="content_theme_beach">Spiaggia</string>
+    <string name="content_theme_mountains">Montagne</string>
+    <string name="content_theme_nature">Natura</string>
+    <string name="content_theme_flowers">Fiori</string>
+    <string name="content_theme_city">Città</string>
+    <string name="content_theme_night">Notte</string>
+    <string name="content_theme_sunsets">Tramonti</string>
+    <string name="content_theme_sky">Cielo</string>
+    <string name="content_theme_snow">Neve</string>
+    <string name="content_theme_portraits">Ritratti</string>
+    <string name="content_theme_group_photos">Foto di gruppo</string>
+    <string name="content_theme_celebrations">Feste</string>
+    <string name="content_theme_sports">Sport</string>
+    <string name="content_theme_cars">Auto</string>
+    <string name="content_theme_documents">Documenti</string>
+    <string name="content_theme_screenshots">Screenshot</string>
+    <string name="content_theme_drawings">Disegni</string>
     <string name="season_winter">Inverno</string>
     <string name="season_spring">Primavera</string>
     <string name="season_summer">Estate</string>

@@ -78,8 +78,8 @@ import eu.akoos.photos.presentation.places.PlaceCard
 import eu.akoos.photos.presentation.theme.AppColors
 import java.util.Calendar
 
-/** The two memory groupings, each with its own preview section and "see all" sub-page. */
-enum class MemoryCategory { ON_THIS_DAY, SEASONS }
+/** The memory groupings, each with its own preview section and "see all" sub-page. */
+enum class MemoryCategory { ON_THIS_DAY, SEASONS, THEMES }
 
 /**
  * Top-level Memories view. Floating pills (back button + title) over a LazyColumn that stacks one
@@ -120,7 +120,7 @@ fun MemoriesScreen(
         // collectionPeople); the empty state keys off the same set.
         val peopleShown = collectionPeople(state.people)
         val isEmpty = state.onThisDay.isEmpty() && state.seasons.isEmpty() &&
-            peopleShown.isEmpty() && state.places.isEmpty()
+            peopleShown.isEmpty() && state.places.isEmpty() && state.themes.isEmpty()
         // Loading / empty / content phase, cross-faded so the neutral empty state never flashes before
         // the first grouped library emission arrives.
         val phase = when {
@@ -183,6 +183,34 @@ fun MemoriesScreen(
                                                     PersonTapTarget.NameOrMerge -> { nameOrMerge = person }
                                                 }
                                             },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (state.themes.isNotEmpty()) {
+                        item(key = "themes_section") {
+                            // Same shape as Seasons: a tappable header opening every theme, over a row
+                            // of the biggest ones. A card opens that theme's photos in the viewer.
+                            SectionHeaderRow(
+                                title = stringResource(R.string.memories_themes),
+                                onClick = { onSeeAll(MemoryCategory.THEMES) },
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(top = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                state.themes.take(12).forEach { theme ->
+                                    Box(Modifier.width(132.dp)) {
+                                        SeasonCard(
+                                            coverItem = theme.cover,
+                                            title = theme.title,
+                                            count = theme.items.size,
+                                            onClick = { onPhotoClick(theme.items, 0) },
                                         )
                                     }
                                 }

@@ -908,6 +908,27 @@
     <!-- Écran Souvenirs -->
     <string name="memories_title">Collection</string>
     <string name="memories_seasons">Saisons</string>
+    <string name="memories_themes">Thèmes</string>
+    <string name="content_theme_food">Nourriture</string>
+    <string name="content_theme_pets">Animaux de compagnie</string>
+    <string name="content_theme_animals">Animaux</string>
+    <string name="content_theme_beach">Plage</string>
+    <string name="content_theme_mountains">Montagnes</string>
+    <string name="content_theme_nature">Nature</string>
+    <string name="content_theme_flowers">Fleurs</string>
+    <string name="content_theme_city">Ville</string>
+    <string name="content_theme_night">Nuit</string>
+    <string name="content_theme_sunsets">Couchers de soleil</string>
+    <string name="content_theme_sky">Ciel</string>
+    <string name="content_theme_snow">Neige</string>
+    <string name="content_theme_portraits">Portraits</string>
+    <string name="content_theme_group_photos">Photos de groupe</string>
+    <string name="content_theme_celebrations">Fêtes</string>
+    <string name="content_theme_sports">Sport</string>
+    <string name="content_theme_cars">Voitures</string>
+    <string name="content_theme_documents">Documents</string>
+    <string name="content_theme_screenshots">Captures d\'écran</string>
+    <string name="content_theme_drawings">Dessins</string>
     <string name="season_winter">Hiver</string>
     <string name="season_spring">Printemps</string>
     <string name="season_summer">Été</string>

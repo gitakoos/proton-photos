@@ -1165,6 +1165,27 @@
     <!-- Memories screen -->
     <string name="memories_title">Zbirka</string>
     <string name="memories_seasons">Letni časi</string>
+    <string name="memories_themes">Teme</string>
+    <string name="content_theme_food">Hrana</string>
+    <string name="content_theme_pets">Hišni ljubljenčki</string>
+    <string name="content_theme_animals">Živali</string>
+    <string name="content_theme_beach">Plaža</string>
+    <string name="content_theme_mountains">Gore</string>
+    <string name="content_theme_nature">Narava</string>
+    <string name="content_theme_flowers">Rože</string>
+    <string name="content_theme_city">Mesto</string>
+    <string name="content_theme_night">Noč</string>
+    <string name="content_theme_sunsets">Sončni zahodi</string>
+    <string name="content_theme_sky">Nebo</string>
+    <string name="content_theme_snow">Sneg</string>
+    <string name="content_theme_portraits">Portreti</string>
+    <string name="content_theme_group_photos">Skupinske fotografije</string>
+    <string name="content_theme_celebrations">Praznovanja</string>
+    <string name="content_theme_sports">Šport</string>
+    <string name="content_theme_cars">Avtomobili</string>
+    <string name="content_theme_documents">Dokumenti</string>
+    <string name="content_theme_screenshots">Posnetki zaslona</string>
+    <string name="content_theme_drawings">Risbe</string>
     <string name="season_winter">Zima</string>
     <string name="season_spring">Pomlad</string>
     <string name="season_summer">Poletje</string>

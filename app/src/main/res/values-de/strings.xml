@@ -907,6 +907,27 @@
     <!-- Erinnerungen-Bildschirm -->
     <string name="memories_title">Sammlung</string>
     <string name="memories_seasons">Jahreszeiten</string>
+    <string name="memories_themes">Themen</string>
+    <string name="content_theme_food">Essen</string>
+    <string name="content_theme_pets">Haustiere</string>
+    <string name="content_theme_animals">Tiere</string>
+    <string name="content_theme_beach">Strand</string>
+    <string name="content_theme_mountains">Berge</string>
+    <string name="content_theme_nature">Natur</string>
+    <string name="content_theme_flowers">Blumen</string>
+    <string name="content_theme_city">Stadt</string>
+    <string name="content_theme_night">Nacht</string>
+    <string name="content_theme_sunsets">Sonnenuntergänge</string>
+    <string name="content_theme_sky">Himmel</string>
+    <string name="content_theme_snow">Schnee</string>
+    <string name="content_theme_portraits">Porträts</string>
+    <string name="content_theme_group_photos">Gruppenfotos</string>
+    <string name="content_theme_celebrations">Feiern</string>
+    <string name="content_theme_sports">Sport</string>
+    <string name="content_theme_cars">Autos</string>
+    <string name="content_theme_documents">Dokumente</string>
+    <string name="content_theme_screenshots">Screenshots</string>
+    <string name="content_theme_drawings">Zeichnungen</string>
     <string name="season_winter">Winter</string>
     <string name="season_spring">Frühling</string>
     <string name="season_summer">Sommer</string>

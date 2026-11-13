@@ -371,6 +371,13 @@ class ThumbnailUrlsViewModel @Inject constructor(
 
 /** Encodes a single trash viewer action as the "action|kind|key" string the Trash screen parses and
  *  runs. A Synced item never appears in trash, so it maps to an empty no-op. */
+/** The route argument naming a Collection grouping's see-all page. */
+private fun memoryCategoryRouteType(category: MemoryCategory): String = when (category) {
+    MemoryCategory.ON_THIS_DAY -> "onthisday"
+    MemoryCategory.SEASONS -> "seasons"
+    MemoryCategory.THEMES -> "themes"
+}
+
 private fun trashActionString(action: String, item: GalleryItem): String = when (item) {
     is GalleryItem.LocalOnly -> "$action|device|${item.local.uri}"
     is GalleryItem.CloudOnly -> "$action|cloud|${item.cloud.linkId}"
@@ -929,11 +936,7 @@ fun NavGraph(
                     navController.navigate(Screen.Viewer.route)
                 },
                 onSeeAll = { cat ->
-                    navController.navigate(
-                        Screen.MemoryCategory.create(
-                            if (cat == MemoryCategory.ON_THIS_DAY) "onthisday" else "seasons",
-                        ),
-                    )
+                    navController.navigate(Screen.MemoryCategory.create(memoryCategoryRouteType(cat)))
                 },
                 onPersonClick = { personId -> navController.navigate(Screen.PersonDetail.create(personId)) },
                 onSeeAllPeople = { navController.navigate(Screen.People.route) },
@@ -963,10 +966,10 @@ fun NavGraph(
             Screen.MemoryCategory.route,
             arguments = listOf(navArgument("type") { type = NavType.StringType }),
         ) { backStackEntry ->
-            val category = if (backStackEntry.arguments?.getString("type") == "seasons") {
-                MemoryCategory.SEASONS
-            } else {
-                MemoryCategory.ON_THIS_DAY
+            val category = when (backStackEntry.arguments?.getString("type")) {
+                "seasons" -> MemoryCategory.SEASONS
+                "themes" -> MemoryCategory.THEMES
+                else -> MemoryCategory.ON_THIS_DAY
             }
             MemoryCategoryScreen(
                 category = category,
@@ -980,8 +983,7 @@ fun NavGraph(
                     navController.navigate(Screen.Viewer.route)
                 },
                 onSwitchCategory = { cat ->
-                    val type = if (cat == MemoryCategory.ON_THIS_DAY) "onthisday" else "seasons"
-                    navController.navigate(Screen.MemoryCategory.create(type)) {
+                    navController.navigate(Screen.MemoryCategory.create(memoryCategoryRouteType(cat))) {
                         popUpTo(Screen.MemoryCategory.route) { inclusive = true }
                     }
                 },

@@ -83,6 +83,7 @@ import eu.akoos.photos.domain.model.PersonSummary
 import eu.akoos.photos.domain.usecase.GetGalleryItemsUseCase
 import eu.akoos.photos.domain.usecase.ObservePeopleUseCase
 import eu.akoos.photos.domain.usecase.SemanticSearchUseCase
+import eu.akoos.photos.domain.usecase.ThemeIndex
 import eu.akoos.photos.domain.usecase.decodeAlbumOrder
 import eu.akoos.photos.presentation.albums.AlbumBrowseSource
 import eu.akoos.photos.presentation.albums.DeviceFolderCards
@@ -146,6 +147,7 @@ class SearchViewModel @Inject constructor(
     private val selectionFactory: GalleryItemSelectionController.Factory,
     private val observePeopleUseCase: ObservePeopleUseCase,
     private val semanticSearchUseCase: SemanticSearchUseCase,
+    private val themeIndex: ThemeIndex,
     private val faceDao: FaceDao,
     private val moveController: MoveToFolderController,
     private val driveRepo: DrivePhotoRepository,
@@ -423,7 +425,11 @@ class SearchViewModel @Inject constructor(
                 else flow {
                     emit(RankStep(true, null))
                     delay(QUERY_SETTLE_MS)
-                    emit(RankStep(false, semanticSearchUseCase.searchKeys(q, userId, SEMANTIC_LIMIT)))
+                    // A query naming a theme (Food, Beach, in any shipped language) lists that theme's
+                    // photos first, best match first, then the usual content matches.
+                    val themed = themeIndex.keysForQuery(q, userId)
+                    val ranked = semanticSearchUseCase.searchKeys(q, userId, SEMANTIC_LIMIT)
+                    emit(RankStep(false, if (themed.isEmpty()) ranked else (themed + ranked).distinct()))
                 }
             }
         }
