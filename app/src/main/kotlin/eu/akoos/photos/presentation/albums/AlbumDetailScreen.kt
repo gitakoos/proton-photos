@@ -572,7 +572,7 @@ fun AlbumDetailScreen(
     val glass = rememberGlassBackdrop(appColors.bg0)
     Box(modifier = Modifier.fillMaxSize().background(appColors.bg0)) {
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-            isRefreshing = state.isLoading && state.photos.isNotEmpty(),
+            isRefreshing = state.isRefreshing,
             onRefresh = { viewModel.refresh() },
             state = pullRefreshState,
             modifier = Modifier.fillMaxSize(),

@@ -164,10 +164,21 @@ enum class AlbumBusyOp { None, Deleting, Removing, Moving, Adding, Hiding }
 internal fun idsToDropFromSource(removeFromSource: Boolean, addedIds: List<String>): List<String> =
     if (removeFromSource) addedIds else emptyList()
 
+/** Numbers each pull-to-refresh so an older, overlapped one cannot clear the indicator of a newer one. */
+internal class PullRefreshTracker {
+    private var latest = 0
+
+    fun begin(): Int = ++latest
+
+    fun isLatest(ticket: Int): Boolean = ticket == latest
+}
+
 data class AlbumDetailUiState(
     val albumName: String = "",
     val albumLinkId: String = "",
     val isLoading: Boolean = true,
+    /** True only while a user pull-to-refresh is running; background reloads never set it. */
+    val isRefreshing: Boolean = false,
     val photos: List<CloudPhoto> = emptyList(),
     val error: String? = null,
     val selectedPhotos: Set<String> = emptySet(),
@@ -718,10 +729,27 @@ class AlbumDetailViewModel @Inject constructor(
         }
     }
 
+    private val pullRefresh = PullRefreshTracker()
+
+    /** User pull-to-refresh. Only this path drives [AlbumDetailUiState.isRefreshing]; background
+     *  reloads call [load] directly and never show the indicator. */
     fun refresh() {
         val s = _uiState.value
         if (s.albumLinkId.isBlank()) return
+        val ticket = pullRefresh.begin()
+        _uiState.update { it.copy(isRefreshing = true) }
         load(s.albumLinkId, s.albumName, s.shareId, s.sharedByEmail, s.volumeId)
+        val networkPhase = albumJob
+        viewModelScope.launch {
+            try {
+                networkPhase?.join()
+            } finally {
+                // A newer pull owns the indicator now; only the latest one may clear it.
+                if (pullRefresh.isLatest(ticket)) {
+                    _uiState.update { it.copy(isRefreshing = false) }
+                }
+            }
+        }
     }
 
     fun loadInvitations() {
