@@ -70,6 +70,7 @@ import java.io.FileOutputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -279,7 +280,7 @@ class MlDriveStore @Inject constructor(
                     name = name,
                     mediaType = mediaType,
                     fileSize = size,
-                    lastModificationTime = modified,
+                    lastModificationTime = modified.atOffset(ZoneOffset.UTC),
                     // The name carries this install's id, so a draft holding it is this install's
                     // own leftover from an interrupted upload.
                     overrideExistingDraftByOtherClient = true,
@@ -289,7 +290,7 @@ class MlDriveStore @Inject constructor(
             is FileNode -> client.uploader(
                 FileRevisionUploaderRequest(
                     currentActiveRevisionUid = existing.activeRevision.uid,
-                    lastModificationTime = modified,
+                    lastModificationTime = modified.atOffset(ZoneOffset.UTC),
                     size = size,
                     noWaiting = false,
                 ),
@@ -500,7 +501,7 @@ class MlDriveStore @Inject constructor(
                 activeRevisionUid = revision.uid.value,
                 serverModifiedAtMs = revision.creationTime.toEpochMilli(),
                 serverCreatedAtMs = file.creationTime.toEpochMilli(),
-                claimedModifiedAtMs = revision.claimedModificationTime?.toEpochMilli(),
+                claimedModifiedAtMs = revision.claimedModificationTime?.toInstant()?.toEpochMilli(),
             )
         }
 

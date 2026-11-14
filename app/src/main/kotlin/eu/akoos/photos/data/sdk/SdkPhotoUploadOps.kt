@@ -40,6 +40,7 @@ import me.proton.drive.sdk.entity.ThumbnailType
 import org.json.JSONObject
 import java.nio.channels.Channels
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -86,7 +87,7 @@ class SdkPhotoUploadOps @Inject constructor(
                     name = upload.name,
                     mediaType = upload.mediaType,
                     fileSize = upload.fileSize,
-                    lastModificationTime = upload.time,
+                    lastModificationTime = upload.time?.atOffset(ZoneOffset.UTC),
                     captureTime = upload.time,
                     mainPhotoUid = upload.mainPhotoUid,
                     tags = upload.tags,

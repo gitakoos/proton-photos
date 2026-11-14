@@ -54,8 +54,7 @@ import me.proton.core.network.data.ApiProvider
 import me.proton.core.network.data.di.BaseProtonApiUrl
 import me.proton.core.network.domain.session.SessionProvider
 import me.proton.core.user.domain.repository.UserAddressRepository
-import me.proton.drive.sdk.CorePublicAddressResolver
-import me.proton.drive.sdk.CoreUserAddressResolver
+import me.proton.drive.sdk.ClientHost
 import me.proton.drive.sdk.LoggerProvider
 import me.proton.drive.sdk.ProtonDriveClient
 import me.proton.drive.sdk.ProtonDriveSdk
@@ -71,9 +70,8 @@ class SdkClientClosedException : IllegalStateException("Drive client closed")
 
 /**
  * Builds and caches the Proton Drive SDK clients per user: the My files [ProtonDriveClient] and the
- * Photos [ProtonPhotosClient], each made on first use. The auth
- * dependencies come from the sign-in stack already in the graph, and the address resolvers ship inside
- * the SDK, so no extra Proton wiring is needed.
+ * Photos [ProtonPhotosClient], each made on first use. Their requests and
+ * address lookups go through the sign-in stack already in the graph, so no extra Proton wiring is needed.
  *
  * Every call runs through [withClient] or [withPhotosClient], which count it as in flight, so a sign-out
  * never frees a native client under a call: [close] refuses the account from then on, and [remove] waits
@@ -160,31 +158,29 @@ class SdkDriveClientProvider @Inject constructor(
                 bindingsLanguage = "kotlin",
                 uid = sdkClientUid(installClientUid(), userId.id),
             )
-            val userAddressResolver = CoreUserAddressResolver(
-                userId = userId,
-                cryptoContext = cryptoContext,
-                userAddressRepository = userAddressRepository,
-            )
-            val publicAddressResolver = CorePublicAddressResolver(
-                userId = userId,
-                publicAddressRepository = publicAddressRepository,
+            val host = ClientHost(
+                userId = userId.id,
+                httpClient = CoreSdkHttpClient(userId, apiProvider),
+                userAddressResolver = CoreUserAddressResolver(
+                    userId = userId,
+                    cryptoContext = cryptoContext,
+                    userAddressRepository = userAddressRepository,
+                ),
+                publicAddressResolver = CorePublicAddressResolver(
+                    userId = userId,
+                    publicAddressRepository = publicAddressRepository,
+                ),
             )
             val client: ProtonSdkClient = when (kind) {
                 ClientKind.DRIVE -> ProtonDriveSdk.protonDriveClientCreate(
                     coroutineScope = scope,
-                    userId = userId,
-                    apiProvider = apiProvider,
+                    host = host,
                     request = request,
-                    userAddressResolver = userAddressResolver,
-                    publicAddressResolver = publicAddressResolver,
                 )
                 ClientKind.PHOTOS -> ProtonDriveSdk.protonPhotosClientCreate(
                     coroutineScope = scope,
-                    userId = userId,
-                    apiProvider = apiProvider,
+                    host = host,
                     request = request,
-                    userAddressResolver = userAddressResolver,
-                    publicAddressResolver = publicAddressResolver,
                 )
             }
             return HeldClient(client, scope)
