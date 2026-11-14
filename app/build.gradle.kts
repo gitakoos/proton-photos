@@ -27,7 +27,7 @@ base {
 
 android {
     namespace = "eu.akoos.photos"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         // applicationId is intentionally OUTSIDE the me.proton.* namespace — this is an
@@ -271,6 +271,7 @@ dependencies {
     // Video playback
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
+    implementation(libs.media3.inspector)
 
     // Video upload compression (opt-in transcode)
     implementation(libs.media3.transformer)

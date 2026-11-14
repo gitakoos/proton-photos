@@ -35,7 +35,7 @@ import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.MetadataRetriever
+import androidx.media3.inspector.MetadataRetriever
 import eu.akoos.photos.data.upload.UploadImageCompressor
 import eu.akoos.photos.domain.entity.compression.HdrTransfer
 import eu.akoos.photos.domain.entity.compression.VideoSourceInfo

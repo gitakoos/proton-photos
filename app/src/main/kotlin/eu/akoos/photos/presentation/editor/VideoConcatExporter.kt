@@ -200,8 +200,8 @@ private fun volumeProcessors(gain: Float): List<AudioProcessor> {
     if (gain in 0.999f..1.001f) return emptyList()
     val g = gain.coerceIn(0f, 1f)
     val processor = ChannelMixingAudioProcessor()
-    processor.putChannelMixingMatrix(ChannelMixingMatrix.create(1, 1).scaleBy(g))
-    processor.putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(g))
+    processor.putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(1, 1).scaleBy(g))
+    processor.putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(2, 2).scaleBy(g))
     return listOf(processor)
 }
 
