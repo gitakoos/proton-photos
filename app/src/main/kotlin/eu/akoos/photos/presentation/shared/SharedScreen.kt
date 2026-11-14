@@ -163,11 +163,9 @@ fun SharedScreen(
     var sharedAlbumSheetFor by remember { mutableStateOf<Album?>(null) }
     var leaveAlbumConfirmFor by remember { mutableStateOf<Album?>(null) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Bg0)
-    ) {
+    // No background of its own: the page under the floating header paints it, so the header and
+    // the content read as one surface.
+    Box(modifier = Modifier.fillMaxSize()) {
         eu.akoos.photos.presentation.common.ThemedSnackbarHost(snackbarHost, modifier = Modifier.align(Alignment.BottomCenter))
         PullToRefreshBox(
             isRefreshing = state.isLoading,
